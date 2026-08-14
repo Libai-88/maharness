@@ -22,6 +22,7 @@ export interface ChatHandlers {
   onReasoning(text: string): void;
   onToolStart(name: string, args: unknown): void;
   onToolResult(name: string, summary: string, ok: boolean): void;
+  onApprovalRequired(approvalId: string, name: string, summary: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number }): void;
   onError(e: string): void;
   onEnd(): void;
@@ -80,6 +81,7 @@ export async function streamChat(
           case 'delta': h.onDelta(String(d.text ?? '')); break;
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
           case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
+          case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
           case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok)); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number }); break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
@@ -112,6 +114,10 @@ export const sessionApi = {
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
+};
+
+export const approvalsApi = {
+  respond: (id: string, approved: boolean) => api<{ ok: boolean }>(`/api/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approved }) }),
 };
 
 export const modelsApi = {

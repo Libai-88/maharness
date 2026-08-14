@@ -1,6 +1,6 @@
 // ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具卡片 + 思考过程折叠 + Markdown）
 import { useEffect, useRef, useState } from 'react';
-import type { ChatMessage } from '../types';
+import type { ApprovalItem, ChatMessage, PlanState } from '../types';
 import Markdown from './Markdown';
 
 interface Props {
@@ -9,9 +9,12 @@ interface Props {
   onSend: (text: string) => void;
   onStop: () => void;
   hasModels: boolean;
+  approvals: ApprovalItem[];
+  onApproval: (id: string, approved: boolean) => void;
+  plan: PlanState | null;
 }
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels }: Props) {
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -33,6 +36,23 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   return (
     <div className="chat-body">
       <div className="messages">
+        {/* 目标计划卡片：实时展示多步任务的推进状态 */}
+        {plan && (
+          <div className="plan-card">
+            <div className="plan-title">🎯 {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
+            <div className="plan-steps">
+              {plan.steps.map((s, i) => (
+                <div key={i} className={`plan-step ${s.status}`}>
+                  <span className="plan-step-icon">
+                    {s.status === 'done' ? '✅' : s.status === 'in_progress' ? '▶️' : s.status === 'blocked' ? '⛔' : '⬜'}
+                  </span>
+                  <span className="plan-step-title">{i + 1}. {s.title}</span>
+                  {s.note && <div className="plan-step-note">{s.note}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {messages.length === 0 && (
           <div className="welcome">
             <h2>自研 Web Agent</h2>
@@ -87,6 +107,22 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         ))}
         <div ref={bottomRef} />
       </div>
+
+      {/* 审批卡片：危险操作等待用户决策（执行器级安全机制） */}
+      {approvals.length > 0 && (
+        <div className="approval-area">
+          {approvals.map((a) => (
+            <div key={a.id} className="approval-card">
+              <div className="approval-title">🔐 需要审批 · {a.name}</div>
+              <pre className="approval-summary">{a.summary}</pre>
+              <div className="approval-actions">
+                <button className="approve" onClick={() => onApproval(a.id, true)}>批准执行</button>
+                <button className="reject" onClick={() => onApproval(a.id, false)}>拒绝</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="input-bar">
         <textarea

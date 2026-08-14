@@ -3,6 +3,7 @@
  * 循环模型：决策(LLM 流式) → 动作(工具执行) → 观测(结果回填)，直到无工具调用。
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
+import { randomUUID } from 'node:crypto';
 import type {
   KernelLike, LLMMessage, ProviderDef, ToolCall, TraceStep,
 } from '../../kernel/types';
@@ -12,6 +13,7 @@ export type AgentEvent =
   | { type: 'reasoning'; text: string }
   | { type: 'tool_start'; name: string; args: unknown }
   | { type: 'tool_result'; name: string; summary: string; ok: boolean }
+  | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
   | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number }
   | { type: 'error'; error: string };
 
@@ -35,8 +37,22 @@ const DEFAULT_SYSTEM_PROMPT = [
   '5. 不要编造工具结果。',
 ].join('\n');
 
+/** 审批等待超时（毫秒）：10 分钟未响应自动拒绝 */
+const APPROVAL_TIMEOUT = 10 * 60 * 1000;
+
 export class AgentRunner {
+  private pendingApprovals = new Map<string, (approved: boolean) => void>();
+
   constructor(private kernel: KernelLike) {}
+
+  /** 外部（REST 接口）响应审批：批准或拒绝 */
+  approveApproval(approvalId: string, approved: boolean): boolean {
+    const resolve = this.pendingApprovals.get(approvalId);
+    if (!resolve) return false;
+    this.pendingApprovals.delete(approvalId);
+    resolve(approved);
+    return true;
+  }
 
   /** 运行一轮完整对话（直到模型不再调用工具） */
   async *run(opts: RunOptions): AsyncGenerator<AgentEvent> {
@@ -139,6 +155,37 @@ export class AgentRunner {
           });
         } catch (err) {
           result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+        }
+
+        // ---- 审批挂起：工具请求用户审批时，执行器暂停等待（安全机制，不可绕过） ----
+        if (!result.ok && result.needsApproval) {
+          const approvalId = randomUUID().slice(0, 8);
+          yield {
+            type: 'approval_required',
+            approvalId,
+            name: tool.name,
+            summary: result.approvalSummary ?? result.error ?? '',
+            args,
+          };
+          const approved = await new Promise<boolean>((resolve) => {
+            this.pendingApprovals.set(approvalId, resolve);
+            setTimeout(() => { if (this.pendingApprovals.delete(approvalId)) resolve(false); }, APPROVAL_TIMEOUT);
+          });
+          if (!approved) {
+            tStep.cancel();
+            result = { ok: false, error: '用户拒绝了该操作（审批未通过）' };
+          } else {
+            // 已批准：带 approved 标记重试执行
+            try {
+              result = await tool.handler(args, {
+                traceId, turn, sandboxRoot, signal,
+                cache: this.kernel.cache, trace: this.kernel.trace,
+                approved: true, approvalId,
+              });
+            } catch (err) {
+              result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            }
+          }
         }
         if (result.ok) {
           tStep.finish({ outputSummary: summarize(result.data) });

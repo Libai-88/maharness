@@ -114,3 +114,19 @@ export interface ToolStep {
   ok?: boolean;
   status: 'running' | 'done' | 'error';
 }
+
+export interface ApprovalItem {
+  id: string;
+  name: string;
+  summary: string;
+}
+
+export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
+
+export interface PlanState {
+  objective: string;
+  steps: { title: string; status: StepStatus; note?: string }[];
+  current: number;
+  completed: boolean;
+  createdAt: number;
+}

@@ -74,11 +74,10 @@ export default {
         content: [
           'PowerShell 工具使用规则：',
           '1. 执行命令前先说明意图；输出过长会自动截断；',
-          '2. 危险命令（删除/覆盖/格式化/杀进程/关机/下载执行/注册表修改等）会被安全机制拦截；',
-          '3. 被拦截时向用户说明原因，询问是否确认执行；只有用户明确回复同意后，才可带 confirm=true 重新调用；',
-          '4. 绝不自行确认危险命令，也不诱导用户确认；',
-          '5. 需要管理员权限的操作会失败，提示用户以管理员身份运行；',
-          '6. 不要用 PowerShell 读取 .env、密钥等敏感文件内容，除非用户明确要求。',
+          '2. 危险命令（删除/覆盖/格式化/杀进程/关机/下载执行/注册表修改等）会被安全机制拦截并弹出审批卡片，等待用户批准后自动执行；',
+          '3. 被拦截时向用户说明原因，等待用户在界面批准；不要自行绕过、不要诱导用户批准；',
+          '4. 需要管理员权限的操作会失败，提示用户以管理员身份运行；',
+          '5. 不要用 PowerShell 读取 .env、密钥等敏感文件内容，除非用户明确要求。',
         ].join('\n'),
       },
     });
@@ -87,36 +86,32 @@ export default {
       kind: 'tool',
       tool: {
         name: 'powershell_execute',
-        description: '在 Windows 上执行 PowerShell 命令并返回输出。危险命令（删除/覆盖/格式化/杀进程/关机/下载执行等）默认被拦截，需用户明确同意后带 confirm=true 重试。',
+        description: '在 Windows 上执行 PowerShell 命令并返回输出。危险命令（删除/覆盖/格式化/杀进程/关机/下载执行等）会被安全机制拦截并请求用户审批，批准后自动执行。',
         parameters: {
           type: 'object',
           properties: {
             command: { type: 'string', description: 'PowerShell 命令（一行或分号分隔）' },
-            confirm: { type: 'boolean', description: '是否已获用户确认（仅当用户明确同意危险命令时设为 true，默认 false）' },
             timeoutSec: { type: 'number', description: '超时秒数（默认 15，最大 60）' },
           },
           required: ['command'],
         },
-        async handler(args: { command?: string; confirm?: boolean; timeoutSec?: number }, tctx: ToolContext) {
+        async handler(args: { command?: string; timeoutSec?: number }, tctx: ToolContext) {
           const command = String(args.command ?? '').trim();
           if (!command) return { ok: false, error: '命令不能为空' };
-          const confirm = args.confirm === true;
           const timeoutSec = Math.min(Math.max(Number(args.timeoutSec) || 15, 1), 60);
 
           const hit = DANGEROUS_PATTERNS.find((d) => d.pattern.test(command));
-          if (hit && !confirm) {
+          if (hit && !tctx.approved) {
+            // 请求用户审批（执行器级挂起，批准后自动重试）
             return {
               ok: false,
-              error: [
-                `命令已被安全机制拦截（检测到危险操作：${hit.reason}）。`,
-                `命令：${command}`,
-                '如确认需要执行，请向用户说明原因并征得明确同意后，带 confirm=true 重新调用。',
-              ].join('\n'),
+              needsApproval: true,
+              approvalSummary: `PowerShell 危险命令（${hit.reason}）\n命令：${command.slice(0, 300)}`,
             };
           }
-          if (hit && confirm) {
-            // 用户已确认：审计留痕
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: '危险命令已获用户确认' })
+          if (hit && tctx.approved) {
+            // 已获用户批准：审计留痕
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: '危险命令已获用户批准' })
               .finish({ outputSummary: `[${hit.reason}] ${command.slice(0, 300)}` });
           }
 

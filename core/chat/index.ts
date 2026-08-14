@@ -40,6 +40,7 @@ export default {
       setPersonas: (list: { name: string; content: string }[]) => void;
       getSystemPrompt: () => string;
       refreshPrompt: () => void;
+      approveApproval: (approvalId: string, approved: boolean) => boolean;
     } = {
       providers,
       runner,
@@ -70,6 +71,7 @@ export default {
         service.systemPrompt = parts.join('\n\n');
       },
       getSystemPrompt: () => service.systemPrompt,
+      approveApproval: (approvalId: string, approved: boolean) => runner.approveApproval(approvalId, approved),
     };
 
     // 插件加载/卸载/重载 → 自动重装系统提示词（L2 层随插件增减）

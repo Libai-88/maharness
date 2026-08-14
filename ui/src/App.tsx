@@ -1,7 +1,7 @@
 // ui/src/App.tsx —— 主布局与状态管理
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { BusEvent, ChatMessage, ModelInfo, PersonaInfo, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
+import { approvalsApi, modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PersonaInfo, PlanState, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
 import ChatView from './components/ChatView';
 import SessionList from './components/SessionList';
 import PluginPanel from './components/PluginPanel';
@@ -25,6 +25,8 @@ export default function App() {
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
+  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
+  const [plan, setPlan] = useState<PlanState | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -105,6 +107,8 @@ export default function App() {
     const off = subscribeEvents((e: BusEvent) => {
       if (e.type === 'trace.step') {
         setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
+      } else if (e.type === 'plan.updated') {
+        setPlan(e.data as PlanState | null);
       }
     });
     const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
@@ -131,6 +135,7 @@ export default function App() {
       onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
         ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? { ...t, summary, ok, status: ok ? 'done' as const : 'error' as const } : t),
       } : m)),
+      onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
       onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost } : m)),
       onError: (e) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m)),
       onEnd: () => {
@@ -147,6 +152,12 @@ export default function App() {
     abortRef.current?.abort();
     setMessages((prev) => prev.map((m) => m.streaming ? { ...m, streaming: false } : m));
     setStreaming(false);
+  }, []);
+
+  // 审批响应：批准/拒绝后移除卡片
+  const respondApproval = useCallback(async (id: string, approved: boolean) => {
+    try { await approvalsApi.respond(id, approved); } catch { /* 审批已过期 */ }
+    setApprovals((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
   const currentSession = sessions.find((s) => s.id === activeId);
@@ -197,7 +208,16 @@ export default function App() {
             {traceOpen ? '隐藏轨迹' : '运行轨迹'}
           </button>
         </header>
-        <ChatView messages={messages} streaming={streaming} onSend={send} onStop={stop} hasModels={models.length > 0} />
+        <ChatView
+          messages={messages}
+          streaming={streaming}
+          onSend={send}
+          onStop={stop}
+          hasModels={models.length > 0}
+          approvals={approvals}
+          onApproval={respondApproval}
+          plan={plan}
+        />
       </main>
 
       {traceOpen && (

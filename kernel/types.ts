@@ -130,6 +130,8 @@ export interface ToolResult {
   data?: unknown;           // 成功时返回给 LLM 的结构化结果
   error?: string;           // 失败原因（会原样回给 LLM）
   cacheable?: boolean;      // 是否允许 L2 缓存（默认 true）
+  needsApproval?: boolean;  // 需用户审批（执行器级挂起，不可绕过）
+  approvalSummary?: string; // 审批卡片摘要（needsApproval 时必填）
 }
 
 export interface ToolContext {
@@ -139,6 +141,8 @@ export interface ToolContext {
   signal?: AbortSignal;
   cache: CacheLike;         // 工具自管理时效性缓存（L2）
   trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
+  approved?: boolean;       // 已通过用户审批（审批后重试时置 true）
+  approvalId?: string;      // 本次审批 ID
 }
 
 export interface CommandDef {

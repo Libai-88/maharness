@@ -20,6 +20,7 @@ interface ChatService {
   setProviders: (cfgs: ProviderConfig[]) => void;
   setPersonas: (list: { name: string; content: string }[]) => void;
   getSystemPrompt: () => string;
+  approveApproval: (approvalId: string, approved: boolean) => boolean;
 }
 
 /** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启） */
@@ -282,6 +283,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
           sse(res, 'reasoning', { text: ev.text });
         } else if (ev.type === 'tool_start') {
           sse(res, 'tool_start', { name: ev.name, args: ev.args });
+        } else if (ev.type === 'approval_required') {
+          sse(res, 'approval_required', { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args });
         } else if (ev.type === 'tool_result') {
           sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok });
         } else if (ev.type === 'assistant_done') {
@@ -383,6 +386,16 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
 
   app.get('/api/trace/stats', (_req, res) => {
     res.json({ trace: kernel.trace.statsSnapshot(), cache: kernel.cache.statsSnapshot(), l1Enabled: kernel.cache.l1Enabled });
+  });
+
+  // ---------- 审批（执行器级安全机制） ----------
+  app.post('/api/approvals/:id', (req, res) => {
+    const approved = req.body?.approved === true;
+    const chat = getChatService(kernel);
+    if (!chat) return res.status(500).json({ error: '对话服务未加载' });
+    const ok = chat.approveApproval(req.params.id, approved);
+    if (!ok) return res.status(404).json({ error: '审批不存在或已过期' });
+    res.json({ ok: true, approved });
   });
 
   // ---------- 全局事件流（前端实时面板） ----------
