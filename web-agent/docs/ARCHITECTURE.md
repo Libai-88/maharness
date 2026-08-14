@@ -182,7 +182,26 @@ interface ToolDef {
 - **L3 缓存友好**：memory 插件注入记忆时追加到 history 末尾（不动 system prompt 与历史前缀），provider KV cache 前缀命中不受影响。
 - 首个实战消费者：`memory` 插件（before_llm 注入长期记忆，跨会话生效）。
 
-### 4.4 沙箱与安全（Windows 重点）
+### 4.4 上下文管理（超预算优雅降级）
+
+- 会话历史按预算（默认 30000 tokens，config `context.maxTokens`）估算（中文 ≈1 token/字，英文 4 字符/token）。
+- 超预算时保留 system 提示与最新消息，丢弃较早消息并注入「【上下文管理】已截断 N 条」说明（LLM 对截断有感知）；截断作为 `system` 类型步骤记入 Trace。
+- 位置：`server/context.ts`（纯函数），在会话历史组装后、进入 Agent 循环前执行。
+
+### 4.5 斜杠命令（不消耗 LLM）
+
+- `POST /api/commands`：内置命令（help/new/clear/plan/goal/normal/model）+ 插件 `command` 能力分发（任何插件可注册命令）。
+- 前端输入 `/` 开头消息时直接调命令接口，动作类命令（新建/清空/切模式/切模型）即时生效，消息类命令以系统消息呈现。
+
+### 4.6 会话模式切换（normal / plan / goal）
+
+- `sessions.mode` + `sessions.plan_pending`（DB 持久化，UI 头部选择器或 `/plan` 等命令切换）。
+- 模式提示词注入 system prompt；**plan 模式状态机**（强制层，非仅提示词）：
+  - `1 待出计划`：不注入工具定义（LLM 无法调用工具，只能输出计划）→ 出计划轮后置 `2`；
+  - `2 已出计划待确认`：放行工具，用户下一条消息视为确认 → 执行后置 `0`（无限制）。
+- goal 模式：注入目标计划纪律（多步任务自动 create_plan）。
+
+### 4.7 沙箱与安全（Windows 重点）
 
 - 文件类工具锚定根目录 = 当前工作区（`D:\DEEPSEEK`，用户 2026-08-14 确认开发阶段沙箱限制在当前工作区；config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越。
 - 写入工具拒绝符号链接指向沙箱外；只读操作默认允许，写操作逐项审计入 Trace。
