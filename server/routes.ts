@@ -93,7 +93,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
 
     const traceId = randomUUID();
     const ac = new AbortController();
-    req.on('close', () => ac.abort());
+    // 客户端断开才中断（req close 在请求体读完即触发，不可用）
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
 
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
