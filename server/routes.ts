@@ -1,0 +1,234 @@
+/**
+ * server/routes.ts —— REST + SSE API
+ * 与插件解耦：对话服务通过能力注册表获取（kind=service, id=chat），不认识插件内部实现。
+ */
+import { randomUUID } from 'node:crypto';
+import express from 'express';
+import type { Express, Response } from 'express';
+import type { Kernel } from '../kernel';
+import type { LLMMessage, ProviderDef } from '../kernel/types';
+import type { AgentRunner } from '../core/chat/agent';
+import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
+import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { resolve, relative } from 'node:path';
+import type { Store } from './db';
+
+interface ChatService {
+  providers: ProviderDef[];
+  runner: AgentRunner;
+}
+
+function getChatService(kernel: Kernel): ChatService | undefined {
+  const cap = kernel.plugins.capabilities('service').find((c) => c.service.id === 'chat');
+  return cap?.service.instance as ChatService | undefined;
+}
+
+function sse(res: Response, event: string, data: unknown): void {
+  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+}
+
+export function registerRoutes(app: Express, kernel: Kernel, store: Store): void {
+  app.use(express.json({ limit: '5mb' }));
+
+  // ---------- 模型 ----------
+  app.get('/api/models', (_req, res) => {
+    const chat = getChatService(kernel);
+    if (!chat) return res.json([]);
+    res.json(chat.providers.map((p) => ({ id: p.id, label: p.label, model: p.defaultModel })));
+  });
+
+  // ---------- 会话 ----------
+  app.get('/api/sessions', (_req, res) => res.json(store.listSessions()));
+
+  app.post('/api/sessions', (req, res) => {
+    const model = String(req.body?.model ?? '');
+    res.json(store.createSession(model));
+  });
+
+  app.get('/api/sessions/:id/messages', (req, res) => {
+    const session = store.getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+    res.json(store.listMessages(session.id));
+  });
+
+  app.patch('/api/sessions/:id', (req, res) => {
+    const session = store.getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+    const { title, model } = req.body ?? {};
+    store.updateSession(session.id, {
+      ...(typeof title === 'string' ? { title } : {}),
+      ...(typeof model === 'string' ? { model } : {}),
+    });
+    res.json(store.getSession(session.id));
+  });
+
+  app.delete('/api/sessions/:id', (req, res) => {
+    if (!store.getSession(req.params.id)) return res.status(404).json({ error: '会话不存在' });
+    store.deleteSession(req.params.id);
+    res.json({ ok: true });
+  });
+
+  // ---------- 对话（SSE 流式） ----------
+  app.post('/api/sessions/:id/chat', async (req, res) => {
+    const session = store.getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+    const { message, model, provider: providerId, systemPrompt } = req.body ?? {};
+    if (!message?.trim()) return res.status(400).json({ error: '消息不能为空' });
+
+    const chat = getChatService(kernel);
+    if (!chat) return res.status(500).json({ error: '对话服务未加载' });
+    const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
+    if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
+    const resolvedModel = model || session.model || provider.defaultModel;
+
+    // 历史组装：DB 消息 → LLM 消息（工具中间消息不入库，历史保持干净）
+    const history: LLMMessage[] = store
+      .listMessages(session.id)
+      .map((m) => ({ role: m.role, content: m.content }))
+      .filter((m): m is LLMMessage => m.role === 'user' || m.role === 'assistant');
+    history.push({ role: 'user', content: message });
+
+    store.addMessage({ sessionId: session.id, role: 'user', content: message });
+    if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
+
+    const traceId = randomUUID();
+    const ac = new AbortController();
+    req.on('close', () => ac.abort());
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    sse(res, 'start', { traceId });
+
+    let assistantText = '';
+    let usage = { input: 0, output: 0 };
+    let cost = 0;
+    try {
+      for await (const ev of chat.runner.run({
+        provider, model: resolvedModel, messages: history, traceId,
+        signal: ac.signal, systemPrompt,
+      })) {
+        if (ev.type === 'delta') {
+          assistantText += ev.text;
+          sse(res, 'delta', { text: ev.text });
+        } else if (ev.type === 'tool_start') {
+          sse(res, 'tool_start', { name: ev.name, args: ev.args });
+        } else if (ev.type === 'tool_result') {
+          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok });
+        } else if (ev.type === 'assistant_done') {
+          usage = ev.usage;
+          cost = ev.cost;
+          sse(res, 'done', { content: ev.content, usage: ev.usage, cost: ev.cost });
+        } else if (ev.type === 'error') {
+          sse(res, 'error', { error: ev.error });
+        }
+      }
+    } catch (err) {
+      sse(res, 'error', { error: err instanceof Error ? err.message : String(err) });
+    }
+    if (assistantText) {
+      store.addMessage({
+        sessionId: session.id, role: 'assistant', content: assistantText,
+        tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
+      });
+    }
+    store.touchSession(session.id);
+    sse(res, 'end', {});
+    res.end();
+  });
+
+  // ---------- 文件（沙箱内） ----------
+  app.get('/api/files', (req, res) => {
+    try {
+      const dir = resolveInSandbox(kernel.config.get<string>('sandboxRoot', kernel.rootDir), String(req.query.path ?? '.'));
+      if (!existsSync(dir)) return res.status(404).json({ error: '目录不存在' });
+      const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
+        const full = resolve(dir, e.name);
+        try {
+          const s = statSync(full);
+          return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
+        } catch {
+          return { name: e.name, type: e.isDirectory() ? 'dir' : 'file' };
+        }
+      }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+      res.json({ path: relative(kernel.config.get<string>('sandboxRoot', kernel.rootDir), dir) || '.', entries });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.get('/api/files/read', (req, res) => {
+    try {
+      const file = resolveInSandbox(kernel.config.get<string>('sandboxRoot', kernel.rootDir), String(req.query.path ?? ''));
+      if (!existsSync(file)) return res.status(404).json({ error: '文件不存在' });
+      const r = readTextSmart(file);
+      if (r.isBinary) return res.status(400).json({ error: '二进制文件不支持读取' });
+      res.json({ path: relative(kernel.config.get<string>('sandboxRoot', kernel.rootDir), file), text: r.text, encoding: r.encoding });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/files/write', (req, res) => {
+    try {
+      const { path, content } = req.body ?? {};
+      if (!path || content === undefined) return res.status(400).json({ error: '需要 path 与 content' });
+      const file = resolveInSandbox(kernel.config.get<string>('sandboxRoot', kernel.rootDir), String(path));
+      mkdirSync(resolve(file, '..'), { recursive: true });
+      writeFileSync(file, String(content), 'utf8');
+      res.json({ ok: true, path: relative(kernel.config.get<string>('sandboxRoot', kernel.rootDir), file) });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---------- 插件管理 ----------
+  app.get('/api/plugins', (_req, res) => {
+    res.json(kernel.plugins.list().map((p) => ({
+      id: p.manifest.id, name: p.manifest.name, version: p.manifest.version,
+      state: p.state, caps: p.caps.map((c) => c.kind), error: p.error,
+    })));
+  });
+
+  app.post('/api/plugins/:id/actions', async (req, res) => {
+    const { action } = req.body ?? {};
+    const id = req.params.id;
+    try {
+      if (action === 'enable') await kernel.plugins.enable(id);
+      else if (action === 'disable') await kernel.plugins.disable(id);
+      else if (action === 'reload') await kernel.plugins.reload(id);
+      else return res.status(400).json({ error: `未知操作: ${action}` });
+      const inst = kernel.plugins.get(id);
+      res.json({ ok: true, state: inst?.state });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---------- Trace 观测 ----------
+  app.get('/api/trace', (req, res) => {
+    const traceId = req.query.trace_id ? String(req.query.trace_id) : undefined;
+    res.json({ steps: kernel.trace.query(traceId) });
+  });
+
+  app.get('/api/trace/stats', (_req, res) => {
+    res.json({ trace: kernel.trace.statsSnapshot(), cache: kernel.cache.statsSnapshot(), l1Enabled: kernel.cache.l1Enabled });
+  });
+
+  // ---------- 全局事件流（前端实时面板） ----------
+  app.get('/api/events', (req, res) => {
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    const off = kernel.bus.on('*', (e) => {
+      sse(res, 'event', { type: e.type, traceId: e.traceId, data: e.data, ts: e.ts });
+    });
+    req.on('close', off);
+  });
+}

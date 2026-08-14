@@ -1,0 +1,182 @@
+// ui/src/App.tsx —— 主布局与状态管理
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { modelsApi, pluginsApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import type { BusEvent, ChatMessage, ModelInfo, PluginInfo, Session, TraceStep } from './types';
+import ChatView from './components/ChatView';
+import SessionList from './components/SessionList';
+import PluginPanel from './components/PluginPanel';
+import TracePanel from './components/TracePanel';
+
+type SideTab = 'sessions' | 'plugins';
+
+export default function App() {
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [activeId, setActiveId] = useState<string | null>(null);
+  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [streaming, setStreaming] = useState(false);
+  const [models, setModels] = useState<ModelInfo[]>([]);
+  const [model, setModel] = useState('');
+  const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [sideTab, setSideTab] = useState<SideTab>('sessions');
+  const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
+  const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
+  const [traceOpen, setTraceOpen] = useState(false);
+
+  const abortRef = useRef<AbortController | null>(null);
+
+  // 初始加载
+  useEffect(() => {
+    void loadAll();
+  }, []);
+
+  async function loadAll() {
+    const [ss, ms, pl] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list()]);
+    setSessions(ss);
+    setModels(ms);
+    setPlugins(pl);
+    if (ms.length) setModel((prev) => prev || ms[0].model);
+    if (!ss.length) {
+      const created = await sessionApi.create(ms[0]?.model ?? '');
+      setSessions([created]);
+      setActiveId(created.id);
+    } else {
+      setActiveId(ss[0].id);
+    }
+  }
+
+  // 切换会话：加载历史
+  const selectSession = useCallback(async (id: string) => {
+    setActiveId(id);
+    setMessages([]);
+    setTraceSteps([]);
+    try {
+      const msgs = await sessionApi.messages(id);
+      setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '' })));
+    } catch { /* 忽略 */ }
+  }, []);
+
+  const createSession = useCallback(async () => {
+    const s = await sessionApi.create(model);
+    setSessions((prev) => [s, ...prev]);
+    setActiveId(s.id);
+    setMessages([]);
+    setTraceSteps([]);
+  }, [model]);
+
+  const deleteSession = useCallback(async (id: string) => {
+    await sessionApi.remove(id);
+    setSessions((prev) => {
+      const next = prev.filter((s) => s.id !== id);
+      if (activeId === id) {
+        if (next.length) { void selectSession(next[0].id); } else {
+          setActiveId(null);
+          setMessages([]);
+        }
+      }
+      return next;
+    });
+  }, [activeId, selectSession]);
+
+  // 插件管理
+  const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
+    await pluginsApi.action(id, action);
+    setPlugins(await pluginsApi.list());
+  }, []);
+
+  // Trace 实时订阅
+  useEffect(() => {
+    const off = subscribeEvents((e: BusEvent) => {
+      if (e.type === 'trace.step') {
+        setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
+      }
+    });
+    const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
+    return () => { off(); clearInterval(t); };
+  }, []);
+
+  // 发送消息
+  const send = useCallback(async (text: string) => {
+    if (!activeId || !text.trim() || streaming) return;
+    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: text };
+    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
+    setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setStreaming(true);
+    const ac = new AbortController();
+    abortRef.current = ac;
+
+    await streamChat(activeId, { message: text, model }, {
+      onStart: () => {},
+      onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
+      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const }],
+      } : m)),
+      onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? { ...t, summary, ok, status: ok ? 'done' as const : 'error' as const } : t),
+      } : m)),
+      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, streaming: false, usage: d.usage, cost: d.cost } : m)),
+      onError: (e) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m)),
+      onEnd: () => {
+        setStreaming(false);
+        setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
+      },
+    }, ac.signal);
+
+    // 刷新会话列表（标题可能已自动生成）
+    setSessions(await sessionApi.list());
+  }, [activeId, model, streaming]);
+
+  const stop = useCallback(() => {
+    abortRef.current?.abort();
+    setMessages((prev) => prev.map((m) => m.streaming ? { ...m, streaming: false } : m));
+    setStreaming(false);
+  }, []);
+
+  const currentSession = sessions.find((s) => s.id === activeId);
+
+  return (
+    <div className="app">
+      <aside className="sidebar">
+        <div className="sidebar-tabs">
+          <button className={sideTab === 'sessions' ? 'tab active' : 'tab'} onClick={() => setSideTab('sessions')}>会话</button>
+          <button className={sideTab === 'plugins' ? 'tab active' : 'tab'} onClick={() => setSideTab('plugins')}>插件</button>
+        </div>
+        {sideTab === 'sessions' ? (
+          <SessionList
+            sessions={sessions}
+            activeId={activeId}
+            onSelect={selectSession}
+            onCreate={createSession}
+            onDelete={deleteSession}
+          />
+        ) : (
+          <PluginPanel plugins={plugins} onAction={pluginAction} />
+        )}
+      </aside>
+
+      <main className="chat-area">
+        <header className="chat-header">
+          <div className="chat-title">{currentSession?.title ?? '新会话'}</div>
+          <select
+            className="model-picker"
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            title="切换模型"
+          >
+            {models.length === 0 && <option value="">未配置 LLM（见 .env）</option>}
+            {models.map((m) => <option key={m.id} value={m.model}>{m.label} · {m.model}</option>)}
+          </select>
+          <button className="trace-toggle" onClick={() => setTraceOpen((v) => !v)} title="运行轨迹面板">
+            {traceOpen ? '隐藏轨迹' : '运行轨迹'}
+          </button>
+        </header>
+        <ChatView messages={messages} streaming={streaming} onSend={send} onStop={stop} hasModels={models.length > 0} />
+      </main>
+
+      {traceOpen && (
+        <aside className="trace-panel">
+          <TracePanel steps={traceSteps} stats={traceStats} />
+        </aside>
+      )}
+    </div>
+  );
+}

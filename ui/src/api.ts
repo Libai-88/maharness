@@ -1,0 +1,128 @@
+// ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
+import type { BusEvent, Message, ModelInfo, PluginInfo, Session, TraceStep } from './types';
+
+export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
+  const res = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+    ...opts,
+  });
+  if (!res.ok) {
+    let msg = `HTTP ${res.status}`;
+    try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
+    throw new Error(msg);
+  }
+  return res.json() as Promise<T>;
+}
+
+// ---------- SSE 流式对话 ----------
+
+export interface ChatHandlers {
+  onStart(traceId: string): void;
+  onDelta(text: string): void;
+  onToolStart(name: string, args: unknown): void;
+  onToolResult(name: string, summary: string, ok: boolean): void;
+  onDone(d: { content: string; usage: { input: number; output: number }; cost: number }): void;
+  onError(e: string): void;
+  onEnd(): void;
+}
+
+/** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研） */
+export async function streamChat(
+  sessionId: string,
+  body: { message: string; model?: string; provider?: string },
+  h: ChatHandlers,
+  signal?: AbortSignal,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch(`/api/sessions/${sessionId}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+      signal,
+    });
+  } catch {
+    h.onError('网络错误或已中断');
+    return;
+  }
+  if (!res.ok) {
+    let msg = `请求失败 ${res.status}`;
+    try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
+    h.onError(msg);
+    return;
+  }
+  if (!res.body) { h.onError('响应无内容'); return; }
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  let buf = '';
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const blocks = buf.split('\n\n');
+      buf = blocks.pop() ?? '';
+      for (const block of blocks) {
+        let event = 'message';
+        const dataLines: string[] = [];
+        for (const line of block.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) continue;
+        let data: unknown;
+        try { data = JSON.parse(dataLines.join('\n')); } catch { continue; }
+        const d = data as Record<string, unknown>;
+        switch (event) {
+          case 'start': h.onStart(String(d.traceId ?? '')); break;
+          case 'delta': h.onDelta(String(d.text ?? '')); break;
+          case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
+          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok)); break;
+          case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number }); break;
+          case 'error': h.onError(String(d.error ?? '未知错误')); break;
+          case 'end': h.onEnd(); break;
+        }
+      }
+    }
+  } catch {
+    // 中断或网络异常
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+// ---------- 全局事件订阅（Trace 实时面板） ----------
+
+export function subscribeEvents(onEvent: (e: BusEvent) => void): () => void {
+  const es = new EventSource('/api/events');
+  es.addEventListener('event', (ev) => {
+    try { onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent); } catch { /* 忽略 */ }
+  });
+  return () => es.close();
+}
+
+// ---------- 会话 ----------
+
+export const sessionApi = {
+  list: () => api<Session[]>('/api/sessions'),
+  create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
+  rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
+  messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
+};
+
+export const modelsApi = {
+  list: () => api<ModelInfo[]>('/api/models'),
+};
+
+export const pluginsApi = {
+  list: () => api<PluginInfo[]>('/api/plugins'),
+  action: (id: string, action: 'enable' | 'disable' | 'reload') =>
+    api<{ ok: boolean; state: string }>(`/api/plugins/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
+};
+
+export const traceApi = {
+  stats: () => api<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean }>('/api/trace/stats'),
+  byTraceId: (traceId: string) => api<{ steps: TraceStep[] }>(`/api/trace?trace_id=${encodeURIComponent(traceId)}`),
+};
