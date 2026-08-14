@@ -95,6 +95,13 @@ export class Store {
     if (!sCols.some((c) => c.name === 'plan_pending')) {
       this.db.exec('ALTER TABLE sessions ADD COLUMN plan_pending INTEGER NOT NULL DEFAULT 0');
     }
+    // 迁移：sessions.archived / pinned 列（会话管理：归档与置顶标记）
+    if (!sCols.some((c) => c.name === 'archived')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN archived INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!sCols.some((c) => c.name === 'pinned')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   // ---------- providers（网页端管理，DB 为唯一来源） ----------
@@ -176,23 +183,25 @@ export class Store {
 
   listSessions(): Session[] {
     const rows = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY updated_at DESC')
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
       .all() as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string, title: r.title as string, model: r.model as string,
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
     }));
   }
 
   getSession(id: string): Session | undefined {
     const r = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
       .get(id) as Record<string, unknown> | undefined;
     if (!r) return undefined;
     return {
       id: r.id as string, title: r.title as string, model: r.model as string,
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
     };
   }
@@ -200,20 +209,21 @@ export class Store {
   createSession(model: string): Session {
     const s: Session = {
       id: randomUUID(), title: '新会话', model, mode: 'normal', planPending: 0,
+      archived: 0, pinned: 0,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     this.db
-      .prepare('INSERT INTO sessions (id, title, model, mode, plan_pending, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
-      .run(s.id, s.title, s.model, s.mode, s.planPending, s.createdAt, s.updatedAt);
+      .prepare('INSERT INTO sessions (id, title, model, mode, plan_pending, archived, pinned, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
+      .run(s.id, s.title, s.model, s.mode, s.planPending, s.archived, s.pinned, s.createdAt, s.updatedAt);
     return s;
   }
 
-  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending'>>): void {
+  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending' | 'archived' | 'pinned'>>): void {
     const cur = this.getSession(id);
     if (!cur) return;
     this.db
-      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, updated_at = ? WHERE id = ?')
-      .run(patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode, patch.planPending ?? cur.planPending, Date.now(), id);
+      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
+      .run(patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode, patch.planPending ?? cur.planPending, patch.archived ?? cur.archived, patch.pinned ?? cur.pinned, Date.now(), id);
   }
 
   touchSession(id: string): void {

@@ -1,41 +1,41 @@
 /* ui/src/styles.css —— 简洁实用风 */
 
-/* ---------- Markdown 渲染 ---------- */
-.md { line-height: 1.75; word-break: break-word; }
+/* ---------- Markdown 渲染（紧凑排版，减少留白） ---------- */
+.md { line-height: 1.6; word-break: break-word; }
 .md > *:first-child { margin-top: 0; }
 .md > *:last-child { margin-bottom: 0; }
-.md h1, .md h2, .md h3, .md h4 { margin: 1.1em 0 0.5em; line-height: 1.35; }
-.md h1 { font-size: 1.45em; border-bottom: 1px solid var(--border); padding-bottom: 0.3em; }
-.md h2 { font-size: 1.25em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
-.md h3 { font-size: 1.1em; }
-.md p { margin: 0.55em 0; }
-.md ul, .md ol { margin: 0.5em 0; padding-left: 1.6em; }
-.md li { margin: 0.25em 0; }
-.md li > ul, .md li > ol { margin: 0.2em 0; }
+.md h1, .md h2, .md h3, .md h4 { margin: 0.9em 0 0.4em; line-height: 1.35; }
+.md h1 { font-size: 1.4em; border-bottom: 1px solid var(--border); padding-bottom: 0.25em; }
+.md h2 { font-size: 1.22em; border-bottom: 1px solid var(--border); padding-bottom: 0.2em; }
+.md h3 { font-size: 1.08em; }
+.md p { margin: 0.38em 0; }
+.md ul, .md ol { margin: 0.32em 0; padding-left: 1.5em; }
+.md li { margin: 0.1em 0; }
+.md li > ul, .md li > ol { margin: 0.15em 0; }
 .md a { color: var(--accent); text-decoration: none; }
 .md a:hover { text-decoration: underline; }
 .md blockquote {
-  margin: 0.6em 0; padding: 0.2em 1em; color: var(--muted);
+  margin: 0.45em 0; padding: 0.15em 0.9em; color: var(--muted);
   border-left: 3px solid var(--border); background: var(--bg); border-radius: 0 6px 6px 0;
 }
 .md code {
   font-family: var(--mono); font-size: 0.88em;
-  background: var(--bg); padding: 0.15em 0.4em; border-radius: 4px;
+  background: var(--bg); padding: 0.12em 0.35em; border-radius: 4px;
 }
 .md pre {
-  margin: 0.7em 0; padding: 12px 14px; border-radius: 8px;
-  overflow-x: auto; font-size: 12.5px; line-height: 1.55;
+  margin: 0.5em 0; padding: 10px 12px; border-radius: 8px;
+  overflow-x: auto; font-size: 12.5px; line-height: 1.5;
   background: #f6f8fa; border: 1px solid var(--border);
 }
 .md pre code { background: none; padding: 0; font-size: inherit; }
 .md table {
-  border-collapse: collapse; margin: 0.7em 0; font-size: 13px;
+  border-collapse: collapse; margin: 0.5em 0; font-size: 13px;
   width: 100%; display: block; overflow-x: auto;
 }
-.md th, .md td { border: 1px solid var(--border); padding: 6px 12px; text-align: left; }
+.md th, .md td { border: 1px solid var(--border); padding: 5px 10px; text-align: left; }
 .md th { background: var(--bg); font-weight: 600; }
 .md tr:nth-child(even) td { background: #fafafa; }
-.md hr { border: none; border-top: 1px solid var(--border); margin: 1em 0; }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 0.7em 0; }
 .md input[type='checkbox'] { margin-right: 6px; }
 
 /* ---------- 思考过程（折叠可控） ---------- */
@@ -202,20 +202,34 @@ body {
 .session-list, .plugin-list { flex: 1; overflow-y: auto; padding: 10px; }
 .new-session { width: 100%; margin-bottom: 8px; }
 .session-item {
-  position: relative; padding: 8px 10px; border-radius: 8px;
-  cursor: pointer; margin-bottom: 4px;
+  position: relative; padding: 7px 10px; border-radius: 8px;
+  cursor: pointer; margin-bottom: 3px;
 }
 .session-item:hover { background: var(--bg); }
 .session-item.active { background: var(--accent-weak); }
-.session-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 20px; }
+.session-item.pinned .session-title::before { content: '📌 '; }
+.session-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 64px; }
 .session-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
-.session-del {
-  position: absolute; right: 8px; top: 50%; transform: translateY(-50%);
-  border: none; background: none; color: var(--muted); cursor: pointer;
-  display: none; font-size: 12px;
+.session-actions {
+  position: absolute; right: 6px; top: 50%; transform: translateY(-50%);
+  display: flex; gap: 2px;
 }
-.session-item:hover .session-del { display: block; }
-.session-del:hover { color: var(--red); }
+.session-actions button {
+  border: none; background: none; color: var(--muted); cursor: pointer;
+  font-size: 12px; padding: 2px 3px; border-radius: 4px; line-height: 1;
+}
+.session-actions button:hover { background: var(--panel); color: var(--text); }
+.session-actions button.danger:hover { color: var(--red); }
+.session-group-title {
+  font-size: 11px; color: var(--muted); margin: 8px 4px 4px;
+  user-select: none;
+}
+.archive-toggle {
+  width: 100%; text-align: left; border: none; background: none;
+  font-size: 11px; color: var(--muted); padding: 6px 4px; cursor: pointer;
+  border-radius: 6px;
+}
+.archive-toggle:hover { background: var(--bg); color: var(--text); }
 .empty-hint { color: var(--muted); text-align: center; padding: 20px 10px; font-size: 12px; }
 
 .plugin-hint { font-size: 11px; color: var(--muted); margin-bottom: 10px; }
@@ -267,7 +281,7 @@ body {
 .welcome .warn { color: var(--amber); }
 code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
 
-.msg { display: flex; gap: 12px; margin-bottom: 20px; }
+.msg { display: flex; gap: 12px; margin-bottom: 14px; }
 .msg-label {
   min-width: 44px; height: 28px; padding: 0 8px; border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
@@ -278,7 +292,7 @@ code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border
 .msg.system .msg-label { background: #94a3b8; }
 .msg.system .msg-content { color: var(--muted); font-size: 13px; }
 .msg-content { flex: 1; min-width: 0; }
-.msg-text { white-space: pre-wrap; word-break: break-word; line-height: 1.7; }
+.msg-text { white-space: pre-wrap; word-break: break-word; line-height: 1.6; }
 .cursor { color: var(--accent); animation: blink 1s infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 .thinking { color: var(--muted); }

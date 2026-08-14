@@ -112,7 +112,7 @@ export const sessionApi = {
   list: () => api<Session[]>('/api/sessions'),
   create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
-  update: (id: string, patch: Partial<{ title: string; model: string; mode: string }>) =>
+  update: (id: string, patch: Partial<{ title: string; model: string; mode: string; archived: boolean | number; pinned: boolean | number }>) =>
     api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),

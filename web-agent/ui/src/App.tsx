@@ -87,6 +87,17 @@ export default function App() {
     });
   }, [activeId, selectSession]);
 
+  // 会话管理：归档 / 置顶标记
+  const archiveSession = useCallback(async (id: string, archived: boolean) => {
+    await sessionApi.update(id, { archived });
+    setSessions(await sessionApi.list());
+  }, []);
+
+  const pinSession = useCallback(async (id: string, pinned: boolean) => {
+    await sessionApi.update(id, { pinned });
+    setSessions(await sessionApi.list());
+  }, []);
+
   // 插件管理
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
     await pluginsApi.action(id, action);
@@ -207,6 +218,8 @@ export default function App() {
             onSelect={selectSession}
             onCreate={createSession}
             onDelete={deleteSession}
+            onArchive={archiveSession}
+            onPin={pinSession}
           />
         ) : sideTab === 'plugins' ? (
           <PluginPanel plugins={plugins} onAction={pluginAction} />

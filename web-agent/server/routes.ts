@@ -276,14 +276,21 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
   app.patch('/api/sessions/:id', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { title, model, mode } = req.body ?? {};
+    const { title, model, mode, archived, pinned } = req.body ?? {};
     if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
       return res.status(400).json({ error: 'mode 仅支持 normal / plan / goal' });
+    }
+    for (const [k, v] of [['archived', archived], ['pinned', pinned]] as const) {
+      if (v !== undefined && v !== 0 && v !== 1 && v !== false && v !== true) {
+        return res.status(400).json({ error: `${k} 仅支持 0/1` });
+      }
     }
     store.updateSession(session.id, {
       ...(typeof title === 'string' ? { title } : {}),
       ...(typeof model === 'string' ? { model } : {}),
       ...(typeof mode === 'string' ? { mode, planPending: mode === 'plan' ? 1 : 0 } : {}),
+      ...(archived !== undefined ? { archived: archived ? 1 : 0 } : {}),
+      ...(pinned !== undefined ? { pinned: pinned ? 1 : 0 } : {}),
     });
     res.json(store.getSession(session.id));
   });

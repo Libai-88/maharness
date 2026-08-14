@@ -4,6 +4,9 @@ export interface Session {
   title: string;
   model: string;
   mode: string;
+  planPending: number;
+  archived: number;
+  pinned: number;
   createdAt: number;
   updatedAt: number;
 }
