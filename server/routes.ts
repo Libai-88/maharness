@@ -173,6 +173,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     if (!session) return res.status(404).json({ error: '会话不存在' });
     const { message, model, provider: providerId, systemPrompt } = req.body ?? {};
     if (!message?.trim()) return res.status(400).json({ error: '消息不能为空' });
+    // 编码防御：拒绝含替换符/孤立代理项的消息（防外部工具写入乱码）
+    if (/\uFFFD/.test(message) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\uDC00-\uDFFF](?<![\uD800-\uDBFF])/.test(message)) {
+      return res.status(400).json({ error: '消息包含无法识别的编码字符，请检查输入编码（应为 UTF-8）' });
+    }
 
     const chat = getChatService(kernel);
     if (!chat) return res.status(500).json({ error: '对话服务未加载' });
