@@ -57,6 +57,7 @@ export default function App() {
     setActiveId(id);
     setMessages([]);
     setTraceSteps([]);
+    setPlan(null); // 计划卡片属于会话，切换时清空（防跨会话残留）
     try {
       const msgs = await sessionApi.messages(id);
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
@@ -69,6 +70,7 @@ export default function App() {
     setActiveId(s.id);
     setMessages([]);
     setTraceSteps([]);
+    setPlan(null);
   }, [sel]);
 
   const deleteSession = useCallback(async (id: string) => {
