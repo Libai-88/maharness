@@ -74,5 +74,33 @@ if (cp) {
   }
 }
 
+// ---- memory：工具 + before_llm 钩子注入 ----
+const rf = tools.find((t) => t.name === 'remember_fact');
+const recall = tools.find((t) => t.name === 'recall_facts');
+const forget = tools.find((t) => t.name === 'forget_fact');
+if (rf && recall && forget) {
+  const cleanSelftest = async () => {
+    const r = await recall.handler({ query: 'selftest' }, tctx());
+    for (const f of (r.data as { facts: { id: string }[] }).facts) await forget.handler({ id: f.id }, tctx());
+  };
+  await cleanSelftest();
+  await rf.handler({ text: `selftest 记忆测试 ${Date.now()}` }, tctx());
+  const q1 = await recall.handler({ query: 'selftest' }, tctx());
+  console.log('[memory] remember+recall:', (q1.data as { count: number }).count >= 1 ? '✓' : '✗');
+
+  // before_llm 钩子注入验证（模拟 agent 循环发布的钩子事件）
+  const history = [{ role: 'system', content: 's' }, { role: 'user', content: 'u' }];
+  await kernel.bus.emitAsync({
+    type: 'agent.before_llm',
+    data: { traceId: 't', turn: 0, model: 'm', history, systemPrompt: 's', tools: [], scratchpad: {} },
+    ts: Date.now(),
+  });
+  const injected = history.length === 3 && String(history[2].content).includes('长期记忆');
+  console.log('[memory] before_llm 注入:', injected ? '✓' : '✗');
+  await cleanSelftest();
+  const q3 = await recall.handler({ query: 'selftest' }, tctx());
+  console.log('[memory] 清理完成:', (q3.data as { count: number }).count === 0 ? '✓' : '✗');
+}
+
 await kernel.stop();
 console.log('selftest done');

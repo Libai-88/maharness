@@ -165,7 +165,24 @@ interface ToolDef {
 - 工具由任意插件通过 `ctx.register('tool', toolDef)` 注册，Agent 执行器只认注册表，不认识具体工具 —— **新工具=现场写插件**。
 - 工具执行统一包裹：超时（默认 30s）、错误捕获（错误文本返回给 LLM 而非中断会话）、Trace 记录、L2 缓存查询/写入。
 
-### 4.3 沙箱与安全（Windows 重点）
+### 4.3 钩子管线（agent.* 六钩子，零内核改动）
+
+执行器在每个关键节点通过事件总线发布 `agent.*` 事件（`emitAsync` 按优先级有序等待监听器），**监听器通过改写事件负载影响流程**——事件总线即钩子管线：
+
+| 钩子 | 时机 | 负载可改写 |
+| --- | --- | --- |
+| `agent.input.received` | 用户输入进入循环 | history / tools / `blocked`（拦截） |
+| `agent.before_llm` | 每轮调用 LLM 前 | history（注入上下文/记忆）、tools |
+| `agent.after_llm` | 模型输出后 | 观测（content/reasoning/toolCalls） |
+| `agent.before_tool` | 工具执行前 | tool.args（改写参数）、`blocked`（拦截） |
+| `agent.after_tool` | 工具执行后 | result（改写结果） |
+| `agent.on_error` | 异常/超轮数 | 观测（error） |
+
+- 负载为 `AgentHookCtx`：`{ traceId, turn, model, history, systemPrompt, tools, scratchpad, ... }`，`scratchpad` 跨轮共享（钩子自管理防重复注入等）。
+- **L3 缓存友好**：memory 插件注入记忆时追加到 history 末尾（不动 system prompt 与历史前缀），provider KV cache 前缀命中不受影响。
+- 首个实战消费者：`memory` 插件（before_llm 注入长期记忆，跨会话生效）。
+
+### 4.4 沙箱与安全（Windows 重点）
 
 - 文件类工具锚定根目录 = 当前工作区（`D:\DEEPSEEK`，用户 2026-08-14 确认开发阶段沙箱限制在当前工作区；config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越。
 - 写入工具拒绝符号链接指向沙箱外；只读操作默认允许，写操作逐项审计入 Trace。

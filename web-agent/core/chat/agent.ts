@@ -5,8 +5,31 @@
  */
 import { randomUUID } from 'node:crypto';
 import type {
-  KernelLike, LLMMessage, ProviderDef, ToolCall, TraceStep,
+  EventBusLike, KernelLike, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
+
+/**
+ * 钩子管线运行上下文（agent.* 事件负载）
+ * 监听器通过改写字段影响流程：history（注入上下文/记忆）、tools、scratchpad（跨轮共享）、
+ * blocked（拦截）、tool.args（改写参数）、result（改写结果）。约定俗成，不触碰内核。
+ */
+export interface AgentHookCtx {
+  traceId: string;
+  turn: number;
+  model: string;
+  history: LLMMessage[];
+  systemPrompt: string;                 // 信息展示；改 history[0].content 才真正生效
+  tools: ToolDef[];
+  scratchpad: Record<string, unknown>;
+  blocked?: boolean;                    // 置 true 拦截（agent.input.received / agent.before_tool）
+  blockReason?: string;
+  tool?: { name: string; args: unknown };
+  content?: string;                     // after_llm：模型输出（观测）
+  reasoning?: string;
+  toolCalls?: ToolCall[];
+  result?: ToolResult;                  // after_tool：结果（可改写）
+  error?: string;                       // on_error
+}
 
 export type AgentEvent =
   | { type: 'delta'; text: string }
@@ -43,7 +66,12 @@ const APPROVAL_TIMEOUT = 10 * 60 * 1000;
 export class AgentRunner {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
 
-  constructor(private kernel: KernelLike) {}
+  constructor(private kernel: KernelLike, private bus: EventBusLike) {}
+
+  /** 发布钩子事件（await 所有监听器；总线已隔离监听器错误） */
+  private emitHook(type: string, data: AgentHookCtx): Promise<void> {
+    return this.bus.emitAsync({ type, data, traceId: data.traceId, ts: Date.now() });
+  }
 
   /** 外部（REST 接口）响应审批：批准或拒绝 */
   approveApproval(approvalId: string, approved: boolean): boolean {
@@ -58,13 +86,23 @@ export class AgentRunner {
   async *run(opts: RunOptions): AsyncGenerator<AgentEvent> {
     const { provider, model, messages, traceId, signal } = opts;
     const maxTurns = opts.maxTurns ?? 8;
+    const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     const history: LLMMessage[] = [
-      { role: 'system', content: opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT },
+      { role: 'system', content: systemPrompt },
       ...messages,
     ];
     const tools = this.kernel.plugins.capabilities('tool');
     const toolDefs = tools.map((c) => c.tool);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
+    const scratchpad: Record<string, unknown> = {};
+
+    // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
+    const inputCtx: AgentHookCtx = { traceId, turn: 0, model, history, systemPrompt, tools: toolDefs, scratchpad };
+    await this.emitHook('agent.input.received', inputCtx);
+    if (inputCtx.blocked) {
+      yield { type: 'error', error: inputCtx.blockReason ?? '已被策略拦截' };
+      return;
+    }
 
     let totalIn = 0, totalOut = 0, totalCost = 0;
 
@@ -73,6 +111,10 @@ export class AgentRunner {
         yield { type: 'error', error: '已中断' };
         return;
       }
+
+      // ---- 钩子：调用 LLM 前（记忆注入 / 上下文拼装 / 工具调整） ----
+      const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad };
+      await this.emitHook('agent.before_llm', llmCtx);
 
       // ---- 决策：LLM 调用（流式） ----
       const step = this.kernel.trace.startStep({
@@ -83,7 +125,7 @@ export class AgentRunner {
       let usage: { input: number; output: number } | undefined;
       let collected: ToolCall[] = [];
       try {
-        for await (const chunk of provider.chat(history, { model, tools: toolDefs, signal })) {
+        for await (const chunk of provider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
           if (chunk.type === 'delta') {
             text += chunk.text;
             yield { type: 'delta', text: chunk.text };
@@ -97,8 +139,10 @@ export class AgentRunner {
           }
         }
       } catch (err) {
-        step.fail(err instanceof Error ? err.message : String(err));
-        yield { type: 'error', error: err instanceof Error ? err.message : String(err) };
+        const errMsg = err instanceof Error ? err.message : String(err);
+        await this.emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg });
+        step.fail(errMsg);
+        yield { type: 'error', error: errMsg };
         return;
       }
       const tIn = usage?.input ?? 0;
@@ -110,6 +154,12 @@ export class AgentRunner {
       step.finish({
         outputSummary: text.slice(0, 200),
         tokensIn: tIn, tokensOut: tOut, cost,
+      });
+
+      // ---- 钩子：LLM 输出后（校验/观测；流出的输出暂不可改写） ----
+      await this.emitHook('agent.after_llm', {
+        traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad,
+        content: text, reasoning, toolCalls: collected,
       });
 
       history.push({
@@ -141,12 +191,21 @@ export class AgentRunner {
           continue;
         }
         yield { type: 'tool_start', name: tool.name, args };
+        // ---- 钩子：工具执行前（权限策略 / 参数改写 / 拦截） ----
+        const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args } };
+        await this.emitHook('agent.before_tool', toolCtx);
+        if (toolCtx.blocked) {
+          history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' }) });
+          yield { type: 'tool_result', name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
+          continue;
+        }
+        const toolArgs = toolCtx.tool?.args ?? args;
         const tStep = this.kernel.trace.startStep({
-          traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(args),
+          traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(toolArgs),
         });
         let result;
         try {
-          result = await tool.handler(args, {
+          result = await tool.handler(toolArgs, {
             traceId, turn,
             sandboxRoot,
             signal,
@@ -187,17 +246,22 @@ export class AgentRunner {
             }
           }
         }
-        if (result.ok) {
-          tStep.finish({ outputSummary: summarize(result.data) });
+        // ---- 钩子：工具执行后（结果过滤/改写） ----
+        const afterTCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args: toolArgs }, result };
+        await this.emitHook('agent.after_tool', afterTCtx);
+        const finalResult = afterTCtx.result ?? result;
+        if (finalResult.ok) {
+          tStep.finish({ outputSummary: summarize(finalResult.data) });
         } else {
-          tStep.fail(result.error ?? '工具执行失败', { outputSummary: summarize(result) });
+          tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
         }
-        const content = JSON.stringify(result).slice(0, 4000);
+        const content = JSON.stringify(finalResult).slice(0, 4000);
         history.push({ role: 'tool', tool_call_id: tc.id, content });
-        yield { type: 'tool_result', name: tool.name, summary: summarize(result), ok: !!result.ok };
+        yield { type: 'tool_result', name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok };
       }
     }
 
+    await this.emitHook('agent.on_error', { traceId, turn: maxTurns, model, history, systemPrompt, tools: toolDefs, scratchpad, error: `超过最大轮数 ${maxTurns}，已停止` });
     yield { type: 'error', error: `超过最大轮数 ${maxTurns}，已停止` };
   }
 }

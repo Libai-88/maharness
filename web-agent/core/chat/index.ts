@@ -29,7 +29,7 @@ export default {
   async onLoad(ctx) {
     const providers = discoverProviders().map(createProvider);
     setupEmbedding(ctx); // 配置了 EMBEDDING_* 则激活 L1 语义缓存
-    const runner = new AgentRunner(ctx.kernel);
+    const runner = new AgentRunner(ctx.kernel, ctx.bus);
 
     const service: {
       providers: ReturnType<typeof createProvider>[];

@@ -107,6 +107,7 @@ web-agent/
 │  ├─ chat/       #   Agent 执行器 + 自研 OpenAI 兼容流式客户端
 │  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存）
 │  ├─ search/     #   联网搜索（Tavily / DuckDuckGo 降级 + 可选代理）
+│  ├─ memory/     #   长期记忆（before_llm 钩子自动注入，跨会话）
 │  ├─ goal-plan/  #   多步目标计划模式
 │  ├─ powershell/ #   PowerShell 执行器（危险命令审批）
 │  └─ self-extend/#   ★ 自我扩展（agent 可自建插件，定义自己）
@@ -131,6 +132,7 @@ npm run ui:build     # 前端构建
 - [x] v1 最小闭环：内核 + 对话 + 文件工具 + 网页面板 + 轨迹观测
 - [x] self-extend 自我扩展：Agent 可自建插件（万物皆插件，自己定义自己）
 - [x] search 插件（联网搜索，Tavily / DuckDuckGo 降级 + 可选代理）
-- [ ] memory 插件（长期记忆）
+- [x] 钩子管线：agent.* 六钩子（input/before_llm/after_llm/before_tool/after_tool/on_error）
+- [x] memory 插件（长期记忆，before_llm 钩子注入，跨会话）
 - [x] powershell 插件（Windows Shell 能力）
 - [ ] 系统托盘 / 开机自启
