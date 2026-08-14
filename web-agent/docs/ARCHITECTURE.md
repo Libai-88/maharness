@@ -1,8 +1,8 @@
-# Web Agent 架构设计文档（v1）
+# maharness 架构设计文档（v1）
 
-> 版本：v1.0（已定稿，2026-08-14 用户确认）
-> 定位：从 0 自研的 Windows 原生网页版 Agent。除内核运行必备外，一切能力为可插拔组件。
-> 原则：不用任何现成 agent 框架（LangChain/CrewAI/AutoGen 等）；极简高效；运行全程可观测；高缓存命中；创新自研。
+> 版本：v1.1（2026-08-14）
+> 定位：从 0 自研的 Windows 原生网页版 Agent。**只有内外之分**：内部是唯一保持不变的 Agent 核心（kernel/），其余一切能力为可插拔组件（外部）。
+> 原则：不用任何现成 agent 框架（LangChain/CrewAI/AutoGen 等）；极简高效；运行全程可观测；高缓存命中；创新自研；**万物都是插件，agent 可以自己定义自己**。
 
 ---
 
@@ -28,7 +28,8 @@
 ├────────────────────────────────────────────────────┤
 │ 能力层（全部插件，plugins/ 目录现场开发）             │
 │   chat(对话) · tools-fs(文件) · search(搜索) ·       │
-│   memory(记忆) · powershell · automation ...        │
+│   goal-plan(目标计划) · powershell(Shell) ·          │
+│   self-extend(自我扩展：agent 自建插件) · memory ...  │
 ├────────────────────────────────────────────────────┤
 │ 内核 Kernel（运行必备，仅 5 大件）                   │
 │   EventBus  事件总线（一切通信走总线）                │
@@ -259,7 +260,8 @@ web-agent/
 | 3 | server API + SSE | curl 验证全部接口 |
 | 4 | 前端 UI + 插件面板 + Trace 面板 | 浏览器全流程点测 |
 | 5 | 联调、README、`.env.example` 说明 | 交付启动即用 |
-| 后续 | search / memory / powershell / 托盘 插件按需现场写 | — |
+| 6 | search 插件（Tavily/DDG）+ self-extend（agent 自建插件） | 对话中完成「自建插件→热加载→调用新工具」闭环 |
+| 后续 | memory / 托盘 插件按需现场写 | — |
 
 ## 11. 现场写插件示例（开发范式）
 

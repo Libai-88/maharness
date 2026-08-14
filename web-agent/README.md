@@ -1,7 +1,7 @@
-# Web Agent —— 自研 Windows 原生网页版 Agent
+# maharness —— 自研 Windows 原生网页版 Agent
 
-> **薄内核 · 全插件化 · 全程可观测 · 高缓存命中**
-> 除内核运行必备外，一切能力均为可插拔组件：**现场写、现场加载、现场启停**。
+> **薄内核 · 全插件化 · 全程可观测 · 高缓存命中 · agent 可以自己定义自己**
+> 只有内外之分：内部是唯一不变的 Agent 核心（kernel/）；其余一切能力均为可插拔组件——**现场写、现场加载、现场启停**。
 
 ## 设计理念（详见 `docs/ARCHITECTURE.md`）
 
@@ -76,6 +76,15 @@ export default {
 
 能力类型：`tool`（Agent 工具）/ `listener`（事件监听）/ `command`（斜杠命令）/ `provider`（LLM 提供者）/ `service`（对外服务）。
 
+### Agent 自己写插件（自我扩展）
+
+**maharness 核心理念：万物都是插件，agent 可以自己定义自己。** 内置 `self-extend` 插件让 Agent 具备自我扩展能力：
+
+- `create_plugin` —— 由 Agent 调用：传入插件 id 与完整 `index.ts` 源码，自动生成 `plugin.json` 并写入 `plugins/`，热加载后回传状态；加载失败时回传错误信息供 Agent 修复迭代。
+- `plugin_status` —— 查看 `plugins/` 现场插件的加载状态 / 能力 / 错误。
+
+工作闭环：**Agent 想要新能力 → create_plugin（或 write_file）写插件 → 保存即热加载 → plugin_status 验证 → 失败则读错误修复 → 下一轮对话即可使用新工具**。内核与 core/ 目录保持不变，扩展永远发生在外部插件空间。
+
 ## 环境变量
 
 | 变量 | 说明 |
@@ -84,6 +93,8 @@ export default {
 | `OPENAI_BASE_URL/API_KEY/MODEL` | OpenAI Provider |
 | `<NAME>_PRICE_IN/OUT` | 可选：覆盖价格（USD/百万 token，用于成本核算） |
 | `EMBEDDING_BASE_URL/API_KEY/MODEL` | 可选：激活 L1 语义缓存 |
+| `TAVILY_API_KEY` | 可选：联网搜索用 Tavily（更稳定）；未配置自动降级 DuckDuckGo |
+| `SEARCH_PROXY` | 可选：搜索请求走 HTTP 代理（如 `http://127.0.0.1:7897`），网络受限时使用 |
 | `SANDBOX_ROOT` | 文件工具沙箱根目录（默认启动目录；防目录穿越） |
 | `PORT` | 服务端口（默认 3000） |
 
@@ -91,11 +102,15 @@ export default {
 
 ```
 web-agent/
-├─ kernel/        # 内核 5 大件（薄）：bus / config / trace / cache / plugin-loader
+├─ kernel/        # 内核 5 大件（薄）：bus / config / trace / cache / plugin-loader ← 内部，唯一不变
 ├─ core/          # 核心插件（同样走插件机制）
 │  ├─ chat/       #   Agent 执行器 + 自研 OpenAI 兼容流式客户端
-│  └─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存）
-├─ plugins/       # ★ 现场插件目录（热加载）
+│  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存）
+│  ├─ search/     #   联网搜索（Tavily / DuckDuckGo 降级 + 可选代理）
+│  ├─ goal-plan/  #   多步目标计划模式
+│  ├─ powershell/ #   PowerShell 执行器（危险命令审批）
+│  └─ self-extend/#   ★ 自我扩展（agent 可自建插件，定义自己）
+├─ plugins/       # ★ 现场插件目录（热加载；Agent 自我扩展的落点）
 ├─ server/        # Express + SSE API
 ├─ ui/            # React + Vite 前端
 ├─ data/          # SQLite 会话存储 + traces/ JSONL 审计日志
@@ -114,7 +129,8 @@ npm run ui:build     # 前端构建
 ## 路线
 
 - [x] v1 最小闭环：内核 + 对话 + 文件工具 + 网页面板 + 轨迹观测
-- [ ] search 插件（联网搜索，Tavily / DuckDuckGo 降级）
+- [x] self-extend 自我扩展：Agent 可自建插件（万物皆插件，自己定义自己）
+- [x] search 插件（联网搜索，Tavily / DuckDuckGo 降级 + 可选代理）
 - [ ] memory 插件（长期记忆）
-- [ ] powershell 插件（Windows Shell 能力）
+- [x] powershell 插件（Windows Shell 能力）
 - [ ] 系统托盘 / 开机自启

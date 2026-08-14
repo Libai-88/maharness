@@ -1,0 +1,7 @@
+{
+  "id": "self-extend",
+  "name": "自我扩展",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

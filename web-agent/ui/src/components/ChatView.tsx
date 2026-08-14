@@ -55,8 +55,8 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         )}
         {messages.length === 0 && (
           <div className="welcome">
-            <h2>自研 Web Agent</h2>
-            <p>薄内核 · 全插件化 · 全程可观测。我可以读写工作区文件、调用工具。</p>
+            <h2>maharness</h2>
+            <p>薄内核 · 全插件化 · 全程可观测。我可以读写工作区文件、联网搜索，甚至可以给自己写新插件。</p>
             {!hasModels && <p className="warn">尚未配置 LLM Provider —— 在左侧「设置」中添加。</p>}
           </div>
         )}

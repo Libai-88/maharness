@@ -1,2 +1,8 @@
 # maharness
-自研agent
+
+自研 Windows 原生网页版 Agent —— 薄内核 · 全插件化 · 全程可观测。
+
+**万物都是插件：agent 可以自己定义自己。** 只有内外之分：内部是唯一保持不变的 Agent 核心（kernel/），其余一切能力都通过可插拔的插件实现（外部）。
+
+- 实现与使用文档：[web-agent/](web-agent/)
+- 架构设计：[docs/ARCHITECTURE.md](web-agent/docs/ARCHITECTURE.md)
