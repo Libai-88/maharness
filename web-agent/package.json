@@ -3,12 +3,16 @@
   "version": "0.1.0",
   "private": true,
   "description": "maharness：自研 Windows 原生网页版 Agent——薄内核 + 全插件化 + 全程可观测，agent 可以自己定义自己",
+  "bin": {
+    "maharness": "./bin/maharness.js"
+  },
   "type": "module",
   "engines": {
     "node": ">=20.6"
   },
   "scripts": {
     "setup": "node scripts/setup.mjs",
+    "link": "npm link",
     "dev": "tsx watch server/index.ts",
     "dev:all": "node scripts/dev-all.mjs",
     "start": "tsx server/index.ts",
