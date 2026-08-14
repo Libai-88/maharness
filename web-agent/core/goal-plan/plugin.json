@@ -1,0 +1,7 @@
+{
+  "id": "goal-plan",
+  "name": "目标计划模式",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}
