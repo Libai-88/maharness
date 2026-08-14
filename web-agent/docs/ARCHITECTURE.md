@@ -131,6 +131,9 @@ TraceSession(traceId)
 **L3 设计要点（高命中关键）**：保持 system prompt 字节级稳定；历史消息按"只追加不重写"策略组装（同一会话内，旧消息序列不变）；多轮工具结果不回写历史。这样 provider 侧 KV cache 前缀复用最大化，DeepSeek/OpenAI 的 context caching 均吃满。
 
 **缓存统计**：命中次数、节省 token、节省成本、命中率，全部进入 Trace 并在面板展示。缓存"是什么、为什么命中"永远可查。
+- L3 可观测：Agent 循环在每次 LLM 调用前对比与上一轮消息的公共前缀，估算复用 token 计入 `cache.l3`（`kernel/tokens.ts` 的 `sharedPrefixTokens`）。
+
+**统计面板（`GET /api/stats`）**：聚合全局概览（会话/消息/tokens/成本/截断次数，SQLite 累计）、本次运行明细（Trace 进程级）、每会话上下文用量（`estimateTokens` 估算 + 与 `context.maxTokens` 预算对比 + 截断标记）、三层缓存命中率（L1/L2 命中率、L3 复用次数与 token 数）。前端侧边栏「统计」Tab 每 5 秒轮询刷新。
 
 ---
 
@@ -275,6 +278,8 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | GET | `/api/plugins` | 插件列表与状态 |
 | POST | `/api/plugins/:id/actions` | `enable/disable/reload` |
 | GET | `/api/trace?session_id=` | 查询轨迹（环形缓冲/落盘） |
+| GET | `/api/trace/stats` | 进程级 Trace/Cache 计数 |
+| GET | `/api/stats` | 统计面板：全局概览 + 上下文用量 + 三层缓存命中率 |
 | GET | `/api/events` | 全局事件 SSE（前端实时面板） |
 
 **chat SSE 事件流**：`turn.started` → `message.delta`(文本增量) → `tool.started` → `tool.delta`(工具输出增量) → `tool.done` → `message.done` → `turn.done` → `done`（含汇总：tokens/成本/缓存命中）。任意时刻 `stop` 可中断。

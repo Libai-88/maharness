@@ -80,6 +80,8 @@ export interface CacheLike {
   l2Set(key: string, value: unknown, ttlMs?: number): void;
   makeKey(parts: string[]): string;
   setEmbeddingFn(fn: (text: string) => Promise<number[]>): void;
+  /** L3 prompt 前缀复用统计：记录本轮与上轮 LLM 调用公共前缀的 token 数 */
+  recordPrefixRepeat(tokens: number): void;
   clear(): void;
   stats(): CacheStats;
 }
@@ -248,6 +250,9 @@ export interface CacheStats {
   l2Misses: number;
   l1Hits: number;
   l1Misses: number;
+  /** L3 prompt 前缀复用：相邻 LLM 调用公共前缀的累计 token 数（provider KV cache 直接命中） */
+  l3Hits: number;
+  l3Tokens: number;
   savedCost: number;
 }
 

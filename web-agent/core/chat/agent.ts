@@ -4,6 +4,7 @@
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
 import { randomUUID } from 'node:crypto';
+import { sharedPrefixTokens } from '../../kernel/tokens';
 import type {
   EventBusLike, KernelLike, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
@@ -124,6 +125,8 @@ export class AgentRunner {
     }
 
     let totalIn = 0, totalOut = 0, totalCost = 0;
+    // L3 前缀缓存统计：记录上一轮实际发给 LLM 的 history 快照（钩子可能改写）
+    let lastHistory: { role?: string; content?: string | null }[] | null = null;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (signal?.aborted) {
@@ -144,6 +147,12 @@ export class AgentRunner {
       let usage: { input: number; output: number } | undefined;
       let collected: ToolCall[] = [];
       try {
+        // L3 前缀复用统计：与上一轮调用共享的公共前缀 token（provider KV cache 直接命中）
+        if (lastHistory) {
+          const shared = sharedPrefixTokens(lastHistory, llmCtx.history);
+          if (shared > 0) this.kernel.cache.recordPrefixRepeat(shared);
+        }
+        lastHistory = llmCtx.history.map((m) => ({ role: m.role, content: m.content }));
         for await (const chunk of provider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
           if (chunk.type === 'delta') {
             text += chunk.text;

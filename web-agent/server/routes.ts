@@ -12,7 +12,7 @@ import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync, cpSync, rmSync, readFileSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
-import { truncateHistory } from './context';
+import { truncateHistory, estimateTokens } from './context';
 import type { Store } from './db';
 
 interface ChatService {
@@ -611,6 +611,51 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
 
   app.get('/api/trace/stats', (_req, res) => {
     res.json({ trace: kernel.trace.statsSnapshot(), cache: kernel.cache.statsSnapshot(), l1Enabled: kernel.cache.l1Enabled });
+  });
+
+  // ---------- 统计（上下文用量 / 缓存命中率 / 总体概览） ----------
+  app.get('/api/stats', (_req, res) => {
+    const trace = kernel.trace.stats();
+    const cache = kernel.cache.stats();
+    const overview = store.statsOverview();
+    const maxCtx = kernel.config.get<number>('context.maxTokens', 30000);
+    const rate = (hits: number, misses: number): { hits: number; misses: number; rate: number } => {
+      const total = hits + misses;
+      return { hits, misses, rate: total > 0 ? Math.round((hits / total) * 1000) / 10 : 0 };
+    };
+    // 每会话：消息量 / 成本 / 估算上下文用量（与预算对比）/ 截断次数
+    const perSession = store.listSessions().map((s) => {
+      const msgs = store.listMessages(s.id);
+      const truncations = msgs.filter((m) => m.role === 'system' && (m.content ?? '').includes('上下文管理')).length;
+      const estimatedTokens = msgs.reduce((sum, m) => sum + estimateTokens(m.content ?? ''), 0);
+      return {
+        id: s.id, title: s.title, mode: s.mode,
+        messages: msgs.length,
+        tokensIn: msgs.reduce((sum, m) => sum + (m.tokensIn ?? 0), 0),
+        tokensOut: msgs.reduce((sum, m) => sum + (m.tokensOut ?? 0), 0),
+        cost: msgs.reduce((sum, m) => sum + (m.cost ?? 0), 0),
+        estimatedTokens,
+        contextBudget: maxCtx,
+        contextUsage: Math.min(999, Math.round((estimatedTokens / Math.max(maxCtx, 1)) * 1000) / 10),
+        truncated: truncations > 0,
+        truncations,
+      };
+    });
+    res.json({
+      overview: { ...overview, cacheHitSteps: trace.cacheHits },
+      process: {
+        steps: trace.steps, llmCalls: trace.llmCalls, toolCalls: trace.toolCalls,
+        tokensIn: trace.totalTokensIn, tokensOut: trace.totalTokensOut, cost: trace.totalCost,
+      },
+      context: { maxTokens: maxCtx, perSession },
+      cache: {
+        l1Enabled: kernel.cache.l1Enabled,
+        l1: rate(cache.l1Hits, cache.l1Misses),
+        l2: rate(cache.l2Hits, cache.l2Misses),
+        l3: { hits: cache.l3Hits, tokens: cache.l3Tokens },
+        savedCost: cache.savedCost,
+      },
+    });
   });
 
   // ---------- 审批（执行器级安全机制） ----------

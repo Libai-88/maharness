@@ -5,13 +5,9 @@
  *           丢弃后注入说明消息，LLM 对截断有感知（不产生"缺失记忆"的错觉）。
  */
 import type { LLMMessage } from '../kernel/types';
+import { estimateTokens } from '../kernel/tokens';
 
-/** 粗略估算 token 数：中文字符 ≈ 1 token，其他字符 ≈ 4 字符 1 token */
-export function estimateTokens(text: string): number {
-  if (!text) return 0;
-  const cjk = (text.match(/[\u4e00-\u9fff\u3040-\u30ff\uac00-\ud7af]/g) ?? []).length;
-  return Math.ceil(cjk + (text.length - cjk) / 4);
-}
+export { estimateTokens }; // 兼容旧导入（实现已下沉 kernel/tokens.ts）
 
 export interface ContextTruncateResult {
   messages: LLMMessage[];

@@ -96,6 +96,51 @@ export interface TreeEntry {
   size: number;
 }
 
+/** 统计面板：全局概览 / 进程 / 上下文用量 / 缓存命中率 */
+export interface StatsInfo {
+  overview: {
+    sessions: number;
+    messages: number;
+    tokensIn: number;
+    tokensOut: number;
+    cost: number;
+    truncations: number;
+    cacheHitSteps: number;
+  };
+  process: {
+    steps: number;
+    llmCalls: number;
+    toolCalls: number;
+    tokensIn: number;
+    tokensOut: number;
+    cost: number;
+  };
+  context: {
+    maxTokens: number;
+    perSession: {
+      id: string;
+      title: string;
+      mode: string;
+      messages: number;
+      tokensIn: number;
+      tokensOut: number;
+      cost: number;
+      estimatedTokens: number;
+      contextBudget: number;
+      contextUsage: number;
+      truncated: boolean;
+      truncations: number;
+    }[];
+  };
+  cache: {
+    l1Enabled: boolean;
+    l1: { hits: number; misses: number; rate: number };
+    l2: { hits: number; misses: number; rate: number };
+    l3: { hits: number; tokens: number };
+    savedCost: number;
+  };
+}
+
 export interface TraceStep {
   id: string;
   traceId: string;

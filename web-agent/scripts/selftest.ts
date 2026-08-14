@@ -146,6 +146,21 @@ if (ls && gs) {
     };
     const hasInstalled = Array.isArray(skills.installed) && skills.installed.length >= 4;
     console.log('[skills API] 已安装/市场:', hasInstalled ? '✓' : '✗', `installed=${skills.installed.length} market=${skills.market.length}`);
+
+    // 统计 API：上下文用量 / 缓存命中率 / 总体概览
+    const stats = await fetch(`${base}/api/stats`).then((r) => r.json()) as {
+      overview: { sessions: number; messages: number; truncations: number };
+      process: { llmCalls: number; toolCalls: number };
+      context: { maxTokens: number; perSession: { contextUsage: number; truncations: number }[] };
+      cache: { l1Enabled: boolean; l1: { rate: number }; l2: { rate: number }; l3: { hits: number; tokens: number } };
+    };
+    const hasStats = typeof stats.overview?.sessions === 'number'
+      && stats.context?.maxTokens > 0
+      && Array.isArray(stats.context?.perSession)
+      && typeof stats.cache?.l2?.rate === 'number' && stats.cache?.l2?.rate >= 0
+      && typeof stats.cache?.l3?.hits === 'number';
+    console.log('[stats API] 上下文/缓存统计:', hasStats ? '✓' : '✗',
+      `sessions=${stats.overview?.sessions} ctxMax=${stats.context?.maxTokens} l2率=${stats.cache?.l2?.rate}% l3=${stats.cache?.l3?.hits}次/${stats.cache?.l3?.tokens}tok`);
   } finally {
     server.close();
     await httpKernel.stop();

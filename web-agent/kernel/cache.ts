@@ -27,7 +27,10 @@ const DEFAULT_TTL = 5 * 60_000; // L2 默认 TTL 5 分钟
 export class Cache {
   private l2 = new Map<string, L2Entry>();
   private l1 = new Map<string, L1Entry>(); // key = 原始文本（去空白归一化）
-  private counter: CacheStats = { l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0, savedCost: 0 };
+  private counter: CacheStats = {
+    l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
+    l3Hits: 0, l3Tokens: 0, savedCost: 0,
+  };
 
   constructor(private embeddingFn?: EmbeddingFn) {}
 
@@ -112,6 +115,13 @@ export class Cache {
   clear(): void {
     this.l2.clear();
     this.l1.clear();
+  }
+
+  /** L3 prompt 前缀复用统计：由 Agent 循环在每次 LLM 调用前记录与上一轮公共前缀的 token 数 */
+  recordPrefixRepeat(tokens: number): void {
+    if (tokens <= 0) return;
+    this.counter.l3Hits++;
+    this.counter.l3Tokens += tokens;
   }
 
   stats(): CacheStats {

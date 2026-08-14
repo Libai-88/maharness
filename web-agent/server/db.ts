@@ -293,4 +293,23 @@ export class Store {
       );
     return msg;
   }
+
+  // ---------- 统计 ----------
+
+  /** 全局聚合：会话数 / 消息数 / tokens / 成本 / 上下文截断次数（system 注入的截断说明消息计数） */
+  statsOverview(): { sessions: number; messages: number; tokensIn: number; tokensOut: number; cost: number; truncations: number } {
+    const s = this.db.prepare('SELECT COUNT(*) AS n FROM sessions').get() as { n: number };
+    const m = this.db
+      .prepare(`SELECT COUNT(*) AS n,
+                  COALESCE(SUM(tokens_in), 0) AS tokensIn,
+                  COALESCE(SUM(tokens_out), 0) AS tokensOut,
+                  COALESCE(SUM(cost), 0) AS cost,
+                  COALESCE(SUM(CASE WHEN role = 'system' AND content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations
+                FROM messages`)
+      .get() as Record<string, number>;
+    return {
+      sessions: s.n, messages: m.n,
+      tokensIn: m.tokensIn, tokensOut: m.tokensOut, cost: m.cost, truncations: m.truncations,
+    };
+  }
 }

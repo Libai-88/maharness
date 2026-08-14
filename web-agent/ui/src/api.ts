@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BusEvent, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -129,6 +129,10 @@ export interface CommandResult {
 export const commandsApi = {
   exec: (input: string, sessionId: string) =>
     api<CommandResult>('/api/commands', { method: 'POST', body: JSON.stringify({ input, sessionId }) }),
+};
+
+export const statsApi = {
+  get: () => api<StatsInfo>('/api/stats'),
 };
 
 export interface SkillInfo {
