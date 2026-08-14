@@ -10,8 +10,8 @@ import type { LLMMessage, ProviderDef } from '../kernel/types';
 import type { AgentRunner } from '../core/chat/agent';
 import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
-import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { resolve, relative } from 'node:path';
+import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync, cpSync, rmSync, readFileSync } from 'node:fs';
+import { resolve, relative, join } from 'node:path';
 import { truncateHistory } from './context';
 import type { Store } from './db';
 
@@ -183,6 +183,75 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     store.deletePersona(req.params.id);
     refreshChatPersonas(kernel, store);
     res.json({ ok: true });
+  });
+
+  // ---------- Skills（内置 + 市场安装管理） ----------
+  interface SkillService { list: () => { name: string; description: string; source: string }[]; get: (n: string) => { ok: boolean; content?: string; error?: string } }
+  const getSkillsService = (): SkillService | undefined => {
+    const cap = kernel.plugins.capabilities('service').find((c) => c.service.id === 'skills');
+    return cap?.service.instance as SkillService | undefined;
+  };
+  const marketDir = join(kernel.rootDir, 'market');
+  const userSkillsDir = join(kernel.rootDir, 'data', 'skills');
+
+  /** 读取市场 skill 的 description（frontmatter） */
+  function marketSkillDesc(dir: string): string {
+    try {
+      const md = readFileSync(join(dir, 'SKILL.md'), 'utf-8');
+      const m = md.match(/^---\n([\s\S]*?)\n---/);
+      const desc = m?.[1].match(/description:\s*(.+)/);
+      return desc ? desc[1].trim() : '(无描述)';
+    } catch { return '(无描述)'; }
+  }
+
+  app.get('/api/skills', (_req, res) => {
+    const installed = getSkillsService()?.list() ?? [];
+    const market: { name: string; description: string }[] = [];
+    if (existsSync(marketDir)) {
+      for (const e of readdirSync(marketDir, { withFileTypes: true })) {
+        if (!e.isDirectory()) continue;
+        const skillDir = join(marketDir, e.name);
+        if (!existsSync(join(skillDir, 'SKILL.md'))) continue;
+        if (installed.some((s) => s.name === e.name)) continue; // 已安装不重复显示
+        market.push({ name: e.name, description: marketSkillDesc(skillDir) });
+      }
+    }
+    res.json({ installed, market });
+  });
+
+  app.post('/api/skills/install', async (req, res) => {
+    const name = String(req.body?.name ?? '').replace(/[^a-zA-Z0-9_-]/g, '');
+    if (!name) return res.status(400).json({ error: '缺少技能名' });
+    const src = join(marketDir, name);
+    if (!existsSync(join(src, 'SKILL.md'))) return res.status(404).json({ error: `市场中不存在技能: ${name}` });
+    const dest = join(userSkillsDir, name);
+    if (existsSync(dest)) return res.status(400).json({ error: `技能已安装: ${name}` });
+    mkdirSync(userSkillsDir, { recursive: true });
+    cpSync(src, dest, { recursive: true });
+    try {
+      await kernel.plugins.reload('skills'); // 热加载新技能
+    } catch (err) {
+      rmSync(dest, { recursive: true, force: true }); // 重载失败则回滚安装
+      return res.status(500).json({ error: `技能安装失败（重载插件出错）: ${err instanceof Error ? err.message : String(err)}` });
+    }
+    res.json({ ok: true, name });
+  });
+
+  app.post('/api/skills/:name/uninstall', async (req, res) => {
+    const name = String(req.params.name).replace(/[^a-zA-Z0-9_-]/g, '');
+    const dest = join(userSkillsDir, name);
+    if (!existsSync(dest)) return res.status(404).json({ error: `技能未安装: ${name}` });
+    rmSync(dest, { recursive: true, force: true });
+    await kernel.plugins.reload('skills');
+    res.json({ ok: true, name });
+  });
+
+  app.get('/api/skills/:source/:name/read', (req, res) => {
+    const { source, name } = req.params;
+    const dir = source === 'builtin' ? join(kernel.rootDir, 'core', 'skills', 'builtin') : userSkillsDir;
+    const mdPath = join(dir, String(name).replace(/[^a-zA-Z0-9_-]/g, ''), 'SKILL.md');
+    if (!existsSync(mdPath)) return res.status(404).json({ error: '技能不存在' });
+    res.json({ name, content: readFileSync(mdPath, 'utf-8') });
   });
 
   // ---------- 模型 ----------
@@ -409,6 +478,61 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     store.touchSession(session.id);
     sse(res, 'end', {});
     res.end();
+  });
+
+  // ---------- 工作区（切换热生效：沙箱边界、文件 API、Agent 工具立即跟随） ----------
+  app.get('/api/workspaces', (_req, res) => {
+    const current = resolve(kernel.config.get<string>('sandboxRoot', kernel.rootDir));
+    res.json(store.listWorkspaces().map((w) => ({
+      id: w.id, path: w.path, current: resolve(w.path) === current,
+    })));
+  });
+
+  app.post('/api/workspaces', (req, res) => {
+    const path = String(req.body?.path ?? '').trim();
+    if (!path) return res.status(400).json({ error: '缺少路径' });
+    const abs = resolve(path);
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) return res.status(400).json({ error: '目录不存在或不是目录' });
+    const row = store.addWorkspace(abs);
+    res.json({ id: row.id, path: row.path });
+  });
+
+  app.delete('/api/workspaces/:id', (req, res) => {
+    if (!store.removeWorkspace(req.params.id)) return res.status(404).json({ error: '工作区不存在' });
+    res.json({ ok: true });
+  });
+
+  app.post('/api/workspaces/switch', (req, res) => {
+    const path = String(req.body?.path ?? '').trim();
+    const abs = resolve(path);
+    if (!existsSync(abs) || !statSync(abs).isDirectory()) return res.status(400).json({ error: '目录不存在或不是目录' });
+    kernel.config.set('sandboxRoot', abs); // 运行时热切换（文件工具/文件 API 下一轮生效）
+    res.json({ ok: true, current: abs });
+  });
+
+  /** 文件树（单层，前端懒加载展开；忽略噪音目录） */
+  const TREE_IGNORE = new Set(['node_modules', '.git', 'dist', 'data', '.dsh', '.idea', '__pycache__', 'coverage']);
+  app.get('/api/files/tree', (req, res) => {
+    try {
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const dir = resolveInSandbox(sandbox, String(req.query.path ?? '.'));
+      if (!existsSync(dir)) return res.status(404).json({ error: '目录不存在' });
+      const entries = readdirSync(dir, { withFileTypes: true })
+        .filter((e) => !TREE_IGNORE.has(e.name) && !e.name.startsWith('.'))
+        .map((e) => {
+          const full = resolve(dir, e.name);
+          try {
+            const s = statSync(full);
+            return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: s.size };
+          } catch {
+            return { name: e.name, type: e.isDirectory() ? 'dir' : 'file' };
+          }
+        })
+        .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+      res.json({ path: relative(sandbox, dir) || '.', entries });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   // ---------- 文件（沙箱内） ----------

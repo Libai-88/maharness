@@ -78,6 +78,24 @@ export interface PluginInfo {
   error?: string;
 }
 
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source: 'builtin' | 'user';
+}
+
+export interface WorkspaceInfo {
+  id: string;
+  path: string;
+  current: boolean;
+}
+
+export interface TreeEntry {
+  name: string;
+  type: 'dir' | 'file';
+  size: number;
+}
+
 export interface TraceStep {
   id: string;
   traceId: string;

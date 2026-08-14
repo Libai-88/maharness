@@ -1,0 +1,7 @@
+{
+  "id": "skills",
+  "name": "技能系统",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

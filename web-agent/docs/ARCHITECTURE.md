@@ -203,9 +203,27 @@ interface ToolDef {
 
 ### 4.7 沙箱与安全（Windows 重点）
 
-- 文件类工具锚定根目录 = 当前工作区（`D:\DEEPSEEK`，用户 2026-08-14 确认开发阶段沙箱限制在当前工作区；config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越。
+- 文件类工具锚定根目录 = 当前工作区（默认 `D:\DEEPSEEK`，config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越。
+- **工作区热切换**：网页端「文件」Tab 可添加/切换工作区——`config.sandboxRoot` 运行时热更新，文件工具沙箱边界、文件 API 与 Agent 工具下一轮立即跟随，无需重启。
 - 写入工具拒绝符号链接指向沙箱外；只读操作默认允许，写操作逐项审计入 Trace。
 - 工具参数只接受 JSONSchema 声明字段（防注入）。
+
+### 4.8 技能系统（skills：自我设计的知识底座）
+
+- 技能 = 一个 `SKILL.md` 指南包（frontmatter 含 name/description + 正文），**按需读取、不自动注入提示词**（避免提示词膨胀），Agent 用 `list_skills` / `get_skill` 精准取用。
+- 内置技能随产品分发（`core/skills/builtin/`，当前 4 个：`agent-self-design` / `plugin-authoring` / `skill-authoring` / `thinking-chain`）；用户技能装到 `data/skills/`（gitignore，运行时安装）。
+- 市场技能包放入 `market/` 目录即进入网页端「设置 → 技能」市场，一键安装/卸载，**安装后热重载立即生效**；web 端可查看任意技能全文。
+- 技能插件（`core/skills`）通过 persona 引导 Agent 何时读取技能，形成"自我设计"闭环：需要改自己 → `get_skill("agent-self-design")` → 按其指引写插件/技能。
+
+### 4.9 系统提示词分层（L0 / L1 / L2）
+
+| 层 | 来源 | 内容 | 变更方式 |
+| --- | --- | --- | --- |
+| L0 内核纪律 | `core/chat` BASE_PROMPT | 思考-行动-观察工作链、效率与成本、安全纪律 | 代码级，不可热改 |
+| L1 用户人设 | DB `personas` 表 | 身份/语气/能力边界（默认人设，可编辑） | 网页端「设置 → 人设」，热生效 |
+| L2 插件规则 | 任意插件 `ctx.register({kind:'persona'})` | 插件自述与使用规则 | 随插件加载/卸载自动增减，priority 降序叠加 |
+
+组装：`L0 → L1（按序）→ L2（priority 降序）`，由 `chat` 插件 `refreshPrompt()` 维护，插件热事件（loaded/unloaded/reloaded）触发自动重装。设计原则：**宁短勿长**——超长稀释注意力、破坏前缀缓存命中；规则可执行、可检查。
 
 ---
 
@@ -247,6 +265,13 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | GET | `/api/files?path=` | 沙箱内目录浏览 |
 | GET | `/api/files/read?path=` | 读文件（自动编码识别） |
 | POST | `/api/files/write` | 写文件（沙箱校验） |
+| GET | `/api/files/tree?path=` | 文件树（单层懒加载，前端展开；忽略 node_modules/.git 等噪音） |
+| GET/POST/DELETE | `/api/workspaces` | 工作区列表 / 添加 / 移除（DB 持久化） |
+| POST | `/api/workspaces/switch` | 切换当前工作区（sandboxRoot 热生效） |
+| GET | `/api/skills` | 技能列表（已安装 = 内置 + 用户；市场可安装） |
+| POST | `/api/skills/install` | 从市场安装技能（复制到 data/skills + 热重载，失败回滚） |
+| POST | `/api/skills/:name/uninstall` | 卸载用户技能（热重载） |
+| GET | `/api/skills/:source/:name/read` | 读取技能全文（SKILL.md） |
 | GET | `/api/plugins` | 插件列表与状态 |
 | POST | `/api/plugins/:id/actions` | `enable/disable/reload` |
 | GET | `/api/trace?session_id=` | 查询轨迹（环形缓冲/落盘） |

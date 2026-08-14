@@ -39,10 +39,19 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
 
   const store = new Store(kernel.paths.dbFile);
   seedDefaults(store);
+  // 种子工作区：当前沙箱根目录始终可选（沙箱可切换，切换后工具边界随之热更新）
+  const sandbox = kernel.config.get<string>('sandboxRoot', rootDir);
+  if (!store.listWorkspaces().some((w) => w.path === sandbox)) store.addWorkspace(sandbox);
   refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
   refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
   const app = express();
   registerRoutes(app, kernel, store);
+
+  // 兜底错误处理：handler 异常返回 500 而非进程崩溃（安装/卸载/文件操作等异步路径）
+  app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
+    console.error('[server] 请求处理异常:', err instanceof Error ? err.message : err);
+    if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+  });
 
   // 生产：托管前端构建产物（SPA fallback；/api 未命中仍走 404）
   const uiDist = join(rootDir, 'ui', 'dist');

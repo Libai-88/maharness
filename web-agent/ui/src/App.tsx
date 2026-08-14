@@ -7,9 +7,11 @@ import SessionList from './components/SessionList';
 import PluginPanel from './components/PluginPanel';
 import ProviderPanel from './components/ProviderPanel';
 import PersonaPanel from './components/PersonaPanel';
+import SkillsPanel from './components/SkillsPanel';
+import FileTree from './components/FileTree';
 import TracePanel from './components/TracePanel';
 
-type SideTab = 'sessions' | 'plugins' | 'settings';
+type SideTab = 'sessions' | 'plugins' | 'settings' | 'files';
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -209,6 +211,7 @@ export default function App() {
         <div className="sidebar-tabs">
           <button className={sideTab === 'sessions' ? 'tab active' : 'tab'} onClick={() => setSideTab('sessions')}>会话</button>
           <button className={sideTab === 'plugins' ? 'tab active' : 'tab'} onClick={() => setSideTab('plugins')}>插件</button>
+          <button className={sideTab === 'files' ? 'tab active' : 'tab'} onClick={() => setSideTab('files')}>文件</button>
           <button className={sideTab === 'settings' ? 'tab active' : 'tab'} onClick={() => setSideTab('settings')}>设置</button>
         </div>
         {sideTab === 'sessions' ? (
@@ -223,10 +226,13 @@ export default function App() {
           />
         ) : sideTab === 'plugins' ? (
           <PluginPanel plugins={plugins} onAction={pluginAction} />
+        ) : sideTab === 'files' ? (
+          <FileTree />
         ) : (
           <>
             <ProviderPanel providers={providers} onChanged={refreshProviders} />
             <PersonaPanel personas={personas} onChanged={refreshPersonas} />
+            <SkillsPanel onChanged={refreshPersonas} />
           </>
         )}
       </aside>

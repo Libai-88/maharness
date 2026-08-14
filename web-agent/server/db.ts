@@ -31,21 +31,14 @@ export interface PersonaRow {
   updatedAt: number;
 }
 
-/** 默认人设种子（用户可编辑/停用/删除） */
+/** 默认人设种子（用户可编辑/停用/删除）；L0 内核纪律（见 core/chat BASE_PROMPT）不在此重复 */
 export const DEFAULT_PERSONA = {
   id: 'default',
   name: '默认人设',
   content: [
-    '身份：你是运行在 Windows 上的自研 Web Agent。',
-    '语气：简洁、直接、专业；默认使用中文；长回答用 Markdown 组织（标题/列表/表格/代码块）。',
+    '身份：你是运行在 Windows 上的自研 Web Agent（maharness）。',
+    '语气：简洁、直接、专业；默认使用中文；给出可直接复制使用的命令、路径与代码。',
     '能力边界：可以读写工作区文件（路径相对沙箱根目录）、浏览目录；可以调用已加载插件提供的工具。超出能力范围的事，明确说明不能做，并给出替代方案。',
-    '规则：',
-    '1. 需要文件或外部信息时，先调用工具获取事实，再基于事实回答；',
-    '2. 绝不编造数据、文件内容、搜索结果或引用来源；',
-    '3. 文件写入前说明意图，写入内容要完整准确；',
-    '4. 工具执行失败时，说明原因并给出可行的替代方案；',
-    '5. 不确定的信息明确标注不确定性；',
-    '6. 不读取 .env、密钥等敏感文件，除非用户明确要求。',
   ].join('\n'),
 };
 
@@ -79,6 +72,9 @@ export class Store {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, content TEXT NOT NULL,
         enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS workspaces (
+        id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at INTEGER NOT NULL
       );
     `);
     // 迁移：reasoning 列（旧库无此列）
@@ -238,6 +234,27 @@ export class Store {
   /** 清空会话消息（保留会话本身，/clear 命令用） */
   clearSessionMessages(id: string): void {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
+  }
+
+  // ---------- workspaces ----------
+
+  listWorkspaces(): { id: string; path: string; createdAt: number }[] {
+    return this.db
+      .prepare('SELECT id, path, created_at AS createdAt FROM workspaces ORDER BY created_at ASC')
+      .all() as { id: string; path: string; createdAt: number }[];
+  }
+
+  addWorkspace(path: string): { id: string; path: string; createdAt: number } {
+    const existing = this.db.prepare('SELECT id FROM workspaces WHERE path = ?').get(path) as { id: string } | undefined;
+    if (existing) return this.listWorkspaces().find((w) => w.id === existing.id)!;
+    const id = randomUUID();
+    this.db.prepare('INSERT INTO workspaces (id, path, created_at) VALUES (?,?,?)').run(id, path, Date.now());
+    return { id, path, createdAt: Date.now() };
+  }
+
+  removeWorkspace(id: string): boolean {
+    const r = this.db.prepare('DELETE FROM workspaces WHERE id = ?').run(id);
+    return r.changes > 0;
   }
 
   // ---------- messages ----------

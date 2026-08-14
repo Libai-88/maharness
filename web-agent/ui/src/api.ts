@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, TraceStep } from './types';
+import type { BusEvent, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -129,6 +129,32 @@ export interface CommandResult {
 export const commandsApi = {
   exec: (input: string, sessionId: string) =>
     api<CommandResult>('/api/commands', { method: 'POST', body: JSON.stringify({ input, sessionId }) }),
+};
+
+export interface SkillInfo {
+  name: string;
+  description: string;
+  source: 'builtin' | 'user';
+}
+
+export const skillsApi = {
+  list: () => api<{ installed: SkillInfo[]; market: { name: string; description: string }[] }>('/api/skills'),
+  install: (name: string) => api<{ ok: boolean }>('/api/skills/install', { method: 'POST', body: JSON.stringify({ name }) }),
+  uninstall: (name: string) => api<{ ok: boolean }>(`/api/skills/${name}/uninstall`, { method: 'POST' }),
+  read: (name: string, source: string) =>
+    api<{ name: string; content: string }>(`/api/skills/${source}/${name}/read`),
+};
+
+export const workspacesApi = {
+  list: () => api<WorkspaceInfo[]>('/api/workspaces'),
+  add: (path: string) => api<{ id: string; path: string }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ path }) }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
+  switchTo: (path: string) => api<{ ok: boolean; current: string }>('/api/workspaces/switch', { method: 'POST', body: JSON.stringify({ path }) }),
+};
+
+export const fileApi = {
+  tree: (path: string) => api<{ path: string; entries: TreeEntry[] }>(`/api/files/tree?path=${encodeURIComponent(path)}`),
+  read: (path: string) => api<{ path: string; text: string; encoding: string }>(`/api/files/read?path=${encodeURIComponent(path)}`),
 };
 
 export const approvalsApi = {
