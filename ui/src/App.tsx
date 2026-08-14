@@ -16,7 +16,7 @@ export default function App() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [streaming, setStreaming] = useState(false);
   const [models, setModels] = useState<ModelInfo[]>([]);
-  const [model, setModel] = useState('');
+  const [sel, setSel] = useState<{ provider: string; model: string } | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [sideTab, setSideTab] = useState<SideTab>('sessions');
@@ -37,7 +37,7 @@ export default function App() {
     setModels(ms);
     setPlugins(pl);
     setProviders(pvs);
-    if (ms.length) setModel((prev) => prev || ms[0].model);
+    if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
     if (!ss.length) {
       const created = await sessionApi.create(ms[0]?.model ?? '');
       setSessions([created]);
@@ -59,12 +59,12 @@ export default function App() {
   }, []);
 
   const createSession = useCallback(async () => {
-    const s = await sessionApi.create(model);
+    const s = await sessionApi.create(sel?.model ?? '');
     setSessions((prev) => [s, ...prev]);
     setActiveId(s.id);
     setMessages([]);
     setTraceSteps([]);
-  }, [model]);
+  }, [sel]);
 
   const deleteSession = useCallback(async (id: string) => {
     await sessionApi.remove(id);
@@ -113,7 +113,7 @@ export default function App() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    await streamChat(activeId, { message: text, model }, {
+    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider }, {
       onStart: () => {},
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
@@ -132,7 +132,7 @@ export default function App() {
 
     // 刷新会话列表（标题可能已自动生成）
     setSessions(await sessionApi.list());
-  }, [activeId, model, streaming]);
+  }, [activeId, sel, streaming]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -170,12 +170,16 @@ export default function App() {
           <div className="chat-title">{currentSession?.title ?? '新会话'}</div>
           <select
             className="model-picker"
-            value={model}
-            onChange={(e) => setModel(e.target.value)}
+            value={sel ? `${sel.provider}:${sel.model}` : ''}
+            onChange={(e) => {
+              const [pid, ...rest] = e.target.value.split(':');
+              const m = models.find((x) => x.id === pid && x.model === rest.join(':'));
+              if (m) setSel({ provider: m.id, model: m.model });
+            }}
             title="切换模型"
           >
-            {models.length === 0 && <option value="">未配置 LLM（见 .env）</option>}
-            {models.map((m) => <option key={m.id} value={m.model}>{m.label} · {m.model}</option>)}
+            {models.length === 0 && <option value="">未配置 LLM（见「设置」）</option>}
+            {models.map((m) => <option key={`${m.id}:${m.model}`} value={`${m.id}:${m.model}`}>{m.label} · {m.model}</option>)}
           </select>
           <button className="trace-toggle" onClick={() => setTraceOpen((v) => !v)} title="运行轨迹面板">
             {traceOpen ? '隐藏轨迹' : '运行轨迹'}
