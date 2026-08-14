@@ -359,6 +359,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // SSE 心跳：审批等待等长挂起场景防代理/客户端超时断开
+    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
+    res.on('close', () => clearInterval(heartbeat));
     sse(res, 'start', { traceId });
 
     let assistantText = '';
@@ -504,9 +507,11 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // SSE 心跳：长连接保活
+    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
     const off = kernel.bus.on('*', (e) => {
       sse(res, 'event', { type: e.type, traceId: e.traceId, data: e.data, ts: e.ts });
     });
-    req.on('close', off);
+    req.on('close', () => { off(); clearInterval(heartbeat); });
   });
 }

@@ -102,5 +102,39 @@ if (rf && recall && forget) {
   console.log('[memory] 清理完成:', (q3.data as { count: number }).count === 0 ? '✓' : '✗');
 }
 
+// ---- 工具执行超时保护（mock provider + 挂起工具） ----
+{
+  kernel.config.set('agent.toolTimeoutMs', 2000); // 缩短超时便于测试
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  let calls = 0;
+  const mockProvider = {
+    id: 'mock', label: 'MOCK', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() {
+      calls++;
+      if (calls === 1) {
+        yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'hang_test', arguments: '{}' } } };
+      } else {
+        yield { type: 'delta' as const, text: '完成' };
+        yield { type: 'usage' as const, input: 10, output: 10 };
+      }
+      yield { type: 'done' as const };
+    },
+  };
+  const hangTool = {
+    name: 'hang_test',
+    description: '挂起测试',
+    parameters: { type: 'object', properties: {} },
+    async handler() { await new Promise(() => { /* 永不 resolve */ }); return { ok: true, data: 'never' }; },
+  };
+  const evs: string[] = [];
+  for await (const ev of runner.run({ provider: mockProvider, model: 'm', messages: [{ role: 'user', content: 'hi' }], traceId: `t-${Date.now()}`, tools: [hangTool] })) {
+    evs.push(ev.type);
+  }
+  const timedOut = evs.filter((t) => t === 'tool_result').length >= 1 && evs.includes('assistant_done');
+  console.log('[timeout] 挂起工具被超时拦截并继续循环:', timedOut ? '✓' : '✗', '| 事件:', evs.join(','));
+  kernel.config.set('agent.toolTimeoutMs', 30_000); // 恢复默认
+}
+
 await kernel.stop();
 console.log('selftest done');

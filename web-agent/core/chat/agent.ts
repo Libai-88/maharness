@@ -64,6 +64,23 @@ const DEFAULT_SYSTEM_PROMPT = [
 /** 审批等待超时（毫秒）：10 分钟未响应自动拒绝 */
 const APPROVAL_TIMEOUT = 10 * 60 * 1000;
 
+/** 工具执行默认超时（毫秒；config agent.toolTimeoutMs 可调） */
+const TOOL_TIMEOUT_DEFAULT = 30_000;
+
+/** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话（超时后 handler 仍可能在后台运行，由工具自行响应 signal 取消） */
+async function withToolTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+  if (!ms || ms <= 0) return p;
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`工具执行超时（${ms / 1000}s）`)), ms);
+  });
+  try {
+    return await Promise.race([p, timeout]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export class AgentRunner {
   private pendingApprovals = new Map<string, (approved: boolean) => void>();
 
@@ -95,6 +112,7 @@ export class AgentRunner {
     const tools = this.kernel.plugins.capabilities('tool');
     const toolDefs = opts.tools ?? tools.map((c) => c.tool);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
+    const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
     const scratchpad: Record<string, unknown> = {};
 
     // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
@@ -206,13 +224,13 @@ export class AgentRunner {
         });
         let result;
         try {
-          result = await tool.handler(toolArgs, {
+          result = await withToolTimeout(tool.handler(toolArgs, {
             traceId, turn,
             sandboxRoot,
             signal,
             cache: this.kernel.cache,
             trace: this.kernel.trace,
-          });
+          }), toolTimeout);
         } catch (err) {
           result = { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
@@ -237,11 +255,11 @@ export class AgentRunner {
           } else {
             // 已批准：带 approved 标记重试执行
             try {
-              result = await tool.handler(args, {
+              result = await withToolTimeout(tool.handler(args, {
                 traceId, turn, sandboxRoot, signal,
                 cache: this.kernel.cache, trace: this.kernel.trace,
                 approved: true, approvalId,
-              });
+              }), toolTimeout);
             } catch (err) {
               result = { ok: false, error: err instanceof Error ? err.message : String(err) };
             }

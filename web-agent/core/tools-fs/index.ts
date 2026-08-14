@@ -4,7 +4,7 @@
  * Windows 原生：路径沙箱（大小写不敏感防穿越）、编码自动识别（UTF-8/UTF-16/GBK）、二进制防护。
  * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；write_file 成功后清空 L2（保一致性）。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync } from 'node:fs';
+import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync, rmSync } from 'node:fs';
 import { resolve, relative, sep } from 'node:path';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
 
@@ -207,6 +207,41 @@ export default {
       },
     });
 
-    ctx.logger.info('工具就绪: list_dir / read_file / write_file（沙箱内）');
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'delete_file',
+        description: '删除沙箱内的文件或空目录。破坏性操作：默认需要用户审批，批准后执行；非空目录会失败（不能递归删除）。',
+        parameters: {
+          type: 'object',
+          properties: { path: { type: 'string', description: '文件或空目录路径（相对沙箱根目录）' } },
+          required: ['path'],
+        },
+        async handler(args: { path?: string }, tctx: ToolContext) {
+          const target = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
+          if (!existsSync(target)) return { ok: false, error: `目标不存在: ${relative(tctx.sandboxRoot, target) || '.'}` };
+          const rel = relative(tctx.sandboxRoot, target) || '.';
+          if (rel === '.') return { ok: false, error: '不能删除沙箱根目录' };
+          if (!tctx.approved) {
+            // 删除是破坏性操作：请求用户审批（执行器级挂起，批准后自动重试）
+            return {
+              ok: false,
+              needsApproval: true,
+              approvalSummary: `删除文件/目录\n路径：${rel}`,
+            };
+          }
+          const st = statSync(target);
+          try {
+            rmSync(target, { force: true }); // 非空目录会抛 ENOTEMPTY
+          } catch (err) {
+            return { ok: false, error: `删除失败（非空目录不允许递归删除）: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          tctx.cache.clear(); // 文件变化，清 L2 保一致性
+          return { ok: true, data: { removed: rel, type: st.isDirectory() ? 'dir' : 'file' } };
+        },
+      },
+    });
+
+    ctx.logger.info('工具就绪: list_dir / read_file / write_file / delete_file（沙箱内）');
   },
 } satisfies Plugin;

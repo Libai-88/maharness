@@ -131,6 +131,9 @@ export class PluginLoader {
   async stop(inst: PluginInstance): Promise<void> {
     if (inst.state !== 'started' && inst.state !== 'loaded') return;
     try { await inst.plugin?.onStop?.(this.buildContext(inst)); } catch { /* 忽略 */ }
+    // onUnload：插件在此清理资源（取消事件订阅等）。监听器泄漏的官方解法：
+    // 插件保存 ctx.bus.on 返回的 off 句柄，在 onUnload 中调用。
+    try { await inst.plugin?.onUnload?.(this.buildContext(inst)); } catch { /* 忽略 */ }
     inst.state = 'stopped';
     this.bus.emit(EventBus.event('plugin.stopped', { id: inst.manifest.id }));
   }
@@ -176,6 +179,8 @@ export class PluginLoader {
     if (!inst) throw new Error(`插件不存在: ${id}`);
     const { dir } = inst;
     await this.stop(inst);
+    // 先广播卸载，让依赖 unloaded 事件的插件（如 self-extend 的状态跟踪）清理旧状态
+    this.bus.emit(EventBus.event('plugin.unloaded', { id: inst.manifest.id }));
     // 清能力与实例，重新注册（新 query 参数绕过模块缓存）
     inst.caps = [];
     this.registry.delete(id);
