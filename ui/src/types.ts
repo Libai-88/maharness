@@ -48,6 +48,16 @@ export interface ProviderForm {
   priceOut?: string;
 }
 
+export interface PersonaInfo {
+  id: string;
+  name: string;
+  content: string;
+  enabled: number;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface BusEvent {
   type: string;
   traceId?: string;

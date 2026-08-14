@@ -18,6 +18,8 @@ interface ChatService {
   providers: ProviderDef[];
   runner: AgentRunner;
   setProviders: (cfgs: ProviderConfig[]) => void;
+  setPersonas: (list: { name: string; content: string }[]) => void;
+  getSystemPrompt: () => string;
 }
 
 /** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启） */
@@ -29,6 +31,14 @@ export function refreshChatProviders(kernel: Kernel, store: Store): void {
     id: r.id, baseUrl: r.baseUrl, apiKey: r.apiKey, model: r.model,
     inputPrice: r.priceIn ?? undefined, outputPrice: r.priceOut ?? undefined,
   })));
+}
+
+/** 用 DB 中的启用人设刷新对话服务（L1 层，热生效） */
+export function refreshChatPersonas(kernel: Kernel, store: Store): void {
+  const chat = getChatService(kernel);
+  if (!chat) return;
+  const rows = store.listPersonas().filter((r) => r.enabled);
+  chat.setPersonas(rows.map((r) => ({ name: r.name, content: r.content })));
 }
 
 function maskKey(key: string): string {
@@ -129,6 +139,50 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     }
   });
 
+  // ---------- 人设管理（L1 用户人设） ----------
+  /** 预览三层组装后的完整系统提示词（调试/审计） */
+  app.get('/api/personas/preview', (_req, res) => {
+    const chat = getChatService(kernel);
+    res.json({ systemPrompt: chat?.getSystemPrompt() ?? '(chat 服务未加载)' });
+  });
+
+  app.get('/api/personas', (_req, res) => {
+    res.json(store.listPersonas());
+  });
+
+  app.post('/api/personas', (req, res) => {
+    const { name, content, sortOrder } = req.body ?? {};
+    if (!name?.trim() || !content?.trim()) {
+      return res.status(400).json({ error: '名称与内容均为必填' });
+    }
+    const id = `persona-${Math.random().toString(36).slice(2, 8)}`;
+    store.upsertPersona({ id, name: name.trim(), content: content.trim(), sortOrder: sortOrder === undefined ? store.listPersonas().length : Number(sortOrder) });
+    refreshChatPersonas(kernel, store);
+    res.json(store.getPersona(id));
+  });
+
+  app.patch('/api/personas/:id', (req, res) => {
+    const existing = store.getPersona(req.params.id);
+    if (!existing) return res.status(404).json({ error: '人设不存在' });
+    const { name, content, enabled, sortOrder } = req.body ?? {};
+    store.upsertPersona({
+      id: existing.id,
+      name: name?.trim() || existing.name,
+      content: content?.trim() || existing.content,
+      enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
+      sortOrder: sortOrder === undefined ? existing.sortOrder : Number(sortOrder),
+    });
+    refreshChatPersonas(kernel, store);
+    res.json(store.getPersona(existing.id));
+  });
+
+  app.delete('/api/personas/:id', (req, res) => {
+    if (!store.getPersona(req.params.id)) return res.status(404).json({ error: '人设不存在' });
+    store.deletePersona(req.params.id);
+    refreshChatPersonas(kernel, store);
+    res.json({ ok: true });
+  });
+
   // ---------- 模型 ----------
   app.get('/api/models', (_req, res) => {
     const chat = getChatService(kernel);
@@ -171,7 +225,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
   app.post('/api/sessions/:id/chat', async (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { message, model, provider: providerId, systemPrompt } = req.body ?? {};
+    const { message, model, provider: providerId, systemPrompt: systemPromptParam } = req.body ?? {};
     if (!message?.trim()) return res.status(400).json({ error: '消息不能为空' });
     // 编码防御：拒绝含替换符/孤立代理项的消息（防外部工具写入乱码）
     if (/\uFFFD/.test(message) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\uDC00-\uDFFF](?<![\uD800-\uDBFF])/.test(message)) {
@@ -183,6 +237,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
     const resolvedModel = model || session.model || provider.defaultModel;
+    // 系统提示词：三层组装（L0 框架 + L1 用户人设 + L2 插件自述）；body.systemPrompt 可临时覆盖（调试）
+    const systemPrompt = typeof systemPromptParam === 'string' && systemPromptParam.trim()
+      ? systemPromptParam
+      : chat.getSystemPrompt();
 
     // 历史组装：DB 消息 → LLM 消息（工具中间消息不入库，历史保持干净）
     const history: LLMMessage[] = store

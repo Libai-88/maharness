@@ -94,6 +94,26 @@ export default {
   name: '文件工具',
   version: '0.1.0',
   onLoad(ctx) {
+    // L2 插件自述：随插件加载/卸载自动增减的系统提示词片段
+    ctx.register({
+      kind: 'persona',
+      persona: {
+        id: 'tools-fs-rules',
+        name: '文件工具使用规则',
+        description: '约束 LLM 正确使用文件工具',
+        priority: 10,
+        content: [
+          '文件工具使用规则：',
+          '1. 所有路径相对沙箱根目录（当前工作区），不要使用绝对路径；',
+          '2. 不确定路径时先 list_dir 查看，再 read_file 读取；',
+          '3. 写入前先说明意图；写入内容要完整，不要截断；',
+          '4. 不要读取 .env、密钥文件等敏感内容，除非用户明确要求；',
+          '5. 二进制文件无法读取时，告知用户并说明原因；',
+          '6. 查看代码时优先读关键文件（入口/类型定义/配置），避免无差别全量扫描。',
+        ].join('\n'),
+      },
+    });
+
     ctx.register({
       kind: 'tool',
       tool: {

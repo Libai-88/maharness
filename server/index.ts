@@ -7,25 +7,30 @@ import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import express from 'express';
 import { Kernel } from '../kernel';
-import { Store } from './db';
-import { registerRoutes, refreshChatProviders } from './routes';
+import { Store, DEFAULT_PERSONA } from './db';
+import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './routes';
 import { discoverProviders } from '../core/chat/provider';
 
 const rootDir = process.env.AGENT_ROOT ?? process.cwd();
 const port = Number(process.env.PORT ?? 3000);
 
-/** DB 为空时从 .env 首次导入 Provider；之后以 DB 为唯一来源 */
-function seedProviders(store: Store): void {
-  if (store.listProviders().length > 0) return;
-  const envCfgs = discoverProviders();
-  for (const c of envCfgs) {
-    store.upsertProvider({
-      id: c.id, label: c.id.toUpperCase(),
-      baseUrl: c.baseUrl, apiKey: c.apiKey, model: c.model,
-      priceIn: c.inputPrice, priceOut: c.outputPrice,
-    });
+/** DB 为空时从 .env 首次导入 Provider、写入默认人设；之后以 DB 为唯一来源 */
+function seedDefaults(store: Store): void {
+  if (store.listProviders().length === 0) {
+    const envCfgs = discoverProviders();
+    for (const c of envCfgs) {
+      store.upsertProvider({
+        id: c.id, label: c.id.toUpperCase(),
+        baseUrl: c.baseUrl, apiKey: c.apiKey, model: c.model,
+        priceIn: c.inputPrice, priceOut: c.outputPrice,
+      });
+    }
+    if (envCfgs.length) console.log(`[seed] 已从 .env 导入 ${envCfgs.length} 个供应商到本地数据库`);
   }
-  if (envCfgs.length) console.log(`[provider] 已从 .env 导入 ${envCfgs.length} 个供应商到本地数据库`);
+  if (store.listPersonas().length === 0) {
+    store.upsertPersona({ id: DEFAULT_PERSONA.id, name: DEFAULT_PERSONA.name, content: DEFAULT_PERSONA.content, sortOrder: 0 });
+    console.log('[seed] 已写入默认人设（可在网页端「设置」编辑）');
+  }
 }
 
 export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']> }> {
@@ -33,8 +38,9 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   await kernel.start();
 
   const store = new Store(kernel.paths.dbFile);
-  seedProviders(store);
+  seedDefaults(store);
   refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
+  refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
   const app = express();
   registerRoutes(app, kernel, store);
 

@@ -98,12 +98,22 @@ export type Capability =
   | { kind: 'listener'; event: string; listener: EventListener }
   | { kind: 'command'; command: CommandDef }
   | { kind: 'provider'; provider: ProviderDef }
-  | { kind: 'service'; service: ServiceDef };
+  | { kind: 'service'; service: ServiceDef }
+  | { kind: 'persona'; persona: PersonaDef };
 
 /** 服务能力：插件对外暴露的实例（如 chat 服务），server 层通过 capability 获取，不依赖插件内部实现 */
 export interface ServiceDef {
   id: string;
   instance: unknown;
+}
+
+/** 人设能力：插件向 LLM 贡献的系统提示词片段（随插件加载/卸载自动增减） */
+export interface PersonaDef {
+  id: string;
+  name: string;
+  description: string;
+  content: string;          // 提示词片段（自然语言规则）
+  priority?: number;        // 排序，大者在前（默认 0）
 }
 
 // ---------- 工具 ----------

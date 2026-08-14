@@ -20,6 +20,35 @@ export interface ProviderRow {
   updatedAt: number;
 }
 
+/** 用户人设行 */
+export interface PersonaRow {
+  id: string;
+  name: string;
+  content: string;
+  enabled: number;
+  sortOrder: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+/** 默认人设种子（用户可编辑/停用/删除） */
+export const DEFAULT_PERSONA = {
+  id: 'default',
+  name: '默认人设',
+  content: [
+    '身份：你是运行在 Windows 上的自研 Web Agent。',
+    '语气：简洁、直接、专业；默认使用中文；长回答用 Markdown 组织（标题/列表/表格/代码块）。',
+    '能力边界：可以读写工作区文件（路径相对沙箱根目录）、浏览目录；可以调用已加载插件提供的工具。超出能力范围的事，明确说明不能做，并给出替代方案。',
+    '规则：',
+    '1. 需要文件或外部信息时，先调用工具获取事实，再基于事实回答；',
+    '2. 绝不编造数据、文件内容、搜索结果或引用来源；',
+    '3. 文件写入前说明意图，写入内容要完整准确；',
+    '4. 工具执行失败时，说明原因并给出可行的替代方案；',
+    '5. 不确定的信息明确标注不确定性；',
+    '6. 不读取 .env、密钥等敏感文件，除非用户明确要求。',
+  ].join('\n'),
+};
+
 export class Store {
   private db: Database.Database;
 
@@ -44,6 +73,11 @@ export class Store {
         id TEXT PRIMARY KEY, label TEXT NOT NULL, base_url TEXT NOT NULL,
         api_key TEXT NOT NULL, model TEXT NOT NULL,
         price_in REAL, price_out REAL, enabled INTEGER DEFAULT 1,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS personas (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, content TEXT NOT NULL,
+        enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0,
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
     `);
@@ -92,6 +126,41 @@ export class Store {
 
   setProviderEnabled(id: string, enabled: number): void {
     this.db.prepare('UPDATE providers SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id);
+  }
+
+  // ---------- personas（用户人设，网页端管理） ----------
+
+  listPersonas(): PersonaRow[] {
+    return this.db
+      .prepare('SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas ORDER BY sort_order ASC, created_at ASC')
+      .all() as PersonaRow[];
+  }
+
+  getPersona(id: string): PersonaRow | undefined {
+    return this.db
+      .prepare('SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas WHERE id = ?')
+      .get(id) as PersonaRow | undefined;
+  }
+
+  upsertPersona(p: {
+    id: string; name: string; content: string;
+    enabled?: number; sortOrder?: number;
+  }): void {
+    const now = Date.now();
+    const existing = this.getPersona(p.id);
+    if (existing) {
+      this.db
+        .prepare('UPDATE personas SET name=?, content=?, enabled=?, sort_order=?, updated_at=? WHERE id=?')
+        .run(p.name, p.content, p.enabled ?? existing.enabled, p.sortOrder ?? existing.sortOrder, now, p.id);
+    } else {
+      this.db
+        .prepare('INSERT INTO personas (id, name, content, enabled, sort_order, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
+        .run(p.id, p.name, p.content, p.enabled ?? 1, p.sortOrder ?? 0, now, now);
+    }
+  }
+
+  deletePersona(id: string): void {
+    this.db.prepare('DELETE FROM personas WHERE id = ?').run(id);
   }
 
   // ---------- sessions ----------

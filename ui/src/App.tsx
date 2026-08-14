@@ -1,11 +1,12 @@
 // ui/src/App.tsx —— 主布局与状态管理
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { BusEvent, ChatMessage, ModelInfo, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
+import { modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import type { BusEvent, ChatMessage, ModelInfo, PersonaInfo, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
 import ChatView from './components/ChatView';
 import SessionList from './components/SessionList';
 import PluginPanel from './components/PluginPanel';
 import ProviderPanel from './components/ProviderPanel';
+import PersonaPanel from './components/PersonaPanel';
 import TracePanel from './components/TracePanel';
 
 type SideTab = 'sessions' | 'plugins' | 'settings';
@@ -19,6 +20,7 @@ export default function App() {
   const [sel, setSel] = useState<{ provider: string; model: string } | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
+  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
   const [sideTab, setSideTab] = useState<SideTab>('sessions');
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
@@ -32,11 +34,12 @@ export default function App() {
   }, []);
 
   async function loadAll() {
-    const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
+    const [ss, ms, pl, pvs, pns] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list(), personasApi.list()]);
     setSessions(ss);
     setModels(ms);
     setPlugins(pl);
     setProviders(pvs);
+    setPersonas(pns);
     if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
     if (!ss.length) {
       const created = await sessionApi.create(ms[0]?.model ?? '');
@@ -90,6 +93,11 @@ export default function App() {
   const refreshProviders = useCallback(async () => {
     setProviders(await providersApi.list());
     setModels(await modelsApi.list());
+  }, []);
+
+  // 人设变更后：刷新列表（后端已热注入）
+  const refreshPersonas = useCallback(async () => {
+    setPersonas(await personasApi.list());
   }, []);
 
   // Trace 实时订阅
@@ -162,7 +170,10 @@ export default function App() {
         ) : sideTab === 'plugins' ? (
           <PluginPanel plugins={plugins} onAction={pluginAction} />
         ) : (
-          <ProviderPanel providers={providers} onChanged={refreshProviders} />
+          <>
+            <ProviderPanel providers={providers} onChanged={refreshProviders} />
+            <PersonaPanel personas={personas} onChanged={refreshPersonas} />
+          </>
         )}
       </aside>
 
