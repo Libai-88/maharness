@@ -1,6 +1,6 @@
 // ui/src/App.tsx —— 主布局与状态管理
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { approvalsApi, modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import { approvalsApi, commandsApi, modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
 import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PersonaInfo, PlanState, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
 import ChatView from './components/ChatView';
 import SessionList from './components/SessionList';
@@ -115,9 +115,37 @@ export default function App() {
     return () => { off(); clearInterval(t); };
   }, []);
 
-  // 发送消息
+  // 发送消息（斜杠命令走命令分发，不走 LLM）
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
+
+    if (text.trim().startsWith('/')) {
+      const systemMsg = (content: string) => setMessages((prev) => [...prev, { id: `cmd-${Date.now()}`, role: 'system', content }]);
+      try {
+        const r = await commandsApi.exec(text.trim(), activeId);
+        if (r.type === 'message') {
+          systemMsg(r.data?.text ?? '');
+        } else if (r.type === 'action') {
+          const a = r.data?.action;
+          if (a === 'new_session') await createSession();
+          else if (a === 'clear') setMessages([]);
+          else if (a === 'set_mode') {
+            const mode = r.data?.mode ?? 'normal';
+            setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
+            systemMsg(`已切换到${mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通模式'}（影响后续对话）`);
+          } else if (a === 'set_model') {
+            setSel({ provider: r.data?.provider ?? '', model: r.data?.model ?? '' });
+            systemMsg(`模型已切换：${r.data?.model ?? ''}`);
+          }
+        } else if (!r.ok) {
+          systemMsg(`⚠ ${r.error ?? '命令执行失败'}`);
+        }
+      } catch (err) {
+        systemMsg(`⚠ ${err instanceof Error ? err.message : String(err)}`);
+      }
+      return;
+    }
+
     const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: text };
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
@@ -146,7 +174,7 @@ export default function App() {
 
     // 刷新会话列表（标题可能已自动生成）
     setSessions(await sessionApi.list());
-  }, [activeId, sel, streaming]);
+  }, [activeId, sel, streaming, createSession]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -191,6 +219,23 @@ export default function App() {
       <main className="chat-area">
         <header className="chat-header">
           <div className="chat-title">{currentSession?.title ?? '新会话'}</div>
+          <select
+            className="mode-picker"
+            value={currentSession?.mode ?? 'normal'}
+            onChange={async (e) => {
+              const mode = e.target.value;
+              if (!activeId) return;
+              try {
+                await sessionApi.update(activeId, { mode });
+                setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
+              } catch { /* 忽略 */ }
+            }}
+            title="会话模式：普通 / 计划（先计划后执行）/ 目标（自动建计划）"
+          >
+            <option value="normal">普通</option>
+            <option value="plan">计划</option>
+            <option value="goal">目标</option>
+          </select>
           <select
             className="model-picker"
             value={sel ? `${sel.provider}:${sel.model}` : ''}

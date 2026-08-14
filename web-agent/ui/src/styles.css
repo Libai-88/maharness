@@ -248,6 +248,10 @@ body {
   background: var(--panel); font-size: 12px; color: var(--text);
   max-width: 260px;
 }
+.mode-picker {
+  padding: 5px 10px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); font-size: 12px; color: var(--text);
+}
 .trace-toggle {
   border: 1px solid var(--border); background: var(--panel); border-radius: 6px;
   padding: 5px 10px; font-size: 12px; cursor: pointer; color: var(--text);
@@ -271,6 +275,8 @@ code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border
 }
 .msg.user .msg-label { background: var(--accent); }
 .msg.assistant .msg-label { background: #6b7280; }
+.msg.system .msg-label { background: #94a3b8; }
+.msg.system .msg-content { color: var(--muted); font-size: 13px; }
 .msg-content { flex: 1; min-width: 0; }
 .msg-text { white-space: pre-wrap; word-break: break-word; line-height: 1.7; }
 .cursor { color: var(--accent); animation: blink 1s infinite; }

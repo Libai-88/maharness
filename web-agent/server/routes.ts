@@ -12,6 +12,7 @@ import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
+import { truncateHistory } from './context';
 import type { Store } from './db';
 
 interface ChatService {
@@ -191,6 +192,73 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     res.json(chat.providers.map((p) => ({ id: p.id, label: p.label, model: p.defaultModel })));
   });
 
+  // ---------- 斜杠命令 ----------
+  /** 内置命令表：[/name, 参数说明, 说明] */
+  const BUILTIN_COMMANDS: [string, string, string][] = [
+    ['help', '', '列出全部可用命令'],
+    ['new', '', '新建会话'],
+    ['clear', '', '清空当前会话的消息'],
+    ['plan', '', '切换会话到计划模式'],
+    ['goal', '', '切换会话到目标模式'],
+    ['normal', '', '切换回普通模式'],
+    ['model', '<名称>', '切换模型（如 /model deepseek-chat）'],
+  ];
+
+  app.post('/api/commands', async (req, res) => {
+    const input = String(req.body?.input ?? '').trim();
+    const sessionId = req.body?.sessionId ? String(req.body.sessionId) : undefined;
+    if (!input.startsWith('/')) return res.status(400).json({ error: '非斜杠命令' });
+    const [name, ...rest] = input.slice(1).trim().split(/\s+/);
+    const arg = rest.join(' ').trim();
+
+    const fail = (error: string, status = 400) => res.status(status).json({ ok: false, error });
+
+    switch (name) {
+      case 'help': {
+        const pluginCmds = kernel.plugins.capabilities('command').map((c) => [c.command.name, c.command.description]);
+        const lines = [...BUILTIN_COMMANDS, ...pluginCmds]
+          .map(([n, p, d]) => `/${n}${p ? ` ${p}` : ''} — ${d}`);
+        return res.json({ ok: true, type: 'message', data: { text: `可用命令：\n${lines.join('\n')}` } });
+      }
+      case 'new':
+        return res.json({ ok: true, type: 'action', data: { action: 'new_session' } });
+      case 'clear': {
+        if (!sessionId) return fail('缺少会话');
+        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        store.clearSessionMessages(sessionId);
+        return res.json({ ok: true, type: 'action', data: { action: 'clear' } });
+      }
+      case 'plan':
+      case 'goal':
+      case 'normal': {
+        if (!sessionId) return fail('缺少会话');
+        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        store.updateSession(sessionId, { mode: name, planPending: name === 'plan' ? 1 : 0 });
+        return res.json({ ok: true, type: 'action', data: { action: 'set_mode', mode: name } });
+      }
+      case 'model': {
+        if (!sessionId) return fail('缺少会话');
+        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        const chat = getChatService(kernel);
+        const p = chat?.providers.find((x) => x.defaultModel === arg || x.label === arg.toUpperCase() || x.id === arg);
+        if (!p) return fail(`未找到模型: ${arg}（用 /help 查看，或查看右上角模型列表）`);
+        store.updateSession(sessionId, { model: p.defaultModel });
+        return res.json({ ok: true, type: 'action', data: { action: 'set_model', provider: p.id, model: p.defaultModel } });
+      }
+      default: {
+        const cmd = kernel.plugins.capabilities('command').find((c) => c.command.name === name);
+        if (!cmd) return fail(`未知命令: /${name}（输入 /help 查看全部命令）`, 404);
+        try {
+          const out = cmd.command.handler(rest);
+          const text = out instanceof Promise ? String(await out) : String(out);
+          return res.json({ ok: true, type: 'message', data: { text } });
+        } catch (err) {
+          return fail(err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+  });
+
   // ---------- 会话 ----------
   app.get('/api/sessions', (_req, res) => res.json(store.listSessions()));
 
@@ -208,10 +276,14 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
   app.patch('/api/sessions/:id', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { title, model } = req.body ?? {};
+    const { title, model, mode } = req.body ?? {};
+    if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
+      return res.status(400).json({ error: 'mode 仅支持 normal / plan / goal' });
+    }
     store.updateSession(session.id, {
       ...(typeof title === 'string' ? { title } : {}),
       ...(typeof model === 'string' ? { model } : {}),
+      ...(typeof mode === 'string' ? { mode, planPending: mode === 'plan' ? 1 : 0 } : {}),
     });
     res.json(store.getSession(session.id));
   });
@@ -238,10 +310,19 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
     const resolvedModel = model || session.model || provider.defaultModel;
-    // 系统提示词：三层组装（L0 框架 + L1 用户人设 + L2 插件自述）；body.systemPrompt 可临时覆盖（调试）
-    const systemPrompt = typeof systemPromptParam === 'string' && systemPromptParam.trim()
+    // 系统提示词：三层组装（L0 框架 + L1 用户人设 + L2 插件自述）+ 会话模式注入；body.systemPrompt 可临时覆盖（调试）
+    const MODE_PROMPTS: Record<string, string> = {
+      plan: '【当前模式：计划模式】先输出完整的执行计划（分步列表，含理由），等待用户确认后再执行任何工具；用户未明确同意前不得执行写操作。',
+      goal: '【当前模式：目标模式】多步任务先用 create_plan 建立目标计划并随进度调用 update_plan_progress 更新；单步任务直接执行。',
+    };
+    const modePrompt = MODE_PROMPTS[session.mode];
+    const systemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
-      : chat.getSystemPrompt();
+      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '');
+
+    // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
+    const planPending = session.planPending ?? 0;
+    const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : undefined;
 
     // 历史组装：DB 消息 → LLM 消息（工具中间消息不入库，历史保持干净）
     const history: LLMMessage[] = store
@@ -254,6 +335,13 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
 
     const traceId = randomUUID();
+    // 上下文管理：超预算截断较早历史（保留 system 与最新消息，丢弃部分注入说明）
+    const maxCtx = kernel.config.get<number>('context.maxTokens', 30000);
+    const { messages: ctxHistory, truncated, droppedMessages } = truncateHistory(history, maxCtx);
+    if (truncated) {
+      kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: '上下文截断' })
+        .finish({ outputSummary: `超出预算（${maxCtx} tokens），已丢弃 ${droppedMessages} 条较早消息` });
+    }
     const ac = new AbortController();
     // 客户端断开才中断（req close 在请求体读完即触发，不可用）
     res.on('close', () => { if (!res.writableEnded) ac.abort(); });
@@ -272,8 +360,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     let cost = 0;
     try {
       for await (const ev of chat.runner.run({
-        provider, model: resolvedModel, messages: history, traceId,
-        signal: ac.signal, systemPrompt,
+        provider, model: resolvedModel, messages: ctxHistory, traceId,
+        signal: ac.signal, systemPrompt, tools: toolsOverride,
       })) {
         if (ev.type === 'delta') {
           assistantText += ev.text;
@@ -305,6 +393,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
       });
     }
+    // 计划模式状态推进：出计划轮完成 → 待确认；确认轮完成 → 回到无限制
+    if (session.mode === 'plan' && planPending === 1) store.updateSession(session.id, { planPending: 2 });
+    else if (session.mode === 'plan' && planPending === 2) store.updateSession(session.id, { planPending: 0 });
     store.touchSession(session.id);
     sse(res, 'end', {});
     res.end();

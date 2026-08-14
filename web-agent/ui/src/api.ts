@@ -112,8 +112,23 @@ export const sessionApi = {
   list: () => api<Session[]>('/api/sessions'),
   create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  update: (id: string, patch: Partial<{ title: string; model: string; mode: string }>) =>
+    api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
+};
+
+/** 斜杠命令执行结果 */
+export interface CommandResult {
+  ok: boolean;
+  type?: 'action' | 'message';
+  data?: { action?: string; mode?: string; provider?: string; model?: string; text?: string };
+  error?: string;
+}
+
+export const commandsApi = {
+  exec: (input: string, sessionId: string) =>
+    api<CommandResult>('/api/commands', { method: 'POST', body: JSON.stringify({ input, sessionId }) }),
 };
 
 export const approvalsApi = {

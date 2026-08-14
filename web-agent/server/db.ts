@@ -86,6 +86,15 @@ export class Store {
     if (!cols.some((c) => c.name === 'reasoning')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN reasoning TEXT');
     }
+    // 迁移：sessions.mode 列（普通/计划/目标模式）
+    const sCols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    if (!sCols.some((c) => c.name === 'mode')) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'");
+    }
+    // 迁移：sessions.plan_pending 列（计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认）
+    if (!sCols.some((c) => c.name === 'plan_pending')) {
+      this.db.exec('ALTER TABLE sessions ADD COLUMN plan_pending INTEGER NOT NULL DEFAULT 0');
+    }
   }
 
   // ---------- providers（网页端管理，DB 为唯一来源） ----------
@@ -167,34 +176,44 @@ export class Store {
 
   listSessions(): Session[] {
     const rows = this.db
-      .prepare('SELECT id, title, model, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY updated_at DESC')
-      .all() as Session[];
-    return rows;
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY updated_at DESC')
+      .all() as Array<Record<string, unknown>>;
+    return rows.map((r) => ({
+      id: r.id as string, title: r.title as string, model: r.model as string,
+      mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
+    }));
   }
 
   getSession(id: string): Session | undefined {
-    return this.db
-      .prepare('SELECT id, title, model, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
-      .get(id) as Session | undefined;
+    const r = this.db
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
+      .get(id) as Record<string, unknown> | undefined;
+    if (!r) return undefined;
+    return {
+      id: r.id as string, title: r.title as string, model: r.model as string,
+      mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
+    };
   }
 
   createSession(model: string): Session {
     const s: Session = {
-      id: randomUUID(), title: '新会话', model,
+      id: randomUUID(), title: '新会话', model, mode: 'normal', planPending: 0,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     this.db
-      .prepare('INSERT INTO sessions (id, title, model, created_at, updated_at) VALUES (?,?,?,?,?)')
-      .run(s.id, s.title, s.model, s.createdAt, s.updatedAt);
+      .prepare('INSERT INTO sessions (id, title, model, mode, plan_pending, created_at, updated_at) VALUES (?,?,?,?,?,?,?)')
+      .run(s.id, s.title, s.model, s.mode, s.planPending, s.createdAt, s.updatedAt);
     return s;
   }
 
-  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model'>>): void {
+  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending'>>): void {
     const cur = this.getSession(id);
     if (!cur) return;
     this.db
-      .prepare('UPDATE sessions SET title = ?, model = ?, updated_at = ? WHERE id = ?')
-      .run(patch.title ?? cur.title, patch.model ?? cur.model, Date.now(), id);
+      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, updated_at = ? WHERE id = ?')
+      .run(patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode, patch.planPending ?? cur.planPending, Date.now(), id);
   }
 
   touchSession(id: string): void {
@@ -204,6 +223,11 @@ export class Store {
   deleteSession(id: string): void {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
     this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+  }
+
+  /** 清空会话消息（保留会话本身，/clear 命令用） */
+  clearSessionMessages(id: string): void {
+    this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
   }
 
   // ---------- messages ----------

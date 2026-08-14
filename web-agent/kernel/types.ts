@@ -257,6 +257,8 @@ export interface Session {
   id: string;
   title: string;
   model: string;
+  mode: string;             // normal / plan / goal（会话级 Agent 模式）
+  planPending: number;      // 计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认
   createdAt: number;
   updatedAt: number;
 }

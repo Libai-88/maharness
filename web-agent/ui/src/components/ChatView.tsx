@@ -62,7 +62,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         )}
         {messages.map((m) => (
           <div key={m.id} className={`msg ${m.role}`}>
-            <div className="msg-label">{m.role === 'user' ? '你' : 'Agent'}</div>
+            <div className="msg-label">{m.role === 'user' ? '你' : m.role === 'system' ? '系统' : 'Agent'}</div>
             <div className="msg-content">
               {m.tools && m.tools.length > 0 && (
                 <div className="tools">

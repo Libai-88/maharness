@@ -3,6 +3,7 @@ export interface Session {
   id: string;
   title: string;
   model: string;
+  mode: string;
   createdAt: number;
   updatedAt: number;
 }
@@ -97,7 +98,7 @@ export interface TraceStep {
 // 前端会话中的本地消息（含流式状态与工具调用过程）
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'system';   // system = 斜杠命令等系统提示
   content: string;
   reasoning?: string;       // 思考过程（推理模型）
   streaming?: boolean;

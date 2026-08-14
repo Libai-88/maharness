@@ -45,6 +45,7 @@ export interface RunOptions {
   model: string;
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
   systemPrompt?: string;
+  tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
   traceId: string;
   signal?: AbortSignal;
   maxTurns?: number;
@@ -92,7 +93,7 @@ export class AgentRunner {
       ...messages,
     ];
     const tools = this.kernel.plugins.capabilities('tool');
-    const toolDefs = tools.map((c) => c.tool);
+    const toolDefs = opts.tools ?? tools.map((c) => c.tool);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const scratchpad: Record<string, unknown> = {};
 
