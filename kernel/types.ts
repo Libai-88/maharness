@@ -166,6 +166,7 @@ export interface LLMMessage {
 
 export type LLMChunk =
   | { type: 'delta'; text: string }
+  | { type: 'reasoning'; text: string }   // 推理模型思考过程（如 deepseek reasoning_content）
   | { type: 'tool_call'; toolCall: ToolCall }
   | { type: 'usage'; input: number; output: number }
   | { type: 'done' };
@@ -251,6 +252,7 @@ export interface Message {
   sessionId: string;
   role: LLMRole;
   content: string | null;
+  reasoning?: string;          // 推理模型思考过程（可选）
   toolCalls?: ToolCall[];
   toolCallId?: string;
   tokensIn?: number;

@@ -12,6 +12,7 @@ export interface Message {
   sessionId: string;
   role: 'user' | 'assistant' | 'system' | 'tool';
   content: string | null;
+  reasoning?: string;
   tokensIn?: number;
   tokensOut?: number;
   cost?: number;
@@ -88,6 +89,7 @@ export interface ChatMessage {
   id: string;
   role: 'user' | 'assistant';
   content: string;
+  reasoning?: string;       // 思考过程（推理模型）
   streaming?: boolean;
   tools?: ToolStep[];
   error?: string;

@@ -37,8 +37,7 @@ export class Store {
         tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, cost REAL DEFAULT 0,
         trace_id TEXT, created_at INTEGER NOT NULL
       );
-      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);
-      CREATE TABLE IF NOT EXISTS plugin_state (
+      CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);      CREATE TABLE IF NOT EXISTS plugin_state (
         plugin_id TEXT PRIMARY KEY, enabled INTEGER DEFAULT 1, version TEXT, loaded_at INTEGER
       );
       CREATE TABLE IF NOT EXISTS providers (
@@ -48,6 +47,11 @@ export class Store {
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
     `);
+    // 迁移：reasoning 列（旧库无此列）
+    const cols = this.db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
+    if (!cols.some((c) => c.name === 'reasoning')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN reasoning TEXT');
+    }
   }
 
   // ---------- providers（网页端管理，DB 为唯一来源） ----------
@@ -144,6 +148,7 @@ export class Store {
       sessionId: r.session_id as string,
       role: r.role as LLMRole,
       content: r.content as string | null,
+      reasoning: (r.reasoning as string | null) ?? undefined,
       toolCalls: r.tool_calls ? JSON.parse(r.tool_calls as string) as ToolCall[] : undefined,
       toolCallId: (r.tool_call_id as string) ?? undefined,
       tokensIn: r.tokens_in as number,
@@ -157,10 +162,11 @@ export class Store {
   addMessage(m: Omit<Message, 'id' | 'createdAt'>): Message {
     const msg: Message = { ...m, id: randomUUID(), createdAt: Date.now() };
     this.db
-      .prepare(`INSERT INTO messages (id, session_id, role, content, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?)`)
+      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         msg.id, msg.sessionId, msg.role, msg.content,
+        msg.reasoning ?? null,
         msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
         msg.toolCallId ?? null, msg.tokensIn ?? 0, msg.tokensOut ?? 0, msg.cost ?? 0,
         msg.traceId ?? null, msg.createdAt,

@@ -134,6 +134,9 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
               const json = JSON.parse(payload);
               const delta = json.choices?.[0]?.delta;
               if (delta?.content) yield { type: 'delta', text: delta.content };
+              // 推理模型思考过程：DeepSeek 系 reasoning_content / OpenAI o1 系 reasoning
+              const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+              if (reasoning) yield { type: 'reasoning', text: reasoning };
               if (delta?.tool_calls) {
                 for (const tc of delta.tool_calls) {
                   const idx = tc.index ?? 0;

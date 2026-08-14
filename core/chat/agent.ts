@@ -9,9 +9,10 @@ import type {
 
 export type AgentEvent =
   | { type: 'delta'; text: string }
+  | { type: 'reasoning'; text: string }
   | { type: 'tool_start'; name: string; args: unknown }
   | { type: 'tool_result'; name: string; summary: string; ok: boolean }
-  | { type: 'assistant_done'; content: string; usage: { input: number; output: number }; cost: number }
+  | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number }
   | { type: 'error'; error: string };
 
 export interface RunOptions {
@@ -62,6 +63,7 @@ export class AgentRunner {
         traceId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
       });
       let text = '';
+      let reasoning = '';
       let usage: { input: number; output: number } | undefined;
       let collected: ToolCall[] = [];
       try {
@@ -69,6 +71,9 @@ export class AgentRunner {
           if (chunk.type === 'delta') {
             text += chunk.text;
             yield { type: 'delta', text: chunk.text };
+          } else if (chunk.type === 'reasoning') {
+            reasoning += chunk.text;
+            yield { type: 'reasoning', text: chunk.text };
           } else if (chunk.type === 'tool_call') {
             collected.push(chunk.toolCall);
           } else if (chunk.type === 'usage') {
@@ -102,6 +107,7 @@ export class AgentRunner {
         yield {
           type: 'assistant_done',
           content: text,
+          reasoning,
           usage: { input: totalIn, output: totalOut },
           cost: totalCost,
         };

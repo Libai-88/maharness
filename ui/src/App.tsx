@@ -54,7 +54,7 @@ export default function App() {
     setTraceSteps([]);
     try {
       const msgs = await sessionApi.messages(id);
-      setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '' })));
+      setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
     } catch { /* 忽略 */ }
   }, []);
 
@@ -116,13 +116,14 @@ export default function App() {
     await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider }, {
       onStart: () => {},
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
+      onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
       onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
         ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const }],
       } : m)),
       onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
         ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? { ...t, summary, ok, status: ok ? 'done' as const : 'error' as const } : t),
       } : m)),
-      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, streaming: false, usage: d.usage, cost: d.cost } : m)),
+      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost } : m)),
       onError: (e) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m)),
       onEnd: () => {
         setStreaming(false);

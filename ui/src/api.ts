@@ -19,9 +19,10 @@ export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
 export interface ChatHandlers {
   onStart(traceId: string): void;
   onDelta(text: string): void;
+  onReasoning(text: string): void;
   onToolStart(name: string, args: unknown): void;
   onToolResult(name: string, summary: string, ok: boolean): void;
-  onDone(d: { content: string; usage: { input: number; output: number }; cost: number }): void;
+  onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number }): void;
   onError(e: string): void;
   onEnd(): void;
 }
@@ -77,6 +78,7 @@ export async function streamChat(
         switch (event) {
           case 'start': h.onStart(String(d.traceId ?? '')); break;
           case 'delta': h.onDelta(String(d.text ?? '')); break;
+          case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
           case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
           case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok)); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number }); break;

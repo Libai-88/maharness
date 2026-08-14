@@ -204,6 +204,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     sse(res, 'start', { traceId });
 
     let assistantText = '';
+    let assistantReasoning = '';
     let usage = { input: 0, output: 0 };
     let cost = 0;
     try {
@@ -214,6 +215,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         if (ev.type === 'delta') {
           assistantText += ev.text;
           sse(res, 'delta', { text: ev.text });
+        } else if (ev.type === 'reasoning') {
+          assistantReasoning += ev.text;
+          sse(res, 'reasoning', { text: ev.text });
         } else if (ev.type === 'tool_start') {
           sse(res, 'tool_start', { name: ev.name, args: ev.args });
         } else if (ev.type === 'tool_result') {
@@ -221,7 +225,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;
-          sse(res, 'done', { content: ev.content, usage: ev.usage, cost: ev.cost });
+          sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost });
         } else if (ev.type === 'error') {
           sse(res, 'error', { error: ev.error });
         }
@@ -232,6 +236,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     if (assistantText) {
       store.addMessage({
         sessionId: session.id, role: 'assistant', content: assistantText,
+        reasoning: assistantReasoning,
         tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
       });
     }

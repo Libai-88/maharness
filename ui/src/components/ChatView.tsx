@@ -1,6 +1,7 @@
-// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具调用卡片）
+// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具卡片 + 思考过程折叠 + Markdown）
 import { useEffect, useRef, useState } from 'react';
 import type { ChatMessage } from '../types';
+import Markdown from './Markdown';
 
 interface Props {
   messages: ChatMessage[];
@@ -12,6 +13,7 @@ interface Props {
 
 export default function ChatView({ messages, streaming, onSend, onStop, hasModels }: Props) {
   const [input, setInput] = useState('');
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -25,6 +27,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
     onSend(text);
   };
 
+  const toggleReasoning = (id: string) =>
+    setExpanded((e) => ({ ...e, [id]: !e[id] }));
+
   return (
     <div className="chat-body">
       <div className="messages">
@@ -32,7 +37,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           <div className="welcome">
             <h2>自研 Web Agent</h2>
             <p>薄内核 · 全插件化 · 全程可观测。我可以读写工作区文件、调用工具。</p>
-            {!hasModels && <p className="warn">尚未配置 LLM Provider —— 在 <code>web-agent/.env</code> 填入 API Key 后重启。</p>}
+            {!hasModels && <p className="warn">尚未配置 LLM Provider —— 在左侧「设置」中添加。</p>}
           </div>
         )}
         {messages.map((m) => (
@@ -50,8 +55,27 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                   ))}
                 </div>
               )}
-              {m.content ? <div className="msg-text">{m.content}{m.streaming && <span className="cursor">▍</span>}</div>
-                : m.streaming ? <div className="msg-text thinking"><span className="cursor">思考中▍</span></div> : null}
+              {/* 思考过程：默认折叠，可展开，限高滚动（不失控） */}
+              {m.reasoning && m.reasoning.length > 0 && (
+                <div className="reasoning">
+                  <button className="reasoning-toggle" onClick={() => toggleReasoning(m.id)}>
+                    🧠 思考过程{expanded[m.id] ? ' ▾' : ' ▸'}
+                  </button>
+                  {expanded[m.id] && (
+                    <div className="reasoning-body">
+                      <div className="reasoning-text">{m.reasoning}{m.streaming && <span className="cursor">▍</span>}</div>
+                    </div>
+                  )}
+                </div>
+              )}
+              {m.content ? (
+                <div className="msg-text">
+                  {m.role === 'assistant' ? <Markdown text={m.content} /> : <div className="plain">{m.content}</div>}
+                  {m.streaming && <span className="cursor">▍</span>}
+                </div>
+              ) : m.streaming ? (
+                <div className="msg-text thinking"><span className="cursor">思考中▍</span></div>
+              ) : null}
               {m.error && <div className="msg-error">{m.error}</div>}
               {m.usage && (
                 <div className="msg-meta">
@@ -67,7 +91,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
       <div className="input-bar">
         <textarea
           value={input}
-          placeholder={hasModels ? '输入消息，Enter 发送，Shift+Enter 换行' : '请先在 .env 配置 LLM Provider'}
+          placeholder={hasModels ? '输入消息，Enter 发送，Shift+Enter 换行' : '请先在「设置」配置 LLM Provider'}
           rows={2}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
