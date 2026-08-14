@@ -24,6 +24,29 @@ export interface ModelInfo {
   model: string;
 }
 
+export interface ProviderInfo {
+  id: string;
+  label: string;
+  baseUrl: string;
+  model: string;
+  priceIn?: number | null;
+  priceOut?: number | null;
+  enabled: boolean;
+  apiKeyMasked: string;
+  hasKey: boolean;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface ProviderForm {
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  priceIn?: string;
+  priceOut?: string;
+}
+
 export interface BusEvent {
   type: string;
   traceId?: string;

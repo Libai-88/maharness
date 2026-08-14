@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, Message, ModelInfo, PluginInfo, Session, TraceStep } from './types';
+import type { BusEvent, Message, ModelInfo, PluginInfo, ProviderForm, ProviderInfo, Session, TraceStep } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -114,6 +114,16 @@ export const sessionApi = {
 
 export const modelsApi = {
   list: () => api<ModelInfo[]>('/api/models'),
+};
+
+export const providersApi = {
+  list: () => api<ProviderInfo[]>('/api/providers'),
+  create: (form: ProviderForm) => api<ProviderInfo>('/api/providers', { method: 'POST', body: JSON.stringify(form) }),
+  update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean }) =>
+    api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
+  test: (body: { baseUrl: string; apiKey: string; model: string }) =>
+    api<{ ok: boolean; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 export const pluginsApi = {

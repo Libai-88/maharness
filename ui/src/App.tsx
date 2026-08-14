@@ -1,13 +1,14 @@
 // ui/src/App.tsx —— 主布局与状态管理
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { modelsApi, pluginsApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { BusEvent, ChatMessage, ModelInfo, PluginInfo, Session, TraceStep } from './types';
+import { modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import type { BusEvent, ChatMessage, ModelInfo, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
 import ChatView from './components/ChatView';
 import SessionList from './components/SessionList';
 import PluginPanel from './components/PluginPanel';
+import ProviderPanel from './components/ProviderPanel';
 import TracePanel from './components/TracePanel';
 
-type SideTab = 'sessions' | 'plugins';
+type SideTab = 'sessions' | 'plugins' | 'settings';
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -17,6 +18,7 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [model, setModel] = useState('');
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [sideTab, setSideTab] = useState<SideTab>('sessions');
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
@@ -30,10 +32,11 @@ export default function App() {
   }, []);
 
   async function loadAll() {
-    const [ss, ms, pl] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list()]);
+    const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
     setSessions(ss);
     setModels(ms);
     setPlugins(pl);
+    setProviders(pvs);
     if (ms.length) setModel((prev) => prev || ms[0].model);
     if (!ss.length) {
       const created = await sessionApi.create(ms[0]?.model ?? '');
@@ -81,6 +84,12 @@ export default function App() {
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
     await pluginsApi.action(id, action);
     setPlugins(await pluginsApi.list());
+  }, []);
+
+  // 供应商变更后：刷新列表与模型下拉（热生效）
+  const refreshProviders = useCallback(async () => {
+    setProviders(await providersApi.list());
+    setModels(await modelsApi.list());
   }, []);
 
   // Trace 实时订阅
@@ -139,6 +148,7 @@ export default function App() {
         <div className="sidebar-tabs">
           <button className={sideTab === 'sessions' ? 'tab active' : 'tab'} onClick={() => setSideTab('sessions')}>会话</button>
           <button className={sideTab === 'plugins' ? 'tab active' : 'tab'} onClick={() => setSideTab('plugins')}>插件</button>
+          <button className={sideTab === 'settings' ? 'tab active' : 'tab'} onClick={() => setSideTab('settings')}>设置</button>
         </div>
         {sideTab === 'sessions' ? (
           <SessionList
@@ -148,8 +158,10 @@ export default function App() {
             onCreate={createSession}
             onDelete={deleteSession}
           />
-        ) : (
+        ) : sideTab === 'plugins' ? (
           <PluginPanel plugins={plugins} onAction={pluginAction} />
+        ) : (
+          <ProviderPanel providers={providers} onChanged={refreshProviders} />
         )}
       </aside>
 

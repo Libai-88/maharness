@@ -6,6 +6,20 @@ import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
 
+/** 网页端管理的 Provider 配置行 */
+export interface ProviderRow {
+  id: string;
+  label: string;
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+  priceIn?: number | null;
+  priceOut?: number | null;
+  enabled: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
 export class Store {
   private db: Database.Database;
 
@@ -27,7 +41,53 @@ export class Store {
       CREATE TABLE IF NOT EXISTS plugin_state (
         plugin_id TEXT PRIMARY KEY, enabled INTEGER DEFAULT 1, version TEXT, loaded_at INTEGER
       );
+      CREATE TABLE IF NOT EXISTS providers (
+        id TEXT PRIMARY KEY, label TEXT NOT NULL, base_url TEXT NOT NULL,
+        api_key TEXT NOT NULL, model TEXT NOT NULL,
+        price_in REAL, price_out REAL, enabled INTEGER DEFAULT 1,
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+      );
     `);
+  }
+
+  // ---------- providers（网页端管理，DB 为唯一来源） ----------
+
+  listProviders(): ProviderRow[] {
+    const rows = this.db
+      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
+      .all() as ProviderRow[];
+    return rows;
+  }
+
+  getProvider(id: string): ProviderRow | undefined {
+    return this.db
+      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
+      .get(id) as ProviderRow | undefined;
+  }
+
+  upsertProvider(p: {
+    id: string; label: string; baseUrl: string; apiKey: string; model: string;
+    priceIn?: number; priceOut?: number; enabled?: number;
+  }): void {
+    const now = Date.now();
+    const existing = this.getProvider(p.id);
+    if (existing) {
+      this.db
+        .prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
+        .run(p.label, p.baseUrl, p.apiKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
+    } else {
+      this.db
+        .prepare('INSERT INTO providers (id, label, base_url, api_key, model, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+        .run(p.id, p.label, p.baseUrl, p.apiKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
+    }
+  }
+
+  deleteProvider(id: string): void {
+    this.db.prepare('DELETE FROM providers WHERE id = ?').run(id);
+  }
+
+  setProviderEnabled(id: string, enabled: number): void {
+    this.db.prepare('UPDATE providers SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id);
   }
 
   // ---------- sessions ----------

@@ -8,6 +8,7 @@ import type { Express, Response } from 'express';
 import type { Kernel } from '../kernel';
 import type { LLMMessage, ProviderDef } from '../kernel/types';
 import type { AgentRunner } from '../core/chat/agent';
+import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
@@ -16,6 +17,23 @@ import type { Store } from './db';
 interface ChatService {
   providers: ProviderDef[];
   runner: AgentRunner;
+  setProviders: (cfgs: ProviderConfig[]) => void;
+}
+
+/** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启） */
+export function refreshChatProviders(kernel: Kernel, store: Store): void {
+  const chat = getChatService(kernel);
+  if (!chat) return;
+  const rows = store.listProviders().filter((r) => r.enabled);
+  chat.setProviders(rows.map((r) => ({
+    id: r.id, baseUrl: r.baseUrl, apiKey: r.apiKey, model: r.model,
+    inputPrice: r.priceIn ?? undefined, outputPrice: r.priceOut ?? undefined,
+  })));
+}
+
+function maskKey(key: string): string {
+  if (!key) return '';
+  return key.length <= 8 ? '****' : `${key.slice(0, 4)}****${key.slice(-4)}`;
 }
 
 function getChatService(kernel: Kernel): ChatService | undefined {
@@ -29,6 +47,87 @@ function sse(res: Response, event: string, data: unknown): void {
 
 export function registerRoutes(app: Express, kernel: Kernel, store: Store): void {
   app.use(express.json({ limit: '5mb' }));
+
+  // ---------- Provider 管理（网页端；DB 为唯一来源） ----------
+  app.get('/api/providers', (_req, res) => {
+    res.json(store.listProviders().map((r) => ({
+      id: r.id, label: r.label, baseUrl: r.baseUrl, model: r.model,
+      priceIn: r.priceIn, priceOut: r.priceOut, enabled: !!r.enabled,
+      apiKeyMasked: maskKey(r.apiKey), hasKey: !!r.apiKey,
+      createdAt: r.createdAt, updatedAt: r.updatedAt,
+    })));
+  });
+
+  app.post('/api/providers', (req, res) => {
+    const { label, baseUrl, apiKey, model, priceIn, priceOut } = req.body ?? {};
+    if (!label?.trim() || !baseUrl?.trim() || !apiKey?.trim() || !model?.trim()) {
+      return res.status(400).json({ error: '名称 / 地址 / Key / 模型 均为必填' });
+    }
+    const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'provider'}-${Math.random().toString(36).slice(2, 6)}`;
+    store.upsertProvider({
+      id, label: label.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), model: model.trim(),
+      priceIn: priceIn === '' || priceIn == null ? undefined : Number(priceIn),
+      priceOut: priceOut === '' || priceOut == null ? undefined : Number(priceOut),
+    });
+    refreshChatProviders(kernel, store);
+    const row = store.getProvider(id)!;
+    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey) });
+  });
+
+  app.patch('/api/providers/:id', (req, res) => {
+    const existing = store.getProvider(req.params.id);
+    if (!existing) return res.status(404).json({ error: '供应商不存在' });
+    const { label, baseUrl, apiKey, model, priceIn, priceOut, enabled } = req.body ?? {};
+    store.upsertProvider({
+      id: existing.id,
+      label: label?.trim() || existing.label,
+      baseUrl: baseUrl?.trim() || existing.baseUrl,
+      // Key 留空/不传 = 保持不变
+      apiKey: apiKey?.trim() || existing.apiKey,
+      model: model?.trim() || existing.model,
+      priceIn: priceIn === undefined ? (existing.priceIn ?? undefined) : priceIn === '' ? undefined : Number(priceIn),
+      priceOut: priceOut === undefined ? (existing.priceOut ?? undefined) : priceOut === '' ? undefined : Number(priceOut),
+      enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
+    });
+    refreshChatProviders(kernel, store);
+    const row = store.getProvider(existing.id)!;
+    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey) });
+  });
+
+  app.delete('/api/providers/:id', (req, res) => {
+    if (!store.getProvider(req.params.id)) return res.status(404).json({ error: '供应商不存在' });
+    store.deleteProvider(req.params.id);
+    refreshChatProviders(kernel, store);
+    res.json({ ok: true });
+  });
+
+  /** 连接测试：直连 OpenAI 兼容接口发最小请求验证 key/地址/模型可用（编辑时可不传 key，用已保存的） */
+  app.post('/api/providers/test', async (req, res) => {
+    const { baseUrl, apiKey, model, providerId } = req.body ?? {};
+    let useKey = apiKey;
+    if (!useKey && providerId) {
+      const row = store.getProvider(String(providerId));
+      useKey = row?.apiKey;
+    }
+    if (!baseUrl?.trim() || !useKey?.trim() || !model?.trim()) {
+      return res.status(400).json({ error: '地址 / Key / 模型 均为必填' });
+    }
+    try {
+      const r = await fetch(`${String(baseUrl).replace(/\/+$/, '')}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${useKey}` },
+        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) {
+        const text = await r.text().catch(() => '');
+        return res.status(400).json({ ok: false, error: `HTTP ${r.status}: ${text.slice(0, 300)}` });
+      }
+      res.json({ ok: true, message: '连接成功' });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
 
   // ---------- 模型 ----------
   app.get('/api/models', (_req, res) => {

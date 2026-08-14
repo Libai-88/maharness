@@ -8,16 +8,33 @@ import { join } from 'node:path';
 import express from 'express';
 import { Kernel } from '../kernel';
 import { Store } from './db';
-import { registerRoutes } from './routes';
+import { registerRoutes, refreshChatProviders } from './routes';
+import { discoverProviders } from '../core/chat/provider';
 
 const rootDir = process.env.AGENT_ROOT ?? process.cwd();
 const port = Number(process.env.PORT ?? 3000);
+
+/** DB 为空时从 .env 首次导入 Provider；之后以 DB 为唯一来源 */
+function seedProviders(store: Store): void {
+  if (store.listProviders().length > 0) return;
+  const envCfgs = discoverProviders();
+  for (const c of envCfgs) {
+    store.upsertProvider({
+      id: c.id, label: c.id.toUpperCase(),
+      baseUrl: c.baseUrl, apiKey: c.apiKey, model: c.model,
+      priceIn: c.inputPrice, priceOut: c.outputPrice,
+    });
+  }
+  if (envCfgs.length) console.log(`[provider] 已从 .env 导入 ${envCfgs.length} 个供应商到本地数据库`);
+}
 
 export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']> }> {
   const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir });
   await kernel.start();
 
   const store = new Store(kernel.paths.dbFile);
+  seedProviders(store);
+  refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
   const app = express();
   registerRoutes(app, kernel, store);
 
