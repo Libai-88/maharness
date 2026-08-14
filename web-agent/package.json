@@ -8,8 +8,11 @@
     "node": ">=20.6"
   },
   "scripts": {
+    "setup": "node scripts/setup.mjs",
     "dev": "tsx watch server/index.ts",
+    "dev:all": "node scripts/dev-all.mjs",
     "start": "tsx server/index.ts",
+    "start:all": "npm run ui:build && npm start",
     "selftest": "tsx scripts/selftest.ts",
     "typecheck": "tsc -p tsconfig.json",
     "ui:dev": "npm --prefix ui run dev",

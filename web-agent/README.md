@@ -17,21 +17,17 @@
 ## 快速开始
 
 ```bash
-# 1. 安装依赖
+# 1. 一键安装（后端 + 前端依赖；首次自动生成 .env，填入至少一个 API Key）
 cd web-agent
-npm install
-cd ui && npm install && cd ..
+npm run setup
 
-# 2. 配置 LLM（至少一组 OpenAI 兼容 Provider）
-copy .env.example .env
-# 编辑 .env，填入 DEEPSEEK_API_KEY（或 OPENAI_API_KEY 等）
-
-# 3. 启动
-npm run dev          # 后端 http://localhost:3000
-# 前端开发模式（热更新）：另开终端 npm run ui:dev → http://localhost:5173
+# 2. 一键启动
+npm run dev:all      # 开发模式：后端 :3000 + 前端 :5173（热更新）
+# 或
+npm run start:all    # 生产模式：构建前端后单端口启动 → http://localhost:3000
 ```
 
-浏览器打开 **http://localhost:3000** 即可使用。
+浏览器打开 **http://localhost:3000**（生产模式）或 **http://localhost:5173**（开发模式）即可使用。
 
 ## 使用
 
