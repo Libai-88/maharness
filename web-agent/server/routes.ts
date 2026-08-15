@@ -785,7 +785,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
       },
       agent: {
-        reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 400),
+        reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 800),
+        reasoningTotalBudget: kernel.config.get<number>('agent.reasoningTotalBudget', 3000),
         thinkInEnglish: kernel.config.get<boolean>('agent.thinkInEnglish', true),
       },
     });
@@ -810,7 +811,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       }
       if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
       if (agent?.reasoningBudget !== undefined) {
-        kernel.config.set('agent.reasoningBudget', Math.max(50, Math.min(8000, Number(agent.reasoningBudget))));
+        kernel.config.set('agent.reasoningBudget', Math.max(100, Math.min(16000, Number(agent.reasoningBudget))));
+      }
+      if (agent?.reasoningTotalBudget !== undefined) {
+        kernel.config.set('agent.reasoningTotalBudget', Math.max(200, Math.min(64000, Number(agent.reasoningTotalBudget))));
       }
       if (agent?.thinkInEnglish !== undefined) {
         kernel.config.set('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));

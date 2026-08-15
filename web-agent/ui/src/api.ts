@@ -185,7 +185,7 @@ export const gitApi = {
 export interface RuntimeConfig {
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
-  agent: { reasoningBudget: number; thinkInEnglish: boolean };
+  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean };
 }
 
 export const configApi = {

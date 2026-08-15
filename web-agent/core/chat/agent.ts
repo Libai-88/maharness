@@ -77,8 +77,14 @@ const CONTEXT_PROVIDER_BUDGET = 1500;
 /** 自适应阈值：连续工具失败达到该次数时，harness 注入策略提示（管理"认知资源"） */
 const ADAPT_FAIL_STREAK = 3;
 
-/** 单轮思考预算（token）：超过则下一轮注入降级提示，阻止推理膨胀（见 docs/思维链研究.md） */
-const REASONING_BUDGET_DEFAULT = 400;
+/** 单轮思考预算（token）：单轮 reasoning 超限 → 下一轮注入降级提示。
+ *  800 ≈ 600 英文词，足以容纳深度推理的完整一轮；配合任务分级（代码 ×1.5 / 问答 ×0.5）。
+ *  预算的本质是限制「空转」（重复推理、原地打转），而不是限制「有效思考」——
+ *  降级提示因此允许模型在有新路径时继续推进。 */
+const REASONING_BUDGET_DEFAULT = 800;
+
+/** 单任务总思考预算（token）：跨轮累计，防多轮空转绕过单轮预算（每轮 600 词 × 5 轮 ≈ 3000） */
+const REASONING_TOTAL_DEFAULT = 3000;
 
 /** 英文思考提醒：紧贴每次 LLM 决策点注入（system role，位置稳定可复用 L3 前缀缓存）。
  *  与 system prompt 的思维宪章呼应：英文思考 + We need 行动式开头 + 第一性原理/奥卡姆/经验主义。 */
@@ -145,8 +151,9 @@ export class AgentRunner {
     const toolDefs = (opts.tools ?? tools.map((c) => c.tool)).map(annotateToolDef);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
-    // 思考预算：基准值 × 任务本质系数（代码多思考、问答少思考）——认知资源按本质分配
+    // 思考预算：单轮 + 总量双轨，基准值 × 任务本质系数（代码多思考、问答少思考）——认知资源按本质分配
     const baseBudget = this.kernel.config.get<number>('agent.reasoningBudget', REASONING_BUDGET_DEFAULT);
+    const totalBudget = this.kernel.config.get<number>('agent.reasoningTotalBudget', REASONING_TOTAL_DEFAULT);
     const lastUserMsg0 = [...messages].reverse().find((m) => m.role === 'user');
     const reasoningBudget = reasoningBudgetFor(classifyTask(lastUserMsg0?.content ?? ''), baseBudget);
     const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
@@ -166,8 +173,11 @@ export class AgentRunner {
     // 自适应：本会话连续工具失败计数（超阈值时注入建议，管理"认知资源"）
     let toolFailStreak = 0;
     let adaptHintInjected = false;
-    // 思考预算：上一轮 reasoning 长度（token）；超预算后注入降级提示（限一次）
+    // 思考预算：上一轮 reasoning 长度 + 全任务累计（token）；超限后注入降级提示（限一次）
+    // 双轨语义：单轮预算防「单轮空转」，总量预算防「多轮累计空转」。
+    // 降级提示允许模型区分「空转」与「推进」——有新路径可继续思考，原地打转才收敛。
     let lastTurnReasoningTokens = 0;
+    let totalReasoningTokens = 0;
     let budgetHintInjected = false;
 
     for (let turn = 0; turn < maxTurns; turn++) {
@@ -180,17 +190,20 @@ export class AgentRunner {
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad };
       await this.emitHook('agent.before_llm', llmCtx);
 
-      // ---- 思考预算（思维链管理）：上一轮思考超限 → 注入降级指令 ----
-      // 依据：Anthropic effort 实测「少想反而更好」；无预算约束时模型会在单点上反复空转。
-      // 降级后不再重复注入，避免提示本身污染上下文。
-      if (lastTurnReasoningTokens > reasoningBudget && !budgetHintInjected) {
+      // ---- 思考预算（思维链管理）：单轮或总量超限 → 注入降级指令 ----
+      // 依据：Anthropic effort 实测「少想反而更好」；但预算的本质是限制空转而非有效思考，
+      // 故降级提示保留「有新路径可继续推进」的出口。
+      if (!budgetHintInjected && (totalReasoningTokens > totalBudget || lastTurnReasoningTokens > reasoningBudget)) {
         budgetHintInjected = true;
+        const overTotal = totalReasoningTokens > totalBudget;
+        const shown = overTotal ? totalReasoningTokens : lastTurnReasoningTokens;
+        const cap = overTotal ? totalBudget : reasoningBudget;
         llmCtx.history.push({
           role: 'system',
-          content: `【harness 思考预算】上一轮思考已超预算（约 ${lastTurnReasoningTokens} token > ${reasoningBudget}）。请停止继续思考，直接基于已有信息与工具结果给出结论或执行下一步动作；如需更多事实，先调工具再答。`,
+          content: `【harness 思考预算·${overTotal ? '总量' : '单轮'}】思考已达预算（${shown} token > ${cap}）。请自检是否在原地打转：若确有新信息可观察（调工具）或新路径可尝试，继续推进；若只是在重复已有推理，请基于已有信息与工具结果给出当前最佳结论。`,
         });
         this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'reasoning-budget' })
-          .finish({ outputSummary: `注入思考预算降级提示（上轮 ${lastTurnReasoningTokens} token）` });
+          .finish({ outputSummary: `注入思考预算降级提示（${overTotal ? '总量' : '单轮'} ${shown}/${cap} token）` });
       }
 
       // ---- 英文思考提醒：紧贴决策点注入（位置稳定，不破坏 L3 前缀复用） ----
@@ -329,8 +342,9 @@ export class AgentRunner {
       totalOut += tOut;
       const cost = estimateCost(activeProvider, tIn, tOut);
       totalCost += cost;
-      // 思考预算统计：记录本轮 reasoning 长度（下一轮 LLM 调用前消费）
+      // 思考预算统计：记录本轮 reasoning 长度并累计（下一轮 LLM 调用前消费）
       lastTurnReasoningTokens = estimateTokens(reasoning);
+      totalReasoningTokens += lastTurnReasoningTokens;
       step.finish({
         outputSummary: text.slice(0, 200),
         tokensIn: tIn, tokensOut: tOut, cost,
