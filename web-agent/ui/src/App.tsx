@@ -12,7 +12,7 @@ import FileTree from './components/FileTree';
 import StatsPanel from './components/StatsPanel';
 import TracePanel from './components/TracePanel';
 
-type SideTab = 'sessions' | 'plugins' | 'files' | 'stats' | 'settings';
+type ManagerTab = 'plugins' | 'files' | 'stats' | 'settings' | null;
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -24,7 +24,7 @@ export default function App() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
-  const [sideTab, setSideTab] = useState<SideTab>('sessions');
+  const [managerOpen, setManagerOpen] = useState<ManagerTab>(null);
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
   const [traceOpen, setTraceOpen] = useState(false);
@@ -208,38 +208,63 @@ export default function App() {
 
   return (
     <div className="app">
+      {/* 左侧边栏：只放会话（高频核心），管理面板独立为右侧窗口 */}
       <aside className="sidebar">
-        <div className="sidebar-tabs">
-          <button className={sideTab === 'sessions' ? 'tab active' : 'tab'} onClick={() => setSideTab('sessions')}>会话</button>
-          <button className={sideTab === 'plugins' ? 'tab active' : 'tab'} onClick={() => setSideTab('plugins')}>插件</button>
-          <button className={sideTab === 'files' ? 'tab active' : 'tab'} onClick={() => setSideTab('files')}>文件</button>
-          <button className={sideTab === 'stats' ? 'tab active' : 'tab'} onClick={() => setSideTab('stats')}>统计</button>
-          <button className={sideTab === 'settings' ? 'tab active' : 'tab'} onClick={() => setSideTab('settings')}>设置</button>
+        <SessionList
+          sessions={sessions}
+          activeId={activeId}
+          onSelect={selectSession}
+          onCreate={createSession}
+          onDelete={deleteSession}
+          onBatchDelete={async (ids) => {
+            try {
+              await sessionApi.batchRemove(ids);
+              setSessions(await sessionApi.list());
+              if (activeId && ids.includes(activeId)) {
+                const rest = sessions.filter((s) => !ids.includes(s.id));
+                if (rest.length) void selectSession(rest[0].id); else { setActiveId(null); setMessages([]); }
+              }
+            } catch (err) {
+              alert(err instanceof Error ? err.message : String(err));
+            }
+          }}
+          onArchive={archiveSession}
+          onPin={pinSession}
+        />
+        <div className="sidebar-manage">
+          <button className={managerOpen === 'plugins' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'plugins' ? null : 'plugins')}>插件</button>
+          <button className={managerOpen === 'files' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'files' ? null : 'files')}>文件</button>
+          <button className={managerOpen === 'stats' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'stats' ? null : 'stats')}>统计</button>
+          <button className={managerOpen === 'settings' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'settings' ? null : 'settings')}>设置</button>
         </div>
-        {sideTab === 'sessions' ? (
-          <SessionList
-            sessions={sessions}
-            activeId={activeId}
-            onSelect={selectSession}
-            onCreate={createSession}
-            onDelete={deleteSession}
-            onArchive={archiveSession}
-            onPin={pinSession}
-          />
-        ) : sideTab === 'plugins' ? (
-          <PluginPanel plugins={plugins} onAction={pluginAction} />
-        ) : sideTab === 'files' ? (
-          <FileTree />
-        ) : sideTab === 'stats' ? (
-          <StatsPanel />
-        ) : (
-          <>
-            <ProviderPanel providers={providers} onChanged={refreshProviders} />
-            <PersonaPanel personas={personas} onChanged={refreshPersonas} />
-            <SkillsPanel onChanged={refreshPersonas} />
-          </>
-        )}
       </aside>
+
+      {/* 右侧管理窗口：插件/文件/统计/设置独立小窗口（可关闭，与轨迹面板共存） */}
+      {managerOpen && (
+        <aside className="manager-panel">
+          <div className="manager-head">
+            <span className="manager-title">
+              {managerOpen === 'plugins' ? '🔌 插件管理' : managerOpen === 'files' ? '📁 文件与工作区' : managerOpen === 'stats' ? '📊 信息统计' : '⚙️ 设置'}
+            </span>
+            <button className="manager-close" title="关闭面板" onClick={() => setManagerOpen(null)}>✕</button>
+          </div>
+          <div className="manager-body">
+            {managerOpen === 'plugins' ? (
+              <PluginPanel plugins={plugins} onAction={pluginAction} />
+            ) : managerOpen === 'files' ? (
+              <FileTree />
+            ) : managerOpen === 'stats' ? (
+              <StatsPanel />
+            ) : (
+              <>
+                <ProviderPanel providers={providers} onChanged={refreshProviders} />
+                <PersonaPanel personas={personas} onChanged={refreshPersonas} />
+                <SkillsPanel onChanged={refreshPersonas} />
+              </>
+            )}
+          </div>
+        </aside>
+      )}
 
       <main className="chat-area">
         <header className="chat-header">

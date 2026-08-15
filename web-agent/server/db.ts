@@ -231,6 +231,21 @@ export class Store {
     this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
   }
 
+  /** 批量删除会话（事务原子：全部成功或全部失败） */
+  deleteSessions(ids: string[]): number {
+    if (ids.length === 0) return 0;
+    const delMsg = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
+    const delSess = this.db.prepare('DELETE FROM sessions WHERE id = ?');
+    const tx = this.db.transaction((list: string[]) => {
+      for (const id of list) {
+        delMsg.run(id);
+        delSess.run(id);
+      }
+    });
+    tx(ids);
+    return ids.length;
+  }
+
   /** 清空会话消息（保留会话本身，/clear 命令用） */
   clearSessionMessages(id: string): void {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);

@@ -412,6 +412,16 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     res.json({ ok: true });
   });
 
+  // 批量删除会话（事务原子；前端批量管理用）
+  app.post('/api/sessions/batch-delete', (req, res) => {
+    const ids = Array.isArray(req.body?.ids)
+      ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500)
+      : [];
+    if (ids.length === 0) return res.status(400).json({ error: '缺少 ids' });
+    const removed = store.deleteSessions(ids);
+    res.json({ ok: true, removed });
+  });
+
   // ---------- 对话（SSE 流式） ----------
   app.post('/api/sessions/:id/chat', async (req, res) => {
     const session = store.getSession(req.params.id);

@@ -256,7 +256,7 @@ body {
 
 .app { display: flex; height: 100%; }
 
-/* ---------- 侧边栏 ---------- */
+/* ---------- 侧边栏（只放会话；管理面板独立为右侧窗口） ---------- */
 .sidebar {
   width: 260px; min-width: 260px;
   background: var(--panel);
@@ -264,11 +264,50 @@ body {
   display: flex; flex-direction: column;
 }
 .sidebar-tabs { display: flex; border-bottom: 1px solid var(--border); }
+.sidebar-manage {
+  display: flex; border-top: 1px solid var(--border);
+  background: var(--bg);
+}
+.sidebar-manage .tab { flex: 1; padding: 9px 4px; font-size: 12px; }
 .tab {
   flex: 1; padding: 10px; border: none; background: none;
   font-size: 13px; color: var(--muted); cursor: pointer;
   border-bottom: 2px solid transparent;
 }
+
+/* ---------- 右侧管理窗口（插件/文件/统计/设置独立小窗口） ---------- */
+.manager-panel {
+  width: 360px; min-width: 360px; max-width: 420px;
+  background: var(--panel);
+  border-left: 1px solid var(--border);
+  display: flex; flex-direction: column;
+}
+.manager-head {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 14px; border-bottom: 1px solid var(--border);
+}
+.manager-title { font-size: 13px; font-weight: 600; }
+.manager-close {
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+  border-radius: 6px; padding: 2px 8px; cursor: pointer; font-size: 12px;
+}
+.manager-close:hover { color: var(--red); border-color: var(--red); }
+.manager-body { flex: 1; overflow: hidden; display: flex; flex-direction: column; min-height: 0; }
+.manager-body > div { flex: 1; min-height: 0; }
+
+/* 会话批量管理 */
+.session-toolbar { display: flex; align-items: center; gap: 6px; margin-bottom: 10px; }
+.session-toolbar .new-session { flex: 1; margin-bottom: 0; }
+.manage-btn {
+  border: 1px solid var(--border); background: var(--bg); color: var(--muted);
+  border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 11px;
+}
+.manage-btn:hover { color: var(--text); border-color: var(--accent); }
+.manage-btn.danger { color: var(--red); border-color: var(--red); }
+.manage-btn.danger:disabled { opacity: 0.4; cursor: not-allowed; }
+.manage-count { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.session-check { font-size: 15px; color: var(--muted); cursor: pointer; user-select: none; flex-shrink: 0; }
+.session-check.on { color: var(--accent); }
 .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
 
 .session-list, .plugin-list { flex: 1; overflow-y: auto; padding: 10px; }
@@ -276,10 +315,13 @@ body {
 .session-item {
   position: relative; padding: 7px 10px; border-radius: 8px;
   cursor: pointer; margin-bottom: 3px;
+  display: flex; align-items: center; gap: 6px;
 }
 .session-item:hover { background: var(--bg); }
 .session-item.active { background: var(--accent-weak); }
+.session-item.checked { background: var(--bg); border: 1px solid var(--accent); }
 .session-item.pinned .session-title::before { content: '📌 '; }
+.session-body { flex: 1; min-width: 0; }
 .session-title { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; padding-right: 64px; }
 .session-time { font-size: 11px; color: var(--muted); margin-top: 2px; }
 .session-actions {

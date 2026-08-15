@@ -115,6 +115,7 @@ export const sessionApi = {
   update: (id: string, patch: Partial<{ title: string; model: string; mode: string; archived: boolean | number; pinned: boolean | number }>) =>
     api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
+  batchRemove: (ids: string[]) => api<{ ok: boolean; removed: number }>('/api/sessions/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
 };
 
