@@ -87,8 +87,9 @@ const REASONING_BUDGET_DEFAULT = 800;
 const REASONING_TOTAL_DEFAULT = 3000;
 
 /** 英文思考提醒：紧贴每次 LLM 决策点注入（system role，位置稳定可复用 L3 前缀缓存）。
- *  与 system prompt 的思维宪章呼应：英文思考 + We need 行动式开头 + 第一性原理/奥卡姆/经验主义。 */
-const EN_THINK_REMINDER = 'Reminder: Reason in ENGLISH, start with "We need ...". First principles — known, unknown, what must be observed. Ockham: act with evidence, not assertion.';
+ *  与 system prompt 的思维宪章呼应；带英文思考示例（few-shot 引导强于纯指令，Wei22）：
+ *  模型推理语言跟随上下文主导语言，中文消息会淹没英文指令——示例让模型进入英文推理语境。 */
+const EN_THINK_REMINDER = 'Reason in ENGLISH, start with "We need ...". Example: "We need to explain virtual memory. Known: it maps virtual addresses to physical frames. Unknown: the exact page-table mechanism. Plan: define the concept, then the mechanism, then why it matters." Chinese is only for the final answer.';
 
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
  *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
@@ -206,13 +207,6 @@ export class AgentRunner {
           .finish({ outputSummary: `注入思考预算降级提示（${overTotal ? '总量' : '单轮'} ${shown}/${cap} token）` });
       }
 
-      // ---- 英文思考提醒：紧贴决策点注入（位置稳定，不破坏 L3 前缀复用） ----
-      // system prompt 已声明英文思考；此处再在每轮 LLM 调用前放一条 reminder，
-      // 对部分推理模型的原生 reasoning 语言有引导作用。
-      if (thinkInEnglish && (llmCtx.history[llmCtx.history.length - 1]?.content ?? '') !== EN_THINK_REMINDER) {
-        llmCtx.history.push({ role: 'system', content: EN_THINK_REMINDER });
-      }
-
       // ---- Context Provider 注入（上下文工程）：插件按需提供上下文 ----
       // 与 before_llm 钩子并存：钩子 = 命令式（失败教训注入），context = 声明式。
       // 全部追加到 history 末尾（前缀稳定，不破坏 L3）；总预算控制，超限丢弃低权重；
@@ -234,6 +228,13 @@ export class AgentRunner {
             cStep.finish({ outputSummary: `${cp.id} 注入 ${t} tokens${cp.description ? `（${cp.description.slice(0, 40)}）` : ''}` });
           } catch { /* context provider 自身异常不影响主循环 */ }
         }
+      }
+
+      // ---- 英文思考提醒：紧贴决策点注入（位置稳定，不破坏 L3 前缀复用） ----
+      // 必须在 Context Provider 注入【之后】：记忆/上下文消息若追加在 reminder 后面，
+      // 模型最后看到的是中文消息，思考语言会被带偏（思维链不稳定的根因）。
+      if (thinkInEnglish && (llmCtx.history[llmCtx.history.length - 1]?.content ?? '') !== EN_THINK_REMINDER) {
+        llmCtx.history.push({ role: 'system', content: EN_THINK_REMINDER });
       }
 
       // ---- L1 语义缓存：问答命中直接返回缓存答案（跳过 LLM 调用，零成本） ----
