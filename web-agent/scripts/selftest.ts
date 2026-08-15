@@ -146,6 +146,19 @@ const sub = tools.find((t) => t.name === 'run_subagent');
 console.log('[subagent] run_subagent 工具:', sub ? '✓' : '✗');
 if (!sub) console.log('[subagent] ✗ 子代理未注册，检查 core/subagent 插件加载');
 
+// ---- 能力发现：工具风险/成本元数据（harness 视角第 2/6/9 问） ----
+const wf = tools.find((t) => t.name === 'write_file');
+const lf = tools.find((t) => t.name === 'list_dir');
+const hasMeta = wf?.risk === 'high' && wf?.approval === true && wf?.costHint === 'low' && lf?.risk === 'low';
+console.log('[capabilities] 工具元数据（risk/approval/cost）:', hasMeta ? '✓' : '✗',
+  `write_file=${wf?.risk}/${wf?.approval} list_dir=${lf?.risk}`);
+// annotateToolDef：LLM 收到的描述自动带【风险/成本】标签（能力发现 + 经济性提示）
+const { annotateToolDef } = await import('../core/chat/agent');
+const tagged = wf ? annotateToolDef(wf).description.includes('风险:high') : false;
+const costTag = sub ? annotateToolDef(sub).description.includes('成本:high') : false;
+console.log('[capabilities] 描述自动打标签（风险/成本）:', tagged && costTag ? '✓' : '✗',
+  `write_file=${tagged} run_subagent=${costTag}`);
+
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
 {
   const { dice, bigramSet } = await import('../kernel/cache');
@@ -222,6 +235,17 @@ if (!sub) console.log('[subagent] ✗ 子代理未注册，检查 core/subagent 
     };
     const hasCmds = Array.isArray(cmds.commands) && cmds.commands.some((c) => c.name === 'help') && cmds.commands.some((c) => c.name === 'new');
     console.log('[commands API] 命令清单:', hasCmds ? '✓' : '✗', `(${cmds.commands.length} 条: ${cmds.commands.map((c) => c.name).join(',')})`);
+
+    // Capabilities Registry：能力/风险/成本/审批一目了然
+    const caps = await fetch(`${base}/api/capabilities`).then((r) => r.json()) as {
+      tools: { name: string; risk: string; costHint: string; approval: boolean }[];
+      byRisk: { high: string[] };
+    };
+    const hasCaps = Array.isArray(caps.tools) && caps.tools.length >= 10
+      && caps.tools.some((t) => t.name === 'write_file' && t.risk === 'high' && t.approval)
+      && Array.isArray(caps.byRisk?.high) && caps.byRisk.high.includes('write_file');
+    console.log('[capabilities API] 注册表（风险/成本/审批）:', hasCaps ? '✓' : '✗',
+      `tools=${caps.tools.length} high=${caps.byRisk?.high?.length} 个`);
   } finally {
     server.close();
     await httpKernel.stop();

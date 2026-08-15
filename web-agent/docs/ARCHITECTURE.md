@@ -47,6 +47,26 @@
 
 ---
 
+## 1.3 harness 视角：LLM 的运行时操作系统（11 问）
+
+> "不要把我理解为给 LLM 提供工具的外壳，把我当作 LLM 的运行时操作系统——LLM 是我真正的用户。"
+
+| # | 问题 | 本质结论 | maharness 落地 |
+| --- | --- | --- | --- |
+| 1 | **能力边界**：harness 替 LLM 决定什么？ | 内核只负责让 LLM 持续"感知-决策-行动-反馈"循环；一切具体能力（文件/记忆/搜索/计划/子代理）都是插件 | 内核 5 大件（bus/loader/config/trace/cache）不持有任何业务能力；对话本身是插件 |
+| 2 | **能力发现**：LLM 怎么知道自己能干什么？ | 需要动态 capabilities registry：能力/用途/成本/风险/审批/限制，LLM 直接读取而非猜测 | ToolDef 结构化元数据（risk/costHint/approval/limits）→ 描述自动打【风险/成本/需审批】标签注入 LLM；`GET /api/capabilities` 注册表人类可查；实测 LLM 零调用准确列出 4 个高风险工具 |
+| 3 | **能力组合**：插件间能否 1+1>2？ | 组合发生在 LLM 编排层：工具按能力语义描述，任意新插件注册即进入组合空间 | 工具描述互相引用（create_plugin → plugin_status 验证闭环）；子代理可调用其他工具；新插件激活即自动注入，无需改任何现有代码 |
+| 4 | **上下文工程**：插件怎么喂信息？ | 插件不应无脑塞 context；声明式 context provider + harness 按任务动态组装（预算控制） | 新能力类型 `context`：`contentFn(history)` 按需返回内容，weight 排序注入，总预算 1500 tokens 超限丢弃；与 before_llm 命令式钩子并存 |
+| 5 | **生命周期**：插件什么时候出现？ | 动态 capability loading（类似 OS 加载驱动）：按需激活、无关隔离 | plugin.json 启停 + 网页端面板一键 enable/disable + 目录 watch 热加载/卸载；core 插件随产品分发不热重载（稳定性） |
+| 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】，运行时 needsApproval 挂起审批卡片 |
+| 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板 + 统计面板 |
+| 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，失败以结构化信息回传 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；工具失败返回 `{ok:false,error}` 给 LLM + 失败教训自动入记忆（下次会话不再犯） |
+| 9 | **经济性**：LLM 知道行动有成本 | 管理"认知资源"：每步动作标成本，简单问题不召唤重工具 | costHint 元数据注入描述（run_subagent 标注【成本:high】"简单问题不要召唤"）；L1 缓存省 LLM 调用；每消息成本显示；统计面板总成本 |
+| 10 | **自适应性**：harness 能否改变 agent 工作方式？ | 根据历史表现调整运行策略（adaptive harness → skill graph） | 连续 3 次工具失败 → 注入自适应提示（停止重试/拆任务/委派子代理）；失败教训自动记忆形成"任务类型→教训"知识；goal-plan 提供工作流状态机 |
+| 11 | **可替换性**：实现可换、语义不变 | 插件接口抽象能力语义而非具体实现——LLM 是唯一不需要重新学习世界的部分 | 工具接口=能力语义（remember/recall 不关心存储实现，web_search 不关心搜索引擎）；L2 缓存键带版本命名空间，实现升级旧缓存自动失效 |
+
+---
+
 ## 1. 设计信条
 
 | # | 信条 | 含义 |

@@ -6,7 +6,7 @@
 import { randomUUID, createHash } from 'node:crypto';
 import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
 import type {
-  EventBusLike, KernelLike, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
+  EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
 
 /**
@@ -68,6 +68,24 @@ const APPROVAL_TIMEOUT = 10 * 60 * 1000;
 /** 工具执行默认超时（毫秒；config agent.toolTimeoutMs 可调） */
 const TOOL_TIMEOUT_DEFAULT = 30_000;
 
+/** Context Provider 单轮注入总预算（tokens）：上下文工程——按需组装，杜绝无脑塞入 */
+const CONTEXT_PROVIDER_BUDGET = 1500;
+
+/** 自适应阈值：连续工具失败达到该次数时，harness 注入策略提示（管理"认知资源"） */
+const ADAPT_FAIL_STREAK = 3;
+
+/** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制标签（registry 元数据 → 提示词）
+ *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀 */
+export function annotateToolDef(t: ToolDef): ToolDef {
+  if (!t.risk && !t.costHint && !t.approval && !t.limits) return t;
+  const tags: string[] = [];
+  if (t.risk) tags.push(`风险:${t.risk}`);
+  if (t.costHint) tags.push(`成本:${t.costHint}`);
+  if (t.approval) tags.push('需审批');
+  if (t.limits) tags.push(t.limits);
+  return { ...t, description: `【${tags.join('|')}】${t.description}` };
+}
+
 /** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话（超时后 handler 仍可能在后台运行，由工具自行响应 signal 取消） */
 async function withToolTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
   if (!ms || ms <= 0) return p;
@@ -112,7 +130,7 @@ export class AgentRunner {
       ...messages,
     ];
     const tools = this.kernel.plugins.capabilities('tool');
-    const toolDefs = opts.tools ?? tools.map((c) => c.tool);
+    const toolDefs = (opts.tools ?? tools.map((c) => c.tool)).map(annotateToolDef);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
     const scratchpad: Record<string, unknown> = {};
@@ -128,6 +146,9 @@ export class AgentRunner {
     let totalIn = 0, totalOut = 0, totalCost = 0;
     // L3 前缀缓存统计：记录上一轮实际发给 LLM 的 history 快照（钩子可能改写）
     let lastHistory: { role?: string; content?: string | null }[] | null = null;
+    // 自适应：本会话连续工具失败计数（超阈值时注入建议，管理"认知资源"）
+    let toolFailStreak = 0;
+    let adaptHintInjected = false;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (signal?.aborted) {
@@ -138,6 +159,26 @@ export class AgentRunner {
       // ---- 钩子：调用 LLM 前（记忆注入 / 上下文拼装 / 工具调整） ----
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad };
       await this.emitHook('agent.before_llm', llmCtx);
+
+      // ---- Context Provider 注入（上下文工程）：插件按需提供上下文 ----
+      // 与 before_llm 钩子并存：钩子 = 命令式（memory 注入），context = 声明式。
+      // 全部追加到 history 末尾（前缀稳定，不破坏 L3）；总预算控制，超限丢弃低权重。
+      if (turn === 0) {
+        const ctxProviders = this.kernel.plugins.capabilities('context')
+          .map((c) => c.context)
+          .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
+        let ctxTokens = 0;
+        for (const cp of ctxProviders) {
+          try {
+            const content = cp.contentFn({ history: llmCtx.history, systemPrompt, scratchpad });
+            if (!content) continue;
+            const t = estimateTokens(content);
+            if (ctxTokens + t > CONTEXT_PROVIDER_BUDGET) continue;
+            ctxTokens += t;
+            llmCtx.history.push({ role: 'system', content });
+          } catch { /* context provider 自身异常不影响主循环 */ }
+        }
+      }
 
       // ---- L1 语义缓存：问答命中直接返回缓存答案（跳过 LLM 调用，零成本） ----
       // 命中条件：首轮（turn=0，历史无运行时 tool 消息）且最后一条是真实 user 消息；
@@ -180,6 +221,21 @@ export class AgentRunner {
       let reasoning = '';
       let usage: { input: number; output: number } | undefined;
       let collected: ToolCall[] = [];
+      // 失败恢复（内核拯救 LLM）：LLM 调用瞬态失败（provider 抖动/网络）自动重试 1 次，
+      // LLM 作为用户不需要面对 error 500 并开始胡乱思考
+      const handleChunk = (chunk: LLMChunk): { type: 'delta' | 'reasoning'; text: string } | null => {
+        if (chunk.type === 'delta') {
+          text += chunk.text;
+          return { type: 'delta', text: chunk.text };
+        }
+        if (chunk.type === 'reasoning') {
+          reasoning += chunk.text;
+          return { type: 'reasoning', text: chunk.text };
+        }
+        if (chunk.type === 'tool_call') collected.push(chunk.toolCall);
+        else if (chunk.type === 'usage') usage = { input: chunk.input, output: chunk.output };
+        return null;
+      };
       try {
         // L3 前缀复用统计：与上一轮调用共享的公共前缀 token（provider KV cache 直接命中）
         if (lastHistory) {
@@ -187,17 +243,18 @@ export class AgentRunner {
           if (shared > 0) this.kernel.cache.recordPrefixRepeat(shared);
         }
         lastHistory = llmCtx.history.map((m) => ({ role: m.role, content: m.content }));
-        for await (const chunk of provider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
-          if (chunk.type === 'delta') {
-            text += chunk.text;
-            yield { type: 'delta', text: chunk.text };
-          } else if (chunk.type === 'reasoning') {
-            reasoning += chunk.text;
-            yield { type: 'reasoning', text: chunk.text };
-          } else if (chunk.type === 'tool_call') {
-            collected.push(chunk.toolCall);
-          } else if (chunk.type === 'usage') {
-            usage = { input: chunk.input, output: chunk.output };
+        let attempts = 0;
+        while (true) {
+          try {
+            for await (const chunk of provider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
+              const ev = handleChunk(chunk);
+              if (ev) yield ev;
+            }
+            break; // 成功结束
+          } catch (err) {
+            attempts++;
+            if (attempts >= 2) throw err; // 第二次失败：抛给外层终止本轮
+            await new Promise((r) => setTimeout(r, 1200)); // 瞬态恢复缓冲
           }
         }
       } catch (err) {
@@ -321,6 +378,20 @@ export class AgentRunner {
           tStep.finish({ outputSummary: summarize(finalResult.data) });
         } else {
           tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
+        }
+        // 自适应性：连续工具失败 → harness 注入策略提示（管理"认知资源"，
+        // 阻止 LLM 在错误路径上反复消耗 token）
+        if (!finalResult.ok) {
+          toolFailStreak++;
+          if (toolFailStreak >= ADAPT_FAIL_STREAK && !adaptHintInjected) {
+            adaptHintInjected = true;
+            history.push({
+              role: 'system',
+              content: `【harness 自适应提示】检测到连续 ${ADAPT_FAIL_STREAK} 次工具失败：请停止重试，重新核对路径/参数/前提假设，或将任务拆小后继续；也可考虑用 run_subagent 委派独立子代理排查。`,
+            });
+          }
+        } else {
+          toolFailStreak = 0; // 成功一次即重置连败
         }
         // observation 完整性：截断时明确告知 LLM，避免"看不到全貌却以为看到了全部"
         const rawResult = JSON.stringify(finalResult);

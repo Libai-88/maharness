@@ -127,6 +127,10 @@ export default {
       kind: 'tool',
       tool: {
         name: 'create_plugin',
+        risk: 'high',
+        costHint: 'medium',
+        approval: true,
+        limits: '写入 plugins/ 并热加载代码',
         description: '创建自我扩展插件：生成 plugin.json 与 index.ts 写入 plugins/ 现场目录，等待热加载后回传状态；失败时回传错误信息供修复。',
         parameters: {
           type: 'object',
@@ -214,6 +218,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'plugin_status',
+        risk: 'low',
+        costHint: 'low',
         description: '查看 plugins/ 现场插件的加载状态（state）、注册能力（caps）与错误信息（error）。',
         parameters: { type: 'object', properties: {} },
         async handler() {

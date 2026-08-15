@@ -121,6 +121,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'list_dir',
+        risk: 'low',
+        costHint: 'low',
         description: '列出目录内容（文件名、类型、大小、修改时间）。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -156,6 +158,9 @@ export default {
       kind: 'tool',
       tool: {
         name: 'read_file',
+        risk: 'low',
+        costHint: 'low',
+        limits: '仅文本文件；二进制返回错误',
         description: '读取文本文件内容（自动识别 UTF-8/UTF-16/GBK 编码；二进制文件返回错误）。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -190,6 +195,9 @@ export default {
       kind: 'tool',
       tool: {
         name: 'write_file',
+        risk: 'high',
+        costHint: 'low',
+        approval: true,
         description: '写入文本文件（UTF-8，自动创建父目录；已存在则覆盖）。路径相对沙箱根目录。写成功后相关读缓存自动失效。',
         parameters: {
           type: 'object',
@@ -214,6 +222,9 @@ export default {
       kind: 'tool',
       tool: {
         name: 'delete_file',
+        risk: 'high',
+        costHint: 'low',
+        approval: true,
         description: '删除沙箱内的文件或空目录。破坏性操作：默认需要用户审批，批准后执行；非空目录会失败（不能递归删除）。',
         parameters: {
           type: 'object',

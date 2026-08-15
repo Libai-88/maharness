@@ -52,6 +52,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'create_plan',
+        risk: 'low',
+        costHint: 'low',
         description: '为多步目标创建执行计划。参数 steps 为拆解后的步骤标题列表（由你根据目标拆解）。返回计划摘要。',
         parameters: {
           type: 'object',
@@ -92,6 +94,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'update_plan_progress',
+        risk: 'low',
+        costHint: 'low',
         description: '更新计划的步骤状态：done（完成）/ in_progress（进行中）/ blocked（受阻）。可附说明。',
         parameters: {
           type: 'object',
@@ -121,6 +125,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'complete_goal',
+        risk: 'low',
+        costHint: 'low',
         description: '标记目标计划完成，附最终总结。',
         parameters: {
           type: 'object',

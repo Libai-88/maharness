@@ -126,6 +126,9 @@ export default {
       kind: 'tool',
       tool: {
         name: 'web_search',
+        risk: 'low',
+        costHint: 'medium',
+        limits: '外部搜索服务；结果可能不完整',
         description: '联网搜索（Tavily / DuckDuckGo）：返回结果列表（标题、URL、摘要）。适合查询时事、外部信息、文档资料等。',
         parameters: {
           type: 'object',

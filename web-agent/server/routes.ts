@@ -285,6 +285,36 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     res.json({ commands: [...builtin, ...pluginCmds] });
   });
 
+  // ---------- Capabilities Registry（能力发现） ----------
+  /** 动态能力注册表：LLM 能力/风险/成本/审批/限制一目了然（人类与前端可查） */
+  app.get('/api/capabilities', (_req, res) => {
+    const tools = kernel.plugins.capabilities('tool').map((c) => ({
+      name: c.tool.name,
+      risk: c.tool.risk ?? 'low',
+      costHint: c.tool.costHint ?? 'low',
+      approval: c.tool.approval ?? false,
+      limits: c.tool.limits ?? null,
+      description: c.tool.description,
+    }));
+    const contexts = kernel.plugins.capabilities('context').map((c) => ({
+      id: c.context.id,
+      weight: c.context.weight ?? 0,
+      description: c.context.description,
+    }));
+    const personas = kernel.plugins.capabilities('persona').map((c) => ({
+      id: c.persona.id, name: c.persona.name, priority: c.persona.priority ?? 0,
+    }));
+    res.json({
+      tools: tools.sort((a, b) => a.name.localeCompare(b.name)),
+      contexts,
+      personas,
+      byRisk: {
+        high: tools.filter((t) => t.risk === 'high').map((t) => t.name),
+        medium: tools.filter((t) => t.risk === 'medium').map((t) => t.name),
+      },
+    });
+  });
+
   app.post('/api/commands', async (req, res) => {
     const input = String(req.body?.input ?? '').trim();
     const sessionId = req.body?.sessionId ? String(req.body.sessionId) : undefined;

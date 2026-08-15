@@ -88,6 +88,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'list_skills',
+        risk: 'low',
+        costHint: 'low',
         description: '列出全部可用技能（内置 + 已安装）：名称、描述、来源。技能是指导 Agent 的指南包，需要时用 get_skill 读取全文。',
         parameters: { type: 'object', properties: {} },
         async handler() {
@@ -101,6 +103,8 @@ export default {
       kind: 'tool',
       tool: {
         name: 'get_skill',
+        risk: 'low',
+        costHint: 'low',
         description: '读取指定技能全文（SKILL.md，含 frontmatter 与正文）。技能指导 Agent 完成特定任务或自我设计，如 plugin-authoring / agent-self-design / thinking-chain / skill-authoring。',
         parameters: {
           type: 'object',

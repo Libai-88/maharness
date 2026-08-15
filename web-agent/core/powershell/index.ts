@@ -86,6 +86,10 @@ export default {
       kind: 'tool',
       tool: {
         name: 'powershell_execute',
+        risk: 'high',
+        costHint: 'medium',
+        approval: true,
+        limits: '命令超时 60s；拒绝危险命令模式',
         description: '在 Windows 上执行 PowerShell 命令并返回输出。危险命令（删除/覆盖/格式化/杀进程/关机/下载执行等）会被安全机制拦截并请求用户审批，批准后自动执行。',
         parameters: {
           type: 'object',

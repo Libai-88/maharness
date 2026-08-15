@@ -107,7 +107,8 @@ export type Capability =
   | { kind: 'command'; command: CommandDef }
   | { kind: 'provider'; provider: ProviderDef }
   | { kind: 'service'; service: ServiceDef }
-  | { kind: 'persona'; persona: PersonaDef };
+  | { kind: 'persona'; persona: PersonaDef }
+  | { kind: 'context'; context: ContextDef };
 
 /** 服务能力：插件对外暴露的实例（如 chat 服务），server 层通过 capability 获取，不依赖插件内部实现 */
 export interface ServiceDef {
@@ -130,7 +131,28 @@ export interface ToolDef {
   name: string;
   description: string;      // 给 LLM 看的能力说明
   parameters: Record<string, unknown>; // JSONSchema
+  /** 风险等级：high 的工具默认需要审批（harness 可在审批策略中自动挂起） */
+  risk?: 'low' | 'medium' | 'high';
+  /** 成本提示（注入 LLM：管理"认知资源"——简单问题不召唤重工具） */
+  costHint?: 'low' | 'medium' | 'high';
+  /** 明确要求审批（与 needsApproval 运行时返回值互补：声明式 vs 运行时） */
+  approval?: boolean;
+  /** 使用限制（如文件大小/并发/频率），注入 LLM 减少幻觉 */
+  limits?: string;
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
+}
+
+/** Context Provider：插件不只是 tool provider，也可以是 context provider。
+ *  按需向 LLM 注入上下文（区别于无脑塞进 system prompt）：
+ *  harness 在每轮 LLM 调用前收集全部 context 能力，按 weight 排序注入，
+ *  受总预算（contextMaxTokens）约束；contentFn 可依据当前任务动态返回内容。 */
+export interface ContextDef {
+  id: string;
+  description: string;      // 给人类/harness 看（registry 可查）
+  /** 注入优先级（越大越靠前，默认 0） */
+  weight?: number;
+  /** 动态内容：返回 null/空串则不注入（按任务按需出现） */
+  contentFn(ctx: { history: LLMMessage[]; systemPrompt: string; scratchpad: Record<string, unknown> }): string | null;
 }
 
 export interface ToolResult {
