@@ -80,8 +80,9 @@ const ADAPT_FAIL_STREAK = 3;
 /** 单轮思考预算（token）：超过则下一轮注入降级提示，阻止推理膨胀（见 docs/思维链研究.md） */
 const REASONING_BUDGET_DEFAULT = 400;
 
-/** 英文思考提醒：紧贴每次 LLM 决策点注入（system role，位置稳定可复用 L3 前缀缓存） */
-const EN_THINK_REMINDER = 'Reminder: When you think, think in ENGLISH, start with "We need ...".';
+/** 英文思考提醒：紧贴每次 LLM 决策点注入（system role，位置稳定可复用 L3 前缀缓存）。
+ *  与 system prompt 的思维宪章呼应：英文思考 + We need 行动式开头 + 第一性原理/奥卡姆/经验主义。 */
+const EN_THINK_REMINDER = 'Reminder: Reason in ENGLISH, start with "We need ...". First principles — known, unknown, what must be observed. Ockham: act with evidence, not assertion.';
 
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
  *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
