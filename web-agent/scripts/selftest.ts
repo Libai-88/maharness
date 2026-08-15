@@ -141,6 +141,27 @@ if (ls && gs) {
   console.log('[skills] 非法技能名被拦截:', missing.ok === false ? '✓' : '✗');
 }
 
+// ---- 能力边界：内核隔离断言（薄内核的机器可验证保证） ----
+// kernel/ 只能依赖 node 内置 + kernel 自身；不得依赖 core/server/ui 等能力层。
+// 一旦内核开始 import 能力层，就说明业务逻辑渗入了内核——系统开始变臃肿。
+{
+  const { readdirSync, readFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const kernelFiles = readdirSync(join(rootDir, 'kernel')).filter((f) => f.endsWith('.ts'));
+  const violations: string[] = [];
+  for (const f of kernelFiles) {
+    const src = readFileSync(join(rootDir, 'kernel', f), 'utf-8');
+    for (const m of src.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
+      const target = m[1];
+      if (target.startsWith('.') && !target.startsWith('./') && !target.startsWith('../kernel')) {
+        violations.push(`${f} → ${target}`);
+      }
+    }
+  }
+  console.log('[boundary] 内核隔离（kernel 不依赖能力层）:', violations.length === 0 ? '✓' : '✗',
+    violations.length ? violations.join('; ') : `(${kernelFiles.length} 个内核文件仅依赖 node 内置与自身)`);
+}
+
 // ---- subagent：子代理工具注册（LLM 第 6 项能力） ----
 const sub = tools.find((t) => t.name === 'run_subagent');
 console.log('[subagent] run_subagent 工具:', sub ? '✓' : '✗');
