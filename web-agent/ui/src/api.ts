@@ -181,11 +181,11 @@ export const gitApi = {
   push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST' }),
 };
 
-/** 运行时配置（上下文管理 / 缓存参数 / 思维链预算） */
+/** 运行时配置（上下文管理 / 缓存参数 / 思维链预算与语言） */
 export interface RuntimeConfig {
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
-  agent: { reasoningBudget: number };
+  agent: { reasoningBudget: number; thinkInEnglish: boolean };
 }
 
 export const configApi = {

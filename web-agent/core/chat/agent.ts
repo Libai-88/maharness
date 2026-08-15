@@ -80,6 +80,9 @@ const ADAPT_FAIL_STREAK = 3;
 /** 单轮思考预算（token）：超过则下一轮注入降级提示，阻止推理膨胀（见 docs/思维链研究.md） */
 const REASONING_BUDGET_DEFAULT = 400;
 
+/** 英文思考提醒：紧贴每次 LLM 决策点注入（system role，位置稳定可复用 L3 前缀缓存） */
+const EN_THINK_REMINDER = 'Reminder: When you think, think in ENGLISH, start with "We need ...".';
+
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
  *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
 export function annotateToolDef(t: ToolDef): ToolDef {
@@ -142,6 +145,7 @@ export class AgentRunner {
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
     const reasoningBudget = this.kernel.config.get<number>('agent.reasoningBudget', REASONING_BUDGET_DEFAULT);
+    const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
     const scratchpad: Record<string, unknown> = {};
 
     // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
@@ -183,6 +187,13 @@ export class AgentRunner {
         });
         this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'reasoning-budget' })
           .finish({ outputSummary: `注入思考预算降级提示（上轮 ${lastTurnReasoningTokens} token）` });
+      }
+
+      // ---- 英文思考提醒：紧贴决策点注入（位置稳定，不破坏 L3 前缀复用） ----
+      // system prompt 已声明英文思考；此处再在每轮 LLM 调用前放一条 reminder，
+      // 对部分推理模型的原生 reasoning 语言有引导作用。
+      if (thinkInEnglish && (llmCtx.history[llmCtx.history.length - 1]?.content ?? '') !== EN_THINK_REMINDER) {
+        llmCtx.history.push({ role: 'system', content: EN_THINK_REMINDER });
       }
 
       // ---- Context Provider 注入（上下文工程）：插件按需提供上下文 ----

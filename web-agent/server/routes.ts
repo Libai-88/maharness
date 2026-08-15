@@ -786,6 +786,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       },
       agent: {
         reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 400),
+        thinkInEnglish: kernel.config.get<boolean>('agent.thinkInEnglish', true),
       },
     });
   });
@@ -810,6 +811,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
       if (agent?.reasoningBudget !== undefined) {
         kernel.config.set('agent.reasoningBudget', Math.max(50, Math.min(8000, Number(agent.reasoningBudget))));
+      }
+      if (agent?.thinkInEnglish !== undefined) {
+        kernel.config.set('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
       }
       res.json({ ok: true });
     } catch (err) {
