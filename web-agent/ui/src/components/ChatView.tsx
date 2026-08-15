@@ -1,7 +1,7 @@
-// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具卡片 + 思考过程折叠 + Markdown + 命令面板）
+// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 终端风工具流水线 + 思考过程实时流 + 命令面板）
 import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
-import type { ApprovalItem, ChatMessage, CommandInfo, PlanState } from '../types';
+import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
 import Markdown from './Markdown';
 
 interface Props {
@@ -15,6 +15,35 @@ interface Props {
   plan: PlanState | null;
 }
 
+/** 工具参数摘要（终端风格，截断防爆） */
+function argsSummary(args: unknown): string {
+  try {
+    const s = JSON.stringify(args);
+    return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+  } catch { return String(args); }
+}
+
+/** 工具执行流水卡片：状态灯 + 名称 + 耗时 + 参数/结果摘要（科技感终端风格） */
+function ToolCard({ t }: { t: ToolStep }) {
+  const fmtMs = (ms?: number) => (ms === undefined ? '' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+  return (
+    <div className={`tool-card ${t.status}`}>
+      <div className="tool-line">
+        <span className={`tool-dot ${t.status}`} />
+        <span className="tool-name">{t.name}</span>
+        <span className="tool-time">{fmtMs(t.durationMs)}</span>
+        <span className={`tool-status ${t.status}`}>
+          {t.status === 'running' ? '执行中…' : t.status === 'done' ? '完成' : '失败'}
+        </span>
+      </div>
+      {t.args !== undefined && t.status === 'running' && (
+        <pre className="tool-args">{argsSummary(t.args)}</pre>
+      )}
+      {t.summary && <pre className="tool-summary">{t.summary}</pre>}
+    </div>
+  );
+}
+
 export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
@@ -23,10 +52,18 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [cmdIdx, setCmdIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const reasoningRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // 思考过程流式时自动跟随最新内容
+  useEffect(() => {
+    if (streaming && reasoningRef.current) {
+      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
+    }
+  }, [messages, streaming]);
 
   // 加载命令清单（命令面板用）
   useEffect(() => {
@@ -108,35 +145,39 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         )}
         {messages.map((m) => (
           <div key={m.id} className={`msg ${m.role}`}>
-            <div className="msg-label">{m.role === 'user' ? '你' : m.role === 'system' ? '系统' : 'Agent'}</div>
+            <div className="msg-label">{m.role === 'user' ? '你' : m.role === 'system' ? '系统' : 'AI'}</div>
             <div className="msg-content">
               {m.tools && m.tools.length > 0 && (
                 <div className="tools">
                   {m.tools.map((t, i) => (
-                    <div key={i} className={`tool-card ${t.status}`}>
-                      <span className="tool-name">{t.name}</span>
-                      <span className="tool-status">{t.status === 'running' ? '执行中…' : t.status === 'done' ? '完成' : '失败'}</span>
-                      {t.summary && <pre className="tool-summary">{t.summary}</pre>}
-                    </div>
+                    <ToolCard key={`${t.name}-${i}`} t={t} />
                   ))}
                 </div>
               )}
-              {/* 思考过程：默认折叠，可展开，限高滚动（不失控） */}
+              {/* 思考过程：流式时实时显示（终端风，自动跟随），完成后折叠 */}
               {m.reasoning && m.reasoning.length > 0 && (
                 <div className="reasoning">
                   <button className="reasoning-toggle" onClick={() => toggleReasoning(m.id)}>
-                    🧠 思考过程{expanded[m.id] ? ' ▾' : ' ▸'}
+                    <span className={`brain-dot ${m.streaming ? 'active' : ''}`} />
+                    🧠 思考过程{m.streaming ? '（实时）' : expanded[m.id] ? ' ▾' : ' ▸'}
                   </button>
-                  {expanded[m.id] && (
-                    <div className="reasoning-body">
-                      <div className="reasoning-text">{m.reasoning}{m.streaming && <span className="cursor">▍</span>}</div>
+                  {m.streaming ? (
+                    <div className="reasoning-body streaming" ref={reasoningRef}>
+                      <div className="reasoning-text">{m.reasoning}<span className="cursor">▍</span></div>
                     </div>
-                  )}
+                  ) : expanded[m.id] ? (
+                    <div className="reasoning-body">
+                      <div className="reasoning-text">{m.reasoning}</div>
+                    </div>
+                  ) : null}
                 </div>
               )}
               {m.content ? (
                 <div className="msg-text">
-                  {m.role === 'assistant' ? <Markdown text={m.content} /> : <div className="plain">{m.content}</div>}
+                  {/* 响应快：流式期间轻量渲染（纯文本），完成后一次完整 Markdown（避免每次 delta 全量管线） */}
+                  {m.role === 'assistant' && !m.streaming
+                    ? <Markdown text={m.content} />
+                    : <div className="plain">{m.content}</div>}
                   {m.streaming && <span className="cursor">▍</span>}
                 </div>
               ) : m.streaming ? (

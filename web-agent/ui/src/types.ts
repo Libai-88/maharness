@@ -192,6 +192,10 @@ export interface ToolStep {
   summary?: string;
   ok?: boolean;
   status: 'running' | 'done' | 'error';
+  /** 执行开始时间戳（前端计时用） */
+  startedAt?: number;
+  /** 执行耗时（毫秒，onToolResult 结算） */
+  durationMs?: number;
 }
 
 export interface ApprovalItem {

@@ -15,6 +15,16 @@ import TracePanel from './components/TracePanel';
 type ManagerTab = 'plugins' | 'files' | 'stats' | 'settings' | null;
 
 export default function App() {
+  // 主题（浅色/深色科技）：localStorage 持久化，初始跟随系统偏好
+  const [dark, setDark] = useState<boolean>(() => {
+    const saved = localStorage.getItem('maharness-theme');
+    if (saved) return saved === 'dark';
+    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
+  });
+  useEffect(() => {
+    document.body.dataset.theme = dark ? 'dark' : 'light';
+    localStorage.setItem('maharness-theme', dark ? 'dark' : 'light');
+  }, [dark]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -174,10 +184,13 @@ export default function App() {
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
       onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const }],
+        ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }],
       } : m)),
       onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? { ...t, summary, ok, status: ok ? 'done' as const : 'error' as const } : t),
+        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
+          ...t, summary, ok, status: ok ? 'done' as const : 'error' as const,
+          durationMs: Date.now() - (t.startedAt ?? Date.now()),
+        } : t),
       } : m)),
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
       onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m)),
@@ -299,6 +312,9 @@ export default function App() {
             {models.length === 0 && <option value="">未配置 LLM（见「设置」）</option>}
             {models.map((m) => <option key={`${m.id}:${m.model}`} value={`${m.id}:${m.model}`}>{m.label} · {m.model}</option>)}
           </select>
+          <button className="theme-toggle" onClick={() => setDark((v) => !v)} title={dark ? '切换到浅色主题' : '切换到深色科技主题'}>
+            {dark ? '☀️' : '🌙'}
+          </button>
           <button className="trace-toggle" onClick={() => setTraceOpen((v) => !v)} title="运行轨迹面板">
             {traceOpen ? '隐藏轨迹' : '运行轨迹'}
           </button>
