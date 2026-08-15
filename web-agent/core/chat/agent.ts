@@ -322,7 +322,11 @@ export class AgentRunner {
         } else {
           tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
         }
-        const content = JSON.stringify(finalResult).slice(0, 4000);
+        // observation 完整性：截断时明确告知 LLM，避免"看不到全貌却以为看到了全部"
+        const rawResult = JSON.stringify(finalResult);
+        const content = rawResult.length > 4000
+          ? `${rawResult.slice(0, 4000)}\n【结果已截断：共 ${rawResult.length} 字符，仅显示前 4000；需要完整内容请用工具定向读取】`
+          : rawResult;
         history.push({ role: 'tool', tool_call_id: tc.id, content });
         yield { type: 'tool_result', name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok };
       }

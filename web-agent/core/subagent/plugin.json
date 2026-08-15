@@ -1,0 +1,7 @@
+{
+  "id": "subagent",
+  "name": "子代理",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

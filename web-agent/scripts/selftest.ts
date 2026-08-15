@@ -107,6 +107,23 @@ if (rf && recall && forget) {
   await cleanSelftest();
   const q3 = await recall.handler({ query: 'selftest' }, tctx());
   console.log('[memory] 清理完成:', (q3.data as { count: number }).count === 0 ? '✓' : '✗');
+
+  // 失败教训自动记忆：模拟工具失败事件 → 自动记录（不重复犯错的底层机制）
+  await kernel.bus.emitAsync({
+    type: 'agent.after_tool',
+    data: { tool: { name: 'read_file' }, result: { ok: false, error: '文件不存在: /no-such-file.txt' } },
+    ts: Date.now(),
+  });
+  await kernel.bus.emitAsync({
+    type: 'agent.after_tool',
+    data: { tool: { name: 'read_file' }, result: { ok: false, error: '文件不存在: /no-such-file.txt' } },
+    ts: Date.now(),
+  }); // 第二次同样失败：应去重
+  const autoRecall = await recall.handler({ query: '工具失败教训' }, tctx());
+  const autoCount = (autoRecall.data as { count: number }).count;
+  console.log('[memory] 失败教训自动记忆+去重:', autoCount >= 1 ? '✓' : '✗', `(记 ${autoCount} 条，去重生效)`);
+  const autoFacts = (autoRecall.data as { facts: { id: string }[] }).facts;
+  for (const f of autoFacts) await forget.handler({ id: f.id }, tctx());
 }
 
 // ---- skills：list_skills / get_skill（内置指南按需读取） ----
@@ -123,6 +140,11 @@ if (ls && gs) {
   const missing = await gs.handler({ name: '../etc/passwd' }, tctx());
   console.log('[skills] 非法技能名被拦截:', missing.ok === false ? '✓' : '✗');
 }
+
+// ---- subagent：子代理工具注册（LLM 第 6 项能力） ----
+const sub = tools.find((t) => t.name === 'run_subagent');
+console.log('[subagent] run_subagent 工具:', sub ? '✓' : '✗');
+if (!sub) console.log('[subagent] ✗ 子代理未注册，检查 core/subagent 插件加载');
 
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
 {

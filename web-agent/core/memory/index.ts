@@ -67,6 +67,20 @@ export default {
       h.scratchpad.memoryInjected = true;
     });
 
+    // ---- 钩子：失败教训自动记忆（"不重复犯错"的底层机制） ----
+    // 工具执行失败 → 自动记录一条教训（带【自动】标记，同工具同错误 1 小时内去重），
+    // 下次会话 before_llm 注入时 LLM 即知道哪些做法不可行，避免重复踩坑。
+    ctx.bus.on('agent.after_tool', (e) => {
+      const d = e.data as AgentHookCtx & { tool?: { name: string }; result?: { ok?: boolean; error?: string } };
+      const result = d.result;
+      if (!result || result.ok !== false || !result.error) return;
+      const err = String(result.error).replace(/\s+/g, ' ').slice(0, 120);
+      const dedupKey = `【自动】工具失败教训: ${d.tool?.name ?? '?'}`;
+      const now = Date.now();
+      if (facts.some((f) => f.text.startsWith(dedupKey) && now - f.ts < 3600_000)) return; // 1 小时内去重
+      remember(`${dedupKey} ${err}`);
+    });
+
     // ---- L2 人设：记忆使用规则 ----
     ctx.register({
       kind: 'persona',
@@ -81,7 +95,8 @@ export default {
           '2. 回答涉及先前信息时，先用 recall_facts 查询相关记忆，再回答；',
           '3. 每轮对话开始会自动注入最近记忆（勿重复要求，也不要逐条复述）；',
           '4. 记忆与事实不符或用户否认时，用 forget_fact 删除，不要带着错误记忆回答；',
-          '5. 不要记忆敏感信息（密码、密钥等）。',
+          '5. 不要记忆敏感信息（密码、密钥等）；',
+          '6. 工具失败会自动记录教训（【自动】标记）；若教训已不适用，用 forget_fact 删除。',
         ].join('\n'),
       },
     });

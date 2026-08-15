@@ -22,10 +22,12 @@ interface L1Entry {
   answer: string;
   hits: number;
   promptKey: string;    // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
+  expiresAt: number;    // TTL：时效性内容（天气/新闻/用户数据）不永久缓存
 }
 
 const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
 const L1_TEXT_THRESHOLD = 0.85;   // 自研 bigram Dice 命中阈值（近义问题可命中；无关文本仍远低于阈值）
+const L1_TTL = 24 * 3600_000;     // L1 答案 TTL 24h：时效性内容（天气/新闻/用户数据）不永久缓存
 const DEFAULT_TTL = 30 * 60_000;  // L2 默认 TTL 30 分钟（文件类键含 mtime+size 校验，TTL 只是防膨胀）
 const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
 
@@ -99,6 +101,10 @@ export class Cache {
       let best: { key: string; score: number } | null = null;
       for (const [key, entry] of this.l1) {
         if (entry.promptKey !== promptKey) continue;
+        if (entry.expiresAt < Date.now()) {
+          this.l1.delete(key);
+          continue;
+        }
         const score = cosine(vec, entry.vector ?? []);
         if (score > (best?.score ?? 0)) best = { key, score };
       }
@@ -116,6 +122,10 @@ export class Cache {
     let best: { key: string; score: number } | null = null;
     for (const [key, entry] of this.l1) {
       if (entry.promptKey !== promptKey) continue;
+      if (entry.expiresAt < Date.now()) { // TTL 过期：删除并按未命中处理
+        this.l1.delete(key);
+        continue;
+      }
       const score = dice(qBigrams, entry.bigrams);
       if (score > (best?.score ?? 0)) best = { key, score };
     }
@@ -132,7 +142,10 @@ export class Cache {
   async l1Set(question: string, answer: string, promptKey = ''): Promise<void> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8 || !answer || answer.length > MAX_L1_ANSWER) return;
-    const entry: L1Entry = { bigrams: bigramSet(norm), answer, hits: 0, promptKey };
+    const entry: L1Entry = {
+      bigrams: bigramSet(norm), answer, hits: 0, promptKey,
+      expiresAt: Date.now() + L1_TTL,
+    };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
     this.l1.set(`${promptKey}|${norm}`, entry);
     if (this.l1.size > 500) {

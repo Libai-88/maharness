@@ -404,9 +404,19 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       goal: '【当前模式：目标模式】多步任务先用 create_plan 建立目标计划并随进度调用 update_plan_progress 更新；单步任务直接执行。',
     };
     const modePrompt = MODE_PROMPTS[session.mode];
+    // 世界状态（context）：LLM 需要知道自己身处的世界——工作区、模式、可用工具、模型。
+    // 内容只含会话内稳定事实（不含时间戳等易变项），同一会话内字节级稳定，
+    // 不破坏 L3 前缀缓存；工作区/模式变更时内容随之更新（前缀失效一次，符合"世界变了"）。
+    const sandboxNow = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+    const worldState = [
+      '【世界状态】',
+      `- 沙箱根目录（工作区，文件工具路径相对此）: ${sandboxNow}`,
+      `- 会话模式: ${session.mode}${modePrompt ? `（${modePrompt.replace(/^【当前模式：[^】]+】/, '').slice(0, 40)}…）` : ''}`,
+      `- 模型: ${resolvedModel}`,
+    ].join('\n');
     const systemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
-      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '');
+      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '') + `\n\n${worldState}`;
 
     // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
     const planPending = session.planPending ?? 0;
