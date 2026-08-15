@@ -43,6 +43,13 @@ export interface KernelLike {
   config: ConfigLike;
   trace: TraceLike;
   cache: CacheLike;
+  /** 认知资源管理（harness 管，不是 LLM 自觉）：重工具配额 + 任务画像 */
+  budget: {
+    subagentQuota(): { allowed: boolean; remaining: number; reason?: string };
+    consumeSubagent(): void;
+    recordTask(record: { type: string; turns: number; cost: number; failed: boolean; ts: number }): void;
+    taskProfile(): { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
+  };
   plugins: {
     capabilities<T extends Capability['kind']>(kind: T): Extract<Capability, { kind: T }>[];
     /** 生命周期管理（dynamic capability loading）：按需激活/停用插件 */
@@ -147,6 +154,8 @@ export interface ToolDef {
   limits?: string;
   /** 输出格式描述：返回结构的显式说明（减少"靠猜/试错"型幻觉），注入 LLM */
   output?: string;
+  /** 独立超时（毫秒）：重工具（如 run_subagent 内部多轮）需要比默认 30s 更长的执行窗口 */
+  timeoutMs?: number;
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 

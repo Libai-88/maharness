@@ -428,6 +428,13 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
     const resolvedModel = model || session.model || provider.defaultModel;
+    // 经济性（harness 管理认知资源）：会话累计成本超预算 → 强制注入成本警告
+    // （不是"请 LLM 自觉节约"，而是 harness 直接告诉它预算边界）
+    const sessionCost = store.listMessages(session.id).reduce((s, m) => s + (m.cost ?? 0), 0);
+    const costBudget = kernel.config.get<number>('budget.maxSessionCost', 0);
+    const costWarning = costBudget > 0 && sessionCost > costBudget
+      ? `\n【成本预算警告】本会话累计成本 $${sessionCost.toFixed(5)} 已超过预算 $${costBudget.toFixed(5)}：请立即收敛——停止探索性工具调用，直接给出结论；如需继续深入，请告知用户新建会话。`
+      : '';
     // 系统提示词：三层组装（L0 框架 + L1 用户人设 + L2 插件自述）+ 会话模式注入；body.systemPrompt 可临时覆盖（调试）
     const MODE_PROMPTS: Record<string, string> = {
       plan: '【当前模式：计划模式】先输出完整的执行计划（分步列表，含理由），等待用户确认后再执行任何工具；用户未明确同意前不得执行写操作。',
@@ -446,7 +453,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     ].join('\n');
     const systemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
-      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '') + `\n\n${worldState}`;
+      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '') + `\n\n${worldState}` + costWarning;
 
     // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
     const planPending = session.planPending ?? 0;
@@ -705,6 +712,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         tokensIn: trace.totalTokensIn, tokensOut: trace.totalTokensOut, cost: trace.totalCost,
       },
       context: { maxTokens: maxCtx, perSession },
+      taskProfile: kernel.budget.taskProfile(),
       cache: {
         l1Enabled: kernel.cache.l1Enabled,
         l1: rate(cache.l1Hits, cache.l1Misses),

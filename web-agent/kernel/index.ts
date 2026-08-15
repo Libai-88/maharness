@@ -1,6 +1,6 @@
 /**
  * kernel/index.ts —— 内核聚合入口
- * 内核仅 5 大件：EventBus / Config / Trace / Cache / PluginLoader。
+ * 内核 6 大件：EventBus / Config / Trace / Cache / Budget(认知资源) / PluginLoader。
  * 其余一切能力由插件提供（含对话本身）。
  */
 import { join } from 'node:path';
@@ -8,6 +8,7 @@ import { EventBus } from './bus';
 import { Config, paths } from './config';
 import { Trace } from './trace';
 import { Cache } from './cache';
+import { Budget } from './budget';
 import { PluginLoader } from './plugin-loader';
 import type { Paths } from './config';
 
@@ -15,6 +16,7 @@ export { EventBus } from './bus';
 export { Config, paths } from './config';
 export { Trace } from './trace';
 export { Cache } from './cache';
+export { Budget, classifyTask } from './budget';
 export { PluginLoader } from './plugin-loader';
 export * from './types';
 
@@ -23,6 +25,7 @@ export class Kernel {
   readonly config: Config;
   readonly trace: Trace;
   readonly cache: Cache;
+  readonly budget: Budget;   // 认知资源管理（harness 管，不是 LLM 自觉）
   readonly plugins: PluginLoader;
   readonly paths: Paths;
   readonly rootDir: string;
@@ -33,6 +36,7 @@ export class Kernel {
     this.config = new Config(this.bus, defaults, this.paths.configFile);
     this.trace = new Trace(this.bus, this.paths.traces);
     this.cache = new Cache();
+    this.budget = new Budget();
     this.plugins = new PluginLoader(
       this.bus,
       { kernel: this, config: this.config, trace: this.trace, cache: this.cache },

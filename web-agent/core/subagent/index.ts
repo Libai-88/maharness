@@ -39,6 +39,7 @@ export default {
         costHint: 'high',
         limits: '子代理最多 6 轮；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
         output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
+        timeoutMs: 240_000, // 子代理内部多轮，独立超时 4 分钟
         description: '委派一个子代理独立完成目标（复用完整 Agent 循环，独立上下文）。' +
           '用于：任务可拆分为多个独立部分时并行分工；或需要独立视角交叉审查自己的产出。' +
           '默认只读工具（侦查/搜索/记忆）；tools="all" 可放开全部工具（含写操作，慎用）。',
@@ -54,6 +55,12 @@ export default {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
+
+          // 认知资源管理（harness 强制，不是 LLM 自觉）：
+          // 子代理配额——窗口内超限直接拒绝，"简单问题不需要召唤 3 个子代理"由 harness 保证
+          const quota = ctx.kernel.budget.subagentQuota();
+          if (!quota.allowed) return { ok: false, error: quota.reason };
+          ctx.kernel.budget.consumeSubagent();
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider）
           const chatSvc = ctx.kernel.plugins.capabilities('service').find((c) => c.service.id === 'chat')?.service.instance as
@@ -82,7 +89,7 @@ export default {
               systemPrompt: SUB_SYSTEM_PROMPT,
               tools,
               traceId,
-              maxTurns: 6,
+              maxTurns: 10,
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;

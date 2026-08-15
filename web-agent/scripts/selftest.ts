@@ -237,6 +237,43 @@ export default {
   await new Promise((r) => setTimeout(r, 1200));
 }
 
+// ---- 可替换性：核心能力接口语义自检 ----
+// 插件接口抽象的是能力语义而非具体实现——核心能力名称/语义必须稳定，
+// 实现（存储引擎/搜索引擎/向量库）可任意替换而 LLM 无需重新学习。
+{
+  const coreSemantics: [string, string][] = [
+    ['list_dir', '目录'],
+    ['read_file', '读取'],
+    ['write_file', '写入'],
+    ['remember_fact', '记住'],
+    ['recall_facts', '查询'],
+    ['web_search', '搜索'],
+    ['run_subagent', '子代理'],
+  ];
+  const missing = coreSemantics.filter(([name]) => !tools.some((t) => t.name === name));
+  const descOk = coreSemantics.every(([name, kw]) => {
+    const t = tools.find((x) => x.name === name);
+    return t && String(t.description).includes(kw);
+  });
+  console.log('[replaceability] 核心能力接口语义稳定:', missing.length === 0 && descOk ? '✓' : '✗',
+    missing.length ? `缺失: ${missing.map((m) => m[0]).join(',')}` : '(8 个核心能力名称+语义不变，实现可替换)');
+}
+
+// ---- 经济性：harness 管理认知资源（子代理配额） ----
+{
+  kernel.budget.consumeSubagent();
+  kernel.budget.consumeSubagent();
+  kernel.budget.consumeSubagent(); // 消耗满 3 次配额
+  const q = kernel.budget.subagentQuota();
+  console.log('[budget] 子代理配额（窗口内 3 次上限）:', q.allowed === false ? '✓' : '✗',
+    q.allowed ? '' : `(harness 拒绝: ${(q.reason ?? '').slice(0, 30)}…)`);
+  kernel.budget.recordTask({ type: '代码', turns: 5, cost: 0.01, failed: false, ts: Date.now() });
+  kernel.budget.recordTask({ type: '代码', turns: 8, cost: 0.02, failed: true, ts: Date.now() });
+  const profile = kernel.budget.taskProfile();
+  const code = profile.find((p) => p.type === '代码');
+  console.log('[budget] 任务画像聚合:', code && code.count === 2 && code.failRate === 50 ? '✓' : '✗', JSON.stringify(profile));
+}
+
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
 {
   const { dice, bigramSet } = await import('../kernel/cache');

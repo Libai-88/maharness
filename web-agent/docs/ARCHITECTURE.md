@@ -61,9 +61,9 @@
 | 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】；**审批全程入 Trace**（approval 步骤：挂起/批准/拒绝可审计——"权力"的使用必须可追溯） |
 | 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板（**类型过滤**：LLM/工具/缓存/系统）+ `/api/trace` 过滤查询（type/name/limit）+ 统计面板 |
 | 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，能力级备选路径 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；**provider failover**：主 provider 重试仍失败自动切换备用 provider（failover 入 Trace，LLM 无感）；工具失败返回 `{ok:false,error}` + 失败教训自动入记忆 |
-| 9 | **经济性**：LLM 知道行动有成本 | 管理"认知资源"：每步动作标成本，简单问题不召唤重工具 | costHint 元数据注入描述（run_subagent 标注【成本:high】"简单问题不要召唤"）；L1 缓存省 LLM 调用；每消息成本显示；统计面板总成本 |
-| 10 | **自适应性**：harness 能否改变 agent 工作方式？ | 根据历史表现调整运行策略（adaptive harness → skill graph） | 连续 3 次工具失败 → 注入自适应提示（停止重试/拆任务/委派子代理）；失败教训自动记忆形成"任务类型→教训"知识；goal-plan 提供工作流状态机 |
-| 11 | **可替换性**：实现可换、语义不变 | 插件接口抽象能力语义而非具体实现——LLM 是唯一不需要重新学习世界的部分 | 工具接口=能力语义（remember/recall 不关心存储实现，web_search 不关心搜索引擎）；L2 缓存键带版本命名空间，实现升级旧缓存自动失效 |
+| 9 | **经济性**：harness 让 LLM 知道行动有成本 | **认知资源由 harness 管理，不是 LLM 自觉**：重工具配额强制、成本预算强制注入 | costHint 元数据注入描述；**run_subagent 配额**（10 分钟内 ≤3 次，超限 harness 直接拒绝并说明）；**会话成本预算**（`budget.maxSessionCost`，超预算自动注入成本警告——不是请 LLM 节约，是 harness 告诉它边界）；L1 缓存省 LLM 调用；统计面板总成本/节省 |
+| 10 | **自适应性**：harness 能否改变 agent 工作方式？ | 基于历史表现调整策略（adaptive harness → skill graph） | **任务画像**（内核 Budget）：每次任务记录 类型/轮数/成本/成败（classifyTask 关键词分类），统计面板展示"类型→次数/平均轮数/成本/失败率"——自适应策略的数据源；连续 3 次工具失败注入自适应提示；失败教训自动记忆形成"任务类型→教训"知识 |
+| 11 | **可替换性**：实现可换、语义不变 | 插件接口抽象能力语义而非具体实现——LLM 是唯一不需要重新学习世界的部分 | 工具接口=能力语义（remember/recall 不关心存储实现，web_search 不关心搜索引擎）；**核心能力接口语义自检**（selftest：8 个核心工具名称+描述语义稳定，防改名破坏 LLM 认知）；L2 缓存键带版本命名空间；provider 可替换（failover 链） |
 
 ---
 

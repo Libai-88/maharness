@@ -35,7 +35,7 @@ export default function StatsPanel() {
   if (err) return <div className="provider-panel"><div className="provider-msg err">统计加载失败: {err}</div></div>;
   if (!stats) return <div className="provider-panel"><div className="empty-hint">统计加载中…</div></div>;
 
-  const { overview, process, context, cache } = stats;
+  const { overview, process, context, cache, taskProfile } = stats;
   const ctxTotal = context.perSession.reduce((s, p) => s + p.estimatedTokens, 0);
 
   return (
@@ -62,7 +62,22 @@ export default function StatsPanel() {
       </div>
 
       <div className="panel-section-title">🧠 上下文用量</div>
-      <div className="provider-hint">预算 {fmt(context.maxTokens)} tokens/会话，超出时自动截断较早历史</div>
+      {taskProfile.length > 0 && (
+        <>
+          <div className="panel-section-title">📈 任务画像（自适应数据源）</div>
+          <div className="provider-hint">harness 按任务类型统计：次数 / 平均轮数 / 平均成本 / 失败率——自适应策略的输入</div>
+          {taskProfile.map((t) => (
+            <div key={t.type} className="stats-row">
+              <div className="stats-row-head">
+                <span className="stats-row-title">{t.type}</span>
+                <span className="stats-row-meta">{t.count} 次 · 平均 {t.avgTurns} 轮 · ${t.avgCost.toFixed(5)}</span>
+              </div>
+              <Bar pct={t.failRate} warn={t.failRate > 30} />
+              <div className="stats-row-sub">失败率 <b>{t.failRate}%</b></div>
+            </div>
+          ))}
+        </>
+      )}      <div className="provider-hint">预算 {fmt(context.maxTokens)} tokens/会话，超出时自动截断较早历史</div>
       <div className="stats-grid">
         <div className="stats-card"><div className="stats-num">{fmt(ctxTotal)}</div><div className="stats-label">全部会话估算</div></div>
         <div className="stats-card"><div className="stats-num">{context.perSession.filter((s) => s.truncated).length}</div><div className="stats-label">已截断会话</div></div>

@@ -140,6 +140,8 @@ export interface StatsInfo {
       truncations: number;
     }[];
   };
+  /** 任务画像（harness 自适应数据源）：类型 → 次数/平均轮数/成本/失败率 */
+  taskProfile: { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
   cache: {
     l1Enabled: boolean;
     l1: { hits: number; misses: number; rate: number };

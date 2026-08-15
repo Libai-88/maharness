@@ -5,6 +5,7 @@
  */
 import { randomUUID, createHash } from 'node:crypto';
 import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
+import { classifyTask } from '../../kernel/budget';
 import type {
   EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
@@ -317,6 +318,14 @@ export class AgentRunner {
           const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
           void this.kernel.cache.l1Set(q, text, promptKey);
         }
+        // 任务画像（自适应性数据源）：harness 记录任务类型/轮数/成本/成败
+        this.kernel.budget.recordTask({
+          type: classifyTask(q),
+          turns: turn + 1,
+          cost: totalCost,
+          failed: false,
+          ts: Date.now(),
+        });
         yield {
           type: 'assistant_done',
           content: text,
@@ -358,7 +367,7 @@ export class AgentRunner {
             signal,
             cache: this.kernel.cache,
             trace: this.kernel.trace,
-          }), toolTimeout);
+          }), tool.timeoutMs ?? toolTimeout);
         } catch (err) {
           result = { ok: false, error: err instanceof Error ? err.message : String(err) };
         }
@@ -394,7 +403,7 @@ export class AgentRunner {
                 traceId, turn, sandboxRoot, signal,
                 cache: this.kernel.cache, trace: this.kernel.trace,
                 approved: true, approvalId,
-              }), toolTimeout);
+              }), tool.timeoutMs ?? toolTimeout);
             } catch (err) {
               result = { ok: false, error: err instanceof Error ? err.message : String(err) };
             }
@@ -434,6 +443,16 @@ export class AgentRunner {
     }
 
     await this.emitHook('agent.on_error', { traceId, turn: maxTurns, model, history, systemPrompt, tools: toolDefs, scratchpad, error: `超过最大轮数 ${maxTurns}，已停止` });
+    // 任务画像：截断/失败也算一次任务记录（失败率是自适应策略的输入）
+    const lastUserMsg = [...history].reverse()
+      .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
+    this.kernel.budget.recordTask({
+      type: classifyTask(lastUserMsg?.content ?? ''),
+      turns: maxTurns,
+      cost: totalCost,
+      failed: true,
+      ts: Date.now(),
+    });
     yield { type: 'error', error: `超过最大轮数 ${maxTurns}，已停止` };
   }
 }
