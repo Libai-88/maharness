@@ -46,10 +46,14 @@ export default function StatsView() {
         <div className="hero-card">
           <div className="hero-head">
             <span className="hero-label">综合命中率 · HIT RATE</span>
-            <span className="hero-badge">+ {cache.l1Enabled ? 'L1 已启用' : 'L1 关闭'}</span>
+            <span className="hero-badge">{cache.l3.realHits > 0 ? 'L3 真实命中' : cache.l1Enabled ? 'L1 已启用' : 'L1 关闭'}</span>
           </div>
-          <div className="hero-value">{pct(overall?.rate ?? 0)}</div>
-          <div className="hero-sub">节省调用 {overall?.served ?? 0} 次 · 折合 {cost(cache.savedCost ?? 0)}</div>
+          <div className="hero-value">{pct(cache.l3.realHits > 0 ? cache.l3.realRate / 100 : (overall?.rate ?? 0) / 100)}</div>
+          <div className="hero-sub">
+            {cache.l3.realHits > 0
+              ? `provider 确认命中 ${fmt(cache.l3.realTokens)} tok · 折合 ${cost(cache.savedCost ?? 0)}`
+              : `节省调用 ${overall?.served ?? 0} 次 · 折合 ${cost(cache.savedCost ?? 0)}`}
+          </div>
           <div className="hero-chart">
             <div className="hc-bars">
               {[36, 44, 28, 52, 48, 60, 64].map((h, i) => (

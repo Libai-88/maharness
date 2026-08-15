@@ -37,9 +37,17 @@ function exportJsonl(steps: TraceStep[]) {
 export default function TracePanel({ steps, stats, onRefresh }: Props) {
   const [typeFilter, setTypeFilter] = useState('');
   const filtered = typeFilter ? steps.filter((s) => s.type === typeFilter) : steps;
-  const cacheRate = stats?.trace?.cacheHits
-    ? Math.min(100, Math.round((stats.trace.cacheHits / Math.max(1, stats.trace.llmCalls + stats.trace.toolCalls)) * 100))
-    : 0;
+  // 缓存命中率优先用「provider 真实命中率」（token 口径，唯一权威）：
+  // L3 前缀缓存是 agent 成本主战场（DeepSeek 命中/未命中价差 50~120 倍），
+  // L1/L2 只对重复问题/重复工具调用生效——全新问答命中为 0 是正常设计，不能作为主指标。
+  // 无 provider 反馈（不支持缓存/无命中字段）时回退 trace.cacheHits 口径。
+  const cache = stats?.cache ?? {};
+  const realTotal = (cache.l3RealTokens ?? 0) + (cache.l3RealMissTokens ?? 0);
+  const cacheRate = realTotal > 0
+    ? Math.round(((cache.l3RealTokens ?? 0) / realTotal) * 100)
+    : stats?.trace?.cacheHits
+      ? Math.min(100, Math.round((stats.trace.cacheHits / Math.max(1, stats.trace.llmCalls + stats.trace.toolCalls)) * 100))
+      : 0;
 
   return (
     <>
@@ -61,7 +69,11 @@ export default function TracePanel({ steps, stats, onRefresh }: Props) {
             <div className="ts-card">
               <span className="ts-label">缓存命中率</span>
               <span className="ts-value teal">{cacheRate}%</span>
-              <span className="ts-hint">L1 {stats.cache.l1Hits ?? 0} · L2 {stats.cache.l2Hits ?? 0}</span>
+              <span className="ts-hint">
+                {realTotal > 0
+                  ? `L3 真实命中 ${(cache.l3RealTokens ?? 0).toLocaleString()} tok · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`
+                  : `L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`}
+              </span>
             </div>
             <div className="ts-card">
               <span className="ts-label">本次成本</span>

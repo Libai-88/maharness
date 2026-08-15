@@ -108,11 +108,18 @@ export default function StatsPanel() {
       </div>
       <div className="stats-row">
         <div className="stats-row-head">
-          <span className="stats-row-title">综合（L1 回答 + L2 结果 + L3 前缀）</span>
-          <span className="stats-row-meta">服务 {cache.overall.served} / {cache.overall.total} 轮次</span>
+          <span className="stats-row-title">综合（provider 前缀缓存真实命中优先）</span>
+          <span className="stats-row-meta">
+            {cache.l3.realHits > 0
+              ? `真实命中 ${fmt(cache.l3.realTokens)} / ${fmt(cache.l3.realTokens + cache.l3.realMissTokens)} tok`
+              : `服务 ${cache.overall.served} / ${cache.overall.total} 轮次`}
+          </span>
         </div>
-        <Bar pct={cache.overall.rate} warn={cache.overall.rate < 50} />
-        <div className="stats-row-sub">综合命中率 <b>{cache.overall.rate}%</b></div>
+        <Bar pct={cache.l3.realHits > 0 ? cache.l3.realRate : cache.overall.rate} warn={(cache.l3.realHits > 0 ? cache.l3.realRate : cache.overall.rate) < 50} />
+        <div className="stats-row-sub">
+          综合命中率 <b>{cache.l3.realHits > 0 ? `${cache.l3.realRate}%（真实）` : `${cache.overall.rate}%`}</b>
+          {cache.l3.realHits > 0 && ' · 全新问答 L1/L2 不命中属正常（只对重复生效）'}
+        </div>
       </div>
       <div className="stats-row">
         <div className="stats-row-head">
