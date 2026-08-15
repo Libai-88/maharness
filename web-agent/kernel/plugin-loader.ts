@@ -200,6 +200,18 @@ export class PluginLoader {
     this.bus.emit(EventBus.event('plugin.reloaded', { id }));
   }
 
+  /** 重载全部插件（环境变量/全局配置变化后调用；单个失败不阻断其余） */
+  async reloadAll(): Promise<void> {
+    const ids = [...this.registry.keys()];
+    for (const id of ids) {
+      try {
+        await this.reload(id);
+      } catch (err) {
+        console.warn(`[plugin] 重载失败 ${id}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
   // ---------- 热监听（仅用户插件目录） ----------
 
   watch(): void {
