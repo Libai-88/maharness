@@ -213,7 +213,7 @@ export const providersApi = {
   update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean }) =>
     api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
-  test: (body: { baseUrl: string; apiKey: string; model: string }) =>
+  test: (body: { baseUrl: string; apiKey: string; model: string; providerId?: string }) =>
     api<{ ok: boolean; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
 };
 

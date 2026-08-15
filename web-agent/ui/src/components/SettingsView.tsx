@@ -73,7 +73,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const runTest = async (p: ProviderInfo) => {
     setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: Math.round(40 + Math.random() * 160) } }));
     try {
-      const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model });
+      // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key）
+      const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model, providerId: p.id });
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: r.ok, ms: Math.round(30 + Math.random() * 140) } }));
     } catch {
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: false, ms: 0 } }));
