@@ -1,6 +1,7 @@
 // ui/src/components/StatsPanel.tsx —— 统计面板：上下文用量 / 缓存命中率 / 总体概览
 import { useEffect, useState } from 'react';
 import { statsApi } from '../api';
+import { IconBolt, IconBrain, IconStats } from './Icon';
 import type { StatsInfo } from '../types';
 
 const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n));
@@ -40,7 +41,7 @@ export default function StatsPanel() {
 
   return (
     <div className="stats-panel">
-      <div className="panel-section-title">📊 信息统计</div>
+      <div className="panel-section-title"><IconStats size={14} /> 信息统计</div>
 
       <div className="provider-hint">全局概览（历史累计，来自本地数据库）</div>
       <div className="stats-grid">
@@ -61,10 +62,10 @@ export default function StatsPanel() {
         <div className="stats-card"><div className="stats-num">{cost(process.cost)}</div><div className="stats-label">成本</div></div>
       </div>
 
-      <div className="panel-section-title">🧠 上下文用量</div>
+      <div className="panel-section-title"><IconBrain size={14} /> 上下文用量</div>
       {taskProfile.length > 0 && (
         <>
-          <div className="panel-section-title">📈 任务画像（自适应数据源）</div>
+          <div className="panel-section-title"><IconStats size={14} /> 任务画像（自适应数据源）</div>
           <div className="provider-hint">harness 按任务类型统计：次数 / 平均轮数 / 平均成本 / 失败率——自适应策略的输入</div>
           {taskProfile.map((t) => (
             <div key={t.type} className="stats-row">
@@ -101,7 +102,7 @@ export default function StatsPanel() {
         </div>
       ))}
 
-      <div className="panel-section-title">⚡ 缓存命中率</div>
+      <div className="panel-section-title"><IconBolt size={14} /> 缓存命中率</div>
       <div className="provider-hint">
         L1 语义问答{!cache.l1Enabled && '（未配置 embedding，未启用）'} · L2 工具结果缓存 · L3 prompt 前缀复用
       </div>

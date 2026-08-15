@@ -1,6 +1,7 @@
 // ui/src/components/FileTree.tsx —— 文件 Tab：工作区切换 + 文件树浏览 + 文件预览
 import { useCallback, useEffect, useState } from 'react';
 import { fileApi, workspacesApi } from '../api';
+import { IconFolder } from './Icon';
 import type { WorkspaceInfo } from '../types';
 
 interface TreeEntry { name: string; type: 'dir' | 'file'; size: number }
@@ -29,7 +30,7 @@ function TreeNode({ entry, path, depth, onOpenFile }: {
     return (
       <div>
         <div className={`tree-node tree-dir`} style={{ paddingLeft: depth * 14 + 6 }} onClick={() => void toggle()}>
-          <span className="tree-caret">{open ? '▾' : '▸'}</span>📁 {entry.name}
+          <span className="tree-caret">{open ? '▾' : '▸'}</span><IconFolder size={13} /> {entry.name}
         </div>
         {open && children && children.map((c) => (
           <TreeNode key={c.name} entry={c} path={rel} depth={depth + 1} onOpenFile={onOpenFile} />

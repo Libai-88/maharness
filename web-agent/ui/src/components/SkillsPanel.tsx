@@ -55,7 +55,7 @@ export default function SkillsPanel({ onChanged }: Props) {
 
   return (
     <div className="provider-panel">
-      <div className="panel-section-title">📚 技能（Skills）</div>
+      <div className="panel-section-title">技能（Skills）</div>
       <div className="provider-hint">技能是指导 Agent 的指南包（SKILL.md），Agent 在需要时按需读取。内置技能指导 Agent 自我设计。</div>
       {msg && <div className={`provider-msg ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
 

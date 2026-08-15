@@ -1,6 +1,7 @@
 // ui/src/components/SessionList.tsx —— 会话列表（置顶/普通/归档分组 + hover 操作条 + 批量管理模式）
 import { useState } from 'react';
 import type { Session } from '../types';
+import { IconArchive, IconManage, IconPin, IconTrash } from './Icon';
 
 interface Props {
   sessions: Session[];
@@ -35,9 +36,9 @@ function SessionItem({ s, active, selectable, checked, onSelect, onToggle, onDel
       </div>
       {!selectable && (
         <div className="session-actions" onClick={(e) => e.stopPropagation()}>
-          <button title={s.pinned ? '取消置顶' : '置顶'} onClick={onPin}>{s.pinned ? '📌' : '📍'}</button>
-          <button title={s.archived ? '恢复' : '归档'} onClick={onArchive}>🗄</button>
-          <button className="danger" title="删除" onClick={onDelete}>✕</button>
+          <button className="icon-btn" title={s.pinned ? '取消置顶' : '置顶'} onClick={onPin}><IconPin /></button>
+          <button className="icon-btn" title={s.archived ? '恢复' : '归档'} onClick={onArchive}><IconArchive /></button>
+          <button className="icon-btn danger" title="删除" onClick={onDelete}><IconTrash /></button>
         </div>
       )}
     </div>
@@ -97,25 +98,25 @@ export default function SessionList({ sessions, activeId, onSelect, onCreate, on
         {!manageMode ? (
           <>
             <button className="btn new-session" onClick={() => void onCreate()}>＋ 新会话</button>
-            <button className="manage-btn" title="批量管理（多选删除）" onClick={() => setManageMode(true)}>🛠</button>
+            <button className="manage-btn" title="批量管理（多选删除）" onClick={() => setManageMode(true)}><IconManage size={14} /></button>
           </>
         ) : (
           <>
             <button className="manage-btn" onClick={toggleAll} title="全选/取消全选">全选</button>
             <span className="manage-count">{checked.size} 个已选</span>
-            <button className="manage-btn danger" onClick={batchDelete} disabled={checked.size === 0} title="批量删除">🗑 删除</button>
+            <button className="manage-btn danger" onClick={batchDelete} disabled={checked.size === 0} title="批量删除"><IconTrash size={13} /> 删除</button>
             <button className="manage-btn" onClick={exitManage} title="退出批量管理">完成</button>
           </>
         )}
       </div>
-      {pinned.length > 0 && <div className="session-group-title">📌 置顶</div>}
+      {pinned.length > 0 && <div className="session-group-title"><IconPin size={12} /> 置顶</div>}
       {pinned.map(item)}
       {normal.map(item)}
       {sessions.length === 0 && <div className="empty-hint">暂无会话</div>}
       {archived.length > 0 && (
         <>
           <button className="archive-toggle" onClick={() => setArchivedOpen((v) => !v)}>
-            🗄 已归档（{archived.length}）{archivedOpen ? '▾' : '▸'}
+            <IconArchive size={12} /> 已归档（{archived.length}）{archivedOpen ? '▾' : '▸'}
           </button>
           {archivedOpen && archived.map(item)}
         </>

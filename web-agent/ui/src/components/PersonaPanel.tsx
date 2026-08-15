@@ -59,7 +59,7 @@ export default function PersonaPanel({ personas, onChanged }: Props) {
 
   return (
     <div className="provider-panel">
-      <div className="panel-section-title">🧠 人设（系统提示词）</div>
+      <div className="panel-section-title">人设（系统提示词）</div>
       <div className="provider-hint">L0 内核纪律固定 · L1 以下人设按序叠加（热生效）· L2 插件规则随插件自动增减</div>
       {msg && <div className={`provider-msg ${msg.ok ? 'ok' : 'err'}`}>{msg.text}</div>}
 

@@ -10,6 +10,7 @@ import PersonaPanel from './components/PersonaPanel';
 import SkillsPanel from './components/SkillsPanel';
 import FileTree from './components/FileTree';
 import StatsPanel from './components/StatsPanel';
+import { IconClose, IconFolder, IconPlugin, IconSettings, IconStats, IconTheme } from './components/Icon';
 import TracePanel from './components/TracePanel';
 
 type ManagerTab = 'plugins' | 'files' | 'stats' | 'settings' | null;
@@ -245,10 +246,10 @@ export default function App() {
           onPin={pinSession}
         />
         <div className="sidebar-manage">
-          <button className={managerOpen === 'plugins' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'plugins' ? null : 'plugins')}>插件</button>
-          <button className={managerOpen === 'files' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'files' ? null : 'files')}>文件</button>
-          <button className={managerOpen === 'stats' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'stats' ? null : 'stats')}>统计</button>
-          <button className={managerOpen === 'settings' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'settings' ? null : 'settings')}>设置</button>
+          <button className={managerOpen === 'plugins' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'plugins' ? null : 'plugins')} title="插件管理"><IconPlugin size={15} /><span>插件</span></button>
+          <button className={managerOpen === 'files' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'files' ? null : 'files')} title="文件与工作区"><IconFolder size={15} /><span>文件</span></button>
+          <button className={managerOpen === 'stats' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'stats' ? null : 'stats')} title="信息统计"><IconStats size={15} /><span>统计</span></button>
+          <button className={managerOpen === 'settings' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'settings' ? null : 'settings')} title="设置"><IconSettings size={15} /><span>设置</span></button>
         </div>
       </aside>
 
@@ -257,9 +258,9 @@ export default function App() {
         <aside className="manager-panel">
           <div className="manager-head">
             <span className="manager-title">
-              {managerOpen === 'plugins' ? '🔌 插件管理' : managerOpen === 'files' ? '📁 文件与工作区' : managerOpen === 'stats' ? '📊 信息统计' : '⚙️ 设置'}
+              {managerOpen === 'plugins' ? '插件管理' : managerOpen === 'files' ? '文件与工作区' : managerOpen === 'stats' ? '信息统计' : '设置'}
             </span>
-            <button className="manager-close" title="关闭面板" onClick={() => setManagerOpen(null)}>✕</button>
+            <button className="manager-close" title="关闭面板" onClick={() => setManagerOpen(null)}><IconClose size={13} /></button>
           </div>
           <div className="manager-body">
             {managerOpen === 'plugins' ? (
@@ -313,7 +314,7 @@ export default function App() {
             {models.map((m) => <option key={`${m.id}:${m.model}`} value={`${m.id}:${m.model}`}>{m.label} · {m.model}</option>)}
           </select>
           <button className="theme-toggle" onClick={() => setDark((v) => !v)} title={dark ? '切换到浅色主题' : '切换到深色科技主题'}>
-            {dark ? '☀️' : '🌙'}
+            <IconTheme size={14} dark={dark} />
           </button>
           <button className="trace-toggle" onClick={() => setTraceOpen((v) => !v)} title="运行轨迹面板">
             {traceOpen ? '隐藏轨迹' : '运行轨迹'}

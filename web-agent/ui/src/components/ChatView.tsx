@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
 import Markdown from './Markdown';
+import BrandLogo from './BrandLogo';
+import { IconLock, IconPlan } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -23,11 +25,14 @@ function argsSummary(args: unknown): string {
   } catch { return String(args); }
 }
 
-/** 工具执行流水卡片：状态灯 + 名称 + 耗时 + 参数/结果摘要（科技感终端风格） */
+/** 工具执行流水卡片：默认折叠（按需展开），运行中自动展开显示参数 */
 function ToolCard({ t }: { t: ToolStep }) {
+  const [open, setOpen] = useState(false);
   const fmtMs = (ms?: number) => (ms === undefined ? '' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
+  const isRunning = t.status === 'running';
+  const show = open || isRunning; // 运行中自动展开（实时反馈），完成后按需展开
   return (
-    <div className={`tool-card ${t.status}`}>
+    <div className={`tool-card ${t.status} ${show ? 'open' : ''}`} onClick={() => { if (!isRunning) setOpen((v) => !v); }}>
       <div className="tool-line">
         <span className={`tool-dot ${t.status}`} />
         <span className="tool-name">{t.name}</span>
@@ -35,11 +40,12 @@ function ToolCard({ t }: { t: ToolStep }) {
         <span className={`tool-status ${t.status}`}>
           {t.status === 'running' ? '执行中…' : t.status === 'done' ? '完成' : '失败'}
         </span>
+        <span className={`tool-chevron ${show ? 'up' : ''}`}>▾</span>
       </div>
-      {t.args !== undefined && t.status === 'running' && (
+      {show && t.args !== undefined && (
         <pre className="tool-args">{argsSummary(t.args)}</pre>
       )}
-      {t.summary && <pre className="tool-summary">{t.summary}</pre>}
+      {show && t.summary && <pre className="tool-summary">{t.summary}</pre>}
     </div>
   );
 }
@@ -122,7 +128,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         {/* 目标计划卡片：实时展示多步任务的推进状态 */}
         {plan && (
           <div className="plan-card">
-            <div className="plan-title">🎯 {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
+            <div className="plan-title"><IconPlan size={14} /> {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
             <div className="plan-steps">
               {plan.steps.map((s, i) => (
                 <div key={i} className={`plan-step ${s.status}`}>
@@ -138,8 +144,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         )}
         {messages.length === 0 && (
           <div className="welcome">
-            <h2>maharness</h2>
-            <p>薄内核 · 全插件化 · 全程可观测。我可以读写工作区文件、联网搜索，甚至可以给自己写新插件。</p>
+            <BrandLogo size={110} />
+            <div className="welcome-slogan">万物皆插件，自我进化</div>
+            <div className="welcome-hint">输入消息开始对话 · 输入 <span className="welcome-slash">/</span> 调出命令面板</div>
             {!hasModels && <p className="warn">尚未配置 LLM Provider —— 在左侧「设置」中添加。</p>}
           </div>
         )}
@@ -159,7 +166,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 <div className="reasoning">
                   <button className="reasoning-toggle" onClick={() => toggleReasoning(m.id)}>
                     <span className={`brain-dot ${m.streaming ? 'active' : ''}`} />
-                    🧠 思考过程{m.streaming ? '（实时）' : expanded[m.id] ? ' ▾' : ' ▸'}
+                    {m.streaming ? '🧠 烧脑中…' : `🧠 思考过程${expanded[m.id] ? ' ▾' : ' ▸'}`}
                   </button>
                   {m.streaming ? (
                     <div className="reasoning-body streaming" ref={reasoningRef}>
@@ -187,7 +194,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               {m.usage && (
                 <div className="msg-meta">
                   ↑{m.usage.input} · ↓{m.usage.output} tokens · 成本 ${(m.cost ?? 0).toFixed(5)}
-                  {m.cached && <em className="cache-badge">⚡ 缓存命中</em>}
+                  {m.cached && <em className="cache-badge">⚡ 秒回（缓存）</em>}
                 </div>
               )}
             </div>
@@ -201,7 +208,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         <div className="approval-area">
           {approvals.map((a) => (
             <div key={a.id} className="approval-card">
-              <div className="approval-title">🔐 需要审批 · {a.name}</div>
+              <div className="approval-title"><IconLock size={14} /> 需要审批 · {a.name}</div>
               <pre className="approval-summary">{a.summary}</pre>
               <div className="approval-actions">
                 <button className="approve" onClick={() => onApproval(a.id, true)}>批准执行</button>

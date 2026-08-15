@@ -272,7 +272,11 @@ body {
   display: flex; border-top: 1px solid var(--border);
   background: var(--bg);
 }
-.sidebar-manage .tab { flex: 1; padding: 9px 4px; font-size: 12px; }
+.sidebar-manage .tab {
+  flex: 1; padding: 8px 2px; font-size: 11px;
+  display: flex; flex-direction: column; align-items: center; gap: 3px;
+  border-bottom: none;
+}
 .tab {
   flex: 1; padding: 10px; border: none; background: none;
   font-size: 13px; color: var(--muted); cursor: pointer;
@@ -336,6 +340,8 @@ body {
   border: none; background: none; color: var(--muted); cursor: pointer;
   font-size: 12px; padding: 2px 3px; border-radius: 4px; line-height: 1;
 }
+.icon-btn { display: inline-flex; align-items: center; }
+.session-actions .icon-btn svg { display: block; }
 .session-actions button:hover { background: var(--panel); color: var(--text); }
 .session-actions button.danger:hover { color: var(--red); }
 .session-group-title {
@@ -398,8 +404,30 @@ body {
 .chat-body { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
 .messages { flex: 1; overflow-y: auto; padding: 20px; }
 
-.welcome { text-align: center; margin-top: 15vh; color: var(--muted); }
-.welcome h2 { color: var(--text); margin-bottom: 8px; }
+/* 空白页品牌区：羊 Logo + 品牌宣言 */
+.welcome {
+  text-align: center; margin-top: 12vh; color: var(--muted);
+  display: flex; flex-direction: column; align-items: center; gap: 14px;
+}
+.brand-logo {
+  animation: logo-breathe 3.2s ease-in-out infinite;
+}
+@keyframes logo-breathe {
+  0%, 100% { transform: scale(1); filter: drop-shadow(0 0 6px var(--glow)); }
+  50% { transform: scale(1.03); filter: drop-shadow(0 0 14px var(--glow)); }
+}
+.welcome-slogan {
+  font-size: 22px; font-weight: 700; letter-spacing: 0.12em;
+  background: linear-gradient(90deg, var(--accent), #7c3aed);
+  -webkit-background-clip: text; background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: var(--accent);
+}
+.welcome-hint { font-size: 13px; }
+.welcome-slash {
+  font-family: var(--mono); color: var(--accent); font-weight: 700;
+  padding: 1px 6px; border: 1px solid var(--accent); border-radius: 5px;
+}
 .welcome p { margin: 6px 0; font-size: 13px; }
 .welcome .warn { color: var(--amber); }
 code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border-radius: 4px; font-size: 12px; }
@@ -432,7 +460,15 @@ code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border
   border: 1px solid var(--border); border-radius: 8px;
   padding: 6px 10px; font-size: 12px; background: var(--panel);
   animation: tool-in 0.2s ease-out;
+  cursor: pointer;
 }
+.tool-card:hover { border-color: var(--accent); }
+.tool-card.open { border-color: var(--accent); }
+.tool-chevron {
+  margin-left: 2px; font-size: 10px; color: var(--muted);
+  transition: transform 0.18s;
+}
+.tool-chevron.up { transform: rotate(180deg); }
 @keyframes tool-in {
   from { opacity: 0; transform: translateY(-4px); }
   to { opacity: 1; transform: translateY(0); }
@@ -461,6 +497,7 @@ code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border
   color: var(--muted); background: var(--bg); padding: 4px 8px;
   border-radius: 5px; white-space: pre-wrap; word-break: break-all;
   border-left: 2px solid var(--accent);
+  animation: tool-in 0.15s ease-out;
 }
 .tool-summary {
   margin-top: 5px; font-family: var(--mono); font-size: 11px;
