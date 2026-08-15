@@ -74,16 +74,18 @@ const CONTEXT_PROVIDER_BUDGET = 1500;
 /** 自适应阈值：连续工具失败达到该次数时，harness 注入策略提示（管理"认知资源"） */
 const ADAPT_FAIL_STREAK = 3;
 
-/** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制标签（registry 元数据 → 提示词）
- *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀 */
+/** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
+ *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
 export function annotateToolDef(t: ToolDef): ToolDef {
-  if (!t.risk && !t.costHint && !t.approval && !t.limits) return t;
+  if (!t.risk && !t.costHint && !t.approval && !t.limits && !t.output) return t;
   const tags: string[] = [];
   if (t.risk) tags.push(`风险:${t.risk}`);
   if (t.costHint) tags.push(`成本:${t.costHint}`);
   if (t.approval) tags.push('需审批');
   if (t.limits) tags.push(t.limits);
-  return { ...t, description: `【${tags.join('|')}】${t.description}` };
+  const head = tags.length ? `【${tags.join('|')}】` : '';
+  const tail = t.output ? `\n输出格式: ${t.output}` : '';
+  return { ...t, description: `${head}${t.description}${tail}` };
 }
 
 /** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话（超时后 handler 仍可能在后台运行，由工具自行响应 signal 取消） */

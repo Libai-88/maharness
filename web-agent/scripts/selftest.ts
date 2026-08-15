@@ -179,6 +179,12 @@ const tagged = wf ? annotateToolDef(wf).description.includes('风险:high') : fa
 const costTag = sub ? annotateToolDef(sub).description.includes('成本:high') : false;
 console.log('[capabilities] 描述自动打标签（风险/成本）:', tagged && costTag ? '✓' : '✗',
   `write_file=${tagged} run_subagent=${costTag}`);
+// 输出格式显式化（output 字段 → 描述尾部）：LLM 拿到结果即知结构，减少试错型幻觉
+const outputTag = sub ? annotateToolDef(sub).description.includes('输出格式: {answer') : false;
+const rf2 = tools.find((t) => t.name === 'read_file');
+const rfOutput = rf2 ? annotateToolDef(rf2).description.includes('输出格式') : false;
+console.log('[capabilities] 输出格式显式化:', outputTag && rfOutput ? '✓' : '✗',
+  `run_subagent=${outputTag} read_file=${rfOutput}`);
 
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
 {

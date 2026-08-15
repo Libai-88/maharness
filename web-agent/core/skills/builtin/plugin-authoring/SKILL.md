@@ -36,6 +36,14 @@ export default {
 } satisfies Plugin;
 ```
 
+## 组合设计（可组合的工具 = 1+1>2）
+- **描述说清输入/输出/限制**：`output` 字段声明返回结构（如 `{path, entries[]}`）、
+  `limits` 声明限制、`risk`/`costHint`/`approval` 声明风险成本——组合链里 harness 才能正确判断审批与成本；
+- **输入复用现有格式**：路径就用沙箱相对路径（list_dir/read_file 可直接接力）；
+- **输出结构化**：JSON 结果让下游工具与 LLM 直接消费，别用散文；
+- **互相引用**：描述里提一句相关工具（如"配合 read_file 使用"），LLM 编排时更易成链；
+- 完整组合范式见 `get_skill("capability-composition")`。
+
 ## 关键要点
 - **工具名**：小写字母/数字/下划线，语义清晰；
 - **结果**：成功 `{ ok: true, data }`；失败 `{ ok: false, error }`（error 会原样回给 LLM 供修复）；

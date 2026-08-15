@@ -49,7 +49,12 @@ export interface ReadResult {
   isBinary: boolean;
   size: number;
   path: string;
+  /** 超大文件截断标记：text 仅为前 MAX_READ 字符，完整内容可用分段读取获取 */
+  truncated?: boolean;
 }
+
+/** read_file 单次返回上限（字符）：保护上下文预算；截断显式告知（观测完整性） */
+const MAX_READ = 100_000;
 
 export function readTextSmart(filePath: string): { text: string; encoding: string; isBinary: boolean } {
   const buf = readFileSync(filePath);
@@ -161,6 +166,7 @@ export default {
         risk: 'low',
         costHint: 'low',
         limits: '仅文本文件；二进制返回错误',
+        output: '{text, encoding, size, path}；超大文件返回前 100KB 并标注 truncated',
         description: '读取文本文件内容（自动识别 UTF-8/UTF-16/GBK 编码；二进制文件返回错误）。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -181,9 +187,12 @@ export default {
           }
           const r = readTextSmart(file);
           if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），v1 不支持读取` };
+          const truncated = r.text.length > MAX_READ;
           const result: ReadResult = {
-            text: r.text, encoding: r.encoding, isBinary: false,
+            text: truncated ? r.text.slice(0, MAX_READ) : r.text,
+            encoding: r.encoding, isBinary: false,
             size: st.size, path: relative(tctx.sandboxRoot, file),
+            truncated: truncated || undefined,
           };
           tctx.cache.l2Set(key, result);
           return { ok: true, data: result };

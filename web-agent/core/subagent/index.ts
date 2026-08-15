@@ -38,6 +38,7 @@ export default {
         risk: 'low',
         costHint: 'high',
         limits: '子代理最多 6 轮；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
+        output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
         description: '委派一个子代理独立完成目标（复用完整 Agent 循环，独立上下文）。' +
           '用于：任务可拆分为多个独立部分时并行分工；或需要独立视角交叉审查自己的产出。' +
           '默认只读工具（侦查/搜索/记忆）；tools="all" 可放开全部工具（含写操作，慎用）。',

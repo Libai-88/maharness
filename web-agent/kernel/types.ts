@@ -139,6 +139,8 @@ export interface ToolDef {
   approval?: boolean;
   /** 使用限制（如文件大小/并发/频率），注入 LLM 减少幻觉 */
   limits?: string;
+  /** 输出格式描述：返回结构的显式说明（减少"靠猜/试错"型幻觉），注入 LLM */
+  output?: string;
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 

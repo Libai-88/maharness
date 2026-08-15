@@ -79,7 +79,8 @@ export default {
           '2. 用户要求你改造自己的行为/工作方式时，先 get_skill("agent-self-design") 了解改造途径；',
           '3. 需要给用户提供提示词/思维链建议时，先 get_skill("thinking-chain")；',
           '4. 用户要求你沉淀经验/写技能时，先 get_skill("skill-authoring")；',
-          '5. 技能是知识包不是代码，读取后按其指导执行即可；不确定有什么技能时用 list_skills 查看。',
+          '5. 任务需要多工具协作编排时，先 get_skill("capability-composition") 查看组合范式；',
+          '6. 技能是知识包不是代码，读取后按其指导执行即可；不确定有什么技能时用 list_skills 查看。',
         ].join('\n'),
       },
     });

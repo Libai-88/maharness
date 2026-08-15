@@ -107,6 +107,7 @@ export default {
         name: 'remember_fact',
         risk: 'low',
         costHint: 'low',
+        output: '{id, count}',
         description: '记住一条长期事实（跨会话有效，持久化到 data/memory.json）。用于用户偏好、重要信息、任务结论。',
         parameters: {
           type: 'object',
@@ -128,6 +129,7 @@ export default {
         name: 'recall_facts',
         risk: 'low',
         costHint: 'low',
+        output: '{count, facts: [{id, text, ts}]}',
         description: '查询长期记忆（按关键词过滤，返回最近 20 条；不传关键词返回全部最近记忆）。',
         parameters: {
           type: 'object',
