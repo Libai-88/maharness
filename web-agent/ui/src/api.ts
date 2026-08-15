@@ -181,15 +181,16 @@ export const gitApi = {
   push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST' }),
 };
 
-/** 运行时配置（上下文管理 / 缓存参数） */
+/** 运行时配置（上下文管理 / 缓存参数 / 思维链预算） */
 export interface RuntimeConfig {
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
+  agent: { reasoningBudget: number };
 }
 
 export const configApi = {
   get: () => api<RuntimeConfig>('/api/config'),
-  patch: (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']> }) =>
+  patch: (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']>; agent?: Partial<RuntimeConfig['agent']> }) =>
     api<{ ok: boolean }>('/api/config', { method: 'PATCH', body: JSON.stringify(patch) }),
 };
 

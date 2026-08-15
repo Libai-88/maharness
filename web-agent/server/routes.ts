@@ -772,7 +772,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     }
   });
 
-  // ---------- 运行时配置（上下文管理 / 缓存参数，config.changed 热生效） ----------
+  // ---------- 运行时配置（上下文管理 / 缓存参数 / 思维链预算，config.changed 热生效） ----------
   app.get('/api/config', (_req, res) => {
     res.json({
       context: {
@@ -784,12 +784,15 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
         l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
       },
+      agent: {
+        reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 400),
+      },
     });
   });
 
   app.patch('/api/config', (req, res) => {
     try {
-      const { context, cache } = req.body ?? {};
+      const { context, cache, agent } = req.body ?? {};
       if (context?.maxTokens !== undefined) {
         kernel.config.set('context.maxTokens', Math.max(2000, Math.min(200_000, Number(context.maxTokens))));
       }
@@ -805,6 +808,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         kernel.cache.setConfig({ l2TtlMs: m * 60_000 });
       }
       if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
+      if (agent?.reasoningBudget !== undefined) {
+        kernel.config.set('agent.reasoningBudget', Math.max(50, Math.min(8000, Number(agent.reasoningBudget))));
+      }
       res.json({ ok: true });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });

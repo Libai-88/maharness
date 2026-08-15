@@ -77,6 +77,9 @@ const CONTEXT_PROVIDER_BUDGET = 1500;
 /** 自适应阈值：连续工具失败达到该次数时，harness 注入策略提示（管理"认知资源"） */
 const ADAPT_FAIL_STREAK = 3;
 
+/** 单轮思考预算（token）：超过则下一轮注入降级提示，阻止推理膨胀（见 docs/思维链研究.md） */
+const REASONING_BUDGET_DEFAULT = 400;
+
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
  *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
 export function annotateToolDef(t: ToolDef): ToolDef {
@@ -138,6 +141,7 @@ export class AgentRunner {
     const toolDefs = (opts.tools ?? tools.map((c) => c.tool)).map(annotateToolDef);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
+    const reasoningBudget = this.kernel.config.get<number>('agent.reasoningBudget', REASONING_BUDGET_DEFAULT);
     const scratchpad: Record<string, unknown> = {};
 
     // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
@@ -154,6 +158,9 @@ export class AgentRunner {
     // 自适应：本会话连续工具失败计数（超阈值时注入建议，管理"认知资源"）
     let toolFailStreak = 0;
     let adaptHintInjected = false;
+    // 思考预算：上一轮 reasoning 长度（token）；超预算后注入降级提示（限一次）
+    let lastTurnReasoningTokens = 0;
+    let budgetHintInjected = false;
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (signal?.aborted) {
@@ -164,6 +171,19 @@ export class AgentRunner {
       // ---- 钩子：调用 LLM 前（记忆注入 / 上下文拼装 / 工具调整） ----
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad };
       await this.emitHook('agent.before_llm', llmCtx);
+
+      // ---- 思考预算（思维链管理）：上一轮思考超限 → 注入降级指令 ----
+      // 依据：Anthropic effort 实测「少想反而更好」；无预算约束时模型会在单点上反复空转。
+      // 降级后不再重复注入，避免提示本身污染上下文。
+      if (lastTurnReasoningTokens > reasoningBudget && !budgetHintInjected) {
+        budgetHintInjected = true;
+        llmCtx.history.push({
+          role: 'system',
+          content: `【harness 思考预算】上一轮思考已超预算（约 ${lastTurnReasoningTokens} token > ${reasoningBudget}）。请停止继续思考，直接基于已有信息与工具结果给出结论或执行下一步动作；如需更多事实，先调工具再答。`,
+        });
+        this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'reasoning-budget' })
+          .finish({ outputSummary: `注入思考预算降级提示（上轮 ${lastTurnReasoningTokens} token）` });
+      }
 
       // ---- Context Provider 注入（上下文工程）：插件按需提供上下文 ----
       // 与 before_llm 钩子并存：钩子 = 命令式（失败教训注入），context = 声明式。
@@ -294,6 +314,8 @@ export class AgentRunner {
       totalOut += tOut;
       const cost = estimateCost(activeProvider, tIn, tOut);
       totalCost += cost;
+      // 思考预算统计：记录本轮 reasoning 长度（下一轮 LLM 调用前消费）
+      lastTurnReasoningTokens = estimateTokens(reasoning);
       step.finish({
         outputSummary: text.slice(0, 200),
         tokensIn: tIn, tokensOut: tOut, cost,
