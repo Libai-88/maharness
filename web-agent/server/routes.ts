@@ -780,7 +780,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         truncateInject: kernel.config.get<boolean>('context.truncateInject', true),
       },
       cache: {
-        l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.85),
+        l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.58),
         l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
         l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
       },

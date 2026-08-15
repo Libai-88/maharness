@@ -42,7 +42,7 @@ export interface CacheConfig {
 export class Cache {
   private l2 = new Map<string, L2Entry>();
   private l1 = new Map<string, L1Entry>(); // key = 原始文本（去空白归一化）
-  private l1TextThreshold = 0.85;
+  private l1TextThreshold = 0.58;
   private l2TtlMs = 30 * 60_000;
   private counter: CacheStats = {
     l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,

@@ -57,27 +57,31 @@ export default function App() {
   }, []);
 
   async function loadAll() {
-    const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
-    setSessions(ss);
-    setModels(ms);
-    setPlugins(pl);
-    setProviders(pvs);
-    if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
-    let initialId: string | null = null;
-    if (!ss.length) {
-      const created = await sessionApi.create(ms[0]?.model ?? '');
-      setSessions([created]);
-      initialId = created.id;
-    } else {
-      initialId = ss[0].id;
-    }
-    // 初始会话：同步加载历史消息，避免首屏空白
-    setActiveId(initialId);
-    if (initialId) {
-      try {
-        const msgs = await sessionApi.messages(initialId);
-        setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
-      } catch { /* 忽略 */ }
+    try {
+      const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
+      setSessions(ss);
+      setModels(ms);
+      setPlugins(pl);
+      setProviders(pvs);
+      if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
+      let initialId: string | null = null;
+      if (!ss.length) {
+        const created = await sessionApi.create(ms[0]?.model ?? '');
+        setSessions([created]);
+        initialId = created.id;
+      } else {
+        initialId = ss[0].id;
+      }
+      // 初始会话：同步加载历史消息，避免首屏空白
+      setActiveId(initialId);
+      if (initialId) {
+        try {
+          const msgs = await sessionApi.messages(initialId);
+          setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
+        } catch { /* 忽略 */ }
+      }
+    } catch (err) {
+      console.error('[maharness] 初始加载失败:', err);
     }
   }
 
@@ -93,16 +97,20 @@ export default function App() {
   }, []);
 
   const createSession = useCallback(async () => {
-    const s = await sessionApi.create(sel?.model ?? '');
-    setSessions((prev) => [s, ...prev]);
-    setActiveId(s.id);
-    setMessages([]);
-    setTraceSteps([]);
-    setPlan(null);
+    try {
+      const s = await sessionApi.create(sel?.model ?? '');
+      setSessions((prev) => [s, ...prev]);
+      setActiveId(s.id);
+      setMessages([]);
+      setTraceSteps([]);
+      setPlan(null);
+    } catch (err) { console.error('[maharness] 新建会话失败:', err); }
   }, [sel]);
 
   const deleteSession = useCallback(async (id: string) => {
-    await sessionApi.remove(id);
+    try {
+      await sessionApi.remove(id);
+    } catch (err) { console.error('[maharness] 删除会话失败:', err); return; }
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
       if (activeId === id) {
@@ -114,13 +122,17 @@ export default function App() {
   }, [activeId, selectSession]);
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
-    await sessionApi.update(id, { archived });
-    setSessions(await sessionApi.list());
+    try {
+      await sessionApi.update(id, { archived });
+      setSessions(await sessionApi.list());
+    } catch (err) { console.error('[maharness] 归档会话失败:', err); }
   }, []);
 
   const pinSession = useCallback(async (id: string, pinned: boolean) => {
-    await sessionApi.update(id, { pinned });
-    setSessions(await sessionApi.list());
+    try {
+      await sessionApi.update(id, { pinned });
+      setSessions(await sessionApi.list());
+    } catch (err) { console.error('[maharness] 置顶会话失败:', err); }
   }, []);
 
   const renameSession = useCallback(async (id: string, title: string) => {
@@ -150,13 +162,17 @@ export default function App() {
   }, [models, activeId]);
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
-    await pluginsApi.action(id, action);
-    setPlugins(await pluginsApi.list());
+    try {
+      await pluginsApi.action(id, action);
+      setPlugins(await pluginsApi.list());
+    } catch (err) { console.error(`[maharness] 插件操作失败（${action}）:`, err); }
   }, []);
 
   const refreshProviders = useCallback(async () => {
-    setProviders(await providersApi.list());
-    setModels(await modelsApi.list());
+    try {
+      setProviders(await providersApi.list());
+      setModels(await modelsApi.list());
+    } catch (err) { console.error('[maharness] 刷新 Provider 失败:', err); }
   }, []);
 
   const send = useCallback(async (text: string) => {
@@ -215,7 +231,7 @@ export default function App() {
       },
     }, ac.signal);
 
-    setSessions(await sessionApi.list());
+    try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession]);
 
   const stop = useCallback(() => {

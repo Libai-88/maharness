@@ -251,6 +251,8 @@ export class AgentRunner {
         const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
         const cached = await this.kernel.cache.l1Get(q, promptKey);
         if (cached.hit && cached.answer) {
+          // 命中学习：把当前措辞也回填，语义缓存簇随使用扩展——同义改写可连续命中
+          void this.kernel.cache.l1Set(q, cached.answer, promptKey);
           const tIn = estimateTokens([...llmCtx.history.map((m) => m.content ?? '')].join('\n'));
           const tOut = estimateTokens(cached.answer);
           // 按 provider 价格估算本次节省的成本（缓存命中 = 省掉的 LLM 调用费用）
