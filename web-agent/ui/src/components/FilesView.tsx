@@ -1,7 +1,7 @@
 // ui/src/components/FilesView.tsx —— 文件工作区（Screen 2）：工作区 + 文件树 + 代码查看器 + Git 面板
 import { useCallback, useEffect, useState } from 'react';
 import { fileApi, workspacesApi } from '../api';
-import { IconFolder } from './Icon';
+import { IconBox, IconCheck, IconChevronRight, IconClose, IconExpand, IconFileText, IconFolder, IconGitBranch, IconMore, IconPlus, IconRefresh, IconSearch, IconSync } from './Icon';
 
 interface TreeEntry { name: string; type: 'dir' | 'file'; size: number }
 
@@ -27,11 +27,11 @@ function TreeNode({ entry, path, depth, onOpenFile, selected, onSelect }: {
     return (
       <>
         <div
-          className="tree-item dir"
+          className={`tree-item dir ${open ? 'open' : ''}`}
           style={{ paddingLeft: depth * 14 + 6 }}
           onClick={() => void toggle()}
         >
-          <span className="ti-chev">{open ? '▾' : '▸'}</span>
+          <span className="ti-chev" style={{ display: 'inline-flex', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><IconChevronRight size={10} /></span>
           <span className="ti-icon"><IconFolder size={13} /></span>
           {entry.name}
         </div>
@@ -49,7 +49,7 @@ function TreeNode({ entry, path, depth, onOpenFile, selected, onSelect }: {
       onClick={() => { onSelect(rel); onOpenFile(rel); }}
       title={rel}
     >
-      <span className="ti-icon" style={{ color: 'var(--text-4)' }}>·</span>
+      <span className="ti-icon" style={{ color: 'var(--text-4)', display: 'inline-flex' }}><IconFileText size={12} /></span>
       {entry.name}
       {entry.name.endsWith('.ts') && <span className="ti-badge m">M</span>}
     </div>
@@ -71,8 +71,8 @@ function GitPanel() {
         <span className="gh-count">4</span>
       </div>
       <div className="git-branch">
-        <span className="gb-name"><span className="gb-icon">⌥</span>main · 3 ahead</span>
-        <button className="manager-close" title="同步">⇅</button>
+        <span className="gb-name"><span className="gb-icon"><IconGitBranch size={10} /></span>main · 3 ahead</span>
+        <button className="manager-close" title="同步" aria-label="同步"><IconSync size={13} /></button>
       </div>
       <div className="git-scroll">
         <div className="git-section">STAGED <span className="gs-count">· 2</span></div>
@@ -163,7 +163,7 @@ export default function FilesView() {
         <div className="ft-head">EXPLORER</div>
         <div className="ws-picker" onClick={() => void switchWs(prompt('切换工作区（绝对路径）') ?? current)}>
           <div className="ws-picker-left">
-            <span className="ws-picker-icon">▣</span>
+            <span className="ws-picker-icon"><IconBox size={13} /></span>
             <div>
               <div className="ws-picker-name">{current.split(/[\\/]/).pop() || 'DEEPSEEK'}</div>
               <div className="ws-picker-path">{current || '选择工作区…'}</div>
@@ -172,10 +172,10 @@ export default function FilesView() {
           <span style={{ color: 'var(--text-4)', fontSize: 10 }}>▾</span>
         </div>
         <div className="ft-tools">
-          <button className="ft-tool" onClick={() => void addWs()} title="添加工作区">+</button>
-          <button className="ft-tool" onClick={() => void loadRoot()} title="刷新">↻</button>
-          <button className="ft-tool" title="搜索">⌕</button>
-          <button className="ft-tool" title="更多" style={{ marginLeft: 'auto' }}>⋯</button>
+          <button className="ft-tool" onClick={() => void addWs()} title="添加工作区" aria-label="添加工作区"><IconPlus size={13} /></button>
+          <button className="ft-tool" onClick={() => void loadRoot()} title="刷新" aria-label="刷新"><IconRefresh size={13} /></button>
+          <button className="ft-tool" title="搜索" aria-label="搜索"><IconSearch size={13} /></button>
+          <button className="ft-tool" title="更多" aria-label="更多" style={{ marginLeft: 'auto' }}><IconMore size={13} /></button>
         </div>
         <div className="tree-scroll">
           {roots === null && <div className="empty-state">加载中…</div>}
@@ -193,14 +193,14 @@ export default function FilesView() {
             {!preview && <span className="cur" style={{ color: 'var(--text-4)' }}>选择文件预览</span>}
           </div>
           <div className="vb-right">
-            <button className="vb-btn">⊘</button>
-            <button className="vb-btn">⤢</button>
+            <button className="vb-btn" title="关闭" aria-label="关闭"><IconClose size={12} /></button>
+            <button className="vb-btn" title="全屏" aria-label="全屏"><IconExpand size={12} /></button>
             <button className="vb-save">保存 ⌃S</button>
           </div>
         </div>
         <div className="viewer-tabs">
-          <div className="v-tab active"><span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled.ts'}<span className="vtx">×</span></div>
-          <div className="v-tab"><span className="vtd clean" />Cache.ts<span className="vtx">×</span></div>
+          <div className="v-tab active"><span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled.ts'}<IconClose size={11} /></div>
+          <div className="v-tab"><span className="vtd clean" />Cache.ts<IconClose size={11} /></div>
         </div>
         <div className="code-viewer">
           {preview ? (
@@ -227,7 +227,7 @@ export default function FilesView() {
           <span className="vs-sep" />
           <span>Ln {lines.length ? 5 : 0}, Col 48</span>
           <span className="vs-sep" />
-          <span className="vs-bold">✓ chokidar 监听器已就绪</span>
+          <span className="vs-bold"><IconCheck size={11} /> chokidar 监听器已就绪</span>
         </div>
       </div>
 

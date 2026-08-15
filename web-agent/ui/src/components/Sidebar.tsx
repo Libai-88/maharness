@@ -1,7 +1,7 @@
-// ui/src/components/Sidebar.tsx —— 左侧边栏（Logo + 4 Tab + 会话列表 + Footer）
+// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + 4 Tab + 会话列表 + Footer）
 import { useState } from 'react';
 import type { Session } from '../types';
-import { IconArchive, IconFolder, IconPin, IconPlugin, IconSettings, IconStats, IconTrash } from './Icon';
+import { IconArchive, IconChat, IconFolder, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
 export type MainTab = 'chat' | 'files' | 'plugins' | 'stats';
 
@@ -91,29 +91,29 @@ export default function Sidebar({ sessions, activeId, activeTab, onTab, onSelect
     <aside className="sidebar">
       <div className="sb-logo">
         <div className="sb-logo-left">
-          <div className="sb-logo-mark">M</div>
+          <div className="sb-logo-mark"><IconSheep size={17} /></div>
           <div className="sb-logo-title">maharness</div>
         </div>
       </div>
 
       <div className="sb-tabs">
         <button className={`sb-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => onTab('chat')}>
-          <span className="tab-icon">✦</span>会话
+          <IconChat size={14} />会话
         </button>
         <button className={`sb-tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => onTab('files')}>
-          <span className="tab-icon"><IconFolder size={13} /></span>文件
+          <IconFolder size={14} />文件
         </button>
         <button className={`sb-tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => onTab('plugins')}>
-          <span className="tab-icon"><IconPlugin size={13} /></span>插件
+          <IconPlugin size={14} />插件
         </button>
         <button className={`sb-tab ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => onTab('stats')}>
-          <span className="tab-icon"><IconStats size={13} /></span>统计
+          <IconStats size={14} />统计
         </button>
       </div>
 
       <div className="sb-divider" />
 
-      <button className="sb-new-chat" onClick={onCreate}><span style={{ fontSize: 16, fontWeight: 400 }}>+</span>新会话</button>
+      <button className="sb-new-chat" onClick={onCreate}><IconPlus size={15} />新会话</button>
 
       <div className="sb-session-scroll">
         {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>暂无会话</div>}

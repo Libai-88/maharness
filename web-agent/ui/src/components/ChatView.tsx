@@ -3,7 +3,8 @@ import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
 import Markdown from './Markdown';
-import { IconBrain, IconLock, IconPlan } from './Icon';
+import BrandLogo from './BrandLogo';
+import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconPlus, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -38,10 +39,12 @@ function ToolCard({ t }: { t: ToolStep }) {
   const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
-    <div className="tool-card" onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
+    <div className={`tool-card ${running ? 'running' : ''}`} onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
       <div className="tool-head">
         <div className="tool-head-left">
-          <span className={`tool-icon ${statusCls}`}>{t.status === 'done' ? '$' : '⟳'}</span>
+          <span className={`tool-icon ${statusCls}`}>
+            {t.status === 'done' ? <IconCheck size={12} /> : t.status === 'error' ? <IconWarn size={12} /> : <IconRefresh size={12} />}
+          </span>
           <span className="tool-name">{t.name}</span>
           <span className="tool-path">{t.args ? argsSummary(t.args) : ''}</span>
         </div>
@@ -77,7 +80,7 @@ function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
       <div className="code-head">
         <span className="code-lang"><span className="cl-dot" />{lang || 'code'}</span>
         <div className="code-actions">
-          <button className="code-copy" onClick={() => { navigator.clipboard?.writeText(code).catch(() => undefined); setCopied(true); setTimeout(() => setCopied(false), 1200); }} title="复制代码">{copied ? '✓' : '⧉'}</button>
+          <button className="code-copy" onClick={() => { navigator.clipboard?.writeText(code).catch(() => undefined); setCopied(true); setTimeout(() => setCopied(false), 1200); }} title="复制代码" aria-label="复制代码">{copied ? <IconCheck size={12} /> : <IconCopy size={13} />}</button>
         </div>
       </div>
       <pre className="code-body" dangerouslySetInnerHTML={{ __html: hl }} />
@@ -170,13 +173,15 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           )}
 
           {messages.length === 0 && (
-            <div className="empty-state" style={{ padding: '72px 0' }}>
-              <div className="sb-logo-mark" style={{ width: 56, height: 56, fontSize: 28, borderRadius: 14, marginBottom: 16 }}>M</div>
-              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.3 }}>探索未至之境</div>
-              <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
-                万物皆插件，自我进化 · 输入 <span style={{ color: 'var(--accent)', fontWeight: 700 }}>/</span> 调出命令面板
+            <div className="brand-hero">
+              <BrandLogo size={96} />
+              <div className="brand-title">探索未至之境</div>
+              <div className="brand-slogan">
+                万物皆插件，自我进化——maharness 是你的羊，也是你的牧羊犬。<br />
+                文件读写 · 命令执行 · 联网搜索 · 自我扩展
               </div>
-              {!hasModels && <div style={{ color: 'var(--orange)', marginTop: 12, fontSize: 13 }}>尚未配置 LLM Provider —— 在左下角「设置」中添加。</div>}
+              <div className="brand-kbd"><span className="bk">/</span> 调出命令面板 <span className="bk">Enter</span> 发送</div>
+              {!hasModels && <div className="brand-note">尚未配置 LLM Provider —— 在左下角「设置」中添加。</div>}
             </div>
           )}
 
@@ -184,7 +189,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
             <div key={m.id} className="msg-row">
               {m.role !== 'user' ? (
                 <>
-                  <div className="msg-avatar">M</div>
+                  <div className="msg-avatar"><IconSheep size={16} /></div>
                   <div className="msg-col">
                     <div className="msg-meta">
                       <span className="msg-author">maharness</span>
@@ -247,7 +252,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         <div style={{ padding: '0 24px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {approvals.map((a) => (
             <div key={a.id} className="approval-card" style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
-              <div className="a-title"><IconLock size={14} /> 需要审批 · {a.name}</div>
+              <div className="a-title"><span className="a-lock"><IconLock size={13} /></span> 需要审批 · {a.name}<span className="a-pulse" /></div>
               <pre className="a-summary">{a.summary}</pre>
               <div className="approval-actions">
                 <button className="btn-primary" onClick={() => onApproval(a.id, true)}>批准执行</button>
@@ -276,7 +281,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     onClick={() => applyCommand(c)}
                   >
                     <span className="ci-icon" style={{ background: c.source === 'builtin' ? 'var(--blue-soft)' : 'var(--purple-soft)', color: c.source === 'builtin' ? 'var(--accent)' : 'var(--purple)' }}>
-                      {c.source === 'builtin' ? '⚙' : '◇'}
+                      {c.source === 'builtin' ? <IconSettings size={12} /> : <IconPlugin size={12} />}
                     </span>
                     <span className="ci-name">/{c.name}{c.usage ? ` ${c.usage}` : ''}</span>
                     <span className="ci-desc">{c.description}</span>
@@ -311,15 +316,15 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           />
           <div className="composer-toolbar">
             <div className="comp-left">
-              <button className="comp-btn" title="附加内容"><span style={{ fontSize: 15 }}>+</span></button>
-              <button className="comp-btn" title="工具"><span className="dot" style={{ background: 'var(--text-3)' }} />Workspace Write<span style={{ fontSize: 9 }}>▾</span></button>
+              <button className="comp-btn" title="附加内容" aria-label="附加内容"><IconPlus size={15} /></button>
+              <button className="comp-btn" title="工具"><span className="dot" style={{ background: 'var(--text-3)' }} />Workspace Write<IconChevronDown size={10} /></button>
             </div>
             <div className="comp-right">
-              <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<span style={{ fontSize: 9 }}>▾</span></span>
+              <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<IconChevronDown size={10} /></span>
               {streaming ? (
-                <button className="send-btn stop" onClick={onStop} title="停止">■</button>
+                <button className="send-btn stop" onClick={onStop} title="停止" aria-label="停止"><IconStop size={14} /></button>
               ) : (
-                <button className="send-btn" onClick={() => submit()} disabled={!input.trim() || !hasModels} title="发送">↑</button>
+                <button className="send-btn" onClick={() => submit()} disabled={!input.trim() || !hasModels} title="发送" aria-label="发送"><IconSend size={15} /></button>
               )}
             </div>
           </div>

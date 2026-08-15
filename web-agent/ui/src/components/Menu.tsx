@@ -1,5 +1,6 @@
 // ui/src/components/Menu.tsx —— 通用下拉菜单（顶栏模式 / 模型选择）
 import { useEffect, useRef, useState } from 'react';
+import { IconCheck } from './Icon';
 
 export interface MenuItem {
   key: string;
@@ -65,7 +66,7 @@ export default function Menu({ trigger, items, selectedKey, onSelect, title, wid
               {it.dot && <span className="menu-dot" style={{ background: it.dot }} />}
               <span className="menu-label">{it.label}</span>
               {it.sub && <span className="menu-sub">{it.sub}</span>}
-              {it.key === selectedKey && <span className="menu-check">✓</span>}
+              {it.key === selectedKey && <IconCheck size={12} />}
             </button>
           ))}
         </div>

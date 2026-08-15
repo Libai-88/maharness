@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { skillsApi } from '../api';
 import type { SkillInfo } from '../types';
+import { IconClose, IconSpark } from './Icon';
 
 const COLORS = ['#a277ff', '#11d080', '#2f63f6', '#f0993e', '#f85149', '#3a4350'];
 
@@ -87,7 +88,7 @@ export default function SkillsView() {
             <div className="plugin-group" style={{ marginTop: 12 }}>技能市场 · 可安装</div>
             {market.map((m) => (
               <div key={m.name} className="skill-card">
-                <span className="skill-icon" style={{ background: '#3a435026', color: 'var(--text-3)' }}>◈</span>
+                <span className="skill-icon" style={{ background: 'var(--blue-soft)', color: 'var(--accent)' }}><IconSpark size={15} /></span>
                 <div className="skill-info">
                   <div className="skill-info-top">
                     <span className="skill-name">{m.name}</span>
@@ -105,7 +106,7 @@ export default function SkillsView() {
       <aside className="manager-panel">
         <div className="manager-head">
           <span className="manager-title">技能详情</span>
-          <button className="manager-close" onClick={() => { setSelected(null); setGuide(null); }}>×</button>
+          <button className="manager-close" onClick={() => { setSelected(null); setGuide(null); }} aria-label="关闭详情"><IconClose size={13} /></button>
         </div>
         <div className="manager-body">
           {selected ? (

@@ -4,7 +4,7 @@
    ============================================================ */
 
 :root {
-  /* 基础色板 */
+  /* 基础色板（深色主题 · 默认） */
   --bg-deep: #0e1116;
   --bg-panel: #161b22;
   --bg-elev: #1e242d;
@@ -19,6 +19,7 @@
   --text-2: #aab3bf;
   --text-3: #7d8594;
   --text-4: #4a5260;
+  --muted: #5a6474;
 
   /* 强调色 */
   --accent: #2f63f6;        /* selection blue */
@@ -31,6 +32,16 @@
   --blue-soft: rgba(47, 99, 246, 0.14);
   --orange-soft: rgba(240, 153, 62, 0.14);
   --red-soft: rgba(248, 81, 73, 0.14);
+
+  /* 派生色（按钮文字 / 遮罩 / 滚动条 / hover，需随主题翻转） */
+  --on-accent: #ffffff;
+  --on-teal: #0b0e13;
+  --overlay: rgba(11, 14, 19, 0.6);
+  --scroll-thumb: #2a313b;
+  --scroll-thumb-hover: #3a4350;
+  --btn-hover: #232b37;
+  --toggle-off: #3a4350;
+  --toggle-knob: #ffffff;
 
   /* 字体 */
   --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
@@ -45,6 +56,50 @@
   --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
 
   color-scheme: dark;
+}
+
+/* ============================================================
+   浅色主题（蓝白）· data-theme="light"
+   ============================================================ */
+:root[data-theme='light'] {
+  --bg-deep: #f3f6fc;
+  --bg-panel: #ffffff;
+  --bg-elev: #ffffff;
+  --bg-input: #eef2f9;
+  --bg-hover: rgba(24, 60, 140, 0.055);
+  --bg-active: #e3eaf8;
+  --border: #d7deec;
+  --border-soft: #e2e8f4;
+
+  --text-1: #18213a;
+  --text-2: #44506e;
+  --text-3: #6b7896;
+  --text-4: #98a4bf;
+  --muted: #8b95ab;
+
+  --accent: #2f63f6;
+  --teal: #0aa169;
+  --purple: #7a5af0;
+  --orange: #d97706;
+  --red: #dc2626;
+  --teal-soft: rgba(10, 161, 105, 0.12);
+  --purple-soft: rgba(122, 90, 240, 0.12);
+  --blue-soft: rgba(47, 99, 246, 0.12);
+  --orange-soft: rgba(217, 119, 6, 0.12);
+  --red-soft: rgba(220, 38, 38, 0.12);
+
+  --on-accent: #ffffff;
+  --on-teal: #04321f;
+  --overlay: rgba(240, 244, 252, 0.72);
+  --scroll-thumb: #c2cde2;
+  --scroll-thumb-hover: #a4b3d2;
+  --btn-hover: #e6ecf8;
+  --toggle-off: #c2cde2;
+  --toggle-knob: #ffffff;
+
+  --shadow-pop: 0 16px 40px rgba(35, 60, 120, 0.16);
+
+  color-scheme: light;
 }
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -78,8 +133,8 @@ input, select, textarea {
 }
 
 ::-webkit-scrollbar { width: 8px; height: 8px; }
-::-webkit-scrollbar-thumb { background: #2a313b; border-radius: 4px; }
-::-webkit-scrollbar-thumb:hover { background: #3a4350; }
+::-webkit-scrollbar-thumb { background: var(--scroll-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
 .mono { font-family: var(--font-mono); }
@@ -184,7 +239,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   border-radius: 7px;
   background: var(--teal);
   display: flex; align-items: center; justify-content: center;
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-weight: 800;
   font-size: 15px;
   font-family: var(--font-mono);
@@ -224,7 +279,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sb-tab:hover { background: var(--bg-hover); color: var(--text-2); }
 .sb-tab.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .sb-tab .tab-icon { font-size: 11px; line-height: 1; }
 
@@ -238,7 +293,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   height: 38px;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 13px;
   font-weight: 500;
   display: flex; align-items: center; justify-content: center;
@@ -357,7 +412,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sb-settings-btn.active {
   background: var(--blue-soft);
   border-color: var(--accent);
-  color: #b8c7f8;
+  color: var(--accent);
 }
 
 /* ---------- 右侧管理面板（插件详情等） ---------- */
@@ -429,7 +484,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--text-1);
   transition: all 0.15s;
 }
-.tb-btn:hover { background: #232b37; }
+.tb-btn:hover { background: var(--btn-hover); }
 .tb-btn .chev { font-size: 10px; color: var(--text-3); }
 .tb-btn .mode-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--purple); }
 
@@ -441,8 +496,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--text-2);
   transition: all 0.15s;
 }
-.tb-icon-btn:hover { background: #232b37; }
-.tb-icon-btn.active { background: var(--accent); color: #fff; }
+.tb-icon-btn:hover { background: var(--btn-hover); }
+.tb-icon-btn.active { background: var(--accent); color: var(--on-accent); }
 
 .tb-live {
   height: 32px;
@@ -490,14 +545,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 28px; height: 28px;
   border-radius: 7px;
   background: var(--teal);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono);
   font-size: 14px;
   flex-shrink: 0;
 }
-.msg-avatar.user-av { background: #3a4350; color: var(--text-1); font-size: 12px; border-radius: 50%; }
+.msg-avatar.user-av { background: var(--toggle-off); color: var(--text-1); font-size: 12px; border-radius: 50%; }
 
 .msg-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
@@ -553,6 +608,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   border-radius: var(--radius);
   background: var(--bg-deep);
   overflow: hidden;
+  position: relative;
+  transition: border-color 0.2s;
+}
+.tool-card:hover { border-color: var(--text-3); }
+
+/* 执行中：顶部流光进度条 + 呼吸辉光 */
+.tool-card.running {
+  border-color: var(--accent);
+  animation: toolBreath 1.6s ease-in-out infinite;
+}
+.tool-card.running::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, #7aa2ff 50%, var(--accent) 70%, transparent);
+  background-size: 200% 100%;
+  animation: toolFlow 1.4s linear infinite;
+  z-index: 1;
+}
+@keyframes toolFlow {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes toolBreath {
+  0%, 100% { box-shadow: 0 0 0 rgba(47, 99, 246, 0); }
+  50% { box-shadow: 0 0 14px rgba(47, 99, 246, 0.18); }
 }
 .tool-head {
   height: 36px;
@@ -563,15 +645,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .tool-head-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
 .tool-icon {
-  width: 18px; height: 18px;
-  border-radius: 5px;
+  width: 20px; height: 20px;
+  border-radius: 6px;
   display: flex; align-items: center; justify-content: center;
-  font-size: 11px;
   flex-shrink: 0;
 }
-.tool-icon.ok { background: var(--teal-soft); color: var(--teal); font-family: var(--font-mono); font-weight: 700; }
-.tool-icon.run { background: var(--blue-soft); color: var(--accent); font-size: 12px; }
-.tool-icon.err { background: var(--red-soft); color: var(--red); font-family: var(--font-mono); font-weight: 700; }
+.tool-icon.ok { background: var(--teal-soft); color: var(--teal); }
+.tool-icon.run { background: var(--blue-soft); color: var(--accent); }
+.tool-icon.run svg { animation: spin 1.4s linear infinite; }
+.tool-icon.err { background: var(--red-soft); color: var(--red); }
+@keyframes spin { to { transform: rotate(360deg); } }
 .tool-name { font-size: 12px; font-weight: 600; font-family: var(--font-mono); }
 .tool-path { font-size: 12px; font-family: var(--font-mono); color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tool-head-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
@@ -601,22 +684,55 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .tool-body .t-out { color: var(--text-3); }
 .tool-divider { height: 1px; background: var(--border); }
 
-/* 审批卡片 */
+/* 审批卡片：左侧警示渐变条 + 呼吸状态点 */
 .approval-card {
+  position: relative;
   border: 1px solid var(--orange);
   border-radius: var(--radius);
   background: var(--bg-elev);
-  padding: 14px 16px;
+  padding: 14px 16px 14px 22px;
   display: flex; flex-direction: column; gap: 12px;
+  overflow: hidden;
 }
-.approval-card .a-title { font-size: 13px; font-weight: 600; }
-.approval-card .a-summary { font-size: 12px; color: var(--text-2); font-family: var(--font-mono); }
+.approval-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  width: 4px;
+  background: linear-gradient(180deg, var(--orange), var(--red));
+}
+.approval-card .a-title {
+  font-size: 13px; font-weight: 600;
+  display: flex; align-items: center; gap: 8px;
+}
+.approval-card .a-title .a-lock {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  background: var(--orange-soft);
+  color: var(--orange);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.approval-card .a-pulse {
+  width: 7px; height: 7px;
+  border-radius: 50%;
+  background: var(--orange);
+  margin-left: auto;
+  animation: pulse 1.4s infinite;
+}
+.approval-card .a-summary {
+  font-size: 12px; color: var(--text-2); font-family: var(--font-mono);
+  background: var(--bg-input);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin: 0;
+}
 .approval-actions { display: flex; gap: 8px; }
 .btn-primary {
   height: 30px;
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 500;
   padding: 0 14px;
@@ -654,7 +770,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .plan-step.done { color: var(--text-3); text-decoration: line-through; }
 .plan-step.done .ps-num { background: var(--teal-soft); color: var(--teal); }
-.plan-step.active .ps-num { background: var(--purple); color: #fff; }
+.plan-step.active .ps-num { background: var(--purple); color: var(--on-accent); }
 
 /* 正文 / 代码块 */
 .assistant-text { font-size: 14px; line-height: 1.65; color: var(--text-1); }
@@ -697,15 +813,21 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .code-body .st { color: var(--teal); }
 .code-body .diff-add { background: var(--teal-soft); color: var(--text-1); border-radius: 3px; padding: 0 2px; }
 
-/* 流式光标 */
+/* 流式光标：品牌蓝渐变流光条（呼吸发光） */
 .stream-cursor {
   display: inline-block;
-  width: 2px;
-  height: 14px;
-  background: var(--accent);
-  margin-left: 2px;
-  vertical-align: -2px;
-  animation: blink 0.9s steps(1) infinite;
+  width: 3px;
+  height: 15px;
+  margin-left: 3px;
+  vertical-align: -3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), #7aa2ff 55%, var(--teal));
+  box-shadow: 0 0 8px rgba(47, 99, 246, 0.55);
+  animation: cursorPulse 1s ease-in-out infinite;
+}
+@keyframes cursorPulse {
+  0%, 100% { opacity: 1; transform: scaleY(1); }
+  50% { opacity: 0.45; transform: scaleY(0.72); }
 }
 @keyframes blink { 50% { opacity: 0; } }
 
@@ -782,7 +904,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 36px; height: 32px;
   border-radius: 8px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 16px;
   font-weight: 700;
   display: flex; align-items: center; justify-content: center;
@@ -800,7 +922,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .cmd-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(11, 14, 19, 0.6);
+  background: var(--overlay);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -881,7 +1003,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #fff;
+  color: var(--on-accent);
   background: var(--accent);
   height: 20px;
   border-radius: 4px;
@@ -1127,7 +1249,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   height: 24px;
   border-radius: 5px;
   background: var(--teal);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 11px;
   font-weight: 700;
   padding: 0 10px;
@@ -1199,10 +1321,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   gap: 12px;
   font-size: 11px;
   font-family: var(--font-mono);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   flex-shrink: 0;
 }
-.viewer-status .vs-sep { width: 1px; height: 12px; background: rgba(11, 14, 19, 0.3); }
+.viewer-status .vs-sep { width: 1px; height: 12px; background: var(--on-teal); opacity: 0.3; }
 .viewer-status .vs-bold { font-weight: 700; }
 
 /* Git 面板 */
@@ -1226,7 +1348,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 22px; height: 18px;
   border-radius: 9px;
   background: var(--orange);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1318,7 +1440,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   height: 28px;
   border-radius: 6px;
   background: var(--teal);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 11px;
   font-weight: 700;
   padding: 0 14px;
@@ -1345,7 +1467,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .hero-label { font-size: 11px; font-weight: 700; letter-spacing: 1.5px; color: var(--text-3); }
 .hero-badge {
   background: var(--teal);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 10px;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1418,9 +1540,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-size: 10px;
   font-weight: 700;
 }
-.cc-badge.b1 { background: var(--purple); color: #fff; }
-.cc-badge.b2 { background: var(--teal); color: var(--bg-deep); }
-.cc-badge.b3 { background: var(--accent); color: #fff; }
+.cc-badge.b1 { background: var(--purple); color: var(--on-accent); }
+.cc-badge.b2 { background: var(--teal); color: var(--on-teal); }
+.cc-badge.b3 { background: var(--accent); color: var(--on-accent); }
 .cc-rate { font-size: 16px; font-weight: 700; font-family: var(--font-mono); }
 .cache-card.c1 .cc-rate { color: var(--purple); }
 .cache-card.c2 .cc-rate { color: var(--teal); }
@@ -1520,7 +1642,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .toggle {
   width: 36px; height: 20px;
   border-radius: 10px;
-  background: #3a4350;
+  background: var(--toggle-off);
   position: relative;
   cursor: pointer;
   transition: background 0.2s;
@@ -1533,7 +1655,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   left: 2px;
   width: 16px; height: 16px;
   border-radius: 50%;
-  background: #fff;
+  background: var(--toggle-knob);
   transition: left 0.2s;
 }
 .toggle.on { background: var(--teal); }
@@ -1645,7 +1767,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .btn-sm.ghost { background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-2); }
 .btn-sm.ghost:hover { color: var(--text-1); border-color: var(--text-3); }
-.btn-sm.primary { background: var(--accent); color: #fff; font-weight: 600; }
+.btn-sm.primary { background: var(--accent); color: var(--on-accent); font-weight: 600; }
 
 /* 技能详情 */
 .skill-detail-card {
@@ -1698,7 +1820,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: 22px; height: 16px;
   border-radius: 3px;
   background: var(--orange);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 9px;
   font-family: var(--font-mono);
   font-weight: 700;
@@ -1819,7 +1941,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   height: 32px;
   border-radius: 7px;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 12px;
   font-weight: 600;
   padding: 0 14px;
@@ -1830,7 +1952,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   height: 32px;
   border-radius: 7px;
   background: var(--teal);
-  color: var(--bg-deep);
+  color: var(--on-teal);
   font-size: 12px;
   font-weight: 700;
   padding: 0 16px;
@@ -1853,3 +1975,77 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 
 .badge { display: inline-flex; align-items: center; gap: 4px; }
+
+/* ============================================================
+   品牌空状态（新会话首页）· 羊 Logo × 蓝白
+   ============================================================ */
+.brand-hero {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 64px 24px 48px;
+  overflow: hidden;
+}
+.brand-hero::before {
+  content: '';
+  position: absolute;
+  top: -120px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 420px;
+  height: 420px;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--blue-soft) 0%, var(--purple-soft) 45%, transparent 70%);
+  pointer-events: none;
+}
+.brand-logo {
+  position: relative;
+  filter: drop-shadow(0 8px 24px rgba(47, 99, 246, 0.28));
+}
+.brand-title {
+  margin-top: 20px;
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  background: linear-gradient(90deg, var(--accent), var(--purple));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.brand-slogan {
+  margin-top: 8px;
+  font-size: 13px;
+  color: var(--text-3);
+  text-align: center;
+  line-height: 1.7;
+}
+.brand-kbd {
+  margin-top: 18px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  font-size: 12px;
+  color: var(--text-2);
+}
+.brand-kbd .bk {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--blue-soft);
+  border-radius: 5px;
+  padding: 1px 7px;
+}
+.brand-note {
+  margin-top: 10px;
+  font-size: 12px;
+  color: var(--orange);
+}
+
+/* 主题切换过渡（避免生硬跳变） */
+.theme-fade { transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease; }

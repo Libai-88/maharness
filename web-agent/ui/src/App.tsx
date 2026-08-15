@@ -11,7 +11,13 @@ import PluginsView from './components/PluginsView';
 import StatsView from './components/StatsView';
 import SettingsView from './components/SettingsView';
 import Menu from './components/Menu';
-import { IconClose } from './components/Icon';
+import { IconChevronDown, IconClose, IconPanel } from './components/Icon';
+
+export type Theme = 'dark' | 'light';
+
+function readTheme(): Theme {
+  try { return localStorage.getItem('maharness-theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; }
+}
 
 export default function App() {
   const [sessions, setSessions] = useState<Session[]>([]);
@@ -29,8 +35,15 @@ export default function App() {
   const [traceOpen, setTraceOpen] = useState(true);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
+  const [theme, setTheme] = useState<Theme>(readTheme);
 
   const abortRef = useRef<AbortController | null>(null);
+
+  // 主题：写 dataset + localStorage（首帧由 main.tsx 预置，避免闪烁）
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
+  }, [theme]);
 
   // 初始加载
   useEffect(() => { void loadAll(); }, []);
@@ -265,7 +278,7 @@ export default function App() {
             {activeTab === 'chat' && (
               <>
                 <Menu
-                  trigger={<><span className="mode-dot" style={{ background: modeColor }} />{modeLabel}<span className="chev">▾</span></>}
+                  trigger={<><span className="mode-dot" style={{ background: modeColor }} />{modeLabel}<IconChevronDown size={11} /></>}
                   items={modeItems}
                   selectedKey={currentSession?.mode ?? 'normal'}
                   onSelect={(k) => void setSessionMode(k)}
@@ -274,7 +287,7 @@ export default function App() {
                   triggerTitle="会话模式"
                 />
                 <Menu
-                  trigger={<>{modelLabel || '未选择模型'}<span className="chev">▾</span></>}
+                  trigger={<>{modelLabel || '未选择模型'}<IconChevronDown size={11} /></>}
                   items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
                   selectedKey={sel?.provider}
                   onSelect={(k) => void selectModel(k)}
@@ -289,7 +302,7 @@ export default function App() {
                   title="运行轨迹面板"
                   aria-label="运行轨迹面板"
                 >
-                  {traceOpen ? <IconClose size={14} /> : <span style={{ fontSize: 14 }}>≡</span>}
+                  {traceOpen ? <IconClose size={14} /> : <IconPanel size={15} />}
                 </button>
               </>
             )}
@@ -298,7 +311,7 @@ export default function App() {
         </header>
 
         {settingsOpen ? (
-          <SettingsView providers={providers} onChanged={refreshProviders} />
+          <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
         ) : activeTab === 'chat' ? (
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
             <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

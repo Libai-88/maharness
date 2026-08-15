@@ -1,6 +1,7 @@
 // ui/src/components/PluginsView.tsx —— 插件面板（Screen 4）：列表 + 详情 + 现场热加载指南
 import { useEffect, useState } from 'react';
 import type { PluginInfo } from '../types';
+import { IconClose } from './Icon';
 
 interface Props {
   plugins: PluginInfo[];
@@ -88,7 +89,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
       <aside className="manager-panel">
         <div className="manager-head">
           <span className="manager-title">插件详情</span>
-          <button className="manager-close" onClick={() => setSelected(null)}>×</button>
+          <button className="manager-close" onClick={() => setSelected(null)} aria-label="关闭详情"><IconClose size={13} /></button>
         </div>
         <div className="manager-body">
           {selected ? (

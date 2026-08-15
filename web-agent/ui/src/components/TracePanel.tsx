@@ -1,6 +1,7 @@
 // ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤 + 缓存/成本统计
 import { useState } from 'react';
 import type { TraceStep } from '../types';
+import { IconDownload, IconRefresh } from './Icon';
 
 interface Props {
   steps: TraceStep[];
@@ -49,8 +50,8 @@ export default function TracePanel({ steps, stats, onRefresh }: Props) {
           {stats && <span className="msg-tag">{filtered.length} 条</span>}
         </div>
         <div className="th-right" style={{ display: 'flex', gap: 4 }}>
-          <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}>↻</button>
-          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(filtered)} disabled={!steps.length}>⤓</button>
+          <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}><IconRefresh size={13} /></button>
+          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(filtered)} disabled={!steps.length}><IconDownload size={13} /></button>
         </div>
       </div>
 

@@ -2,18 +2,21 @@
 import { useEffect, useState } from 'react';
 import { providersApi, statsApi } from '../api';
 import type { ProviderForm, ProviderInfo, StatsInfo } from '../types';
+import type { Theme } from '../App';
 import SkillsView from './SkillsView';
 
 interface Props {
   providers: ProviderInfo[];
   onChanged: () => void;
+  theme: Theme;
+  onThemeChange: (t: Theme) => void;
 }
 
 type SettingTab = 'general' | 'providers' | 'context' | 'skills' | 'advanced';
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', priceIn: '', priceOut: '' };
 
-function ProvidersSection({ providers, onChanged }: Props) {
+function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[]; onChanged: () => void }) {
   const [editing, setEditing] = useState<ProviderInfo | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProviderForm>(EMPTY);
@@ -228,7 +231,7 @@ function ContextSection() {
   );
 }
 
-function GeneralSection() {
+function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
   return (
     <>
       <span className="page-title">通用</span>
@@ -236,8 +239,13 @@ function GeneralSection() {
       <div className="set-sec">
         <span className="ss-title">外观</span>
         <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">深色主题</span><span className="set-row-desc">VS Code Dark + Warp 强调色设计系统</span></div>
-          <button className="toggle on"><span className="knob" /></button>
+          <div className="set-row-l">
+            <span className="set-row-label">深色主题</span>
+            <span className="set-row-desc">{theme === 'dark' ? '深色模式（当前）· 终端风' : '蓝白浅色（当前）· 清爽风'}</span>
+          </div>
+          <button className={`toggle ${theme === 'dark' ? 'on' : ''}`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')} aria-label="切换深色主题">
+            <span className="knob" />
+          </button>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">界面语言</span><span className="set-row-desc">简体中文（默认）</span></div>
@@ -259,7 +267,7 @@ function GeneralSection() {
   );
 }
 
-export default function SettingsView({ providers, onChanged }: Props) {
+export default function SettingsView({ providers, onChanged, theme, onThemeChange }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
     { key: 'general', label: '通用' },
@@ -281,7 +289,7 @@ export default function SettingsView({ providers, onChanged }: Props) {
         ))}
       </div>
       <div className="settings-content">
-        {tab === 'general' && <GeneralSection />}
+        {tab === 'general' && <GeneralSection theme={theme} onThemeChange={onThemeChange} />}
         {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
         {tab === 'context' && <ContextSection />}
         {tab === 'skills' && <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><SkillsView /></div>}

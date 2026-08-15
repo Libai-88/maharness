@@ -91,19 +91,130 @@ export const IconLock = (p: IconProps) => (
   <Svg {...p}><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10 V7 a4 4 0 0 1 8 0 v3" /><circle cx="12" cy="15" r="1.5" /></Svg>
 );
 
-/** 羊（品牌）：极简羊头 */
+/** 羊（品牌）：极简羊头——弯角 + 卷毛 + 微笑 */
 export const IconSheep = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M8 9 C 5 7.5 5 4.5 7.5 3.5 C 9 4.5 9 6 8.5 7.5" />
-    <path d="M16 9 C 19 7.5 19 4.5 16.5 3.5 C 15 4.5 15 6 15.5 7.5" />
-    <circle cx="8.5" cy="11" r="2.6" />
-    <circle cx="15.5" cy="11" r="2.6" />
-    <circle cx="12" cy="15" r="5" />
-    <path d="M10 15 h1.5 l1 1.5 1.5 -2.5 1 1 h1.5" />
+    <path d="M8.5 10 C 5.5 8.5, 4.5 5, 7 3.8 C 8.8 3, 9.5 4.5, 9 6" />
+    <path d="M15.5 10 C 18.5 8.5, 19.5 5, 17 3.8 C 15.2 3, 14.5 4.5, 15 6" />
+    <circle cx="8.2" cy="11.5" r="2.8" />
+    <circle cx="15.8" cy="11.5" r="2.8" />
+    <circle cx="12" cy="15" r="5.4" />
+    <path d="M9.6 14.4 h.01 M14.4 14.4 h.01" strokeWidth="2.6" />
+    <path d="M10.2 16.8 q1.8 1.5 3.6 0" />
   </Svg>
 );
 
 /** 关闭：× */
 export const IconClose = (p: IconProps) => (
   <Svg {...p}><path d="M6 6 l12 12 M18 6 l-12 12" /></Svg>
+);
+
+/** 会话：对话气泡 */
+export const IconChat = (p: IconProps) => (
+  <Svg {...p}><path d="M4 5 h16 v11 h-9 l-4 3 v-3 h-3 Z" /><path d="M8.5 10.5 h.01 M12 10.5 h.01 M15.5 10.5 h.01" /></Svg>
+);
+
+/** 发送：纸飞机 */
+export const IconSend = (p: IconProps) => (
+  <Svg {...p}><path d="M20 4 L3 11 l7 2.5 L12.5 20 Z" /><path d="M10 13.5 L20 4" /></Svg>
+);
+
+/** 停止：方块 */
+export const IconStop = (p: IconProps) => (
+  <Svg {...p}><rect x="6" y="6" width="12" height="12" rx="2.5" /></Svg>
+);
+
+/** 复制：叠层矩形 */
+export const IconCopy = (p: IconProps) => (
+  <Svg {...p}><rect x="8" y="8" width="12" height="12" rx="2.5" /><path d="M16 8 V5 a2 2 0 0 0 -2 -2 H6 a2 2 0 0 0 -2 2 v8 a2 2 0 0 0 2 2 h2" /></Svg>
+);
+
+/** 刷新：循环箭头 */
+export const IconRefresh = (p: IconProps) => (
+  <Svg {...p}><path d="M20 12 a8 8 0 1 1 -2.34 -5.66" /><path d="M20 3 v4 h-4" /></Svg>
+);
+
+/** 下载：箭头入托盘 */
+export const IconDownload = (p: IconProps) => (
+  <Svg {...p}><path d="M12 4 v10 M8 10 l4 4 4 -4" /><path d="M4 18 h16" /></Svg>
+);
+
+/** 搜索：放大镜 */
+export const IconSearch = (p: IconProps) => (
+  <Svg {...p}><circle cx="11" cy="11" r="6.5" /><path d="M16 16 l5 5" /></Svg>
+);
+
+/** 加号 */
+export const IconPlus = (p: IconProps) => (
+  <Svg {...p}><path d="M12 5 v14 M5 12 h14" /></Svg>
+);
+
+/** 更多：水平三点 */
+export const IconMore = (p: IconProps) => (
+  <Svg {...p}><path d="M5 12 h.01 M12 12 h.01 M19 12 h.01" strokeWidth="3" /></Svg>
+);
+
+/** 终端：命令行提示符 */
+export const IconTerminal = (p: IconProps) => (
+  <Svg {...p}><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M7 9.5 l3 2.5 -3 2.5" /><path d="M13 14.5 h4" /></Svg>
+);
+
+/** 对勾 */
+export const IconCheck = (p: IconProps) => (
+  <Svg {...p}><path d="M4.5 12.5 l5 5 10 -11" /></Svg>
+);
+
+/** 警告：三角感叹号 */
+export const IconWarn = (p: IconProps) => (
+  <Svg {...p}><path d="M12 3.5 L22 20 H2 Z" /><path d="M12 10 v4.5" /><path d="M12 17.5 h.01" /></Svg>
+);
+
+/** 面板：分栏矩形（轨迹面板开关） */
+export const IconPanel = (p: IconProps) => (
+  <Svg {...p}><rect x="3" y="4.5" width="18" height="15" rx="2.5" /><path d="M15 4.5 v15" /></Svg>
+);
+
+/** 下箭头（chevron） */
+export const IconChevronDown = (p: IconProps) => (
+  <Svg {...p}><path d="M6 9.5 l6 6 6 -6" /></Svg>
+);
+
+/** 右箭头（chevron） */
+export const IconChevronRight = (p: IconProps) => (
+  <Svg {...p}><path d="M9.5 6 l6 6 -6 6" /></Svg>
+);
+
+/** 展开：对角箭头 */
+export const IconExpand = (p: IconProps) => (
+  <Svg {...p}><path d="M9 4 H4 v5" /><path d="M15 4 h5 v5" /><path d="M9 20 H4 v-5" /><path d="M15 20 h5 v-5" /></Svg>
+);
+
+/** 收缩：对角箭头 */
+export const IconShrink = (p: IconProps) => (
+  <Svg {...p}><path d="M9 9 H4 M9 9 V4" /><path d="M15 9 h5 M15 9 V4" /><path d="M9 15 H4 M9 15 v5" /><path d="M15 15 h5 M15 15 v5" /></Svg>
+);
+
+/** 同步：双向箭头 */
+export const IconSync = (p: IconProps) => (
+  <Svg {...p}><path d="M4 12 a8 8 0 0 1 14 -5" /><path d="M18 3 v4 h-4" /><path d="M20 12 a8 8 0 0 1 -14 5" /><path d="M6 21 v-4 h4" /></Svg>
+);
+
+/** Git 分支 */
+export const IconGitBranch = (p: IconProps) => (
+  <Svg {...p}><circle cx="6" cy="5.5" r="2.2" /><circle cx="6" cy="18.5" r="2.2" /><circle cx="17.5" cy="7" r="2.2" /><path d="M6 7.7 v8.6" /><path d="M17.5 9.2 c0 5 -5.5 3.5 -7.5 4.5" /></Svg>
+);
+
+/** 星芒：品牌装饰 */
+export const IconSpark = (p: IconProps) => (
+  <Svg {...p}><path d="M12 3 l1.8 5.2 L19 10 l-5.2 1.8 L12 17 l-1.8 -5.2 L5 10 l5.2 -1.8 Z" /><path d="M19 15.5 l0.9 2.6 2.6 0.9 -2.6 0.9 -0.9 2.6 -0.9 -2.6 -2.6 -0.9 2.6 -0.9 Z" /></Svg>
+);
+
+/** 工作区：盒子（文件页工作区标识） */
+export const IconBox = (p: IconProps) => (
+  <Svg {...p}><path d="M12 3 L20 7 v10 L12 21 L4 17 V7 Z" /><path d="M4 7 l8 4 8 -4" /><path d="M12 11 v10" /></Svg>
+);
+
+/** 文件：单页文档 */
+export const IconFileText = (p: IconProps) => (
+  <Svg {...p}><path d="M7 3 h7 l5 5 v13 a1 1 0 0 1 -1 1 H7 a1 1 0 0 1 -1 -1 V4 a1 1 0 0 1 1 -1 Z" /><path d="M14 3 v5 h5" /><path d="M9 12 h6 M9 15.5 h6" /></Svg>
 );
