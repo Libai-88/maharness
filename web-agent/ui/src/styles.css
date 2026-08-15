@@ -2012,6 +2012,22 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   gap: 8px;
 }
 .pd-manifest .pm-title { font-size: 10px; font-weight: 700; letter-spacing: 1.2px; color: var(--text-3); }
+
+/* 插件贡献的前端面板 */
+.plugin-panel-body {
+  font-size: 12px;
+  color: var(--text-2);
+  line-height: 1.8;
+}
+.plugin-panel-body code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--teal);
+}
 .pm-row { display: flex; justify-content: space-between; font-size: 11px; font-family: var(--font-mono); }
 .pm-row .k { color: var(--text-3); }
 .pm-row .v { color: var(--text-1); }

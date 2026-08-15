@@ -1,5 +1,6 @@
-// ui/src/components/PluginsView.tsx —— 插件面板（Screen 4）：列表 + 详情 + 现场热加载指南
+// ui/src/components/PluginsView.tsx —— 插件面板（Screen 4）：列表 + 详情 + 插件贡献的面板 + 现场热加载指南
 import { useEffect, useState } from 'react';
+import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
 import { IconClose } from './Icon';
@@ -10,6 +11,32 @@ interface Props {
 }
 
 const ICON_COLORS = ['#11d080', '#2f63f6', '#f0993e', '#a277ff', '#3a4350'];
+
+/** 插件贡献的前端面板（前端是插件的一部分：插件通过 api 能力提供 GET /panel → { title, html }） */
+function PluginPanel({ pluginId }: { pluginId: string }) {
+  const [panel, setPanel] = useState<{ title: string; html: string } | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setPanel(null);
+    setErr(null);
+    fetch(`/api/plugins/${pluginId}/panel`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => { if (alive && d?.html) setPanel(d); })
+      .catch(() => { if (alive) setErr('该插件未提供面板'); });
+    return () => { alive = false; };
+  }, [pluginId]);
+
+  if (err) return null;
+  if (!panel) return <div className="pd-manifest"><span className="pm-title">PLUGIN PANEL</span><span className="sd-desc" style={{ color: 'var(--text-3)' }}>加载面板…</span></div>;
+  return (
+    <div className="pd-manifest">
+      <span className="pm-title">PLUGIN PANEL · {panel.title}</span>
+      <div className="plugin-panel-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} />
+    </div>
+  );
+}
 
 export default function PluginsView({ plugins, onAction }: Props) {
   const [selected, setSelected] = useState<PluginInfo | null>(null);
@@ -120,6 +147,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
                 <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? 'true ✓' : 'false'}</span></div>
               </div>
+              <PluginPanel pluginId={selected.id} />
             </>
           ) : (
             <div className="empty-state">← 选择插件查看详情</div>

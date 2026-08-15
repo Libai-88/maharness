@@ -50,6 +50,19 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   const app = express();
   registerRoutes(app, kernel, store);
 
+  // ---- 插件 API 能力：前端是插件的一部分的数据通道 ----
+  // 动态分发（每次请求取当前插件实例）——插件热重载后新路由立即生效，无需重启。
+  // 路径约定：/api/plugins/<pluginId>/<mount>/...；插件提供的 GET /panel 会渲染为前端插件面板。
+  app.use('/api/plugins/:pluginId', (req, res, next) => {
+    const inst = kernel.plugins.get(req.params.pluginId);
+    const api = inst?.caps.find((c) => c.kind === 'api');
+    if (!inst || !api || api.kind !== 'api') {
+      return res.status(404).json({ error: '插件不存在或未提供 API 能力' });
+    }
+    const router = api.api.router as unknown as (req: express.Request, res: express.Response, next: express.NextFunction) => void;
+    router(req, res, next);
+  });
+
   // 兜底错误处理：handler 异常返回 500 而非进程崩溃（安装/卸载/文件操作等异步路径）
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('[server] 请求处理异常:', err instanceof Error ? err.message : err);

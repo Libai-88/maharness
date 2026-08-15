@@ -117,8 +117,34 @@ export default {
           '3. 创建后立即用 plugin_status 确认加载状态且 caps 非空；若 error 或 caps 为空，读取错误信息与插件文件，修复后保存（目录监听会自动重载），再验证；',
           '4. 插件目录名必须等于 id（小写字母/数字/连字符）；',
           '5. 新插件注册的工具在下一轮对话生效（本轮不能立即调用），完成后告知用户新能力已就绪；',
-          '6. 绝不修改 kernel/ 与 core/ 目录（内部核心保持不变），自我扩展只写 plugins/ 现场目录。',
+          '6. 修改边界：agent 运行时核心（kernel/ 与 core/chat 的执行循环）不可修改；core/ 其余内置插件与 ui/ 前端同属插件体系，可按需修改（core/ 改动经服务重启生效，ui/ 改动经前端构建生效）。',
         ].join('\n'),
+      },
+    });
+
+    // ---- API 能力：贡献前端面板（前端是插件的一部分——插件可以定义自己的 UI 面板） ----
+    ctx.register({
+      kind: 'api',
+      api: {
+        mount: 'panel',
+        router: ((req: { path?: string }, res: { json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void } }) => {
+          if (!req.path || req.path === '/' || req.path === '/panel') {
+            res.json({
+              title: '自我扩展 · 万物皆插件',
+              html: `<div style="line-height:1.9">
+                <p><b>maharness 积木哲学</b>：除了 agent 运行时核心，一切皆插件——包括你正在看的这个面板，就是由 self-extend 插件通过 <code>api</code> 能力提供的。</p>
+                <ul style="padding-left:18px">
+                  <li>需要新能力 → 用 <code>create_plugin</code> 现场编写插件</li>
+                  <li>插件写在 <code>plugins/&lt;id&gt;/</code>，保存即热重载</li>
+                  <li>插件可以注册工具、命令、人设、上下文，甚至 REST API 与前端面板</li>
+                  <li>修改边界：内核不可动，其余皆可塑</li>
+                </ul>
+              </div>`,
+            });
+          } else {
+            res.status(404).json({ error: '未知端点' });
+          }
+        }) as never,
       },
     });
 

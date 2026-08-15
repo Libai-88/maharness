@@ -167,6 +167,18 @@ export class PluginLoader {
     return out;
   }
 
+  /** 插件 API 清单（含所属插件 id）：server 层按 /api/plugins/<id>/<mount> 动态分发 */
+  apiRoutes(): { pluginId: string; mount: string; router: unknown }[] {
+    const out: { pluginId: string; mount: string; router: unknown }[] = [];
+    for (const inst of this.registry.values()) {
+      if (inst.state !== 'started') continue;
+      for (const cap of inst.caps) {
+        if (cap.kind === 'api') out.push({ pluginId: inst.manifest.id, mount: cap.api.mount, router: cap.api.router });
+      }
+    }
+    return out;
+  }
+
   async enable(id: string): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);

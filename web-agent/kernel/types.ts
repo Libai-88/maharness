@@ -121,7 +121,19 @@ export type Capability =
   | { kind: 'provider'; provider: ProviderDef }
   | { kind: 'service'; service: ServiceDef }
   | { kind: 'persona'; persona: PersonaDef }
-  | { kind: 'context'; context: ContextDef };
+  | { kind: 'context'; context: ContextDef }
+  | { kind: 'api'; api: ApiDef };
+
+/**
+ * API 能力：插件向 Web 前端贡献 REST 端点（「前端是插件的一部分」的数据通道）。
+ * 挂载到 /api/plugins/<pluginId>/<mount>/...，热重载后动态取当前实例（无需重启）。
+ * 约定：提供 GET /panel 返回 { title, html } 时，前端插件详情页自动渲染为插件面板。
+ */
+export interface ApiDef {
+  mount: string;
+  /** server 层断言为 express 中间件 (req, res, next)；插件侧可用任意兼容签名 */
+  router: (req: never, res: never, next?: never) => void;
+}
 
 /** 服务能力：插件对外暴露的实例（如 chat 服务），server 层通过 capability 获取，不依赖插件内部实现 */
 export interface ServiceDef {
