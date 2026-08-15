@@ -62,6 +62,7 @@ export function paths(rootDir: string) {
     traces: join(rootDir, 'data', 'traces'),
     configFile: join(rootDir, 'config.json'),
     dbFile: join(rootDir, 'data', 'agent.db'),
+    cacheFile: join(rootDir, 'data', 'cache.json'),
   };
 }
 

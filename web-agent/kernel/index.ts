@@ -38,7 +38,7 @@ export class Kernel {
     this.cache = new Cache(undefined, {
       l1TextThreshold: this.config.get<number>('cache.l1Threshold', 0.58),
       l2TtlMs: this.config.get<number>('cache.l2TtlMin', 30) * 60_000,
-    });
+    }, this.paths.cacheFile);
     this.budget = new Budget();
     this.plugins = new PluginLoader(
       this.bus,
@@ -60,6 +60,7 @@ export class Kernel {
 
   async stop(): Promise<void> {
     await this.plugins.dispose();
+    this.cache.save(); // 缓存落盘（跨重启保留命中）
     this.bus.emit(EventBus.event('kernel.stopped', {}));
   }
 }
