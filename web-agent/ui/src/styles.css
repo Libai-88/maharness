@@ -472,3 +472,11 @@ code { font-family: var(--mono); background: var(--bg); padding: 1px 5px; border
   white-space: pre-wrap; word-break: break-all; max-height: 100px; overflow-y: auto;
   color: var(--muted);
 }
+
+/* 轨迹过滤 */
+.trace-filter { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.trace-filter select {
+  padding: 3px 8px; border: 1px solid var(--border); border-radius: 6px;
+  background: var(--panel); font-size: 11px; color: var(--text);
+}
+.trace-filter-count { font-size: 11px; color: var(--muted); }

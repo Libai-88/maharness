@@ -58,9 +58,9 @@
 | 3 | **能力组合**：插件间能否 1+1>2？ | 组合发生在 LLM 编排层：工具按能力语义描述，任意新插件注册即进入组合空间 | 工具描述互相引用 + 输出结构化（下游直接消费）；内置技能 `capability-composition`（组合范式：list_dir→read_file→总结、子代理审查→read_file 核验等）；plugin-authoring 契约含组合设计章节；实测新旧工具混合成链（read_file→count_words） |
 | 4 | **上下文工程**：插件怎么喂信息？ | 插件不应无脑塞 context；声明式 context provider + harness 按任务动态组装（预算控制） | 新能力类型 `context`：`contentFn(history)` 按需返回内容，weight 排序注入，总预算 1500 tokens 超限丢弃，每次注入记 Trace（context-inject）；memory 插件实战落地：普通记忆按任务 bigram 相关检索（无关零注入），失败教训经 before_llm 钩子固定注入（不重复犯错优先） |
 | 5 | **生命周期**：插件什么时候出现？ | 动态 capability loading（类似 OS 加载驱动）：按需激活、无关隔离 | manifest `enabled=false`/`lazy=true` 声明生效（注册可见但能力不进上下文）；`enable_plugin`/`disable_plugin` 工具（LLM 按需加载驱动，审批保护）；plugin_status 输出语义化 `active` 标记；watch 热加载/卸载同样遵守声明；实测 lazy 插件激活前后能力可见性切换 |
-| 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】，运行时 needsApproval 挂起审批卡片 |
-| 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板 + 统计面板 |
-| 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，失败以结构化信息回传 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；工具失败返回 `{ok:false,error}` 给 LLM + 失败教训自动入记忆（下次会话不再犯） |
+| 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】；**审批全程入 Trace**（approval 步骤：挂起/批准/拒绝可审计——"权力"的使用必须可追溯） |
+| 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板（**类型过滤**：LLM/工具/缓存/系统）+ `/api/trace` 过滤查询（type/name/limit）+ 统计面板 |
+| 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，能力级备选路径 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；**provider failover**：主 provider 重试仍失败自动切换备用 provider（failover 入 Trace，LLM 无感）；工具失败返回 `{ok:false,error}` + 失败教训自动入记忆 |
 | 9 | **经济性**：LLM 知道行动有成本 | 管理"认知资源"：每步动作标成本，简单问题不召唤重工具 | costHint 元数据注入描述（run_subagent 标注【成本:high】"简单问题不要召唤"）；L1 缓存省 LLM 调用；每消息成本显示；统计面板总成本 |
 | 10 | **自适应性**：harness 能否改变 agent 工作方式？ | 根据历史表现调整运行策略（adaptive harness → skill graph） | 连续 3 次工具失败 → 注入自适应提示（停止重试/拆任务/委派子代理）；失败教训自动记忆形成"任务类型→教训"知识；goal-plan 提供工作流状态机 |
 | 11 | **可替换性**：实现可换、语义不变 | 插件接口抽象能力语义而非具体实现——LLM 是唯一不需要重新学习世界的部分 | 工具接口=能力语义（remember/recall 不关心存储实现，web_search 不关心搜索引擎）；L2 缓存键带版本命名空间，实现升级旧缓存自动失效 |

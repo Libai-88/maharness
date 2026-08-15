@@ -50,6 +50,8 @@ export interface RunOptions {
   traceId: string;
   signal?: AbortSignal;
   maxTurns?: number;
+  /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */
+  fallbackProviders?: ProviderDef[];
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -221,6 +223,11 @@ export class AgentRunner {
       }
 
       // ---- 决策：LLM 调用（流式） ----
+      // 失败恢复（内核拯救 LLM）：provider 链 = 主 provider + 备用 providers。
+      // 每个 provider 瞬态失败自动重试 1 次，仍失败则换下一个备用（如主服务宕机/限流）。
+      // LLM 作为用户只需要知道"系统换了备用路径"，不需要面对 error 500 胡乱思考。
+      const providerChain = [provider, ...(opts.fallbackProviders ?? [])];
+      let activeProvider: ProviderDef = provider;
       const step = this.kernel.trace.startStep({
         traceId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
       });
@@ -228,8 +235,6 @@ export class AgentRunner {
       let reasoning = '';
       let usage: { input: number; output: number } | undefined;
       let collected: ToolCall[] = [];
-      // 失败恢复（内核拯救 LLM）：LLM 调用瞬态失败（provider 抖动/网络）自动重试 1 次，
-      // LLM 作为用户不需要面对 error 500 并开始胡乱思考
       const handleChunk = (chunk: LLMChunk): { type: 'delta' | 'reasoning'; text: string } | null => {
         if (chunk.type === 'delta') {
           text += chunk.text;
@@ -250,18 +255,29 @@ export class AgentRunner {
           if (shared > 0) this.kernel.cache.recordPrefixRepeat(shared);
         }
         lastHistory = llmCtx.history.map((m) => ({ role: m.role, content: m.content }));
-        let attempts = 0;
-        while (true) {
-          try {
-            for await (const chunk of provider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
-              const ev = handleChunk(chunk);
-              if (ev) yield ev;
+        let lastErr: unknown;
+        for (let pi = 0; pi < providerChain.length; pi++) {
+          activeProvider = providerChain[pi];
+          let ok = false;
+          for (let attempts = 0; attempts < 2 && !ok; attempts++) {
+            try {
+              for await (const chunk of activeProvider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
+                const ev = handleChunk(chunk);
+                if (ev) yield ev;
+              }
+              ok = true; // 成功结束
+            } catch (err) {
+              lastErr = err;
+              if (attempts === 0) await new Promise((r) => setTimeout(r, 1200)); // 瞬态恢复缓冲
             }
-            break; // 成功结束
-          } catch (err) {
-            attempts++;
-            if (attempts >= 2) throw err; // 第二次失败：抛给外层终止本轮
-            await new Promise((r) => setTimeout(r, 1200)); // 瞬态恢复缓冲
+          }
+          if (ok) break;
+          if (pi < providerChain.length - 1) {
+            // 备用路径：记录切换（可观察），继续下一个 provider
+            this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'failover' })
+              .finish({ outputSummary: `${activeProvider.id} 连续失败，切换备用 ${providerChain[pi + 1].id}` });
+          } else {
+            throw lastErr; // 全部 provider 失败：抛给外层终止本轮
           }
         }
       } catch (err) {
@@ -275,7 +291,7 @@ export class AgentRunner {
       const tOut = usage?.output ?? 0;
       totalIn += tIn;
       totalOut += tOut;
-      const cost = estimateCost(provider, tIn, tOut);
+      const cost = estimateCost(activeProvider, tIn, tOut);
       totalCost += cost;
       step.finish({
         outputSummary: text.slice(0, 200),
@@ -348,8 +364,13 @@ export class AgentRunner {
         }
 
         // ---- 审批挂起：工具请求用户审批时，执行器暂停等待（安全机制，不可绕过） ----
+        // 审批全程入 Trace（approval 步骤）：挂起/批准/拒绝可追溯——"权力"的使用必须可审计
         if (!result.ok && result.needsApproval) {
           const approvalId = randomUUID().slice(0, 8);
+          const aStep = this.kernel.trace.startStep({
+            traceId, turn, type: 'system', name: 'approval',
+            inputSummary: `等待用户审批: ${tool.name} ${summarize(args)}`,
+          });
           yield {
             type: 'approval_required',
             approvalId,
@@ -362,9 +383,11 @@ export class AgentRunner {
             setTimeout(() => { if (this.pendingApprovals.delete(approvalId)) resolve(false); }, APPROVAL_TIMEOUT);
           });
           if (!approved) {
+            aStep.fail('用户拒绝或审批超时');
             tStep.cancel();
             result = { ok: false, error: '用户拒绝了该操作（审批未通过）' };
           } else {
+            aStep.finish({ outputSummary: `已批准: ${tool.name}` });
             // 已批准：带 approved 标记重试执行
             try {
               result = await withToolTimeout(tool.handler(args, {

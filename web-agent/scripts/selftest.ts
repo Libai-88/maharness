@@ -364,5 +364,35 @@ export default {
   kernel.config.set('agent.toolTimeoutMs', 30_000); // 恢复默认
 }
 
+// ---- 失败恢复：provider failover（主 provider 失败 → 备用 provider 接管） ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const failProvider = {
+    id: 'broken', label: '宕机', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() { throw new Error('上游 500'); yield { type: 'done' as const }; },
+  };
+  const backupProvider = {
+    id: 'backup', label: '备用', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() { yield { type: 'delta' as const, text: '备用路径成功' }; yield { type: 'done' as const }; },
+  };
+  let answer = '';
+  for await (const ev of runner.run({
+    provider: failProvider, model: 'm', messages: [{ role: 'user', content: 'hi' }],
+    traceId: `fo-${Date.now()}`, fallbackProviders: [backupProvider],
+  })) {
+    if (ev.type === 'delta') answer += ev.text;
+  }
+  const failoverSteps = kernel.trace.query(undefined, { name: 'failover' });
+  console.log('[failover] 主 provider 失败自动切换备用:', answer.includes('备用路径') ? '✓' : '✗',
+    `| 回答: ${answer.slice(0, 20)} | failover 步骤: ${failoverSteps.length}`);
+
+  // 可观察性：trace 按类型过滤
+  const llmSteps = kernel.trace.query(undefined, { type: 'llm_call' });
+  const sysSteps = kernel.trace.query(undefined, { type: 'system' });
+  console.log('[trace] 类型过滤（llm_call/system）:', llmSteps.length > 0 && sysSteps.length > 0 ? '✓' : '✗',
+    `(${llmSteps.length}/${sysSteps.length})`);
+}
+
 await kernel.stop();
 console.log('selftest done');

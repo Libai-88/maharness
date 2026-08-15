@@ -493,6 +493,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       for await (const ev of chat.runner.run({
         provider, model: resolvedModel, messages: ctxHistory, traceId,
         signal: ac.signal, systemPrompt, tools: toolsOverride,
+        // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
+        fallbackProviders: chat.providers.filter((p) => p.id !== provider.id),
       })) {
         if (ev.type === 'delta') {
           assistantText += ev.text;
@@ -658,7 +660,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
   // ---------- Trace 观测 ----------
   app.get('/api/trace', (req, res) => {
     const traceId = req.query.trace_id ? String(req.query.trace_id) : undefined;
-    res.json({ steps: kernel.trace.query(traceId) });
+    const type = req.query.type ? String(req.query.type) : undefined;
+    const name = req.query.name ? String(req.query.name) : undefined;
+    const limit = req.query.limit ? Number(req.query.limit) : undefined;
+    res.json({ steps: kernel.trace.query(traceId, { type, name, limit }) });
   });
 
   app.get('/api/trace/stats', (_req, res) => {

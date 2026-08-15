@@ -1,4 +1,5 @@
-// ui/src/components/TracePanel.tsx —— 运行轨迹面板（黑箱解药）
+// ui/src/components/TracePanel.tsx —— 运行轨迹面板（黑箱解药：可过滤、可追溯）
+import { useState } from 'react';
 import type { TraceStep } from '../types';
 
 interface Props {
@@ -15,6 +16,8 @@ const TYPE_LABEL: Record<string, string> = {
 };
 
 export default function TracePanel({ steps, stats }: Props) {
+  const [typeFilter, setTypeFilter] = useState('');
+  const filtered = typeFilter ? steps.filter((s) => s.type === typeFilter) : steps;
   return (
     <div className="trace-body">
       {stats && (
@@ -26,9 +29,16 @@ export default function TracePanel({ steps, stats }: Props) {
           <div>L2 命中 <b>{stats.cache.l2Hits}</b> / L1 {stats.l1Enabled ? '开' : '关'}</div>
         </div>
       )}
+      <div className="trace-filter">
+        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} title="按步骤类型过滤">
+          <option value="">全部步骤</option>
+          {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+        </select>
+        <span className="trace-filter-count">{filtered.length} 条</span>
+      </div>
       <div className="trace-list">
         {steps.length === 0 && <div className="empty-hint">暂无运行记录——发送消息后这里会实时显示每一步动作</div>}
-        {[...steps].reverse().map((s) => (
+        {[...filtered].reverse().map((s) => (
           <div key={s.id} className={`trace-step ${s.status}`}>
             <div className="trace-head">
               <span className={`trace-type ${s.type}`}>{TYPE_LABEL[s.type] ?? s.type}</span>
