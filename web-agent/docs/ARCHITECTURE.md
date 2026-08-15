@@ -56,8 +56,8 @@
 | 1 | **能力边界**：harness 替 LLM 决定什么？ | 内核只负责让 LLM 持续"感知-决策-行动-反馈"循环；一切具体能力（文件/记忆/搜索/计划/子代理）都是插件 | 内核 5 大件（bus/loader/config/trace/cache）不持有任何业务能力；对话本身是插件 |
 | 2 | **能力发现**：LLM 怎么知道自己能干什么？ | 需要动态 capabilities registry：能力/用途/成本/风险/审批/限制，LLM 直接读取而非猜测 | ToolDef 结构化元数据（risk/costHint/approval/limits/**output**）→ 描述自动打【风险/成本/需审批】标签 + **输出格式说明**注入 LLM；`GET /api/capabilities` 注册表人类可查；实测 LLM 零调用准确列出 4 个高风险工具、准确复述 read_file 返回结构（含截断语义） |
 | 3 | **能力组合**：插件间能否 1+1>2？ | 组合发生在 LLM 编排层：工具按能力语义描述，任意新插件注册即进入组合空间 | 工具描述互相引用 + 输出结构化（下游直接消费）；内置技能 `capability-composition`（组合范式：list_dir→read_file→总结、子代理审查→read_file 核验等）；plugin-authoring 契约含组合设计章节；实测新旧工具混合成链（read_file→count_words） |
-| 4 | **上下文工程**：插件怎么喂信息？ | 插件不应无脑塞 context；声明式 context provider + harness 按任务动态组装（预算控制） | 新能力类型 `context`：`contentFn(history)` 按需返回内容，weight 排序注入，总预算 1500 tokens 超限丢弃；与 before_llm 命令式钩子并存 |
-| 5 | **生命周期**：插件什么时候出现？ | 动态 capability loading（类似 OS 加载驱动）：按需激活、无关隔离 | plugin.json 启停 + 网页端面板一键 enable/disable + 目录 watch 热加载/卸载；core 插件随产品分发不热重载（稳定性） |
+| 4 | **上下文工程**：插件怎么喂信息？ | 插件不应无脑塞 context；声明式 context provider + harness 按任务动态组装（预算控制） | 新能力类型 `context`：`contentFn(history)` 按需返回内容，weight 排序注入，总预算 1500 tokens 超限丢弃，每次注入记 Trace（context-inject）；memory 插件实战落地：普通记忆按任务 bigram 相关检索（无关零注入），失败教训经 before_llm 钩子固定注入（不重复犯错优先） |
+| 5 | **生命周期**：插件什么时候出现？ | 动态 capability loading（类似 OS 加载驱动）：按需激活、无关隔离 | manifest `enabled=false`/`lazy=true` 声明生效（注册可见但能力不进上下文）；`enable_plugin`/`disable_plugin` 工具（LLM 按需加载驱动，审批保护）；plugin_status 输出语义化 `active` 标记；watch 热加载/卸载同样遵守声明；实测 lazy 插件激活前后能力可见性切换 |
 | 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】，运行时 needsApproval 挂起审批卡片 |
 | 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板 + 统计面板 |
 | 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，失败以结构化信息回传 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；工具失败返回 `{ok:false,error}` 给 LLM + 失败教训自动入记忆（下次会话不再犯） |

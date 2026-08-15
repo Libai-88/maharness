@@ -163,8 +163,9 @@ export class AgentRunner {
       await this.emitHook('agent.before_llm', llmCtx);
 
       // ---- Context Provider 注入（上下文工程）：插件按需提供上下文 ----
-      // 与 before_llm 钩子并存：钩子 = 命令式（memory 注入），context = 声明式。
-      // 全部追加到 history 末尾（前缀稳定，不破坏 L3）；总预算控制，超限丢弃低权重。
+      // 与 before_llm 钩子并存：钩子 = 命令式（失败教训注入），context = 声明式。
+      // 全部追加到 history 末尾（前缀稳定，不破坏 L3）；总预算控制，超限丢弃低权重；
+      // 每次注入记入 Trace（context-inject），可观察"谁喂了什么给 LLM"。
       if (turn === 0) {
         const ctxProviders = this.kernel.plugins.capabilities('context')
           .map((c) => c.context)
@@ -178,6 +179,8 @@ export class AgentRunner {
             if (ctxTokens + t > CONTEXT_PROVIDER_BUDGET) continue;
             ctxTokens += t;
             llmCtx.history.push({ role: 'system', content });
+            const cStep = this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'context-inject' });
+            cStep.finish({ outputSummary: `${cp.id} 注入 ${t} tokens${cp.description ? `（${cp.description.slice(0, 40)}）` : ''}` });
           } catch { /* context provider 自身异常不影响主循环 */ }
         }
       }
@@ -188,7 +191,9 @@ export class AgentRunner {
       // 长度门槛（≥8 字符）："继续/总结一下"等短问题不参与缓存，避免跨上下文误命中。
       // 排除 before_llm 钩子注入的记忆消息（【长期记忆】）。
       // promptKey = systemPrompt 指纹：LLM 输出依赖完整输入，人设/插件规则不同则隔离缓存空间。
-      const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】'));
+      // 排除 before_llm 钩子注入的记忆/教训消息（【长期记忆】/【失败教训】），避免被当作"问题"
+      const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content
+        && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
       const lastUser = realUsers[realUsers.length - 1];
       const q = lastUser?.content ?? '';
       if (turn === 0 && q.length >= 8 && !llmCtx.history.some((m) => m.role === 'tool')) {

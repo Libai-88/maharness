@@ -96,14 +96,34 @@ if (rf && recall && forget) {
   console.log('[memory] remember+recall:', (q1.data as { count: number }).count >= 1 ? '✓' : '✗');
 
   // before_llm 钩子注入验证（模拟 agent 循环发布的钩子事件）
+  // 上下文工程：普通记忆走 context provider（按任务相关注入），钩子只注入失败教训
+  // 先清理环境中可能残留的自动教训，保证"零注入"断言成立
+  const autoBefore = await recall.handler({ query: '失败教训' }, tctx());
+  for (const f of (autoBefore.data as { facts: { id: string }[] }).facts) await forget.handler({ id: f.id }, tctx());
   const history = [{ role: 'system', content: 's' }, { role: 'user', content: 'u' }];
   await kernel.bus.emitAsync({
     type: 'agent.before_llm',
     data: { traceId: 't', turn: 0, model: 'm', history, systemPrompt: 's', tools: [], scratchpad: {} },
     ts: Date.now(),
   });
-  const injected = history.length === 3 && String(history[2].content).includes('长期记忆');
-  console.log('[memory] before_llm 注入:', injected ? '✓' : '✗');
+  const noLessonInjected = history.length === 2; // 无失败教训时不注入任何记忆（零成本）
+  console.log('[memory] 无教训时零注入:', noLessonInjected ? '✓' : '✗');
+
+  // context provider 按任务检索：模拟一次工具失败（生成教训），再模拟 LLM 循环的
+  // context 注入路径——教训应被 before_llm 钩子注入，普通记忆按任务相关才注入
+  await kernel.bus.emitAsync({
+    type: 'agent.after_tool',
+    data: { tool: { name: 'read_file' }, result: { ok: false, error: '文件不存在: /no-such-file.txt' } },
+    ts: Date.now(),
+  });
+  const history2 = [{ role: 'system', content: 's' }, { role: 'user', content: '读取 no-such-file.txt 内容' }];
+  await kernel.bus.emitAsync({
+    type: 'agent.before_llm',
+    data: { traceId: 't', turn: 0, model: 'm', history: history2, systemPrompt: 's', tools: [], scratchpad: {} },
+    ts: Date.now(),
+  });
+  const lessonInjected = history2.length === 3 && String(history2[2].content).includes('失败教训');
+  console.log('[memory] 失败教训钩子注入:', lessonInjected ? '✓' : '✗');
   await cleanSelftest();
   const q3 = await recall.handler({ query: 'selftest' }, tctx());
   console.log('[memory] 清理完成:', (q3.data as { count: number }).count === 0 ? '✓' : '✗');
@@ -185,6 +205,37 @@ const rf2 = tools.find((t) => t.name === 'read_file');
 const rfOutput = rf2 ? annotateToolDef(rf2).description.includes('输出格式') : false;
 console.log('[capabilities] 输出格式显式化:', outputTag && rfOutput ? '✓' : '✗',
   `run_subagent=${outputTag} read_file=${rfOutput}`);
+
+// ---- 生命周期：lazy 插件（dynamic capability loading，类似 OS 加载驱动） ----
+{
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const dir = join(rootDir, 'plugins', 'tmp-lazy');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-lazy', name: '惰性测试', version: '0.1.0', entry: 'index.ts', lazy: true }));
+  writeFileSync(join(dir, 'index.ts'), `
+import type { Plugin } from '../../kernel/types';
+export default {
+  id: 'tmp-lazy', name: '惰性测试', version: '0.1.0',
+  onLoad(ctx) {
+    ctx.register({ kind: 'tool', tool: { name: 'lazy_probe', risk: 'low', costHint: 'low', description: '惰性插件探针',
+      parameters: { type: 'object', properties: {} },
+      async handler() { return { ok: true, data: { lazy: true } }; } } });
+  },
+} satisfies Plugin;
+`);
+  await new Promise((r) => setTimeout(r, 1200)); // 等热扫描
+  const before = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
+  console.log('[lifecycle] lazy 插件默认不加载（能力不进上下文）:', !before ? '✓' : '✗');
+  await kernel.plugins.enable('tmp-lazy');
+  const after = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
+  console.log('[lifecycle] enable_plugin 按需激活:', after ? '✓' : '✗');
+  await kernel.plugins.disable('tmp-lazy');
+  const disabled = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
+  console.log('[lifecycle] disable_plugin 能力卸载:', !disabled ? '✓' : '✗');
+  rmSync(dir, { recursive: true, force: true });
+  await new Promise((r) => setTimeout(r, 1200));
+}
 
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
 {

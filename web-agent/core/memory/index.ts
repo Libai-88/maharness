@@ -1,8 +1,10 @@
 /**
  * core/memory/index.ts —— 长期记忆插件
- * 钩子管线（agent.before_llm）的首个实战消费者：
- *   每轮对话开始前，把最近记忆作为一条 user 消息追加到 history 末尾注入 LLM。
- *   追加在末尾 = 不动 system prompt 与历史前缀 → 不破坏 L3 provider KV 缓存命中。
+ * 上下文工程（context provider 的实战消费者）：
+ *   普通记忆 = context provider：按当前任务动态组装——contentFn 用最后
+ *   user 消息与记忆做字符 bigram 相关匹配，只注入相关记忆（无关记忆零成本）；
+ *   失败教训 = before_llm 钩子：固定注入最近几条（"不重复犯错"优先，任何任务都可能相关）。
+ *   注入均追加到 history 末尾 → 不动前缀 → 不破坏 L3 provider KV 缓存命中。
  * 持久化：data/memory.json（facts 列表，上限 200 条，最旧淘汰；重启不丢）。
  * 工具：remember_fact / recall_facts / forget_fact。
  */
@@ -10,6 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
+import { bigramSet } from '../../kernel/cache';
 import type { AgentHookCtx } from '../chat/agent';
 import type { Plugin } from '../../kernel/types';
 
@@ -18,9 +21,19 @@ const dataDir = join(rootDir, 'data');
 const memoryFile = join(dataDir, 'memory.json');
 
 const MAX_FACTS = 200;
-const INJECT_COUNT = 5;       // 每轮注入最近 N 条记忆
+const LESSON_COUNT = 3;       // 失败教训固定注入条数（不重复犯错优先）
+const RELATED_BIGRAM_MIN = 3; // 记忆与当前任务共享 ≥3 个字符 bigram 视为相关
 
 interface Fact { id: string; text: string; ts: number }
+
+/** 记忆与任务相关性：字符 bigram 重叠数（与 L1 语义缓存同源思想） */
+function relatedToTask(task: string, factText: string): boolean {
+  const tb = bigramSet(task);
+  const fb = bigramSet(factText);
+  let inter = 0;
+  for (const x of tb) if (fb.has(x)) inter++;
+  return inter >= RELATED_BIGRAM_MIN;
+}
 
 /** 加载/保存记忆（同步、容错） */
 function loadFacts(): Fact[] {
@@ -54,17 +67,43 @@ export default {
       return f;
     };
 
-    // ---- 钩子：每轮 LLM 调用前注入记忆（追加到 history 末尾，保持前缀稳定） ----
+    // ---- 钩子：失败教训注入（before_llm，追加到末尾保持前缀稳定） ----
+    // 教训任何任务都可能相关（不重复犯错优先），固定注入最近几条；
+    // 普通记忆走下方 context provider（按任务动态组装）。
     ctx.bus.on('agent.before_llm', (e) => {
       const h = e.data as AgentHookCtx;
       if (!h || !Array.isArray(h.history) || h.scratchpad.memoryInjected) return;
-      if (facts.length === 0) return;
-      const recent = facts.slice(-INJECT_COUNT).reverse();
+      const lessons = facts.filter((f) => f.text.startsWith('【自动】')).slice(-LESSON_COUNT).reverse();
+      if (lessons.length === 0) return;
       h.history.push({
         role: 'user',
-        content: `【长期记忆】（来自之前会话，供参考）\n${recent.map((f) => `- ${f.text}`).join('\n')}`,
+        content: `【失败教训】（来自之前会话，避免重复犯错）\n${lessons.map((f) => `- ${f.text}`).join('\n')}`,
       });
       h.scratchpad.memoryInjected = true;
+    });
+
+    // ---- Context Provider：普通记忆按任务动态组装（上下文工程） ----
+    // contentFn 用最后真实 user 消息检索相关记忆（bigram 相关匹配），
+    // 无相关记忆返回 null → 零成本不注入；相关才注入 → 无关记忆隔离在外。
+    ctx.register({
+      kind: 'context',
+      context: {
+        id: 'memory-recall',
+        description: '按当前任务检索相关长期记忆（字符 bigram 相关匹配，无关不注入）',
+        weight: 10,
+        contentFn({ history }) {
+          const lastUser = [...history].reverse()
+            .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
+          if (!lastUser?.content) return null;
+          const task = lastUser.content.slice(0, 80);
+          const hits = facts
+            .filter((f) => !f.text.startsWith('【自动】') && relatedToTask(task, f.text)) // 教训由钩子注入，这里不重复
+            .slice(-5)
+            .reverse();
+          if (hits.length === 0) return null;
+          return `【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- ${f.text}`).join('\n')}`;
+        },
+      },
     });
 
     // ---- 钩子：失败教训自动记忆（"不重复犯错"的底层机制） ----

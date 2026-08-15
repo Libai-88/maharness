@@ -220,10 +220,12 @@ export default {
         name: 'plugin_status',
         risk: 'low',
         costHint: 'low',
-        description: '查看 plugins/ 现场插件的加载状态（state）、注册能力（caps）与错误信息（error）。',
+        output: '{plugins: [{id, name, version, state, active, caps, error}]}；active=true 表示能力已在上下文可用',
+        description: '查看 plugins/ 现场插件的状态。state 为机器态（started=运行中/loaded=已注册未激活/lazy=惰性声明/stopped=已停用/error=失败），' +
+          'active 为语义判断（是否已进入上下文）：active=false 的插件需要 enable_plugin 激活后才能使用其能力。',
         parameters: { type: 'object', properties: {} },
         async handler() {
-          const plugins: { id: string; name: string; version: string; state: string; caps: string[]; error?: string }[] = [];
+          const plugins: { id: string; name: string; version: string; state: string; active: boolean; caps: string[]; error?: string }[] = [];
           if (existsSync(userPluginsDir)) {
             for (const e of readdirSync(userPluginsDir, { withFileTypes: true })) {
               if (!e.isDirectory()) continue;
@@ -233,11 +235,14 @@ export default {
               try { manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')); } catch { /* 清单损坏按目录名兜底 */ }
               const id = String(manifest.id ?? e.name);
               const rt = runtime.get(id);
+              const state = rt?.state ?? 'pending(未加载)';
+              const active = rt?.state === 'started';
               plugins.push({
                 id,
                 name: String(manifest.name ?? id),
                 version: String(manifest.version ?? ''),
-                state: rt?.state ?? 'pending(未加载)',
+                state,
+                active,
                 caps: rt?.caps ?? [],
                 error: rt?.error,
               });
@@ -245,6 +250,65 @@ export default {
           }
           plugins.sort((a, b) => a.id.localeCompare(b.id));
           return { ok: true, data: { dir: 'plugins/', count: plugins.length, plugins } };
+        },
+      },
+    });
+
+    // ---- 生命周期：dynamic capability loading（LLM 按需激活/停用插件，类似 OS 加载驱动） ----
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'enable_plugin',
+        risk: 'medium',
+        costHint: 'low',
+        approval: true,
+        description: '激活一个插件（加载其能力进入上下文）。用于 lazy 声明或已停用的插件——' +
+          '插件状态用 plugin_status 查看；激活后其工具/规则立即对后续对话生效。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: '插件 id（plugin_status 可查）' } },
+          required: ['id'],
+        },
+        async handler(args: { id?: string }) {
+          const id = String(args.id ?? '').trim();
+          if (!id) return { ok: false, error: '缺少插件 id' };
+          const inst = ctx.kernel.plugins.list().find((p) => p.manifest.id === id);
+          if (!inst) return { ok: false, error: `插件不存在: ${id}（plugin_status 查看）` };
+          try {
+            await ctx.kernel.plugins.enable(id);
+          } catch (err) {
+            return { ok: false, error: `激活失败: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          return { ok: true, data: { id, state: ctx.kernel.plugins.list().find((p) => p.manifest.id === id)?.state } };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'disable_plugin',
+        risk: 'medium',
+        costHint: 'low',
+        approval: true,
+        description: '停用一个插件（卸载其能力与规则，能力从上下文消失）。用于不再需要的插件——' +
+          '停用后其工具不再可用；可随时 enable_plugin 重新激活。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: '插件 id（plugin_status 可查）' } },
+          required: ['id'],
+        },
+        async handler(args: { id?: string }) {
+          const id = String(args.id ?? '').trim();
+          if (!id) return { ok: false, error: '缺少插件 id' };
+          const inst = ctx.kernel.plugins.list().find((p) => p.manifest.id === id);
+          if (!inst) return { ok: false, error: `插件不存在: ${id}（plugin_status 查看）` };
+          try {
+            await ctx.kernel.plugins.disable(id);
+          } catch (err) {
+            return { ok: false, error: `停用失败: ${err instanceof Error ? err.message : String(err)}` };
+          }
+          return { ok: true, data: { id, state: ctx.kernel.plugins.list().find((p) => p.manifest.id === id)?.state } };
         },
       },
     });

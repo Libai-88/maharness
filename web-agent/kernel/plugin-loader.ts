@@ -34,12 +34,17 @@ export class PluginLoader {
     private userDir: string,
   ) {}
 
-  /** 扫描并加载全部插件（core 在前，用户插件在后，确保依赖顺序） */
+  /** 扫描并加载全部插件（core 在前，用户插件在后，确保依赖顺序）
+   *  生命周期控制：manifest.enabled=false 声明停用、lazy=true 声明惰性加载
+   *  （类似 OS 驱动按需加载——注册可见，但不自动进入上下文，LLM 需要时 enable_plugin 激活） */
   async loadAll(): Promise<void> {
     await this.scanDir(this.coreDir);
     await this.scanDir(this.userDir);
     for (const inst of this.registry.values()) {
-      if (inst.state !== 'started' && inst.state !== 'stopped') await this.start(inst);
+      if (inst.state !== 'started' && inst.state !== 'stopped') {
+        if (inst.manifest.enabled === false || inst.manifest.lazy) continue;
+        await this.start(inst);
+      }
     }
   }
 
@@ -161,8 +166,9 @@ export class PluginLoader {
   async enable(id: string): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
-    if (inst.state === 'registered') await this.start(inst);
-    else if (inst.state === 'stopped') {
+    // registered（未加载）/ loaded（lazy 声明：onLoad 已执行但未启动）/ stopped（停用后）
+    // 均可激活——dynamic capability loading：能力按需进入上下文
+    if (inst.state === 'registered' || inst.state === 'loaded' || inst.state === 'stopped') {
       inst.plugin = inst.plugin; // 保留已加载实例
       await this.start(inst);
     } else throw new Error(`插件当前状态: ${inst.state}`);
@@ -174,7 +180,7 @@ export class PluginLoader {
     await this.stop(inst);
   }
 
-  async reload(id: string): Promise<void> {
+  async reload(id: string, start = true): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
     const { dir } = inst;
@@ -185,7 +191,8 @@ export class PluginLoader {
     inst.caps = [];
     this.registry.delete(id);
     const fresh = await this.register(dir);
-    if (fresh) await this.start(fresh);
+    // 生命周期：lazy/停用声明的插件重载后保持未激活（不进入上下文）
+    if (fresh && start) await this.start(fresh);
     this.bus.emit(EventBus.event('plugin.reloaded', { id }));
   }
 
@@ -213,8 +220,18 @@ export class PluginLoader {
         if (!existsSync(join(this.userDir, e.name, 'plugin.json'))) continue;
         now.add(e.name);
         const existing = [...this.registry.values()].find((i) => basename(i.dir) === e.name);
-        if (existing) await this.reload(existing.manifest.id);
-        else await this.register(join(this.userDir, e.name))?.then((i) => i && this.start(i));
+        if (existing) {
+          // 生命周期：lazy/停用声明的插件文件变化时重载但保持未激活
+          if (existing.manifest.enabled === false || existing.manifest.lazy) {
+            await this.reload(existing.manifest.id, false);
+          } else {
+            await this.reload(existing.manifest.id);
+          }
+        } else {
+          const inst = await this.register(join(this.userDir, e.name));
+          // 生命周期：新注册插件同样遵守 enabled=false / lazy 声明（按需加载，不进上下文）
+          if (inst && inst.manifest.enabled !== false && !inst.manifest.lazy) await this.start(inst);
+        }
       }
     }
     // 卸载已删除的

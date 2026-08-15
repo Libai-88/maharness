@@ -21,8 +21,10 @@ export interface PluginManifest {
   name: string;
   version: string;
   entry: string;            // 入口文件（相对插件目录）
-  enabled?: boolean;        // 默认 true
+  enabled?: boolean;        // 默认 true；false = 声明停用（不自动启动）
   requires?: string[];      // 依赖的插件 id（先加载）
+  lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
+                            // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
 }
 
 export interface Plugin {
@@ -43,6 +45,10 @@ export interface KernelLike {
   cache: CacheLike;
   plugins: {
     capabilities<T extends Capability['kind']>(kind: T): Extract<Capability, { kind: T }>[];
+    /** 生命周期管理（dynamic capability loading）：按需激活/停用插件 */
+    enable(id: string): Promise<void>;
+    disable(id: string): Promise<void>;
+    list(): { manifest: PluginManifest; state: string; error?: string }[];
   };
 }
 
