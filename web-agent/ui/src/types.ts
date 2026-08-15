@@ -146,7 +146,11 @@ export interface StatsInfo {
     l1Enabled: boolean;
     l1: { hits: number; misses: number; rate: number };
     l2: { hits: number; misses: number; rate: number };
-    l3: { hits: number; tokens: number };
+    /** L3 双口径：hits/tokens 为本地估算（相邻调用公共前缀）；real* 为 provider usage 确认的真实命中 */
+    l3: {
+      hits: number; tokens: number;
+      realHits: number; realTokens: number; realMissTokens: number; realRate: number;
+    };
     savedCost: number;
     overall: { served: number; total: number; rate: number };
   };

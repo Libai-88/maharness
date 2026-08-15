@@ -534,6 +534,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     try {
       for await (const ev of chat.runner.run({
         provider, model: resolvedModel, messages: ctxHistory, traceId,
+        // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
+        // 不同会话互不串用（答案依赖工具观察时仅本会话可命中）
+        scope: session.id,
         signal: ac.signal, systemPrompt, tools: toolsOverride,
         // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
         fallbackProviders: chat.providers.filter((p) => p.id !== provider.id),
@@ -936,7 +939,17 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         l1Enabled: kernel.cache.l1Enabled,
         l1: rate(cache.l1Hits, cache.l1Misses),
         l2: rate(cache.l2Hits, cache.l2Misses),
-        l3: { hits: cache.l3Hits, tokens: cache.l3Tokens },
+        // L3 双口径：估算（相邻调用公共前缀 token，无 provider 反馈时的降级度量）
+        // + 真实（provider usage 确认的缓存命中 token，唯一权威）。
+        // 真实命中率 = realTokens / (realTokens + realMissTokens)
+        l3: {
+          hits: cache.l3Hits, tokens: cache.l3Tokens,
+          realHits: cache.l3RealHits, realTokens: cache.l3RealTokens, realMissTokens: cache.l3RealMissTokens,
+          realRate: (() => {
+            const total = cache.l3RealTokens + cache.l3RealMissTokens;
+            return total > 0 ? Math.round((cache.l3RealTokens / total) * 1000) / 10 : 0;
+          })(),
+        },
         savedCost: cache.savedCost,
         // 综合命中率：L1 直接回答 + L2 工具结果 + L3 前缀复用 占总轮次比例
         overall: (() => {

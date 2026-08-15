@@ -221,7 +221,9 @@ export default {
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
           mkdirSync(resolve(file, '..'), { recursive: true });
           writeFileSync(file, args.content, 'utf8');
-          tctx.cache.clear(); // 写操作可能影响任意读缓存，v1 直接清空 L2（保一致性优先）
+          // 写操作影响文件系统观察：失效文件类读缓存（list_dir/read_file），不误伤其他工具（如 web_search）
+          tctx.cache.l2DeleteNamespace('list_dir');
+          tctx.cache.l2DeleteNamespace('read_file');
           return { ok: true, data: { path: relative(tctx.sandboxRoot, file), bytes: Buffer.byteLength(args.content, 'utf8') } };
         },
       },
@@ -259,7 +261,8 @@ export default {
           } catch (err) {
             return { ok: false, error: `删除失败（非空目录不允许递归删除）: ${err instanceof Error ? err.message : String(err)}` };
           }
-          tctx.cache.clear(); // 文件变化，清 L2 保一致性
+          tctx.cache.l2DeleteNamespace('list_dir'); // 文件变化，失效文件读缓存（保留其他工具缓存）
+          tctx.cache.l2DeleteNamespace('read_file');
           return { ok: true, data: { removed: rel, type: st.isDirectory() ? 'dir' : 'file' } };
         },
       },

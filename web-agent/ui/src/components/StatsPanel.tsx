@@ -135,7 +135,14 @@ export default function StatsPanel() {
           <span className="stats-row-title">L3 前缀复用</span>
           <span className="stats-row-meta">{cache.l3.hits} 次复用</span>
         </div>
-        <div className="stats-row-sub">累计复用 <b>{fmt(cache.l3.tokens)}</b> tokens（provider KV cache 直接命中）</div>
+        <div className="stats-row-sub">
+          估算复用 <b>{fmt(cache.l3.tokens)}</b> tokens ·
+          {cache.l3.realHits > 0 || cache.l3.realTokens > 0 ? (
+            <> provider 确认命中 <b>{fmt(cache.l3.realTokens)}</b> tokens（真实命中率 <b>{cache.l3.realRate}%</b>）</>
+          ) : (
+            <> provider 未报告缓存命中（TTL 过期 / 前缀抖动 / 不支持）</>
+          )}
+        </div>
       </div>
       {cache.savedCost > 0 && (
         <div className="provider-hint">缓存累计节省约 <b>{cost(cache.savedCost)}</b></div>

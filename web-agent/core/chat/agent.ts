@@ -49,6 +49,9 @@ export interface RunOptions {
   systemPrompt?: string;
   tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
   traceId: string;
+  /** L1 会话级缓存作用域（如 session.id）：跨多次 run 的同一会话共享"会话自产答案"；
+   *  缺省用 traceId——子代理/独立循环天然隔离（每次 traceId 唯一）。 */
+  scope?: string;
   signal?: AbortSignal;
   maxTurns?: number;
   /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */
@@ -141,6 +144,9 @@ export class AgentRunner {
   /** 运行一轮完整对话（直到模型不再调用工具） */
   async *run(opts: RunOptions): AsyncGenerator<AgentEvent> {
     const { provider, model, messages, traceId, signal } = opts;
+    // L1 会话级缓存作用域：优先使用调用方传入的稳定会话标识（session.id），
+    // 缺省用 traceId（每次 run 唯一 → 天然隔离，子代理不串答案）
+    const cacheScope = opts.scope ?? traceId;
     // 12 轮：探索型任务（查代码/多工具协作）能走到最终总结轮，L1 语义缓存回填更可靠
     const maxTurns = opts.maxTurns ?? 12;
     const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
@@ -238,22 +244,23 @@ export class AgentRunner {
       }
 
       // ---- L1 语义缓存：问答命中直接返回缓存答案（跳过 LLM 调用，零成本） ----
-      // 命中条件：首轮（turn=0，历史无运行时 tool 消息）且最后一条是真实 user 消息；
-      // 用最后一条 user 消息做语义匹配（bigram Dice ≥ 阈值），命中即返回缓存答案。
-      // 长度门槛（≥8 字符）："继续/总结一下"等短问题不参与缓存，避免跨上下文误命中。
-      // 排除 before_llm 钩子注入的记忆消息（【长期记忆】）。
-      // promptKey = systemPrompt 指纹：LLM 输出依赖完整输入，人设/插件规则不同则隔离缓存空间。
+      // 命中条件：首轮（turn=0）且最后一条是真实 user 消息，问题 ≥8 字符
+      // （"继续/总结一下"等短问题不参与，避免跨上下文误命中）。
+      // 作用域安全：全局条目（纯问答，不依赖工具观察）任何会话可命中；
+      // 会话条目（答案依赖本会话工具观察，如"这个文件里写了什么"）仅本会话可命中——
+      // 因此即使历史已有工具消息也可安全查询：跨会话不串陈旧观察，会话内换措辞可命中。
+      // promptKey = systemPrompt 指纹：人设/插件规则不同则隔离缓存空间。
       // 排除 before_llm 钩子注入的记忆/教训消息（【长期记忆】/【失败教训】），避免被当作"问题"
       const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content
         && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
       const lastUser = realUsers[realUsers.length - 1];
       const q = lastUser?.content ?? '';
-      if (turn === 0 && q.length >= 8 && !llmCtx.history.some((m) => m.role === 'tool')) {
+      if (turn === 0 && q.length >= 8) {
         const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
-        const cached = await this.kernel.cache.l1Get(q, promptKey);
+        const cached = await this.kernel.cache.l1Get(q, promptKey, cacheScope);
         if (cached.hit && cached.answer) {
-          // 命中学习：把当前措辞也回填，语义缓存簇随使用扩展——同义改写可连续命中
-          void this.kernel.cache.l1Set(q, cached.answer, promptKey);
+          // 命中学习：把当前措辞也回填（沿用来源条目的作用域，缓存簇同域扩展——同义改写可连续命中）
+          void this.kernel.cache.l1Set(q, cached.answer, promptKey, cached.hitScope);
           const tIn = estimateTokens([...llmCtx.history.map((m) => m.content ?? '')].join('\n'));
           const tOut = estimateTokens(cached.answer);
           // 按 provider 价格估算本次节省的成本（缓存命中 = 省掉的 LLM 调用费用）
@@ -285,7 +292,7 @@ export class AgentRunner {
       });
       let text = '';
       let reasoning = '';
-      let usage: { input: number; output: number } | undefined;
+      let usage: { input: number; output: number; cachedInput?: number; missInput?: number } | undefined;
       let collected: ToolCall[] = [];
       const handleChunk = (chunk: LLMChunk): { type: 'delta' | 'reasoning'; text: string } | null => {
         if (chunk.type === 'delta') {
@@ -297,7 +304,9 @@ export class AgentRunner {
           return { type: 'reasoning', text: chunk.text };
         }
         if (chunk.type === 'tool_call') collected.push(chunk.toolCall);
-        else if (chunk.type === 'usage') usage = { input: chunk.input, output: chunk.output };
+        else if (chunk.type === 'usage') {
+          usage = { input: chunk.input, output: chunk.output, cachedInput: chunk.cachedInput, missInput: chunk.missInput };
+        }
         return null;
       };
       try {
@@ -345,12 +354,20 @@ export class AgentRunner {
       totalOut += tOut;
       const cost = estimateCost(activeProvider, tIn, tOut);
       totalCost += cost;
+      // L3 真实命中核算：provider usage 确认的缓存命中 token——前缀缓存命中省的是
+      // prefill 输入的钱（DeepSeek 50~120 倍价差 / OpenAI 最高省 90% / Anthropic 1/10 价），
+      // 真实命中率 = cachedInput/(cachedInput+missInput)，本地估算不可替代。
+      if (usage?.cachedInput != null && usage.cachedInput > 0) {
+        this.kernel.cache.recordProviderCacheHit(usage.cachedInput, usage.missInput ?? 0);
+        const saved = (usage.cachedInput / 1_000_000) * (activeProvider.prices?.in ?? 0);
+        this.kernel.cache.recordSavedCost(saved);
+      }
       // 思考预算统计：记录本轮 reasoning 长度并累计（下一轮 LLM 调用前消费）
       lastTurnReasoningTokens = estimateTokens(reasoning);
       totalReasoningTokens += lastTurnReasoningTokens;
       step.finish({
         outputSummary: text.slice(0, 200),
-        tokensIn: tIn, tokensOut: tOut, cost,
+        tokensIn: tIn, tokensOut: tOut, tokensCached: usage?.cachedInput, cost,
       });
 
       // ---- 钩子：LLM 输出后（校验/观测；流出的输出暂不可改写） ----
@@ -367,10 +384,13 @@ export class AgentRunner {
 
       // ---- 无工具调用：本轮结束 ----
       if (!collected.length) {
-        // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）
+        // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）。
+        // 作用域规则：本轮历史含工具消息 → 答案可能依赖本会话工具观察 → 会话级（仅本会话可命中，
+        // 防跨会话复用陈旧观察）；纯问答（全程无工具）→ 全局可见，跨会话共享。
         if (q.length >= 8 && text.trim()) {
           const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
-          void this.kernel.cache.l1Set(q, text, promptKey);
+          const scope = llmCtx.history.some((m) => m.role === 'tool') ? cacheScope : undefined;
+          void this.kernel.cache.l1Set(q, text, promptKey, scope);
         }
         // 任务画像（自适应性数据源）：harness 记录任务类型/轮数/成本/成败
         this.kernel.budget.recordTask({

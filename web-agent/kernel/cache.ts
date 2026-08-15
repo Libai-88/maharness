@@ -8,6 +8,11 @@
  *  - L2 工具结果缓存：观察的重复（同一工具+同一参数+文件未变 = 同一事实）——hash(工具名+参数)+mtime/size 校验；
  *  - L3 prompt 前缀缓存：token 的重复（多轮对话前缀不变，吃 provider KV cache 折扣）——无显式键，靠消息组装策略。
  *
+ * 真实命中原则：provider 侧前缀缓存是逐 token 精确匹配（非语义匹配），命中率完全由
+ * 请求序列稳定性决定；其真实命中数只能从 usage 字段读取（DeepSeek prompt_cache_hit_tokens /
+ * OpenAI·智谱 prompt_tokens_details.cached_tokens / Anthropic cache_read_input_tokens），
+ * 本地估算（sharedPrefixTokens）仅作无反馈时的降级度量。
+ *
  * 持久化：L1/L2 落盘 data/cache.json（防抖 5s 保存、启动加载）——跨重启保留，
  * 命中率不因进程重启归零（逼近 100% 的前提：缓存必须比进程活得久）。
  */
@@ -22,6 +27,7 @@ interface L2Entry {
   value: unknown;
   expiresAt: number;
   hits: number;
+  lastAccess: number;   // LRU：淘汰最久未访问
 }
 
 interface L1Entry {
@@ -31,6 +37,8 @@ interface L1Entry {
   answer: string;
   hits: number;
   promptKey: string;    // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
+  scope?: string;       // 会话级隔离：undefined=全局（纯问答产物，所有会话可见）；
+                        // 有值=会话自产（答案依赖本会话工具观察，仅本会话可见，防跨会话串陈旧答案）
   expiresAt: number;    // TTL：时效性内容（天气/新闻/用户数据）不永久缓存
 }
 
@@ -42,23 +50,29 @@ const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
  * 中文功能词（虚词/祈使词）：语义缓存的「内容词过滤」——忽略表面措辞，保留内容词。
  * 借鉴 GPTCache 的归一化思想：同一含义的提问在措辞上差异大，但在内容词上高度重合；
  * 动词与名词保留（「写文件」≠「读文件」，动作词是语义的一部分）。
+ * 多字词单独成组：单字剔除按字符、多字词按整词剔除（否则永远匹配不上）。
  */
-const STOPWORDS = new Set([
+const STOPWORDS_SINGLE = new Set([
   '的', '了', '吗', '呢', '吧', '啊', '呀', '哦', '噢', '嗯',
   '在', '是', '有', '和', '与', '及', '或', '把', '被', '给', '对', '从', '向', '到', '于', '着', '过',
-  '请', '帮', '我', '你', '他', '她', '它', '我们', '你们', '他们', '她们',
-  '什么', '怎么', '为什么', '如何', '哪些', '哪个', '一个', '一下', '当前', '现在', '这个', '那个',
-  '可以', '能', '要', '会', '应该', '需要', '用', '以', '之', '其', '这', '那',
+  '请', '帮', '我', '你', '他', '她', '它', '们', '什', '么', '怎', '哪', '些', '个',
+  '可', '以', '要', '会', '该', '能', '用', '之', '其', '这', '那',
   '很', '也', '都', '就', '才', '再', '还', '又', '更', '最', '只', '但', '而', '且', '并',
-  '或者', '因为', '所以', '如果', '然后', '请问', '给我', '下', '中', '里', '内', '上',
+  '下', '中', '里', '内', '上',
 ]);
+const STOPWORDS_MULTI = [
+  '我们', '你们', '他们', '她们', '一个', '一下', '当前', '现在', '这个', '那个',
+  '什么', '怎么', '为什么', '如何', '哪些', '哪个', '可以', '应该', '需要',
+  '因为', '所以', '如果', '然后', '请问', '给我', '或者',
+];
 
-/** 内容词提取：去标点空格 → 去停用词 → 内容词序列（用于 bigram 特征） */
+/** 内容词提取：去标点空格 → 去停用词（先整词后单字）→ 内容词序列（用于 bigram 特征） */
 export function contentWords(text: string): string {
-  const norm = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  let norm = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  for (const w of STOPWORDS_MULTI) norm = norm.split(w).join('');
   let out = '';
   for (const ch of norm) {
-    if (!STOPWORDS.has(ch)) out += ch;
+    if (!STOPWORDS_SINGLE.has(ch)) out += ch;
   }
   return out;
 }
@@ -121,7 +135,9 @@ export class Cache {
   private saveTimer: NodeJS.Timeout | null = null;
   private counter: CacheStats = {
     l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
-    l3Hits: 0, l3Tokens: 0, savedCost: 0,
+    l3Hits: 0, l3Tokens: 0,
+    l3RealHits: 0, l3RealTokens: 0, l3RealMissTokens: 0,
+    savedCost: 0,
   };
 
   constructor(private embeddingFn?: EmbeddingFn, cfg: CacheConfig = {}, private persistFile?: string) {
@@ -145,7 +161,8 @@ export class Cache {
       mkdirSync(dirname(this.persistFile), { recursive: true });
       writeFileSync(this.persistFile, JSON.stringify({
         l1: [...this.l1.entries()].map(([k, e]) => ({
-          k, answer: e.answer, hits: e.hits, promptKey: e.promptKey, expiresAt: e.expiresAt,
+          k, answer: e.answer, hits: e.hits, promptKey: e.promptKey,
+          scope: e.scope, expiresAt: e.expiresAt,
           bigrams: [...e.bigrams], actions: e.actions, vector: e.vector ? [...e.vector] : undefined,
         })),
         l2: [...this.l2.entries()].map(([k, e]) => ({ k, value: e.value, expiresAt: e.expiresAt, hits: e.hits })),
@@ -161,20 +178,21 @@ export class Cache {
     try {
       if (!existsSync(this.persistFile)) return;
       const data = JSON.parse(readFileSync(this.persistFile, 'utf8')) as {
-        l1?: { k: string; answer: string; hits: number; promptKey: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[];
+        l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[];
         l2?: { k: string; value: unknown; expiresAt: number; hits: number }[];
       };
       const now = Date.now();
       for (const item of data.l1 ?? []) {
         if (item.expiresAt < now) continue;
         this.l1.set(item.k, {
-          answer: item.answer, hits: item.hits, promptKey: item.promptKey, expiresAt: item.expiresAt,
+          answer: item.answer, hits: item.hits, promptKey: item.promptKey,
+          scope: item.scope, expiresAt: item.expiresAt,
           bigrams: new Set(item.bigrams ?? []), actions: item.actions ?? [], vector: item.vector,
         });
       }
       for (const item of data.l2 ?? []) {
         if (item.expiresAt < now) continue;
-        this.l2.set(item.k, { value: item.value, expiresAt: item.expiresAt, hits: item.hits });
+        this.l2.set(item.k, { value: item.value, expiresAt: item.expiresAt, hits: item.hits, lastAccess: now });
       }
       if (data.l1?.length || data.l2?.length) {
         console.log(`[cache] 已从磁盘恢复缓存：L1 ${data.l1?.length ?? 0} 条 / L2 ${data.l2?.length ?? 0} 条`);
@@ -200,9 +218,14 @@ export class Cache {
     this.embeddingFn = fn;
   }
 
-  /** 生成稳定缓存键（sha256 摘要） */
+  /**
+   * 生成稳定缓存键（sha256 摘要，带命名空间前缀）。
+   * 命名空间 = parts[0]（惯例为工具名）：支持按命名空间批量失效（l2DeleteNamespace）——
+   * 写操作只需失效受影响工具的缓存，不必清空整个 L2（v1 全清会误伤其他工具）。
+   */
   makeKey(parts: string[]): string {
-    return createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32);
+    const ns = parts[0] ?? '';
+    return `${ns}:${createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32)}`;
   }
 
   // ---------- L2 工具结果缓存 ----------
@@ -216,16 +239,21 @@ export class Cache {
       return { hit: false };
     }
     e.hits++;
+    e.lastAccess = Date.now();
     this.counter.l2Hits++;
     return { hit: true, value: e.value };
   }
 
   l2Set(key: string, value: unknown, ttlMs = this.l2TtlMs): void {
-    this.l2.set(key, { value, expiresAt: Date.now() + ttlMs, hits: 0 });
-    // 防内存膨胀：上限 2000 条，超出清最旧
+    this.l2.set(key, { value, expiresAt: Date.now() + ttlMs, hits: 0, lastAccess: Date.now() });
+    // 防内存膨胀：上限 2000 条，超出淘汰最久未访问（LRU——按访问时间淘汰，而非插入序）
     if (this.l2.size > 2000) {
-      const oldest = this.l2.keys().next().value;
-      if (oldest !== undefined) this.l2.delete(oldest);
+      let oldestKey: string | undefined;
+      let oldest = Infinity;
+      for (const [k, e] of this.l2) {
+        if (e.lastAccess < oldest) { oldest = e.lastAccess; oldestKey = k; }
+      }
+      if (oldestKey !== undefined) this.l2.delete(oldestKey);
     }
     this.scheduleSave();
   }
@@ -235,12 +263,31 @@ export class Cache {
     this.scheduleSave();
   }
 
+  /**
+   * 按命名空间批量失效（key 前缀 = parts[0]，惯例为工具名）：
+   * 如写操作后失效 list_dir/read_file 的缓存，而不误伤 web_search 等其他工具的缓存。
+   */
+  l2DeleteNamespace(ns: string): void {
+    if (!ns) return;
+    const prefix = `${ns}:`;
+    let changed = false;
+    for (const key of this.l2.keys()) {
+      if (key.startsWith(prefix)) { this.l2.delete(key); changed = true; }
+    }
+    if (changed) this.scheduleSave();
+  }
+
   // ---------- L1 语义缓存 ----------
 
-  /** 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）
+  /**
+   * 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）
    *  promptKey：systemPrompt 指纹。LLM 输出依赖完整输入（system + 历史），
-   *  人设/插件规则变更后 systemPrompt 不同 → 按 promptKey 隔离缓存空间，不串用旧答案。 */
-  async l1Get(question: string, promptKey = ''): Promise<{ hit: boolean; answer?: string; key?: string }> {
+   *  人设/插件规则变更后 systemPrompt 不同 → 按 promptKey 隔离缓存空间，不串用旧答案。
+   *  scope：会话级隔离键（如 traceId）。作用域规则——全局条目（scope 为空）对所有
+   *  会话可见（纯问答产物，不依赖工具观察）；会话条目只对本会话可见（答案依赖本会话
+   *  工具结果，跨会话复用会串「看过的东西」，即陈旧事实）。
+   *  返回 hitScope：命中条目的作用域，供命中学习回填时沿用（保持同域扩展）。 */
+  async l1Get(question: string, promptKey = '', scope?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string }> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8) {
       // 短问题（"继续/你好"等）不参与语义匹配，避免跨上下文误命中
@@ -249,21 +296,22 @@ export class Cache {
     }
     if (this.embeddingFn) {
       const vec = await this.embeddingFn(norm);
-      let best: { key: string; score: number } | null = null;
+      let best: { key: string; score: number; scope?: string } | null = null;
       for (const [key, entry] of this.l1) {
         if (entry.promptKey !== promptKey) continue;
+        if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
         if (entry.expiresAt < Date.now()) {
           this.l1.delete(key);
           continue;
         }
         const score = cosine(vec, entry.vector ?? []);
-        if (score > (best?.score ?? 0)) best = { key, score };
+        if (score > (best?.score ?? 0)) best = { key, score, scope: entry.scope };
       }
       if (best && best.score >= L1_THRESHOLD) {
         const entry = this.l1.get(best.key)!;
         entry.hits++;
         this.counter.l1Hits++;
-        return { hit: true, answer: entry.answer, key: best.key };
+        return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
       }
       this.counter.l1Misses++;
       return { hit: false };
@@ -272,24 +320,28 @@ export class Cache {
     // 精确匹配优先：归一化后全等（同句重复提问）直接命中，不走相似度
     if (this.l1.has(`${promptKey}|${norm}`)) {
       const entry = this.l1.get(`${promptKey}|${norm}`)!;
-      if (entry.expiresAt >= Date.now()) {
+      if (entry.scope && entry.scope !== scope) {
+        // 精确键存在但作用域不匹配：会话自产答案不串用，继续相似度扫描
+      } else if (entry.expiresAt >= Date.now()) {
         entry.hits++;
         this.counter.l1Hits++;
-        return { hit: true, answer: entry.answer, key: `${promptKey}|${norm}` };
+        return { hit: true, answer: entry.answer, key: `${promptKey}|${norm}`, hitScope: entry.scope };
+      } else {
+        this.l1.delete(`${promptKey}|${norm}`);
       }
-      this.l1.delete(`${promptKey}|${norm}`);
     }
     const qBigrams = bigramSet(contentWords(norm));
     const qActions = actionGroups(norm);
-    let best: { key: string; score: number } | null = null;
+    let best: { key: string; score: number; scope?: string } | null = null;
     for (const [key, entry] of this.l1) {
       if (entry.promptKey !== promptKey) continue;
+      if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
       if (entry.expiresAt < Date.now()) { // TTL 过期：删除并按未命中处理
         this.l1.delete(key);
         continue;
       }
       const score = dice(qBigrams, entry.bigrams);
-      if (score > (best?.score ?? 0)) best = { key, score };
+      if (score > (best?.score ?? 0)) best = { key, score, scope: entry.scope };
     }
     if (best && best.score >= this.l1TextThreshold) {
       const entry = this.l1.get(best.key)!;
@@ -302,18 +354,24 @@ export class Cache {
       }
       entry.hits++;
       this.counter.l1Hits++;
-      return { hit: true, answer: entry.answer, key: best.key };
+      return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
     }
     this.counter.l1Misses++;
     return { hit: false };
   }
 
-  async l1Set(question: string, answer: string, promptKey = ''): Promise<void> {
+  /**
+   * 回填语义缓存。scope 语义：
+   *  - 不传 scope（默认）：答案不依赖工具观察（纯问答），全局可见——任何会话都可复用；
+   *  - 传 scope：答案依赖本会话的工具结果/观察，仅本会话可命中（防止跨会话复用
+   *    陈旧的工具观察——同一问题在文件变更后应重新观察，而不是复用旧答案）。
+   */
+  async l1Set(question: string, answer: string, promptKey = '', scope?: string): Promise<void> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8 || !answer || answer.length > MAX_L1_ANSWER) return;
     const entry: L1Entry = {
       bigrams: bigramSet(contentWords(norm)), actions: [...actionGroups(norm)], answer, hits: 0, promptKey,
-      expiresAt: Date.now() + L1_TTL,
+      scope: scope || undefined, expiresAt: Date.now() + L1_TTL,
     };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
     this.l1.set(`${promptKey}|${norm}`, entry);
@@ -329,11 +387,26 @@ export class Cache {
     this.l1.clear();
   }
 
-  /** L3 prompt 前缀复用统计：由 Agent 循环在每次 LLM 调用前记录与上一轮公共前缀的 token 数 */
+  /** L3 prompt 前缀复用统计（估算口径）：由 Agent 循环在每次 LLM 调用前记录与上一轮公共前缀的 token 数。
+   *  这是无 provider 反馈时的降级度量；真实命中以 recordProviderCacheHit 为准。 */
   recordPrefixRepeat(tokens: number): void {
     if (tokens <= 0) return;
     this.counter.l3Hits++;
     this.counter.l3Tokens += tokens;
+  }
+
+  /**
+   * L3 真实命中统计（唯一权威口径）：provider usage 归一化后的缓存命中/未命中 token。
+   *  - hitTokens：本次请求被前缀缓存命中的输入 token（省下的 prefill 计算）；
+   *  - missTokens：本次请求未命中、实际重算的输入 token。
+   *  真实命中率 = hit / (hit + miss)。本地估算（recordPrefixRepeat）只用于预测与对照。
+   */
+  recordProviderCacheHit(hitTokens: number, missTokens: number): void {
+    if (hitTokens > 0) {
+      this.counter.l3RealHits++;
+      this.counter.l3RealTokens += hitTokens;
+    }
+    if (missTokens > 0) this.counter.l3RealMissTokens += missTokens;
   }
 
   /** 累计缓存节省成本（按 provider 价格 × 估算 token；由命中方报告） */

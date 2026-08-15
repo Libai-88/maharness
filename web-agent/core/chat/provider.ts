@@ -3,10 +3,46 @@
  * 统一走 OpenAI 兼容接口（/chat/completions），原生 fetch + SSE 流式解析，零 SDK 依赖。
  * 环境变量约定：<NAME>_BASE_URL + <NAME>_API_KEY + <NAME>_MODEL（NAME 大写），自动发现。
  * 价格：内置常见模型价格表（每百万 token USD），可用 <NAME>_PRICE_IN/OUT 覆盖。
+ *
+ * 缓存真实命中：各厂商在 usage 中以不同字段报告前缀缓存命中 token（DeepSeek
+ * prompt_cache_hit_tokens / OpenAI·智谱 prompt_tokens_details.cached_tokens /
+ * Anthropic cache_read_input_tokens），此处统一归一化为 cachedInput/missInput——
+ * 真实命中率只能由 provider 说了算，本地估算不可替代。
  */
 import type {
   ChatOptions, LLMChunk, LLMMessage, PluginContext, ProviderDef, ToolDef,
 } from '../../kernel/types';
+
+/** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
+ *  - DeepSeek：prompt_cache_hit_tokens + prompt_cache_miss_tokens（和 = prompt_tokens）
+ *  - OpenAI / 智谱：prompt_tokens_details.cached_tokens（命中）；miss = prompt - cached
+ *  - Anthropic：cache_read_input_tokens（命中读取）；miss ≈ input_tokens - cache_read
+ *  不识别任何字段（provider 不支持缓存）时返回 undefined，调用方按「无反馈」处理。 */
+export function normalizeUsage(raw: Record<string, unknown>): {
+  input: number; output: number; cachedInput?: number; missInput?: number;
+} {
+  const input = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0;
+  const output = Number(raw.completion_tokens ?? raw.output_tokens ?? 0) || 0;
+  const details = raw.prompt_tokens_details as Record<string, unknown> | undefined;
+  let cachedInput: number | undefined;
+  let missInput: number | undefined;
+  if (typeof raw.prompt_cache_hit_tokens === 'number') {
+    // DeepSeek 风格：命中 + 未命中 = 全部输入
+    cachedInput = raw.prompt_cache_hit_tokens;
+    missInput = typeof raw.prompt_cache_miss_tokens === 'number'
+      ? raw.prompt_cache_miss_tokens
+      : Math.max(0, input - cachedInput);
+  } else if (details && typeof details.cached_tokens === 'number') {
+    // OpenAI / 智谱 风格：cached_tokens 单独报告，未命中 = 总输入 - 命中
+    cachedInput = details.cached_tokens;
+    missInput = Math.max(0, input - cachedInput);
+  } else if (typeof raw.cache_read_input_tokens === 'number') {
+    // Anthropic 风格：cache_read 为命中读取，其余 input 为未命中
+    cachedInput = raw.cache_read_input_tokens;
+    missInput = Math.max(0, input - cachedInput);
+  }
+  return { input, output, cachedInput, missInput };
+}
 
 export interface ProviderConfig {
   id: string;
@@ -148,7 +184,14 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
                 }
               }
               if (json.usage) {
-                yield { type: 'usage', input: json.usage.prompt_tokens ?? 0, output: json.usage.completion_tokens ?? 0 };
+                const u = normalizeUsage(json.usage);
+                yield {
+                  type: 'usage',
+                  input: u.input,
+                  output: u.output,
+                  cachedInput: u.cachedInput,
+                  missInput: u.missInput,
+                };
               }
             } catch { /* 非 JSON 行（keep-alive 等）跳过 */ }
           }

@@ -103,10 +103,13 @@ export default function StatsView() {
         <div className="cache-card c3">
           <div className="cc-head">
             <span className="cc-badge b3">L3 prompt 前缀</span>
-            <span className="cc-rate">{fmt(l3.hits)}</span>
+            <span className="cc-rate">{cache.l3.realHits > 0 ? pct(cache.l3.realRate / 100) : fmt(l3.hits)}</span>
           </div>
           <span className="cc-desc">消息只追加不重写 → KV cache</span>
-          <span className="cc-meta">命中 {l3.hits} · 前缀 token {fmt(l3.tokens ?? 0)}</span>
+          <span className="cc-meta">
+            真实命中 {fmt(cache.l3.realTokens ?? 0)} tok
+            {cache.l3.realHits > 0 ? ` · 命中率 ${pct(cache.l3.realRate / 100)}` : ' · 估算 ' + fmt(l3.tokens ?? 0) + ' tok'}
+          </span>
           <div className="cc-bar"><div className="cc-bar-fill" /></div>
           <span className="cc-example">多轮对话输入成本按 provider 折扣计费</span>
         </div>

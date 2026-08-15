@@ -306,6 +306,73 @@ export default {
   console.log('[L1] savedCost 累计:', s2.savedCost >= 0.123 ? '✓' : '✗', s2.savedCost.toFixed(6));
 }
 
+// ---- L1 作用域隔离：会话自产答案（依赖工具观察）不跨会话串用 ----
+{
+  // 全局答案（纯问答）任何会话可命中
+  await kernel.cache.l1Set('什么是作用域隔离机制', '全局答案', 'prompt-s', undefined);
+  const gHit = await kernel.cache.l1Get('什么是作用域隔离机制', 'prompt-s', 'trace-A');
+  // 会话答案（scope=trace-A）仅 trace-A 可命中，trace-B 不命中
+  await kernel.cache.l1Set('当前目录下有哪些文件', '会话答案A', 'prompt-s', 'trace-A');
+  const sHitA = await kernel.cache.l1Get('当前目录下有哪些文件', 'prompt-s', 'trace-A');
+  const sMissB = await kernel.cache.l1Get('当前目录下有哪些文件', 'prompt-s', 'trace-B');
+  console.log('[L1] 作用域隔离: 全局跨会话命中=1 会话内命中=1 跨会话不串=1:',
+    gHit.hit && sHitA.hit && !sMissB.hit ? '✓' : '✗',
+    `(全局=${gHit.hit} 会话A=${sHitA.hit} 会话B=${sMissB.hit})`);
+}
+
+// ---- L1 内容词停用词修复：多字功能词（什么/怎么/为什么等）整词剔除生效 ----
+{
+  const { contentWords } = await import('../kernel/cache');
+  // 修复前：按单字符判断多字词永不匹配 → "为什么" 残留；修复后应被整词剔除
+  const cw = contentWords('为什么我现在不能运行这个文件呢');
+  const leftover = cw.includes('为什么') || cw.includes('什么');
+  console.log('[L1] 多字停用词整词剔除:', !leftover ? '✓' : '✗', `内容词="${cw}"`);
+}
+
+// ---- usage 归一化：各厂商缓存命中字段统一口径 ----
+{
+  const { normalizeUsage } = await import('../core/chat/provider');
+  // DeepSeek：prompt_cache_hit_tokens + prompt_cache_miss_tokens
+  const ds = normalizeUsage({ prompt_tokens: 1000, completion_tokens: 50, prompt_cache_hit_tokens: 800, prompt_cache_miss_tokens: 200 });
+  // OpenAI / 智谱：prompt_tokens_details.cached_tokens
+  const oa = normalizeUsage({ prompt_tokens: 1000, completion_tokens: 50, prompt_tokens_details: { cached_tokens: 700 } });
+  // Anthropic：cache_read_input_tokens
+  const an = normalizeUsage({ input_tokens: 900, output_tokens: 60, cache_read_input_tokens: 500, cache_creation_input_tokens: 400 });
+  // 不支持缓存：无字段
+  const na = normalizeUsage({ prompt_tokens: 1000, completion_tokens: 50 });
+  const ok = ds.cachedInput === 800 && ds.missInput === 200
+    && oa.cachedInput === 700 && oa.missInput === 300
+    && an.cachedInput === 500 && an.missInput === 400
+    && na.cachedInput === undefined;
+  console.log('[usage] 缓存命中归一化 (DeepSeek/OpenAI/Anthropic/无):', ok ? '✓' : '✗',
+    `ds=${ds.cachedInput}/${ds.missInput} oa=${oa.cachedInput}/${oa.missInput} an=${an.cachedInput}/${an.missInput} na=${na.cachedInput ?? 'undefined'}`);
+}
+
+// ---- L3 真实命中统计：provider usage 确认的缓存命中（真实命中率唯一权威口径） ----
+{
+  kernel.cache.recordProviderCacheHit(800, 200);
+  kernel.cache.recordProviderCacheHit(600, 100);
+  const s = kernel.cache.stats();
+  const realRate = (s.l3RealTokens / (s.l3RealTokens + s.l3RealMissTokens)) * 100;
+  console.log('[L3] 真实命中统计: token=1400 miss=300 命中率=82.4%:',
+    s.l3RealTokens === 1400 && s.l3RealMissTokens === 300 && Math.round(realRate * 10) / 10 === 82.4 ? '✓' : '✗',
+    `(${s.l3RealTokens}/${s.l3RealMissTokens}/${realRate.toFixed(1)}%)`);
+}
+
+// ---- L2 LRU 淘汰：超出容量淘汰最久未访问（而非插入最早） ----
+{
+  // 直接构造小容量场景：填充后访问旧条目，再触发淘汰应保留被访问的旧条目
+  const { Cache } = await import('../kernel/cache');
+  const c = new Cache(undefined, {}, undefined); // 不落盘
+  for (let i = 0; i < 2000; i++) c.l2Set(`k${i}`, i);
+  c.l2Get('k0'); // 访问最旧插入的 → lastAccess 刷新
+  c.l2Set('overflow', 'x'); // 触发淘汰（>2000）
+  const kept = c.l2Get('k0');
+  const dropped = c.l2Get('k1'); // 未被访问的最旧条目（k0 已刷新）→ 应被淘汰
+  console.log('[L2] LRU 淘汰: 访问过的旧条目保留=1 未访问的最旧条目淘汰=1:',
+    kept.hit && !dropped.hit ? '✓' : '✗', `(k0=${kept.hit} k1=${dropped.hit})`);
+}
+
 // ---- HTTP 冒烟：工作区 / 文件树 / skills 管理 API（端到端） ----
 {
   process.env.PORT = String(Number(process.env.PORT ?? 3000) + 1); // 避开默认端口

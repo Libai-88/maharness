@@ -91,14 +91,23 @@ export interface TraceLike {
 export interface CacheLike {
   l2Get(key: string): { hit: boolean; value?: unknown };
   l2Set(key: string, value: unknown, ttlMs?: number): void;
+  l2Delete(key: string): void;
+  /** 按命名空间批量失效（key 前缀 = parts[0]）：写操作后失效受影响工具的缓存，不误伤其他工具 */
+  l2DeleteNamespace(ns: string): void;
   makeKey(parts: string[]): string;
   setEmbeddingFn(fn: (text: string) => Promise<number[]>): void;
   /** L1 语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）；
-   *  promptKey 为 systemPrompt 指纹，人设/插件规则不同则隔离缓存空间 */
-  l1Get(question: string, promptKey?: string): Promise<{ hit: boolean; answer?: string; key?: string }>;
-  l1Set(question: string, answer: string, promptKey?: string): Promise<void>;
-  /** L3 prompt 前缀复用统计：记录本轮与上轮 LLM 调用公共前缀的 token 数 */
+   *  promptKey 为 systemPrompt 指纹，人设/插件规则不同则隔离缓存空间；
+   *  scope 为会话级隔离键（如 traceId）：传入时仅命中「该会话自产」的答案，
+   *  全局答案对所有会话可见（纯问答产物），会话答案只对本会话可见（依赖工具观察的产物）。
+   *  hitScope：命中条目的作用域，供命中学习回填沿用。 */
+  l1Get(question: string, promptKey?: string, scope?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string }>;
+  l1Set(question: string, answer: string, promptKey?: string, scope?: string): Promise<void>;
+  /** L3 前缀复用统计（估算口径）：记录本轮与上轮 LLM 调用公共前缀的 token 数 */
   recordPrefixRepeat(tokens: number): void;
+  /** L3 真实命中统计：provider usage 确认的缓存命中/未命中 token（归一化后）
+   *  ——真实命中率只能由 provider 说了算，本地估算不可替代 */
+  recordProviderCacheHit(hitTokens: number, missTokens: number): void;
   /** 累计缓存节省成本（由命中方按 provider 价格估算报告） */
   recordSavedCost(cost: number): void;
   clear(): void;
@@ -241,7 +250,17 @@ export type LLMChunk =
   | { type: 'delta'; text: string }
   | { type: 'reasoning'; text: string }   // 推理模型思考过程（如 deepseek reasoning_content）
   | { type: 'tool_call'; toolCall: ToolCall }
-  | { type: 'usage'; input: number; output: number }
+  | {
+      type: 'usage';
+      input: number;           // 总输入 token（含缓存命中部分）
+      output: number;
+      /** 本次请求中 provider 前缀缓存真实命中的输入 token（归一化各厂商字段）：
+       *  DeepSeek prompt_cache_hit_tokens / OpenAI·智谱 prompt_tokens_details.cached_tokens /
+       *  Anthropic cache_read_input_tokens。无该字段（provider 不支持）时为 undefined。 */
+      cachedInput?: number;
+      /** 本次请求中未命中缓存的输入 token（真实命中率 = cachedInput/(cachedInput+missInput)） */
+      missInput?: number;
+    }
   | { type: 'done' };
 
 export interface ChatOptions {
@@ -277,6 +296,8 @@ export interface TraceStep extends TraceStepInit {
   outputSummary?: string;
   tokensIn?: number;
   tokensOut?: number;
+  /** 本次 LLM 调用中 provider 前缀缓存真实命中的输入 token（usage 归一化后） */
+  tokensCached?: number;
   cost?: number;
   error?: string;
 }
@@ -307,9 +328,15 @@ export interface CacheStats {
   l2Misses: number;
   l1Hits: number;
   l1Misses: number;
-  /** L3 prompt 前缀复用：相邻 LLM 调用公共前缀的累计 token 数（provider KV cache 直接命中） */
+  /** L3 前缀复用（本地估算口径）：相邻 LLM 调用公共前缀的 token 数——无 provider 反馈时的降级度量 */
   l3Hits: number;
   l3Tokens: number;
+  /** L3 前缀缓存（真实口径）：provider usage 确认的缓存命中 token 数。
+   *  真实命中率 = l3RealTokens / (l3RealTokens + l3RealMissTokens)；
+   *  与估算口径(l3Tokens)的差距 = provider TTL 过期 / 路由抖动 / 不支持缓存 造成的损耗。 */
+  l3RealHits: number;
+  l3RealTokens: number;
+  l3RealMissTokens: number;
   savedCost: number;
 }
 
