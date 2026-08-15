@@ -224,17 +224,19 @@ TraceSession(traceId)
 
 | 层 | 名称 | 键 | 命中条件 | 失效策略 |
 | --- | --- | --- | --- | --- |
-| L1 | 语义问答缓存 | 规范化问题文本（默认字符 bigram Dice；配置 embedding 后升级向量余弦） | 相同/近似问题 Dice ≥ 0.85（或向量 ≥ 0.95）命中直接返回缓存答案 | 手动清空；LLM 版本升级时清空；短问题（<8 字符）不参与 |
-| L2 | 工具结果缓存 | `hash(工具名 + 规范化参数)`；文件类追加 `mtime+size` | 键相同且未失效 | 文件 mtime/size 变化；TTL（30 分钟）；显式失效 |
-| L3 | prompt 前缀缓存 | 无显式键——**靠消息组装策略** | 依赖 provider 原生 KV cache | 由 provider 管理 |
+| L1 | 语义问答缓存 | 规范化问题文本（默认字符 bigram Dice；配置 embedding 后升级向量余弦）+ promptKey 指纹 + scope 作用域 | 相同/近似问题 Dice ≥ 0.58（或向量 ≥ 0.95）命中直接返回缓存答案 | 手动清空；LLM 版本升级时清空；短问题（<8 字符）不参与；TTL 24h |
+| L2 | 工具结果缓存 | `hash(工具名 + 规范化参数)`；文件类追加 `mtime+size` | 键相同且未失效 | 文件 mtime/size 变化；TTL（30 分钟）；显式失效；超容量 LRU 淘汰 |
+| L3 | prompt 前缀缓存 | 无显式键——**靠消息组装策略** | 依赖 provider 原生 KV cache（逐 token 精确前缀匹配） | 由 provider 管理（TTL 5min~数小时不等）；真实命中按 usage 统计 |
 
-**L3 设计要点（高命中关键）**：保持 system prompt 字节级稳定；历史消息按"只追加不重写"策略组装（同一会话内，旧消息序列不变）；多轮工具结果不回写历史。这样 provider 侧 KV cache 前缀复用最大化，DeepSeek/OpenAI 的 context caching 均吃满。
+**L3 设计要点（高命中关键）**：保持 system prompt 字节级稳定；历史消息按"只追加不重写"策略组装（同一会话内，旧消息序列不变）；多轮工具结果不回写历史；动态注入（记忆/时间/预算提示）一律追加到末尾。这样 provider 侧 KV cache 前缀复用最大化，DeepSeek/OpenAI/Anthropic 的 context caching 均吃满。
+
+**真实命中原则（v2）**：provider 前缀缓存是逐 token 精确匹配，真实命中数只能从 usage 读取——DeepSeek `prompt_cache_hit_tokens`、OpenAI/智谱 `prompt_tokens_details.cached_tokens`、Anthropic `cache_read_input_tokens`，`core/chat/provider.ts` 统一归一化为 `cachedInput/missInput`。L3 双口径：估算（`sharedPrefixTokens` 相邻轮公共前缀，无反馈时降级）+ 真实（provider 确认命中 token，唯一权威）。真实命中率 = 真实命中/(真实命中+真实未命中)，骤降即前缀被改动的信号（TTL 过期/路由抖动/换模型）。L3 命中按 provider input 价格计入 savedCost。
 
 **缓存统计**：命中次数、节省 token、节省成本、命中率，全部进入 Trace 并在面板展示。缓存"是什么、为什么命中"永远可查。
-- L1 可观测：Agent 循环在首轮问答（最后一条真实 user 消息，≥8 字符，排除记忆注入）查询语义缓存，命中直接 yield 缓存答案（`cached: true`，前端显示 ⚡缓存命中，成本 0）；无工具调用的最终轮按最后 user 消息回填（探索型任务 maxTurns=12 保证能走到最终总结轮，回填可靠）。
-- L3 可观测：Agent 循环在每次 LLM 调用前对比与上一轮消息的公共前缀，估算复用 token 计入 `cache.l3`（`kernel/tokens.ts` 的 `sharedPrefixTokens`）。
+- L1 可观测：Agent 循环在首轮问答（最后一条真实 user 消息，≥8 字符，排除记忆注入）查询语义缓存，命中直接 yield 缓存答案（`cached: true`，前端显示 ⚡缓存命中，成本 0）；无工具调用的最终轮按最后 user 消息回填（探索型任务 maxTurns=12 保证能走到最终总结轮，回填可靠）。回填/查询带 scope：纯问答答案全局共享，依赖工具观察的答案仅本会话可命中（防跨会话串陈旧观察）。
+- L3 可观测：Agent 循环在每次 LLM 调用前对比与上一轮消息的公共前缀，估算复用 token 计入 `cache.l3`（`kernel/tokens.ts` 的 `sharedPrefixTokens`）；调用后按 usage 归一化的 `cachedInput` 记录真实命中（`cache.l3Real*`），trace 步骤带 `tokensCached`。
 
-**统计面板（`GET /api/stats`）**：聚合全局概览（会话/消息/tokens/成本/截断次数，SQLite 累计）、本次运行明细（Trace 进程级）、每会话上下文用量（`estimateTokens` 估算 + 与 `context.maxTokens` 预算对比 + 截断标记）、三层缓存命中率（L1/L2 命中率、L3 复用次数与 token 数）。前端侧边栏「统计」Tab 每 5 秒轮询刷新。
+**统计面板（`GET /api/stats`）**：聚合全局概览（会话/消息/tokens/成本/截断次数，SQLite 累计）、本次运行明细（Trace 进程级）、每会话上下文用量（`estimateTokens` 估算 + 与 `context.maxTokens` 预算对比 + 截断标记）、三层缓存命中率（L1/L2 命中率、L3 双口径：估算复用 token + 真实命中 token/rate）。前端侧边栏「统计」Tab 每 5 秒轮询刷新。
 
 ---
 
