@@ -1,10 +1,9 @@
-// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 终端风工具流水线 + 思考过程实时流 + 命令面板）
+// ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
 import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
 import Markdown from './Markdown';
-import BrandLogo from './BrandLogo';
-import { IconLock, IconPlan } from './Icon';
+import { IconBrain, IconLock, IconPlan } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -15,42 +14,93 @@ interface Props {
   approvals: ApprovalItem[];
   onApproval: (id: string, approved: boolean) => void;
   plan: PlanState | null;
+  modelLabel?: string;
+  modelTag?: string;
 }
 
-/** 工具参数摘要（终端风格，截断防爆） */
+function fmtMs(ms?: number): string {
+  if (ms === undefined) return '';
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
 function argsSummary(args: unknown): string {
   try {
     const s = JSON.stringify(args);
-    return s.length > 80 ? `${s.slice(0, 80)}…` : s;
+    return s.length > 90 ? `${s.slice(0, 90)}…` : s;
   } catch { return String(args); }
 }
 
-/** 工具执行流水卡片：默认折叠（按需展开），运行中自动展开显示参数 */
+/** 工具调用卡片（Warp 命令块风格） */
 function ToolCard({ t }: { t: ToolStep }) {
   const [open, setOpen] = useState(false);
-  const fmtMs = (ms?: number) => (ms === undefined ? '' : ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`);
-  const isRunning = t.status === 'running';
-  const show = open || isRunning; // 运行中自动展开（实时反馈），完成后按需展开
+  const running = t.status === 'running';
+  const show = open || running;
+  const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
+  const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
-    <div className={`tool-card ${t.status} ${show ? 'open' : ''}`} onClick={() => { if (!isRunning) setOpen((v) => !v); }}>
-      <div className="tool-line">
-        <span className={`tool-dot ${t.status}`} />
-        <span className="tool-name">{t.name}</span>
-        <span className="tool-time">{fmtMs(t.durationMs)}</span>
-        <span className={`tool-status ${t.status}`}>
-          {t.status === 'running' ? '执行中…' : t.status === 'done' ? '完成' : '失败'}
-        </span>
-        <span className={`tool-chevron ${show ? 'up' : ''}`}>▾</span>
+    <div className="tool-card" onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
+      <div className="tool-head">
+        <div className="tool-head-left">
+          <span className={`tool-icon ${statusCls}`}>{t.status === 'done' ? '$' : '⟳'}</span>
+          <span className="tool-name">{t.name}</span>
+          <span className="tool-path">{t.args ? argsSummary(t.args) : ''}</span>
+        </div>
+        <div className="tool-head-right">
+          <span className={`tool-status ${statusCls}`}><span className="sd" />{statusTxt}</span>
+          <span className="tool-dur">{fmtMs(t.durationMs)}</span>
+          <span style={{ fontSize: 10, color: 'var(--text-4)', transform: show ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▾</span>
+        </div>
       </div>
-      {show && t.args !== undefined && (
-        <pre className="tool-args">{argsSummary(t.args)}</pre>
+      {show && t.summary && (
+        <div className="tool-body">
+          <span className="t-out">{t.summary}</span>
+        </div>
       )}
-      {show && t.summary && <pre className="tool-summary">{t.summary}</pre>}
     </div>
   );
 }
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan }: Props) {
+/** 代码块：简化语言高亮（关键字/字符串/注释） */
+function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
+  const [copied, setCopied] = useState(false);
+  const hl = code
+    .split('\n')
+    .map((line) =>
+      line
+        .replace(/(\/\/.*$)/, (m) => `<span class="cm">${m}</span>`)
+        .replace(/('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g, (m) => `<span class="st">${m}</span>`)
+        .replace(/\b(import|from|export|default|const|let|var|function|return|async|await|new|class|this|interface|type)\b/g, (m) => `<span class="kw">${m}</span>`),
+    )
+    .join('\n');
+  return (
+    <div className="code-block">
+      <div className="code-head">
+        <span className="code-lang"><span className="cl-dot" />{lang || 'code'}</span>
+        <div className="code-actions">
+          <button className="code-copy" onClick={() => { navigator.clipboard?.writeText(code).catch(() => undefined); setCopied(true); setTimeout(() => setCopied(false), 1200); }} title="复制代码">{copied ? '✓' : '⧉'}</button>
+        </div>
+      </div>
+      <pre className="code-body" dangerouslySetInnerHTML={{ __html: hl }} />
+    </div>
+  );
+}
+
+/** 渲染 assistant 消息内容：含代码块的轻量 markdown 分段 */
+function renderContent(text: string) {
+  const parts: React.ReactNode[] = [];
+  const blocks = text.split(/```(\w*)\n([\s\S]*?)```/g);
+  for (let i = 0; i < blocks.length; i++) {
+    if (i % 3 === 0) {
+      if (blocks[i].trim()) parts.push(<div key={i} className="assistant-text"><Markdown text={blocks[i]} /></div>);
+    } else if (i % 3 === 1) {
+      parts.push(<CodeBlock key={i} code={blocks[i + 1] ?? ''} lang={blocks[i]} />);
+      i++;
+    }
+  }
+  return parts;
+}
+
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, modelLabel = '', modelTag = '' }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -58,23 +108,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [cmdIdx, setCmdIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
-  const reasoningRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  // 思考过程流式时自动跟随最新内容
-  useEffect(() => {
-    if (streaming && reasoningRef.current) {
-      reasoningRef.current.scrollTop = reasoningRef.current.scrollHeight;
-    }
-  }, [messages, streaming]);
-
-  // 加载命令清单（命令面板用）
-  useEffect(() => {
-    commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined);
-  }, []);
+  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => { commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined); }, []);
 
   const submit = (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
@@ -84,7 +120,6 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
     onSend(text);
   };
 
-  /** 当前匹配的命令（输入 /xxx 时按前缀过滤；仅输入 / 时显示全部） */
   const matched = input.startsWith('/')
     ? commands.filter((c) => {
         const q = input.slice(1).toLowerCase();
@@ -92,7 +127,6 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
       })
     : [];
 
-  /** 执行或补全选中命令：无参数命令直接执行；有参数命令（如 /model）补全并让用户继续输入 */
   const applyCommand = (cmd: CommandInfo, execute = true) => {
     if (cmd.usage) {
       setInput(`/${cmd.name} `);
@@ -119,130 +153,153 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   };
 
-  const toggleReasoning = (id: string) =>
-    setExpanded((e) => ({ ...e, [id]: !e[id] }));
-
   return (
-    <div className="chat-body">
+    <div className="chat-area">
       <div className="messages">
-        {/* 目标计划卡片：实时展示多步任务的推进状态 */}
-        {plan && (
-          <div className="plan-card">
-            <div className="plan-title"><IconPlan size={14} /> {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
-            <div className="plan-steps">
+        <div className="messages-inner">
+          {plan && (
+            <div className="plan-card">
+              <div className="p-title"><IconPlan size={14} /> {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
               {plan.steps.map((s, i) => (
                 <div key={i} className={`plan-step ${s.status}`}>
-                  <span className="plan-step-icon">
-                    {s.status === 'done' ? '✅' : s.status === 'in_progress' ? '▶️' : s.status === 'blocked' ? '⛔' : '⬜'}
-                  </span>
-                  <span className="plan-step-title">{i + 1}. {s.title}</span>
-                  {s.note && <div className="plan-step-note">{s.note}</div>}
+                  <span className="ps-num">{s.status === 'done' ? '✓' : s.status === 'in_progress' ? '▶' : s.status === 'blocked' ? '!' : i + 1}</span>
+                  <span>{i + 1}. {s.title}</span>
                 </div>
               ))}
             </div>
-          </div>
-        )}
-        {messages.length === 0 && (
-          <div className="welcome">
-            <BrandLogo size={110} />
-            <div className="welcome-slogan">万物皆插件，自我进化</div>
-            <div className="welcome-hint">输入消息开始对话 · 输入 <span className="welcome-slash">/</span> 调出命令面板</div>
-            {!hasModels && <p className="warn">尚未配置 LLM Provider —— 在左侧「设置」中添加。</p>}
-          </div>
-        )}
-        {messages.map((m) => (
-          <div key={m.id} className={`msg ${m.role}`}>
-            <div className="msg-label">{m.role === 'user' ? '你' : m.role === 'system' ? '系统' : 'AI'}</div>
-            <div className="msg-content">
-              {m.tools && m.tools.length > 0 && (
-                <div className="tools">
-                  {m.tools.map((t, i) => (
-                    <ToolCard key={`${t.name}-${i}`} t={t} />
-                  ))}
-                </div>
-              )}
-              {/* 思考过程：流式时实时显示（终端风，自动跟随），完成后折叠 */}
-              {m.reasoning && m.reasoning.length > 0 && (
-                <div className="reasoning">
-                  <button className="reasoning-toggle" onClick={() => toggleReasoning(m.id)}>
-                    <span className={`brain-dot ${m.streaming ? 'active' : ''}`} />
-                    {m.streaming ? '🧠 烧脑中…' : `🧠 思考过程${expanded[m.id] ? ' ▾' : ' ▸'}`}
-                  </button>
-                  {m.streaming ? (
-                    <div className="reasoning-body streaming" ref={reasoningRef}>
-                      <div className="reasoning-text">{m.reasoning}<span className="cursor">▍</span></div>
+          )}
+
+          {messages.length === 0 && (
+            <div className="empty-state" style={{ padding: '72px 0' }}>
+              <div className="sb-logo-mark" style={{ width: 56, height: 56, fontSize: 28, borderRadius: 14, marginBottom: 16 }}>M</div>
+              <div style={{ fontSize: 20, fontWeight: 700, letterSpacing: -0.3 }}>探索未至之境</div>
+              <div style={{ fontSize: 13, color: 'var(--text-3)', marginTop: 4 }}>
+                万物皆插件，自我进化 · 输入 <span style={{ color: 'var(--accent)', fontWeight: 700 }}>/</span> 调出命令面板
+              </div>
+              {!hasModels && <div style={{ color: 'var(--orange)', marginTop: 12, fontSize: 13 }}>尚未配置 LLM Provider —— 在左下角「设置」中添加。</div>}
+            </div>
+          )}
+
+          {messages.map((m) => (
+            <div key={m.id} className="msg-row">
+              {m.role !== 'user' ? (
+                <>
+                  <div className="msg-avatar">M</div>
+                  <div className="msg-col">
+                    <div className="msg-meta">
+                      <span className="msg-author">maharness</span>
+                      <span className="msg-tag">{modelTag || 'AI'}</span>
+                      <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? '⚡ 缓存命中' : ''}</span>
                     </div>
-                  ) : expanded[m.id] ? (
-                    <div className="reasoning-body">
-                      <div className="reasoning-text">{m.reasoning}</div>
-                    </div>
-                  ) : null}
-                </div>
-              )}
-              {m.content ? (
-                <div className="msg-text">
-                  {/* 响应快：流式期间轻量渲染（纯文本），完成后一次完整 Markdown（避免每次 delta 全量管线） */}
-                  {m.role === 'assistant' && !m.streaming
-                    ? <Markdown text={m.content} />
-                    : <div className="plain">{m.content}</div>}
-                  {m.streaming && <span className="cursor">▍</span>}
-                </div>
-              ) : m.streaming ? (
-                <div className="msg-text thinking"><span className="cursor">思考中▍</span></div>
-              ) : null}
-              {m.error && <div className="msg-error">{m.error}</div>}
-              {m.usage && (
-                <div className="msg-meta">
-                  ↑{m.usage.input} · ↓{m.usage.output} tokens · 成本 ${(m.cost ?? 0).toFixed(5)}
-                  {m.cached && <em className="cache-badge">⚡ 秒回（缓存）</em>}
+                    {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
+                    {m.reasoning && m.reasoning.length > 0 && (
+                      <div className="think-card">
+                        <div className="think-head">
+                          <span className="think-dot"><IconBrain size={12} /></span>
+                          <span className="think-label">思考</span>
+                          <span className="think-dur">{m.streaming ? '推理中…' : expanded[m.id] ? '▾' : '▸'}</span>
+                          <button
+                            style={{ marginLeft: 'auto', color: 'var(--text-4)', fontSize: 11 }}
+                            onClick={() => setExpanded((e) => ({ ...e, [m.id]: !e[m.id] }))}
+                          >
+                            {m.streaming ? '流式' : expanded[m.id] ? '收起' : '展开'}
+                          </button>
+                        </div>
+                        {(m.streaming || expanded[m.id]) && (
+                          <div className="think-body">{m.reasoning}{m.streaming && <span className="stream-cursor" />}</div>
+                        )}
+                      </div>
+                    )}
+                    {m.content ? (
+                      m.streaming ? (
+                        <div className="assistant-text">{m.content}<span className="stream-cursor" /></div>
+                      ) : (
+                        renderContent(m.content)
+                      )
+                    ) : m.streaming ? (
+                      <div className="assistant-text" style={{ color: 'var(--text-3)' }}>思考中<span className="stream-cursor" /></div>
+                    ) : null}
+                    {m.error && <div className="assistant-text" style={{ color: 'var(--red)' }}>{m.error}</div>}
+                    {m.usage && (
+                      <div className="msg-extra">
+                        ↑{m.usage.input} · ↓{m.usage.output} tokens · ¥{(m.cost ?? 0).toFixed(4)}
+                        {m.cached && <span style={{ color: 'var(--teal)' }}> · ⚡ 秒回（缓存）</span>}
+                      </div>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <div className="msg-col" style={{ alignItems: 'flex-end' }}>
+                  <div className="msg-meta" style={{ justifyContent: 'flex-end' }}>
+                    <span className="msg-author">你</span>
+                    <span className="msg-extra">刚刚</span>
+                  </div>
+                  <div className="user-bubble">{m.content}</div>
                 </div>
               )}
             </div>
-          </div>
-        ))}
-        <div ref={bottomRef} />
+          ))}
+          <div ref={bottomRef} />
+        </div>
       </div>
 
-      {/* 审批卡片：危险操作等待用户决策（执行器级安全机制） */}
       {approvals.length > 0 && (
-        <div className="approval-area">
+        <div style={{ padding: '0 24px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
           {approvals.map((a) => (
-            <div key={a.id} className="approval-card">
-              <div className="approval-title"><IconLock size={14} /> 需要审批 · {a.name}</div>
-              <pre className="approval-summary">{a.summary}</pre>
+            <div key={a.id} className="approval-card" style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+              <div className="a-title"><IconLock size={14} /> 需要审批 · {a.name}</div>
+              <pre className="a-summary">{a.summary}</pre>
               <div className="approval-actions">
-                <button className="approve" onClick={() => onApproval(a.id, true)}>批准执行</button>
-                <button className="reject" onClick={() => onApproval(a.id, false)}>拒绝</button>
+                <button className="btn-primary" onClick={() => onApproval(a.id, true)}>批准执行</button>
+                <button className="btn-ghost" onClick={() => onApproval(a.id, false)}>拒绝</button>
               </div>
             </div>
           ))}
         </div>
       )}
 
-      <div className="input-wrap">
-        {/* 命令面板：输入 / 弹出，方向键选择，Enter 执行，Tab 补全，Esc 关闭 */}
+      <div className="composer-area">
         {cmdOpen && matched.length > 0 && (
-          <div className="cmd-panel">
-            <div className="cmd-panel-title">斜杠命令（Enter 执行 · Tab 补全 · Esc 关闭）</div>
-            {matched.map((c, i) => (
-              <div
-                key={c.name}
-                className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
-                onMouseEnter={() => setCmdIdx(i)}
-                onClick={() => applyCommand(c)}
-              >
-                <span className="cmd-name">/{c.name}{c.usage ? ` ${c.usage}` : ''}</span>
-                <span className="cmd-desc">{c.description}</span>
-                <span className="cmd-src">{c.source === 'builtin' ? '内置' : '插件'}</span>
+          <div className="cmd-overlay" onClick={() => setCmdOpen(false)}>
+            <div className="cmd-panel" onClick={(e) => e.stopPropagation()}>
+              <div className="cmd-input-row">
+                <span className="cmd-slash">/</span>
+                <span className="cmd-typed">{input.slice(1)}</span>
+                <span className="cmd-cursor" />
               </div>
-            ))}
+              <div className="cmd-list">
+                {matched.map((c, i) => (
+                  <div
+                    key={c.name}
+                    className={`cmd-item ${i === cmdIdx ? 'selected' : ''}`}
+                    onMouseEnter={() => setCmdIdx(i)}
+                    onClick={() => applyCommand(c)}
+                  >
+                    <span className="ci-icon" style={{ background: c.source === 'builtin' ? 'var(--blue-soft)' : 'var(--purple-soft)', color: c.source === 'builtin' ? 'var(--accent)' : 'var(--purple)' }}>
+                      {c.source === 'builtin' ? '⚙' : '◇'}
+                    </span>
+                    <span className="ci-name">/{c.name}{c.usage ? ` ${c.usage}` : ''}</span>
+                    <span className="ci-desc">{c.description}</span>
+                    {i === cmdIdx && <span className="ci-badge">⏎ 执行</span>}
+                    <span className="ci-kbd">{c.source === 'builtin' ? '内置' : '插件'}</span>
+                  </div>
+                ))}
+              </div>
+              <div className="cmd-foot">
+                <span className="cf-item"><span className="cf-kbd">↑↓</span><span className="cf-label">选择</span></span>
+                <span className="cf-item"><span className="cf-kbd">Enter</span><span className="cf-label">执行</span></span>
+                <span className="cf-item"><span className="cf-kbd">Tab</span><span className="cf-label">补全</span></span>
+                <span className="cf-item"><span className="cf-kbd">Esc</span><span className="cf-label">关闭</span></span>
+              </div>
+            </div>
           </div>
         )}
-        <div className="input-bar">
+
+        <div className="composer">
           <textarea
             ref={inputRef}
             value={input}
-            placeholder={hasModels ? '输入消息，Enter 发送，Shift+Enter 换行；输入 / 调出命令面板' : '请先在「设置」配置 LLM Provider'}
+            placeholder={hasModels ? '描述你想构建的内容…（/ 调出命令面板）' : '请先在「设置」配置 LLM Provider'}
             rows={2}
             onChange={(e) => {
               setInput(e.target.value);
@@ -252,12 +309,22 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
             onKeyDown={onKeyDown}
             disabled={!hasModels || streaming}
           />
-          {streaming ? (
-            <button className="btn stop" onClick={onStop}>停止</button>
-          ) : (
-            <button className="btn send" onClick={submit} disabled={!input.trim() || !hasModels}>发送</button>
-          )}
+          <div className="composer-toolbar">
+            <div className="comp-left">
+              <button className="comp-btn" title="附加内容"><span style={{ fontSize: 15 }}>+</span></button>
+              <button className="comp-btn" title="工具"><span className="dot" style={{ background: 'var(--text-3)' }} />Workspace Write<span style={{ fontSize: 9 }}>▾</span></button>
+            </div>
+            <div className="comp-right">
+              <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<span style={{ fontSize: 9 }}>▾</span></span>
+              {streaming ? (
+                <button className="send-btn stop" onClick={onStop} title="停止">■</button>
+              ) : (
+                <button className="send-btn" onClick={() => submit()} disabled={!input.trim() || !hasModels} title="发送">↑</button>
+              )}
+            </div>
+          </div>
         </div>
+        <div className="composer-hint">按 <span className="mono">/</span> 调出命令面板 · <span className="mono">Enter</span> 发送 · <span className="mono">Shift + Enter</span> 换行</div>
       </div>
     </div>
   );

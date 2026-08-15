@@ -1,31 +1,19 @@
-// ui/src/App.tsx —— 主布局与状态管理
+// ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { approvalsApi, commandsApi, modelsApi, personasApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PersonaInfo, PlanState, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
+import { approvalsApi, commandsApi, modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
+import Sidebar from './components/Sidebar';
+import type { MainTab } from './components/Sidebar';
 import ChatView from './components/ChatView';
-import SessionList from './components/SessionList';
-import PluginPanel from './components/PluginPanel';
-import ProviderPanel from './components/ProviderPanel';
-import PersonaPanel from './components/PersonaPanel';
-import SkillsPanel from './components/SkillsPanel';
-import FileTree from './components/FileTree';
-import StatsPanel from './components/StatsPanel';
-import { IconClose, IconFolder, IconPlugin, IconSettings, IconStats, IconTheme } from './components/Icon';
 import TracePanel from './components/TracePanel';
-
-type ManagerTab = 'plugins' | 'files' | 'stats' | 'settings' | null;
+import FilesView from './components/FilesView';
+import PluginsView from './components/PluginsView';
+import StatsView from './components/StatsView';
+import SettingsView from './components/SettingsView';
+import Menu from './components/Menu';
+import { IconClose } from './components/Icon';
 
 export default function App() {
-  // 主题（浅色/深色科技）：localStorage 持久化，初始跟随系统偏好
-  const [dark, setDark] = useState<boolean>(() => {
-    const saved = localStorage.getItem('maharness-theme');
-    if (saved) return saved === 'dark';
-    return window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? false;
-  });
-  useEffect(() => {
-    document.body.dataset.theme = dark ? 'dark' : 'light';
-    localStorage.setItem('maharness-theme', dark ? 'dark' : 'light');
-  }, [dark]);
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -34,44 +22,57 @@ export default function App() {
   const [sel, setSel] = useState<{ provider: string; model: string } | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [personas, setPersonas] = useState<PersonaInfo[]>([]);
-  const [managerOpen, setManagerOpen] = useState<ManagerTab>(null);
+  const [activeTab, setActiveTab] = useState<MainTab>('chat');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
-  const [traceOpen, setTraceOpen] = useState(false);
+  const [traceOpen, setTraceOpen] = useState(true);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
 
   // 初始加载
+  useEffect(() => { void loadAll(); }, []);
   useEffect(() => {
-    void loadAll();
+    const off = subscribeEvents((e: BusEvent) => {
+      if (e.type === 'trace.step') setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
+      else if (e.type === 'plan.updated') setPlan(e.data as PlanState | null);
+    });
+    const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
+    return () => { off(); clearInterval(t); };
   }, []);
 
   async function loadAll() {
-    const [ss, ms, pl, pvs, pns] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list(), personasApi.list()]);
+    const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
     setSessions(ss);
     setModels(ms);
     setPlugins(pl);
     setProviders(pvs);
-    setPersonas(pns);
     if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
+    let initialId: string | null = null;
     if (!ss.length) {
       const created = await sessionApi.create(ms[0]?.model ?? '');
       setSessions([created]);
-      setActiveId(created.id);
+      initialId = created.id;
     } else {
-      setActiveId(ss[0].id);
+      initialId = ss[0].id;
+    }
+    // 初始会话：同步加载历史消息，避免首屏空白
+    setActiveId(initialId);
+    if (initialId) {
+      try {
+        const msgs = await sessionApi.messages(initialId);
+        setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
+      } catch { /* 忽略 */ }
     }
   }
 
-  // 切换会话：加载历史
   const selectSession = useCallback(async (id: string) => {
     setActiveId(id);
     setMessages([]);
     setTraceSteps([]);
-    setPlan(null); // 计划卡片属于会话，切换时清空（防跨会话残留）
+    setPlan(null);
     try {
       const msgs = await sessionApi.messages(id);
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
@@ -92,16 +93,13 @@ export default function App() {
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
       if (activeId === id) {
-        if (next.length) { void selectSession(next[0].id); } else {
-          setActiveId(null);
-          setMessages([]);
-        }
+        if (next.length) void selectSession(next[0].id);
+        else { setActiveId(null); setMessages([]); }
       }
       return next;
     });
   }, [activeId, selectSession]);
 
-  // 会话管理：归档 / 置顶标记
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     await sessionApi.update(id, { archived });
     setSessions(await sessionApi.list());
@@ -112,37 +110,42 @@ export default function App() {
     setSessions(await sessionApi.list());
   }, []);
 
-  // 插件管理
+  const renameSession = useCallback(async (id: string, title: string) => {
+    const t = title.trim();
+    if (!t) return;
+    try {
+      await sessionApi.rename(id, t);
+      setSessions(await sessionApi.list());
+    } catch { /* 忽略 */ }
+  }, []);
+
+  const setSessionMode = useCallback(async (mode: string) => {
+    if (!activeId) return;
+    try {
+      await sessionApi.update(activeId, { mode });
+      setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
+    } catch { /* 忽略 */ }
+  }, [activeId]);
+
+  const selectModel = useCallback(async (id: string) => {
+    const m = models.find((x) => x.id === id);
+    if (!m) return;
+    setSel({ provider: m.id, model: m.model });
+    if (activeId) {
+      try { await sessionApi.update(activeId, { model: m.model }); } catch { /* 忽略 */ }
+    }
+  }, [models, activeId]);
+
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
     await pluginsApi.action(id, action);
     setPlugins(await pluginsApi.list());
   }, []);
 
-  // 供应商变更后：刷新列表与模型下拉（热生效）
   const refreshProviders = useCallback(async () => {
     setProviders(await providersApi.list());
     setModels(await modelsApi.list());
   }, []);
 
-  // 人设变更后：刷新列表（后端已热注入）
-  const refreshPersonas = useCallback(async () => {
-    setPersonas(await personasApi.list());
-  }, []);
-
-  // Trace 实时订阅
-  useEffect(() => {
-    const off = subscribeEvents((e: BusEvent) => {
-      if (e.type === 'trace.step') {
-        setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
-      } else if (e.type === 'plan.updated') {
-        setPlan(e.data as PlanState | null);
-      }
-    });
-    const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
-    return () => { off(); clearInterval(t); };
-  }, []);
-
-  // 发送消息（斜杠命令走命令分发，不走 LLM）
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
 
@@ -184,13 +187,10 @@ export default function App() {
       onStart: () => {},
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
-      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }],
-      } : m)),
+      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
       onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
         ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
-          ...t, summary, ok, status: ok ? 'done' as const : 'error' as const,
-          durationMs: Date.now() - (t.startedAt ?? Date.now()),
+          ...t, summary, ok, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
         } : t),
       } : m)),
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
@@ -202,7 +202,6 @@ export default function App() {
       },
     }, ac.signal);
 
-    // 刷新会话列表（标题可能已自动生成）
     setSessions(await sessionApi.list());
   }, [activeId, sel, streaming, createSession]);
 
@@ -212,131 +211,128 @@ export default function App() {
     setStreaming(false);
   }, []);
 
-  // 审批响应：批准/拒绝后移除卡片
   const respondApproval = useCallback(async (id: string, approved: boolean) => {
     try { await approvalsApi.respond(id, approved); } catch { /* 审批已过期 */ }
     setApprovals((prev) => prev.filter((a) => a.id !== id));
   }, []);
 
   const currentSession = sessions.find((s) => s.id === activeId);
+  const pluginRunning = plugins.filter((p) => p.state === 'running' || p.state === 'loaded').length;
+  const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
+  const modeColor = currentSession?.mode === 'plan' ? 'var(--purple)' : currentSession?.mode === 'goal' ? 'var(--orange)' : 'var(--text-3)';
+  const selModel = models.find((m) => m.id === sel?.provider);
+  const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : (sel ? `${sel.provider} · ${sel.model}` : '');
+  const modelTag = selModel?.model ?? sel?.model ?? '';
+  const modeItems = [
+    { key: 'normal', label: '普通模式', sub: '自由对话', dot: 'var(--text-3)' },
+    { key: 'plan', label: '计划模式', sub: '先出计划再执行', dot: 'var(--purple)' },
+    { key: 'goal', label: '目标模式', sub: '以目标驱动多轮', dot: 'var(--orange)' },
+  ];
+
+  const onTab = (t: MainTab) => {
+    setActiveTab(t);
+    setSettingsOpen(false);
+  };
 
   return (
     <div className="app">
-      {/* 左侧边栏：只放会话（高频核心），管理面板独立为右侧窗口 */}
-      <aside className="sidebar">
-        <SessionList
-          sessions={sessions}
-          activeId={activeId}
-          onSelect={selectSession}
-          onCreate={createSession}
-          onDelete={deleteSession}
-          onBatchDelete={async (ids) => {
-            try {
-              await sessionApi.batchRemove(ids);
-              setSessions(await sessionApi.list());
-              if (activeId && ids.includes(activeId)) {
-                const rest = sessions.filter((s) => !ids.includes(s.id));
-                if (rest.length) void selectSession(rest[0].id); else { setActiveId(null); setMessages([]); }
-              }
-            } catch (err) {
-              alert(err instanceof Error ? err.message : String(err));
-            }
-          }}
-          onArchive={archiveSession}
-          onPin={pinSession}
-        />
-        <div className="sidebar-manage">
-          <button className={managerOpen === 'plugins' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'plugins' ? null : 'plugins')} title="插件管理"><IconPlugin size={15} /><span>插件</span></button>
-          <button className={managerOpen === 'files' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'files' ? null : 'files')} title="文件与工作区"><IconFolder size={15} /><span>文件</span></button>
-          <button className={managerOpen === 'stats' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'stats' ? null : 'stats')} title="信息统计"><IconStats size={15} /><span>统计</span></button>
-          <button className={managerOpen === 'settings' ? 'tab active' : 'tab'} onClick={() => setManagerOpen(managerOpen === 'settings' ? null : 'settings')} title="设置"><IconSettings size={15} /><span>设置</span></button>
-        </div>
-      </aside>
+      <Sidebar
+        sessions={sessions}
+        activeId={activeId}
+        activeTab={activeTab}
+        onTab={onTab}
+        onSelect={selectSession}
+        onCreate={createSession}
+        onDelete={deleteSession}
+        onArchive={archiveSession}
+        onPin={pinSession}
+        onRename={renameSession}
+        settingsOpen={settingsOpen}
+        onToggleSettings={() => setSettingsOpen((v) => !v)}
+        pluginRunning={pluginRunning}
+      />
 
-      {/* 右侧管理窗口：插件/文件/统计/设置独立小窗口（可关闭，与轨迹面板共存） */}
-      {managerOpen && (
-        <aside className="manager-panel">
-          <div className="manager-head">
-            <span className="manager-title">
-              {managerOpen === 'plugins' ? '插件管理' : managerOpen === 'files' ? '文件与工作区' : managerOpen === 'stats' ? '信息统计' : '设置'}
-            </span>
-            <button className="manager-close" title="关闭面板" onClick={() => setManagerOpen(null)}><IconClose size={13} /></button>
+      <main className="main">
+        <header className="topbar">
+          <div className="topbar-left">
+            <div className="crumb">
+              <span className="prev">DEEPSEEK</span>
+              <span className="sep">/</span>
+              <span className="cur">{activeTab === 'chat' ? (currentSession?.title ?? '新会话') : activeTab === 'files' ? '文件工作区' : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}</span>
+            </div>
           </div>
-          <div className="manager-body">
-            {managerOpen === 'plugins' ? (
-              <PluginPanel plugins={plugins} onAction={pluginAction} />
-            ) : managerOpen === 'files' ? (
-              <FileTree />
-            ) : managerOpen === 'stats' ? (
-              <StatsPanel />
-            ) : (
+          <div className="topbar-right">
+            {activeTab === 'chat' && (
               <>
-                <ProviderPanel providers={providers} onChanged={refreshProviders} />
-                <PersonaPanel personas={personas} onChanged={refreshPersonas} />
-                <SkillsPanel onChanged={refreshPersonas} />
+                <Menu
+                  trigger={<><span className="mode-dot" style={{ background: modeColor }} />{modeLabel}<span className="chev">▾</span></>}
+                  items={modeItems}
+                  selectedKey={currentSession?.mode ?? 'normal'}
+                  onSelect={(k) => void setSessionMode(k)}
+                  title="会话模式"
+                  width={220}
+                  triggerTitle="会话模式"
+                />
+                <Menu
+                  trigger={<>{modelLabel || '未选择模型'}<span className="chev">▾</span></>}
+                  items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
+                  selectedKey={sel?.provider}
+                  onSelect={(k) => void selectModel(k)}
+                  title="切换模型"
+                  width={280}
+                  triggerTitle="切换模型"
+                  disabled={models.length === 0}
+                />
+                <button
+                  className={`tb-icon-btn ${traceOpen ? 'active' : ''}`}
+                  onClick={() => setTraceOpen((v) => !v)}
+                  title="运行轨迹面板"
+                  aria-label="运行轨迹面板"
+                >
+                  {traceOpen ? <IconClose size={14} /> : <span style={{ fontSize: 14 }}>≡</span>}
+                </button>
               </>
             )}
+            {activeTab !== 'chat' && <span className="tb-live"><span className="live-dot" />实时</span>}
           </div>
-        </aside>
-      )}
-
-      <main className="chat-area">
-        <header className="chat-header">
-          <div className="chat-title">{currentSession?.title ?? '新会话'}</div>
-          <select
-            className="mode-picker"
-            value={currentSession?.mode ?? 'normal'}
-            onChange={async (e) => {
-              const mode = e.target.value;
-              if (!activeId) return;
-              try {
-                await sessionApi.update(activeId, { mode });
-                setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
-              } catch { /* 忽略 */ }
-            }}
-            title="会话模式：普通 / 计划（先计划后执行）/ 目标（自动建计划）"
-          >
-            <option value="normal">普通</option>
-            <option value="plan">计划</option>
-            <option value="goal">目标</option>
-          </select>
-          <select
-            className="model-picker"
-            value={sel ? `${sel.provider}:${sel.model}` : ''}
-            onChange={(e) => {
-              const [pid, ...rest] = e.target.value.split(':');
-              const m = models.find((x) => x.id === pid && x.model === rest.join(':'));
-              if (m) setSel({ provider: m.id, model: m.model });
-            }}
-            title="切换模型"
-          >
-            {models.length === 0 && <option value="">未配置 LLM（见「设置」）</option>}
-            {models.map((m) => <option key={`${m.id}:${m.model}`} value={`${m.id}:${m.model}`}>{m.label} · {m.model}</option>)}
-          </select>
-          <button className="theme-toggle" onClick={() => setDark((v) => !v)} title={dark ? '切换到浅色主题' : '切换到深色科技主题'}>
-            <IconTheme size={14} dark={dark} />
-          </button>
-          <button className="trace-toggle" onClick={() => setTraceOpen((v) => !v)} title="运行轨迹面板">
-            {traceOpen ? '隐藏轨迹' : '运行轨迹'}
-          </button>
         </header>
-        <ChatView
-          messages={messages}
-          streaming={streaming}
-          onSend={send}
-          onStop={stop}
-          hasModels={models.length > 0}
-          approvals={approvals}
-          onApproval={respondApproval}
-          plan={plan}
-        />
-      </main>
 
-      {traceOpen && (
-        <aside className="trace-panel">
-          <TracePanel steps={traceSteps} stats={traceStats} />
-        </aside>
-      )}
+        {settingsOpen ? (
+          <SettingsView providers={providers} onChanged={refreshProviders} />
+        ) : activeTab === 'chat' ? (
+          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+              <ChatView
+                messages={messages}
+                streaming={streaming}
+                onSend={send}
+                onStop={stop}
+                hasModels={models.length > 0}
+                approvals={approvals}
+                onApproval={respondApproval}
+                plan={plan}
+                modelLabel={modelLabel}
+                modelTag={modelTag}
+              />
+            </div>
+            {traceOpen && (
+              <aside className="trail-panel">
+                <TracePanel
+                  steps={traceSteps}
+                  stats={traceStats}
+                  onRefresh={() => void traceApi.stats().then(setTraceStats).catch(() => undefined)}
+                />
+              </aside>
+            )}
+          </div>
+        ) : activeTab === 'files' ? (
+          <FilesView />
+        ) : activeTab === 'plugins' ? (
+          <PluginsView plugins={plugins} onAction={pluginAction} />
+        ) : (
+          <StatsView />
+        )}
+      </main>
     </div>
   );
 }

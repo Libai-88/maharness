@@ -1,59 +1,123 @@
-// ui/src/components/TracePanel.tsx —— 运行轨迹面板（黑箱解药：可过滤、可追溯）
+// ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤 + 缓存/成本统计
 import { useState } from 'react';
 import type { TraceStep } from '../types';
 
 interface Props {
   steps: TraceStep[];
   stats: { trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null;
+  onRefresh: () => void;
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  llm_call: 'LLM 调用',
-  tool_call: '工具调用',
-  cache_hit: '缓存命中',
-  user_msg: '用户消息',
-  system: '系统',
+const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
+  llm_call: { label: 'LLM', cls: 'llm' },
+  tool_call: { label: 'TOOL', cls: 'tool' },
+  cache_hit: { label: 'CACHE', cls: 'cache' },
+  user_msg: { label: 'USER', cls: 'sys' },
+  system: { label: 'SYS', cls: 'sys' },
 };
 
-export default function TracePanel({ steps, stats }: Props) {
+function fmtMs(ms?: number): string {
+  if (ms === undefined) return '—';
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
+}
+
+/** 当前可见步骤导出为 JSONL 审计文件（本地下载） */
+function exportJsonl(steps: TraceStep[]) {
+  if (!steps.length) return;
+  const blob = new Blob([steps.map((s) => JSON.stringify(s)).join('\n')], { type: 'application/x-ndjson' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `maharness-trace-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+export default function TracePanel({ steps, stats, onRefresh }: Props) {
   const [typeFilter, setTypeFilter] = useState('');
   const filtered = typeFilter ? steps.filter((s) => s.type === typeFilter) : steps;
+  const cacheRate = stats?.trace?.cacheHits
+    ? Math.min(100, Math.round((stats.trace.cacheHits / Math.max(1, stats.trace.llmCalls + stats.trace.toolCalls)) * 100))
+    : 0;
+
   return (
-    <div className="trace-body">
+    <>
+      <div className="trail-head">
+        <div className="th-left">
+          <span className="th-dot" />
+          <span className="th-title">运行轨迹</span>
+          {stats && <span className="msg-tag">{filtered.length} 条</span>}
+        </div>
+        <div className="th-right" style={{ display: 'flex', gap: 4 }}>
+          <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}>↻</button>
+          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(filtered)} disabled={!steps.length}>⤓</button>
+        </div>
+      </div>
+
       {stats && (
-        <div className="trace-stats">
-          <div>LLM 调用 <b>{stats.trace.llmCalls}</b></div>
-          <div>工具调用 <b>{stats.trace.toolCalls}</b></div>
-          <div>缓存命中 <b>{stats.trace.cacheHits}</b></div>
-          <div>总成本 <b>${(stats.trace.totalCost ?? 0).toFixed(5)}</b></div>
-          <div>L2 命中 <b>{stats.cache.l2Hits}</b> / L1 {stats.l1Enabled ? '开' : '关'}</div>
+        <div className="trail-stats">
+          <div className="ts-grid">
+            <div className="ts-card">
+              <span className="ts-label">缓存命中率</span>
+              <span className="ts-value teal">{cacheRate}%</span>
+              <span className="ts-hint">L1 {stats.cache.l1Hits ?? 0} · L2 {stats.cache.l2Hits ?? 0}</span>
+            </div>
+            <div className="ts-card">
+              <span className="ts-label">本次成本</span>
+              <span className="ts-value">¥{(stats.trace.totalCost ?? 0).toFixed(3)}</span>
+              <span className="ts-hint">in {stats.trace.tokensIn ?? 0} · out {stats.trace.tokensOut ?? 0}</span>
+            </div>
+          </div>
+          <div className="ts-grid">
+            <div className="ts-card" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
+              <span className="ts-label">步骤</span>
+              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.steps ?? 0}</span>
+              <span className="ts-label">LLM 调用</span>
+              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.llmCalls ?? 0}</span>
+              <span className="ts-label">工具</span>
+              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.toolCalls ?? 0}</span>
+            </div>
+          </div>
+          <select
+            className="set-input" style={{ height: 28, fontSize: 11, width: '100%' }}
+            value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
+          >
+            <option value="">全部步骤</option>
+            {Object.entries(TYPE_BADGE).map(([v, x]) => <option key={v} value={v}>{x.label}</option>)}
+          </select>
         </div>
       )}
-      <div className="trace-filter">
-        <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)} title="按步骤类型过滤">
-          <option value="">全部步骤</option>
-          {Object.entries(TYPE_LABEL).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <span className="trace-filter-count">{filtered.length} 条</span>
-      </div>
-      <div className="trace-list">
-        {steps.length === 0 && <div className="empty-hint">暂无运行记录——发送消息后这里会实时显示每一步动作</div>}
-        {[...filtered].reverse().map((s) => (
-          <div key={s.id} className={`trace-step ${s.status}`}>
-            <div className="trace-head">
-              <span className={`trace-type ${s.type}`}>{TYPE_LABEL[s.type] ?? s.type}</span>
-              {s.name && <span className="trace-name">{s.name}</span>}
-              <span className={`trace-status ${s.status}`}>{s.status === 'done' ? `✓ ${s.durationMs ?? '?'}ms` : s.status}</span>
+
+      <div className="trail-scroll">
+        {steps.length === 0 && (
+          <div className="empty-state">暂无运行记录——发送消息后这里会实时显示每一步动作</div>
+        )}
+        {[...filtered].reverse().map((s) => {
+          const b = TYPE_BADGE[s.type] ?? { label: s.type.toUpperCase(), cls: 'sys' };
+          return (
+            <div key={s.id} className={`tl-item ${s.status === 'running' ? 'streaming' : ''}`}>
+              <div className="tl-head">
+                <div className="tl-left">
+                  <span className={`tl-badge ${b.cls}`}>{b.label}</span>
+                  <span className="tl-title">{s.name ?? b.label}</span>
+                </div>
+                <div className="tl-right">
+                  {s.cacheLayer && <span style={{ color: 'var(--teal)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>L{s.cacheLayer} ✓</span>}
+                  <span className="tl-dur">{fmtMs(s.durationMs)}</span>
+                </div>
+              </div>
+              {(s.tokensIn || s.tokensOut || s.cost) && (
+                <div className="tl-body">↑{s.tokensIn ?? 0} ↓{s.tokensOut ?? 0}{s.cost ? ` · ¥${s.cost.toFixed(4)}` : ''}</div>
+              )}
+              {s.outputSummary && <div className="tl-body" style={{ color: 'var(--text-3)' }}>{s.outputSummary}</div>}
+              {s.error && <div className="tl-body" style={{ color: 'var(--red)' }}>{s.error}</div>}
             </div>
-            {(s.tokensIn || s.tokensOut) && (
-              <div className="trace-tokens">tokens ↑{s.tokensIn} ↓{s.tokensOut}{s.cost ? ` · $${s.cost.toFixed(5)}` : ''}</div>
-            )}
-            {s.cacheLayer && <div className="trace-cache">L2 缓存命中 · 键 {s.cacheKey?.slice(0, 12)}…</div>}
-            {s.error && <div className="trace-error">{s.error}</div>}
-            {s.outputSummary && <pre className="trace-output">{s.outputSummary}</pre>}
-          </div>
-        ))}
+          );
+        })}
+        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
+          <button className="tl-export" onClick={() => exportJsonl(filtered)} disabled={!steps.length} title="导出当前步骤为 JSONL 审计文件">查看完整 JSONL 审计 →</button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
