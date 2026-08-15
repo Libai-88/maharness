@@ -12,8 +12,33 @@ import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync, cpSync, rmSync, readFileSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { truncateHistory, estimateTokens } from './context';
 import type { Store } from './db';
+
+const execFileAsync = promisify(execFile);
+
+/** 在沙箱根目录执行 git 命令（无 repo 时返回 null） */
+async function gitIn(sandbox: string, args: string[]): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync('git', args, { cwd: sandbox, timeout: 15_000, windowsHide: true });
+    return stdout;
+  } catch (err) {
+    const code = (err as { code?: number | string }).code;
+    if (code === 128 || code === 'ENOENT') return null; // 非 git 仓库 / git 未安装
+    throw err;
+  }
+}
+
+/** 用系统文件管理器打开目标（Windows: explorer） */
+function openInExplorer(target: string): void {
+  const args = process.platform === 'win32' ? [`/select,${target}`] : [target];
+  const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'darwin' ? 'open' : 'xdg-open';
+  execFile(cmd, args, { windowsHide: true }, (err) => {
+    if (err) console.warn(`[open] ${target} 失败:`, err.message);
+  });
+}
 
 interface ChatService {
   providers: ProviderDef[];
@@ -651,6 +676,167 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     }
   });
 
+  // 文件搜索：递归匹配文件名/相对路径（跳过 node_modules/.git/dist，上限 200 条）
+  app.get('/api/files/search', (req, res) => {
+    try {
+      const q = String(req.query.q ?? '').trim().toLowerCase();
+      if (!q) return res.json({ query: '', results: [] });
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const skip = new Set(['node_modules', '.git', 'dist', '.dsh', 'data']);
+      const results: { path: string; size: number }[] = [];
+      const walk = (dir: string, rel: string): void => {
+        if (results.length >= 200) return;
+        let entries;
+        try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        for (const e of entries) {
+          if (results.length >= 200) return;
+          if (skip.has(e.name)) continue;
+          const child = join(dir, e.name);
+          const childRel = rel ? `${rel}/${e.name}` : e.name;
+          if (e.isDirectory()) walk(child, childRel);
+          else if (e.name.toLowerCase().includes(q)) {
+            let size = 0;
+            try { size = statSync(child).size; } catch { /* 忽略 */ }
+            results.push({ path: childRel, size });
+          }
+        }
+      };
+      walk(sandbox, '');
+      res.json({ query: q, results });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // 用系统文件管理器打开沙箱内文件/目录
+  app.post('/api/files/open', (req, res) => {
+    try {
+      const relPath = String(req.body?.path ?? '');
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const target = relPath ? resolveInSandbox(sandbox, relPath) : sandbox;
+      if (!existsSync(target)) return res.status(404).json({ error: '路径不存在' });
+      openInExplorer(target);
+      res.json({ ok: true, path: relPath || '.' });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---------- Git（沙箱仓库状态 / 提交 / 推送） ----------
+  app.get('/api/git/status', async (_req, res) => {
+    try {
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const out = await gitIn(sandbox, ['status', '--porcelain=v1', '-b']);
+      if (out === null) return res.json({ repo: false, branch: '', ahead: 0, staged: [], changes: [] });
+      const lines = out.split('\n').filter(Boolean);
+      const head = lines[0]?.startsWith('## ') ? lines.shift()! : '';
+      const branch = head.replace('## ', '').split('...')[0] || '';
+      const ahead = Number(/ahead (\d+)/.exec(head)?.[1] ?? 0);
+      const staged: { path: string; status: string }[] = [];
+      const changes: { path: string; status: string }[] = [];
+      for (const line of lines) {
+        const x = line[0] ?? ' ', y = line[1] ?? ' ', p = line.slice(3);
+        if (!p) continue;
+        if (x === '?' && y === '?') { changes.push({ path: p, status: '??' }); continue; }
+        if (x !== ' ' && x !== '?') staged.push({ path: p, status: x });
+        if (y !== ' ' && y !== '?') changes.push({ path: p, status: y });
+      }
+      res.json({ repo: true, branch, ahead, staged, changes });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/git/commit', async (req, res) => {
+    try {
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const message = String(req.body?.message ?? '').trim();
+      if (!message) return res.status(400).json({ error: '提交信息不能为空' });
+      await gitIn(sandbox, ['add', '-A']);
+      const out = await gitIn(sandbox, ['commit', '-m', message]);
+      if (out === null) return res.status(400).json({ error: '沙箱不是 git 仓库' });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  app.post('/api/git/push', async (_req, res) => {
+    try {
+      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const out = await gitIn(sandbox, ['push']);
+      if (out === null) return res.status(400).json({ error: '沙箱不是 git 仓库' });
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---------- 运行时配置（上下文管理 / 缓存参数，config.changed 热生效） ----------
+  app.get('/api/config', (_req, res) => {
+    res.json({
+      context: {
+        maxTokens: kernel.config.get<number>('context.maxTokens', 30000),
+        truncateInject: kernel.config.get<boolean>('context.truncateInject', true),
+      },
+      cache: {
+        l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.85),
+        l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
+        l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
+      },
+    });
+  });
+
+  app.patch('/api/config', (req, res) => {
+    try {
+      const { context, cache } = req.body ?? {};
+      if (context?.maxTokens !== undefined) {
+        kernel.config.set('context.maxTokens', Math.max(2000, Math.min(200_000, Number(context.maxTokens))));
+      }
+      if (context?.truncateInject !== undefined) kernel.config.set('context.truncateInject', Boolean(context.truncateInject));
+      if (cache?.l1Threshold !== undefined) {
+        const v = Math.min(1, Math.max(0.5, Number(cache.l1Threshold)));
+        kernel.config.set('cache.l1Threshold', v);
+        kernel.cache.setConfig({ l1TextThreshold: v });
+      }
+      if (cache?.l2TtlMin !== undefined) {
+        const m = Math.max(1, Math.min(1440, Number(cache.l2TtlMin)));
+        kernel.config.set('cache.l2TtlMin', m);
+        kernel.cache.setConfig({ l2TtlMs: m * 60_000 });
+      }
+      if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
+      res.json({ ok: true });
+    } catch (err) {
+      res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
+  // ---------- 元信息（设置页「打开目录」等） ----------
+  app.get('/api/meta/paths', (_req, res) => {
+    const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+    res.json({
+      sandboxRoot: sandbox,
+      dbFile: kernel.paths.dbFile,
+      tracesDir: kernel.paths.traces,
+      configFile: kernel.paths.configFile,
+    });
+  });
+
+  app.post('/api/meta/open', (req, res) => {
+    const kind = String(req.body?.kind ?? '');
+    const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+    const targets: Record<string, string> = {
+      sandbox,
+      db: kernel.paths.dbFile,
+      traces: kernel.paths.traces,
+      config: kernel.paths.configFile,
+    };
+    const target = targets[kind];
+    if (!target || !existsSync(target)) return res.status(404).json({ error: '目标不存在' });
+    openInExplorer(target);
+    res.json({ ok: true, kind, path: target });
+  });
+
   // ---------- 插件管理 ----------
   app.get('/api/plugins', (_req, res) => {
     res.json(kernel.plugins.list().map((p) => ({
@@ -672,6 +858,15 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
+  });
+
+  // 用系统文件管理器打开插件源码目录
+  app.post('/api/plugins/:id/open', (req, res) => {
+    const inst = kernel.plugins.get(req.params.id);
+    if (!inst) return res.status(404).json({ error: '插件不存在' });
+    if (!existsSync(inst.dir)) return res.status(404).json({ error: '插件目录不存在' });
+    openInExplorer(inst.dir);
+    res.json({ ok: true, path: inst.dir });
   });
 
   // ---------- Trace 观测 ----------

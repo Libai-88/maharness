@@ -1,6 +1,6 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useEffect, useState } from 'react';
-import { providersApi, statsApi } from '../api';
+import { configApi, metaApi, providersApi, statsApi } from '../api';
 import type { ProviderForm, ProviderInfo, StatsInfo } from '../types';
 import type { Theme } from '../App';
 import SkillsView from './SkillsView';
@@ -160,22 +160,39 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
 
 function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
-  const [l1Threshold, setL1Threshold] = useState(0.85);
-  const [l3On, setL3On] = useState(true);
+  const [cfg, setCfg] = useState<{ context: { maxTokens: number; truncateInject: boolean }; cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean } } | null>(null);
+  const [savedTip, setSavedTip] = useState<string | null>(null);
+
   useEffect(() => {
     let alive = true;
-    const load = async () => { try { const s = await statsApi.get(); if (alive) setStats(s); } catch { /* 忽略 */ } };
-    void load();
-    const t = setInterval(load, 5000);
+    const loadStats = async () => { try { const s = await statsApi.get(); if (alive) setStats(s); } catch { /* 忽略 */ } };
+    const loadCfg = async () => { try { const c = await configApi.get(); if (alive) setCfg(c); } catch { /* 忽略 */ } };
+    void loadStats(); void loadCfg();
+    const t = setInterval(loadStats, 5000);
     return () => { alive = false; clearInterval(t); };
   }, []);
-  const maxTokens = stats?.context.maxTokens ?? 30000;
+
+  const patch = async (p: Parameters<typeof configApi.patch>[0], tip: string) => {
+    try {
+      await configApi.patch(p);
+      const c = await configApi.get();
+      setCfg(c);
+      setSavedTip(tip);
+      setTimeout(() => setSavedTip(null), 2500);
+    } catch { /* 忽略 */ }
+  };
+
+  const maxTokens = stats?.context.maxTokens ?? cfg?.context.maxTokens ?? 30000;
   const truncations = stats?.overview.truncations ?? 0;
+  const l1Threshold = cfg?.cache.l1Threshold ?? 0.85;
+  const l2TtlMin = cfg?.cache.l2TtlMin ?? 30;
+  const l3Enabled = cfg?.cache.l3Enabled ?? true;
 
   return (
     <>
       <span className="page-title">上下文管理</span>
-      <div className="page-sub">会话历史预算、自动截断、三层缓存参数</div>
+      <div className="page-sub">会话历史预算、自动截断、三层缓存参数（即时生效）</div>
+      {savedTip && <div style={{ fontSize: 12, color: 'var(--teal)' }}>✓ {savedTip}</div>}
       <div className="set-sec">
         <span className="ss-title">预算与截断</span>
         <div className="set-row">
@@ -183,14 +200,21 @@ function ContextSection() {
             <span className="set-row-label">context.maxTokens</span>
             <span className="set-row-desc">会话历史超出预算时自动截断较早消息</span>
           </div>
-          <input className="set-input" style={{ width: 140 }} defaultValue={maxTokens} />
+          <input
+            className="set-input" style={{ width: 140 }} defaultValue={maxTokens}
+            onBlur={(e) => { const v = Number(e.target.value); if (v && v !== maxTokens) void patch({ context: { maxTokens: v } }, `maxTokens → ${v}`); }}
+          />
         </div>
         <div className="set-row">
           <div className="set-row-l">
             <span className="set-row-label">截断注入说明</span>
             <span className="set-row-desc">截断时注入说明消息，全程在轨迹面板可见</span>
           </div>
-          <button className="toggle on"><span className="knob" /></button>
+          <button
+            className={`toggle ${cfg?.context.truncateInject ?? true ? 'on' : ''}`}
+            onClick={() => void patch({ context: { truncateInject: !(cfg?.context.truncateInject ?? true) } }, '截断注入已切换')}
+            aria-label="截断注入说明"
+          ><span className="knob" /></button>
         </div>
         <div className="set-row">
           <div className="set-row-l">
@@ -208,7 +232,11 @@ function ContextSection() {
             <span className="set-row-desc">bigram Dice 相似度 ≥ 阈值即命中，免 LLM 调用</span>
           </div>
           <div className="set-slider">
-            <input type="range" min={0.5} max={1} step={0.05} value={l1Threshold} onChange={(e) => setL1Threshold(Number(e.target.value))} />
+            <input
+              type="range" min={0.5} max={1} step={0.05}
+              value={l1Threshold}
+              onChange={(e) => void patch({ cache: { l1Threshold: Number(e.target.value) } }, `L1 阈值 → ${Number(e.target.value).toFixed(2)}`)}
+            />
             <span className="sl-val">{l1Threshold.toFixed(2)}</span>
           </div>
         </div>
@@ -217,14 +245,24 @@ function ContextSection() {
             <span className="set-row-label"><span className="tag t2">L2</span>工具结果 TTL</span>
             <span className="set-row-desc">工具结果缓存有效期，文件变更立即失效</span>
           </div>
-          <input className="set-input" style={{ width: 100 }} defaultValue="30 min" />
+          <input
+            className="set-input" style={{ width: 100 }} defaultValue={`${l2TtlMin} min`}
+            onBlur={(e) => {
+              const m = Number(e.target.value.replace(/[^\d.]/g, ''));
+              if (m && m !== l2TtlMin) void patch({ cache: { l2TtlMin: m } }, `L2 TTL → ${m} min`);
+            }}
+          />
         </div>
         <div className="set-row">
           <div className="set-row-l">
             <span className="set-row-label"><span className="tag t3">L3</span>prompt 前缀复用</span>
             <span className="set-row-desc">消息只追加不重写，吃满 provider KV cache 折扣</span>
           </div>
-          <button className={`toggle ${l3On ? 'on' : ''}`} onClick={() => setL3On((v) => !v)} aria-label="L3 prompt 前缀复用"><span className="knob" /></button>
+          <button
+            className={`toggle ${l3Enabled ? 'on' : ''}`}
+            onClick={() => void patch({ cache: { l3Enabled: !l3Enabled } }, 'L3 已切换')}
+            aria-label="L3 prompt 前缀复用"
+          ><span className="knob" /></button>
         </div>
       </div>
     </>
@@ -239,17 +277,12 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
       <div className="set-sec">
         <span className="ss-title">外观</span>
         <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">深色主题</span>
+          <div className="set-row-l"><span className="set-row-label">深色主题</span>
             <span className="set-row-desc">{theme === 'dark' ? '深色模式（当前）· 终端风' : '蓝白浅色（当前）· 清爽风'}</span>
           </div>
           <button className={`toggle ${theme === 'dark' ? 'on' : ''}`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')} aria-label="切换深色主题">
             <span className="knob" />
           </button>
-        </div>
-        <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">界面语言</span><span className="set-row-desc">简体中文（默认）</span></div>
-          <select className="set-input" defaultValue="zh"><option value="zh">简体中文</option><option value="en">English</option></select>
         </div>
       </div>
       <div className="set-sec">
@@ -300,12 +333,20 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
             <div className="set-sec">
               <span className="ss-title">审计</span>
               <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">JSONL 审计日志</span><span className="set-row-desc">每次运行的结构化轨迹落盘</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }}>查看目录</button>
+                <div className="set-row-l"><span className="set-row-label">JSONL 审计日志</span><span className="set-row-desc">每次运行的结构化轨迹落盘（data/traces）</span></div>
+                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('traces')}>查看目录</button>
               </div>
               <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">数据存储</span><span className="set-row-desc">本地 SQLite 数据库位置</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }}>打开</button>
+                <div className="set-row-l"><span className="set-row-label">数据存储</span><span className="set-row-desc">本地 SQLite 数据库位置（data/agent.db）</span></div>
+                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('db')}>打开</button>
+              </div>
+              <div className="set-row">
+                <div className="set-row-l"><span className="set-row-label">沙箱根目录</span><span className="set-row-desc">文件工具与文件 API 的可访问范围</span></div>
+                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('sandbox')}>打开</button>
+              </div>
+              <div className="set-row">
+                <div className="set-row-l"><span className="set-row-label">用户配置</span><span className="set-row-desc">config.json（分层配置，运行时修改优先）</span></div>
+                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('config')}>打开</button>
               </div>
             </div>
           </>

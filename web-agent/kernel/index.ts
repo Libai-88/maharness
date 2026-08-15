@@ -35,7 +35,10 @@ export class Kernel {
     this.paths = paths(rootDir);
     this.config = new Config(this.bus, defaults, this.paths.configFile);
     this.trace = new Trace(this.bus, this.paths.traces);
-    this.cache = new Cache();
+    this.cache = new Cache(undefined, {
+      l1TextThreshold: this.config.get<number>('cache.l1Threshold', 0.85),
+      l2TtlMs: this.config.get<number>('cache.l2TtlMin', 30) * 60_000,
+    });
     this.budget = new Budget();
     this.plugins = new PluginLoader(
       this.bus,

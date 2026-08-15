@@ -125,7 +125,7 @@ export default function SkillsView() {
                   <span className="sd-desc" style={{ color: 'var(--text-3)' }}>读取中…</span>
                 )}
               </div>
-              <button className="btn-ok" style={{ width: '100%' }}>get_skill 读取指南</button>
+              <button className="btn-ok" style={{ width: '100%' }} onClick={() => { if (selected) void readGuide(selected); }} disabled={!selected}>get_skill 读取指南</button>
             </>
           ) : (
             <div className="empty-state">← 选择技能查看指南</div>

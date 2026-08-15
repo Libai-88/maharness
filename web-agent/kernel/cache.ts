@@ -26,20 +26,36 @@ interface L1Entry {
 }
 
 const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
-const L1_TEXT_THRESHOLD = 0.85;   // 自研 bigram Dice 命中阈值（近义问题可命中；无关文本仍远低于阈值）
 const L1_TTL = 24 * 3600_000;     // L1 答案 TTL 24h：时效性内容（天气/新闻/用户数据）不永久缓存
-const DEFAULT_TTL = 30 * 60_000;  // L2 默认 TTL 30 分钟（文件类键含 mtime+size 校验，TTL 只是防膨胀）
 const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
+
+export interface CacheConfig {
+  /** 自研 bigram Dice 命中阈值（默认 0.85，可经 config.json 调整） */
+  l1TextThreshold?: number;
+  /** L2 工具结果默认 TTL 毫秒（默认 30 分钟） */
+  l2TtlMs?: number;
+}
 
 export class Cache {
   private l2 = new Map<string, L2Entry>();
   private l1 = new Map<string, L1Entry>(); // key = 原始文本（去空白归一化）
+  private l1TextThreshold = 0.85;
+  private l2TtlMs = 30 * 60_000;
   private counter: CacheStats = {
     l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
     l3Hits: 0, l3Tokens: 0, savedCost: 0,
   };
 
-  constructor(private embeddingFn?: EmbeddingFn) {}
+  constructor(private embeddingFn?: EmbeddingFn, cfg: CacheConfig = {}) {
+    if (cfg.l1TextThreshold !== undefined) this.l1TextThreshold = cfg.l1TextThreshold;
+    if (cfg.l2TtlMs !== undefined) this.l2TtlMs = cfg.l2TtlMs;
+  }
+
+  /** 运行时更新缓存参数（配置热更新入口） */
+  setConfig(cfg: CacheConfig): void {
+    if (cfg.l1TextThreshold !== undefined) this.l1TextThreshold = cfg.l1TextThreshold;
+    if (cfg.l2TtlMs !== undefined) this.l2TtlMs = cfg.l2TtlMs;
+  }
 
   /** L1 始终可用（自研文本相似度）；配置 embedding 后自动升级为向量语义匹配 */
   get l1Enabled(): boolean {
@@ -71,7 +87,7 @@ export class Cache {
     return { hit: true, value: e.value };
   }
 
-  l2Set(key: string, value: unknown, ttlMs = DEFAULT_TTL): void {
+  l2Set(key: string, value: unknown, ttlMs = this.l2TtlMs): void {
     this.l2.set(key, { value, expiresAt: Date.now() + ttlMs, hits: 0 });
     // 防内存膨胀：上限 2000 条，超出清最旧
     if (this.l2.size > 2000) {
@@ -129,7 +145,7 @@ export class Cache {
       const score = dice(qBigrams, entry.bigrams);
       if (score > (best?.score ?? 0)) best = { key, score };
     }
-    if (best && best.score >= L1_TEXT_THRESHOLD) {
+    if (best && best.score >= this.l1TextThreshold) {
       const entry = this.l1.get(best.key)!;
       entry.hits++;
       this.counter.l1Hits++;

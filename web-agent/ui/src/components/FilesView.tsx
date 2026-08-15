@@ -1,7 +1,9 @@
 // ui/src/components/FilesView.tsx —— 文件工作区（Screen 2）：工作区 + 文件树 + 代码查看器 + Git 面板
-import { useCallback, useEffect, useState } from 'react';
-import { fileApi, workspacesApi } from '../api';
-import { IconBox, IconCheck, IconChevronRight, IconClose, IconExpand, IconFileText, IconFolder, IconGitBranch, IconMore, IconPlus, IconRefresh, IconSearch, IconSync } from './Icon';
+// 全部交互真实接线：搜索/编辑保存/关闭全屏/工作区切换/Git 状态提交推送
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { fileApi, gitApi, workspacesApi } from '../api';
+import type { GitStatus } from '../api';
+import { IconBox, IconCheck, IconChevronRight, IconClose, IconExpand, IconFileText, IconFolder, IconGitBranch, IconPlus, IconRefresh, IconSearch, IconSync } from './Icon';
 
 interface TreeEntry { name: string; type: 'dir' | 'file'; size: number }
 
@@ -56,48 +58,103 @@ function TreeNode({ entry, path, depth, onOpenFile, selected, onSelect }: {
   );
 }
 
-/** Git 变更面板（展示性 UI） */
+const GIT_STATUS_LABEL: Record<string, { icon: string; cls: string }> = {
+  M: { icon: 'M', cls: 'm' },
+  A: { icon: 'A', cls: 'a' },
+  D: { icon: 'D', cls: 'd' },
+  R: { icon: 'R', cls: 'a' },
+  '??': { icon: 'U', cls: 'a' },
+};
+
+/** Git 变更面板：真实状态 / 提交 / 推送 */
 function GitPanel() {
-  const changes = [
-    { icon: 'M', cls: 'm', name: 'PluginLoader.ts', stat: '+12' },
-    { icon: 'A', cls: 'a', name: 'plugins/clock/index.ts', stat: '+28' },
-    { icon: 'M', cls: 'm', name: 'Cache.ts', stat: '+5 -2', dim: true },
-    { icon: 'D', cls: 'd', name: 'legacy/fsWatcher.ts', dim: true },
+  const [status, setStatus] = useState<GitStatus | null>(null);
+  const [msg, setMsg] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const [okTip, setOkTip] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { setStatus(await gitApi.status()); setErr(null); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const tip = (t: string | null) => { setOkTip(t); if (t) setTimeout(() => setOkTip(null), 3000); };
+
+  const commit = async () => {
+    const m = msg.trim();
+    if (!m || !status?.repo || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await gitApi.commit(m);
+      setMsg('');
+      await load();
+      tip('已提交 ✓');
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const push = async () => {
+    if (!status?.repo || busy) return;
+    setBusy(true); setErr(null);
+    try {
+      await gitApi.push();
+      await load();
+      tip('已推送 ✓');
+    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setBusy(false); }
+  };
+
+  const items = [
+    ...(status?.staged ?? []).map((c) => ({ ...c, staged: true })),
+    ...(status?.changes ?? []).map((c) => ({ ...c, staged: false })),
   ];
+
   return (
     <aside className="git-panel">
       <div className="git-head">
         <span className="gh-title"><span style={{ color: 'var(--teal)' }}>Y</span> SOURCE CONTROL</span>
-        <span className="gh-count">4</span>
+        {status?.repo && <span className="gh-count">{items.length}</span>}
       </div>
       <div className="git-branch">
-        <span className="gb-name"><span className="gb-icon"><IconGitBranch size={10} /></span>main · 3 ahead</span>
-        <button className="manager-close" title="同步" aria-label="同步"><IconSync size={13} /></button>
+        <span className="gb-name"><span className="gb-icon"><IconGitBranch size={10} /></span>
+          {status?.repo ? `${status.branch || '(no branch)'}${status.ahead ? ` · ${status.ahead} ahead` : ''}` : '非 git 仓库'}
+        </span>
+        <button className="manager-close" title="刷新" aria-label="刷新" onClick={() => void load()}><IconSync size={13} /></button>
       </div>
       <div className="git-scroll">
-        <div className="git-section">STAGED <span className="gs-count">· 2</span></div>
-        {changes.slice(0, 2).map((c) => (
-          <div key={c.name} className="git-change">
-            <span className={`gc-icon ${c.cls}`}>{c.icon}</span>
-            <span className="gc-name">{c.name}</span>
-            <span className="gc-stat">{c.stat}</span>
-          </div>
-        ))}
-        <div className="git-section">CHANGES <span className="gs-count">· 2</span></div>
-        {changes.slice(2).map((c) => (
-          <div key={c.name} className="git-change">
-            <span className={`gc-icon ${c.cls}`}>{c.icon}</span>
-            <span className="gc-name">{c.name}</span>
-            {c.stat && <span className={`gc-stat ${c.dim ? 'dim' : ''}`}>{c.stat}</span>}
-          </div>
-        ))}
+        {!status && <div className="empty-state" style={{ padding: '20px 12px' }}>加载中…</div>}
+        {status?.repo && items.length === 0 && <div className="empty-state" style={{ padding: '20px 12px' }}>工作区干净 ✓</div>}
+        {status?.repo && items.length > 0 && (
+          <>
+            <div className="git-section">CHANGES <span className="gs-count">· {items.length}</span></div>
+            {items.map((c, i) => {
+              const g = GIT_STATUS_LABEL[c.status] ?? { icon: c.status, cls: 'm' };
+              return (
+                <div key={`${c.path}-${i}`} className="git-change">
+                  <span className={`gc-icon ${g.cls}`}>{g.icon}</span>
+                  <span className="gc-name">{c.path}</span>
+                </div>
+              );
+            })}
+          </>
+        )}
+        {err && <div style={{ padding: 10, fontSize: 11, color: 'var(--red)', fontFamily: 'var(--font-mono)' }}>{err}</div>}
       </div>
       <div className="git-commit-box">
-        <input className="gcb-input" defaultValue="feat(plugin): hot-reload via chokidar" />
-        <span className="gcb-hint">Ctrl + Enter to commit</span>
+        {okTip && <div style={{ fontSize: 11, color: 'var(--teal)', fontFamily: 'var(--font-mono)' }}>{okTip}</div>}
+        <input
+          className="gcb-input"
+          placeholder={status?.repo ? '提交信息…' : '沙箱不是 git 仓库'}
+          value={msg}
+          disabled={!status?.repo || busy}
+          onChange={(e) => setMsg(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void commit(); } }}
+        />
+        <span className="gcb-hint">Enter 提交 · 全部变更 add -A</span>
         <div className="gcb-actions">
-          <button className="gcb-push">推送 ↑</button>
-          <button className="gcb-commit">提交 ✓</button>
+          <button className="gcb-push" onClick={() => void push()} disabled={!status?.repo || busy || !status.ahead}>推送 ↑</button>
+          <button className="gcb-commit" onClick={() => void commit()} disabled={!status?.repo || busy || !msg.trim()}>提交 ✓</button>
         </div>
       </div>
     </aside>
@@ -110,6 +167,15 @@ export default function FilesView() {
   const [preview, setPreview] = useState<{ path: string; text: string } | null>(null);
   const [selected, setSelected] = useState('');
   const [msg, setMsg] = useState<string | null>(null);
+  const [searching, setSearching] = useState(false);
+  const [searchQ, setSearchQ] = useState('');
+  const [searchResults, setSearchResults] = useState<{ path: string; size: number }[] | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saveTip, setSaveTip] = useState<string | null>(null);
+  const [fullscreen, setFullscreen] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const editRef = useRef<HTMLTextAreaElement>(null);
 
   const loadWorkspaces = useCallback(async () => {
     try {
@@ -130,6 +196,19 @@ export default function FilesView() {
 
   useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
   useEffect(() => { if (current) void loadRoot(); }, [current, loadRoot]);
+  useEffect(() => { if (searching) searchRef.current?.focus(); }, [searching]);
+  useEffect(() => { if (editing) editRef.current?.focus(); }, [editing]);
+
+  // 搜索（防抖 250ms）
+  useEffect(() => {
+    if (!searching) return;
+    const q = searchQ.trim();
+    if (!q) { setSearchResults(null); return; }
+    const t = setTimeout(() => {
+      fileApi.search(q).then((r) => setSearchResults(r.results)).catch((e) => setMsg(e instanceof Error ? e.message : String(e)));
+    }, 250);
+    return () => clearTimeout(t);
+  }, [searchQ, searching]);
 
   const switchWs = async (path: string) => {
     if (path === current) return;
@@ -151,11 +230,23 @@ export default function FilesView() {
       const r = await fileApi.read(rel);
       setPreview({ path: rel, text: r.text });
       setSelected(rel);
+      setEditing(false);
       setMsg(null);
     } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
   };
 
-  const lines = preview?.text.split('\n') ?? [];
+  const saveFile = async () => {
+    if (!preview || !editing) return;
+    try {
+      await fileApi.write(preview.path, draft);
+      setPreview({ path: preview.path, text: draft });
+      setEditing(false);
+      setSaveTip(`已保存 ${preview.path}`);
+      setTimeout(() => setSaveTip(null), 2500);
+    } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
+  };
+
+  const lines = (editing ? draft : preview?.text ?? '').split('\n');
 
   return (
     <div className="files-layout">
@@ -174,18 +265,41 @@ export default function FilesView() {
         <div className="ft-tools">
           <button className="ft-tool" onClick={() => void addWs()} title="添加工作区" aria-label="添加工作区"><IconPlus size={13} /></button>
           <button className="ft-tool" onClick={() => void loadRoot()} title="刷新" aria-label="刷新"><IconRefresh size={13} /></button>
-          <button className="ft-tool" title="搜索" aria-label="搜索"><IconSearch size={13} /></button>
-          <button className="ft-tool" title="更多" aria-label="更多" style={{ marginLeft: 'auto' }}><IconMore size={13} /></button>
+          <button className={`ft-tool ${searching ? 'active' : ''}`} onClick={() => { setSearching((v) => !v); setSearchQ(''); setSearchResults(null); }} title="搜索文件" aria-label="搜索文件"><IconSearch size={13} /></button>
         </div>
         <div className="tree-scroll">
-          {roots === null && <div className="empty-state">加载中…</div>}
-          {roots?.length === 0 && <div className="empty-state">空目录</div>}
-          {roots?.map((e) => <TreeNode key={e.name} entry={e} path="." depth={0} onOpenFile={openFile} selected={selected} onSelect={setSelected} />)}
+          {searching && (
+            <div className="search-box">
+              <input
+                ref={searchRef}
+                className="search-input"
+                placeholder="搜索文件名…"
+                value={searchQ}
+                onChange={(e) => setSearchQ(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Escape') { setSearching(false); setSearchQ(''); setSearchResults(null); } }}
+              />
+              {searchResults !== null && (
+                <div className="search-results">
+                  {searchResults.length === 0 && <div className="empty-state" style={{ padding: '12px 8px' }}>无匹配文件</div>}
+                  {searchResults.map((r) => (
+                    <div key={r.path} className="search-result" onClick={() => void openFile(r.path)} title={r.path}>
+                      <IconFileText size={11} />
+                      <span className="sr-path">{r.path}</span>
+                      <span className="sr-size">{r.size >= 1024 ? `${(r.size / 1024).toFixed(0)}k` : `${r.size}B`}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+          {!searching && roots === null && <div className="empty-state">加载中…</div>}
+          {!searching && roots?.length === 0 && <div className="empty-state">空目录</div>}
+          {!searching && roots?.map((e) => <TreeNode key={e.name} entry={e} path="." depth={0} onOpenFile={openFile} selected={selected} onSelect={setSelected} />)}
           {msg && <div style={{ padding: 12, fontSize: 12, color: 'var(--red)' }}>{msg}</div>}
         </div>
       </div>
 
-      <div className="file-viewer">
+      <div className={`file-viewer ${fullscreen ? 'fullscreen' : ''}`}>
         <div className="viewer-breadcrumb">
           <div className="vb-path">
             <span className="f">{current.split(/[\\/]/).pop()}</span>
@@ -193,27 +307,47 @@ export default function FilesView() {
             {!preview && <span className="cur" style={{ color: 'var(--text-4)' }}>选择文件预览</span>}
           </div>
           <div className="vb-right">
-            <button className="vb-btn" title="关闭" aria-label="关闭"><IconClose size={12} /></button>
-            <button className="vb-btn" title="全屏" aria-label="全屏"><IconExpand size={12} /></button>
-            <button className="vb-save">保存 ⌃S</button>
+            <button className="vb-btn" title="在资源管理器中打开" aria-label="在资源管理器中打开" onClick={() => { if (preview) void fileApi.open(preview.path); }}><IconBox size={12} /></button>
+            <button className="vb-btn" title="全屏" aria-label="全屏" onClick={() => setFullscreen((v) => !v)}><IconExpand size={12} /></button>
+            <button className="vb-btn" title="关闭" aria-label="关闭" onClick={() => { setPreview(null); setSelected(''); setEditing(false); }}><IconClose size={12} /></button>
+            {preview && !editing && <button className="vb-save" onClick={() => { setDraft(preview.text); setEditing(true); }}>编辑</button>}
+            {preview && editing && (
+              <>
+                <button className="vb-save" onClick={() => void saveFile()} disabled={draft === preview.text}>保存 ⌃S</button>
+                <button className="vb-btn" onClick={() => setEditing(false)}>取消</button>
+              </>
+            )}
           </div>
         </div>
         <div className="viewer-tabs">
-          <div className="v-tab active"><span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled.ts'}<IconClose size={11} /></div>
-          <div className="v-tab"><span className="vtd clean" />Cache.ts<IconClose size={11} /></div>
+          <div className="v-tab active"><span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled'}{preview && <IconClose size={11} />}</div>
         </div>
+        {saveTip && <div className="save-tip"><IconCheck size={12} /> {saveTip}</div>}
         <div className="code-viewer">
           {preview ? (
-            <>
-              <div className="code-lines">
-                {lines.map((_, i) => <span key={i} className={`ln ${i === 4 ? 'hot' : ''}`}>{i + 1}</span>)}
-              </div>
-              <pre className="code-content">
-                {lines.map((line, i) => (
-                  <span key={i} className={`line ${i === 4 ? 'diff-add' : ''} ${line.trimStart().startsWith('//') ? 'cm' : ''}`}>{line}</span>
-                ))}
-              </pre>
-            </>
+            editing ? (
+              <textarea
+                ref={editRef}
+                className="code-editor"
+                value={draft}
+                spellCheck={false}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => {
+                  if ((e.ctrlKey || e.metaKey) && e.key === 's') { e.preventDefault(); void saveFile(); }
+                }}
+              />
+            ) : (
+              <>
+                <div className="code-lines">
+                  {lines.map((_, i) => <span key={i} className={`ln ${i === 4 ? 'hot' : ''}`}>{i + 1}</span>)}
+                </div>
+                <pre className="code-content">
+                  {lines.map((line, i) => (
+                    <span key={i} className={`line ${i === 4 ? 'diff-add' : ''} ${line.trimStart().startsWith('//') ? 'cm' : ''}`}>{line}</span>
+                  ))}
+                </pre>
+              </>
+            )
           ) : (
             <div className="empty-state" style={{ flex: 1 }}>← 在左侧文件树中选择文件查看内容</div>
           )}
@@ -225,9 +359,9 @@ export default function FilesView() {
           <span className="vs-sep" />
           <span>{preview ? (preview.path.endsWith('.ts') ? 'TypeScript' : 'Text') : '—'}</span>
           <span className="vs-sep" />
-          <span>Ln {lines.length ? 5 : 0}, Col 48</span>
+          <span>Ln {lines.length || 0}</span>
           <span className="vs-sep" />
-          <span className="vs-bold"><IconCheck size={11} /> chokidar 监听器已就绪</span>
+          <span className="vs-bold"><IconCheck size={11} /> 文件服务就绪</span>
         </div>
       </div>
 

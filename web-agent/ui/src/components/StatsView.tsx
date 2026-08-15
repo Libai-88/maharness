@@ -38,7 +38,6 @@ export default function StatsView() {
         <span className="page-title">缓存与成本</span>
         <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
           <span className="tb-live"><span className="live-dot" />实时</span>
-          <button className="tb-btn">近 7 天 <span className="chev">▾</span></button>
         </span>
       </div>
       <div className="page-sub">本周节省 ¥{cost(cache.savedCost ?? 0)} · 三层缓存命中即可见</div>

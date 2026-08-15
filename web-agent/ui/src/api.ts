@@ -161,6 +161,42 @@ export const workspacesApi = {
 export const fileApi = {
   tree: (path: string) => api<{ path: string; entries: TreeEntry[] }>(`/api/files/tree?path=${encodeURIComponent(path)}`),
   read: (path: string) => api<{ path: string; text: string; encoding: string }>(`/api/files/read?path=${encodeURIComponent(path)}`),
+  write: (path: string, content: string) => api<{ ok: boolean; path: string }>('/api/files/write', { method: 'POST', body: JSON.stringify({ path, content }) }),
+  search: (q: string) => api<{ query: string; results: { path: string; size: number }[] }>(`/api/files/search?q=${encodeURIComponent(q)}`),
+  open: (path: string) => api<{ ok: boolean; path: string }>('/api/files/open', { method: 'POST', body: JSON.stringify({ path }) }),
+};
+
+/** 沙箱 git（状态 / 提交 / 推送） */
+export interface GitStatus {
+  repo: boolean;
+  branch: string;
+  ahead: number;
+  staged: { path: string; status: string }[];
+  changes: { path: string; status: string }[];
+}
+
+export const gitApi = {
+  status: () => api<GitStatus>('/api/git/status'),
+  commit: (message: string) => api<{ ok: boolean }>('/api/git/commit', { method: 'POST', body: JSON.stringify({ message }) }),
+  push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST' }),
+};
+
+/** 运行时配置（上下文管理 / 缓存参数） */
+export interface RuntimeConfig {
+  context: { maxTokens: number; truncateInject: boolean };
+  cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
+}
+
+export const configApi = {
+  get: () => api<RuntimeConfig>('/api/config'),
+  patch: (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']> }) =>
+    api<{ ok: boolean }>('/api/config', { method: 'PATCH', body: JSON.stringify(patch) }),
+};
+
+/** 元信息（数据/审计目录路径） */
+export const metaApi = {
+  paths: () => api<{ sandboxRoot: string; dbFile: string; tracesDir: string; configFile: string }>('/api/meta/paths'),
+  open: (kind: string) => api<{ ok: boolean; kind: string; path: string }>('/api/meta/open', { method: 'POST', body: JSON.stringify({ kind }) }),
 };
 
 export const approvalsApi = {
@@ -193,6 +229,7 @@ export const pluginsApi = {
   list: () => api<PluginInfo[]>('/api/plugins'),
   action: (id: string, action: 'enable' | 'disable' | 'reload') =>
     api<{ ok: boolean; state: string }>(`/api/plugins/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
+  open: (id: string) => api<{ ok: boolean; path: string }>(`/api/plugins/${id}/open`, { method: 'POST' }),
 };
 
 export const traceApi = {

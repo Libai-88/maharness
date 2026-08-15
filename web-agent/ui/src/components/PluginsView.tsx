@@ -1,5 +1,6 @@
 // ui/src/components/PluginsView.tsx —— 插件面板（Screen 4）：列表 + 详情 + 现场热加载指南
 import { useEffect, useState } from 'react';
+import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
 import { IconClose } from './Icon';
 
@@ -72,7 +73,6 @@ export default function PluginsView({ plugins, onAction }: Props) {
           <span className="msg-tag">{plugins.length} 个插件</span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <input className="set-input" style={{ width: 180, height: 32 }} placeholder="搜索插件…" value={q} onChange={(e) => setQ(e.target.value)} />
-            <button className="btn-solid">插件市场</button>
           </span>
         </div>
         <div className="plugin-group">运行中 · {running.length}</div>
@@ -106,7 +106,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 </div>
                 <div className="pd-actions">
                   <button className="pd-btn ghost" onClick={() => onAction(selected.id, 'reload')}>重载</button>
-                  <button className="pd-btn ghost">打开目录</button>
+                  <button className="pd-btn ghost" onClick={() => void pluginsApi.open(selected.id)}>打开目录</button>
                   <button className="pd-btn danger" onClick={() => onAction(selected.id, (selected.state === 'running' || selected.state === 'loaded') ? 'disable' : 'enable')}>
                     {(selected.state === 'running' || selected.state === 'loaded') ? '停用' : '启用'}
                   </button>

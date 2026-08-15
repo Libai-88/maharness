@@ -4,7 +4,7 @@ import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
-import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconPlus, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
+import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -316,8 +316,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           />
           <div className="composer-toolbar">
             <div className="comp-left">
-              <button className="comp-btn" title="附加内容" aria-label="附加内容"><IconPlus size={15} /></button>
-              <button className="comp-btn" title="工具"><span className="dot" style={{ background: 'var(--text-3)' }} />Workspace Write<IconChevronDown size={10} /></button>
+              <span className="comp-tools-label" title="工具将在对话中自动按需调用">工具自动调用</span>
             </div>
             <div className="comp-right">
               <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<IconChevronDown size={10} /></span>
