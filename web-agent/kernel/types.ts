@@ -205,6 +205,8 @@ export interface ToolResult {
 export interface ToolContext {
   traceId?: string;
   turn: number;
+  /** 当前会话 ID（server 层透传）：工具可据此把状态挂到具体会话（如 todo 插件的会话级 to do list） */
+  sessionId?: string;
   sandboxRoot: string;      // 文件类工具的安全边界
   signal?: AbortSignal;
   cache: CacheLike;         // 工具自管理时效性缓存（L2）

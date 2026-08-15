@@ -1,0 +1,7 @@
+{
+  "id": "todo",
+  "name": "待办看板",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

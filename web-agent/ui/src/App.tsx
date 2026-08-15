@@ -1,7 +1,7 @@
 // ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { approvalsApi, commandsApi, modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TraceStep } from './types';
+import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
 import Sidebar from './components/Sidebar';
 import type { MainTab } from './components/Sidebar';
 import ChatView from './components/ChatView';
@@ -35,6 +35,7 @@ export default function App() {
   const [traceOpen, setTraceOpen] = useState(true);
   const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
+  const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
 
   const abortRef = useRef<AbortController | null>(null);
@@ -51,6 +52,7 @@ export default function App() {
     const off = subscribeEvents((e: BusEvent) => {
       if (e.type === 'trace.step') setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
       else if (e.type === 'plan.updated') setPlan(e.data as PlanState | null);
+      else if (e.type === 'todo.updated') setTodos((e.data as { cards: TodoCard[] } | null)?.cards ?? []);
     });
     const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
     return () => { off(); clearInterval(t); };
@@ -365,6 +367,7 @@ export default function App() {
                 approvals={approvals}
                 onApproval={respondApproval}
                 plan={plan}
+                todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
                 modelLabel={modelLabel}
                 modelTag={modelTag}
               />

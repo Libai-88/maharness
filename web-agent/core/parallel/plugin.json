@@ -1,0 +1,7 @@
+{
+  "id": "parallel",
+  "name": "多会话并行",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

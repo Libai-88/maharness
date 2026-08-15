@@ -1,7 +1,7 @@
 // ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
 import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
-import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, ToolStep } from '../types';
+import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
 import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
@@ -15,6 +15,8 @@ interface Props {
   approvals: ApprovalItem[];
   onApproval: (id: string, approved: boolean) => void;
   plan: PlanState | null;
+  /** todo 插件：当前会话的 to do list（模型执行任务时维护，实时更新） */
+  todos?: TodoCard[];
   modelLabel?: string;
   modelTag?: string;
 }
@@ -103,7 +105,7 @@ function renderContent(text: string) {
   return parts;
 }
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, modelLabel = '', modelTag = '' }: Props) {
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '' }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -167,6 +169,19 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 <div key={i} className={`plan-step ${s.status}`}>
                   <span className="ps-num">{s.status === 'done' ? '✓' : s.status === 'in_progress' ? '▶' : s.status === 'blocked' ? '!' : i + 1}</span>
                   <span>{i + 1}. {s.title}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {todos.length > 0 && (
+            <div className="plan-card">
+              <div className="p-title"><IconCheck size={14} /> To Do List · {todos.filter((t) => t.status === 'done').length}/{todos.length} 完成</div>
+              {todos.map((t) => (
+                <div key={t.id} className={`plan-step ${t.status}`}>
+                  <span className="ps-num">{t.status === 'done' ? '✓' : t.status === 'doing' ? '▶' : t.status === 'blocked' ? '!' : '○'}</span>
+                  <span>{t.title}</span>
+                  {t.desc && <span className="todo-note">{t.desc}</span>}
                 </div>
               ))}
             </div>

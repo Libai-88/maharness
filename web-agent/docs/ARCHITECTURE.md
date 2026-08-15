@@ -128,7 +128,8 @@
 ├────────────────────────────────────────────────────┤
 │ 能力层（全部插件，plugins/ 目录现场开发）             │
 │   chat(对话) · tools-fs(文件) · search(搜索) ·       │
-│   goal-plan(目标计划) · powershell(Shell) ·          │
+│   goal-plan(目标计划) · todo(待办看板/to do list) ·  │
+│   parallel(多会话并行) · powershell(Shell) ·         │
 │   self-extend(自我扩展：agent 自建插件) · memory ...  │
 ├────────────────────────────────────────────────────┤
 │ 内核 Kernel（运行必备，仅 5 大件）                   │

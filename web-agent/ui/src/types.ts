@@ -217,3 +217,17 @@ export interface PlanState {
   completed: boolean;
   createdAt: number;
 }
+
+/** todo 插件：待办看板 / 模型 to do list 卡片 */
+export type TodoStatus = 'todo' | 'doing' | 'done' | 'blocked';
+
+export interface TodoCard {
+  id: string;
+  title: string;
+  desc?: string;
+  status: TodoStatus;
+  source: 'agent' | 'human';
+  sessionId?: string;
+  createdAt: number;
+  updatedAt: number;
+}

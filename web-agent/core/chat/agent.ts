@@ -52,6 +52,8 @@ export interface RunOptions {
   /** L1 会话级缓存作用域（如 session.id）：跨多次 run 的同一会话共享"会话自产答案"；
    *  缺省用 traceId——子代理/独立循环天然隔离（每次 traceId 唯一）。 */
   scope?: string;
+  /** 当前会话 ID：透传给工具（ToolContext.sessionId），工具可把状态挂到具体会话 */
+  sessionId?: string;
   signal?: AbortSignal;
   maxTurns?: number;
   /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */
@@ -436,7 +438,7 @@ export class AgentRunner {
         let result;
         try {
           result = await withToolTimeout(tool.handler(toolArgs, {
-            traceId, turn,
+            traceId, turn, sessionId: opts.sessionId,
             sandboxRoot,
             signal,
             cache: this.kernel.cache,
@@ -474,7 +476,7 @@ export class AgentRunner {
             // 已批准：带 approved 标记重试执行
             try {
               result = await withToolTimeout(tool.handler(args, {
-                traceId, turn, sandboxRoot, signal,
+                traceId, turn, sessionId: opts.sessionId, sandboxRoot, signal,
                 cache: this.kernel.cache, trace: this.kernel.trace,
                 approved: true, approvalId,
               }), tool.timeoutMs ?? toolTimeout);

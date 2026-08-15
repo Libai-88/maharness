@@ -373,6 +373,89 @@ export default {
     kept.hit && !dropped.hit ? '✓' : '✗', `(k0=${kept.hit} k1=${dropped.hit})`);
 }
 
+// ---- todo 插件：模型 to do list（工具 CRUD + 会话隔离） ----
+{
+  const tools = kernel.plugins.capabilities('tool').map((c) => c.tool);
+  const todoAdd = tools.find((t) => t.name === 'todo_add');
+  const todoUpdate = tools.find((t) => t.name === 'todo_update');
+  const todoList = tools.find((t) => t.name === 'todo_list');
+  if (!todoAdd || !todoUpdate || !todoList) {
+    console.log('[todo] 插件未加载 ✗（todo_add/todo_update/todo_list 缺失）');
+  } else {
+    // 会话 A 添加两张卡片
+    const ctxA = { traceId: 'todo-a', turn: 0, sandboxRoot: rootDir, sessionId: 'sess-A', cache: kernel.cache, trace: kernel.trace };
+    const ctxB = { traceId: 'todo-b', turn: 0, sandboxRoot: rootDir, sessionId: 'sess-B', cache: kernel.cache, trace: kernel.trace };
+    const r1 = await todoAdd.handler({ title: '调研并行执行方案', desc: '对比 run_subagent 与 run_parallel' }, ctxA);
+    const r2 = await todoAdd.handler({ title: '实现看板面板' }, ctxA);
+    await todoAdd.handler({ title: '会话B的独立任务' }, ctxB);
+    const id1 = (r1.data as { id: string }).id;
+    const id2 = (r2.data as { id: string }).id;
+    // 更新状态：r1 → doing → done
+    await todoUpdate.handler({ id: id1, status: 'doing', note: '已对比' }, ctxA);
+    await todoUpdate.handler({ id: id1, status: 'done' }, ctxA);
+    // 会话隔离：A 只能看到 A 的卡片（含 B 的卡片不带 sessionId 也算全局？不——B 带 sessionId）
+    const listA = await todoList.handler({}, ctxA);
+    const listB = await todoList.handler({}, ctxB);
+    const cardsA = (listA.data as { cards: { id: string; title: string; status: string }[] }).cards;
+    const cardsB = (listB.data as { cards: { id: string; title: string; status: string }[] }).cards;
+    const aOk = cardsA.length === 2 && cardsA.some((c) => c.id === id1 && c.status === 'done') && cardsA.some((c) => c.id === id2);
+    const bOk = cardsB.length === 1 && cardsB.some((c) => c.title === '会话B的独立任务');
+    console.log('[todo] 工具 CRUD + 会话隔离:', aOk && bOk ? '✓' : '✗',
+      `(A=${cardsA.length} B=${cardsB.length} 状态=${cardsA.map((c) => c.status).join(',')})`);
+    // 测试卡片由下方 HTTP 冒烟中的看板 REST 清理
+  }
+}
+
+// ---- parallel 插件：参数校验 + 配额拒绝（不依赖真实 LLM） ----
+{
+  const tools = kernel.plugins.capabilities('tool').map((c) => c.tool);
+  const runParallel = tools.find((t) => t.name === 'run_parallel');
+  if (!runParallel) {
+    console.log('[parallel] 插件未加载 ✗（run_parallel 缺失）');
+  } else {
+    const tctx = { traceId: 'par-test', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace };
+    // 参数校验：单任务拒绝 / 空 objective 拒绝 / 超 4 个拒绝
+    const one = await runParallel.handler({ tasks: [{ objective: '只有一个' }] }, tctx as never);
+    const empty = await runParallel.handler({ tasks: [{ objective: '' }, { objective: 'x' }] }, tctx as never);
+    const tooMany = await runParallel.handler({
+      tasks: [1, 2, 3, 4, 5].map((i) => ({ objective: `任务${i}` })),
+    }, tctx as never);
+    const validated = one.ok === false && empty.ok === false && tooMany.ok === false;
+    console.log('[parallel] 参数校验（单任务/空目标/超量拒绝）:', validated ? '✓' : '✗',
+      `(${one.ok}/${empty.ok}/${tooMany.ok})`);
+  }
+}
+
+// ---- parallel 并发机制：多个独立 Agent 循环并发执行（mock provider，不依赖真实 LLM） ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const mock = (tag: string) => ({
+    id: `mock-${tag}`, label: tag, defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() {
+      yield { type: 'delta' as const, text: `${tag} 完成` };
+      yield { type: 'done' as const };
+    },
+  });
+  // 并发跑 3 个独立循环（模拟 run_parallel 内部机制：Promise.allSettled + 独立 runner/traceId）
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const started = Date.now();
+  const results = await Promise.allSettled(['甲', '乙', '丙'].map(async (tag) => {
+    let answer = '';
+    for await (const ev of runner.run({
+      provider: mock(tag), model: 'm', messages: [{ role: 'user', content: tag }],
+      traceId: `par-${tag}-${Date.now()}`,
+    })) {
+      if (ev.type === 'delta') answer += ev.text;
+    }
+    return answer;
+  }));
+  const elapsed = Date.now() - started;
+  const allOk = results.every((r) => r.status === 'fulfilled' && r.value.includes('完成'));
+  const traces = kernel.trace.query(undefined, { type: 'llm_call' });
+  console.log('[parallel] 3 个独立循环并发（独立 traceId/上下文）:', allOk ? '✓' : '✗',
+    `(${elapsed}ms, ${traces.length} llm_call 步骤)`);
+}
+
 // ---- HTTP 冒烟：工作区 / 文件树 / skills 管理 API（端到端） ----
 {
   process.env.PORT = String(Number(process.env.PORT ?? 3000) + 1); // 避开默认端口
@@ -428,6 +511,34 @@ export default {
       && Array.isArray(caps.byRisk?.high) && caps.byRisk.high.includes('write_file');
     console.log('[capabilities API] 注册表（风险/成本/审批）:', hasCaps ? '✓' : '✗',
       `tools=${caps.tools.length} high=${caps.byRisk?.high?.length} 个`);
+
+    // todo 看板 REST：GET 列表 → POST 新建 → GET 可见 → PATCH 改状态 → DELETE 清理
+    const boardBase = `${base}/api/plugins/todo/board`;
+    const panelRes = await fetch(`${boardBase}/panel`).then((r) => r.json()) as { title: string; html: string };
+    const hasPanel = typeof panelRes.html === 'string' && panelRes.html.includes('待办看板');
+    const created = await fetch(`${boardBase}/cards`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: 'selftest-看板卡片' }),
+    }).then((r) => r.json()) as { ok: boolean; card?: { id: string; status: string; source: string } };
+    let listOk = false;
+    let patchOk = false;
+    if (created.ok && created.card) {
+      const listAfter = await fetch(`${boardBase}/cards`).then((r) => r.json()) as { cards: { id: string; title: string }[] };
+      listOk = Array.isArray(listAfter.cards) && listAfter.cards.some((c) => c.id === created.card!.id && c.title === 'selftest-看板卡片');
+      const patched = await fetch(`${boardBase}/cards/${created.card.id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status: 'doing' }),
+      }).then((r) => r.json()) as { ok: boolean; card?: { status: string } };
+      patchOk = patched.ok === true && patched.card?.status === 'doing';
+      await fetch(`${boardBase}/cards/${created.card.id}`, { method: 'DELETE' });
+    }
+    // 清理：删除 todo 工具测试卡片（sess-A/sess-B 创建）
+    const leftover = await fetch(`${boardBase}/cards`).then((r) => r.json()) as { cards: { id: string; title: string }[] };
+    for (const c of leftover.cards) {
+      if (c.title.includes('调研并行执行方案') || c.title.includes('实现看板面板') || c.title.includes('会话B的独立任务')) {
+        await fetch(`${boardBase}/cards/${c.id}`, { method: 'DELETE' });
+      }
+    }
+    console.log('[todo API] 看板 REST（面板/新增/列表/改状态/删除）:', hasPanel && created.ok === true && listOk && patchOk ? '✓' : '✗',
+      `(panel=${hasPanel} post=${created.ok === true} list=${listOk} patch=${patchOk})`);
   } finally {
     server.close();
     await httpKernel.stop();

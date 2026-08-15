@@ -538,6 +538,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
         // 不同会话互不串用（答案依赖工具观察时仅本会话可命中）
         scope: session.id,
+        // 工具上下文会话 ID：todo 等插件把状态挂到具体会话
+        sessionId: session.id,
         signal: ac.signal, systemPrompt, tools: toolsOverride,
         // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
         fallbackProviders: chat.providers.filter((p) => p.id !== provider.id),

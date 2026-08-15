@@ -978,6 +978,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .plan-step.done .ps-num { background: var(--teal-soft); color: var(--teal); }
 .plan-step.active .ps-num { background: var(--purple); color: var(--on-accent); }
 
+/* to do list：状态符号（todo 空心 / doing 实心 / done 对勾）与备注 */
+.todo-note { color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
+.plan-step.todo .ps-num { background: var(--bg-input); color: var(--text-3); }
+.plan-step.blocked .ps-num { background: rgba(255,107,107,.15); color: #ff6b6b; }
+
 /* 正文 / 代码块 */
 .assistant-text { font-size: 14px; line-height: 1.65; color: var(--text-1); }
 .assistant-text p { margin-bottom: 8px; }
