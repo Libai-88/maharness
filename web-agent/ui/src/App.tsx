@@ -230,7 +230,7 @@ export default function App() {
   }, []);
 
   const currentSession = sessions.find((s) => s.id === activeId);
-  const pluginRunning = plugins.filter((p) => p.state === 'running' || p.state === 'loaded').length;
+  const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
   const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
   const modeColor = currentSession?.mode === 'plan' ? 'var(--purple)' : currentSession?.mode === 'goal' ? 'var(--orange)' : 'var(--text-3)';
   const selModel = models.find((m) => m.id === sel?.provider);

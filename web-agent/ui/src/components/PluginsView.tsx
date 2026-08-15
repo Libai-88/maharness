@@ -26,12 +26,13 @@ export default function PluginsView({ plugins, onAction }: Props) {
   const kw = q.trim().toLowerCase();
   const match = (p: PluginInfo) => !kw || p.name.toLowerCase().includes(kw) || (p.caps?.some((c) => c.toLowerCase().includes(kw)) ?? false) || (p.error ?? '').toLowerCase().includes(kw);
 
-  const running = plugins.filter((p) => (p.state === 'running' || p.state === 'loaded') && match(p));
-  const stopped = plugins.filter((p) => !(p.state === 'running' || p.state === 'loaded') && match(p));
+  const running = plugins.filter((p) => (p.state === 'started' || p.state === 'loaded') && match(p));
+  const stopped = plugins.filter((p) => !(p.state === 'started' || p.state === 'loaded') && match(p));
   const none = kw !== '' && running.length === 0 && stopped.length === 0;
 
   const renderCard = (p: PluginInfo, idx: number) => {
-    const isRun = p.state === 'running' || p.state === 'loaded';
+    const isRun = p.state === 'started' || p.state === 'loaded';
+    const stateLabel = isRun ? '运行中' : p.state === 'error' ? '出错' : '已停止';
     const color = ICON_COLORS[idx % ICON_COLORS.length];
     return (
       <div
@@ -51,7 +52,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
         </div>
         <div className="plugin-right">
           <span className={`plugin-status ${isRun ? 'running' : p.error ? 'error' : 'stopped-s'}`}>
-            <span className="ps-dot" />{isRun ? '运行中' : p.error ? '出错' : '已停止'}
+            <span className="ps-dot" />{stateLabel}
           </span>
           <button
             className={`toggle ${isRun ? 'on' : ''}`}
@@ -102,22 +103,22 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <span className="pd-ver">v{selected.version}</span>
                 <div className="pd-status">
                   <span className="ps-dot" style={{ background: 'currentColor' }} />
-                  {(selected.state === 'running' || selected.state === 'loaded') ? '运行中 · 热重载已启用' : '已停止'}
+                  {(selected.state === 'started' || selected.state === 'loaded') ? '运行中 · 热重载已启用' : selected.state === 'error' ? '出错' : '已停止'}
                 </div>
                 <div className="pd-actions">
                   <button className="pd-btn ghost" onClick={() => onAction(selected.id, 'reload')}>重载</button>
                   <button className="pd-btn ghost" onClick={() => void pluginsApi.open(selected.id)}>打开目录</button>
-                  <button className="pd-btn danger" onClick={() => onAction(selected.id, (selected.state === 'running' || selected.state === 'loaded') ? 'disable' : 'enable')}>
-                    {(selected.state === 'running' || selected.state === 'loaded') ? '停用' : '启用'}
+                  <button className="pd-btn danger" onClick={() => onAction(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')}>
+                    {(selected.state === 'started' || selected.state === 'loaded') ? '停用' : '启用'}
                   </button>
                 </div>
               </div>
               <div className="pd-manifest">
                 <span className="pm-title">MANIFEST</span>
                 <div className="pm-row"><span className="k">id</span><span className="v">{selected.id}</span></div>
-                <div className="pm-row"><span className="k">state</span><span className="v">{selected.state}</span></div>
+                <div className="pm-row"><span className="k">state</span><span className="v">{selected.state === 'started' ? 'started（运行中）' : selected.state === 'stopped' ? 'stopped（已停止）' : selected.state === 'error' ? 'error（出错）' : selected.state === 'loaded' ? 'loaded（已加载）' : selected.state}</span></div>
                 <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
-                <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'running' || selected.state === 'loaded') ? 'true ✓' : 'false'}</span></div>
+                <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? 'true ✓' : 'false'}</span></div>
               </div>
             </>
           ) : (

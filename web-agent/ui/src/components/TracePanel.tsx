@@ -66,7 +66,7 @@ export default function TracePanel({ steps, stats, onRefresh }: Props) {
             <div className="ts-card">
               <span className="ts-label">本次成本</span>
               <span className="ts-value">¥{(stats.trace.totalCost ?? 0).toFixed(3)}</span>
-              <span className="ts-hint">in {stats.trace.tokensIn ?? 0} · out {stats.trace.tokensOut ?? 0}</span>
+              <span className="ts-hint">in {stats.trace.totalTokensIn ?? 0} · out {stats.trace.totalTokensOut ?? 0}</span>
             </div>
           </div>
           <div className="ts-grid">
