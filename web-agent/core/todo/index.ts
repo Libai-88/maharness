@@ -205,6 +205,18 @@ export default {
             return;
           }
 
+          // ---- 独立窗口页面（完整 HTML：window.open 单独打开，人物主题背景） ----
+          if (p === '/page') {
+            const full = boardPageHtml();
+            const r = res as unknown as {
+              writeHead: (n: number, h?: Record<string, string>) => void;
+              end: (s: string) => void;
+            };
+            r.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+            r.end(full);
+            return;
+          }
+
           // ---- REST：看板数据 ----
           if (req.method === 'GET' && p === '/cards') {
             send({ cards: [...cards].sort((a, b) => a.createdAt - b.createdAt) });
@@ -268,7 +280,7 @@ export default {
   },
 } satisfies Plugin;
 
-/** 看板面板 HTML：三列（待办/进行中/完成）+ 受阻标记，内联 JS 调 REST（面板沙箱化，无外部依赖） */
+/** 看板面板 HTML：四列（待办/进行中/受阻/完成）+ 内联 JS 调 REST（面板沙箱化，无外部依赖） */
 function boardHtml(): string {
   return `<!doctype html>
 <div id="todo-app" style="font-family:system-ui,-apple-system,sans-serif;color:#d8dae5">
@@ -276,6 +288,7 @@ function boardHtml(): string {
     <b style="font-size:15px">待办看板</b>
     <span id="todo-summary" style="font-size:12px;color:#8b8fa3"></span>
     <span style="flex:1"></span>
+    <button onclick="window.open('/api/plugins/todo/board/page','_blank')" style="background:#232a40;border:none;border-radius:6px;padding:5px 12px;font-size:12px;color:#aab0c5;cursor:pointer" title="在独立窗口打开看板">⛶ 独立窗口</button>
     <input id="todo-new-title" placeholder="新任务标题…" style="background:#151826;border:1px solid #2a3045;border-radius:6px;padding:5px 9px;font-size:12px;color:#d8dae5;width:200px" />
     <button onclick="todoAdd()" style="background:var(--accent,#7c6cff);border:none;border-radius:6px;padding:5px 12px;font-size:12px;color:#fff;cursor:pointer">添加</button>
   </div>
@@ -288,6 +301,7 @@ const COLS = [
   { key: 'blocked', label: '受阻', color: '#ff6b6b' },
   { key: 'done', label: '完成', color: '#2ecc8f' },
 ];
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 async function loadTodos() {
   const r = await fetch('/api/plugins/todo/board/cards');
   const d = await r.json();
@@ -334,4 +348,146 @@ async function todoDel(id) {
 }
 loadTodos();
 </script>`;
+}
+
+/**
+ * 独立窗口页面：完整 HTML（非面板片段），人物主题背景 + 玻璃拟态看板。
+ * 通过 /api/plugins/todo/board/page 访问（插件详情页「独立窗口」按钮 window.open）。
+ */
+function boardPageHtml(): string {
+  return `<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>待办看板 · maharness</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+    color: #e8eaf2;
+    /* 人物主题：角色插画铺底 + 深色渐变遮罩（可读性优先） */
+    background:
+      linear-gradient(180deg, rgba(10, 12, 18, 0.88) 0%, rgba(10, 12, 18, 0.72) 45%, rgba(8, 10, 15, 0.92) 100%),
+      url('/hero-char.png') center 28% / cover no-repeat fixed;
+    overflow: hidden;
+  }
+  .app { height: 100%; display: flex; flex-direction: column; padding: 18px 22px; }
+  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
+  .head h1 { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+  .head .summary { font-size: 12px; color: #9aa1b8; background: rgba(20,24,38,.75); border: 1px solid #2c3350; border-radius: 99px; padding: 4px 12px; backdrop-filter: blur(8px); }
+  .head .spacer { flex: 1; }
+  .head input {
+    background: rgba(20,24,38,.8); border: 1px solid #333b5c; border-radius: 10px;
+    padding: 8px 14px; font-size: 13px; color: #e8eaf2; width: 260px; outline: none; backdrop-filter: blur(8px);
+  }
+  .head input:focus { border-color: #7c6cff; }
+  .btn {
+    background: linear-gradient(135deg, #7c6cff, #5a4bd6); border: none; border-radius: 10px;
+    padding: 8px 18px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer;
+    box-shadow: 0 4px 16px rgba(124,108,255,.35); transition: transform .12s;
+  }
+  .btn:hover { transform: translateY(-1px); }
+  .cols { flex: 1; display: flex; gap: 14px; align-items: flex-start; overflow: auto; padding-bottom: 8px; }
+  .col {
+    flex: 1; min-width: 190px; max-height: 100%;
+    display: flex; flex-direction: column;
+    background: rgba(16,19,32,.72); border: 1px solid #2b3250; border-radius: 16px;
+    padding: 12px; backdrop-filter: blur(12px); box-shadow: 0 8px 28px rgba(0,0,0,.35);
+  }
+  .col-head { font-size: 12.5px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
+  .col-head .count { font-size: 11px; color: #8b93ad; background: rgba(255,255,255,.06); border-radius: 99px; padding: 1px 8px; }
+  .col-body { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .card {
+    background: rgba(26,30,48,.82); border: 1px solid #333b5c; border-radius: 12px;
+    padding: 10px 12px; font-size: 12.5px; backdrop-filter: blur(6px);
+    box-shadow: 0 2px 10px rgba(0,0,0,.25); transition: transform .1s;
+  }
+  .card:hover { transform: translateY(-1px); border-color: #4a5380; }
+  .card .title { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .card .src { font-size: 10px; opacity: .75; }
+  .card .desc { color: #9aa1b8; margin-bottom: 8px; white-space: pre-wrap; font-size: 11.5px; }
+  .card .acts { display: flex; gap: 5px; flex-wrap: wrap; }
+  .card .acts button {
+    background: #2a3150; border: none; border-radius: 7px; padding: 3px 9px;
+    font-size: 10.5px; color: #c3c9dd; cursor: pointer; transition: background .12s;
+  }
+  .card .acts button:hover { background: #3a4368; }
+  .card .acts .del { color: #ff7b7b; }
+  .col.todo .col-head { color: #f0b429; }
+  .col.doing .col-head { color: #4aa3ff; }
+  .col.blocked .col-head { color: #ff6b6b; }
+  .col.done .col-head { color: #2ecc8f; }
+  .col.done .card .title { color: #7d8aa8; text-decoration: line-through; }
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="head">
+    <h1>🗂 待办看板</h1>
+    <span class="summary" id="summary"></span>
+    <span class="spacer"></span>
+    <input id="new-title" placeholder="新任务标题…" onkeydown="if(event.key==='Enter')add()" />
+    <button class="btn" onclick="add()">＋ 添加</button>
+  </div>
+  <div class="cols" id="cols"></div>
+</div>
+<script>
+const COLS = [
+  { key: 'todo', label: '待办', color: '#f0b429' },
+  { key: 'doing', label: '进行中', color: '#4aa3ff' },
+  { key: 'blocked', label: '受阻', color: '#ff6b6b' },
+  { key: 'done', label: '完成', color: '#2ecc8f' },
+];
+const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+async function load() {
+  const d = await (await fetch('/api/plugins/todo/board/cards')).json();
+  const cards = d.cards || [];
+  document.getElementById('summary').textContent = cards.filter(c=>c.status==='done').length + '/' + cards.length + ' 完成';
+  const root = document.getElementById('cols');
+  root.innerHTML = '';
+  for (const col of COLS) {
+    const list = cards.filter(c => c.status === col.key);
+    const el = document.createElement('div');
+    el.className = 'col ' + col.key;
+    el.innerHTML = '<div class="col-head"><span style="width:8px;height:8px;border-radius:50%;background:' + col.color + '"></span>' + col.label + '<span class="count">' + list.length + '</span></div>';
+    const body = document.createElement('div');
+    body.className = 'col-body';
+    for (const c of list) {
+      const card = document.createElement('div');
+      card.className = 'card';
+      card.innerHTML =
+        '<div class="title">' + esc(c.title) + '<span class="src">' + (c.source === 'agent' ? '🤖 模型' : '👤 人类') + '</span></div>' +
+        (c.desc ? '<div class="desc">' + esc(c.desc) + '</div>' : '') +
+        '<div class="acts">' +
+          COLS.filter(x => x.key !== c.status).map(x => '<button onclick="set(\'' + c.id + '\',\'' + x.key + '\')">' + x.label + '</button>').join('') +
+          '<button class="del" onclick="del(\'' + c.id + '\')">删除</button>' +
+        '</div>';
+      body.appendChild(card);
+    }
+    el.appendChild(body);
+    root.appendChild(el);
+  }
+}
+async function add() {
+  const title = document.getElementById('new-title').value.trim();
+  if (!title) return;
+  await fetch('/api/plugins/todo/board/cards', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title }) });
+  document.getElementById('new-title').value = '';
+  load();
+}
+async function set(id, status) {
+  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  load();
+}
+async function del(id) {
+  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'DELETE' });
+  load();
+}
+load();
+setInterval(load, 5000); // 5s 轮询：模型 to do list 变化实时同步
+</script>
+</body>
+</html>`;
 }

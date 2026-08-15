@@ -107,7 +107,10 @@
 html, body, #root { height: 100%; }
 
 body {
-  background: var(--bg-deep);
+  /* 人物主题背景：角色插画铺底 + 深色渐变遮罩（保证文字可读性） */
+  background:
+    linear-gradient(180deg, rgba(14, 17, 22, 0.92) 0%, rgba(14, 17, 22, 0.82) 40%, rgba(10, 12, 16, 0.94) 100%),
+    url('/hero-char.png') center 30% / cover no-repeat fixed;
   color: var(--text-1);
   font-family: var(--font-sans);
   font-size: 14px;
