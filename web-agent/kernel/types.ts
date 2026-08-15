@@ -80,6 +80,9 @@ export interface CacheLike {
   l2Set(key: string, value: unknown, ttlMs?: number): void;
   makeKey(parts: string[]): string;
   setEmbeddingFn(fn: (text: string) => Promise<number[]>): void;
+  /** L1 语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用） */
+  l1Get(question: string): Promise<{ hit: boolean; answer?: string; key?: string }>;
+  l1Set(question: string, answer: string): Promise<void>;
   /** L3 prompt 前缀复用统计：记录本轮与上轮 LLM 调用公共前缀的 token 数 */
   recordPrefixRepeat(tokens: number): void;
   clear(): void;

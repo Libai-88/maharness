@@ -1,6 +1,7 @@
 /**
  * kernel/cache.ts —— 三层缓存
- * L1 语义缓存：问题向量相似度命中（需注入 embeddingFn，未配置自动降级）
+ * L1 语义缓存：默认自研文本相似度（字符 bigram Dice，免外部 API 始终可用）；
+ *             配置 embedding 后自动升级为向量语义匹配
  * L2 工具结果缓存：hash(工具名+规范化参数)+文件mtime 命中
  * L3 prompt 前缀缓存：无显式键，靠消息组装策略吃 provider KV cache（见 core/chat）
  */
@@ -16,13 +17,16 @@ interface L2Entry {
 }
 
 interface L1Entry {
-  vector: number[];
+  vector?: number[];
+  bigrams: Set<string>; // 自研文本相似度特征
   answer: string;
   hits: number;
 }
 
-const L1_THRESHOLD = 0.95;   // 余弦相似度命中阈值
-const DEFAULT_TTL = 5 * 60_000; // L2 默认 TTL 5 分钟
+const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
+const L1_TEXT_THRESHOLD = 0.88;   // 自研 bigram Dice 命中阈值（宁严勿松，防误命中）
+const DEFAULT_TTL = 30 * 60_000;  // L2 默认 TTL 30 分钟（文件类键含 mtime+size 校验，TTL 只是防膨胀）
+const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
 
 export class Cache {
   private l2 = new Map<string, L2Entry>();
@@ -34,12 +38,12 @@ export class Cache {
 
   constructor(private embeddingFn?: EmbeddingFn) {}
 
-  /** L1 是否可用（配置了 embedding 才有语义缓存） */
+  /** L1 始终可用（自研文本相似度）；配置 embedding 后自动升级为向量语义匹配 */
   get l1Enabled(): boolean {
-    return !!this.embeddingFn;
+    return true;
   }
 
-  /** 运行时注入 embedding 函数（由 LLM provider 插件检测到配置后调用，激活 L1） */
+  /** 运行时注入 embedding 函数（由 LLM provider 插件检测到配置后调用，激活向量语义匹配） */
   setEmbeddingFn(fn: EmbeddingFn): void {
     this.embeddingFn = fn;
   }
@@ -79,18 +83,38 @@ export class Cache {
 
   // ---------- L1 语义缓存 ----------
 
-  /** 查询语义缓存：相似度 ≥ 阈值视为命中 */
+  /** 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用） */
   async l1Get(question: string): Promise<{ hit: boolean; answer?: string; key?: string }> {
-    if (!this.embeddingFn) return { hit: false };
     const norm = question.replace(/\s+/g, ' ').trim();
-    if (!norm) return { hit: false };
-    const vec = await this.embeddingFn(norm);
+    if (!norm || norm.length < 8) {
+      // 短问题（"继续/你好"等）不参与语义匹配，避免跨上下文误命中
+      this.counter.l1Misses++;
+      return { hit: false };
+    }
+    if (this.embeddingFn) {
+      const vec = await this.embeddingFn(norm);
+      let best: { key: string; score: number } | null = null;
+      for (const [key, entry] of this.l1) {
+        const score = cosine(vec, entry.vector ?? []);
+        if (score > (best?.score ?? 0)) best = { key, score };
+      }
+      if (best && best.score >= L1_THRESHOLD) {
+        const entry = this.l1.get(best.key)!;
+        entry.hits++;
+        this.counter.l1Hits++;
+        return { hit: true, answer: entry.answer, key: best.key };
+      }
+      this.counter.l1Misses++;
+      return { hit: false };
+    }
+    // 自研文本相似度：字符 bigram Dice 系数
+    const qBigrams = bigramSet(norm);
     let best: { key: string; score: number } | null = null;
     for (const [key, entry] of this.l1) {
-      const score = cosine(vec, entry.vector);
+      const score = dice(qBigrams, entry.bigrams);
       if (score > (best?.score ?? 0)) best = { key, score };
     }
-    if (best && best.score >= L1_THRESHOLD) {
+    if (best && best.score >= L1_TEXT_THRESHOLD) {
       const entry = this.l1.get(best.key)!;
       entry.hits++;
       this.counter.l1Hits++;
@@ -101,11 +125,11 @@ export class Cache {
   }
 
   async l1Set(question: string, answer: string): Promise<void> {
-    if (!this.embeddingFn) return;
     const norm = question.replace(/\s+/g, ' ').trim();
-    if (!norm) return;
-    const vec = await this.embeddingFn(norm);
-    this.l1.set(norm, { vector: vec, answer, hits: 0 });
+    if (!norm || norm.length < 8 || !answer || answer.length > MAX_L1_ANSWER) return;
+    const entry: L1Entry = { bigrams: bigramSet(norm), answer, hits: 0 };
+    if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
+    this.l1.set(norm, entry);
     if (this.l1.size > 500) {
       const oldest = this.l1.keys().next().value;
       if (oldest !== undefined) this.l1.delete(oldest);
@@ -142,4 +166,22 @@ function cosine(a: number[], b: number[]): number {
   }
   if (na === 0 || nb === 0) return 0;
   return dot / (Math.sqrt(na) * Math.sqrt(nb));
+}
+
+// ---------- 自研文本相似度（L1 默认方案，免 embedding API） ----------
+
+/** 归一化 + 字符 bigram 集合（小写，去标点空白） */
+export function bigramSet(text: string): Set<string> {
+  const norm = text.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
+  const set = new Set<string>();
+  for (let i = 0; i < norm.length - 1; i++) set.add(norm.slice(i, i + 2));
+  return set;
+}
+
+/** Dice 系数：2×|A∩B| / (|A|+|B|)，0~1 */
+export function dice(a: Set<string>, b: Set<string>): number {
+  if (!a.size || !b.size) return 0;
+  let inter = 0;
+  for (const x of a) if (b.has(x)) inter++;
+  return (2 * inter) / (a.size + b.size);
 }

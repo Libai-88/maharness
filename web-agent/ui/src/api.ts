@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BusEvent, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -23,7 +23,7 @@ export interface ChatHandlers {
   onToolStart(name: string, args: unknown): void;
   onToolResult(name: string, summary: string, ok: boolean): void;
   onApprovalRequired(approvalId: string, name: string, summary: string): void;
-  onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number }): void;
+  onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
   onError(e: string): void;
   onEnd(): void;
 }
@@ -83,7 +83,7 @@ export async function streamChat(
           case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
           case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
           case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok)); break;
-          case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number }); break;
+          case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
           case 'end': h.onEnd(); break;
         }
@@ -129,6 +129,7 @@ export interface CommandResult {
 export const commandsApi = {
   exec: (input: string, sessionId: string) =>
     api<CommandResult>('/api/commands', { method: 'POST', body: JSON.stringify({ input, sessionId }) }),
+  list: () => api<{ commands: CommandInfo[] }>('/api/commands/list'),
 };
 
 export const statsApi = {

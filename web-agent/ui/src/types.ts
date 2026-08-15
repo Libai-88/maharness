@@ -96,6 +96,14 @@ export interface TreeEntry {
   size: number;
 }
 
+/** 斜杠命令（命令面板渲染用） */
+export interface CommandInfo {
+  name: string;
+  usage: string;
+  description: string;
+  source: 'builtin' | 'plugin';
+}
+
 /** 统计面板：全局概览 / 进程 / 上下文用量 / 缓存命中率 */
 export interface StatsInfo {
   overview: {
@@ -138,6 +146,7 @@ export interface StatsInfo {
     l2: { hits: number; misses: number; rate: number };
     l3: { hits: number; tokens: number };
     savedCost: number;
+    overall: { served: number; total: number; rate: number };
   };
 }
 
@@ -172,6 +181,7 @@ export interface ChatMessage {
   error?: string;
   usage?: { input: number; output: number };
   cost?: number;
+  cached?: boolean;         // L1 语义缓存命中（零 LLM 成本直接回答）
 }
 
 export interface ToolStep {

@@ -124,6 +124,26 @@ if (ls && gs) {
   console.log('[skills] 非法技能名被拦截:', missing.ok === false ? '✓' : '✗');
 }
 
+// ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
+{
+  const { dice, bigramSet } = await import('../kernel/cache');
+  const same = dice(bigramSet('帮我看看当前目录下有什么文件'), bigramSet('帮我看看当前目录下有什么文件'));
+  const near = dice(bigramSet('用工具查看当前沙箱根目录下有哪些文件，列出文件名'), bigramSet('用工具查看当前沙箱根目录下有哪些文件，列出文件名'));
+  const diff = dice(bigramSet('帮我写一份周报'), bigramSet('介绍一下你自己'));
+  console.log('[L1] bigram Dice 相同=1.0 近似=1.0 无关<0.6:', same === 1 && near === 1 && diff < 0.6 ? '✓' : '✗', `(${same.toFixed(2)}/${near.toFixed(2)}/${diff.toFixed(2)})`);
+
+  // l1Get/l1Set 无 embedding 路径：同题命中、近似命中、无关不命中
+  await kernel.cache.l1Set('查看当前沙箱根目录下的文件列表', '沙箱根目录有 bin core kernel 等目录。');
+  const hitExact = await kernel.cache.l1Get('查看当前沙箱根目录下的文件列表');
+  const hitNear = await kernel.cache.l1Get('查看当前沙箱根目录下的文件列表！');
+  const hitOther = await kernel.cache.l1Get('今天天气怎么样');
+  console.log('[L1] 缓存命中: 同题=1 近题=1 无关=0:',
+    hitExact.hit && hitNear.hit && !hitOther.hit ? '✓' : '✗',
+    `(${hitExact.hit}/${hitNear.hit}/${hitOther.hit})`);
+  const s1 = kernel.cache.stats();
+  console.log('[L1] 计数 l1Hits>=2 l1Misses>=1:', s1.l1Hits >= 2 && s1.l1Misses >= 1 ? '✓' : '✗', JSON.stringify(s1).slice(0, 120));
+}
+
 // ---- HTTP 冒烟：工作区 / 文件树 / skills 管理 API（端到端） ----
 {
   process.env.PORT = String(Number(process.env.PORT ?? 3000) + 1); // 避开默认端口
@@ -161,6 +181,13 @@ if (ls && gs) {
       && typeof stats.cache?.l3?.hits === 'number';
     console.log('[stats API] 上下文/缓存统计:', hasStats ? '✓' : '✗',
       `sessions=${stats.overview?.sessions} ctxMax=${stats.context?.maxTokens} l2率=${stats.cache?.l2?.rate}% l3=${stats.cache?.l3?.hits}次/${stats.cache?.l3?.tokens}tok`);
+
+    // 命令列表 API（命令面板数据源）
+    const cmds = await fetch(`${base}/api/commands/list`).then((r) => r.json()) as {
+      commands: { name: string; usage: string; description: string }[];
+    };
+    const hasCmds = Array.isArray(cmds.commands) && cmds.commands.some((c) => c.name === 'help') && cmds.commands.some((c) => c.name === 'new');
+    console.log('[commands API] 命令清单:', hasCmds ? '✓' : '✗', `(${cmds.commands.length} 条: ${cmds.commands.map((c) => c.name).join(',')})`);
   } finally {
     server.close();
     await httpKernel.stop();

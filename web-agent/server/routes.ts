@@ -273,6 +273,18 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
     ['model', '<名称>', '切换模型（如 /model deepseek-chat）'],
   ];
 
+  /** 当前全部命令（内置 + 插件），供前端命令面板渲染 */
+  app.get('/api/commands/list', (_req, res) => {
+    const pluginCmds = kernel.plugins.capabilities('command').map((c) => ({
+      name: c.command.name,
+      usage: '',
+      description: c.command.description,
+      source: 'plugin' as const,
+    }));
+    const builtin = BUILTIN_COMMANDS.map(([name, usage, description]) => ({ name, usage, description, source: 'builtin' as const }));
+    res.json({ commands: [...builtin, ...pluginCmds] });
+  });
+
   app.post('/api/commands', async (req, res) => {
     const input = String(req.body?.input ?? '').trim();
     const sessionId = req.body?.sessionId ? String(req.body.sessionId) : undefined;
@@ -457,7 +469,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;
-          sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost });
+          sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost, cached: ev.cached ?? false });
         } else if (ev.type === 'error') {
           sse(res, 'error', { error: ev.error });
         }
@@ -654,6 +666,12 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
         l2: rate(cache.l2Hits, cache.l2Misses),
         l3: { hits: cache.l3Hits, tokens: cache.l3Tokens },
         savedCost: cache.savedCost,
+        // 综合命中率：L1 直接回答 + L2 工具结果 + L3 前缀复用 占总轮次比例
+        overall: (() => {
+          const served = cache.l1Hits + cache.l2Hits + cache.l3Hits;
+          const total = trace.llmCalls + trace.toolCalls + cache.l1Hits;
+          return { served, total, rate: total > 0 ? Math.round((served / total) * 1000) / 10 : 0 };
+        })(),
       },
     });
   });

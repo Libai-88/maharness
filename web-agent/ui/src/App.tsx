@@ -180,7 +180,7 @@ export default function App() {
         ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? { ...t, summary, ok, status: ok ? 'done' as const : 'error' as const } : t),
       } : m)),
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
-      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost } : m)),
+      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m)),
       onError: (e) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m)),
       onEnd: () => {
         setStreaming(false);

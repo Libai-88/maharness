@@ -88,15 +88,23 @@ export default function StatsPanel() {
 
       <div className="panel-section-title">⚡ 缓存命中率</div>
       <div className="provider-hint">
-        L1 语义缓存{!cache.l1Enabled && '（未配置 embedding，未启用）'} · L2 工具结果缓存 · L3 prompt 前缀复用
+        L1 语义问答{!cache.l1Enabled && '（未配置 embedding，未启用）'} · L2 工具结果缓存 · L3 prompt 前缀复用
       </div>
       <div className="stats-row">
         <div className="stats-row-head">
-          <span className="stats-row-title">L1 语义</span>
+          <span className="stats-row-title">综合（L1 回答 + L2 结果 + L3 前缀）</span>
+          <span className="stats-row-meta">服务 {cache.overall.served} / {cache.overall.total} 轮次</span>
+        </div>
+        <Bar pct={cache.overall.rate} warn={cache.overall.rate < 50} />
+        <div className="stats-row-sub">综合命中率 <b>{cache.overall.rate}%</b></div>
+      </div>
+      <div className="stats-row">
+        <div className="stats-row-head">
+          <span className="stats-row-title">L1 语义问答</span>
           <span className="stats-row-meta">{cache.l1.hits} 命中 / {cache.l1.misses} 未命中</span>
         </div>
         <Bar pct={cache.l1.rate} />
-        <div className="stats-row-sub">命中率 <b>{cache.l1.rate}%</b></div>
+        <div className="stats-row-sub">命中率 <b>{cache.l1.rate}%</b>（相同/近似问题直接返回缓存答案，零 LLM 成本）</div>
       </div>
       <div className="stats-row">
         <div className="stats-row-head">

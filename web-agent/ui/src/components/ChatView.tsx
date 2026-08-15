@@ -1,6 +1,7 @@
-// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具卡片 + 思考过程折叠 + Markdown）
+// ui/src/components/ChatView.tsx —— 对话区（流式渲染 + 工具卡片 + 思考过程折叠 + Markdown + 命令面板）
 import { useEffect, useRef, useState } from 'react';
-import type { ApprovalItem, ChatMessage, PlanState } from '../types';
+import { commandsApi } from '../api';
+import type { ApprovalItem, ChatMessage, CommandInfo, PlanState } from '../types';
 import Markdown from './Markdown';
 
 interface Props {
@@ -17,17 +18,62 @@ interface Props {
 export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [commands, setCommands] = useState<CommandInfo[]>([]);
+  const [cmdOpen, setCmdOpen] = useState(false);
+  const [cmdIdx, setCmdIdx] = useState(0);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
-  const submit = () => {
-    const text = input.trim();
+  // 加载命令清单（命令面板用）
+  useEffect(() => {
+    commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined);
+  }, []);
+
+  const submit = (textOverride?: string) => {
+    const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
     setInput('');
+    setCmdOpen(false);
     onSend(text);
+  };
+
+  /** 当前匹配的命令（输入 /xxx 时按前缀过滤；仅输入 / 时显示全部） */
+  const matched = input.startsWith('/')
+    ? commands.filter((c) => {
+        const q = input.slice(1).toLowerCase();
+        return !q || c.name.startsWith(q) || q.startsWith(c.name);
+      })
+    : [];
+
+  /** 执行或补全选中命令：无参数命令直接执行；有参数命令（如 /model）补全并让用户继续输入 */
+  const applyCommand = (cmd: CommandInfo, execute = true) => {
+    if (cmd.usage) {
+      setInput(`/${cmd.name} `);
+      inputRef.current?.focus();
+      setCmdOpen(false);
+    } else if (execute) {
+      setInput(`/${cmd.name}`);
+      submit(`/${cmd.name}`);
+    } else {
+      setInput(`/${cmd.name} `);
+      inputRef.current?.focus();
+      setCmdOpen(false);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (cmdOpen && matched.length > 0) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); setCmdIdx((i) => (i + 1) % matched.length); return; }
+      if (e.key === 'ArrowUp') { e.preventDefault(); setCmdIdx((i) => (i - 1 + matched.length) % matched.length); return; }
+      if (e.key === 'Escape') { e.preventDefault(); setCmdOpen(false); return; }
+      if (e.key === 'Tab') { e.preventDefault(); applyCommand(matched[cmdIdx], false); return; }
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applyCommand(matched[cmdIdx]); return; }
+    }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
   };
 
   const toggleReasoning = (id: string) =>
@@ -100,6 +146,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               {m.usage && (
                 <div className="msg-meta">
                   ↑{m.usage.input} · ↓{m.usage.output} tokens · 成本 ${(m.cost ?? 0).toFixed(5)}
+                  {m.cached && <em className="cache-badge">⚡ 缓存命中</em>}
                 </div>
               )}
             </div>
@@ -124,20 +171,45 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         </div>
       )}
 
-      <div className="input-bar">
-        <textarea
-          value={input}
-          placeholder={hasModels ? '输入消息，Enter 发送，Shift+Enter 换行' : '请先在「设置」配置 LLM Provider'}
-          rows={2}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); } }}
-          disabled={!hasModels || streaming}
-        />
-        {streaming ? (
-          <button className="btn stop" onClick={onStop}>停止</button>
-        ) : (
-          <button className="btn send" onClick={submit} disabled={!input.trim() || !hasModels}>发送</button>
+      <div className="input-wrap">
+        {/* 命令面板：输入 / 弹出，方向键选择，Enter 执行，Tab 补全，Esc 关闭 */}
+        {cmdOpen && matched.length > 0 && (
+          <div className="cmd-panel">
+            <div className="cmd-panel-title">斜杠命令（Enter 执行 · Tab 补全 · Esc 关闭）</div>
+            {matched.map((c, i) => (
+              <div
+                key={c.name}
+                className={`cmd-item ${i === cmdIdx ? 'active' : ''}`}
+                onMouseEnter={() => setCmdIdx(i)}
+                onClick={() => applyCommand(c)}
+              >
+                <span className="cmd-name">/{c.name}{c.usage ? ` ${c.usage}` : ''}</span>
+                <span className="cmd-desc">{c.description}</span>
+                <span className="cmd-src">{c.source === 'builtin' ? '内置' : '插件'}</span>
+              </div>
+            ))}
+          </div>
         )}
+        <div className="input-bar">
+          <textarea
+            ref={inputRef}
+            value={input}
+            placeholder={hasModels ? '输入消息，Enter 发送，Shift+Enter 换行；输入 / 调出命令面板' : '请先在「设置」配置 LLM Provider'}
+            rows={2}
+            onChange={(e) => {
+              setInput(e.target.value);
+              setCmdOpen(e.target.value.startsWith('/'));
+              setCmdIdx(0);
+            }}
+            onKeyDown={onKeyDown}
+            disabled={!hasModels || streaming}
+          />
+          {streaming ? (
+            <button className="btn stop" onClick={onStop}>停止</button>
+          ) : (
+            <button className="btn send" onClick={submit} disabled={!input.trim() || !hasModels}>发送</button>
+          )}
+        </div>
       </div>
     </div>
   );

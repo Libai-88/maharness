@@ -4,7 +4,7 @@
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
 import { randomUUID } from 'node:crypto';
-import { sharedPrefixTokens } from '../../kernel/tokens';
+import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
 import type {
   EventBusLike, KernelLike, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
@@ -38,7 +38,7 @@ export type AgentEvent =
   | { type: 'tool_start'; name: string; args: unknown }
   | { type: 'tool_result'; name: string; summary: string; ok: boolean }
   | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
-  | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number }
+  | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
   | { type: 'error'; error: string };
 
 export interface RunOptions {
@@ -138,6 +138,34 @@ export class AgentRunner {
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad };
       await this.emitHook('agent.before_llm', llmCtx);
 
+      // ---- L1 语义缓存：问答命中直接返回缓存答案（跳过 LLM 调用，零成本） ----
+      // 命中条件：首轮（turn=0，历史无运行时 tool 消息）且最后一条是真实 user 消息；
+      // 用最后一条 user 消息做语义匹配（bigram Dice ≥ 阈值），命中即返回缓存答案。
+      // 长度门槛（≥8 字符）："继续/总结一下"等短问题不参与缓存，避免跨上下文误命中。
+      // 排除 before_llm 钩子注入的记忆消息（【长期记忆】）。
+      const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】'));
+      const lastUser = realUsers[realUsers.length - 1];
+      const q = lastUser?.content ?? '';
+      if (turn === 0 && q.length >= 8 && !llmCtx.history.some((m) => m.role === 'tool')) {
+        const cached = await this.kernel.cache.l1Get(q);
+        if (cached.hit && cached.answer) {
+          const tIn = estimateTokens([...llmCtx.history.map((m) => m.content ?? '')].join('\n'));
+          const tOut = estimateTokens(cached.answer);
+          const step = this.kernel.trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L1', cacheKey: cached.key ?? '' });
+          step.finish({ outputSummary: `L1 语义缓存命中：${cached.answer.slice(0, 60)}…`, tokensIn: tIn, tokensOut: tOut });
+          yield { type: 'delta', text: cached.answer };
+          yield {
+            type: 'assistant_done',
+            content: cached.answer,
+            reasoning: '',
+            usage: { input: tIn, output: tOut },
+            cost: 0,
+            cached: true,
+          };
+          return;
+        }
+      }
+
       // ---- 决策：LLM 调用（流式） ----
       const step = this.kernel.trace.startStep({
         traceId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
@@ -198,6 +226,10 @@ export class AgentRunner {
 
       // ---- 无工具调用：本轮结束 ----
       if (!collected.length) {
+        // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）
+        if (q.length >= 8 && text.trim()) {
+          void this.kernel.cache.l1Set(q, text);
+        }
         yield {
           type: 'assistant_done',
           content: text,
