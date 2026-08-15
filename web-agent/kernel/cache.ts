@@ -24,7 +24,7 @@ interface L1Entry {
 }
 
 const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
-const L1_TEXT_THRESHOLD = 0.88;   // 自研 bigram Dice 命中阈值（宁严勿松，防误命中）
+const L1_TEXT_THRESHOLD = 0.85;   // 自研 bigram Dice 命中阈值（近义问题可命中；无关文本仍远低于阈值）
 const DEFAULT_TTL = 30 * 60_000;  // L2 默认 TTL 30 分钟（文件类键含 mtime+size 校验，TTL 只是防膨胀）
 const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
 

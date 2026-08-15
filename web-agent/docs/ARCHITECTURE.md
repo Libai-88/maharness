@@ -124,14 +124,14 @@ TraceSession(traceId)
 
 | 层 | 名称 | 键 | 命中条件 | 失效策略 |
 | --- | --- | --- | --- | --- |
-| L1 | 语义问答缓存 | 规范化问题文本（默认字符 bigram Dice；配置 embedding 后升级向量余弦） | 相同/近似问题 Dice ≥ 0.88（或向量 ≥ 0.95）命中直接返回缓存答案 | 手动清空；LLM 版本升级时清空；短问题（<8 字符）不参与 |
+| L1 | 语义问答缓存 | 规范化问题文本（默认字符 bigram Dice；配置 embedding 后升级向量余弦） | 相同/近似问题 Dice ≥ 0.85（或向量 ≥ 0.95）命中直接返回缓存答案 | 手动清空；LLM 版本升级时清空；短问题（<8 字符）不参与 |
 | L2 | 工具结果缓存 | `hash(工具名 + 规范化参数)`；文件类追加 `mtime+size` | 键相同且未失效 | 文件 mtime/size 变化；TTL（30 分钟）；显式失效 |
 | L3 | prompt 前缀缓存 | 无显式键——**靠消息组装策略** | 依赖 provider 原生 KV cache | 由 provider 管理 |
 
 **L3 设计要点（高命中关键）**：保持 system prompt 字节级稳定；历史消息按"只追加不重写"策略组装（同一会话内，旧消息序列不变）；多轮工具结果不回写历史。这样 provider 侧 KV cache 前缀复用最大化，DeepSeek/OpenAI 的 context caching 均吃满。
 
 **缓存统计**：命中次数、节省 token、节省成本、命中率，全部进入 Trace 并在面板展示。缓存"是什么、为什么命中"永远可查。
-- L1 可观测：Agent 循环在首轮问答（最后一条真实 user 消息，≥8 字符，排除记忆注入）查询语义缓存，命中直接 yield 缓存答案（`cached: true`，前端显示 ⚡缓存命中，成本 0）；无工具调用的最终轮按最后 user 消息回填。
+- L1 可观测：Agent 循环在首轮问答（最后一条真实 user 消息，≥8 字符，排除记忆注入）查询语义缓存，命中直接 yield 缓存答案（`cached: true`，前端显示 ⚡缓存命中，成本 0）；无工具调用的最终轮按最后 user 消息回填（探索型任务 maxTurns=12 保证能走到最终总结轮，回填可靠）。
 - L3 可观测：Agent 循环在每次 LLM 调用前对比与上一轮消息的公共前缀，估算复用 token 计入 `cache.l3`（`kernel/tokens.ts` 的 `sharedPrefixTokens`）。
 
 **统计面板（`GET /api/stats`）**：聚合全局概览（会话/消息/tokens/成本/截断次数，SQLite 累计）、本次运行明细（Trace 进程级）、每会话上下文用量（`estimateTokens` 估算 + 与 `context.maxTokens` 预算对比 + 截断标记）、三层缓存命中率（L1/L2 命中率、L3 复用次数与 token 数）。前端侧边栏「统计」Tab 每 5 秒轮询刷新。

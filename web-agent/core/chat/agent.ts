@@ -104,7 +104,8 @@ export class AgentRunner {
   /** 运行一轮完整对话（直到模型不再调用工具） */
   async *run(opts: RunOptions): AsyncGenerator<AgentEvent> {
     const { provider, model, messages, traceId, signal } = opts;
-    const maxTurns = opts.maxTurns ?? 8;
+    // 12 轮：探索型任务（查代码/多工具协作）能走到最终总结轮，L1 语义缓存回填更可靠
+    const maxTurns = opts.maxTurns ?? 12;
     const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     const history: LLMMessage[] = [
       { role: 'system', content: systemPrompt },
