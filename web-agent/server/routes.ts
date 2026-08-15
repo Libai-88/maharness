@@ -16,6 +16,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { truncateHistory, estimateTokens } from './context';
 import type { Store } from './db';
+import type { ClientTracker } from './client-tracker';
 
 const execFileAsync = promisify(execFile);
 
@@ -82,7 +83,7 @@ function sse(res: Response, event: string, data: unknown): void {
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
 }
 
-export function registerRoutes(app: Express, kernel: Kernel, store: Store): void {
+export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker): void {
   app.use(express.json({ limit: '5mb' }));
 
   // ---------- Provider 管理（网页端；DB 为唯一来源） ----------
@@ -979,11 +980,13 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store): void
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
     });
+    // 页面存活跟踪：SSE 常驻连接 = 前端页面开着的证据（关闭页面/刷新 → 连接断开）
+    tracker?.onConnect(res);
     // SSE 心跳：长连接保活
     const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
     const off = kernel.bus.on('*', (e) => {
       sse(res, 'event', { type: e.type, traceId: e.traceId, data: e.data, ts: e.ts });
     });
-    req.on('close', () => { off(); clearInterval(heartbeat); });
+    req.on('close', () => { off(); clearInterval(heartbeat); tracker?.onDisconnect(res); });
   });
 }

@@ -383,7 +383,9 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | GET | `/api/trace?session_id=` | 查询轨迹（环形缓冲/落盘） |
 | GET | `/api/trace/stats` | 进程级 Trace/Cache 计数 |
 | GET | `/api/stats` | 统计面板：全局概览 + 上下文用量 + 三层缓存命中率 |
-| GET | `/api/events` | 全局事件 SSE（前端实时面板） |
+| GET | `/api/events` | 全局事件 SSE（前端实时面板；**同时是页面存活信号**——连接断开即视为前端关闭） |
+
+**页面感知自动停止**：前端与后端的唯一常驻连接是 `/api/events` SSE。`server/client-tracker.ts` 登记/注销这些连接；所有连接断开（用户彻底关闭页面）超过 `AUTO_STOP_IDLE_MS`（默认 30 秒，设 0 关闭，可经 `.env` 热更新）后，后端优雅退出（`server.close()` + `kernel.stop()` 缓存落盘 + `process.exit(0)`）。刷新页面/网络抖动由 EventSource 自动重连豁免（宽限期）；多标签页任一存活即不停止；纯 API 调用（从未打开页面）永不触发。不用 HTTP 轮询做信号——浏览器对后台标签页的 setInterval 节流会使轮询失真，而 SSE 连接不受 JS 节流影响。
 
 **chat SSE 事件流**：`turn.started` → `message.delta`(文本增量) → `tool.started` → `tool.delta`(工具输出增量) → `tool.done` → `message.done` → `turn.done` → `done`（含汇总：tokens/成本/缓存命中）。任意时刻 `stop` 可中断。
 

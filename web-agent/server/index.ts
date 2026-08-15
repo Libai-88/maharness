@@ -2,6 +2,8 @@
  * server/index.ts —— HTTP 服务入口
  * 启动内核 → 注册路由 → 静态托管前端（ui/dist，生产）→ 监听端口。
  * 环境变量与插件文件一样支持热更新：监听 .env 变化 → 刷新 process.env → 重载全部插件。
+ * 页面感知自动停止：前端唯一常驻连接（/api/events SSE）全部断开超过
+ * AUTO_STOP_IDLE_MS（默认 30s，设 0 关闭）后优雅退出——「页面关了，后端就不该再跑」。
  */
 import dotenv from 'dotenv';
 import { existsSync, watch } from 'node:fs';
@@ -11,6 +13,7 @@ import { Kernel } from '../kernel';
 import { Store, DEFAULT_PERSONA } from './db';
 import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './routes';
 import { discoverProviders } from '../core/chat/provider';
+import { ClientTracker } from './client-tracker';
 
 dotenv.config(); // 启动时读取 .env（初始快照）
 
@@ -36,7 +39,7 @@ function seedDefaults(store: Store): void {
   }
 }
 
-export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']> }> {
+export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker }> {
   const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir });
   await kernel.start();
 
@@ -48,7 +51,8 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
   refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
   const app = express();
-  registerRoutes(app, kernel, store);
+  const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）
+  registerRoutes(app, kernel, store, tracker);
 
   // ---- 插件 API 能力：前端是插件的一部分的数据通道 ----
   // 动态分发（每次请求取当前插件实例）——插件热重载后新路由立即生效，无需重启。
@@ -108,13 +112,16 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     console.error('启动失败:', err.message);
     process.exit(1);
   });
-  return { kernel, app, server };
+  return { kernel, app, server, tracker };
 }
 
 // 直接运行（tsx server/index.ts）
 if (process.argv[1] && import.meta.url.includes(process.argv[1].replace(/\\/g, '/'))) {
-  const { server, kernel } = await startServer();
+  const { server, kernel, tracker } = await startServer();
+  let shuttingDown = false;
   const shutdown = async () => {
+    if (shuttingDown) return;
+    shuttingDown = true;
     console.log('\n 正在关闭…');
     server.close();
     await kernel.stop();
@@ -122,4 +129,22 @@ if (process.argv[1] && import.meta.url.includes(process.argv[1].replace(/\\/g, '
   };
   process.on('SIGINT', shutdown);
   process.on('SIGTERM', shutdown);
+
+  // ---- 页面感知自动停止：前端页面（/api/events 常驻连接）全部关闭后优雅退出 ----
+  // 每 5s 检查一次「最后一个页面关闭后的空闲时长」，超过阈值（AUTO_STOP_IDLE_MS，默认
+  // 30s，设 0 关闭）即停止。宽限期覆盖：刷新页面/网络抖动/EventSource 自动重连。
+  // 阈值从 process.env 动态读取——.env 热更新后下次检查即生效，无需重启。
+  const defaultIdle = Number(process.env.AUTO_STOP_IDLE_MS ?? 30_000);
+  const idleTimer = setInterval(() => {
+    if (shuttingDown) return;
+    const limit = Number(process.env.AUTO_STOP_IDLE_MS ?? defaultIdle);
+    if (!(limit > 0)) return; // 0/负值 = 关闭自动停止
+    const idle = tracker.idleMs();
+    if (idle > limit) {
+      console.log(`\n[server] 前端页面已关闭 ${Math.round(idle / 1000)}s（阈值 ${Math.round(limit / 1000)}s），后端自动停止`);
+      void shutdown();
+    }
+  }, 5000);
+  // 随进程退出清理（selftest 等场景 startServer 后不依赖此定时器）
+  idleTimer.unref();
 }
