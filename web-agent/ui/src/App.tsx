@@ -135,6 +135,29 @@ export default function App() {
     } catch (err) { console.error('[maharness] 置顶会话失败:', err); }
   }, []);
 
+  /** 批量删除（后端事务原子批量接口） */
+  const batchDelete = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      await sessionApi.batchRemove(ids);
+      setSessions(await sessionApi.list());
+      if (activeId && ids.includes(activeId)) {
+        const next = sessions.filter((s) => !ids.includes(s.id));
+        if (next.length) void selectSession(next[0].id);
+        else { setActiveId(null); setMessages([]); setTraceSteps([]); setPlan(null); }
+      }
+    } catch (err) { console.error('[maharness] 批量删除会话失败:', err); }
+  }, [activeId, sessions, selectSession]);
+
+  /** 批量归档（未归档的标记归档） */
+  const batchArchive = useCallback(async (ids: string[]) => {
+    if (!ids.length) return;
+    try {
+      for (const id of ids) await sessionApi.update(id, { archived: true });
+      setSessions(await sessionApi.list());
+    } catch (err) { console.error('[maharness] 批量归档会话失败:', err); }
+  }, []);
+
   const renameSession = useCallback(async (id: string, title: string) => {
     const t = title.trim();
     if (!t) return;
@@ -276,6 +299,8 @@ export default function App() {
         onArchive={archiveSession}
         onPin={pinSession}
         onRename={renameSession}
+        onBatchDelete={batchDelete}
+        onBatchArchive={batchArchive}
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((v) => !v)}
         pluginRunning={pluginRunning}

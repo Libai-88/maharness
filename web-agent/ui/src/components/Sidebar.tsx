@@ -1,7 +1,7 @@
-// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + 4 Tab + 会话列表 + Footer）
+// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + 4 Tab + 会话列表 + 批量管理 + Footer）
 import { useState } from 'react';
 import type { Session } from '../types';
-import { IconArchive, IconChat, IconFolder, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
+import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
 export type MainTab = 'chat' | 'files' | 'plugins' | 'stats';
 
@@ -16,6 +16,8 @@ interface Props {
   onArchive: (id: string, archived: boolean) => void;
   onPin: (id: string, pinned: boolean) => void;
   onRename: (id: string, title: string) => void;
+  onBatchDelete: (ids: string[]) => void;
+  onBatchArchive: (ids: string[]) => void;
   settingsOpen: boolean;
   onToggleSettings: () => void;
   pluginRunning: number;
@@ -32,30 +34,74 @@ function fmtTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export default function Sidebar({ sessions, activeId, activeTab, onTab, onSelect, onCreate, onDelete, onArchive, onPin, onRename, settingsOpen, onToggleSettings, pluginRunning }: Props) {
+export default function Sidebar({
+  sessions, activeId, activeTab, onTab, onSelect, onCreate, onDelete, onArchive, onPin, onRename,
+  onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning,
+}: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+  const [managing, setManaging] = useState(false);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+
   const pinned = sessions.filter((s) => s.pinned && !s.archived);
   const normal = sessions.filter((s) => !s.pinned && !s.archived);
   const archived = sessions.filter((s) => s.archived);
+  const allIds = sessions.map((s) => s.id);
+  const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   const commitRename = () => {
     if (editingId) onRename(editingId, draft);
     setEditingId(null);
   };
 
+  const toggleSelect = (id: string) => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const toggleAll = () => {
+    setSelected(allSelected ? new Set() : new Set(allIds));
+  };
+
+  const exitManage = () => {
+    setManaging(false);
+    setSelected(new Set());
+  };
+
+  const doBatchDelete = () => {
+    if (!selected.size) return;
+    if (confirm(`删除选中的 ${selected.size} 个会话？该操作不可恢复。`)) {
+      onBatchDelete([...selected]);
+      exitManage();
+    }
+  };
+
+  const doBatchArchive = () => {
+    if (!selected.size) return;
+    onBatchArchive([...selected]);
+    exitManage();
+  };
+
   const renderItem = (s: Session) => (
     <div
       key={s.id}
-      className={`sb-session-item ${s.id === activeId ? 'active' : ''}`}
-      onClick={() => onSelect(s.id)}
-      onDoubleClick={() => { setEditingId(s.id); setDraft(s.title || ''); }}
+      className={`sb-session-item ${s.id === activeId ? 'active' : ''} ${managing ? 'managing' : ''}`}
+      onClick={() => { if (managing) toggleSelect(s.id); else onSelect(s.id); }}
+      onDoubleClick={() => { if (!managing) { setEditingId(s.id); setDraft(s.title || ''); } }}
       onMouseEnter={() => setHoverId(s.id)}
       onMouseLeave={() => setHoverId(null)}
       title={s.title || '新会话'}
     >
-      {s.id === activeId && <span className="dot" />}
+      {managing ? (
+        <span className={`sb-check ${selected.has(s.id) ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(s.id); }} role="checkbox" aria-checked={selected.has(s.id)} aria-label={`选择 ${s.title || '新会话'}`} />
+      ) : (
+        s.id === activeId && <span className="dot" />
+      )}
       {editingId === s.id ? (
         <input
           className="sb-rename-input"
@@ -77,7 +123,7 @@ export default function Sidebar({ sessions, activeId, activeTab, onTab, onSelect
           <span className="time">{fmtTime(s.updatedAt)}</span>
         </>
       )}
-      {hoverId === s.id && (
+      {!managing && hoverId === s.id && (
         <span className="item-actions" onClick={(e) => e.stopPropagation()}>
           <button title="置顶" aria-label="置顶" onClick={() => onPin(s.id, !s.pinned)}><IconPin size={12} /></button>
           <button title="归档" aria-label="归档" onClick={() => onArchive(s.id, !s.archived)}><IconArchive size={12} /></button>
@@ -113,9 +159,25 @@ export default function Sidebar({ sessions, activeId, activeTab, onTab, onSelect
 
       <div className="sb-divider" />
 
-      <button className="sb-new-chat" onClick={onCreate}><IconPlus size={15} />新会话</button>
+      <div className="sb-new-row">
+        <button className="sb-new-chat" onClick={() => { if (!managing) onCreate(); }}><IconPlus size={15} />新会话</button>
+        <button
+          className={`sb-manage-btn ${managing ? 'active' : ''}`}
+          onClick={() => { if (managing) exitManage(); else setManaging(true); }}
+          title={managing ? '退出批量管理' : '批量管理会话'}
+          aria-label={managing ? '退出批量管理' : '批量管理会话'}
+        >
+          {managing ? <IconClose size={15} /> : <IconManage size={15} />}
+        </button>
+      </div>
 
       <div className="sb-session-scroll">
+        {managing && (
+          <div className="sb-manage-bar">
+            <button className="sb-mg-link" onClick={toggleAll}>{allSelected ? '取消全选' : '全选'}</button>
+            <span className="sb-mg-count">{selected.size} 已选</span>
+          </div>
+        )}
         {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>暂无会话</div>}
         {pinned.length > 0 && <div className="sb-group-label">已置顶</div>}
         {pinned.map(renderItem)}
@@ -129,18 +191,30 @@ export default function Sidebar({ sessions, activeId, activeTab, onTab, onSelect
         )}
       </div>
 
-      <div className="sb-footer">
-        <div className="sb-foot-row">
-          <div className="sb-foot-left">
-            <span className="sb-foot-chip">{pluginRunning} running</span>
-          </div>
-          <span className="sb-foot-chip" style={{ color: 'var(--text-3)' }}>v0.1.2</span>
+      {managing ? (
+        <div className="sb-manage-actions">
+          <button className="sb-ma-btn" onClick={doBatchArchive} disabled={!selected.size} title="归档选中会话">
+            <IconArchive size={13} />归档
+          </button>
+          <button className="sb-ma-btn danger" onClick={doBatchDelete} disabled={!selected.size} title="删除选中会话">
+            <IconTrash size={13} />删除
+          </button>
+          <button className="sb-ma-btn primary" onClick={exitManage}>完成</button>
         </div>
-        <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
-          <IconSettings size={14} />
-          <span>设置</span>
-        </button>
-      </div>
+      ) : (
+        <div className="sb-footer">
+          <div className="sb-foot-row">
+            <div className="sb-foot-left">
+              <span className="sb-foot-chip">{pluginRunning} running</span>
+            </div>
+            <span className="sb-foot-chip" style={{ color: 'var(--text-3)' }}>v0.1.2</span>
+          </div>
+          <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
+            <IconSettings size={14} />
+            <span>设置</span>
+          </button>
+        </div>
+      )}
     </aside>
   );
 }

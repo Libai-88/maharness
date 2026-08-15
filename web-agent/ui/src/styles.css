@@ -289,7 +289,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sb-session-scroll { flex: 1; overflow-y: auto; min-height: 0; }
 
 .sb-new-chat {
-  margin: 14px 12px 8px;
+  flex: 1;
   height: 38px;
   border-radius: 8px;
   background: var(--accent);
@@ -301,6 +301,94 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   transition: filter 0.15s;
 }
 .sb-new-chat:hover { filter: brightness(1.1); }
+
+/* 新会话 + 批量管理入口 */
+.sb-new-row {
+  margin: 14px 12px 8px;
+  display: flex;
+  gap: 6px;
+}
+.sb-manage-btn {
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.15s;
+}
+.sb-manage-btn:hover { border-color: var(--text-3); color: var(--text-1); }
+.sb-manage-btn.active { background: var(--blue-soft); border-color: var(--accent); color: var(--accent); }
+
+/* 批量管理模式：顶栏（全选/计数） */
+.sb-manage-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 16px 6px;
+}
+.sb-mg-link {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--accent);
+  padding: 2px 6px;
+  border-radius: 5px;
+}
+.sb-mg-link:hover { background: var(--blue-soft); }
+.sb-mg-count { font-size: 11px; font-family: var(--font-mono); color: var(--text-3); }
+
+/* 批量管理模式：会话项复选框 */
+.sb-session-item.managing { padding-left: 12px; }
+.sb-check {
+  width: 15px; height: 15px;
+  flex-shrink: 0;
+  border-radius: 4px;
+  border: 1.5px solid var(--text-4);
+  display: flex; align-items: center; justify-content: center;
+  transition: all 0.12s;
+}
+.sb-check.checked {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.sb-check.checked::after {
+  content: '';
+  width: 7px; height: 4px;
+  border-left: 1.6px solid var(--on-accent);
+  border-bottom: 1.6px solid var(--on-accent);
+  transform: rotate(-45deg) translateY(-1px);
+}
+
+/* 批量管理模式：底部操作栏 */
+.sb-manage-actions {
+  border-top: 1px solid var(--border);
+  background: var(--bg-input);
+  padding: 10px 12px;
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.sb-ma-btn {
+  flex: 1;
+  height: 32px;
+  border-radius: 7px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-1);
+  display: flex; align-items: center; justify-content: center;
+  gap: 6px;
+  transition: all 0.15s;
+}
+.sb-ma-btn:hover:not(:disabled) { border-color: var(--text-3); }
+.sb-ma-btn:disabled { opacity: 0.45; cursor: default; }
+.sb-ma-btn.danger { color: var(--red); }
+.sb-ma-btn.danger:hover:not(:disabled) { background: var(--red-soft); border-color: var(--red); }
+.sb-ma-btn.primary { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.sb-ma-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
 
 .sb-group-label {
   font-size: 10px;
