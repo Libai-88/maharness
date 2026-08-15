@@ -39,7 +39,7 @@ function ToolCard({ t }: { t: ToolStep }) {
   const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
-    <div className={`tool-card ${running ? 'running' : ''}`} onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
+    <div className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'}`} onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
       <div className="tool-head">
         <div className="tool-head-left">
           <span className={`tool-icon ${statusCls}`}>
@@ -186,7 +186,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           )}
 
           {messages.map((m) => (
-            <div key={m.id} className="msg-row">
+            <div key={m.id} className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}>
               {m.role !== 'user' ? (
                 <>
                   <div className="msg-avatar"><IconSheep size={16} /></div>
@@ -198,10 +198,10 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     </div>
                     {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
                     {m.reasoning && m.reasoning.length > 0 && (
-                      <div className="think-card">
+                      <div className={`think-card ${m.streaming ? 'streaming' : ''}`}>
                         <div className="think-head">
                           <span className="think-dot"><IconBrain size={12} /></span>
-                          <span className="think-label">思考</span>
+                          <span className="think-label">{m.streaming ? '推理中' : '思考'}</span>
                           <span className="think-dur">{m.streaming ? '推理中…' : expanded[m.id] ? '▾' : '▸'}</span>
                           <button
                             style={{ marginLeft: 'auto', color: 'var(--text-4)', fontSize: 11 }}

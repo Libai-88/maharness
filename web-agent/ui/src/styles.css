@@ -642,6 +642,45 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .msg-avatar.user-av { background: var(--toggle-off); color: var(--text-1); font-size: 12px; border-radius: 50%; }
 
+/* 流式输出中：AI 头像呼吸发光 + 消息列左侧渐变边条（LLM 输出时的「在场感」） */
+.msg-row.streaming .msg-avatar {
+  animation: avatarBreath 1.6s ease-in-out infinite;
+}
+.msg-row.streaming .msg-col {
+  position: relative;
+}
+.msg-row.streaming .msg-col::before {
+  content: '';
+  position: absolute;
+  left: -12px;
+  top: 4px;
+  bottom: 4px;
+  width: 3px;
+  border-radius: 2px;
+  background: linear-gradient(180deg, var(--accent), #7aa2ff 60%, var(--teal));
+  animation: edgeFlow 1.6s ease-in-out infinite;
+}
+@keyframes avatarBreath {
+  0%, 100% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
+  50% { box-shadow: 0 0 14px rgba(17, 208, 128, 0.45); }
+}
+@keyframes edgeFlow {
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 1; }
+}
+
+/* 缓存命中：teal 一次性闪光（秒回的证据） */
+.msg-row.cached .msg-col {
+  animation: cachedFlash 1.2s ease-out;
+}
+.msg-row.cached .msg-avatar {
+  box-shadow: 0 0 14px rgba(17, 208, 128, 0.45);
+}
+@keyframes cachedFlash {
+  0% { background: var(--teal-soft); border-radius: var(--radius); }
+  100% { background: transparent; }
+}
+
 .msg-col { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
 
 .msg-meta { display: flex; align-items: center; gap: 8px; }
@@ -675,6 +714,47 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   gap: 8px;
+  position: relative;
+  overflow: hidden;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+
+/* 推理中：紫色呼吸发光 + 顶部流光细线（LLM 思考时的「脑波」视觉） */
+.think-card.streaming {
+  border-color: var(--purple);
+  animation: thinkBreath 1.8s ease-in-out infinite;
+}
+.think-card.streaming::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, transparent, var(--purple) 30%, #c9a8ff 50%, var(--purple) 70%, transparent);
+  background-size: 200% 100%;
+  animation: toolFlow 1.6s linear infinite;
+}
+.think-card.streaming .think-label {
+  background: linear-gradient(90deg, var(--purple), #c9a8ff, var(--purple));
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: thinkLabelFlow 2.4s linear infinite;
+}
+.think-card.streaming .think-dot {
+  animation: thinkPulse 1.2s ease-in-out infinite;
+}
+@keyframes thinkBreath {
+  0%, 100% { box-shadow: 0 0 0 rgba(162, 119, 255, 0); }
+  50% { box-shadow: 0 0 18px rgba(162, 119, 255, 0.22); }
+}
+@keyframes thinkPulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.18); opacity: 0.7; }
+}
+@keyframes thinkLabelFlow {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
 .think-head { display: flex; align-items: center; gap: 8px; }
 .think-dot {
@@ -701,11 +781,34 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .tool-card:hover { border-color: var(--text-3); }
 
-/* 执行中：顶部流光进度条 + 呼吸辉光 */
+/* 执行中：顶部流光进度条 + 呼吸辉光 + 工具名后终端光标 */
 .tool-card.running {
   border-color: var(--accent);
   animation: toolBreath 1.6s ease-in-out infinite;
 }
+.tool-card.running .tool-name::after {
+  content: '▍';
+  margin-left: 3px;
+  color: var(--accent);
+  animation: cursorBlink 0.9s steps(1) infinite;
+}
+@keyframes cursorBlink { 50% { opacity: 0; } }
+
+/* 完成：teal 一次性闪光（工具落地的瞬间） */
+.tool-card.done {
+  animation: toolDoneFlash 0.9s ease-out;
+}
+@keyframes toolDoneFlash {
+  0% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
+  35% { box-shadow: 0 0 16px rgba(17, 208, 128, 0.35); }
+  100% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
+}
+
+/* 失败：红色左边条（观察失败的标记） */
+.tool-card.err {
+  border-left: 3px solid var(--red);
+}
+
 .tool-card.running::before {
   content: '';
   position: absolute;
@@ -816,6 +919,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   margin: 0;
 }
 .approval-actions { display: flex; gap: 8px; }
+
+/* 审批等待：橙色光晕呼吸（执行权等待用户的时刻） */
+.approval-card {
+  animation: approvalGlow 1.8s ease-in-out infinite;
+}
+@keyframes approvalGlow {
+  0%, 100% { box-shadow: 0 0 0 rgba(240, 153, 62, 0); }
+  50% { box-shadow: 0 0 20px rgba(240, 153, 62, 0.25); }
+}
 .btn-primary {
   height: 30px;
   border-radius: 6px;
@@ -842,6 +954,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* 计划卡片 */
 .plan-card {
   border: 1px solid var(--purple);
+  border-left: 3px solid var(--purple);
   border-radius: var(--radius);
   background: var(--bg-elev);
   padding: 14px 16px;
@@ -849,6 +962,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .plan-card .p-title { font-size: 13px; font-weight: 600; color: var(--purple); }
 .plan-step { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2); }
+
+/* 计划执行中：进行中步骤脉冲呼吸（目标推进的节奏感） */
+.plan-step.in_progress .ps-num {
+  animation: thinkPulse 1.2s ease-in-out infinite;
+}
 .plan-step .ps-num {
   width: 18px; height: 18px; border-radius: 50%;
   background: var(--purple-soft); color: var(--purple);
@@ -1192,8 +1310,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   gap: 6px;
+  animation: tlIn 0.22s ease;
 }
-.tl-item.streaming { border-color: var(--accent); }
+@keyframes tlIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.tl-item.streaming {
+  border-color: var(--accent);
+  animation: tlIn 0.22s ease, tlBreath 1.6s ease-in-out infinite;
+}
+@keyframes tlBreath {
+  0%, 100% { box-shadow: 0 0 0 rgba(47, 99, 246, 0); }
+  50% { box-shadow: 0 0 12px rgba(47, 99, 246, 0.18); }
+}
 .tl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tl-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tl-badge {
