@@ -21,6 +21,7 @@ interface L1Entry {
   bigrams: Set<string>; // 自研文本相似度特征
   answer: string;
   hits: number;
+  promptKey: string;    // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
 }
 
 const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
@@ -83,8 +84,10 @@ export class Cache {
 
   // ---------- L1 语义缓存 ----------
 
-  /** 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用） */
-  async l1Get(question: string): Promise<{ hit: boolean; answer?: string; key?: string }> {
+  /** 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）
+   *  promptKey：systemPrompt 指纹。LLM 输出依赖完整输入（system + 历史），
+   *  人设/插件规则变更后 systemPrompt 不同 → 按 promptKey 隔离缓存空间，不串用旧答案。 */
+  async l1Get(question: string, promptKey = ''): Promise<{ hit: boolean; answer?: string; key?: string }> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8) {
       // 短问题（"继续/你好"等）不参与语义匹配，避免跨上下文误命中
@@ -95,6 +98,7 @@ export class Cache {
       const vec = await this.embeddingFn(norm);
       let best: { key: string; score: number } | null = null;
       for (const [key, entry] of this.l1) {
+        if (entry.promptKey !== promptKey) continue;
         const score = cosine(vec, entry.vector ?? []);
         if (score > (best?.score ?? 0)) best = { key, score };
       }
@@ -111,6 +115,7 @@ export class Cache {
     const qBigrams = bigramSet(norm);
     let best: { key: string; score: number } | null = null;
     for (const [key, entry] of this.l1) {
+      if (entry.promptKey !== promptKey) continue;
       const score = dice(qBigrams, entry.bigrams);
       if (score > (best?.score ?? 0)) best = { key, score };
     }
@@ -124,12 +129,12 @@ export class Cache {
     return { hit: false };
   }
 
-  async l1Set(question: string, answer: string): Promise<void> {
+  async l1Set(question: string, answer: string, promptKey = ''): Promise<void> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8 || !answer || answer.length > MAX_L1_ANSWER) return;
-    const entry: L1Entry = { bigrams: bigramSet(norm), answer, hits: 0 };
+    const entry: L1Entry = { bigrams: bigramSet(norm), answer, hits: 0, promptKey };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
-    this.l1.set(norm, entry);
+    this.l1.set(`${promptKey}|${norm}`, entry);
     if (this.l1.size > 500) {
       const oldest = this.l1.keys().next().value;
       if (oldest !== undefined) this.l1.delete(oldest);
@@ -146,6 +151,11 @@ export class Cache {
     if (tokens <= 0) return;
     this.counter.l3Hits++;
     this.counter.l3Tokens += tokens;
+  }
+
+  /** 累计缓存节省成本（按 provider 价格 × 估算 token；由命中方报告） */
+  recordSavedCost(cost: number): void {
+    if (cost > 0) this.counter.savedCost += cost;
   }
 
   stats(): CacheStats {

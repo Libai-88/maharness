@@ -261,7 +261,9 @@ export class Store {
 
   listMessages(sessionId: string): Message[] {
     const rows = this.db
-      .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC')
+      // rowid 次排序：created_at 相同的消息（同毫秒写入）顺序固定，
+      // 保证每次组装的历史字节级一致——L3 前缀缓存（provider KV cache）依赖前缀稳定
+      .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
       .all(sessionId) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string,

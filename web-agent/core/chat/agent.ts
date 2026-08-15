@@ -3,7 +3,7 @@
  * 循环模型：决策(LLM 流式) → 动作(工具执行) → 观测(结果回填)，直到无工具调用。
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
-import { randomUUID } from 'node:crypto';
+import { randomUUID, createHash } from 'node:crypto';
 import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
 import type {
   EventBusLike, KernelLike, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
@@ -144,14 +144,19 @@ export class AgentRunner {
       // 用最后一条 user 消息做语义匹配（bigram Dice ≥ 阈值），命中即返回缓存答案。
       // 长度门槛（≥8 字符）："继续/总结一下"等短问题不参与缓存，避免跨上下文误命中。
       // 排除 before_llm 钩子注入的记忆消息（【长期记忆】）。
+      // promptKey = systemPrompt 指纹：LLM 输出依赖完整输入，人设/插件规则不同则隔离缓存空间。
       const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】'));
       const lastUser = realUsers[realUsers.length - 1];
       const q = lastUser?.content ?? '';
       if (turn === 0 && q.length >= 8 && !llmCtx.history.some((m) => m.role === 'tool')) {
-        const cached = await this.kernel.cache.l1Get(q);
+        const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
+        const cached = await this.kernel.cache.l1Get(q, promptKey);
         if (cached.hit && cached.answer) {
           const tIn = estimateTokens([...llmCtx.history.map((m) => m.content ?? '')].join('\n'));
           const tOut = estimateTokens(cached.answer);
+          // 按 provider 价格估算本次节省的成本（缓存命中 = 省掉的 LLM 调用费用）
+          const saved = (tIn / 1_000_000) * (provider.prices?.in ?? 0) + (tOut / 1_000_000) * (provider.prices?.out ?? 0);
+          this.kernel.cache.recordSavedCost(saved);
           const step = this.kernel.trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L1', cacheKey: cached.key ?? '' });
           step.finish({ outputSummary: `L1 语义缓存命中：${cached.answer.slice(0, 60)}…`, tokensIn: tIn, tokensOut: tOut });
           yield { type: 'delta', text: cached.answer };
@@ -229,7 +234,8 @@ export class AgentRunner {
       if (!collected.length) {
         // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）
         if (q.length >= 8 && text.trim()) {
-          void this.kernel.cache.l1Set(q, text);
+          const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
+          void this.kernel.cache.l1Set(q, text, promptKey);
         }
         yield {
           type: 'assistant_done',

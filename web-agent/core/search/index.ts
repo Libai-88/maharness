@@ -141,8 +141,8 @@ export default {
           const max = Math.min(Math.max(Math.trunc(Number(args.max_results) || 5), 1), 10);
           const source = process.env.TAVILY_API_KEY ? 'tavily' : 'duckduckgo';
 
-          // L2 缓存：同查询 10 分钟内命中
-          const key = tctx.cache.makeKey(['web_search', query.toLowerCase(), String(max)]);
+          // L2 缓存：同查询 30 分钟内命中（TTL 由内核管理）；v2 命名空间：结果格式变更时旧缓存失效
+          const key = tctx.cache.makeKey(['web_search', 'v2', query.toLowerCase(), String(max)]);
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })

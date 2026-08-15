@@ -75,6 +75,9 @@ export function readTextSmart(filePath: string): { text: string; encoding: strin
 }
 
 // ============ L2 缓存辅助 ============
+// 缓存键命名空间版本：工具实现变更（输出格式/行为）后递增，
+// 旧缓存自动失效——缓存值依赖工具版本，这是 L2 的第一性原理约束
+const TOOLS_FS_CACHE_VER = 'v2';
 
 function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown): unknown {
   const hit = cache.l2Get(key);
@@ -129,7 +132,7 @@ export default {
           if (!existsSync(dir)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, dir) || '.'}` };
           const st = statSync(dir);
           if (!st.isDirectory()) return { ok: false, error: '目标不是目录' };
-          const key = tctx.cache.makeKey(['list_dir', dir.toLowerCase(), String(st.mtimeMs), String(st.size)]);
+          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), String(st.mtimeMs), String(st.size)]);
           const result = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
             const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
               const full = resolve(dir, e.name);
@@ -164,7 +167,7 @@ export default {
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}` };
           const st = statSync(file);
           if (!st.isFile()) return { ok: false, error: '目标不是文件' };
-          const key = tctx.cache.makeKey(['read_file', file.toLowerCase(), String(st.mtimeMs), String(st.size)]);
+          const key = tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), String(st.mtimeMs), String(st.size)]);
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })

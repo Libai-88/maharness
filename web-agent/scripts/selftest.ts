@@ -142,6 +142,18 @@ if (ls && gs) {
     `(${hitExact.hit}/${hitNear.hit}/${hitOther.hit})`);
   const s1 = kernel.cache.stats();
   console.log('[L1] 计数 l1Hits>=2 l1Misses>=1:', s1.l1Hits >= 2 && s1.l1Misses >= 1 ? '✓' : '✗', JSON.stringify(s1).slice(0, 120));
+
+  // promptKey 隔离：systemPrompt 指纹不同（人设/插件规则变更）→ 缓存空间隔离，不串用旧答案
+  await kernel.cache.l1Set('第一性原理测试问题', '答案A', 'prompt-v1');
+  const isoHit = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v1');
+  const isoMiss = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v2');
+  console.log('[L1] promptKey 隔离: 同指纹命中=1 异指纹不命中=1:',
+    isoHit.hit && !isoMiss.hit ? '✓' : '✗', `(${isoHit.hit}/${isoMiss.hit})`);
+
+  // savedCost 累计
+  kernel.cache.recordSavedCost(0.123);
+  const s2 = kernel.cache.stats();
+  console.log('[L1] savedCost 累计:', s2.savedCost >= 0.123 ? '✓' : '✗', s2.savedCost.toFixed(6));
 }
 
 // ---- HTTP 冒烟：工作区 / 文件树 / skills 管理 API（端到端） ----
