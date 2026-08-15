@@ -1,9 +1,12 @@
 /**
  * kernel/cache.ts —— 三层缓存
- * L1 语义缓存：默认自研文本相似度（字符 bigram Dice，免外部 API 始终可用）；
- *             配置 embedding 后自动升级为向量语义匹配
- * L2 工具结果缓存：hash(工具名+规范化参数)+文件mtime 命中
- * L3 prompt 前缀缓存：无显式键，靠消息组装策略吃 provider KV cache（见 core/chat）
+ *
+ * 第一性原理：重复计算是浪费的本质——同一问题的答案、同一工具的结果、同一段 prompt，
+ * 都是已被观察过的现实，不值得再次付出代价。缓存不是优化，是「不重复劳动」的纪律。
+ * 三层各司其职，因为「重复」有三种本质不同的形态：
+ *  - L1 语义缓存：问题的重复（同一含义的提问，无需再问 LLM）——自研 bigram Dice 相似度，免外部 API 始终可用；
+ *  - L2 工具结果缓存：观察的重复（同一工具+同一参数+文件未变 = 同一事实）——hash(工具名+参数)+mtime/size 校验；
+ *  - L3 prompt 前缀缓存：token 的重复（多轮对话前缀不变，吃 provider KV cache 折扣）——无显式键，靠消息组装策略。
  */
 import { createHash } from 'node:crypto';
 import type { CacheStats } from './types';

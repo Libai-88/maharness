@@ -1,5 +1,9 @@
 /**
  * kernel/plugin-loader.ts —— 插件加载与热管理
+ *
+ * 第一性原理：变化与稳定的分离——Agent 的能力边界必然随需求生长，
+ * 若能力与内核耦合，每次生长都要重写内核；因此「薄内核 + 全插件化」：
+ * 内核只做三件事（事件总线、配置、资源管理），一切能力以插件形式注册。
  * 插件 = plugins/<name>/ 目录（plugin.json + 入口）。现场写、现场加载、现场启停。
  * 能力注册表：插件通过 ctx.register 注册 tool/listener/command/provider。
  * 仅监听用户插件目录（plugins/），core/ 内置插件不热重载（改动需重启）。

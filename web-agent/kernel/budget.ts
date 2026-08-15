@@ -68,6 +68,23 @@ export class Budget {
   }
 }
 
+/**
+ * 第一性原理分配思考预算：认知资源按任务本质分配，而非一刀切。
+ * 本质决定需求：
+ *  - 代码任务：多步推理、易错、需要验证——给足思考空间（×1.5）；
+ *  - 文件操作/检索：观察驱动，思考只是行动的序曲——少想多做（×0.75）；
+ *  - 写作：组织与取舍——中等预算（×1.0）；
+ *  - 问答：已知信息直接答——思考是浪费（×0.5），超限即触发降级；
+ *  - 其他：默认（×1.0）。
+ */
+export function reasoningBudgetFor(taskType: string, base: number): number {
+  const factor = taskType === '代码' ? 1.5
+    : taskType === '文件操作' || taskType === '检索' ? 0.75
+    : taskType === '问答' ? 0.5
+    : 1.0;
+  return Math.round(base * factor);
+}
+
 /** 任务类型分类：按最后 user 消息的关键词（harness 视角的任务画像） */
 export function classifyTask(userText: string): string {
   const t = userText.slice(0, 80);

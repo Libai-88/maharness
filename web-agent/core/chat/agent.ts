@@ -5,7 +5,7 @@
  */
 import { randomUUID, createHash } from 'node:crypto';
 import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
-import { classifyTask } from '../../kernel/budget';
+import { classifyTask, reasoningBudgetFor } from '../../kernel/budget';
 import type {
   EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
@@ -145,7 +145,10 @@ export class AgentRunner {
     const toolDefs = (opts.tools ?? tools.map((c) => c.tool)).map(annotateToolDef);
     const sandboxRoot = this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const toolTimeout = this.kernel.config.get<number>('agent.toolTimeoutMs', TOOL_TIMEOUT_DEFAULT);
-    const reasoningBudget = this.kernel.config.get<number>('agent.reasoningBudget', REASONING_BUDGET_DEFAULT);
+    // 思考预算：基准值 × 任务本质系数（代码多思考、问答少思考）——认知资源按本质分配
+    const baseBudget = this.kernel.config.get<number>('agent.reasoningBudget', REASONING_BUDGET_DEFAULT);
+    const lastUserMsg0 = [...messages].reverse().find((m) => m.role === 'user');
+    const reasoningBudget = reasoningBudgetFor(classifyTask(lastUserMsg0?.content ?? ''), baseBudget);
     const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
     const scratchpad: Record<string, unknown> = {};
 
