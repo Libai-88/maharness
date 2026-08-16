@@ -52,6 +52,22 @@ export class Config {
   section(pluginId: string): Record<string, unknown> {
     return (this.get<Record<string, unknown>>(pluginId) ?? {});
   }
+
+  /**
+   * 声明式配置对账：订阅某配置键的变化（精确键 + 通配符，如 'agent.*'）。
+   * 返回退订函数。与 config.changed 事件的区别：按「变了哪个键」分派（最小干预），
+   * 而不是让每个监听器收到全部变更自己过滤。
+   */
+  watch(pattern: string, cb: (key: string, value: unknown) => void): () => void {
+    const off = this.bus.on('config.changed', (e) => {
+      const { key, value } = (e.data ?? {}) as { key?: string; value?: unknown };
+      if (typeof key !== 'string') return;
+      if (pattern === key || pattern === '*' || (pattern.endsWith('.*') && key.startsWith(pattern.slice(0, -1)))) {
+        cb(key, value);
+      }
+    });
+    return off;
+  }
 }
 
 /** 常用路径：项目根、数据目录 */

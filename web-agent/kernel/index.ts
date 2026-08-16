@@ -1,6 +1,7 @@
 /**
  * kernel/index.ts —— 内核聚合入口
- * 内核 6 大件：EventBus / Config / Trace / Cache / Budget(认知资源) / PluginLoader。
+ * 内核 7 大件：EventBus / Config / Trace / Cache / Budget(认知资源) /
+ *             EffectScope(可逆效应引擎) / PluginLoader(时空可组合性)。
  * 其余一切能力由插件提供（含对话本身）。
  */
 import { join } from 'node:path';
@@ -17,6 +18,7 @@ export { Config, paths } from './config';
 export { Trace } from './trace';
 export { Cache } from './cache';
 export { Budget, classifyTask } from './budget';
+export { EffectScope } from './scope';
 export { PluginLoader } from './plugin-loader';
 export * from './types';
 

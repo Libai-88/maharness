@@ -25,6 +25,9 @@ export interface PluginManifest {
   requires?: string[];      // 依赖的插件 id（先加载）
   lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
                             // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
+  /** 声明本插件提供的服务键（coeffect provide 的声明式预览，供依赖图谱/插件面板可查；
+   *  实际提供以运行时 ctx.provide 为准——声明只读，动态提供才算数） */
+  provides?: string[];
 }
 
 export interface Plugin {
@@ -56,10 +59,14 @@ export interface KernelLike {
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
     list(): { manifest: PluginManifest; state: string; error?: string }[];
+    /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
+    resolveService(key: string): unknown | undefined;
   };
 }
 
-/** 插件运行时上下文：插件与内核通信的唯一句柄 */
+/** 插件运行时上下文：插件与内核通信的唯一句柄
+ *  时空可组合性契约（借鉴 Cordis）：插件通过 ctx 做的一切都会留下逆元，
+ *  卸载时按 LIFO 自动完全恢复——清理正确性由运行时保证，而非作者勤勉。 */
 export interface PluginContext {
   pluginId: string;
   kernel: KernelLike;
@@ -67,7 +74,21 @@ export interface PluginContext {
   config: ConfigLike;
   trace: TraceLike;
   cache: CacheLike;
-  register(cap: Capability): void;
+  /** 注册能力。返回 unregister：可单独撤销；未手动撤销时卸载自动回收（可逆效应） */
+  register(cap: Capability): () => void;
+  /** 事件订阅（自动退订：卸载时自动取消，杜绝监听器泄漏——旧 API ctx.bus.on 的替代） */
+  on(event: string, listener: EventListener, priority?: number): () => void;
+  /** 提供服务绑定（可逆效应：卸载时自动撤回并通知依赖方停用） */
+  provide(key: string, value: unknown): () => void;
+  /** 反应性依赖注入（coeffect）：解析 key 当前绑定并订阅变化。
+   *  依赖方在提供者激活/停用/替换时收到通知——"依赖不可用则保持等待，出现即激活"。 */
+  inject(key: string, onChange?: (value: unknown | undefined) => void): { value: unknown | undefined; stop: () => void };
+  /** 能力集反应性订阅：某类能力集合变化时回调（如 persona 集变化 → 自动重装系统提示词） */
+  onCapabilities(kind: Capability['kind'], cb: () => void): () => void;
+  /** 声明式配置对账：配置键变化时回调（自动退订；替代手写 config.changed 监听） */
+  watchConfig(key: string, cb: (value: unknown) => void): () => void;
+  /** 原始可逆效应：执行 callback 并登记逆元（跨系统边界操作由调用方自备补偿） */
+  effect<T>(callback: () => T | Promise<T>, makeInverse: (value: T) => () => void | Promise<void>): Promise<void>;
   logger: Logger;
 }
 
@@ -81,6 +102,8 @@ export interface ConfigLike {
   get<T>(key: string, def?: T): T;
   set(key: string, value: unknown): void;
   section(pluginId: string): Record<string, unknown>;
+  /** 声明式配置对账：订阅配置键变化（支持 'a.b.*' 通配符），返回退订函数 */
+  watch(pattern: string, cb: (key: string, value: unknown) => void): () => void;
 }
 
 export interface TraceLike {
@@ -131,7 +154,23 @@ export type Capability =
   | { kind: 'service'; service: ServiceDef }
   | { kind: 'persona'; persona: PersonaDef }
   | { kind: 'context'; context: ContextDef }
+  | { kind: 'role'; role: RoleDef }
   | { kind: 'api'; api: ApiDef };
+
+/**
+ * 角色能力（handoff 移交的目标）：角色 = 专业化分工的 systemPrompt + 工具集。
+ * 任何插件可注册角色（万物皆插件：角色也是插件）。执行器识别 handoff_to 工具
+ * 的返回 → 终止当前循环 → 会话记录新角色 → 后续对话由新角色接管（提示词/工具集
+ * 热切换，无需重启）。角色注册表动态枚举进 handoff_to 工具参数。
+ */
+export interface RoleDef {
+  id: string;               // 如 main / planner（handoff_to 的 role 参数枚举值）
+  name: string;             // 显示名（前端/日志）
+  description: string;      // 角色职责说明（进 handoff_to 工具描述，LLM 据此决定移交对象）
+  systemPrompt: string;     // 角色主提示词（置于通用规则之前——系统提示词越靠前引导力越强）
+  /** 角色可用工具集：all=全部（默认）；readonly=只读白名单（侦查/搜索/记忆，不改变世界） */
+  tools?: 'all' | 'readonly';
+}
 
 /**
  * API 能力：插件向 Web 前端贡献 REST 端点（「前端是插件的一部分」的数据通道）。
@@ -177,6 +216,10 @@ export interface ToolDef {
   output?: string;
   /** 独立超时（毫秒）：重工具（如 run_subagent 内部多轮）需要比默认 30s 更长的执行窗口 */
   timeoutMs?: number;
+  /** 输出格式的机器校验（JSONSchema 子集）：工具执行后对 result.data 做结构校验。
+   *  校验失败不阻断（LLM 可拿到原始结果自我修正），但回填内容会附【输出校验】标注，
+   *  且校验事件入 Trace——"成败机器可判"从工具返回值延伸到输出结构。 */
+  outputSchema?: Record<string, unknown>;
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 
@@ -200,6 +243,9 @@ export interface ToolResult {
   cacheable?: boolean;      // 是否允许 L2 缓存（默认 true）
   needsApproval?: boolean;  // 需用户审批（执行器级挂起，不可绕过）
   approvalSummary?: string; // 审批卡片摘要（needsApproval 时必填）
+  /** 角色移交（handoff）：工具返回此字段 → 执行器立即终止本轮循环并移交会话控制权。
+   *  由 handoff_to 工具使用——角色 id 必须存在于角色注册表。 */
+  handoff?: { role: string; objective: string };
 }
 
 export interface ToolContext {
@@ -207,6 +253,8 @@ export interface ToolContext {
   turn: number;
   /** 当前会话 ID（server 层透传）：工具可据此把状态挂到具体会话（如 todo 插件的会话级 to do list） */
   sessionId?: string;
+  /** 当前工具调用的 Trace 步骤 id：子任务（子代理/并行）用它挂 parentId，形成 span 树 */
+  stepId?: string;
   sandboxRoot: string;      // 文件类工具的安全边界
   signal?: AbortSignal;
   cache: CacheLike;         // 工具自管理时效性缓存（L2）
@@ -287,6 +335,9 @@ export interface TraceStepInit {
   inputSummary?: string;
   cacheLayer?: 'L1' | 'L2' | 'L3';
   cacheKey?: string;
+  /** 父步骤 id（span 树）：子代理/并行等子任务的步骤挂到调用方工具步骤下，
+   *  跨 traceId 也能从父轨迹下钻到子轨迹（OpenAI tracing 的 span 层级） */
+  parentId?: string;
 }
 
 export interface TraceStep extends TraceStepInit {
@@ -305,6 +356,8 @@ export interface TraceStep extends TraceStepInit {
 }
 
 export interface StepHandle {
+  /** 本步骤的 id（span 树）：子任务（子代理/并行）用它挂 parentId 下钻 */
+  id: string;
   /** 正常收尾：补充输出摘要/用量/成本 */
   finish(extra?: Partial<TraceStep>): void;
   /** 失败收尾 */
@@ -350,6 +403,8 @@ export interface Session {
   model: string;
   mode: string;             // normal / plan / goal（会话级 Agent 模式）
   planPending: number;      // 计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认
+  /** 当前接管角色（handoff）：空 = 主代理（默认）；有值 = 该角色提示词/工具集接管会话 */
+  role?: string;
   archived: number;         // 0/1 归档（会话管理）
   pinned: number;           // 0/1 置顶标记（会话管理）
   createdAt: number;

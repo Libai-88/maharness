@@ -61,11 +61,11 @@ export default {
   onLoad(ctx) {
     // ---- 通过总线事件跟踪插件加载状态（纯插件方案，不触碰内核） ----
     const runtime = new Map<string, RuntimeState>();
-    ctx.bus.on('plugin.registered', (e) => {
+    ctx.on('plugin.registered', (e) => {
       const d = e.data as { id: string };
       if (d?.id) runtime.set(d.id, { state: 'registered', caps: [] });
     });
-    ctx.bus.on('plugin.loaded', (e) => {
+    ctx.on('plugin.loaded', (e) => {
       const d = e.data as { id: string; caps?: string[] };
       if (!d?.id) return;
       const s = runtime.get(d.id) ?? { state: '', caps: [] };
@@ -73,21 +73,21 @@ export default {
       s.caps = d.caps ?? [];
       runtime.set(d.id, s);
     });
-    ctx.bus.on('plugin.started', (e) => {
+    ctx.on('plugin.started', (e) => {
       const d = e.data as { id: string };
       if (!d?.id) return;
       const s = runtime.get(d.id) ?? { state: '', caps: [] };
       s.state = 'started';
       runtime.set(d.id, s);
     });
-    ctx.bus.on('plugin.stopped', (e) => {
+    ctx.on('plugin.stopped', (e) => {
       const d = e.data as { id: string };
       if (!d?.id) return;
       const s = runtime.get(d.id) ?? { state: '', caps: [] };
       s.state = 'stopped';
       runtime.set(d.id, s);
     });
-    ctx.bus.on('plugin.error', (e) => {
+    ctx.on('plugin.error', (e) => {
       // 注册期失败事件带 dir（目录名 = 插件 id），启动期失败带 id
       const d = e.data as { id?: string; dir?: string; error?: string };
       const id = d?.id ?? d?.dir;
@@ -97,7 +97,7 @@ export default {
       s.error = String(d.error ?? '未知错误');
       runtime.set(id, s);
     });
-    ctx.bus.on('plugin.unloaded', (e) => {
+    ctx.on('plugin.unloaded', (e) => {
       const d = e.data as { id: string };
       if (d?.id) runtime.delete(d.id);
     });

@@ -70,7 +70,9 @@ export default {
     // ---- 钩子：失败教训注入（before_llm，追加到末尾保持前缀稳定） ----
     // 教训任何任务都可能相关（不重复犯错优先），固定注入最近几条；
     // 普通记忆走下方 context provider（按任务动态组装）。
-    ctx.bus.on('agent.before_llm', (e) => {
+    // ctx.on = 自动退订的事件订阅（可逆效应）：重载/卸载时监听器随作用域回收，
+    // 不会出现「旧监听器残留 → 教训双重注入」的泄漏。
+    ctx.on('agent.before_llm', (e) => {
       const h = e.data as AgentHookCtx;
       if (!h || !Array.isArray(h.history) || h.scratchpad.memoryInjected) return;
       const lessons = facts.filter((f) => f.text.startsWith('【自动】')).slice(-LESSON_COUNT).reverse();
@@ -109,7 +111,7 @@ export default {
     // ---- 钩子：失败教训自动记忆（"不重复犯错"的底层机制） ----
     // 工具执行失败 → 自动记录一条教训（带【自动】标记，同工具同错误 1 小时内去重），
     // 下次会话 before_llm 注入时 LLM 即知道哪些做法不可行，避免重复踩坑。
-    ctx.bus.on('agent.after_tool', (e) => {
+    ctx.on('agent.after_tool', (e) => {
       const d = e.data as AgentHookCtx & { tool?: { name: string }; result?: { ok?: boolean; error?: string } };
       const result = d.result;
       if (!result || result.ok !== false || !result.error) return;
