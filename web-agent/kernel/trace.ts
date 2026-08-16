@@ -39,6 +39,7 @@ export class Trace {
     if (init.type === 'tool_call') this.counter.toolCalls++;
     if (init.type === 'cache_hit') this.counter.cacheHits++;
     return {
+      id: step.id,
       finish: (extra) => this.settle(step, 'done', undefined, extra),
       fail: (error, extra) => this.settle(step, 'error', error, extra),
       cancel: () => this.settle(step, 'cancelled', undefined),
@@ -61,11 +62,13 @@ export class Trace {
     this.bus.emit(EventBus.event('trace.step', step, step.traceId));
   }
 
-  /** 查询轨迹：按 traceId / 步骤类型 / 名称过滤环形缓冲（最近 1000 条；可观察性的检索面） */
-  query(traceId?: string, filter?: { type?: string; name?: string; limit?: number }): TraceStep[] {
+  /** 查询轨迹：按 traceId / 步骤类型 / 名称 / 父步骤 过滤环形缓冲（最近 1000 条；可观察性的检索面）
+   *  parentId：span 树下钻——查某步骤的全部子步骤（如 run_subagent 工具步骤下的子代理内部步骤） */
+  query(traceId?: string, filter?: { type?: string; name?: string; parentId?: string; limit?: number }): TraceStep[] {
     let out = traceId ? this.ring.filter((s) => s.traceId === traceId) : [...this.ring];
     if (filter?.type) out = out.filter((s) => s.type === filter.type);
     if (filter?.name) out = out.filter((s) => s.name === filter.name);
+    if (filter?.parentId) out = out.filter((s) => s.parentId === filter.parentId);
     if (filter?.limit && filter.limit > 0) out = out.slice(-filter.limit);
     return out;
   }

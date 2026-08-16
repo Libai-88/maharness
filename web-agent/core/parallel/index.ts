@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AgentRunner } from '../chat/agent';
-import type { Plugin, ProviderDef, ToolDef } from '../../kernel/types';
+import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
 const READ_ONLY_TOOLS = new Set([
@@ -32,6 +32,14 @@ export default {
   name: '多会话并行',
   version: '0.1.0',
   onLoad(ctx) {
+    // 反应性共效应（coeffect）：声明依赖 chat 服务——提供者激活/停用/换主时自动更新引用。
+    // 依赖不可用 → 优雅降级（返回明确错误而非悬空引用）；提供者恢复 → 自动可用，无需重启。
+    let chatSvc: { providers: ProviderDef[] } | undefined;
+    const chatDep = ctx.inject('service:chat', (v) => {
+      chatSvc = v as { providers: ProviderDef[] } | undefined;
+    });
+    chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
+
     // ---- 并行进度事件（前端实时观测：并行任务开始/结束） ----
     const emit = (phase: 'start' | 'done' | 'fail', taskId: string, objective: string, detail?: unknown) => {
       ctx.bus.emit({ type: 'parallel.progress', data: { phase, taskId, objective, detail }, ts: Date.now() });
@@ -68,7 +76,7 @@ export default {
           },
           required: ['tasks'],
         },
-        async handler(args: { tasks?: { objective?: string; tools?: string }[] }) {
+        async handler(args: { tasks?: { objective?: string; tools?: string }[] }, tctx: ToolContext) {
           const tasks = Array.isArray(args.tasks)
             ? args.tasks.map((t) => ({ objective: String(t.objective ?? '').trim(), tools: t.tools }))
             : [];
@@ -87,12 +95,9 @@ export default {
           }
           for (let i = 0; i < tasks.length; i++) ctx.kernel.budget.consumeSubagent();
 
-          // 复用主代理的 provider 配置（chat 服务第一个启用的 provider）
-          const chatSvc = ctx.kernel.plugins.capabilities('service').find((c) => c.service.id === 'chat')?.service.instance as
-            | { providers: ProviderDef[] }
-            | undefined;
+          // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
-          if (!provider) return { ok: false, error: '未配置 LLM Provider，无法并行委派' };
+          if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法并行委派' };
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const toolsFor = (t: { tools?: string }): ToolDef[] => t.tools === 'all'
@@ -119,6 +124,7 @@ export default {
                 tools: toolsFor(t),
                 traceId,
                 maxTurns: 10,
+                parentStepId: tctx.stepId, // span 树：并行子任务全部步骤挂到 run_parallel 工具步骤下
               })) {
                 if (ev.type === 'delta') answer += ev.text;
                 else if (ev.type === 'tool_result') toolCalls++;

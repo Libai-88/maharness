@@ -8,7 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { AgentRunner } from '../chat/agent';
-import type { Plugin, ProviderDef, ToolDef } from '../../kernel/types';
+import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
 /** 只读白名单：子代理默认只能侦查世界，不能改变世界 */
 const READ_ONLY_TOOLS = new Set([
@@ -31,6 +31,14 @@ export default {
   name: '子代理',
   version: '0.1.0',
   onLoad(ctx) {
+    // 反应性共效应（coeffect）：声明依赖 chat 服务——提供者激活/停用/换主时自动更新引用。
+    // 依赖不可用 → 优雅降级（返回明确错误而非悬空引用）；提供者恢复 → 自动可用，无需重启。
+    let chatSvc: { providers: ProviderDef[] } | undefined;
+    const chatDep = ctx.inject('service:chat', (v) => {
+      chatSvc = v as { providers: ProviderDef[] } | undefined;
+    });
+    chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
+
     ctx.register({
       kind: 'tool',
       tool: {
@@ -39,6 +47,20 @@ export default {
         costHint: 'high',
         limits: '子代理最多 6 轮；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
         output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
+        // 输出结构的机器校验（JSONSchema 子集）：声明后执行器对结果做运行时校验，
+        // 不符即标注回填 + 入 Trace（structured output 的机器侧）
+        outputSchema: {
+          type: 'object',
+          required: ['answer', 'toolCalls', 'tokensIn', 'tokensOut', 'cost', 'traceId'],
+          properties: {
+            answer: { type: 'string' },
+            toolCalls: { type: 'integer', minimum: 0 },
+            tokensIn: { type: 'integer', minimum: 0 },
+            tokensOut: { type: 'integer', minimum: 0 },
+            cost: { type: 'number', minimum: 0 },
+            traceId: { type: 'string' },
+          },
+        },
         timeoutMs: 240_000, // 子代理内部多轮，独立超时 4 分钟
         description: '委派一个子代理独立完成目标（复用完整 Agent 循环，独立上下文）。' +
           '用于：任务可拆分为多个独立部分时并行分工；或需要独立视角交叉审查自己的产出。' +
@@ -51,7 +73,7 @@ export default {
           },
           required: ['objective'],
         },
-        async handler(args: { objective?: string; tools?: string }) {
+        async handler(args: { objective?: string; tools?: string }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
@@ -62,12 +84,9 @@ export default {
           if (!quota.allowed) return { ok: false, error: quota.reason };
           ctx.kernel.budget.consumeSubagent();
 
-          // 复用主代理的 provider 配置（chat 服务第一个启用的 provider）
-          const chatSvc = ctx.kernel.plugins.capabilities('service').find((c) => c.service.id === 'chat')?.service.instance as
-            | { providers: ProviderDef[] }
-            | undefined;
+          // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
-          if (!provider) return { ok: false, error: '未配置 LLM Provider，无法委派子代理' };
+          if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派子代理' };
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const tools: ToolDef[] = args.tools === 'all'
@@ -90,6 +109,7 @@ export default {
               tools,
               traceId,
               maxTurns: 10,
+              parentStepId: tctx.stepId, // span 树：子代理全部步骤挂到 run_subagent 工具步骤下
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
