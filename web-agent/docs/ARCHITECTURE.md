@@ -1,9 +1,12 @@
-# maharness 架构设计文档（v1）
+# maharness 架构设计文档
 
-> 版本：v1.2（2026-08-15）
+> 版本：v2.2（2026-08-16）
 > 定位：从 0 自研的 Windows 原生网页版 Agent。**只有内外之分**：内部是唯一保持不变的 Agent 核心（kernel/），其余一切能力为可插拔组件（外部）。
 > 原则：不用任何现成 agent 框架（LangChain/CrewAI/AutoGen 等）；极简高效；运行全程可观测；高缓存命中；创新自研；**万物都是插件，agent 可以自己定义自己**。
 > 方法：**第一性原理**——先研究透彻 LLM 与 agent 的底层机制，再从底层机制推导每个组件的设计（见 §1.1）。
+> v2.0：借鉴北大/DeepSeek《A Programming Paradigm for Spatiotemporal Composability》（Cordis）的思路，落地**时空可组合性**——可逆效应（卸载=完全恢复）、反应性共效应（依赖声明与自动通知）、事务性热重载（坏版本自动回滚）。借鉴优点而非复现：无形式化演算、无 context 树/Proxy 中介，保持薄内核。
+> v2.1：对照大厂 harness 经验补齐三个底层核心——**上下文压缩**（对标 Anthropic context compaction：LLM 摘要替代纯截断）、**嵌套 Trace span 树**（对标 OpenAI Agents SDK tracing：子任务跨 traceId 下钻）、**工具输出机器校验**（对标 structured output：outputSchema 运行时校验）。
+> v2.2：自研落地四个大厂机制的 maharness 版（均按本环境约束裁剪——单会话单循环、页面关即停、薄内核）——**handoff 角色移交**（角色=插件）、**checkpoint 断点续跑**（turn 级自动保存）、**工具结果存储 + recall_tool_result 重读**（观察缓存）、**会话级成本实时熔断**（分级响应）。同期补齐**前端会话状态感知**（§8）：断点/角色/熔断横幅、span 树下钻、结果存储徽标、消息操作与输入效率、渲染性能。
 
 ---
 
@@ -71,7 +74,7 @@
 
 > 判据：内核只负责让 LLM **持续地感知-决策-行动-获得反馈**。凡是这个循环需要的基础设施，内核必须提供；凡是某个具体能力/策略/数据，内核绝不持有。这决定了系统会不会变臃肿。
 
-### 内核掌握（5 大件，各司循环一环）
+### 内核掌握（6 大件，各司循环一环）
 
 | 内核件 | 服务循环的哪个环节 | 为什么必须在内核 |
 | --- | --- | --- |
@@ -80,6 +83,7 @@
 | Config | 感知（世界参数） | 沙箱边界、超时、预算等循环参数的分层配置（默认 → config.json → env → 运行时） |
 | Trace | 反馈（记录） | 循环不可黑箱：每次 LLM 调用/工具调用/缓存命中都入轨迹；这是"获得反馈"的审计面 |
 | Cache | 反馈（效率） | 重复劳动消解的基础设施：存储/命中统计/TTL。**匹配策略是可注入的**（embedding 向量注入即升级，默认自研 bigram 兜底）——内核提供机制，不焊死策略 |
+| EffectScope | 行动（副作用回收） | 可逆效应引擎：插件的一切副作用留下逆元，卸载按 LIFO 完全恢复——动态组合的时序可组合性由运行时结构性保证 |
 
 ### 内核绝不掌握
 
@@ -102,7 +106,171 @@
 
 ### 隔离的机器验证
 
-`selftest [boundary]`：扫描 kernel/*.ts 的 import，断言只允许 node 内置与 kernel 自身（`./`、`../kernel/`）——**内核一旦开始 import 能力层，即视为边界破坏**。当前 8 个内核文件零违规。能力层反向依赖内核（core/* → kernel/types）是单向合法的：能力可以被替换，内核不被能力绑架。
+`selftest [boundary]`：扫描 kernel/*.ts 的 import，断言只允许 node 内置与 kernel 自身（`./`、`../kernel/`）——**内核一旦开始 import 能力层，即视为边界破坏**。当前 10 个内核文件零违规。能力层反向依赖内核（core/* → kernel/types）是单向合法的：能力可以被替换，内核不被能力绑架。
+
+---
+
+## 1.5 时空可组合性：可逆效应 + 反应性共效应 + 事务性热重载
+
+> 借鉴：北大/DeepSeek《A Programming Paradigm for Spatiotemporal Composability》（Cordis 元框架）。
+> 论文将动态组合拆成两个正交维度并给出行之有效的运行时机制：
+> **时序可组合性**（组件移除时其副作用能否完全恢复）与**空间可组合性**（组件间依赖能否声明并反应式管理）。
+> maharness 不照搬其形式化体系（无效果代数/无 context 树/无 Proxy 中介），只落地三个对
+> 「agent 自我修改的 harness」生死攸关的机制——因为 self-extend 允许 agent 自己写插件，
+> 一个坏的自我修改绝不能瘫痪掉"需要用来恢复的进程本身"。
+
+### 1.5.1 可逆效应：卸载 = 完全恢复（时序可组合性）
+
+**旧问题（v1，同 VSCode）**：插件的清理正确性依赖每个作者的勤勉——`ctx.register` 没有
+unregister，reload 时 `caps=[]` 直接丢弃；`ctx.bus.on` 的监听器无人回收（文档曾明文要求
+"插件保存 off 句柄在 onUnload 中调用"）。效果创建与销毁分离，完整清理难以验证。
+
+**v2 机制**：`kernel/scope.ts` 的 `EffectScope`——插件通过 ctx 做的一切都在自己的作用域里
+留下**逆元**，卸载时运行时按 **LIFO 顺序**自动执行全部逆元，环境完全恢复。这是结构性保证，
+不是作者自觉：
+
+| 论文概念 | maharness 落地 |
+| --- | --- |
+| effect context (γ, φ)、track(𝑓, 𝑔) | `scope.add(inverse)`：执行正向效果并登记逆元 |
+| recover、twisted composition | `scope.dispose()`：按逆序执行全部逆元（后进先出） |
+| self-disposal（armed 标志） | dispose 幂等：armed=false，在途操作不再追加逆元 |
+| 子效果级联 | `scope.child()`：父作用域 dispose 连带回收子作用域 |
+
+**插件侧契约**（`PluginContext`，全部自动入作用域）：
+
+```ts
+ctx.register(cap)              // 返回 unregister；未手动撤销时卸载自动回收
+ctx.on(event, listener)        // 自动退订的事件订阅（替代 ctx.bus.on，杜绝监听器泄漏）
+ctx.provide(key, value)        // 服务绑定（卸载自动撤回并通知依赖方）
+ctx.watchConfig(key, cb)       // 声明式配置对账（自动退订）
+ctx.effect(fn, makeInverse)    // 原始可逆效应
+```
+
+- 卸载（stop）顺序：**先标记停供**（依赖方先感知停用）→ LIFO 执行逆元 → 旧式 onStop/onUnload 钩子仍保留兜底。
+- 重新启用（enable）= **重新部署**（onLoad 重跑重建全部能力，进入新作用域）——与论文
+  disabled 字段语义一致：置位卸载 fiber、清除重载。
+- 可观测：每次卸载记录 `plugin.reverted { effects: N }` 事件（回滚了几项副作用一目了然）。
+- 实测（selftest `[compose]`）：插件注册工具+服务+监听+配置对账四项副作用，disable 后四项
+  全部自动恢复（能力消失/服务撤回/监听退订/配置监听退订），enable 后全部重建。
+
+### 1.5.2 反应性共效应：依赖声明 + 自动通知（空间可组合性）
+
+**旧问题（v1）**：`requires` 只是加载期顺序检查；插件间依赖要么靠 `capabilities()` 现场
+查找（不反应对方生死），要么靠手写事件监听（如 chat 监听 plugin.loaded/unloaded/reloaded
+刷新人设——命令式、易漏、易泄漏）。
+
+**v2 机制**：加载器内置**服务共效应注册表**——提供者 `ctx.provide(key, value)`（或注册
+`kind:'service'` 能力自动成为 `service:<id>` 绑定），依赖方 `ctx.inject(key, onChange)` 订阅：
+
+- **绑定只在提供者 ACTIVE 时可见**：started 才发布、卸载先撤回（依赖方收到 `undefined` 通知）。
+- **反应性分类**（论文 Definition 26 的务实版）：提供者停用 → 依赖方自动降级（收到停用通知，
+  不报错、不悬空）；提供者恢复 → 依赖方自动可用（无需重启）。
+- **能力集订阅**：`ctx.onCapabilities(kind, cb)`——某类能力集合变化时通知（chat 用它替代
+  3 个手写插件事件监听，persona 集变化自动重装系统提示词）。
+- **配置对账**：`ctx.watchConfig(key, cb)` 按「变了哪个键」分派（最小干预），替代全量
+  `config.changed` 手写过滤。
+- 实测（selftest `[coeffect]`）：消费者注入 `service:coeffect-svc`，提供者 disable →
+  消费者工具立即返回 provided=false；enable → 自动恢复 true。全程消费者零改动、零重启。
+- 附带修复 v1 启动期 bug：L2 人设层在插件 start 前刷新导致启动后缺失——start 时按能力
+  种类通知订阅者，保证「启动即生效」。
+
+### 1.5.3 事务性热重载：坏版本自动回滚（HMR with rollback）
+
+**旧问题（v1）**：reload = stop → 清 caps → 重新 register；新版本语法错误 → 插件进入
+error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险：**agent 自己写的插件坏了，
+会禁用掉恢复所需的进程本身**。
+
+**v2 机制**（对应论文 Algorithm 10 的事务性语义）：
+
+1. 回收旧实例全部效果（可逆恢复），但**旧模块保留在内存**；
+2. 加载新版本（独立作用域，暂不入注册表）；
+3. **成功 → 提交**（替换注册表）；**失败 → 回滚**（丢弃半成品，用旧模块重跑 onLoad 重建，
+   系统永不进入"半加载"状态；`plugin.error {rollback:true}` 事件可观测）。
+
+- 实测（selftest `[compose]`）：写入语法错误的版本 → reload → 旧工具仍在、回滚事件入轨；
+  写入好版本 v2 → 正常替换（v2 生效、v1 回收）。
+- **惯性转换**（论文 §4.3.3 inertial 的务实版）：每个插件持有在途转换句柄，同一插件的
+  新目标（start/stop/reload）等待在途转换完成——快速文件变更不再产生重叠竞态。
+
+### 1.5.4 系统边界：界内可回滚，界外只能补偿
+
+论文 §6.1 的边界概念给"哪些副作用能撤销、哪些不能"划出原则：
+
+| | 界内（可逆效应追踪） | 界外（发射，只能补偿） |
+| --- | --- | --- |
+| 位置 | 进程内独占可改：能力注册/事件订阅/服务绑定/配置写入 | 文件写入、网络请求、LLM 调用、子进程 |
+| 恢复方式 | LIFO 逆元（结构性保证） | Trace 审计 + 审批 + 失败教训记忆（补偿） |
+| 为什么 | 系统独占修改，可恢复 | 其他方可能读写，无法独占恢复 |
+
+插件卸载**不**撤销它写过的文件——写文件是跨出边界的发射，由审计与审批负责。这条分界让
+「可逆效应」的承诺诚实：它保证的是组合层的完全恢复，不是任务层的时光倒流。
+
+---
+
+## 1.6 大厂机制自研落地：handoff / checkpoint / 结果存储 / 成本熔断（v2.2）
+
+> 四个机制各有大厂原型（OpenAI Agents SDK handoff、LangGraph checkpoint、长上下文
+> 工具结果管理、成本护栏），但 maharness 版均按本环境的硬约束裁剪：
+> **单会话单循环、页面关即停、薄内核、全插件化、可观测优先**。每个设计都回答
+> "为什么这是 maharness 环境下的最优解"。
+
+### 1.6.1 handoff 角色移交（角色 = 插件）
+
+**大厂原型**：OpenAI Agents SDK 的 handoff——agent 把对话控制权连同上下文移交给另一个 agent。
+**maharness 裁剪**：不引入多 agent 注册表与上下文传递协议——本环境没有多 agent 并存，
+只有"一个会话一个循环"。因此 handoff 落地为**角色切换**：
+- **角色 = 插件**（`kind:'role'` 能力）：任意插件注册 `RoleDef { id, name, description,
+  systemPrompt, tools }`——提示词 + 工具集的专业化分工（chat 内置 main 主代理；
+  goal-plan 注册 planner 计划专家，跨插件协作演示）。
+- `handoff_to(role, objective)` 工具：枚举角色注册表（非法角色报错并列出可用角色）；
+  返回 `ToolResult.handoff` → **执行器识别后立即终止本轮循环**（不浪费后续轮次），
+  yield `handoff` 事件 → server 更新 `sessions.role` → 后续对话由新角色的提示词
+  （置于最前，引导力最强）与工具集（支持 readonly 只读白名单）接管，热切换无需重启。
+- 角色与模式正交：plan/goal 模式提示词照常注入；`/normal` 命令清空角色回主代理。
+- 为什么是最优解：复用现有"模式 = 提示词 + 工具集"架构，不新增并发执行模型；
+  角色注册表走既有能力注册表（可观测、可热加载、可审计）。
+
+### 1.6.2 checkpoint 断点续跑（turn 级自动保存）
+
+**大厂原型**：LangGraph checkpoint——图执行的每一步状态持久化，中断后可精确恢复。
+**maharness 裁剪**：单循环模型下"断点 = 完整轮次"，不需要图状态序列化：
+- `AgentRunner` 每轮工具执行完（下轮 LLM 调用前）回调 `onCheckpoint(turn, history)`——
+  此时 history 含全部工具回填（assistant+tool 配对完整），**字节级可恢复**（L3 前缀缓存
+  恢复后依然命中）。
+- server 持久化到 `agent_checkpoints` 表（每会话仅最新一条，upsert）：
+  任务正常完成（assistant_done）自动清除断点；中断（页面关闭/错误/熔断）保留。
+- 恢复：`POST /api/sessions/:id/chat { resume: true }`——从断点历史继续，
+  末尾注入「【任务恢复】继续完成未竟的目标」提示，复用完整对话流程
+  （provider 选择/上下文压缩/成本熔断/SSE），不落库新用户消息。
+- 为什么是最优解：不引入图状态机——本环境的"中断"只发生在轮次边界（SSE 断开即
+  abort），轮级快照就是精确恢复点；每会话一条最新断点足够（恢复点是"最近完成的轮"）。
+
+### 1.6.3 工具结果存储 + recall_tool_result 重读（观察缓存）
+
+**大厂原型**：长工具输出管理——结果摘要化进上下文，完整内容按需重读。
+**maharness 裁剪**：v1 的 4000 字符截断告知有个缺口——**截断后 LLM 只能重算工具拿全文**
+（可能重复花钱/副作用）。v2 补上"重读已观察的原文"：
+- `core/chat/result-store.ts`：进程内会话隔离存储（LRU 每会话 50 条）。
+  回填策略三级：≤2000 字符全文回填；>2000 存入结果存储，history 只留
+  `【工具结果已存入结果存储（id=xxx）】` + 摘要；>4000 才截断告知（兜底）。
+- `recall_tool_result(id)` 工具：按 tool_call_id 零副作用重读全文（不重算、不重查）。
+- 与 L2 缓存的分工：L2 = "同参数同状态的重算不花钱"；结果存储 = "本会话已观察过的
+  事实不占上下文、可重读"。
+- 为什么是最优解：进程内存储符合"页面关即停"的会话模型（无需跨进程持久化）；
+  复用 ToolContext.sessionId 天然会话隔离；LRU 防膨胀。
+
+### 1.6.4 会话级成本实时熔断（分级响应）
+
+**大厂原型**：成本护栏/预算熔断。
+**maharness 裁剪**：预算哲学已有（§1.1 经济性：harness 管理认知资源），v2.2 从
+"注入警告（软边界）"升级为"分级响应"：
+- **85% 预警**：执行器内注入「成本预警」system 提示（限一次），要求收敛；
+- **100% 熔断**：执行器每轮 LLM 调用前核算累计成本，`≥ costBudget` 即硬停止——
+  不再发起新 LLM 调用（唯一能阻止调用的地方就是执行器），已完成结果保留，
+  yield `budget_hit` 事件（SSE 推送）+ `cost-breaker` 步骤入 Trace。
+- server 传**剩余预算**（`maxSessionCost - 会话历史累计`）——会话级实时核算。
+- 为什么是最优解：熔断点放执行器（不是 server 层计数）——只有执行器能保证
+  "不再发起新调用"；分级响应避免一刀切（简单任务在预算内自然完成）。
 
 ---
 
@@ -110,8 +278,8 @@
 
 | # | 信条 | 含义 |
 | --- | --- | --- |
-| 1 | 内核极薄 | 内核只做 5 件事：事件总线、插件加载、配置、轨迹观测、缓存。**连"对话"都是插件** |
-| 2 | 一切可插拔 | 能力层全部为插件：现场写、现场加载、现场启停，不重启内核 |
+| 1 | 内核极薄 | 内核只做 6 件事：事件总线、插件加载、配置、轨迹观测、缓存、可逆效应。**连"对话"都是插件** |
+| 2 | 一切可插拔 | 能力层全部为插件：现场写、现场加载、现场启停，不重启内核；卸载即完全恢复（可逆效应） |
 | 3 | 全部自研 | Agent 循环、工具协议、插件机制、缓存、观测全部手写，无 agent 框架依赖 |
 | 4 | 运行即轨迹 | 每次运行产生结构化 Trace，前端实时可见 + JSONL 审计，无黑箱 |
 | 5 | 缓存是一等公民 | 三层缓存 + 命中率/成本实时可见，重复劳动自动消解 |
@@ -132,12 +300,13 @@
 │   parallel(多会话并行) · powershell(Shell) ·         │
 │   self-extend(自我扩展：agent 自建插件) · memory ...  │
 ├────────────────────────────────────────────────────┤
-│ 内核 Kernel（运行必备，仅 5 大件）                   │
+│ 内核 Kernel（运行必备，仅 6 大件）                   │
 │   EventBus  事件总线（一切通信走总线）                │
-│   PluginLoader  插件加载与热管理                     │
+│   PluginLoader  插件加载与热管理（事务性重载/共效应）  │
 │   Config  分层配置（defaults→文件→env→运行时）       │
 │   Trace  轨迹观测（事件采集/环形缓冲/审计落盘）       │
 │   Cache  三层缓存（语义/工具结果/prompt前缀）         │
+│   EffectScope  可逆效应引擎（副作用逆元 LIFO 回收）   │
 ├────────────────────────────────────────────────────┤
 │ Windows 底座                                        │
 │   Node 运行时 · 文件系统(编码/路径适配) · 进程 · SSE  │
@@ -161,17 +330,31 @@
   - `emitAsync`：等待所有监听器 Promise 完成后返回，用于生命周期等关键路径。
 - 防失控：单事件同步监听深度上限 64；单监听器执行时长超阈值记入 Trace 告警。
 
-### 3.2 PluginLoader（插件加载与热管理）
+### 3.2 PluginLoader（插件加载与热管理，v2：时空可组合性）
 
 **插件形态**：`plugins/<name>/` 目录 = 一个插件，含：
 - `plugin.json`：清单（见 3.2.1）
 - 入口文件（默认 `index.ts`，经 tsx 动态加载）
 
-**状态机**：`registered → loaded → started → stopped → unloaded`
+**状态机**：`registered → loaded → started ⇄ stopped → error`（转换期间标记 loading/unloading）
 - `loaded`：清单解析、依赖检查、动态 import 入口、调用 `onLoad` 注册能力
-- `started`：调用 `onStart`，开始对外服务
-- 热管理命令：`enable / disable / reload`，均不重启内核
+- `started`：调用 `onStart`，开始对外服务；**此时才发布服务绑定**（绑定只在提供者 ACTIVE 时对依赖方可见）
+- 热管理命令：`enable / disable / reload`，均不重启内核；**惯性转换**：同一插件在途转换完成前不响应新目标
 - 文件监听：插件目录变化（新增/修改/删除）触发 `reload`，实现"现场写、现场加载"
+
+**可逆效应（v2）**：每个插件持有 `EffectScope`——`ctx.register` / `ctx.on` / `ctx.provide` /
+`ctx.watchConfig` 全部自动入作用域。`disable`（卸载）按 LIFO 完全恢复全部副作用；
+`enable`（重新部署）= onLoad 重跑重建能力。清理正确性由运行时保证，不再依赖作者在
+onUnload 里手工回收。
+
+**事务性热重载（v2）**：reload = 回收旧效果（旧模块保留在内存）→ 加载新版本 → 成功提交 /
+失败用旧模块重建回滚。坏版本（语法错误/onLoad 抛错）自动回滚到上一个可用版本，
+`plugin.error {rollback:true}` 事件可观测——系统永不进入半加载状态。
+
+**反应性共效应（v2）**：加载器内置服务注册表——`ctx.provide(key, value)` 发布绑定
+（或注册 `kind:'service'` 能力自动成为 `service:<id>` 绑定）；`ctx.inject(key, onChange)`
+解析并订阅（提供者停用收到 undefined / 恢复收到新值）；`ctx.onCapabilities(kind, cb)`
+订阅能力集变化。依赖方无需重启即可感知提供者生死。
 
 **能力注册表 CapabilityRegistry**：插件通过 `onLoad(ctx)` 的 `ctx.register` 注册能力：
 - `tool`：工具函数（给 Agent 调用）
@@ -202,7 +385,7 @@
 
 ### 3.4 Trace（轨迹观测）—— 黑箱解药
 
-**数据模型**（append-only，只增不改）：
+**数据模型**（append-only，只增不改；v2 支持 span 树——嵌套观测）：
 
 ```
 TraceSession(traceId)
@@ -210,9 +393,16 @@ TraceSession(traceId)
      ├─ Step: llm_call   （模型、prompt 摘要、tokens、成本、耗时）
      ├─ Step: tool_call  （工具、参数摘要、结果摘要、耗时、缓存标记）
      └─ Step: cache_hit  （缓存层、键、节省成本）
+每个 Step 可带 parentId → 父步骤 → 子步骤层级（span 树）
 ```
 
-**每步记录字段**：类型 / 开始时间 / 耗时 / 输入摘要（截断）/ 输出摘要（截断）/ tokens(in,out) / 成本估算 / 缓存键 / 状态。
+**span 树（v2，对标 OpenAI Agents SDK tracing）**：每个步骤可挂 `parentId`——子任务
+（子代理/并行）的全部步骤挂到调用方工具步骤下，**跨 traceId 下钻**：从 run_subagent
+工具步骤 → 子代理内部 llm_call/tool_call 全链路可见。`ToolContext.stepId` 把父步骤 id
+传给工具，`RunOptions.parentStepId` 让子循环挂靠；`/api/trace` 支持 parentId 过滤查询。
+单层追踪回答「做了什么」，span 树回答「为什么做这个」——多级委派不再黑箱。
+
+**每步记录字段**：类型 / 开始时间 / 耗时 / 输入摘要（截断）/ 输出摘要（截断）/ tokens(in,out) / 成本估算 / 缓存键 / 状态 / parentId。
 
 **三态输出**：
 1. 实时推送：SSE 推送到前端 Trace 面板（DevTools 风格流水，含耗时与成本条）
@@ -265,12 +455,23 @@ interface ToolDef {
   name: string;              // 如 read_file
   description: string;       // 给 LLM 看的能力说明
   parameters: JSONSchema;    // 参数约束
+  outputSchema?: JSONSchema; // 输出结构机器校验（可选，JSONSchema 子集，见 §4.2.1）
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 ```
 
 - 工具由任意插件通过 `ctx.register('tool', toolDef)` 注册，Agent 执行器只认注册表，不认识具体工具 —— **新工具=现场写插件**。
 - 工具执行统一包裹：超时（默认 30s）、错误捕获（错误文本返回给 LLM 而非中断会话）、Trace 记录、L2 缓存查询/写入。
+
+#### 4.2.1 输出校验（outputSchema，对标 structured output）
+
+- 声明了 `outputSchema` 的工具，执行器对 `result.data` 做运行时结构校验（`kernel/validate.ts`，
+  轻量 JSONSchema 子集：type / object.properties / required / array.items / string.enum /
+  min·max——刻意零依赖，超出子集的声明不校验该规则，渐进增强）。
+- **校验失败不阻断**：原始结果照常回填，但回填内容附「【输出校验】返回与声明格式不符: …」
+  标注（LLM 可拿原始结果自我修正），且 `output-validate` 步骤入 Trace（结构错误可追溯）。
+- 语义：`output` 字段是「告诉 LLM 长什么样」，`outputSchema` 是「harness 机器可判」——
+  verification 能力从 `{ok, data/error}` 返回值延伸到输出结构。
 
 ### 4.3 钩子管线（agent.* 六钩子，零内核改动）
 
@@ -289,11 +490,23 @@ interface ToolDef {
 - **L3 缓存友好**：memory 插件注入记忆时追加到 history 末尾（不动 system prompt 与历史前缀），provider KV cache 前缀命中不受影响。
 - 首个实战消费者：`memory` 插件（before_llm 注入长期记忆，跨会话生效）。
 
-### 4.4 上下文管理（超预算优雅降级）
+### 4.4 上下文管理（v2：压缩优先于截断）
 
 - 会话历史按预算（默认 30000 tokens，config `context.maxTokens`）估算（中文 ≈1 token/字，英文 4 字符/token）。
-- 超预算时保留 system 提示与最新消息，丢弃较早消息并注入「【上下文管理】已截断 N 条」说明（LLM 对截断有感知）；截断作为 `system` 类型步骤记入 Trace。
-- 位置：`server/context.ts`（纯函数），在会话历史组装后、进入 Agent 循环前执行。
+- **v2 三级降级**（对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜）：
+  1. 预算内 → 不动；
+  2. 超预算 → **LLM 摘要压缩**（`core/chat/compact.ts`）：最早的完整对话轮被总结成
+     「【历史摘要】」system 消息（≤300 字，只保留需求/结论/约束），替换原消息——
+     LLM 不丢事实；压缩调用一次 LLM（30s 超时），失败自动降级；压缩事件入 Trace
+     （「上下文压缩」步骤：压缩 N 条 / 旧 token → 新 token / 节省量）；
+  3. 压缩不可用 / 已存在摘要 → **截断兜底**：保留 system 与最新消息，丢弃较早消息并注入
+     「【上下文管理】已截断 N 条」说明（LLM 对截断有感知）。
+- **防重复压缩**：历史已带【历史摘要】标记 → 不再 LLM 总结（已压缩段不可再压），
+  只对摘要之后的最近轮截断——避免「每轮重复花钱总结」与「丢最近信息」两个陷阱。
+- L3 前缀缓存影响：压缩 = 一次性重写历史前缀（失效一次），之后新消息继续追加、前缀
+  重新稳定——与工作区切换同级的一次性代价。
+- 位置：`core/chat/compact.ts`（压缩编排）+ `server/context.ts`（截断纯函数，兼容保留），
+  在会话历史组装后、进入 Agent 循环前执行；`context.compact` 配置可关（默认开）。
 
 ### 4.5 斜杠命令（不消耗 LLM）
 
@@ -368,7 +581,7 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | GET | `/api/models` | 可用模型列表（由 .env provider 配置生成） |
 | GET/POST | `/api/sessions` | 会话列表 / 新建 |
 | GET | `/api/sessions/:id/messages` | 会话消息历史 |
-| POST | `/api/sessions/:id/chat` | SSE 流式对话 |
+| POST | `/api/sessions/:id/chat` | SSE 流式对话；`body.resume=true` 时从断点历史继续（断点续跑） |
 | GET | `/api/files?path=` | 沙箱内目录浏览 |
 | GET | `/api/files/read?path=` | 读文件（自动编码识别） |
 | POST | `/api/files/write` | 写文件（沙箱校验） |
@@ -385,18 +598,39 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | GET | `/api/trace/stats` | 进程级 Trace/Cache 计数 |
 | GET | `/api/stats` | 统计面板：全局概览 + 上下文用量 + 三层缓存命中率 |
 | GET | `/api/events` | 全局事件 SSE（前端实时面板；**同时是页面存活信号**——连接断开即视为前端关闭） |
+| GET | `/api/sessions/:id/checkpoint` | 断点状态查询（{exists, turn, historyMessages}——前端可据此显示「继续任务」入口） |
 
 **页面感知自动停止**：前端与后端的唯一常驻连接是 `/api/events` SSE。`server/client-tracker.ts` 登记/注销这些连接；所有连接断开（用户彻底关闭页面）超过 `AUTO_STOP_IDLE_MS`（默认 30 秒，设 0 关闭，可经 `.env` 热更新）后，后端优雅退出（`server.close()` + `kernel.stop()` 缓存落盘 + `process.exit(0)`）。刷新页面/网络抖动由 EventSource 自动重连豁免（宽限期）；多标签页任一存活即不停止；纯 API 调用（从未打开页面）永不触发。不用 HTTP 轮询做信号——浏览器对后台标签页的 setInterval 节流会使轮询失真，而 SSE 连接不受 JS 节流影响。
 
-**chat SSE 事件流**：`turn.started` → `message.delta`(文本增量) → `tool.started` → `tool.delta`(工具输出增量) → `tool.done` → `message.done` → `turn.done` → `done`（含汇总：tokens/成本/缓存命中）。任意时刻 `stop` 可中断。
+**chat SSE 事件流**：`turn.started` → `message.delta`(文本增量) → `tool.started` → `tool.delta`(工具输出增量) → `tool.done` → `message.done` → `turn.done` → `done`（含汇总：tokens/成本/缓存命中）。任意时刻 `stop` 可中断。v2.2 新增事件：`handoff`（角色移交：{role, objective}——会话控制权已交给新角色）、`budget_hit`（成本熔断：{cost, budget}——harness 硬边界触发）。
 
 ---
 
-## 8. 前端（Web UI 插件）
+## 8. 前端（Web UI 插件，v2.2 会话状态感知）
 
 - Vite + React + TypeScript，ChatGPT 式布局：左侧会话列表 + 插件面板 Tab，中部对话区，右侧可折叠 Trace 流水面板。
 - 组件：`ChatView`（流式渲染、工具调用卡片、中断按钮）、`SessionList`、`ModelPicker`、`PluginPanel`（插件启停/重载/状态）、`TracePanel`（实时流水+成本）、`FileExplorer`（沙箱文件浏览，v1 轻量版）。
 - 插件面板即"现场管理启停"的入口：列表显示所有插件、状态、版本，一键 enable/disable/reload。
+
+**v2.2 会话状态感知（agent harness 前端特征）**——调查结论：agent 前端的第一性原理是
+「让决策-行动-观察循环**实时可见、可中断、可追溯、可恢复**」，据此定制化补齐：
+
+| 能力 | 实现 | 对标 |
+| --- | --- | --- |
+| 断点续跑 UI | 「继续任务」横幅（⏸ 中断于第 N 轮）——Esc 停止/错误后自动查询 checkpoint 状态，点击即从断点恢复（复用 streamChat resume 流） | Claude --resume |
+| 角色接管横幅 | 「会话由 X 角色接管」+ 一键交回主代理（handoff 后可见） | OpenAI handoff 可视化 |
+| 成本熔断横幅 | budget_hit 事件 → 红色横幅（成本/预算/已熔断） | 成本护栏可视化 |
+| span 树 | TracePanel 按 parentId 组织层级：子任务步骤缩进 + 「子任务」标签 + 折叠下钻 | Agent 调试器时间线 |
+| 结果存储徽标 | 工具卡片 📎「已存」——大结果已入结果存储，可零副作用重读 | 操作卡片详情 |
+| 消息操作 | hover 复制回复 / 重发上一条（重试） | ChatGPT/Claude |
+| 输入效率 | ↑ 回放上一条输入（30 条历史）、**Esc 停止**（流式期间输入框不禁用，保留键盘能力） | 终端习惯 |
+| 会话成本 | composer 实时显示本会话累计成本（认知资源可见性） | — |
+| 渲染性能 | 消息行 `content-visibility: auto`——长会话屏外消息跳过渲染（浏览器原生，零 JS 开销） | 虚拟化替代 |
+
+- SSE 解析支持全部事件（含 v2.2 新增 handoff / budget_hit / tool_result.stored）。
+- E2E 实测（Playwright + 真实 LLM）：中断→继续任务→三步任务无缝完成；真实 run_subagent
+  在轨迹面板呈现 3 层子任务下钻；handoff 移交 planner 后横幅出现、交回主代理即消失；
+  全程零控制台错误。
 
 ---
 
@@ -407,9 +641,9 @@ web-agent/
 ├─ package.json / tsconfig.json / .env.example
 ├─ README.md
 ├─ docs/ARCHITECTURE.md          ← 本文档
-├─ kernel/                        ← 内核 5 大件（薄）
+├─ kernel/                        ← 内核 6 大件（薄）
 │  ├─ index.ts  types.ts  bus.ts  config.ts
-│  ├─ plugin-loader.ts  trace.ts  cache.ts
+│  ├─ scope.ts（可逆效应引擎）  plugin-loader.ts  trace.ts  cache.ts
 ├─ core/                          ← 核心插件（同样走插件机制）
 │  ├─ chat/                       ← Agent 执行器 + LLM provider
 │  └─ tools-fs/                   ← 文件工具插件
@@ -435,7 +669,7 @@ web-agent/
 | 6 | search 插件（Tavily/DDG）+ self-extend（agent 自建插件） | 对话中完成「自建插件→热加载→调用新工具」闭环 |
 | 后续 | memory / 托盘 插件按需现场写 | — |
 
-## 11. 现场写插件示例（开发范式）
+## 11. 现场写插件示例（开发范式，v2 契约）
 
 用户要加"计算当前时间"能力，现场写：
 
@@ -454,16 +688,31 @@ import type { Plugin } from '../../kernel/types';
 export default {
   id: 'clock', name: '时钟工具', version: '0.1.0',
   async onLoad(ctx) {
-    ctx.register('tool', {
-      name: 'get_current_time',
-      description: '获取当前日期时间（Windows 本地时区）',
-      parameters: { type: 'object', properties: {} },
-      async handler() {
-        return { ok: true, data: new Date().toLocaleString('zh-CN') };
+    // 一切副作用自动入作用域：卸载/停用时按 LIFO 完全恢复（无需手写 onUnload 清理）
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'get_current_time',
+        description: '获取当前日期时间（Windows 本地时区）',
+        parameters: { type: 'object', properties: {} },
+        async handler() {
+          return { ok: true, data: new Date().toLocaleString('zh-CN') };
+        },
       },
     });
+    // 事件订阅自动退订（旧写法 ctx.bus.on 不再推荐：重载后旧监听器会残留）
+    ctx.on('plugin.started', (e) => {
+      ctx.logger.info(`插件启动: ${(e.data as { id: string }).id}`);
+    });
+    // 声明式配置对账：配置键变化自动回调，卸载自动退订
+    ctx.watchConfig('clock.timezone', (v) => ctx.logger.info(`时区更新: ${v}`));
+    // 反应性依赖：chat 服务可用/不可用自动通知（无需轮询、无需重启）
+    const chat = ctx.inject('service:chat', (v) => ctx.logger.info(v ? 'chat 服务可用' : 'chat 服务不可用'));
+    if (!chat.value) ctx.logger.info('chat 服务暂不可用（可用后自动通知）');
   },
 } satisfies Plugin;
 ```
 
-保存文件 → 内核监听插件目录 → 自动 reload → 网页面板看到新工具 → Agent 立刻能调用。**无需重启、无需改任何既有代码**。
+保存文件 → 内核监听插件目录 → 自动 reload → 网页面板看到新工具 → Agent 立刻能调用。
+**无需重启、无需改任何既有代码。** 若保存的版本有语法错误 → 事务性热重载自动回滚到
+上一可用版本（插件不消失），修复后保存再次热重载即可。

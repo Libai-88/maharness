@@ -7,8 +7,8 @@
 
 | 信条 | 实现 |
 | --- | --- |
-| 内核极薄 | 内核仅 5 大件：EventBus / PluginLoader / Config / Trace / Cache，**连对话都是插件** |
-| 一切可插拔 | `plugins/` 目录现场写插件，保存即热加载，网页面板一键启停 |
+| 内核极薄 | 内核仅 6 大件：EventBus / PluginLoader / Config / Trace / Cache / EffectScope，**连对话都是插件** |
+| 一切可插拔 | `plugins/` 目录现场写插件，保存即热加载，网页面板一键启停；**卸载即完全恢复**（可逆效应：能力/监听/服务/配置自动回收）；**坏版本自动回滚**（事务性热重载，永不半加载） |
 | 全部自研 | Agent 循环、工具协议、插件机制、SSE 流式、缓存全部手写，零 agent 框架依赖 |
 | 运行即轨迹 | 每次运行产生结构化 Trace：LLM 调用/工具调用/缓存命中，前端实时面板 + JSONL 审计 + 成本透明 |
 | 缓存一等公民 | L1 语义缓存 / L2 工具结果缓存 / L3 prompt 前缀缓存（吃满 provider KV cache） |
