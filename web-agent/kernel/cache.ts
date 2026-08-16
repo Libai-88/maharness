@@ -220,12 +220,14 @@ export class Cache {
 
   /**
    * 生成稳定缓存键（sha256 摘要，带命名空间前缀）。
-   * 命名空间 = parts[0]（惯例为工具名）：支持按命名空间批量失效（l2DeleteNamespace）——
-   * 写操作只需失效受影响工具的缓存，不必清空整个 L2（v1 全清会误伤其他工具）。
+   *  命名空间 = parts[0]（惯例为工具名）：支持按命名空间批量失效（l2DeleteNamespace）——
+   *  写操作只需失效受影响工具的缓存，不必清空整个 L2（v1 全清会误伤其他工具）。
+   *  序列化用 JSON.stringify 而非 '|' 连接：part 内含分隔符（文件名/参数串）时
+   *  不会再碰撞出同键（["a|b","c"] 与 ["a","b|c"] 旧实现同键——静默串答案）。
    */
   makeKey(parts: string[]): string {
     const ns = parts[0] ?? '';
-    return `${ns}:${createHash('sha256').update(parts.join('|')).digest('hex').slice(0, 32)}`;
+    return `${ns}:${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32)}`;
   }
 
   // ---------- L2 工具结果缓存 ----------
@@ -324,6 +326,9 @@ export class Cache {
         // 精确键存在但作用域不匹配：会话自产答案不串用，继续相似度扫描
       } else if (entry.expiresAt >= Date.now()) {
         entry.hits++;
+        // LRU：命中重插到尾部
+        this.l1.delete(`${promptKey}|${norm}`);
+        this.l1.set(`${promptKey}|${norm}`, entry);
         this.counter.l1Hits++;
         return { hit: true, answer: entry.answer, key: `${promptKey}|${norm}`, hitScope: entry.scope };
       } else {
@@ -353,6 +358,9 @@ export class Cache {
         return { hit: false };
       }
       entry.hits++;
+      // LRU：命中重插到尾部
+      this.l1.delete(best.key);
+      this.l1.set(best.key, entry);
       this.counter.l1Hits++;
       return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
     }
@@ -375,6 +383,7 @@ export class Cache {
     };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
     this.l1.set(`${promptKey}|${norm}`, entry);
+    // LRU：命中路径已重插（队首 = 最久未访问），超容量直接淘汰队首
     if (this.l1.size > 500) {
       const oldest = this.l1.keys().next().value;
       if (oldest !== undefined) this.l1.delete(oldest);
@@ -382,9 +391,24 @@ export class Cache {
     this.scheduleSave();
   }
 
+  /** 失效指定会话的全部 L1 条目（scope 隔离键 = sessionId）：会话内写入文件成功后调用——
+   *  依赖旧文件观察的"会话自产"答案一并过期，同一问题重新观察而非复用陈旧事实 */
+  l1InvalidateSession(sessionId: string): void {
+    if (!sessionId) return;
+    let changed = false;
+    for (const [key, e] of this.l1) {
+      if (e.scope === sessionId) {
+        this.l1.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) this.scheduleSave();
+  }
+
   clear(): void {
     this.l2.clear();
     this.l1.clear();
+    this.scheduleSave(); // 清空也落盘：否则进程退出时 save() 会把旧内容写回
   }
 
   /** L3 prompt 前缀复用统计（估算口径）：由 Agent 循环在每次 LLM 调用前记录与上一轮公共前缀的 token 数。

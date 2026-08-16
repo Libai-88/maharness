@@ -1,16 +1,21 @@
 /**
  * core/tools-fs/index.ts —— 文件工具插件
- * 提供 read_file / write_file / list_dir 三个工具。
+ * 提供 read_file / write_file / list_dir / delete_file 四个工具。
  * Windows 原生：路径沙箱（大小写不敏感防穿越）、编码自动识别（UTF-8/UTF-16/GBK）、二进制防护。
- * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；write_file 成功后清空 L2（保一致性）。
+ * 安全：内核硬保护（kernel/、core/chat/ 禁写，C-R4）；密钥黑名单（.env、data/ 禁读，C-S4/H10）。
+ * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；写删成功后清空 L2（保一致性）
+ *  并失效本会话 L1 语义缓存（防陈旧观察答案，H8）。
  */
 import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync, rmSync } from 'node:fs';
-import { resolve, relative, sep } from 'node:path';
+import { resolve, relative, join, sep } from 'node:path';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
 
 // ============ Windows 沙箱 ============
 
-/** 将相对路径解析到沙箱内；越界（含 .. 穿越、符号链接逃逸）一律拒绝 */
+/** 将相对路径解析到沙箱内；越界（含 .. 穿越、符号链接逃逸）一律拒绝。
+ *  realpath 强化：校验通过后返回真实路径（已存在部分取 realpath，未创建尾部拼接），
+ *  后续读写直接走真实路径——消除「词法校验通过、实际写入经符号链接逃逸」的 TOCTOU 窗口。
+ *  跨层契约：server 侧文件 API 统一 import 本函数做沙箱校验。 */
 export function resolveInSandbox(sandboxRoot: string, relPath: string): string {
   const root = resolve(sandboxRoot);
   const target = resolve(root, relPath || '.');
@@ -19,7 +24,7 @@ export function resolveInSandbox(sandboxRoot: string, relPath: string): string {
   if (targetLower !== rootLower && !targetLower.startsWith(rootLower + sep)) {
     throw new Error(`路径越界（沙箱根目录: ${root}）: ${relPath}`);
   }
-  // 防符号链接逃逸：逐级校验真实路径仍在沙箱内
+  // 防符号链接逃逸：逐级上溯最深已存在祖先，校验真实路径仍在沙箱内
   let current = target;
   for (;;) {
     if (existsSync(current)) {
@@ -28,13 +33,49 @@ export function resolveInSandbox(sandboxRoot: string, relPath: string): string {
       if (realLower !== rootLower && !realLower.startsWith(rootLower + sep)) {
         throw new Error(`路径指向沙箱外（符号链接）: ${relPath}`);
       }
-      break;
+      const tail = relative(current, target); // 未创建的尾部（write_file 新建文件场景）
+      return tail ? join(real, tail) : real;
     }
     const parent = resolve(current, '..');
     if (parent === current) break;
     current = parent;
   }
   return target;
+}
+
+/** 相对沙箱根的规范化相对路径（小写 + 正斜杠），供保护区/黑名单前缀匹配 */
+function normalizedRel(absPath: string, sandboxRoot: string): string {
+  return relative(resolve(sandboxRoot), resolve(absPath)).split(sep).join('/').toLowerCase();
+}
+
+// ============ C-R4 内核硬保护（机器强制，不依赖提示词） ============
+
+/** AGENT_ALLOW_CORE_EDIT=1 放行内核修改（首次读取后进程内缓存） */
+let allowCoreEditCache: boolean | null = null;
+
+/** kernel/ 与 core/chat/ 为 agent 运行时核心：写/删一律拒绝（AGENT_ALLOW_CORE_EDIT=1 可显式放行） */
+export function isProtectedWritePath(absPath: string, sandboxRoot: string): boolean {
+  if (allowCoreEditCache === null) allowCoreEditCache = process.env.AGENT_ALLOW_CORE_EDIT === '1';
+  if (allowCoreEditCache) return false;
+  const norm = normalizedRel(absPath, sandboxRoot);
+  return norm === 'kernel' || norm.startsWith('kernel/')
+    || norm === 'core/chat' || norm.startsWith('core/chat/');
+}
+
+// ============ C-S4/H10 密钥黑名单 ============
+
+/** .env（密钥/环境配置）与 data/（内部数据）不可读；list_dir 照常列出（可发现不可读） */
+export function isDeniedReadPath(absPath: string, sandboxRoot: string): boolean {
+  const norm = normalizedRel(absPath, sandboxRoot);
+  if (!norm || norm.startsWith('../')) return false; // 沙箱外由 resolveInSandbox 拒绝
+  if (norm === '.env' || norm.endsWith('/.env')) return true;
+  return norm === 'data' || norm.startsWith('data/');
+}
+
+/** H8：失效会话级 L1 语义缓存（契约方法由 kernel/cache.ts 提供；未上线时静默跳过） */
+function invalidateSessionL1(tctx: ToolContext): void {
+  const c = tctx.cache as { l1InvalidateSession?: (sessionId?: string) => void };
+  c.l1InvalidateSession?.(tctx.sessionId);
 }
 
 function resolveSync(p: string): string {
@@ -175,6 +216,9 @@ export default {
         },
         async handler(args: { path?: string }, tctx: ToolContext): Promise<{ ok: boolean; data?: ReadResult; error?: string }> {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
+          if (isDeniedReadPath(file, tctx.sandboxRoot)) {
+            return { ok: false, error: `拒绝读取: ${relative(tctx.sandboxRoot, file)}（密钥与环境配置 .env、内部数据 data/ 不可读）` };
+          }
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}` };
           const st = statSync(file);
           if (!st.isFile()) return { ok: false, error: '目标不是文件' };
@@ -217,13 +261,26 @@ export default {
           required: ['path', 'content'],
         },
         async handler(args: { path?: string; content?: string }, tctx: ToolContext) {
+          // C-S2 工具侧双保险：写入前必须有用户审批（与执行器侧强制互补）
+          if (!tctx.approved) {
+            return {
+              ok: false,
+              needsApproval: true,
+              approvalSummary: `写入文件\n路径：${args.path}`,
+            };
+          }
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
+          if (isProtectedWritePath(file, tctx.sandboxRoot)) {
+            return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
+          }
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
           mkdirSync(resolve(file, '..'), { recursive: true });
           writeFileSync(file, args.content, 'utf8');
           // 写操作影响文件系统观察：失效文件类读缓存（list_dir/read_file），不误伤其他工具（如 web_search）
           tctx.cache.l2DeleteNamespace('list_dir');
           tctx.cache.l2DeleteNamespace('read_file');
+          // H8：文件变化也可能使会话级 L1 里的「观察类答案」陈旧，一并失效
+          invalidateSessionL1(tctx);
           return { ok: true, data: { path: relative(tctx.sandboxRoot, file), bytes: Buffer.byteLength(args.content, 'utf8') } };
         },
       },
@@ -247,6 +304,9 @@ export default {
           if (!existsSync(target)) return { ok: false, error: `目标不存在: ${relative(tctx.sandboxRoot, target) || '.'}` };
           const rel = relative(tctx.sandboxRoot, target) || '.';
           if (rel === '.') return { ok: false, error: '不能删除沙箱根目录' };
+          if (isProtectedWritePath(target, tctx.sandboxRoot)) {
+            return { ok: false, error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
+          }
           if (!tctx.approved) {
             // 删除是破坏性操作：请求用户审批（执行器级挂起，批准后自动重试）
             return {
@@ -263,6 +323,7 @@ export default {
           }
           tctx.cache.l2DeleteNamespace('list_dir'); // 文件变化，失效文件读缓存（保留其他工具缓存）
           tctx.cache.l2DeleteNamespace('read_file');
+          invalidateSessionL1(tctx); // H8：观察类答案可能陈旧，失效会话级 L1
           return { ok: true, data: { removed: rel, type: st.isDirectory() ? 'dir' : 'file' } };
         },
       },

@@ -10,10 +10,12 @@ import { randomUUID } from 'node:crypto';
 import { AgentRunner } from '../chat/agent';
 import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
-/** 只读白名单：子代理默认只能侦查世界，不能改变世界 */
+/** 只读白名单：子代理默认只能侦查世界，不能改变世界。
+ *  M4 防递归：不含 run_subagent/run_parallel——子代理不得再开子代理
+ *  （递归委派会造成不可控的成本与配额放大）。 */
 const READ_ONLY_TOOLS = new Set([
   'list_dir', 'read_file', 'web_search', 'list_skills', 'get_skill',
-  'recall_facts', 'plugin_status', 'run_subagent',
+  'recall_facts', 'plugin_status',
 ]);
 
 const SUB_SYSTEM_PROMPT = [
@@ -79,10 +81,11 @@ export default {
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
 
           // 认知资源管理（harness 强制，不是 LLM 自觉）：
-          // 子代理配额——窗口内超限直接拒绝，"简单问题不需要召唤 3 个子代理"由 harness 保证
-          const quota = ctx.kernel.budget.subagentQuota();
-          if (!quota.allowed) return { ok: false, error: quota.reason };
-          ctx.kernel.budget.consumeSubagent();
+          // M4 原子配额：consumeSubagentQuota 检查+消耗一步完成（并发调用不会超发）
+          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+          if (!quota.allowed) {
+            return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：简单任务请直接执行；确需委派请稍后再试。` };
+          }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
@@ -100,6 +103,10 @@ export default {
           let cost = 0;
           let toolCalls = 0;
           let error: string | undefined;
+          // H3 中断/预算透传：主循环 abort 即刻传导给子循环；主循环剩余预算（执行器在
+          // ToolContext 上局部扩展的 remainingBudget 字段，kernel 契约尚未声明）作为
+          // 子代理成本硬上限——子代理开销受主任务预算约束，不会绕开熔断
+          const remainingBudget = (tctx as ToolContext & { remainingBudget?: number }).remainingBudget;
           try {
             for await (const ev of runner.run({
               provider,
@@ -108,8 +115,10 @@ export default {
               systemPrompt: SUB_SYSTEM_PROMPT,
               tools,
               traceId,
-              maxTurns: 10,
+              maxTurns: 6, // M4：与 limits 文案统一（最多 6 轮）
               parentStepId: tctx.stepId, // span 树：子代理全部步骤挂到 run_subagent 工具步骤下
+              signal: tctx.signal,
+              costBudget: remainingBudget,
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
@@ -129,6 +138,8 @@ export default {
               tokensOut: usage.output,
               cost,
               traceId,
+              // C5 成本回传：主循环执行器把它并入 totalCost/熔断核算（见 agent.ts C5 段）
+              subagentCost: { cost, tokensIn: usage.input, tokensOut: usage.output },
             },
           };
         },

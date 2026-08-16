@@ -40,7 +40,9 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
     if (!Array.isArray(value)) return issues;
     const items = schema.items as Record<string, unknown> | undefined;
     if (items) value.forEach((item, i) => issues.push(...check(item, items, `${path}[${i}]`)));
-  } else if (type === 'string') {
+  } else if (type === 'string' || (type === undefined && typeof value === 'string')) {
+    // 未显式声明 type 时按值的实际类型应用规则：string 值照常校验 enum/minLength/maxLength
+    // （旧实现只认 type==='string'，无 type 声明的 schema 三条规则全部静默跳过）
     if (typeof value !== 'string') return issues;
     if (typeof schema.enum === 'object' && schema.enum !== null && Array.isArray(schema.enum) && !(schema.enum as unknown[]).includes(value)) {
       issues.push(`${path}: 值 "${value}" 不在允许枚举内`);

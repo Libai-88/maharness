@@ -1,6 +1,6 @@
 // ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
 import { useEffect, useRef, useState } from 'react';
-import { commandsApi } from '../api';
+import { commandsApi, onChatRetry } from '../api';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
@@ -159,6 +159,19 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [inputHist, setInputHist] = useState<string[]>([]);
   const histIdxRef = useRef(-1);
 
+  // C1 前端适配：provider 重试（retry 事件）→ 作废当前流式渲染、从 retry 边界重新累积。
+  // 消息状态归父组件所有（onDelta 持续向 content 追加），本组件在渲染层记录 retry 时刻
+  // 流式消息的内容/思考长度，展示时截掉该边界之前的残段——等价于"清空重累积"，
+  // 防止显示「上次失败残段 + 重试全文」的重复内容。仅对流式中的消息生效：
+  // done 后 content 被最终全文整体替换，无需（也不应）截断。
+  const [retryMarks, setRetryMarks] = useState<Record<string, { content: number; reasoning: number }>>({});
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+  useEffect(() => onChatRetry(() => {
+    const m = messagesRef.current.find((x) => x.streaming && x.role === 'assistant');
+    if (m) setRetryMarks((prev) => ({ ...prev, [m.id]: { content: m.content.length, reasoning: (m.reasoning ?? '').length } }));
+  }), []);
+
   useEffect(() => {
     // 自动滚动（设置页可关）：新消息/流式内容自动滚到底部
     let auto = true;
@@ -301,7 +314,12 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
             </div>
           )}
 
-          {messages.map((m) => (
+          {messages.map((m) => {
+            // retry 截断（C1）：流式中的 assistant 消息从最近一次 retry 边界起显示
+            const mark = m.streaming && m.role === 'assistant' ? retryMarks[m.id] : undefined;
+            const content = mark ? m.content.slice(mark.content) : m.content;
+            const reasoning = mark ? (m.reasoning ?? '').slice(mark.reasoning) : m.reasoning;
+            return (
             <div key={m.id} className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}>
               {m.role !== 'user' ? (
                 <>
@@ -318,7 +336,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                       )}
                     </div>
                     {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
-                    {m.reasoning && m.reasoning.length > 0 && (
+                    {reasoning && reasoning.length > 0 && (
                       <div className={`think-card ${m.streaming ? 'streaming' : ''}`}>
                         <div className="think-head">
                           <span className="think-dot"><IconBrain size={12} /></span>
@@ -333,15 +351,15 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                           </button>
                         </div>
                         {(m.streaming || expanded[m.id]) && (
-                          <div className="think-body">{m.reasoning}{m.streaming && <span className="stream-cursor" />}</div>
+                          <div className="think-body">{reasoning}{m.streaming && <span className="stream-cursor" />}</div>
                         )}
                       </div>
                     )}
-                    {m.content ? (
+                    {content ? (
                       m.streaming ? (
-                        <div className="assistant-text">{m.content}<span className="stream-cursor" /></div>
+                        <div className="assistant-text">{content}<span className="stream-cursor" /></div>
                       ) : (
-                        renderContent(m.content)
+                        renderContent(content)
                       )
                     ) : m.streaming ? (
                       <div className="assistant-text" style={{ color: 'var(--text-3)' }}>思考中<span className="stream-cursor" /></div>
@@ -370,7 +388,8 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 </div>
               )}
             </div>
-          ))}
+            );
+          })}
           <div ref={bottomRef} />
         </div>
       </div>

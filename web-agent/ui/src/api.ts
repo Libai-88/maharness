@@ -28,8 +28,19 @@ export interface ChatHandlers {
   onHandoff?(role: string, objective: string): void;
   /** 成本熔断（budget_hit）：harness 硬边界触发 */
   onBudgetHit?(cost: number, budget: number): void;
+  /** provider 重试（retry）：当前流式作废重新开始——调用方应清空流式内容重新累积 */
+  onRetry?(): void;
   onError(e: string): void;
   onEnd(): void;
+}
+
+/** retry 事件广播（模块级订阅）：streamChat 解析到 retry 事件时通知全部订阅者。
+ *  消息状态通常由父组件持有（handler 里不便清空），ChatView 等展示层据此
+ *  在渲染上截掉 retry 时刻之前的残段，等价于「清空重累积」。 */
+const retryListeners = new Set<() => void>();
+export function onChatRetry(fn: () => void): () => void {
+  retryListeners.add(fn);
+  return () => { retryListeners.delete(fn); };
 }
 
 /** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研）
@@ -91,6 +102,11 @@ export async function streamChat(
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
+          case 'retry':
+            // provider 重试：透传给 handler 订阅方 + 广播模块级订阅者（ChatView 清空流式残段）
+            h.onRetry?.();
+            for (const fn of retryListeners) fn();
+            break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
           case 'end': h.onEnd(); break;
         }

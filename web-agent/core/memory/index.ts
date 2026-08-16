@@ -120,9 +120,11 @@ export default {
     // 工具执行失败 → 自动记录一条教训（带【自动】标记，同工具同错误 1 小时内去重），
     // 下次会话 before_llm 注入时 LLM 即知道哪些做法不可行，避免重复踩坑。
     ctx.on('agent.after_tool', (e) => {
-      const d = e.data as AgentHookCtx & { tool?: { name: string }; result?: { ok?: boolean; error?: string } };
+      const d = e.data as AgentHookCtx & { tool?: { name: string }; result?: { ok?: boolean; error?: string; governed?: boolean } };
       const result = d.result;
       if (!result || result.ok !== false || !result.error) return;
+      // H5：治理决策（用户拒绝审批）不是工具失败——不记教训，避免污染"不重复犯错"记忆
+      if (result.governed === true || String(result.error).includes('用户拒绝')) return;
       const err = String(result.error).replace(/\s+/g, ' ').slice(0, 120);
       const dedupKey = `【自动】工具失败教训: ${d.tool?.name ?? '?'}`;
       const now = Date.now();

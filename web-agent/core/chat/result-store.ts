@@ -20,15 +20,26 @@ interface ResultEntry {
 }
 
 const MAX_ENTRIES_PER_SESSION = 50; // LRU：每会话最多保留 50 条结果
+const MAX_SESSIONS = 20;            // LRU：最多保留 20 个会话的结果存储（防会话数膨胀）
 
 export class ResultStore {
+  /** 会话级 LRU（M3）：Map 尾部 = 最近使用（delete+set 即刷新位置） */
   private sessions = new Map<string, Map<string, ResultEntry>>();
 
+  /** 访问即刷新会话新鲜度（真 LRU，非 FIFO）：返回会话 Map（不存在则 undefined） */
+  private touchSession(sessionKey: string): Map<string, ResultEntry> | undefined {
+    const session = this.sessions.get(sessionKey);
+    if (!session) return undefined;
+    this.sessions.delete(sessionKey);
+    this.sessions.set(sessionKey, session);
+    return session;
+  }
+
   put(sessionKey: string, callId: string, content: string): void {
-    let session = this.sessions.get(sessionKey);
+    let session = this.touchSession(sessionKey);
     if (!session) { session = new Map(); this.sessions.set(sessionKey, session); }
     session.set(callId, { content, ts: Date.now() });
-    // LRU 淘汰最旧条目（防内存膨胀）
+    // 条目级 LRU 淘汰最旧条目（防内存膨胀）
     if (session.size > MAX_ENTRIES_PER_SESSION) {
       let oldestKey: string | undefined;
       let oldest = Infinity;
@@ -37,10 +48,20 @@ export class ResultStore {
       }
       if (oldestKey !== undefined) session.delete(oldestKey);
     }
+    // 会话级 LRU 淘汰：超出上限逐出最久未访问的会话（Map 首部 = 最旧）
+    while (this.sessions.size > MAX_SESSIONS) {
+      const oldest = this.sessions.keys().next();
+      if (oldest.done) break;
+      this.sessions.delete(oldest.value);
+    }
   }
 
   get(sessionKey: string, callId: string): string | undefined {
-    return this.sessions.get(sessionKey)?.get(callId)?.content;
+    const session = this.touchSession(sessionKey);
+    const entry = session?.get(callId);
+    if (!entry) return undefined;
+    entry.ts = Date.now(); // M3 真 LRU：读取刷新时间戳（热点结果不因 FIFO 误淘汰）
+    return entry.content;
   }
 
   clearSession(sessionKey: string): void {

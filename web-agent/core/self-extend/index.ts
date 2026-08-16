@@ -15,8 +15,20 @@ import type { Plugin, ToolContext } from '../../kernel/types';
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
 const userPluginsDir = join(rootDir, 'plugins');
 
-/** 内置插件 id（防止 Agent 自建插件与产品内置能力冲突） */
-const CORE_IDS = new Set(['chat', 'goal-plan', 'powershell', 'self-extend', 'tools-fs', 'search']);
+/** 内置插件 id（防止 Agent 自建插件与产品内置能力冲突）。
+ *  M8 动态化：启动时扫描 <项目根>/core/ 子目录名生成，不硬编码清单——
+ *  新增内置插件自动纳入冲突防护，杜绝 create_plugin(id='memory') 注册重名插件绕过。 */
+const CORE_IDS = new Set<string>(
+  (() => {
+    try {
+      return readdirSync(join(rootDir, 'core'), { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name);
+    } catch {
+      return []; // core/ 不可读属极端异常（内核自身也依赖它）；此时冲突校验退化为 id 格式校验
+    }
+  })(),
+);
 
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -170,8 +182,13 @@ export default {
         async handler(args: { id?: string; name?: string; source?: string }, tctx: ToolContext) {
           const id = String(args.id ?? '').trim();
           const name = String(args.name ?? '').trim() || id;
+          if (!id) return { ok: false, error: '缺少插件 id' };
+          // id 校验（M8/M9）：先拦路径穿越，再拦非法字符，最后拦与内置插件冲突
+          if (id.includes('..') || id.includes('/') || id.includes('\\')) {
+            return { ok: false, error: '插件 id 非法：不允许路径穿越（含 ..、/、\\）' };
+          }
           if (!PLUGIN_ID_RE.test(id)) return { ok: false, error: '插件 id 需为小写字母/数字/连字符且不超过 32 字符，如 demo-clock' };
-          if (CORE_IDS.has(id)) return { ok: false, error: `id 与内置插件冲突: ${id}` };
+          if (CORE_IDS.has(id)) return { ok: false, error: `id 与内置插件冲突: ${id}（core/ 目录内插件均不可覆盖）` };
 
           const dir = join(userPluginsDir, id);
           // 沙箱校验：plugins/ 必须位于沙箱根目录内（防御目录穿越）

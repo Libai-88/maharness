@@ -88,12 +88,14 @@ export default {
           }
 
           // 认知资源管理：每个并行子任务消耗 1 次子代理配额（并行 = 多份认知资源同时运行）
-          const quota = ctx.kernel.budget.subagentQuota();
-          if (!quota.allowed) return { ok: false, error: quota.reason };
-          if (quota.remaining < tasks.length) {
-            return { ok: false, error: `子代理配额不足：并行 ${tasks.length} 个需要 ${tasks.length} 次配额，剩余 ${quota.remaining} 次（10 分钟内共 3 次）。请减少并行数量或稍后再试。` };
+          // M4 原子配额：consumeSubagentQuota 逐个消耗（检查+消耗原子完成，并发不超发）；
+          // 不足即在申请时拒绝——不会出现"先检查后消耗"窗口内被并发抢空的超发
+          for (let i = 0; i < tasks.length; i++) {
+            const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+            if (!quota.allowed) {
+              return { ok: false, error: `子代理配额不足：第 ${i + 1}/${tasks.length} 个并行子任务申请配额被拒（剩余 ${quota.remaining}，10 分钟窗口内限额）。请减少并行数量或稍后再试。` };
+            }
           }
-          for (let i = 0; i < tasks.length; i++) ctx.kernel.budget.consumeSubagent();
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
@@ -105,6 +107,9 @@ export default {
             : allTools.filter((x) => READ_ONLY_TOOLS.has(x.name));
 
           // ---- 并发执行：每个子任务独立 AgentRunner 循环，Promise.allSettled 汇总 ----
+          // H3 中断/预算透传：主循环 abort 与剩余预算传导给每个并行子循环
+          //（remainingBudget 为执行器在 ToolContext 上的局部扩展字段，kernel 契约尚未声明）
+          const remainingBudget = (tctx as ToolContext & { remainingBudget?: number }).remainingBudget;
           const results = await Promise.allSettled(tasks.map(async (t, i) => {
             const taskId = `par-${randomUUID().slice(0, 6)}`;
             const traceId = `par-${randomUUID().slice(0, 8)}`;
@@ -123,8 +128,10 @@ export default {
                 systemPrompt: PARALLEL_SYSTEM_PROMPT,
                 tools: toolsFor(t),
                 traceId,
-                maxTurns: 10,
+                maxTurns: 6, // M4：与子代理轮数上限统一（最多 6 轮）
                 parentStepId: tctx.stepId, // span 树：并行子任务全部步骤挂到 run_parallel 工具步骤下
+                signal: tctx.signal,
+                costBudget: remainingBudget,
               })) {
                 if (ev.type === 'delta') answer += ev.text;
                 else if (ev.type === 'tool_result') toolCalls++;
@@ -152,6 +159,12 @@ export default {
           const completed = results.map((r) => r.status === 'fulfilled' ? r.value : {
             taskId: 'par-unknown', objective: '?', ok: false, error: '内部异常',
           });
+          // C5 成本回传：聚合全部子任务的开销，主循环执行器并入 totalCost/熔断核算
+          const subagentCost = {
+            cost: completed.reduce((s, r) => s + ((r as { cost?: number }).cost ?? 0), 0),
+            tokensIn: completed.reduce((s, r) => s + ((r as { tokensIn?: number }).tokensIn ?? 0), 0),
+            tokensOut: completed.reduce((s, r) => s + ((r as { tokensOut?: number }).tokensOut ?? 0), 0),
+          };
           return {
             ok: true,
             data: {
@@ -159,6 +172,7 @@ export default {
               completed: completed.filter((r) => r.ok).length,
               failed: completed.filter((r) => !r.ok).length,
               summary: completed.map((r, i) => `${i + 1}. ${r.objective} → ${r.ok ? '完成' : '失败'}`).join('\n'),
+              subagentCost,
             },
           };
         },

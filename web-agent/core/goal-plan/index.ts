@@ -3,8 +3,9 @@
  * 多步目标管理：LLM 自行拆解步骤 → create_plan 建立计划 → 逐项执行
  * 并 update_plan_progress 推进 → complete_goal 收尾。
  * 计划状态实时通过 plan.updated 事件推送（前端显示计划卡片）。
+ * H14 会话隔离：计划按 sessionId 存取（Map + LRU，上限 50），多会话互不串扰。
  */
-import type { Plugin } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/types';
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 
@@ -16,16 +17,45 @@ export interface PlanState {
   createdAt: number;
 }
 
-// 单用户本地工具：全局单计划（v1 够用）
-const plan: { current: PlanState | null } = { current: null };
+// H14 会话隔离：sessionId → 计划（Map 插入序即 LRU 序；上限 50，最旧淘汰）
+const MAX_SESSIONS = 50;
+const plans = new Map<string, PlanState>();
+
+/** 无 sessionId 时的兜底键（单会话/旧执行器兼容） */
+function sessionKey(tctx: ToolContext): string {
+  return tctx.sessionId ?? '_default';
+}
+
+/** 读取并刷新 LRU 近期性 */
+function getPlan(key: string): PlanState | undefined {
+  const p = plans.get(key);
+  if (p === undefined) return undefined;
+  plans.delete(key);
+  plans.set(key, p);
+  return p;
+}
+
+/** 写入并执行 LRU 淘汰 */
+function putPlan(key: string, p: PlanState): void {
+  plans.delete(key);
+  plans.set(key, p);
+  if (plans.size > MAX_SESSIONS) {
+    const oldest = plans.keys().next().value; // Map 首键 = 最久未触
+    if (oldest !== undefined) plans.delete(oldest);
+  }
+}
 
 export default {
   id: 'goal-plan',
   name: '目标计划模式',
   version: '0.1.0',
   onLoad(ctx) {
-    const notify = () => {
-      ctx.bus.emit({ type: 'plan.updated', data: plan.current, ts: Date.now() });
+    const notify = (key: string) => {
+      const p = plans.get(key);
+      if (!p) return;
+      // 事件 data 保持 PlanState 形状（前端契约不变），附加 sessionId 供多会话区分
+      const data = key === '_default' ? { ...p } : { ...p, sessionId: key };
+      ctx.bus.emit({ type: 'plan.updated', data, ts: Date.now() });
     };
 
     // ---- 角色：计划专家（handoff 移交目标，跨插件协作演示——角色=插件） ----
@@ -86,20 +116,21 @@ export default {
           },
           required: ['objective', 'steps'],
         },
-        async handler(args: { objective?: string; steps?: string[] }) {
+        async handler(args: { objective?: string; steps?: string[] }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
           const steps = Array.isArray(args.steps)
             ? args.steps.map((s) => String(s).trim()).filter(Boolean)
             : [];
           if (!objective || steps.length === 0) return { ok: false, error: '需要 objective 与至少一个 steps' };
-          plan.current = {
+          const key = sessionKey(tctx);
+          putPlan(key, {
             objective,
             steps: steps.map((title) => ({ title, status: 'pending' as StepStatus })),
             current: 0,
             completed: false,
             createdAt: Date.now(),
-          };
-          notify();
+          });
+          notify(key);
           return {
             ok: true,
             data: {
@@ -129,16 +160,19 @@ export default {
           },
           required: ['stepIndex', 'status'],
         },
-        async handler(args: { stepIndex?: number; status?: string; note?: string }) {
-          if (!plan.current) return { ok: false, error: '还没有计划，请先 create_plan' };
+        async handler(args: { stepIndex?: number; status?: string; note?: string }, tctx: ToolContext) {
+          const key = sessionKey(tctx);
+          const p = getPlan(key);
+          if (!p) return { ok: false, error: '还没有计划，请先 create_plan' };
           const idx = Number(args.stepIndex);
-          const st = plan.current.steps[idx];
+          const st = p.steps[idx];
           if (!st) return { ok: false, error: `步骤不存在: ${idx}` };
           const status = ['pending', 'in_progress', 'done', 'blocked'].includes(String(args.status)) ? String(args.status) as StepStatus : 'pending';
           st.status = status;
           if (args.note) st.note = String(args.note);
-          if (status === 'in_progress') plan.current.current = idx;
-          notify();
+          if (status === 'in_progress') p.current = idx;
+          putPlan(key, p); // 就地变更后刷新 LRU 近期性
+          notify(key);
           return { ok: true, data: { step: idx + 1, title: st.title, status } };
         },
       },
@@ -157,12 +191,15 @@ export default {
             summary: { type: 'string', description: '完成总结' },
           },
         },
-        async handler(args: { summary?: string }) {
-          if (!plan.current) return { ok: false, error: '还没有计划' };
-          plan.current.completed = true;
-          if (args.summary) plan.current.steps[plan.current.steps.length - 1]!.note = String(args.summary);
-          notify();
-          return { ok: true, data: { completed: true, objective: plan.current.objective } };
+        async handler(args: { summary?: string }, tctx: ToolContext) {
+          const key = sessionKey(tctx);
+          const p = getPlan(key);
+          if (!p) return { ok: false, error: '还没有计划' };
+          p.completed = true;
+          if (args.summary) p.steps[p.steps.length - 1]!.note = String(args.summary);
+          putPlan(key, p);
+          notify(key);
+          return { ok: true, data: { completed: true, objective: p.objective } };
         },
       },
     });

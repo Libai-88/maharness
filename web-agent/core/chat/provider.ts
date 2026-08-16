@@ -9,6 +9,7 @@
  * Anthropic cache_read_input_tokens），此处统一归一化为 cachedInput/missInput——
  * 真实命中率只能由 provider 说了算，本地估算不可替代。
  */
+import { estimateTokens } from '../../kernel/tokens';
 import type {
   ChatOptions, LLMChunk, LLMMessage, PluginContext, ProviderDef, ToolDef,
 } from '../../kernel/types';
@@ -146,6 +147,9 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       let buf = '';
       const toolAcc = new Map<number, { id: string; name: string; args: string }>();
       let finished = false;
+      // M7：记录是否收到 usage / 累积输出文本（usage 缺失时估算计费用的）
+      let usageSeen = false;
+      let outText = '';
 
       const flushToolCalls = function* (): Generator<LLMChunk> {
         for (const tc of toolAcc.values()) {
@@ -192,6 +196,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
                 }
               }
               if (json.usage) {
+                usageSeen = true;
                 const u = normalizeUsage(json.usage);
                 yield {
                   type: 'usage',
@@ -207,7 +212,20 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       } finally {
         reader.releaseLock();
       }
+      // M7 断流半包：流正常结束但未收到 [DONE] 标记 → 视为错误抛出（半截响应不可信，
+      // 进入重试链——重试状态由执行器 C1 重置，前端作废残段重新累积）
+      if (!finished) {
+        throw new Error(`LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
+      }
       yield* flushToolCalls();
+      // M7 usage 缺失：按 token 估算计费 + console.warn（成本记 0 会让成本熔断失效——
+      // 免费错觉是最危险的错觉；估算仅用于成本核算口径，非精确值）
+      if (!usageSeen) {
+        const estIn = estimateTokens(messages.map((m) => m.content ?? '').join('\n'));
+        const estOut = estimateTokens(outText);
+        console.warn(`[provider:${cfg.id}] 流结束但 usage 缺失，按估算计费（in≈${estIn}, out≈${estOut} tokens）`);
+        yield { type: 'usage', input: estIn, output: estOut };
+      }
       yield { type: 'done' };
     },
   };

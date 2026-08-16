@@ -108,6 +108,11 @@ export class Store {
     }
   }
 
+  /** 关闭数据库连接（嵌入场景清理临时数据目录前调用，释放 Windows 文件句柄） */
+  close(): void {
+    try { this.db.close(); } catch { /* 已关闭 */ }
+  }
+
   // ---------- providers（网页端管理，DB 为唯一来源） ----------
 
   listProviders(): ProviderRow[] {
@@ -242,9 +247,9 @@ export class Store {
     this.db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(Date.now(), id);
   }
 
+  /** 删除会话（事务原子：messages 与 sessions 双删要么都成、要么都不成——参照 deleteSessions 写法） */
   deleteSession(id: string): void {
-    this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
-    this.db.prepare('DELETE FROM sessions WHERE id = ?').run(id);
+    this.deleteSessions([id]);
   }
 
   /** 批量删除会话（事务原子：全部成功或全部失败） */
@@ -327,6 +332,28 @@ export class Store {
     return msg;
   }
 
+  /** 事务化回写：单事务内 delete + 批量 insert（压缩/截断结果持久化用）——
+   *  中途失败整体回滚，不再出现「旧消息已清、新消息未写完」的丢历史窗口。 */
+  replaceSessionMessages(sessionId: string, messages: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]): void {
+    const del = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
+    const ins = this.db
+      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+    const tx = this.db.transaction((list: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]) => {
+      del.run(sessionId);
+      for (const m of list) {
+        ins.run(
+          randomUUID(), sessionId, m.role, m.content,
+          m.reasoning ?? null,
+          m.toolCalls ? JSON.stringify(m.toolCalls) : null,
+          m.toolCallId ?? null, m.tokensIn ?? 0, m.tokensOut ?? 0, m.cost ?? 0,
+          m.traceId ?? null, Date.now(),
+        );
+      }
+    });
+    tx(messages);
+  }
+
   /** 消息结算回填：assistant 消息经 onHistoryMessage 先入库（保持历史字节一致），
    *  run 结束后再补写 tokens/cost/reasoning（结算时才有的字段）。 */
   updateMessageStats(id: string, patch: { reasoning?: string; tokensIn?: number; tokensOut?: number; cost?: number; traceId?: string }): void {
@@ -341,24 +368,46 @@ export class Store {
 
   // ---------- 断点续跑（checkpoint：turn 级自动保存完整历史，resume 从断点继续） ----------
 
+  /** checkpoint 历史尺寸上限（M6）：超长任务（工具密集型可跑数百轮）不能把任意大的
+   *  history 无界写进 DB——超过则保留最新 N 条并附截断标记字段。 */
+  static readonly MAX_CHECKPOINT_HISTORY = 200;
+
   /** 保存会话最新断点（upsert：每会话只保留最新——长任务的恢复点是"最近完成的轮"）
    *  history 必须保存完整字段（role/content/tool_calls/tool_call_id）——恢复时
-   *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。 */
+   *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。
+   *  M6：超上限时保留最新 200 条并附 truncated/originalLength 标记；头部孤儿 tool
+   *  回填（配对的 assistant tool_calls 已被截掉）一并丢弃——provider 拒绝无主 tool 消息。 */
   saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]): void {
+    let kept = history;
+    let truncated = false;
+    const originalLength = history.length;
+    if (history.length > Store.MAX_CHECKPOINT_HISTORY) {
+      kept = history.slice(-Store.MAX_CHECKPOINT_HISTORY);
+      while (kept.length > 0 && kept[0].role === 'tool') kept = kept.slice(1);
+      truncated = true;
+    }
+    const payload = truncated ? { messages: kept, truncated: true, originalLength } : { messages: kept };
     this.db
       .prepare(`INSERT INTO agent_checkpoints (session_id, turn, history, created_at) VALUES (?,?,?,?)
                 ON CONFLICT(session_id) DO UPDATE SET turn=excluded.turn, history=excluded.history, created_at=excluded.created_at`)
-      .run(sessionId, turn, JSON.stringify(history), Date.now());
+      .run(sessionId, turn, JSON.stringify(payload), Date.now());
   }
 
   /** 读取会话断点（无断点返回 undefined） */
-  loadCheckpoint(sessionId: string): { turn: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number } | undefined {
-    const r = this.db.prepare('SELECT turn, history, created_at FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
-      | { turn: number; history: string; created_at: number }
+  loadCheckpoint(sessionId: string): { turn: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number } | undefined {
+    const r = this.db.prepare('SELECT turn, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
+      | { turn: number; history: string; createdAt: number }
       | undefined;
     if (!r) return undefined;
     try {
-      return { turn: r.turn, history: JSON.parse(r.history), createdAt: r.created_at };
+      const parsed = JSON.parse(r.history) as unknown;
+      // 兼容两种格式：旧格式 history 列直接存消息数组；新格式存 { messages, truncated?, originalLength? }
+      if (Array.isArray(parsed)) return { turn: r.turn, history: parsed, createdAt: r.createdAt };
+      const obj = parsed as { messages?: unknown; truncated?: boolean; originalLength?: number };
+      if (obj && Array.isArray(obj.messages)) {
+        return { turn: r.turn, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, createdAt: r.createdAt };
+      }
+      return undefined;
     } catch {
       return undefined;
     }
@@ -370,6 +419,23 @@ export class Store {
   }
 
   // ---------- 统计 ----------
+
+  /** 每会话用量聚合（M1 SQL 下推）：stats 页与 chat 端点的会话成本汇总直接
+   *  走 GROUP BY，不再逐会话 listMessages 全量拉 content。
+   *  truncations = system 注入的截断说明消息计数（与 statsOverview 同口径）；
+   *  chars = content 字符数合计（供上下文占用近似估算）。 */
+  aggregateSessions(): { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[] {
+    return this.db
+      .prepare(`SELECT session_id AS sessionId,
+                  COALESCE(SUM(tokens_in), 0) AS tokensIn,
+                  COALESCE(SUM(tokens_out), 0) AS tokensOut,
+                  COALESCE(SUM(cost), 0) AS cost,
+                  COUNT(*) AS messages,
+                  COALESCE(SUM(CASE WHEN role = 'system' AND content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations,
+                  COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0) AS chars
+                FROM messages GROUP BY session_id`)
+      .all() as { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[];
+  }
 
   /** 全局聚合：会话数 / 消息数 / tokens / 成本 / 上下文截断次数（system 注入的截断说明消息计数） */
   statsOverview(): { sessions: number; messages: number; tokensIn: number; tokensOut: number; cost: number; truncations: number } {

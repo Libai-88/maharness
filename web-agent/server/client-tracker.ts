@@ -38,4 +38,11 @@ export class ClientTracker {
     if (this.clients.size > 0 || this.disconnectedAt === null) return 0;
     return Date.now() - this.disconnectedAt;
   }
+
+  /** 是否允许自动停止：无页面连接且无活跃 run（M3——「页面关了但任务还在跑」
+   *  不是停止时机）。活跃 run 期间由 index 的自动停止 tick 调用 resetIdle()
+   *  持续推迟基准，run 结束后重新起算宽限期；多标签页宽限期语义不变。 */
+  resetIdle(): void {
+    if (this.clients.size === 0) this.disconnectedAt = Date.now();
+  }
 }

@@ -64,7 +64,7 @@
 | 6 | **信任与权限**：插件是能力还是权力？ | 能力越大破坏越大：每个工具必须标注风险，harness 据此判断审批 | risk 元数据 + 声明式 approval；高风险工具（write_file/delete_file/powershell/create_plugin）描述标注【风险:high|需审批】；**审批全程入 Trace**（approval 步骤：挂起/批准/拒绝可审计——"权力"的使用必须可追溯） |
 | 7 | **可观察性**：agent 为什么这样做？ | 过程不可黑箱：每次 LLM 调用/工具调用/缓存命中都入 Trace | trace 三态输出（SSE 实时 / JSONL 落盘 / 环形缓冲）+ 前端轨迹面板（**类型过滤**：LLM/工具/缓存/系统）+ `/api/trace` 过滤查询（type/name/limit）+ 统计面板 |
 | 8 | **失败恢复**：harness 拯救 LLM | LLM 不应面对 error 500 胡乱思考：瞬态失败自动重试，能力级备选路径 | LLM 调用瞬态失败自动重试 1 次（1.2s 缓冲）；**provider failover**：主 provider 重试仍失败自动切换备用 provider（failover 入 Trace，LLM 无感）；工具失败返回 `{ok:false,error}` + 失败教训自动入记忆 |
-| 9 | **经济性**：harness 让 LLM 知道行动有成本 | **认知资源由 harness 管理，不是 LLM 自觉**：重工具配额强制、成本预算强制注入 | costHint 元数据注入描述；**run_subagent 配额**（10 分钟内 ≤3 次，超限 harness 直接拒绝并说明）；**会话成本预算**（`budget.maxSessionCost`，超预算自动注入成本警告——不是请 LLM 节约，是 harness 告诉它边界）；L1 缓存省 LLM 调用；统计面板总成本/节省 |
+| 9 | **经济性**：harness 让 LLM 知道行动有成本 | **认知资源由 harness 管理，不是 LLM 自觉**：重工具配额强制、成本预算强制注入 | costHint 元数据注入描述；**run_subagent 配额**（per-session 原子配额：每会话 10 分钟内 ≤3 次 + 进程级总上限，`consumeSubagentQuota` check-and-consume 一步完成，超限 harness 直接拒绝并说明）；**会话成本预算**（`budget.maxSessionCost`，超预算自动注入成本警告——不是请 LLM 节约，是 harness 告诉它边界）；L1 缓存省 LLM 调用；统计面板总成本/节省 |
 | 10 | **自适应性**：harness 能否改变 agent 工作方式？ | 基于历史表现调整策略（adaptive harness → skill graph） | **任务画像**（内核 Budget）：每次任务记录 类型/轮数/成本/成败（classifyTask 关键词分类），统计面板展示"类型→次数/平均轮数/成本/失败率"——自适应策略的数据源；连续 3 次工具失败注入自适应提示；失败教训自动记忆形成"任务类型→教训"知识 |
 | 11 | **可替换性**：实现可换、语义不变 | 插件接口抽象能力语义而非具体实现——LLM 是唯一不需要重新学习世界的部分 | 工具接口=能力语义（remember/recall 不关心存储实现，web_search 不关心搜索引擎）；**核心能力接口语义自检**（selftest：8 个核心工具名称+描述语义稳定，防改名破坏 LLM 认知）；L2 缓存键带版本命名空间；provider 可替换（failover 链） |
 
@@ -264,7 +264,7 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 **大厂原型**：成本护栏/预算熔断。
 **maharness 裁剪**：预算哲学已有（§1.1 经济性：harness 管理认知资源），v2.2 从
 "注入警告（软边界）"升级为"分级响应"：
-- **85% 预警**：执行器内注入「成本预警」system 提示（限一次），要求收敛；
+- **85% 预警**：在 history 末尾**追加**「成本预警」system 消息（限一次、去重；不改写 system prompt——前缀缓存只失效于追加点之前零字节，L3 命中不受影响），要求收敛；
 - **100% 熔断**：执行器每轮 LLM 调用前核算累计成本，`≥ costBudget` 即硬停止——
   不再发起新 LLM 调用（唯一能阻止调用的地方就是执行器），已完成结果保留，
   yield `budget_hit` 事件（SSE 推送）+ `cost-breaker` 步骤入 Trace。
@@ -328,7 +328,7 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 - 发布分两种：
   - `emitSync`：同步派发，监听器抛错被捕获并记录（不影响发布者）；
   - `emitAsync`：等待所有监听器 Promise 完成后返回，用于生命周期等关键路径。
-- 防失控：单事件同步监听深度上限 64；单监听器执行时长超阈值记入 Trace 告警。
+- 防失控：**实例级递归深度计数**（emit/emitAsync 共享，同步链 >64 层抛错打断死循环，如 `config.changed` 联动 `config.set`）；emitAsync 单监听器超 10s 记告警（不中断）；订阅时维护按优先级有序的监听表，emit 零排序开销。
 
 ### 3.2 PluginLoader（插件加载与热管理，v2：时空可组合性）
 
@@ -348,8 +348,13 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 onUnload 里手工回收。
 
 **事务性热重载（v2）**：reload = 回收旧效果（旧模块保留在内存）→ 加载新版本 → 成功提交 /
-失败用旧模块重建回滚。坏版本（语法错误/onLoad 抛错）自动回滚到上一个可用版本，
+失败用旧模块重建回滚。坏版本（语法错误/**onLoad/onStart 抛错**——start 失败同样走回滚，
+提交前显式检查 `state==='error'`）自动回滚到上一个可用版本，
 `plugin.error {rollback:true}` 事件可观测——系统永不进入半加载状态。
+**生命周期串行队列**：同一插件的 start/stop/reload/enable/disable 经 per-instance Promise 链
+真串行排队（非 check-then-act），排队后从注册表重取实例操作，并发命令不覆盖、不泄漏监听器。
+**模块缓存友好**：入口 URL 以**文件内容 hash** busting——内容不变 reload 复用模块记录，
+重复热重载不再无界累积 ESM 模块（Node 无法卸载已求值模块，内容真变时新旧并存为残余限制）。
 
 **反应性共效应（v2）**：加载器内置服务注册表——`ctx.provide(key, value)` 发布绑定
 （或注册 `kind:'service'` 能力自动成为 `service:<id>` 绑定）；`ctx.inject(key, onChange)`
@@ -523,10 +528,14 @@ interface ToolDef {
 
 ### 4.7 沙箱与安全（Windows 重点）
 
-- 文件类工具锚定根目录 = 当前工作区（默认 `D:\DEEPSEEK`，config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越。
-- **工作区热切换**：网页端「文件」Tab 可添加/切换工作区——`config.sandboxRoot` 运行时热更新，文件工具沙箱边界、文件 API 与 Agent 工具下一轮立即跟随，无需重启。
+- 文件类工具锚定根目录 = 当前工作区（默认 `D:\DEEPSEEK`，config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越；校验后返回 realpath 结果（消除校验-写入 TOCTOU 窗口）。文件 API 与 Agent 文件工具共用同一校验函数（`resolveInSandbox`），双侧语义一致。
+- **工作区热切换（白名单）**：网页端「文件」Tab 可添加/切换工作区——切换仅接受 workspaces 表已登记路径（一次 POST 无法把沙箱根切到 `C:\`）；`config.sandboxRoot` 运行时热更新，下一轮立即生效，无需重启。
 - 写入工具拒绝符号链接指向沙箱外；只读操作默认允许，写操作逐项审计入 Trace。
 - 工具参数只接受 JSONSchema 声明字段（防注入）。
+- **审批由执行器机器强制**：声明 `approval:true` 的工具，执行器在调用 handler 前检查——未批准直接挂起走审批流（不信任工具自觉；工具侧保留双保险）。审批拒绝结果带 `governed:true` 标记（memory 插件据此不把治理决策记为失败教训）。
+- **内核写保护（机器强制）**：write_file/delete_file 对 `kernel/`、`core/chat/` 前缀硬拒绝（环境变量 `AGENT_ALLOW_CORE_EDIT=1` 显式放行，供人工开发）；`.env` 与 `data/` 读硬拒绝（密钥与内部数据不进 LLM 上下文）。文件 API 同规则。
+- **PowerShell 白名单模型**：默认需审批；仅整条命令按 `|`/`;` 分段后每段首 token 都在只读白名单（Get-ChildItem/Get-Content/Select-String/ls/dir/cat/type 等只读集）才免审批；黑名单（Invoke-Expression 等）与敏感文件模式（`.env`/`agent.db`）兜底强制审批；进程 cwd 锚定沙箱根。
+- **服务面**：仅监听 `127.0.0.1`；Host 白名单（localhost/127.0.0.1/[::1]，防 DNS rebinding）+ Origin 白名单校验（无 Origin 的本机工具放行）；同会话并发 chat 互斥（409）；provider 连接测试防 SSRF（拒绝私网/环回目标）。
 
 ### 4.8 技能系统（skills：自我设计的知识底座）
 
@@ -578,10 +587,11 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
+| GET | `/api/health` | 健康检查：`{ok, version, pid}`（bin 启动器校验版本/孤儿进程判定用） |
 | GET | `/api/models` | 可用模型列表（由 .env provider 配置生成） |
 | GET/POST | `/api/sessions` | 会话列表 / 新建 |
 | GET | `/api/sessions/:id/messages` | 会话消息历史 |
-| POST | `/api/sessions/:id/chat` | SSE 流式对话；`body.resume=true` 时从断点历史继续（断点续跑） |
+| POST | `/api/sessions/:id/chat` | SSE 流式对话（同会话并发请求 409 互斥）；`body.resume=true` 时从断点历史继续（断点续跑） |
 | GET | `/api/files?path=` | 沙箱内目录浏览 |
 | GET | `/api/files/read?path=` | 读文件（自动编码识别） |
 | POST | `/api/files/write` | 写文件（沙箱校验） |
@@ -648,7 +658,7 @@ web-agent/
 │  ├─ chat/                       ← Agent 执行器 + LLM provider
 │  └─ tools-fs/                   ← 文件工具插件
 ├─ plugins/                       ← 现场插件目录（用户自写，热加载）
-├─ server/                        ← Express + SSE 路由
+├─ server/                        ← Express + SSE 路由（routes/ 按资源拆分；模式/角色/断点校验策略下沉 core/chat/policy.ts）
 ├─ ui/                            ← 前端（Vite React）
 ├─ data/                          ← SQLite / traces/ 审计日志
 └─ scripts/                       ← dev/build 脚本

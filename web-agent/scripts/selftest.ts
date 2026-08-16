@@ -3,18 +3,47 @@
  * 用法：npm run selftest
  *   SEARCH_PROXY=http://127.0.0.1:7897 npm run selftest  —— 走代理测联网搜索
  *   TAVILY_API_KEY=xxx npm run selftest                  —— 走 Tavily 测搜索
+ *
+ * 数据隔离（第二波）：DB/traces/cache/用户插件测试全部落在
+ * mkdtempSync(tmpdir()/maharness-selftest-) 临时目录，跑完清理，不写生产数据；
+ * core 插件目录仍从项目加载（代码不复制）。HTTP 冒烟经 AGENT_DATA_DIR/
+ * AGENT_USER_PLUGINS_DIR 环境变量让 startServer 复用同一临时目录。
+ * 断言计数：非 LLM 用例全部计入 通过/失败 统计，失败时进程退出码非零；
+ * web_search 等依赖外网的用例保持 informational（不计入）。
  */
 import { Kernel } from '../kernel';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
+import { dirname, join, sep, resolve } from 'node:path';
+import { mkdtempSync, rmSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import type { LLMMessage, ToolDef } from '../kernel/types';
 
 // 基于模块路径定位 web-agent 根，不依赖调用方 cwd（任意目录运行均正确）
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 process.env.AGENT_ROOT = rootDir; // HTTP 冒烟：startServer 复用同一根目录
 process.env.SANDBOX_ROOT = rootDir; // 覆盖 .env 的沙箱配置，保证测试作用于本仓库
+delete process.env.AGENT_ALLOW_CORE_EDIT; // 保护区写拒断言需要确定性行为（tools-fs 首次读取后进程内缓存）
 
-const kernel = new Kernel(rootDir);
+// ---- 临时数据目录隔离：DB/traces/cache/用户插件全部落此，跑完清理 ----
+const dataDir = mkdtempSync(join(tmpdir(), 'maharness-selftest-'));
+const userPluginsDir = join(dataDir, 'plugins');
+mkdirSync(userPluginsDir, { recursive: true }); // PluginLoader.watch 要求用户插件目录存在
+mkdirSync(join(dataDir, 'sandbox'), { recursive: true }); // 沙箱穿越/写审批断言的独立沙箱
+process.env.AGENT_DATA_DIR = dataDir; // HTTP 冒烟（startServer）复用同一临时数据目录
+process.env.AGENT_USER_PLUGINS_DIR = userPluginsDir;
+process.on('exit', () => {
+  try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* 个别句柄迟释放时留待系统清理 */ }
+});
+
+// ---- 断言计数（非 LLM 用例全绿才算通过；失败 → 退出码 1） ----
+let passed = 0;
+let failed = 0;
+function check(name: string, cond: boolean, detail = ''): void {
+  if (cond) { passed++; console.log(`✓ ${name}`); }
+  else { failed++; console.log(`✗ ${name}${detail ? ` ｜ ${detail}` : ''}`); }
+}
+
+const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
 await kernel.start();
 
 const tools = kernel.plugins.capabilities('tool').map((c) => c.tool);
@@ -28,7 +57,7 @@ const tctx = (turn = 0) => ({
   trace: kernel.trace,
 });
 
-// ---- web_search ----
+// ---- web_search（依赖外网/代理：保持 informational，不计入断言） ----
 const search = tools.find((t) => t.name === 'web_search');
 if (search) {
   const r = await search.handler({ query: 'maharness agent framework', max_results: 3 }, tctx());
@@ -41,7 +70,7 @@ if (search) {
   }
 }
 
-// ---- plugin_status（无现场插件时返回空列表） ----
+// ---- plugin_status（无现场插件时返回空列表；informational） ----
 const ps = tools.find((t) => t.name === 'plugin_status');
 if (ps) {
   const r = await ps.handler({}, tctx());
@@ -49,6 +78,9 @@ if (ps) {
 }
 
 // ---- create_plugin 契约校验 ----
+// 注：self-extend 固定写入 <项目根>/plugins/（其自身目录契约，不受测试隔离影响），
+// 本轮加载器监视的是临时 userPluginsDir——热加载为 started 的断言由下方 tmp-compose
+// （写在临时目录、经真实 watcher 加载）覆盖；此处验证契约拦截 + 写入 + 清理。
 const cp = tools.find((t) => t.name === 'create_plugin');
 if (cp) {
   // 1) 坏源码（旧 API 写法）应被静态契约校验拦截，且不写文件
@@ -57,29 +89,110 @@ if (cp) {
     name: '坏插件',
     source: 'export default { initialize(ctx) { ctx.register("tool", { name: "x", execute() {} }) } }',
   }, tctx());
-  console.log('[create_plugin] 坏源码拦截:', bad.ok === false ? '✓ 已拦截' : '✗ 未拦截', '|', (bad.error ?? '').slice(0, 80));
+  check('[create_plugin] 坏源码拦截（契约校验、不写文件）', bad.ok === false, (bad.error ?? '').slice(0, 80));
 
-  // 2) 默认骨架创建 → 等待热加载 → plugin_status 确认
+  // 2) 默认骨架创建：文件写入 self-extend 固定目录（隔离加载器不加载 → state=pending）
   const good = await cp.handler({ id: 'tmp-hello', name: '临时测试' }, tctx());
-  console.log('[create_plugin] 默认骨架:', JSON.stringify(good.data ?? good.error).slice(0, 200));
-  await new Promise((r) => setTimeout(r, 1200));
-  if (ps) {
-    const st = await ps.handler({}, tctx());
-    const list = (st.data as { plugins: { id: string; state: string; caps: string[] }[] }).plugins;
-    const found = list.find((p) => p.id === 'tmp-hello');
-    console.log('[plugin_status] tmp-hello:', found ? `${found.state} caps=[${found.caps}]` : '未出现 ✗');
-  }
+  const writtenFiles = existsSync(join(rootDir, 'plugins', 'tmp-hello', 'plugin.json'))
+    && existsSync(join(rootDir, 'plugins', 'tmp-hello', 'index.ts'));
+  check('[create_plugin] 默认骨架写入 plugins/tmp-hello', good.ok === true && writtenFiles,
+    `state=${(good.data as { state?: string } | undefined)?.state}`);
 
-  // 3) 清理：删除后加载器应自动卸载
-  const { rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  rmSync(join(process.cwd(), 'plugins', 'tmp-hello'), { recursive: true, force: true });
-  await new Promise((r) => setTimeout(r, 1200));
+  // 3) 清理：删除后 plugin_status（读同一固定目录）不再列出
+  rmSync(join(rootDir, 'plugins', 'tmp-hello'), { recursive: true, force: true });
   if (ps) {
     const st = await ps.handler({}, tctx());
     const list = (st.data as { plugins: { id: string }[] }).plugins;
-    console.log('[plugin_status] tmp-hello 已清理:', !list.some((p) => p.id === 'tmp-hello') ? '✓' : '✗');
+    check('[create_plugin] 清理后 plugin_status 不再列出', !list.some((p) => p.id === 'tmp-hello'));
   }
+}
+
+// ---- 安全与运行时行为断言（第二波新增，全部真实断言） ----
+{
+  // a) 沙箱穿越：../、绝对盘符、UNC——抛错或返回根内安全路径，绝不在根外
+  const { resolveInSandbox } = await import('../core/tools-fs/index');
+  const sandbox = join(dataDir, 'sandbox');
+  const tryEscape = (p: string): 'rejected' | 'inside' | 'ESCAPED' => {
+    try {
+      const resolved = resolve(resolveInSandbox(sandbox, p));
+      const rootLower = resolve(sandbox).toLowerCase();
+      const r = resolved.toLowerCase();
+      return (r === rootLower || r.startsWith(rootLower + sep)) ? 'inside' : 'ESCAPED';
+    } catch {
+      return 'rejected';
+    }
+  };
+  check('[sandbox] ../ 穿越拒绝（绝不在根外）', tryEscape('../') !== 'ESCAPED', tryEscape('../'));
+  check('[sandbox] 绝对盘符 C:\\Windows 拒绝（绝不在根外）', tryEscape('C:\\Windows') !== 'ESCAPED', tryEscape('C:\\Windows'));
+  check('[sandbox] UNC \\\\server\\share 拒绝（绝不在根外）', tryEscape('\\\\server\\share') !== 'ESCAPED', tryEscape('\\\\server\\share'));
+
+  // b) write_file 未审批不写盘（C-S2 回归）：approved:false → needsApproval 且文件不存在；
+  //    approved:true → 写入成功
+  const wf = tools.find((t) => t.name === 'write_file');
+  const target = join(sandbox, 'approval-test.txt');
+  const ctxNo = { traceId: 'wf-approval', turn: 0, sandboxRoot: sandbox, cache: kernel.cache, trace: kernel.trace, approved: false };
+  const r1 = wf ? await wf.handler({ path: 'approval-test.txt', content: 'X' }, ctxNo) : { ok: true };
+  check('[approval] write_file 未审批返回 needsApproval 且不写盘',
+    wf !== undefined && r1.ok === false && (r1 as { needsApproval?: boolean }).needsApproval === true && !existsSync(target));
+  const ctxYes = { ...ctxNo, approved: true };
+  const r2 = wf ? await wf.handler({ path: 'approval-test.txt', content: '审批后内容' }, ctxYes) : { ok: false };
+  check('[approval] write_file 审批后写入成功',
+    r2.ok === true && existsSync(target) && readFileSync(target, 'utf8') === '审批后内容');
+
+  // c) 密钥读拒 / 保护区写拒（isDeniedReadPath / isProtectedWritePath 生效）
+  const rf = tools.find((t) => t.name === 'read_file');
+  const secCtx = { traceId: 'sec-test', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace, approved: true };
+  const envRead = rf ? await rf.handler({ path: '.env' }, secCtx) : { ok: true };
+  check('[security] read_file .env 读拒（isDeniedReadPath）',
+    rf !== undefined && envRead.ok === false && String((envRead as { error?: string }).error ?? '').includes('拒绝读取'));
+  const kernWrite = wf ? await wf.handler({ path: 'kernel/x.ts', content: 'x' }, secCtx) : { ok: true };
+  check('[security] write_file kernel/x.ts 写拒（isProtectedWritePath）',
+    wf !== undefined && kernWrite.ok === false && String((kernWrite as { error?: string }).error ?? '').includes('拒绝写入'));
+
+  // d) powershell 审批判定（纯函数，不实际 spawn）：白名单免审批 / 危险需审批 /
+  //    敏感兜底需审批 / 别名（del）不在白名单需审批
+  const { assessCommand } = await import('../core/powershell/index');
+  check('[powershell] Get-ChildItem 免审批（只读白名单）', assessCommand('Get-ChildItem').needsApproval === false);
+  check('[powershell] Remove-Item x 需审批', assessCommand('Remove-Item x').needsApproval === true);
+  check('[powershell] Get-Content .env 需审批（敏感兜底）', assessCommand('Get-Content .env').needsApproval === true);
+  check('[powershell] del x（别名）需审批（白名单模型）', assessCommand('del x').needsApproval === true);
+
+  // f) bus 递归防护：监听器内同步重发同事件 → 深度超限错误被捕获、进程不崩
+  const { EventBus } = await import('../kernel');
+  const bus = new EventBus();
+  let caughtMsg = '';
+  let reentries = 0;
+  const off = bus.on('recur.test', () => {
+    reentries++;
+    if (reentries < 200) {
+      try {
+        bus.emit({ type: 'recur.test', ts: Date.now() });
+      } catch (err) {
+        caughtMsg = err instanceof Error ? err.message : String(err);
+      }
+    }
+  });
+  bus.emit({ type: 'recur.test', ts: Date.now() });
+  off();
+  check('[bus] 递归重发触发深度超限错误且进程不崩',
+    caughtMsg.includes('递归深度') && reentries >= 2, `depth=${reentries} err=${caughtMsg.slice(0, 60)}`);
+
+  // g) scope：dispose 后 add() 为 no-op（返回的 disposer 调用无副作用、逆元不执行）+ LIFO 顺序
+  const { EffectScope } = await import('../kernel/scope');
+  const sDisposed = new EffectScope();
+  const ran: string[] = [];
+  sDisposed.add(() => { ran.push('a'); });
+  await sDisposed.dispose();
+  const disposer = sDisposed.add(() => { ran.push('late'); }); // 已 dispose：no-op
+  disposer(); // 无副作用
+  check('[scope] dispose 后 add() 为 no-op（逆元不执行、disposer 无副作用）', ran.join(',') === 'a', `ran=${ran.join(',')}`);
+  const sLifo = new EffectScope();
+  const order: string[] = [];
+  sLifo.add(() => { order.push('a'); });
+  sLifo.add(() => { order.push('b'); });
+  sLifo.add(() => { order.push('c'); });
+  await sLifo.dispose();
+  check('[scope] LIFO 逆序执行', order.join(',') === 'c,b,a', `order=${order.join(',')}`);
 }
 
 // ---- memory：工具 + before_llm 钩子注入 ----
@@ -94,7 +207,7 @@ if (rf && recall && forget) {
   await cleanSelftest();
   await rf.handler({ text: `selftest 记忆测试 ${Date.now()}` }, tctx());
   const q1 = await recall.handler({ query: 'selftest' }, tctx());
-  console.log('[memory] remember+recall:', (q1.data as { count: number }).count >= 1 ? '✓' : '✗');
+  check('[memory] remember+recall', (q1.data as { count: number }).count >= 1);
 
   // before_llm 钩子注入验证（模拟 agent 循环发布的钩子事件）
   // 上下文工程：普通记忆走 context provider（按任务相关注入），钩子只注入失败教训
@@ -107,8 +220,7 @@ if (rf && recall && forget) {
     data: { traceId: 't', turn: 0, model: 'm', history, systemPrompt: 's', tools: [], scratchpad: {} },
     ts: Date.now(),
   });
-  const noLessonInjected = history.length === 2; // 无失败教训时不注入任何记忆（零成本）
-  console.log('[memory] 无教训时零注入:', noLessonInjected ? '✓' : '✗');
+  check('[memory] 无教训时零注入', history.length === 2); // 无失败教训时不注入任何记忆（零成本）
 
   // context provider 按任务检索：模拟一次工具失败（生成教训），再模拟 LLM 循环的
   // context 注入路径——教训应被 before_llm 钩子注入，普通记忆按任务相关才注入
@@ -123,11 +235,10 @@ if (rf && recall && forget) {
     data: { traceId: 't', turn: 0, model: 'm', history: history2, systemPrompt: 's', tools: [], scratchpad: {} },
     ts: Date.now(),
   });
-  const lessonInjected = history2.length === 3 && String(history2[2].content).includes('失败教训');
-  console.log('[memory] 失败教训钩子注入:', lessonInjected ? '✓' : '✗');
+  check('[memory] 失败教训钩子注入', history2.length === 3 && String(history2[2].content).includes('失败教训'));
   await cleanSelftest();
   const q3 = await recall.handler({ query: 'selftest' }, tctx());
-  console.log('[memory] 清理完成:', (q3.data as { count: number }).count === 0 ? '✓' : '✗');
+  check('[memory] 清理完成', (q3.data as { count: number }).count === 0);
 
   // 失败教训自动记忆：模拟工具失败事件 → 自动记录（不重复犯错的底层机制）
   await kernel.bus.emitAsync({
@@ -142,7 +253,7 @@ if (rf && recall && forget) {
   }); // 第二次同样失败：应去重
   const autoRecall = await recall.handler({ query: '工具失败教训' }, tctx());
   const autoCount = (autoRecall.data as { count: number }).count;
-  console.log('[memory] 失败教训自动记忆+去重:', autoCount >= 1 ? '✓' : '✗', `(记 ${autoCount} 条，去重生效)`);
+  check('[memory] 失败教训自动记忆+去重', autoCount >= 1, `记 ${autoCount} 条`);
   const autoFacts = (autoRecall.data as { facts: { id: string }[] }).facts;
   for (const f of autoFacts) await forget.handler({ id: f.id }, tctx());
 }
@@ -154,24 +265,22 @@ if (ls && gs) {
   const r = await ls.handler({}, tctx());
   const list = (r.data as { count: number; skills: { name: string; source: string }[] }).skills;
   const builtin = list.filter((s) => s.source === 'builtin').length;
-  console.log(`[skills] list_skills: 共 ${list.length} 个（内置 ${builtin}）:`, builtin >= 4 ? '✓' : '✗');
+  check('[skills] list_skills 内置指南可枚举', builtin >= 4, `共 ${list.length} 个（内置 ${builtin}）`);
   const g = await gs.handler({ name: 'agent-self-design' }, tctx());
-  const hasGuide = g.ok === true && String((g.data as { content: string }).content).includes('自我设计');
-  console.log('[skills] get_skill 读取全文:', hasGuide ? '✓' : '✗');
+  check('[skills] get_skill 读取全文', g.ok === true && String((g.data as { content: string }).content).includes('自我设计'));
   const missing = await gs.handler({ name: '../etc/passwd' }, tctx());
-  console.log('[skills] 非法技能名被拦截:', missing.ok === false ? '✓' : '✗');
+  check('[skills] 非法技能名被拦截', missing.ok === false);
 }
 
 // ---- 能力边界：内核隔离断言（薄内核的机器可验证保证） ----
 // kernel/ 只能依赖 node 内置 + kernel 自身；不得依赖 core/server/ui 等能力层。
 // 一旦内核开始 import 能力层，就说明业务逻辑渗入了内核——系统开始变臃肿。
 {
-  const { readdirSync, readFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
+  const { readdirSync, readFileSync: rfSync } = await import('node:fs');
   const kernelFiles = readdirSync(join(rootDir, 'kernel')).filter((f) => f.endsWith('.ts'));
   const violations: string[] = [];
   for (const f of kernelFiles) {
-    const src = readFileSync(join(rootDir, 'kernel', f), 'utf-8');
+    const src = rfSync(join(rootDir, 'kernel', f), 'utf-8');
     for (const m of src.matchAll(/from\s+['"]([^'"]+)['"]/g)) {
       const target = m[1];
       if (target.startsWith('.') && !target.startsWith('./') && !target.startsWith('../kernel')) {
@@ -179,42 +288,40 @@ if (ls && gs) {
       }
     }
   }
-  console.log('[boundary] 内核隔离（kernel 不依赖能力层）:', violations.length === 0 ? '✓' : '✗',
-    violations.length ? violations.join('; ') : `(${kernelFiles.length} 个内核文件仅依赖 node 内置与自身)`);
+  check('[boundary] 内核隔离（kernel 不依赖能力层）', violations.length === 0,
+    violations.length ? violations.join('; ') : `${kernelFiles.length} 个内核文件仅依赖 node 内置与自身`);
 }
 
 // ---- subagent：子代理工具注册（LLM 第 6 项能力） ----
 const sub = tools.find((t) => t.name === 'run_subagent');
-console.log('[subagent] run_subagent 工具:', sub ? '✓' : '✗');
+check('[subagent] run_subagent 工具已注册', sub !== undefined);
 if (!sub) console.log('[subagent] ✗ 子代理未注册，检查 core/subagent 插件加载');
 
 // ---- 能力发现：工具风险/成本元数据（harness 视角第 2/6/9 问） ----
 const wf = tools.find((t) => t.name === 'write_file');
 const lf = tools.find((t) => t.name === 'list_dir');
 const hasMeta = wf?.risk === 'high' && wf?.approval === true && wf?.costHint === 'low' && lf?.risk === 'low';
-console.log('[capabilities] 工具元数据（risk/approval/cost）:', hasMeta ? '✓' : '✗',
+check('[capabilities] 工具元数据（risk/approval/cost）', hasMeta === true,
   `write_file=${wf?.risk}/${wf?.approval} list_dir=${lf?.risk}`);
 // annotateToolDef：LLM 收到的描述自动带【风险/成本】标签（能力发现 + 经济性提示）
 const { annotateToolDef } = await import('../core/chat/agent');
 const tagged = wf ? annotateToolDef(wf).description.includes('风险:high') : false;
 const costTag = sub ? annotateToolDef(sub).description.includes('成本:high') : false;
-console.log('[capabilities] 描述自动打标签（风险/成本）:', tagged && costTag ? '✓' : '✗',
-  `write_file=${tagged} run_subagent=${costTag}`);
+check('[capabilities] 描述自动打标签（风险/成本）', tagged && costTag, `write_file=${tagged} run_subagent=${costTag}`);
 // 输出格式显式化（output 字段 → 描述尾部）：LLM 拿到结果即知结构，减少试错型幻觉
 const outputTag = sub ? annotateToolDef(sub).description.includes('输出格式: {answer') : false;
 const rf2 = tools.find((t) => t.name === 'read_file');
 const rfOutput = rf2 ? annotateToolDef(rf2).description.includes('输出格式') : false;
-console.log('[capabilities] 输出格式显式化:', outputTag && rfOutput ? '✓' : '✗',
-  `run_subagent=${outputTag} read_file=${rfOutput}`);
+check('[capabilities] 输出格式显式化', outputTag && rfOutput, `run_subagent=${outputTag} read_file=${rfOutput}`);
 
 // ---- 生命周期：lazy 插件（dynamic capability loading，类似 OS 加载驱动） ----
+// 写入临时 userPluginsDir（加载器真实监视的目录），热加载全程不触碰生产 plugins/
 {
-  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const dir = join(rootDir, 'plugins', 'tmp-lazy');
-  mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-lazy', name: '惰性测试', version: '0.1.0', entry: 'index.ts', lazy: true }));
-  writeFileSync(join(dir, 'index.ts'), `
+  const { mkdirSync: mk, writeFileSync: wfSync, rmSync: rm } = await import('node:fs');
+  const dir = join(userPluginsDir, 'tmp-lazy');
+  mk(dir, { recursive: true });
+  wfSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-lazy', name: '惰性测试', version: '0.1.0', entry: 'index.ts', lazy: true }));
+  wfSync(join(dir, 'index.ts'), `
 import type { Plugin } from '../../kernel/types';
 export default {
   id: 'tmp-lazy', name: '惰性测试', version: '0.1.0',
@@ -227,14 +334,14 @@ export default {
 `);
   await new Promise((r) => setTimeout(r, 1200)); // 等热扫描
   const before = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
-  console.log('[lifecycle] lazy 插件默认不加载（能力不进上下文）:', !before ? '✓' : '✗');
+  check('[lifecycle] lazy 插件默认不加载（能力不进上下文）', !before);
   await kernel.plugins.enable('tmp-lazy');
   const after = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
-  console.log('[lifecycle] enable_plugin 按需激活:', after ? '✓' : '✗');
+  check('[lifecycle] enable_plugin 按需激活', after);
   await kernel.plugins.disable('tmp-lazy');
   const disabled = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'lazy_probe');
-  console.log('[lifecycle] disable_plugin 能力卸载:', !disabled ? '✓' : '✗');
-  rmSync(dir, { recursive: true, force: true });
+  check('[lifecycle] disable_plugin 能力卸载', !disabled);
+  rm(dir, { recursive: true, force: true });
   await new Promise((r) => setTimeout(r, 1200));
 }
 
@@ -256,23 +363,27 @@ export default {
     const t = tools.find((x) => x.name === name);
     return t && String(t.description).includes(kw);
   });
-  console.log('[replaceability] 核心能力接口语义稳定:', missing.length === 0 && descOk ? '✓' : '✗',
-    missing.length ? `缺失: ${missing.map((m) => m[0]).join(',')}` : '(8 个核心能力名称+语义不变，实现可替换)');
+  check('[replaceability] 核心能力接口语义稳定', missing.length === 0 && descOk,
+    missing.length ? `缺失: ${missing.map((m) => m[0]).join(',')}` : '(核心能力名称+语义不变，实现可替换)');
 }
 
-// ---- 经济性：harness 管理认知资源（子代理配额） ----
+// ---- 经济性：harness 管理认知资源（原子配额：per-session 3 次/10 分钟 + 进程级总上限 8） ----
 {
-  kernel.budget.consumeSubagent();
-  kernel.budget.consumeSubagent();
-  kernel.budget.consumeSubagent(); // 消耗满 3 次配额
-  const q = kernel.budget.subagentQuota();
-  console.log('[budget] 子代理配额（窗口内 3 次上限）:', q.allowed === false ? '✓' : '✗',
-    q.allowed ? '' : `(harness 拒绝: ${(q.reason ?? '').slice(0, 30)}…)`);
+  const sid = 'selftest-sess-A';
+  const r1 = kernel.budget.consumeSubagentQuota(sid);
+  const r2 = kernel.budget.consumeSubagentQuota(sid);
+  const r3 = kernel.budget.consumeSubagentQuota(sid);
+  const r4 = kernel.budget.consumeSubagentQuota(sid); // 同会话第 4 次 → 拒绝
+  check('[budget] 原子配额：同会话连续消耗 3 次后第 4 次 allowed=false',
+    r1.allowed && r2.allowed && r3.allowed && r4.allowed === false,
+    `(${r1.allowed}/${r2.allowed}/${r3.allowed}/${r4.allowed})`);
+  const other = kernel.budget.consumeSubagentQuota('selftest-sess-B'); // 另一会话不受影响
+  check('[budget] 会话隔离：另一 sessionId 不受影响', other.allowed === true, `allowed=${other.allowed}`);
   kernel.budget.recordTask({ type: '代码', turns: 5, cost: 0.01, failed: false, ts: Date.now() });
   kernel.budget.recordTask({ type: '代码', turns: 8, cost: 0.02, failed: true, ts: Date.now() });
   const profile = kernel.budget.taskProfile();
   const code = profile.find((p) => p.type === '代码');
-  console.log('[budget] 任务画像聚合:', code && code.count === 2 && code.failRate === 50 ? '✓' : '✗', JSON.stringify(profile));
+  check('[budget] 任务画像聚合', !!code && code.count === 2 && code.failRate === 50, JSON.stringify(profile));
 }
 
 // ---- L1 语义缓存：自研文本相似度（免 embedding，相同/近似问题命中） ----
@@ -281,30 +392,30 @@ export default {
   const same = dice(bigramSet('帮我看看当前目录下有什么文件'), bigramSet('帮我看看当前目录下有什么文件'));
   const near = dice(bigramSet('用工具查看当前沙箱根目录下有哪些文件，列出文件名'), bigramSet('用工具查看当前沙箱根目录下有哪些文件，列出文件名'));
   const diff = dice(bigramSet('帮我写一份周报'), bigramSet('介绍一下你自己'));
-  console.log('[L1] bigram Dice 相同=1.0 近似=1.0 无关<0.6:', same === 1 && near === 1 && diff < 0.6 ? '✓' : '✗', `(${same.toFixed(2)}/${near.toFixed(2)}/${diff.toFixed(2)})`);
+  check('[L1] bigram Dice 相同=1.0 近似=1.0 无关<0.6', same === 1 && near === 1 && diff < 0.6,
+    `(${same.toFixed(2)}/${near.toFixed(2)}/${diff.toFixed(2)})`);
 
   // l1Get/l1Set 无 embedding 路径：同题命中、近似命中、无关不命中
   await kernel.cache.l1Set('查看当前沙箱根目录下的文件列表', '沙箱根目录有 bin core kernel 等目录。');
   const hitExact = await kernel.cache.l1Get('查看当前沙箱根目录下的文件列表');
   const hitNear = await kernel.cache.l1Get('查看当前沙箱根目录下的文件列表！');
   const hitOther = await kernel.cache.l1Get('今天天气怎么样');
-  console.log('[L1] 缓存命中: 同题=1 近题=1 无关=0:',
-    hitExact.hit && hitNear.hit && !hitOther.hit ? '✓' : '✗',
+  check('[L1] 缓存命中: 同题/近题命中、无关不命中',
+    hitExact.hit && hitNear.hit && !hitOther.hit,
     `(${hitExact.hit}/${hitNear.hit}/${hitOther.hit})`);
   const s1 = kernel.cache.stats();
-  console.log('[L1] 计数 l1Hits>=2 l1Misses>=1:', s1.l1Hits >= 2 && s1.l1Misses >= 1 ? '✓' : '✗', JSON.stringify(s1).slice(0, 120));
+  check('[L1] 计数 l1Hits>=2 l1Misses>=1', s1.l1Hits >= 2 && s1.l1Misses >= 1, JSON.stringify(s1).slice(0, 120));
 
   // promptKey 隔离：systemPrompt 指纹不同（人设/插件规则变更）→ 缓存空间隔离，不串用旧答案
   await kernel.cache.l1Set('第一性原理测试问题', '答案A', 'prompt-v1');
   const isoHit = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v1');
   const isoMiss = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v2');
-  console.log('[L1] promptKey 隔离: 同指纹命中=1 异指纹不命中=1:',
-    isoHit.hit && !isoMiss.hit ? '✓' : '✗', `(${isoHit.hit}/${isoMiss.hit})`);
+  check('[L1] promptKey 隔离: 同指纹命中、异指纹不命中', isoHit.hit && !isoMiss.hit, `(${isoHit.hit}/${isoMiss.hit})`);
 
   // savedCost 累计
   kernel.cache.recordSavedCost(0.123);
   const s2 = kernel.cache.stats();
-  console.log('[L1] savedCost 累计:', s2.savedCost >= 0.123 ? '✓' : '✗', s2.savedCost.toFixed(6));
+  check('[L1] savedCost 累计', s2.savedCost >= 0.123, s2.savedCost.toFixed(6));
 }
 
 // ---- L1 作用域隔离：会话自产答案（依赖工具观察）不跨会话串用 ----
@@ -316,8 +427,8 @@ export default {
   await kernel.cache.l1Set('当前目录下有哪些文件', '会话答案A', 'prompt-s', 'trace-A');
   const sHitA = await kernel.cache.l1Get('当前目录下有哪些文件', 'prompt-s', 'trace-A');
   const sMissB = await kernel.cache.l1Get('当前目录下有哪些文件', 'prompt-s', 'trace-B');
-  console.log('[L1] 作用域隔离: 全局跨会话命中=1 会话内命中=1 跨会话不串=1:',
-    gHit.hit && sHitA.hit && !sMissB.hit ? '✓' : '✗',
+  check('[L1] 作用域隔离: 全局跨会话命中、会话内命中、跨会话不串',
+    gHit.hit && sHitA.hit && !sMissB.hit,
     `(全局=${gHit.hit} 会话A=${sHitA.hit} 会话B=${sMissB.hit})`);
 }
 
@@ -327,7 +438,7 @@ export default {
   // 修复前：按单字符判断多字词永不匹配 → "为什么" 残留；修复后应被整词剔除
   const cw = contentWords('为什么我现在不能运行这个文件呢');
   const leftover = cw.includes('为什么') || cw.includes('什么');
-  console.log('[L1] 多字停用词整词剔除:', !leftover ? '✓' : '✗', `内容词="${cw}"`);
+  check('[L1] 多字停用词整词剔除', !leftover, `内容词="${cw}"`);
 }
 
 // ---- usage 归一化：各厂商缓存命中字段统一口径 ----
@@ -345,7 +456,7 @@ export default {
     && oa.cachedInput === 700 && oa.missInput === 300
     && an.cachedInput === 500 && an.missInput === 400
     && na.cachedInput === undefined;
-  console.log('[usage] 缓存命中归一化 (DeepSeek/OpenAI/Anthropic/无):', ok ? '✓' : '✗',
+  check('[usage] 缓存命中归一化 (DeepSeek/OpenAI/Anthropic/无)', ok,
     `ds=${ds.cachedInput}/${ds.missInput} oa=${oa.cachedInput}/${oa.missInput} an=${an.cachedInput}/${an.missInput} na=${na.cachedInput ?? 'undefined'}`);
 }
 
@@ -355,8 +466,8 @@ export default {
   kernel.cache.recordProviderCacheHit(600, 100);
   const s = kernel.cache.stats();
   const realRate = (s.l3RealTokens / (s.l3RealTokens + s.l3RealMissTokens)) * 100;
-  console.log('[L3] 真实命中统计: token=1400 miss=300 命中率=82.4%:',
-    s.l3RealTokens === 1400 && s.l3RealMissTokens === 300 && Math.round(realRate * 10) / 10 === 82.4 ? '✓' : '✗',
+  check('[L3] 真实命中统计: token=1400 miss=300 命中率=82.4%',
+    s.l3RealTokens === 1400 && s.l3RealMissTokens === 300 && Math.round(realRate * 10) / 10 === 82.4,
     `(${s.l3RealTokens}/${s.l3RealMissTokens}/${realRate.toFixed(1)}%)`);
 }
 
@@ -370,8 +481,8 @@ export default {
   c.l2Set('overflow', 'x'); // 触发淘汰（>2000）
   const kept = c.l2Get('k0');
   const dropped = c.l2Get('k1'); // 未被访问的最旧条目（k0 已刷新）→ 应被淘汰
-  console.log('[L2] LRU 淘汰: 访问过的旧条目保留=1 未访问的最旧条目淘汰=1:',
-    kept.hit && !dropped.hit ? '✓' : '✗', `(k0=${kept.hit} k1=${dropped.hit})`);
+  check('[L2] LRU 淘汰: 访问过的旧条目保留、未访问的最旧条目淘汰',
+    kept.hit && !dropped.hit, `(k0=${kept.hit} k1=${dropped.hit})`);
 }
 
 // ---- todo 插件：模型 to do list（工具 CRUD + 会话隔离） ----
@@ -381,7 +492,7 @@ export default {
   const todoUpdate = tools.find((t) => t.name === 'todo_update');
   const todoList = tools.find((t) => t.name === 'todo_list');
   if (!todoAdd || !todoUpdate || !todoList) {
-    console.log('[todo] 插件未加载 ✗（todo_add/todo_update/todo_list 缺失）');
+    check('[todo] 插件已加载（todo_add/todo_update/todo_list）', false, '工具缺失');
   } else {
     // 会话 A 添加两张卡片
     const ctxA = { traceId: 'todo-a', turn: 0, sandboxRoot: rootDir, sessionId: 'sess-A', cache: kernel.cache, trace: kernel.trace };
@@ -401,7 +512,7 @@ export default {
     const cardsB = (listB.data as { cards: { id: string; title: string; status: string }[] }).cards;
     const aOk = cardsA.length === 2 && cardsA.some((c) => c.id === id1 && c.status === 'done') && cardsA.some((c) => c.id === id2);
     const bOk = cardsB.length === 1 && cardsB.some((c) => c.title === '会话B的独立任务');
-    console.log('[todo] 工具 CRUD + 会话隔离:', aOk && bOk ? '✓' : '✗',
+    check('[todo] 工具 CRUD + 会话隔离', aOk && bOk,
       `(A=${cardsA.length} B=${cardsB.length} 状态=${cardsA.map((c) => c.status).join(',')})`);
     // 测试卡片由下方 HTTP 冒烟中的看板 REST 清理
   }
@@ -412,7 +523,7 @@ export default {
   const tools = kernel.plugins.capabilities('tool').map((c) => c.tool);
   const runParallel = tools.find((t) => t.name === 'run_parallel');
   if (!runParallel) {
-    console.log('[parallel] 插件未加载 ✗（run_parallel 缺失）');
+    check('[parallel] 插件已加载（run_parallel）', false, '工具缺失');
   } else {
     const tctx = { traceId: 'par-test', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace };
     // 参数校验：单任务拒绝 / 空 objective 拒绝 / 超 4 个拒绝
@@ -422,7 +533,7 @@ export default {
       tasks: [1, 2, 3, 4, 5].map((i) => ({ objective: `任务${i}` })),
     }, tctx as never);
     const validated = one.ok === false && empty.ok === false && tooMany.ok === false;
-    console.log('[parallel] 参数校验（单任务/空目标/超量拒绝）:', validated ? '✓' : '✗',
+    check('[parallel] 参数校验（单任务/空目标/超量拒绝）', validated,
       `(${one.ok}/${empty.ok}/${tooMany.ok})`);
   }
 }
@@ -453,32 +564,43 @@ export default {
   const elapsed = Date.now() - started;
   const allOk = results.every((r) => r.status === 'fulfilled' && r.value.includes('完成'));
   const traces = kernel.trace.query(undefined, { type: 'llm_call' });
-  console.log('[parallel] 3 个独立循环并发（独立 traceId/上下文）:', allOk ? '✓' : '✗',
+  check('[parallel] 3 个独立循环并发（独立 traceId/上下文）', allOk,
     `(${elapsed}ms, ${traces.length} llm_call 步骤)`);
 }
 
-// ---- HTTP 冒烟：工作区 / 文件树 / skills 管理 API（端到端） ----
+// ---- HTTP 冒烟：健康检查 / 工作区 / 文件树 / skills 管理 API（端到端） ----
+// L6：startServer 监听失败（端口占用等）以 reject 呈现——下方 finally 清理仍生效，
+// 不再被 server 内部的 process.exit 击穿。数据目录经 AGENT_DATA_DIR 隔离在临时目录。
 {
   process.env.PORT = String(Number(process.env.PORT ?? 3000) + 1); // 避开默认端口
   const { startServer } = await import('../server/index');
-  const { kernel: httpKernel, server } = await startServer();
-  const base = `http://localhost:${process.env.PORT}`;
+  const { readFileSync: pkgRead } = await import('node:fs');
+  const pkgVersion = (JSON.parse(pkgRead(join(rootDir, 'package.json'), 'utf-8')) as { version: string }).version;
+  let started: Awaited<ReturnType<typeof startServer>> | undefined;
   try {
+    started = await startServer();
+    const base = `http://localhost:${process.env.PORT}`;
+
+    // M4 健康检查：bin 脚本据此校验进程身份/版本（pid 为当前进程——selftest 内嵌启动）
+    const health = await fetch(`${base}/api/health`).then((r) => r.json()) as { ok: boolean; version: string; pid: number };
+    check('[health API] ok/version/pid', health.ok === true && health.version === pkgVersion && health.pid === process.pid,
+      `ok=${health.ok} version=${health.version} pid=${health.pid}`);
+
     const ws = await fetch(`${base}/api/workspaces`).then((r) => r.json());
     const hasCurrent = Array.isArray(ws) && ws.some((w) => w.current);
-    console.log('[workspaces] 列表+当前标记:', hasCurrent ? '✓' : '✗', JSON.stringify(ws).slice(0, 140));
+    check('[workspaces] 列表+当前标记', hasCurrent, JSON.stringify(ws).slice(0, 140));
 
     const tree = await fetch(`${base}/api/files/tree`).then((r) => r.json()) as {
       entries: { name: string; type: 'dir' | 'file' }[];
     };
     const hasEntries = Array.isArray(tree.entries) && tree.entries.some((e) => e.name === 'core' || e.name === 'server');
-    console.log('[files/tree] 沙箱根文件树:', hasEntries ? '✓' : '✗', `(${tree.entries?.length ?? 0} 项)`);
+    check('[files/tree] 沙箱根文件树', hasEntries, `(${tree.entries?.length ?? 0} 项)`);
 
     const skills = await fetch(`${base}/api/skills`).then((r) => r.json()) as {
       installed: { name: string; source: string }[]; market: { name: string; description: string }[];
     };
     const hasInstalled = Array.isArray(skills.installed) && skills.installed.length >= 4;
-    console.log('[skills API] 已安装/市场:', hasInstalled ? '✓' : '✗', `installed=${skills.installed.length} market=${skills.market.length}`);
+    check('[skills API] 已安装/市场', hasInstalled, `installed=${skills.installed.length} market=${skills.market.length}`);
 
     // 统计 API：上下文用量 / 缓存命中率 / 总体概览
     const stats = await fetch(`${base}/api/stats`).then((r) => r.json()) as {
@@ -492,7 +614,7 @@ export default {
       && Array.isArray(stats.context?.perSession)
       && typeof stats.cache?.l2?.rate === 'number' && stats.cache?.l2?.rate >= 0
       && typeof stats.cache?.l3?.hits === 'number';
-    console.log('[stats API] 上下文/缓存统计:', hasStats ? '✓' : '✗',
+    check('[stats API] 上下文/缓存统计', hasStats,
       `sessions=${stats.overview?.sessions} ctxMax=${stats.context?.maxTokens} l2率=${stats.cache?.l2?.rate}% l3=${stats.cache?.l3?.hits}次/${stats.cache?.l3?.tokens}tok`);
 
     // 命令列表 API（命令面板数据源）
@@ -500,7 +622,7 @@ export default {
       commands: { name: string; usage: string; description: string }[];
     };
     const hasCmds = Array.isArray(cmds.commands) && cmds.commands.some((c) => c.name === 'help') && cmds.commands.some((c) => c.name === 'new');
-    console.log('[commands API] 命令清单:', hasCmds ? '✓' : '✗', `(${cmds.commands.length} 条: ${cmds.commands.map((c) => c.name).join(',')})`);
+    check('[commands API] 命令清单', hasCmds, `(${cmds.commands.length} 条: ${cmds.commands.map((c) => c.name).join(',')})`);
 
     // Capabilities Registry：能力/风险/成本/审批一目了然
     const caps = await fetch(`${base}/api/capabilities`).then((r) => r.json()) as {
@@ -510,7 +632,7 @@ export default {
     const hasCaps = Array.isArray(caps.tools) && caps.tools.length >= 10
       && caps.tools.some((t) => t.name === 'write_file' && t.risk === 'high' && t.approval)
       && Array.isArray(caps.byRisk?.high) && caps.byRisk.high.includes('write_file');
-    console.log('[capabilities API] 注册表（风险/成本/审批）:', hasCaps ? '✓' : '✗',
+    check('[capabilities API] 注册表（风险/成本/审批）', hasCaps,
       `tools=${caps.tools.length} high=${caps.byRisk?.high?.length} 个`);
 
     // todo 看板 REST：GET 列表 → POST 新建 → GET 可见 → PATCH 改状态 → DELETE 清理
@@ -538,11 +660,13 @@ export default {
         await fetch(`${boardBase}/cards/${c.id}`, { method: 'DELETE' });
       }
     }
-    console.log('[todo API] 看板 REST（面板/新增/列表/改状态/删除）:', hasPanel && created.ok === true && listOk && patchOk ? '✓' : '✗',
+    check('[todo API] 看板 REST（面板/新增/列表/改状态/删除）', hasPanel && created.ok === true && listOk && patchOk,
       `(panel=${hasPanel} post=${created.ok === true} list=${listOk} patch=${patchOk})`);
   } finally {
-    server.close();
-    await httpKernel.stop();
+    // L6：失败路径同样走此处——端口探测 reject 时 started 为 undefined，清理仍生效
+    started?.server.close();
+    started?.store.close();
+    await started?.kernel.stop();
   }
 }
 
@@ -576,7 +700,7 @@ export default {
     evs.push(ev.type);
   }
   const timedOut = evs.filter((t) => t === 'tool_result').length >= 1 && evs.includes('assistant_done');
-  console.log('[timeout] 挂起工具被超时拦截并继续循环:', timedOut ? '✓' : '✗', '| 事件:', evs.join(','));
+  check('[timeout] 挂起工具被超时拦截并继续循环', timedOut, `事件: ${evs.join(',')}`);
   kernel.config.set('agent.toolTimeoutMs', 30_000); // 恢复默认
 }
 
@@ -600,13 +724,13 @@ export default {
     if (ev.type === 'delta') answer += ev.text;
   }
   const failoverSteps = kernel.trace.query(undefined, { name: 'failover' });
-  console.log('[failover] 主 provider 失败自动切换备用:', answer.includes('备用路径') ? '✓' : '✗',
+  check('[failover] 主 provider 失败自动切换备用', answer.includes('备用路径'),
     `| 回答: ${answer.slice(0, 20)} | failover 步骤: ${failoverSteps.length}`);
 
   // 可观察性：trace 按类型过滤
   const llmSteps = kernel.trace.query(undefined, { type: 'llm_call' });
   const sysSteps = kernel.trace.query(undefined, { type: 'system' });
-  console.log('[trace] 类型过滤（llm_call/system）:', llmSteps.length > 0 && sysSteps.length > 0 ? '✓' : '✗',
+  check('[trace] 类型过滤（llm_call/system）', llmSteps.length > 0 && sysSteps.length > 0,
     `(${llmSteps.length}/${sysSteps.length})`);
 }
 
@@ -622,14 +746,14 @@ export default {
   const lifo = order.join(',') === 'c,b,a';
   const before = order.length;
   await s.dispose(); // 幂等：armed=false 后不再执行
-  console.log('[scope] 可逆效应 LIFO 恢复 + 幂等 dispose:', lifo && order.length === before ? '✓' : '✗', `(顺序=${order.join(',')})`);
+  check('[scope] 可逆效应 LIFO 恢复 + 幂等 dispose', lifo && order.length === before, `顺序=${order.join(',')}`);
   // 单独撤销：add 返回的 unregister 可从栈中移除（不随 dispose 执行）
   const s2 = new EffectScope();
   const ran: string[] = [];
   const un = s2.add(() => { ran.push('x'); });
   un();
   await s2.dispose();
-  console.log('[scope] 逆元可单独撤销:', ran.length === 0 ? '✓' : '✗');
+  check('[scope] 逆元可单独撤销', ran.length === 0);
 }
 
 // ---- 时空可组合性：卸载完全恢复 + 重新部署（可逆效应 × 插件） ----
@@ -638,8 +762,7 @@ export default {
 //       enable 后重新部署全部可用（onLoad 重跑重建，无需重启）。
 {
   const { mkdirSync, writeFileSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const dir = join(rootDir, 'plugins', 'tmp-compose');
+  const dir = join(userPluginsDir, 'tmp-compose');
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-compose', name: '可组合性测试', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(dir, 'index.ts'), `
@@ -683,8 +806,8 @@ export default {
   kernel.config.set('compose.testKey', 'hello');
   await new Promise((r) => setTimeout(r, 50));
   const cfgSeen = kernel.trace.query(undefined, { name: 'compose-config' }).length > cfgBefore;
-  console.log('[compose] 插件启动: 工具/服务/监听/配置对账全部生效:',
-    started && toolVisible && svcResolvable && pingSeen && cfgSeen ? '✓' : '✗',
+  check('[compose] 插件启动: 工具/服务/监听/配置对账全部生效',
+    started && toolVisible && svcResolvable && pingSeen && cfgSeen,
     `(state=${kernel.plugins.get('tmp-compose')?.state} tool=${toolVisible} svc=${svcResolvable} ping=${pingSeen} cfg=${cfgSeen})`);
 
   // ---- 卸载 = 完全恢复（可逆效应：四项副作用全部自动撤回） ----
@@ -699,8 +822,8 @@ export default {
   kernel.config.set('compose.testKey', 'after-disable');
   await new Promise((r) => setTimeout(r, 50));
   const cfgSilent = kernel.trace.query(undefined, { name: 'compose-config' }).length === cfg2Before;
-  console.log('[compose] 卸载完全恢复（能力消失/服务撤回/监听退订/配置监听退订）:',
-    toolGone && svcWithdrawn && pingSilent && cfgSilent ? '✓' : '✗',
+  check('[compose] 卸载完全恢复（能力消失/服务撤回/监听退订/配置监听退订）',
+    toolGone && svcWithdrawn && pingSilent && cfgSilent,
     `(tool=${toolGone} svc=${svcWithdrawn} ping=${pingSilent} cfg=${cfgSilent})`);
 
   // ---- 重新部署：enable = 重新加载（onLoad 重跑，全部能力重建） ----
@@ -711,7 +834,7 @@ export default {
   await kernel.bus.emitAsync({ type: 'compose.ping', data: { traceId: 'compose-t3' }, ts: Date.now() });
   await new Promise((r) => setTimeout(r, 50));
   const pingBack = kernel.trace.query(undefined, { name: 'compose-ping' }).length > ping3Before;
-  console.log('[compose] 重新部署（enable 重建能力）:', toolBack && svcBack && pingBack ? '✓' : '✗',
+  check('[compose] 重新部署（enable 重建能力）', toolBack && svcBack && pingBack,
     `(tool=${toolBack} svc=${svcBack} ping=${pingBack})`);
 }
 
@@ -720,8 +843,7 @@ export default {
 // 不会出现「坏自我修改禁用了恢复所需的进程」。
 {
   const { writeFileSync, rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const dir = join(rootDir, 'plugins', 'tmp-compose');
+  const dir = join(userPluginsDir, 'tmp-compose');
   const errEvents: string[] = [];
   const offErr = kernel.bus.on('plugin.error', (e) => {
     const d = e.data as { id?: string; rollback?: boolean; error?: string };
@@ -732,7 +854,7 @@ export default {
   await kernel.plugins.reload('tmp-compose');
   const rolledBack = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
   const errNoted = errEvents.some((e) => e.startsWith('rollback'));
-  console.log('[compose] 事务性热重载（坏版本回滚）:', rolledBack && errNoted ? '✓' : '✗',
+  check('[compose] 事务性热重载（坏版本回滚）', rolledBack && errNoted,
     `(旧工具存活=${rolledBack} 回滚事件=${errNoted} 事件=${errEvents.join(' | ') || '无'})`);
   // 写入好版本 v2（新工具）→ 正常替换：v2 在、v1 不在
   writeFileSync(join(dir, 'index.ts'), `
@@ -749,21 +871,20 @@ export default {
   await kernel.plugins.reload('tmp-compose');
   const v2In = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe_v2');
   const v1Gone = !kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
-  console.log('[compose] 好版本正常替换（v2 生效、v1 回收）:', v2In && v1Gone ? '✓' : '✗', `(v2=${v2In} v1残=${!v1Gone})`);
+  check('[compose] 好版本正常替换（v2 生效、v1 回收）', v2In && v1Gone, `(v2=${v2In} v1残=${!v1Gone})`);
   offErr();
   // 清理
   rmSync(dir, { recursive: true, force: true });
   await new Promise((r) => setTimeout(r, 1200));
   const cleaned = !kernel.plugins.list().some((p) => p.manifest.id === 'tmp-compose');
-  console.log('[compose] 删除目录自动卸载:', cleaned ? '✓' : '✗');
+  check('[compose] 删除目录自动卸载', cleaned);
 }
 
 // ---- 时空可组合性：反应性依赖（coeffect）——提供者停用，依赖方自动降级；恢复自动可用 ----
 // 两个插件：提供者（service:compose-svc）+ 消费者（inject 订阅）；消费者无需重启即可感知提供者生死。
 {
   const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
-  const { join } = await import('node:path');
-  const pdir = join(rootDir, 'plugins', 'tmp-provider');
+  const pdir = join(userPluginsDir, 'tmp-provider');
   mkdirSync(pdir, { recursive: true });
   writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ id: 'tmp-provider', name: '提供者', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(pdir, 'index.ts'), `
@@ -773,7 +894,7 @@ export default {
   onLoad(ctx) { ctx.register({ kind: 'service', service: { id: 'coeffect-svc', instance: { ready: true } } }); },
 } satisfies Plugin;
 `);
-  const cdir = join(rootDir, 'plugins', 'tmp-consumer');
+  const cdir = join(userPluginsDir, 'tmp-consumer');
   mkdirSync(cdir, { recursive: true });
   writeFileSync(join(cdir, 'plugin.json'), JSON.stringify({ id: 'tmp-consumer', name: '消费者', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(cdir, 'index.ts'), `
@@ -807,8 +928,8 @@ export default {
   await kernel.plugins.enable('tmp-provider');
   const probe3 = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'consumer_probe')?.tool;
   const recovered = probe3 ? (await probe3.handler({}, { traceId: 'c-t2', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).data : { provided: false };
-  console.log('[coeffect] 反应性依赖（提供者停用→降级；恢复→自动可用）:',
-    (initial as { provided: boolean }).provided === true && (degraded as { provided: boolean }).provided === false && (recovered as { provided: boolean }).provided === true ? '✓' : '✗',
+  check('[coeffect] 反应性依赖（提供者停用→降级；恢复→自动可用）',
+    (initial as { provided: boolean }).provided === true && (degraded as { provided: boolean }).provided === false && (recovered as { provided: boolean }).provided === true,
     `(初始=${(initial as { provided: boolean }).provided} 停用=${(degraded as { provided: boolean }).provided} 恢复=${(recovered as { provided: boolean }).provided})`);
   rmSync(pdir, { recursive: true, force: true });
   rmSync(cdir, { recursive: true, force: true });
@@ -831,7 +952,7 @@ export default {
   const r1 = await compactHistory(history, 1500, {});
   const truncateOk = r1.mode === 'truncate' && r1.droppedMessages > 0
     && r1.messages[r1.messages.length - 1].content === '问题三：最新问题';
-  console.log('[compact] 无 provider 降级截断（保最新消息）:', truncateOk ? '✓' : '✗',
+  check('[compact] 无 provider 降级截断（保最新消息）', truncateOk,
     `(mode=${r1.mode} 丢弃=${r1.droppedMessages} 保留=${r1.messages.length})`);
   // 2) 有 mock provider：LLM 摘要压缩旧轮（输出必须带标记，否则降级）
   const mockCompact = {
@@ -847,7 +968,7 @@ export default {
   const compactOk = r2.mode === 'compact' && r2.compactedMessages > 0
     && String(r2.messages[0].content).startsWith(SUMMARY_MARK)
     && r2.messages[r2.messages.length - 1].content === '问题三：最新问题';
-  console.log('[compact] LLM 摘要压缩旧轮（保留最新）:', compactOk ? '✓' : '✗',
+  check('[compact] LLM 摘要压缩旧轮（保留最新）', compactOk,
     `(mode=${r2.mode} 压缩=${r2.compactedMessages} 摘要=${String(r2.messages[0].content ?? '').slice(0, 20)}…)`);
   // 3) 已压缩防重复：历史已有【历史摘要】→ 不再 LLM 总结（不会每轮重复花钱）
   let mockCalls = 0;
@@ -862,7 +983,7 @@ export default {
     { role: 'user' as const, content: '问题三：最新问题' },
   ];
   const r3 = await compactHistory(already, 900, { provider: mockCounter, model: 'm' });
-  console.log('[compact] 已摘要不重复压缩（防重复花钱）:', mockCalls === 0 && r3.mode === 'truncate' ? '✓' : '✗',
+  check('[compact] 已摘要不重复压缩（防重复花钱）', mockCalls === 0 && r3.mode === 'truncate',
     `(LLM 调用=${mockCalls} mode=${r3.mode})`);
 }
 
@@ -910,11 +1031,11 @@ export default {
   const children = kernel.trace.query(undefined, { parentId: lastTool?.id });
   const spanOk = !!lastTool && children.length >= 1
     && children.some((s) => s.type === 'llm_call') && children.some((s) => s.traceId !== parentTraceId);
-  console.log('[trace] span 树（子代理步骤挂父工具步骤下）:', spanOk ? '✓' : '✗',
+  check('[trace] span 树（子代理步骤挂父工具步骤下）', spanOk,
     `(父=${lastTool?.id} 子步骤=${children.length} 跨 traceId=${children.some((s) => s.traceId !== parentTraceId)})`);
   // 顶层步骤本身不挂 parentId（根节点）
   const rootSteps = kernel.trace.query(undefined, { name: 'mock_sub' });
-  console.log('[trace] 顶层工具步骤为根（无 parentId）:', rootSteps.every((s) => !s.parentId) ? '✓' : '✗');
+  check('[trace] 顶层工具步骤为根（无 parentId）', rootSteps.every((s) => !s.parentId));
 }
 
 // ---- 工具输出机器校验（outputSchema）：声明即校验，不符标注回填 + 入 Trace ----
@@ -935,8 +1056,8 @@ export default {
   const badType = validateAgainstSchema({ answer: '完成', count: '3' }, schema);
   const badEnum = validateAgainstSchema({ answer: '完成', count: 1, status: '其他' }, schema);
   const badMin = validateAgainstSchema({ answer: '完成', count: -1 }, schema);
-  console.log('[validate] JSONSchema 子集校验: 通过=0 缺字段=1 类型错=1 枚举越界=1 下限越界=1:',
-    pass.length === 0 && missField.length === 1 && badType.length >= 1 && badEnum.length === 1 && badMin.length === 1 ? '✓' : '✗',
+  check('[validate] JSONSchema 子集校验: 通过=0 缺字段=1 类型错=1 枚举越界=1 下限越界=1',
+    pass.length === 0 && missField.length === 1 && badType.length >= 1 && badEnum.length === 1 && badMin.length === 1,
     `(通过=${pass.length} 缺字段=${missField.length} 类型=${badType.length} 枚举=${badEnum.length} 下限=${badMin.length})`);
   // Agent 循环集成：声明了 outputSchema 的工具返回坏结构 → 回填带标注 + output-validate 步骤入 Trace
   const { AgentRunner } = await import('../core/chat/agent');
@@ -963,7 +1084,7 @@ export default {
   }
   const ovSteps = kernel.trace.query(undefined, { name: 'output-validate' });
   const annotated = sawToolResult && ovSteps.length > 0 && ovSteps[ovSteps.length - 1].status === 'error';
-  console.log('[validate] 坏结构回填标注 + output-validate 步骤入 Trace:', annotated ? '✓' : '✗',
+  check('[validate] 坏结构回填标注 + output-validate 步骤入 Trace', annotated,
     `(步骤=${ovSteps.length} 状态=${ovSteps[ovSteps.length - 1]?.status})`);
 }
 
@@ -1007,9 +1128,9 @@ export default {
   const recalled = recall ? await recall.handler({ id: 'rs1' }, { traceId: 'rs-r', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
   const recallOk = recalled.ok === true && (recalled.data as { content: string }).content === JSON.stringify({ ok: true, data: { content: big } });
   const missOk = recall ? (await recall.handler({ id: 'nope' }, { traceId: 'rs-r2', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).ok === false : false;
-  console.log('[result-store] 大结果入存储+摘要回填:', storedRef && noFullText ? '✓' : '✗',
+  check('[result-store] 大结果入存储+摘要回填', !!storedRef && !!noFullText,
     `(引用=${storedRef} 无全文=${noFullText} 回填长度=${toolMsg ? String(toolMsg.content).length : 0})`);
-  console.log('[result-store] recall_tool_result 零副作用重读 + 缺失报错:', recallOk && missOk ? '✓' : '✗',
+  check('[result-store] recall_tool_result 零副作用重读 + 缺失报错', recallOk && missOk,
     `(重读=${recallOk} 缺失=${missOk})`);
   // 小结果（≤2000）全文回填，不折腾存储
   const smallTool: ToolDef = {
@@ -1035,7 +1156,8 @@ export default {
     onCheckpoint: (_t, h) => { smallCap.history = h; },
   })) { /* 消费 */ }
   const smallMsg = smallCap.history?.find((m) => m.role === 'tool');
-  console.log('[result-store] 小结果全文回填（不折腾存储）:', smallMsg && String(smallMsg.content).includes('小') && !String(smallMsg.content).includes('结果存储') ? '✓' : '✗');
+  check('[result-store] 小结果全文回填（不折腾存储）',
+    !!smallMsg && String(smallMsg.content).includes('小') && !String(smallMsg.content).includes('结果存储'));
 }
 
 // ---- 会话级成本实时熔断：预算耗尽 → harness 硬停止（不再发起新 LLM 调用） ----
@@ -1070,7 +1192,7 @@ export default {
   }
   const breakerSteps = kernel.trace.query(undefined, { name: 'cost-breaker' });
   const broke = evs.includes('budget_hit') && evs.includes('error') && llmCalls === 1 && breakerSteps.length > 0;
-  console.log('[cost-breaker] 预算耗尽硬熔断（无第二轮调用）:', broke ? '✓' : '✗',
+  check('[cost-breaker] 预算耗尽硬熔断（无第二轮调用）', broke,
     `(事件=${evs.join(',')} LLM 调用=${llmCalls} 熔断步骤=${breakerSteps.length})`);
 }
 
@@ -1109,7 +1231,7 @@ export default {
   const saved = savedCap.history;
   const toolPaired = !!saved && saved.some((m) => m.role === 'assistant' && m.tool_calls?.length)
     && saved.some((m) => m.role === 'tool' && m.tool_call_id === 'cc1');
-  console.log('[checkpoint] turn 级完整历史（工具回填配对）:', toolPaired && cpTurn === 0 ? '✓' : '✗',
+  check('[checkpoint] turn 级完整历史（工具回填配对）', toolPaired && cpTurn === 0,
     `(turn=${cpTurn} 消息数=${saved?.length ?? 0} 配对=${toolPaired})`);
   // 模拟恢复：checkpoint 历史 + 恢复提示 → 再次进入循环 → 能继续到最终答案（不丢已观察事实）
   let resumedAnswer = '';
@@ -1120,16 +1242,17 @@ export default {
   })) {
     if (ev.type === 'delta') resumedAnswer += ev.text;
   }
-  console.log('[checkpoint] 断点续跑（恢复历史继续决策）:', resumedAnswer.includes('最终答案') ? '✓' : '✗', `(答案=${resumedAnswer || '无'})`);
-  // DB 持久化往返（Store 层）
+  check('[checkpoint] 断点续跑（恢复历史继续决策）', resumedAnswer.includes('最终答案'), `(答案=${resumedAnswer || '无'})`);
+  // DB 持久化往返（Store 层；临时目录内的独立 DB 文件）
   const { Store } = await import('../server/db');
-  const store = new Store(join(rootDir, 'data', 'selftest-checkpoint.db'));
+  const store = new Store(join(dataDir, 'selftest-checkpoint.db'));
   store.saveCheckpoint('sess-cp', 2, [{ role: 'user', content: 'u' }, { role: 'tool', content: 't' }]);
   const loaded = store.loadCheckpoint('sess-cp');
   const persisted = loaded?.turn === 2 && loaded.history.length === 2 && loaded.history[1].content === 't';
   const cleared = (store.clearCheckpoint('sess-cp'), store.loadCheckpoint('sess-cp') === undefined);
-  console.log('[checkpoint] DB 持久化往返（保存/读取/清除）:', persisted && cleared ? '✓' : '✗',
+  check('[checkpoint] DB 持久化往返（保存/读取/清除）', persisted && cleared,
     `(turn=${loaded?.turn} 条数=${loaded?.history.length} 清除=${cleared})`);
+  store.close();
 }
 
 // ---- handoff 角色移交：执行器识别 → 终止循环 → 移交事件（角色=插件注册表） ----
@@ -1141,12 +1264,12 @@ export default {
   const hasMain = roles.some((r) => r.id === 'main');
   const hasPlanner = roles.some((r) => r.id === 'planner');
   const handoffTool = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'handoff_to')?.tool;
-  console.log('[handoff] 角色注册表（main 主代理 + planner 计划专家）:', hasMain && hasPlanner ? '✓' : '✗',
-    `(角色=${roles.map((r) => r.id).join(',')})`);
+  check('[handoff] 角色注册表（main 主代理 + planner 计划专家）', hasMain && hasPlanner,
+    `角色=${roles.map((r) => r.id).join(',')}`);
   // 非法角色 → 明确报错（错误信息列可用角色）
-  const bad = handoffTool ? await handoffTool.handler({ role: 'no-such', objective: 'x' }, { traceId: 'h0', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
-  console.log('[handoff] 非法角色报错（列可用角色）:', bad.ok === false && String(bad.error ?? '').includes('可用角色') ? '✓' : '✗',
-    `(错误=${String(bad.error ?? '').slice(0, 40)}…)`);
+  const bad = handoffTool ? await handoffTool.handler({ role: 'no-such', objective: 'x' }, { traceId: 'h0', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: true };
+  check('[handoff] 非法角色报错（列可用角色）', bad.ok === false && String(bad.error ?? '').includes('可用角色'),
+    `错误=${String(bad.error ?? '').slice(0, 40)}…`);
   // 执行器集成：mock 第一轮调用 handoff_to → 收到 handoff 事件、循环终止（无第二轮）
   let llmCalls = 0;
   const mk = {
@@ -1167,8 +1290,12 @@ export default {
     evs.push({ type: ev.type, role: hoRole });
   }
   const handed = evs.some((e) => e.type === 'handoff' && e.role === 'planner') && llmCalls === 1 && !evs.some((e) => e.type === 'assistant_done');
-  console.log('[handoff] 移交终止循环 + 事件上报:', handed ? '✓' : '✗', `(事件=${evs.map((e) => e.type).join(',')} LLM 调用=${llmCalls})`);
+  check('[handoff] 移交终止循环 + 事件上报', handed, `(事件=${evs.map((e) => e.type).join(',')} LLM 调用=${llmCalls})`);
 }
 
 await kernel.stop();
+
+// ---- 汇总（非 LLM 用例全绿 = exit 0；web_search 等外网依赖用例不计入） ----
+console.log(`\nselftest 结果：${passed} 通过 / ${failed} 失败`);
+if (failed > 0) process.exitCode = 1;
 console.log('selftest done');

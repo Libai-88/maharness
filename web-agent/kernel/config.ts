@@ -26,13 +26,15 @@ export class Config {
     }
   }
 
-  /** 读取配置，支持点路径（a.b.c） */
+  /** 读取配置，支持点路径（a.b.c）。
+   *  值为显式 null 时同样回退默认值——null 常被用作"显式清空"（config.json 里占位），
+   *  与 undefined 一样视为"未设置"，避免把 null 透传给数值/布尔消费方。 */
   get<T>(key: string, def?: T): T {
     const value = key.split('.').reduce<unknown>((acc, k) => {
       if (acc && typeof acc === 'object') return (acc as Record<string, unknown>)[k];
       return undefined;
     }, this.store);
-    return (value === undefined ? def : value) as T;
+    return (value === undefined || value === null ? def : value) as T;
   }
 
   /** 运行时修改（最高层），广播 config.changed */

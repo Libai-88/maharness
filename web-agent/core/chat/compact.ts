@@ -9,8 +9,10 @@
  *   1. compact：LLM 总结最早的完整对话轮 → 摘要替换（一次 LLM 调用，入 Trace）；
  *   2. truncate：兜底截断（保留最新消息，丢弃较早并注入说明）。
  *
- * 防重复压缩：历史已存在【历史摘要】时不再 LLM 总结（已压缩段视为不可再压），
- * 只允许对摘要之后的最近轮截断——避免"每轮重复花钱总结"与"丢最近信息"两个陷阱。
+ * 防重复压缩（M1 二次摘要锚定）：以既有【历史摘要】的位置为锚——摘要之后的
+ * 新增段允许再次 LLM 摘要（与旧摘要合并成一条，事实不丢），压缩路径不会因
+ * "已压缩过"而永久关闭；只有无可压缩段时才退化为截断兜底——
+ * 避免"每轮重复花钱总结"与"丢最近信息"两个陷阱。
  *
  * L3 前缀缓存影响：压缩 = 一次性重写历史前缀（失效一次），之后新消息继续追加、前缀重新稳定——
  * 与工作区切换同级的一次性代价，换来的是长会话不丢事实。
@@ -61,9 +63,12 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
     return { messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total };
   }
 
-  // 已压缩检测：第一条是带摘要标记的消息 → 不再重复总结，超预算则对摘要之后的最近轮截断
-  const alreadyCompacted = history[0]?.role === 'system' && String(history[0].content ?? '').startsWith(SUMMARY_MARK);
-  const compressibleFrom = alreadyCompacted ? 1 : 0;
+  // M1 二次摘要锚定：定位既有摘要消息的位置（不局限于 history[0]）。已有摘要时
+  // 允许对摘要之后新增的段再次 LLM 摘要——旧摘要与新段一起送入合并成一条新摘要
+  // （旧摘要中的事实不丢），不再"永久关闭压缩路径"（旧实现：新摘要直接顶掉旧摘要、
+  // 丢掉旧事实；且摘要一旦存在就只能截断，长会话越截越碎）。
+  const summaryIdx = history.findIndex((m) => m.role === 'system' && String(m.content ?? '').startsWith(SUMMARY_MARK));
+  const compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : 0;
 
   // 切点：从前往后找「压缩段结束」位置——使保留段（切点之后）估算 ≤ 预算 × KEEP_RATIO
   const keepBudget = Math.max(maxTokens * KEEP_RATIO, 512);
@@ -80,11 +85,15 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
     return truncate(history, maxTokens, total);
   }
 
-  // ---- compact：LLM 总结压缩段 ----
+  // ---- compact：LLM 总结压缩段（二次摘要：旧摘要 + 新段 → 合并成一条新摘要） ----
   if (opts.provider && compressible.length >= 2) {
-    const summary = await summarizeSegment(compressible, opts);
+    const summaryInput = summaryIdx >= 0 ? [history[summaryIdx], ...compressible] : compressible;
+    const summary = await summarizeSegment(summaryInput, opts);
     if (summary) {
+      // 摘要之前若还有消息（非常规：如未剥离的头部 system），原样保留
+      const prefix = summaryIdx > 0 ? history.slice(0, summaryIdx) : [];
       const messages: LLMMessage[] = [
+        ...prefix,
         { role: 'system', content: summary },
         ...kept,
       ];
@@ -120,7 +129,7 @@ async function summarizeSegment(segment: LLMMessage[], opts: CompactOptions): Pr
       for await (const chunk of provider.chat(
         [
           { role: 'system', content: SUMMARIZE_PROMPT },
-          { role: 'user', content: segment.map((m) => `${m.role === 'user' ? '用户' : '助手'}: ${m.content ?? ''}`).join('\n---\n') },
+          { role: 'user', content: segment.map((m) => `${m.role === 'user' ? '用户' : m.role === 'system' ? '既有摘要' : '助手'}: ${m.content ?? ''}`).join('\n---\n') },
         ],
         { model, signal, maxTokens: 400 },
       )) {

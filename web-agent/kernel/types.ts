@@ -50,6 +50,8 @@ export interface KernelLike {
   budget: {
     subagentQuota(): { allowed: boolean; remaining: number; reason?: string };
     consumeSubagent(): void;
+    /** 原子配额消耗（check-and-consume 一步完成，消除 TOCTOU）：per-session 池 + 进程级总上限 */
+    consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number };
     recordTask(record: { type: string; turns: number; cost: number; failed: boolean; ts: number }): void;
     taskProfile(): { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
   };
@@ -126,6 +128,9 @@ export interface CacheLike {
    *  hitScope：命中条目的作用域，供命中学习回填沿用。 */
   l1Get(question: string, promptKey?: string, scope?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string }>;
   l1Set(question: string, answer: string, promptKey?: string, scope?: string): Promise<void>;
+  /** 失效指定会话的全部 L1 条目（会话级隔离键命中）：会话内写入文件成功后调用，
+   *  使依赖旧观察的答案过期——同一问题应重新观察，而非复用陈旧事实 */
+  l1InvalidateSession(sessionId: string): void;
   /** L3 前缀复用统计（估算口径）：记录本轮与上轮 LLM 调用公共前缀的 token 数 */
   recordPrefixRepeat(tokens: number): void;
   /** L3 真实命中统计：provider usage 确认的缓存命中/未命中 token（归一化后）
@@ -243,6 +248,9 @@ export interface ToolResult {
   cacheable?: boolean;      // 是否允许 L2 缓存（默认 true）
   needsApproval?: boolean;  // 需用户审批（执行器级挂起，不可绕过）
   approvalSummary?: string; // 审批卡片摘要（needsApproval 时必填）
+  /** 审批/治理类拦截标记：本次"失败"是用户拒绝/策略拦截，不是工具或执行错误——
+   *  memory 插件据此不把"用户拒绝"记为失败教训（拒绝是合法终态，不是教训） */
+  governed?: boolean;
   /** 角色移交（handoff）：工具返回此字段 → 执行器立即终止本轮循环并移交会话控制权。
    *  由 handoff_to 工具使用——角色 id 必须存在于角色注册表。 */
   handoff?: { role: string; objective: string };
@@ -374,6 +382,8 @@ export interface TraceStats {
   totalTokensIn: number;
   totalTokensOut: number;
   totalCost: number;
+  /** JSONL 异步落盘失败次数（不再静默：首次失败 console.warn，此处累计可观测） */
+  writeFailures: number;
 }
 
 // ============ 缓存 ============

@@ -5,6 +5,11 @@
  */
 import { Cache, contentWords } from '../kernel/cache';
 import { normalizeUsage } from '../core/chat/provider';
+import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
+
+// L5：基于模块路径定位项目 data 目录——任意 cwd 运行行为一致（原 './data/...' 依赖 cwd）
+const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
 let pass = 0, fail = 0;
 const ok = (name: string, cond: boolean, detail = '') => {
@@ -117,7 +122,7 @@ console.log('[L2] 命名空间失效');
 // ---- 持久化 roundtrip：scope 字段跨重启保留 ----
 console.log('[persist] scope 持久化');
 {
-  const file = './data/cache-check.json';
+  const file = join(rootDir, 'data', 'cache-check.json');
   const c1 = new Cache(undefined, {}, file);
   await c1.l1Set('持久化测试问题的内容', '答案', 'pk', 'trace-Z');
   c1.l2Set('tk', { a: 1 });

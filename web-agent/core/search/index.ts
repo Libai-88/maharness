@@ -57,18 +57,22 @@ async function searchDdg(query: string, max: number): Promise<SearchResult[]> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   const html = await res.text();
+  // M6 按结果块切分：以 result__a 锚点分段（锚点 → 下一锚点 = 一个结果块），
+  // 块内分别提取 title/href/snippet——不共享正则游标，任一要素缺失只跳过该块，不再连锁错位
   const out: SearchResult[] = [];
-  const titleRe = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
-  const snippetRe = /class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g;
-  let m: RegExpExecArray | null;
-  while (out.length < max && (m = titleRe.exec(html))) {
-    const title = decodeHtml(stripTags(m[2]));
-    if (!title) continue;
-    // DDG 结果按「标题 + 摘要」交替排布，顺序取摘要
-    let snippet = '';
-    const sm = snippetRe.exec(html);
-    if (sm) snippet = decodeHtml(stripTags(sm[1]));
-    out.push({ title, url: cleanDdgUrl(m[1]), snippet });
+  const anchorRe = /class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g;
+  const anchors = [...html.matchAll(anchorRe)];
+  for (let i = 0; i < anchors.length && out.length < max; i++) {
+    const a = anchors[i]!;
+    const blockStart = a.index ?? 0;
+    const blockEnd = i + 1 < anchors.length ? anchors[i + 1]!.index : html.length;
+    const block = html.slice(blockStart, blockEnd);
+    const title = decodeHtml(stripTags(a[2] ?? ''));
+    const href = a[1] ?? '';
+    if (!title || !href) continue; // 块内要素缺失：跳过该块（不再污染后续配对）
+    const sm = block.match(/class="result__snippet"[^>]*>([\s\S]*?)<\/a>/);
+    const snippet = sm ? decodeHtml(stripTags(sm[1] ?? '')) : '';
+    out.push({ title, url: cleanDdgUrl(href), snippet });
   }
   return out;
 }

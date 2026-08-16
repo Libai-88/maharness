@@ -24,6 +24,8 @@ export class EffectScope {
   /** 逆元栈：dispose 时按逆序执行（后注册的副作用先恢复） */
   private inverses: Inverse[] = [];
   private armed = true;
+  /** 从父作用域摘除自己的句柄（child() 登记）：子作用域单独 dispose 时不再被父级连带回收 */
+  private detach?: () => void;
   /** 已执行的逆元数（可观测性：卸载时记录「回滚了几项」） */
   reverted = 0;
 
@@ -37,10 +39,13 @@ export class EffectScope {
 
   /**
    * 登记一个逆元（调用方已在作用域外执行了正向效果）。
-   * 返回一个幂等撤销函数（可在无需卸载时单独撤销——如 register 返回的 unregister）。
-   * 作用域已 dispose 后调用返回 no-op（不追加），保证 in-flight 操作不会在恢复后留下尾巴。
+   * 返回「移除式 disposer」：调用只把逆元从栈中移除、不执行它——
+   * 配合「先移除再手动执行」的组合句柄，保证手动撤销后 dispose 不再二次执行。
+   * 作用域已 dispose 后调用返回 no-op（不追加），保证 in-flight 操作不会在恢复后留下尾巴
+   * （晚到的逆元在已恢复的世界里执行 = 二次破坏）。
    */
   add(inverse: Inverse): () => void {
+    if (!this.armed) return () => {};
     this.inverses.push(inverse);
     let removed = false;
     return () => {
@@ -62,10 +67,12 @@ export class EffectScope {
     this.add(makeInverse(value));
   }
 
-  /** 登记子作用域：父作用域 dispose 时按 LIFO 连带回收子作用域（组件卸载级联到其子效果） */
+  /** 登记子作用域：父作用域 dispose 时按 LIFO 连带回收子作用域（组件卸载级联到其子效果）。
+   *  子作用域也可单独 dispose——dispose 时自动从父级逆元栈摘除自己，
+   *  后续父级 dispose 不再对其二次回收（幂等之外的多重保险）。 */
   child(): EffectScope {
     const c = new EffectScope();
-    this.add(() => c.dispose());
+    c.detach = this.add(() => c.dispose());
     return c;
   }
 
@@ -73,6 +80,7 @@ export class EffectScope {
   async dispose(): Promise<void> {
     if (!this.armed) return;
     this.armed = false;
+    this.detach?.(); // 从父级摘除：本次是主动回收，父级不必再连带
     const stack = this.inverses;
     this.inverses = [];
     for (let i = stack.length - 1; i >= 0; i--) {

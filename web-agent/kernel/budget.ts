@@ -8,7 +8,8 @@
 
 const TASK_PROFILE_MAX = 100;
 const SUBAGENT_WINDOW_MS = 10 * 60_000;
-const SUBAGENT_MAX_CALLS = 3;
+const SUBAGENT_MAX_CALLS_PER_SESSION = 3;   // per-session 池：每会话窗口内上限
+const SUBAGENT_MAX_CALLS_TOTAL_DEFAULT = 8; // 进程级总上限默认值（可经构造参数配置）
 
 export interface TaskRecord {
   type: string;
@@ -19,27 +20,58 @@ export interface TaskRecord {
 }
 
 export class Budget {
-  private subagentCalls: { ts: number }[] = [];
+  /** per-session 池：sessionId → 窗口内调用记录（每会话独立计数，防单会话饿死全局） */
+  private sessionCalls = new Map<string, { ts: number }[]>();
+  /** 进程级总池：全部会话合计的窗口内调用记录 */
+  private totalCalls: { ts: number }[] = [];
   private tasks: TaskRecord[] = [];
 
-  /** 重工具配额检查：窗口内调用次数超限则拒绝（返回剩余配额或超限原因） */
-  subagentQuota(): { allowed: boolean; remaining: number; reason?: string } {
+  constructor(private maxTotalCalls: number = SUBAGENT_MAX_CALLS_TOTAL_DEFAULT) {}
+
+  private inWindow(calls: { ts: number }[]): { ts: number }[] {
     const now = Date.now();
-    this.subagentCalls = this.subagentCalls.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS);
-    const remaining = SUBAGENT_MAX_CALLS - this.subagentCalls.length;
+    return calls.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS);
+  }
+
+  /**
+   * 原子配额消耗（check-and-consume 一步完成，消除 TOCTOU）：
+   * 旧 API「先 subagentQuota() 检查、后 consumeSubagent() 记账」在两次调用之间
+   * 可能有并发调用穿插，导致窗口内超额。本方法检查通过即记账，同一调用内完成。
+   *  双层配额：per-session（默认 3 次/10 分钟）+ 进程级总上限（默认 8，构造可配）。
+   */
+  consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number } {
+    const now = Date.now();
+    this.totalCalls = this.totalCalls.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS);
+    const sess = this.sessionCalls.get(sessionId)?.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS) ?? [];
+    const sessRemaining = SUBAGENT_MAX_CALLS_PER_SESSION - sess.length;
+    const totalRemaining = this.maxTotalCalls - this.totalCalls.length;
+    if (sessRemaining <= 0 || totalRemaining <= 0) {
+      return { allowed: false, remaining: 0 };
+    }
+    // 检查通过，立即记账（原子完成）
+    sess.push({ ts: now });
+    this.sessionCalls.set(sessionId, sess);
+    this.totalCalls.push({ ts: now });
+    return { allowed: true, remaining: Math.min(sessRemaining, totalRemaining) - 1 };
+  }
+
+  /** 重工具配额检查（旧 API，保留兼容；仅反映进程级池，新调用方请用 consumeSubagentQuota） */
+  subagentQuota(): { allowed: boolean; remaining: number; reason?: string } {
+    this.totalCalls = this.inWindow(this.totalCalls);
+    const remaining = this.maxTotalCalls - this.totalCalls.length;
     if (remaining <= 0) {
       return {
         allowed: false,
         remaining: 0,
-        reason: `子代理配额已用尽（${SUBAGENT_WINDOW_MS / 60_000} 分钟内最多 ${SUBAGENT_MAX_CALLS} 次）。harness 在管理认知资源：简单任务请直接执行；确需更多子代理请稍后再试。`,
+        reason: `子代理配额已用尽（${SUBAGENT_WINDOW_MS / 60_000} 分钟内进程级最多 ${this.maxTotalCalls} 次）。harness 在管理认知资源：简单任务请直接执行；确需更多子代理请稍后再试。`,
       };
     }
     return { allowed: true, remaining };
   }
 
-  /** 记录一次子代理调用（配额消耗） */
+  /** 记录一次子代理调用（旧 API 的配额消耗；新调用方用 consumeSubagentQuota 一步完成） */
   consumeSubagent(): void {
-    this.subagentCalls.push({ ts: Date.now() });
+    this.totalCalls.push({ ts: Date.now() });
   }
 
   /** 记录一次任务完成（任务画像：类型/轮数/成本/成败） */

@@ -46,6 +46,14 @@ npm run start:all  # 生产模式：构建前端后单端口启动 → http://lo
 - **统计面板**：左侧「统计」Tab —— 全局概览（会话/消息/tokens/成本/截断次数）、本次运行明细、每会话上下文用量（估算 token 与预算对比、截断状态）、三层缓存命中率（L1 语义问答 / L2 工具结果 / L3 prompt 前缀复用）与综合命中率。
 - **运行轨迹**：右上角「运行轨迹」—— 实时显示每次 LLM 调用与工具执行的耗时、token、成本、缓存命中（黑箱解药）。
 
+## 安全模型（机器强制，不依赖提示词）
+
+- **本机专用**：服务仅监听 `127.0.0.1`，Host/Origin 白名单校验（防局域网直连与 DNS rebinding）。
+- **审批强制**：声明 `approval:true` 的工具由执行器在调用前机器强制挂起（write_file/delete_file/powershell 等）；审批拒绝不会被记为"失败教训"。
+- **PowerShell 白名单模型**：默认需审批；仅整条命令每段都是只读白名单命令（Get-ChildItem/Get-Content/ls/dir/cat 等）免审批；`.env`/数据库等敏感目标即使只读命令也强制审批；进程 cwd 锚定沙箱根。
+- **内核写保护**：Agent 无法写 `kernel/`、`core/chat/`（自我接管防护）；`.env` 与 `data/` 不可读（密钥不进上下文）。开发时设 `AGENT_ALLOW_CORE_EDIT=1` 放行。
+- **沙箱边界**：文件工具与文件 API 共用同一校验（防穿越 + realpath）；工作区切换仅限已登记路径；同会话并发对话 409 互斥。
+
 ## 缓存体系（三层，命中即可见）
 
 | 层 | 机制 | 命中收益 |
@@ -126,7 +134,7 @@ web-agent/
 │  ├─ powershell/ #   PowerShell 执行器（危险命令审批）
 │  └─ self-extend/#   ★ 自我扩展（agent 可自建插件，定义自己）
 ├─ plugins/       # ★ 现场插件目录（热加载；Agent 自我扩展的落点）
-├─ server/        # Express + SSE API
+├─ server/        # Express + SSE API（routes/ 按资源拆分；模式/角色策略在 core/chat/policy.ts）
 ├─ ui/            # React + Vite 前端
 ├─ data/          # SQLite 会话存储 + traces/ JSONL 审计日志
 └─ docs/          # 架构设计文档
