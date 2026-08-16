@@ -2401,3 +2401,115 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* 主题切换过渡（避免生硬跳变） */
 .theme-fade { transition: background-color 0.25s ease, border-color 0.25s ease, color 0.25s ease; }
+
+/* ================= v2.2 会话状态横幅（断点恢复 / 角色接管 / 成本熔断） ================= */
+.session-banners {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px 24px 0;
+  max-width: 860px;
+  margin: 0 auto;
+  width: 100%;
+}
+.sess-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 12px;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.5;
+  animation: msgIn 0.18s ease;
+}
+.sess-banner .sb-icon { font-size: 13px; flex-shrink: 0; }
+.sess-banner .sb-text { flex: 1; min-width: 0; color: var(--text-2); }
+.sess-banner .sb-text b { color: var(--accent); }
+.sess-banner .sb-btn {
+  flex-shrink: 0;
+  font-size: 11px;
+  padding: 4px 12px;
+  border-radius: 7px;
+  border: none;
+  cursor: pointer;
+  font-family: inherit;
+  transition: opacity 0.15s;
+}
+.sess-banner .sb-btn:disabled { opacity: 0.5; cursor: default; }
+.sess-banner.resume { background: var(--blue-soft); border: 1px solid var(--accent); }
+.sess-banner.resume .sb-btn { background: var(--accent); color: #fff; }
+.sess-banner.role { background: var(--purple-soft); border: 1px solid var(--purple); }
+.sess-banner.role .sb-btn { background: transparent; color: var(--purple); border: 1px solid var(--purple); }
+.sess-banner.budget { background: rgba(255, 77, 79, 0.08); border: 1px solid var(--red); }
+.sess-banner.budget .sb-text { color: var(--red); }
+
+/* 消息操作（复制 / 重试）——hover 浮现，不占常驻空间 */
+.msg-actions {
+  display: inline-flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity 0.15s;
+  margin-left: 4px;
+}
+.msg-row:hover .msg-actions { opacity: 1; }
+.ma-btn {
+  background: transparent;
+  border: none;
+  color: var(--text-4);
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 5px;
+  display: inline-flex;
+  align-items: center;
+}
+.ma-btn:hover { color: var(--accent); background: var(--blue-soft); }
+
+/* 工具卡片：结果存储徽标（📎 已存——recall_tool_result 零副作用重读） */
+.tool-stored {
+  font-size: 10px;
+  color: var(--teal);
+  background: rgba(0, 200, 170, 0.1);
+  border: 1px solid rgba(0, 200, 170, 0.3);
+  border-radius: 5px;
+  padding: 1px 6px;
+  margin-left: 6px;
+  flex-shrink: 0;
+}
+.tool-stored-note {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--teal);
+}
+
+/* 会话累计成本（composer 左侧） */
+.comp-cost {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-4);
+  margin-left: 10px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+/* ================= TracePanel span 树（子任务下钻） ================= */
+.tl-arrow {
+  font-size: 9px;
+  color: var(--text-4);
+  width: 12px;
+  display: inline-block;
+  transition: transform 0.15s;
+  transform: rotate(-90deg);
+}
+.tl-arrow.open { transform: rotate(0deg); }
+.tl-child-tag {
+  font-size: 9px;
+  color: var(--purple);
+  background: var(--purple-soft);
+  border-radius: 4px;
+  padding: 0 5px;
+  margin-left: 6px;
+}
+
+/* 渲染性能：长会话屏外消息跳过渲染（浏览器原生，零 JS 开销） */
+.msg-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }

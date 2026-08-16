@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -21,17 +21,22 @@ export interface ChatHandlers {
   onDelta(text: string): void;
   onReasoning(text: string): void;
   onToolStart(name: string, args: unknown): void;
-  onToolResult(name: string, summary: string, ok: boolean): void;
+  onToolResult(name: string, summary: string, ok: boolean, stored?: boolean): void;
   onApprovalRequired(approvalId: string, name: string, summary: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
+  /** 角色移交（handoff）：会话控制权交给目标角色 */
+  onHandoff?(role: string, objective: string): void;
+  /** 成本熔断（budget_hit）：harness 硬边界触发 */
+  onBudgetHit?(cost: number, budget: number): void;
   onError(e: string): void;
   onEnd(): void;
 }
 
-/** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研） */
+/** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研）
+ *  body.resume=true 时从断点历史继续（checkpoint 断点续跑，不需要 message） */
 export async function streamChat(
   sessionId: string,
-  body: { message: string; model?: string; provider?: string },
+  body: { message?: string; model?: string; provider?: string; resume?: boolean },
   h: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
@@ -82,8 +87,10 @@ export async function streamChat(
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
           case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
           case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
-          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok)); break;
+          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
+          case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
+          case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
           case 'end': h.onEnd(); break;
         }
@@ -112,11 +119,13 @@ export const sessionApi = {
   list: () => api<Session[]>('/api/sessions'),
   create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
-  update: (id: string, patch: Partial<{ title: string; model: string; mode: string; archived: boolean | number; pinned: boolean | number }>) =>
+  update: (id: string, patch: Partial<{ title: string; model: string; mode: string; role: string; archived: boolean | number; pinned: boolean | number }>) =>
     api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   batchRemove: (ids: string[]) => api<{ ok: boolean; removed: number }>('/api/sessions/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
+  /** 断点状态（checkpoint：任务中断后「继续任务」入口的数据源） */
+  checkpoint: (id: string) => api<CheckpointInfo>(`/api/sessions/${id}/checkpoint`),
 };
 
 /** 斜杠命令执行结果 */

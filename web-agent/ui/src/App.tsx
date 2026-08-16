@@ -1,7 +1,7 @@
 // ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { approvalsApi, commandsApi, modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { ApprovalItem, BusEvent, ChatMessage, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
+import type { ApprovalItem, BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
 import Sidebar from './components/Sidebar';
 import type { MainTab } from './components/Sidebar';
 import ChatView from './components/ChatView';
@@ -37,6 +37,12 @@ export default function App() {
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
+  // 会话状态感知（agent harness 前端特征）：断点可恢复 / 角色接管 / 成本熔断
+  const [checkpoint, setCheckpoint] = useState<CheckpointInfo | null>(null);
+  const [resuming, setResuming] = useState(false);
+  const [budgetHit, setBudgetHit] = useState<{ cost: number; budget: number } | null>(null);
+  // 会话累计成本（composer 区域实时显示：harness 管理认知资源的可见性）
+  const [sessionCost, setSessionCost] = useState(0);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -92,9 +98,14 @@ export default function App() {
     setMessages([]);
     setTraceSteps([]);
     setPlan(null);
+    setCheckpoint(null);
+    setBudgetHit(null);
+    setSessionCost(0);
     try {
-      const msgs = await sessionApi.messages(id);
+      const [msgs, cp] = await Promise.all([sessionApi.messages(id), sessionApi.checkpoint(id).catch(() => null)]);
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
+      setCheckpoint(cp);
+      setSessionCost(msgs.reduce((s, m) => s + (m.cost ?? 0), 0));
     } catch { /* 忽略 */ }
   }, []);
 
@@ -106,6 +117,9 @@ export default function App() {
       setMessages([]);
       setTraceSteps([]);
       setPlan(null);
+      setCheckpoint(null);
+      setBudgetHit(null);
+      setSessionCost(0);
     } catch (err) { console.error('[maharness] 新建会话失败:', err); }
   }, [sel]);
 
@@ -242,16 +256,34 @@ export default function App() {
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
       onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
-      onToolResult: (name, summary, ok) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
         ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
-          ...t, summary, ok, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
+          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
         } : t),
       } : m)),
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
-      onDone: (d) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m)),
-      onError: (e) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m)),
+      onHandoff: (role, objective) => {
+        // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
+        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `🔀 已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
+        void sessionApi.list().then(setSessions).catch(() => undefined);
+      },
+      onBudgetHit: (cost, budget) => {
+        // 成本熔断：横幅展示（harness 硬边界）
+        setBudgetHit({ cost, budget });
+      },
+      onDone: (d) => {
+        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
+        setSessionCost((prev) => prev + (d.cost ?? 0));
+      },
+      onError: (e) => {
+        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
+        // 错误结束（如超轮数/熔断）→ 同步断点：未完成任务保留「继续任务」入口
+        if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+      },
       onEnd: () => {
         setStreaming(false);
+        // 任务正常完成 → 后端已清除断点
+        setCheckpoint(null);
         setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
       },
     }, ac.signal);
@@ -259,11 +291,60 @@ export default function App() {
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession]);
 
+  /** 断点续跑（checkpoint）：从上次中断的轮次继续，复用完整对话流程 */
+  const resumeTask = useCallback(async () => {
+    if (!activeId || streaming || resuming) return;
+    const cp = checkpoint;
+    if (!cp?.exists) return;
+    setResuming(true);
+    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
+    setMessages((prev) => [...prev, { id: `cp-${Date.now()}`, role: 'system', content: `⏸ 任务曾中断于第 ${cp.turn + 1} 轮——正在从断点继续…` }, assistantMsg]);
+    setCheckpoint(null);
+    const ac = new AbortController();
+    abortRef.current = ac;
+    await streamChat(activeId, { resume: true, model: sel?.model ?? '', provider: sel?.provider }, {
+      onStart: () => {},
+      onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
+      onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
+      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
+      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
+          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
+        } : t),
+      } : m)),
+      onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
+      onHandoff: (role, objective) => {
+        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `🔀 已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
+      },
+      onBudgetHit: (cost, budget) => setBudgetHit({ cost, budget }),
+      onDone: (d) => {
+        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
+        setSessionCost((prev) => prev + (d.cost ?? 0));
+      },
+      onError: (e) => {
+        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
+        if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+      },
+      onEnd: () => {
+        setStreaming(false);
+        setCheckpoint(null);
+      },
+    }, ac.signal);
+    setResuming(false);
+    try {
+      const cp2 = await sessionApi.checkpoint(activeId).catch(() => null);
+      setCheckpoint(cp2); // 恢复后若再次中断（如熔断），断点仍可继续
+      setSessions(await sessionApi.list());
+    } catch { /* 忽略 */ }
+  }, [activeId, streaming, resuming, checkpoint, sel]);
+
   const stop = useCallback(() => {
     abortRef.current?.abort();
     setMessages((prev) => prev.map((m) => m.streaming ? { ...m, streaming: false } : m));
     setStreaming(false);
-  }, []);
+    // 中断后同步断点状态：任务未完成 → 立即显示「继续任务」横幅（无需刷新页面）
+    if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+  }, [activeId]);
 
   const respondApproval = useCallback(async (id: string, approved: boolean) => {
     try { await approvalsApi.respond(id, approved); } catch { /* 审批已过期 */ }
@@ -370,6 +451,20 @@ export default function App() {
                 todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
                 modelLabel={modelLabel}
                 modelTag={modelTag}
+                // 会话状态感知（agent harness 前端特征）：断点恢复 / 角色接管 / 成本熔断 / 会话成本
+                checkpoint={checkpoint}
+                onResume={() => void resumeTask()}
+                resuming={resuming}
+                role={currentSession?.role}
+                onRoleReset={async () => {
+                  if (!activeId) return;
+                  try {
+                    await sessionApi.update(activeId, { role: '' });
+                    setSessions(await sessionApi.list());
+                  } catch { /* 忽略 */ }
+                }}
+                budgetHit={budgetHit}
+                sessionCost={sessionCost}
               />
             </div>
             {traceOpen && (

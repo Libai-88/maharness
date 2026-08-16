@@ -5,6 +5,8 @@ export interface Session {
   model: string;
   mode: string;
   planPending: number;
+  /** 当前接管角色（handoff）：空 = 主代理；有值 = 该角色接管会话 */
+  role?: string;
   archived: number;
   pinned: number;
   createdAt: number;
@@ -170,6 +172,8 @@ export interface TraceStep {
   cost?: number;
   cacheKey?: string;
   cacheLayer?: string;
+  /** 父步骤 id（span 树）：子代理/并行子任务挂到调用方工具步骤下，可跨 traceId 下钻 */
+  parentId?: string;
   status: 'running' | 'done' | 'error' | 'cancelled';
   error?: string;
   ts: number;
@@ -200,12 +204,22 @@ export interface ToolStep {
   startedAt?: number;
   /** 执行耗时（毫秒，onToolResult 结算） */
   durationMs?: number;
+  /** 大结果已存入结果存储（recall_tool_result 可零副作用重读） */
+  stored?: boolean;
 }
 
 export interface ApprovalItem {
   id: string;
   name: string;
   summary: string;
+}
+
+/** 断点状态（checkpoint：任务中断后可继续） */
+export interface CheckpointInfo {
+  exists: boolean;
+  turn: number;
+  historyMessages: number;
+  createdAt: number;
 }
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';

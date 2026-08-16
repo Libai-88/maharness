@@ -1,7 +1,7 @@
 // ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
 import { useEffect, useRef, useState } from 'react';
 import { commandsApi } from '../api';
-import type { ApprovalItem, ChatMessage, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
+import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
 import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
@@ -19,6 +19,17 @@ interface Props {
   todos?: TodoCard[];
   modelLabel?: string;
   modelTag?: string;
+  /** 断点续跑（checkpoint）：任务中断后「继续任务」入口 */
+  checkpoint?: CheckpointInfo | null;
+  onResume?: () => void;
+  resuming?: boolean;
+  /** 角色接管（handoff）：当前会话由哪个角色处理（空 = 主代理） */
+  role?: string;
+  onRoleReset?: () => void;
+  /** 成本熔断横幅（budget_hit） */
+  budgetHit?: { cost: number; budget: number } | null;
+  /** 会话累计成本（composer 实时显示） */
+  sessionCost?: number;
 }
 
 function fmtMs(ms?: number): string {
@@ -33,7 +44,7 @@ function argsSummary(args: unknown): string {
   } catch { return String(args); }
 }
 
-/** 工具调用卡片（Warp 命令块风格） */
+/** 工具调用卡片（Warp 命令块风格；stored=大结果已入结果存储，recall_tool_result 可重读） */
 function ToolCard({ t }: { t: ToolStep }) {
   const [open, setOpen] = useState(false);
   const running = t.status === 'running';
@@ -49,6 +60,7 @@ function ToolCard({ t }: { t: ToolStep }) {
           </span>
           <span className="tool-name">{t.name}</span>
           <span className="tool-path">{t.args ? argsSummary(t.args) : ''}</span>
+          {t.stored && <span className="tool-stored" title="大结果已存入结果存储——Agent 可用 recall_tool_result 零副作用重读全文">📎 已存</span>}
         </div>
         <div className="tool-head-right">
           <span className={`tool-status ${statusCls}`}><span className="sd" />{statusTxt}</span>
@@ -59,6 +71,7 @@ function ToolCard({ t }: { t: ToolStep }) {
       {show && t.summary && (
         <div className="tool-body">
           <span className="t-out">{t.summary}</span>
+          {t.stored && <span className="tool-stored-note">完整结果已存入结果存储（本会话内 recall_tool_result 可重读，零副作用）</span>}
         </div>
       )}
     </div>
@@ -105,7 +118,7 @@ function renderContent(text: string) {
   return parts;
 }
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '' }: Props) {
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -113,6 +126,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [cmdIdx, setCmdIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // 输入历史（↑/↓ 回放，终端习惯——快速高效响应）
+  const [inputHist, setInputHist] = useState<string[]>([]);
+  const histIdxRef = useRef(-1);
 
   useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
   useEffect(() => { commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined); }, []);
@@ -120,6 +136,10 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const submit = (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
+    if (textOverride === undefined && text) {
+      setInputHist((prev) => [text, ...prev].slice(0, 30));
+      histIdxRef.current = -1;
+    }
     setInput('');
     setCmdOpen(false);
     onSend(text);
@@ -155,11 +175,54 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
       if (e.key === 'Tab') { e.preventDefault(); applyCommand(matched[cmdIdx], false); return; }
       if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applyCommand(matched[cmdIdx]); return; }
     }
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); }
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submit(); return; }
+    // 输入历史回放（↑/↓）：空输入框时↑取上一条（终端习惯）
+    if (e.key === 'ArrowUp' && !input && inputHist.length > 0) {
+      e.preventDefault();
+      histIdxRef.current = Math.min(histIdxRef.current + 1, inputHist.length - 1);
+      setInput(inputHist[histIdxRef.current]);
+    } else if (e.key === 'ArrowDown' && histIdxRef.current >= 0) {
+      e.preventDefault();
+      histIdxRef.current -= 1;
+      setInput(histIdxRef.current >= 0 ? inputHist[histIdxRef.current] : '');
+    }
+    // Esc 停止（streaming 时；与停止按钮等价）
+    if (e.key === 'Escape' && streaming) { e.preventDefault(); onStop(); }
   };
 
   return (
     <div className="chat-area">
+      {/* ---- 会话状态横幅（agent harness 前端特征：可恢复 / 可干预 / 边界可见） ---- */}
+      {(role || (checkpoint?.exists && !streaming) || budgetHit) && (
+        <div className="session-banners">
+          {checkpoint?.exists && !streaming && !resuming && (
+            <div className="sess-banner resume">
+              <span className="sb-icon">⏸</span>
+              <span className="sb-text">任务中断于第 {checkpoint.turn + 1} 轮（{checkpoint.historyMessages} 条上下文已存档）——可无缝继续，不丢已完成的工作</span>
+              <button className="sb-btn" onClick={onResume} disabled={resuming}>继续任务</button>
+            </div>
+          )}
+          {resuming && (
+            <div className="sess-banner resume">
+              <span className="sb-icon">⏳</span>
+              <span className="sb-text">正在从断点恢复…</span>
+            </div>
+          )}
+          {role && (
+            <div className="sess-banner role">
+              <span className="sb-icon">🔀</span>
+              <span className="sb-text">会话由「<b>{role}</b>」角色接管（专业化分工）</span>
+              <button className="sb-btn" onClick={onRoleReset}>交回主代理</button>
+            </div>
+          )}
+          {budgetHit && (
+            <div className="sess-banner budget">
+              <span className="sb-icon">💰</span>
+              <span className="sb-text">成本预算已耗尽（${budgetHit.cost.toFixed(4)} / 预算 ${budgetHit.budget.toFixed(4)}）——harness 已熔断，不再发起新调用；已完成的结果保留在会话中</span>
+            </div>
+          )}
+        </div>
+      )}
       <div className="messages">
         <div className="messages-inner">
           {plan && (
@@ -210,6 +273,11 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                       <span className="msg-author">maharness</span>
                       <span className="msg-tag">{modelTag || 'AI'}</span>
                       <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? '⚡ 缓存命中' : ''}</span>
+                      {!m.streaming && m.content && (
+                        <span className="msg-actions">
+                          <button className="ma-btn" title="复制回复" aria-label="复制回复" onClick={() => { navigator.clipboard?.writeText(m.content ?? '').catch(() => undefined); }}><IconCopy size={12} /></button>
+                        </span>
+                      )}
                     </div>
                     {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
                     {m.reasoning && m.reasoning.length > 0 && (
@@ -253,6 +321,11 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                   <div className="msg-meta" style={{ justifyContent: 'flex-end' }}>
                     <span className="msg-author">你</span>
                     <span className="msg-extra">刚刚</span>
+                    {!streaming && (
+                      <span className="msg-actions">
+                        <button className="ma-btn" title="重新发送（重试）" aria-label="重新发送" onClick={() => submit(m.content)}><IconRefresh size={12} /></button>
+                      </span>
+                    )}
                   </div>
                   <div className="user-bubble">{m.content}</div>
                 </div>
@@ -327,11 +400,15 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               setCmdIdx(0);
             }}
             onKeyDown={onKeyDown}
-            disabled={!hasModels || streaming}
+            // 流式期间不禁用：保留 Esc 停止 / ↑ 历史回放等键盘能力（发送由 submit 防护）
+            disabled={!hasModels}
           />
           <div className="composer-toolbar">
             <div className="comp-left">
               <span className="comp-tools-label" title="工具将在对话中自动按需调用">工具自动调用</span>
+              {sessionCost > 0 && (
+                <span className="comp-cost" title="本会话累计成本（harness 管理认知资源）">本会话 ${sessionCost.toFixed(4)}</span>
+              )}
             </div>
             <div className="comp-right">
               <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<IconChevronDown size={10} /></span>
@@ -343,7 +420,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
             </div>
           </div>
         </div>
-        <div className="composer-hint">按 <span className="mono">/</span> 调出命令面板 · <span className="mono">Enter</span> 发送 · <span className="mono">Shift + Enter</span> 换行</div>
+        <div className="composer-hint">按 <span className="mono">/</span> 调出命令面板 · <span className="mono">Enter</span> 发送 · <span className="mono">Shift + Enter</span> 换行 · <span className="mono">↑</span> 回放上一条 · <span className="mono">Esc</span> 停止</div>
       </div>
     </div>
   );
