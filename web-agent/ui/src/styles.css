@@ -1,51 +1,55 @@
 /* ============================================================
-   maharness UI v3 —— 设计系统（OLED Slate Dark × Warp accent）
-   v2.3 升级：对齐 ui-ux-pro-max 设计系统输出（Dark OLED / 高对比 /
-   IBM Plex Sans + JetBrains Mono）；修复对比度与反馈完整性
+   maharness UI v4 —— 设计系统「暖炭 · 手作风」（Warm Charcoal Studio）
+   v4 深度重设：破除 AI 泛化蓝紫渐变，回归暖陶人类质感。
+   基底 = 暖灰炭 / 奶油纸（双主题对等）；强调 = 陶土主色 +
+   琥珀 · 松绿 · 砖红（情绪语义）。无纯黑、无霓虹光晕、无赛博蓝紫。
+   字体 = Fraunces（衬线大标题，手作编辑部感）× IBM Plex Sans（正文）
+   ×  JetBrains Mono（代码）
    ============================================================ */
 
 :root {
-  /* 基础色板（深色主题 · 默认）——slate 深底系（OLED，低亮度护眼） */
-  --bg-deep: #0d1424;
-  --bg-panel: #141d31;
-  --bg-elev: #1b2438;
-  --bg-input: #0a1120;
-  --bg-hover: rgba(255, 255, 255, 0.05);
-  --bg-active: #26304a;
-  --border: #2d3a55;
-  --border-soft: #232e46;
+  /* 基础色板（深色主题 · 默认）——暖灰炭底（含极微红棕，去纯黑冷感，护眼） */
+  --bg-deep: #171310;
+  --bg-panel: #1e1916;
+  --bg-elev: #26201b;
+  --bg-input: #12100d;
+  --bg-hover: rgba(255, 240, 225, 0.05);
+  --bg-active: #332a23;
+  --border: #382f28;
+  --border-soft: #2b241f;
 
-  /* 文字（对比度 ≥ 4.5:1 正文 / 4.4:1 微型标签，均在深底实测） */
-  --text-1: #e9eef7;
-  --text-2: #a9b5ca;
-  --text-3: #8b98af;
-  --text-4: #7584a0;
-  --muted: #6b7a96;
+  /* 文字（暖白基调，对比度 ≥ 4.5:1 正文实测） */
+  --text-1: #ece3d5;
+  --text-2: #bdb09f;
+  --text-3: #9b8d7c;
+  --text-4: #7d7162;
+  --muted: #6b6053;
 
-  /* 强调色（品牌蓝 selection + warp teal 运行语义，与 v2 一致） */
-  --accent: #2f63f6;        /* selection blue */
-  --teal: #11d080;          /* warp teal：成功/缓存命中 */
-  --purple: #a277ff;        /* warp purple：思考/语义缓存 */
-  --orange: #f0993e;        /* 等待/警告 */
-  --red: #f85149;           /* 错误/破坏性 */
-  --teal-soft: rgba(17, 208, 128, 0.14);
-  --purple-soft: rgba(162, 119, 255, 0.14);
-  --blue-soft: rgba(47, 99, 246, 0.16);
-  --orange-soft: rgba(240, 153, 62, 0.14);
-  --red-soft: rgba(248, 81, 73, 0.14);
+  /* 强调色（陶土主色 + 暖情绪语义——琥珀/松绿/砖红，去紫蓝） */
+  --accent: #d0856b;        /* 陶土 terracotta：主色/选择/运行 */
+  --teal: #82a873;          /* 松绿 sage green：成功/缓存命中 */
+  --purple: #d9a441;        /* 琥珀 amber：思考/语义/计划 */
+  --orange: #e0913f;        /* 赭橙 umber：等待/警告 */
+  --red: #d96856;           /* 砖红 brick：错误/破坏性 */
+  --teal-soft: rgba(130, 168, 115, 0.15);
+  --purple-soft: rgba(217, 164, 65, 0.15);
+  --blue-soft: rgba(208, 133, 107, 0.17);
+  --orange-soft: rgba(224, 145, 63, 0.15);
+  --red-soft: rgba(217, 104, 86, 0.16);
 
-  /* 派生色（按钮文字 / 遮罩 / 滚动条 / hover，需随主题翻转） */
-  --on-accent: #ffffff;
-  --on-teal: #0b0e13;
-  --overlay: rgba(8, 12, 22, 0.66);
-  --scroll-thumb: #2a3550;
-  --scroll-thumb-hover: #3a4a6d;
-  --btn-hover: #232e46;
-  --toggle-off: #3a4a6d;
-  --toggle-knob: #ffffff;
+  /* 派生色（按钮文字 / 遮罩 / 滚动条 / hover，随主题翻转） */
+  --on-accent: #2b1c14;
+  --on-teal: #16200f;
+  --overlay: rgba(18, 13, 10, 0.66);
+  --scroll-thumb: #3b3129;
+  --scroll-thumb-hover: #4f4237;
+  --btn-hover: #2b241f;
+  --toggle-off: #4f4237;
+  --toggle-knob: #f2e9dc;
 
   /* 字体（Google Fonts 加载，离线回退系统字体） */
   --font-sans: 'IBM Plex Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --font-display: 'Fraunces', 'Times New Roman', Georgia, 'Songti SC', 'SimSun', serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
 
   /* 尺寸 */
@@ -54,9 +58,11 @@
   --radius: 10px;
   --radius-sm: 7px;
   --radius-lg: 14px;
-  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
+  /* 着色阴影：暖褐（呼应炭底与陶土，替代纯黑投影——去 AI 冷灰感） */
+  --shadow-pop: 0 16px 40px rgba(24, 14, 8, 0.55);
+  --shadow-soft: 0 2px 10px rgba(24, 14, 8, 0.28);
 
-  /* 品牌渐变（v2.4 品牌元素：蓝→紫→青，年轻活力主色带） */
+  /* 品牌渐变（v4 暖调和声：陶土 → 琥珀 → 松绿，暖色相生，弃蓝紫） */
   --brand-gradient: linear-gradient(100deg, var(--accent) 0%, var(--purple) 52%, var(--teal) 100%);
   --brand-gradient-soft: linear-gradient(100deg, var(--blue-soft), var(--purple-soft) 52%, var(--teal-soft));
 
@@ -64,45 +70,46 @@
 }
 
 /* ============================================================
-   浅色主题（蓝白）· data-theme="light"
+   暖浅色主题（奶油纸）· data-theme="light"
    ============================================================ */
 :root[data-theme='light'] {
-  --bg-deep: #f3f6fc;
-  --bg-panel: #ffffff;
-  --bg-elev: #ffffff;
-  --bg-input: #eef2f9;
-  --bg-hover: rgba(24, 60, 140, 0.055);
-  --bg-active: #e3eaf8;
-  --border: #d7deec;
-  --border-soft: #e2e8f4;
+  --bg-deep: #f3ecdf;
+  --bg-panel: #fbf6ec;
+  --bg-elev: #fdf8f0;
+  --bg-input: #ece4d3;
+  --bg-hover: rgba(122, 74, 46, 0.06);
+  --bg-active: #e6d9c2;
+  --border: #ded1bb;
+  --border-soft: #e6dcc9;
 
-  --text-1: #18213a;
-  --text-2: #44506e;
-  --text-3: #66748f;
-  --text-4: #6b7894;
-  --muted: #8b95ab;
+  --text-1: #2b231b;
+  --text-2: #4e4134;
+  --text-3: #7c6d5b;
+  --text-4: #8f7f6b;
+  --muted: #a39581;
 
-  --accent: #2f63f6;
-  --teal: #0aa169;
-  --purple: #7a5af0;
-  --orange: #d97706;
-  --red: #dc2626;
-  --teal-soft: rgba(10, 161, 105, 0.12);
-  --purple-soft: rgba(122, 90, 240, 0.12);
-  --blue-soft: rgba(47, 99, 246, 0.12);
-  --orange-soft: rgba(217, 119, 6, 0.12);
-  --red-soft: rgba(220, 38, 38, 0.12);
+  --accent: #b4613f;
+  --teal: #5d8f50;
+  --purple: #a07c2a;
+  --orange: #bd7627;
+  --red: #c0483b;
+  --teal-soft: rgba(93, 143, 80, 0.13);
+  --purple-soft: rgba(160, 124, 42, 0.13);
+  --blue-soft: rgba(180, 97, 63, 0.13);
+  --orange-soft: rgba(189, 118, 39, 0.13);
+  --red-soft: rgba(192, 72, 59, 0.13);
 
-  --on-accent: #ffffff;
-  --on-teal: #04321f;
-  --overlay: rgba(240, 244, 252, 0.72);
-  --scroll-thumb: #c2cde2;
-  --scroll-thumb-hover: #a4b3d2;
-  --btn-hover: #e6ecf8;
-  --toggle-off: #c2cde2;
+  --on-accent: #fdf6ea;
+  --on-teal: #f3faee;
+  --overlay: rgba(240, 231, 216, 0.72);
+  --scroll-thumb: #cfc1a6;
+  --scroll-thumb-hover: #b5a587;
+  --btn-hover: #e9dfc9;
+  --toggle-off: #cfc1a6;
   --toggle-knob: #ffffff;
 
-  --shadow-pop: 0 16px 40px rgba(35, 60, 120, 0.16);
+  --shadow-pop: 0 16px 40px rgba(96, 62, 34, 0.17);
+  --shadow-soft: 0 2px 10px rgba(96, 62, 34, 0.10);
 
   color-scheme: light;
 }
@@ -112,16 +119,15 @@
 html, body, #root { height: 100%; }
 
 body {
-  /* 人物主题背景：角色插画铺底 + 四段渐变遮罩。
-     中段（40%-60%，人物主体区，原图最亮带）遮罩最浅——人物清晰可见；
-     顶部（顶栏文字区）与底部（输入区）稍深——UI 可读性优先。
-     实测：人物区亮度 ≈ 95（透出 70%），顶/底 ≈ 45-55（可读）。 */
+  /* 暖陶瓷像背景：角色插画铺底 + 暖炭四段遮罩。
+     中段（40%-60%，人物主体区）遮罩最浅——人物柔和透出；
+     顶部（顶栏）与底部（输入区）稍深——UI 可读性优先。 */
   background:
     linear-gradient(180deg,
-      rgba(10, 12, 18, 0.55) 0%,
-      rgba(10, 12, 18, 0.30) 40%,
-      rgba(10, 12, 18, 0.34) 60%,
-      rgba(10, 12, 18, 0.60) 100%),
+      rgba(26, 18, 13, 0.52) 0%,
+      rgba(26, 18, 13, 0.28) 40%,
+      rgba(26, 18, 13, 0.32) 60%,
+      rgba(26, 18, 13, 0.58) 100%),
     url('/hero-char.png') center 32% / cover no-repeat fixed;
   color: var(--text-1);
   font-family: var(--font-sans);
@@ -131,15 +137,31 @@ body {
   overflow: hidden;
 }
 
-/* 浅色主题：人物背景保留但遮罩换浅色（保持文字对比度），中段最透 */
+/* 暖浅主题：遮罩换奶油纸（保持文字对比度），中段最透 */
 :root[data-theme='light'] body {
   background:
     linear-gradient(180deg,
-      rgba(243, 246, 252, 0.58) 0%,
-      rgba(243, 246, 252, 0.34) 40%,
-      rgba(243, 246, 252, 0.38) 60%,
-      rgba(243, 246, 252, 0.66) 100%),
+      rgba(243, 236, 223, 0.58) 0%,
+      rgba(243, 236, 223, 0.34) 40%,
+      rgba(243, 236, 223, 0.38) 60%,
+      rgba(243, 236, 223, 0.66) 100%),
     url('/hero-char.png') center 32% / cover no-repeat fixed;
+}
+
+/* ============================================================
+   v4 质感：全局 grain 噪点层（固定、不挡交互）
+   以细微胶片颗粒破除纯扁平的「数字 AI 感」，制造手作温度。
+   用内联 SVG feTurbulence 做噪点，性能友好且无需外图。
+   ============================================================ */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 999;
+  pointer-events: none;
+  opacity: 0.05;
+  mix-blend-mode: overlay;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
 button {
@@ -283,10 +305,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-weight: 800;
   font-size: 15px;
   font-family: var(--font-mono);
-  box-shadow: 0 2px 10px rgba(47, 99, 246, 0.35);
+  box-shadow: 0 2px 10px rgba(208, 133, 107, 0.35);
 }
 
-.sb-logo-title { font-weight: 700; font-size: 15px; letter-spacing: -0.2px; }
+.sb-logo-title { font-family: var(--font-display); font-size: 17px; font-weight: 600; font-variation-settings: 'SOFT' 60, 'opsz' 36; letter-spacing: 0.2px; }
 
 .sb-icon-btn {
   width: 28px; height: 28px;
@@ -681,7 +703,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   font-family: var(--font-mono);
   font-size: 14px;
   flex-shrink: 0;
-  box-shadow: 0 2px 8px rgba(47, 99, 246, 0.28);
+  box-shadow: 0 2px 8px rgba(208, 133, 107, 0.28);
 }
 .msg-avatar.user-av { background: var(--toggle-off); color: var(--text-1); font-size: 12px; border-radius: 50%; }
 
@@ -700,12 +722,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   bottom: 4px;
   width: 3px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--accent), #7aa2ff 60%, var(--teal));
+  background: linear-gradient(180deg, var(--accent), #e8b85e 60%, var(--teal));
   animation: edgeFlow 1.6s ease-in-out infinite;
 }
 @keyframes avatarBreath {
-  0%, 100% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
-  50% { box-shadow: 0 0 14px rgba(17, 208, 128, 0.45); }
+  0%, 100% { box-shadow: 0 0 0 rgba(130, 168, 115, 0); }
+  50% { box-shadow: 0 0 14px rgba(130, 168, 115, 0.45); }
 }
 @keyframes edgeFlow {
   0%, 100% { opacity: 0.35; }
@@ -717,7 +739,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   animation: cachedFlash 1.2s ease-out;
 }
 .msg-row.cached .msg-avatar {
-  box-shadow: 0 0 14px rgba(17, 208, 128, 0.45);
+  box-shadow: 0 0 14px rgba(130, 168, 115, 0.45);
 }
 @keyframes cachedFlash {
   0% { background: var(--teal-soft); border-radius: var(--radius); }
@@ -772,12 +794,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--purple) 30%, #c9a8ff 50%, var(--purple) 70%, transparent);
+  background: linear-gradient(90deg, transparent, var(--purple) 30%, #efd08a 50%, var(--purple) 70%, transparent);
   background-size: 200% 100%;
   animation: toolFlow 1.6s linear infinite;
 }
 .think-card.streaming .think-label {
-  background: linear-gradient(90deg, var(--purple), #c9a8ff, var(--purple));
+  background: linear-gradient(90deg, var(--purple), #efd08a, var(--purple));
   background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
@@ -788,8 +810,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   animation: thinkPulse 1.2s ease-in-out infinite;
 }
 @keyframes thinkBreath {
-  0%, 100% { box-shadow: 0 0 0 rgba(162, 119, 255, 0); }
-  50% { box-shadow: 0 0 18px rgba(162, 119, 255, 0.22); }
+  0%, 100% { box-shadow: 0 0 0 rgba(217, 164, 65, 0); }
+  50% { box-shadow: 0 0 18px rgba(217, 164, 65, 0.22); }
 }
 @keyframes thinkPulse {
   0%, 100% { transform: scale(1); opacity: 1; }
@@ -842,9 +864,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   animation: toolDoneFlash 0.9s ease-out;
 }
 @keyframes toolDoneFlash {
-  0% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
-  35% { box-shadow: 0 0 16px rgba(17, 208, 128, 0.35); }
-  100% { box-shadow: 0 0 0 rgba(17, 208, 128, 0); }
+  0% { box-shadow: 0 0 0 rgba(130, 168, 115, 0); }
+  35% { box-shadow: 0 0 16px rgba(130, 168, 115, 0.35); }
+  100% { box-shadow: 0 0 0 rgba(130, 168, 115, 0); }
 }
 
 /* 失败：红色左边条（观察失败的标记） */
@@ -857,7 +879,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   position: absolute;
   top: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, transparent, var(--accent) 30%, #7aa2ff 50%, var(--accent) 70%, transparent);
+  background: linear-gradient(90deg, transparent, var(--accent) 30%, #efb98a 50%, var(--accent) 70%, transparent);
   background-size: 200% 100%;
   animation: toolFlow 1.4s linear infinite;
   z-index: 1;
@@ -867,8 +889,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   to { background-position: -200% 0; }
 }
 @keyframes toolBreath {
-  0%, 100% { box-shadow: 0 0 0 rgba(47, 99, 246, 0); }
-  50% { box-shadow: 0 0 14px rgba(47, 99, 246, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 rgba(208, 133, 107, 0); }
+  50% { box-shadow: 0 0 14px rgba(208, 133, 107, 0.18); }
 }
 .tool-head {
   height: 36px;
@@ -1024,13 +1046,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* to do list：状态符号（todo 空心 / doing 实心 / done 对勾）与备注 */
 .todo-note { color: var(--text-3); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 60%; }
 .plan-step.todo .ps-num { background: var(--bg-input); color: var(--text-3); }
-.plan-step.blocked .ps-num { background: rgba(255,107,107,.15); color: #ff6b6b; }
+.plan-step.blocked .ps-num { background: var(--red-soft); color: var(--red); }
 
 /* 正文 / 代码块 */
 .assistant-text { font-size: 14px; line-height: 1.65; color: var(--text-1); }
-/* 正文浮在人物背景上：文字阴影保证中段遮罩较浅时的可读性（浅色主题用浅色阴影） */
-.assistant-text { text-shadow: 0 1px 3px rgba(10, 12, 18, 0.7), 0 0 8px rgba(10, 12, 18, 0.35); }
-:root[data-theme='light'] .assistant-text { text-shadow: 0 1px 3px rgba(243, 246, 252, 0.75), 0 0 8px rgba(243, 246, 252, 0.4); }
+/* 正文浮在人物背景上：文字阴影保证中段遮罩较浅时的可读性（暖调，随主题翻转） */
+.assistant-text { text-shadow: 0 1px 3px rgba(24, 15, 10, 0.7), 0 0 8px rgba(24, 15, 10, 0.35); }
+:root[data-theme='light'] .assistant-text { text-shadow: 0 1px 3px rgba(243, 236, 223, 0.78), 0 0 8px rgba(243, 236, 223, 0.42); }
 .assistant-text p { margin-bottom: 8px; }
 .code-block {
   border: 1px solid var(--border);
@@ -1077,8 +1099,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   margin-left: 3px;
   vertical-align: -3px;
   border-radius: 2px;
-  background: linear-gradient(180deg, var(--accent), #7aa2ff 55%, var(--teal));
-  box-shadow: 0 0 8px rgba(47, 99, 246, 0.55);
+  background: linear-gradient(180deg, var(--accent), #e8b85e 55%, var(--teal));
+  box-shadow: 0 0 8px rgba(208, 133, 107, 0.55);
   animation: cursorPulse 1s ease-in-out infinite;
 }
 @keyframes cursorPulse {
@@ -1375,8 +1397,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   animation: tlIn 0.22s ease, tlBreath 1.6s ease-in-out infinite;
 }
 @keyframes tlBreath {
-  0%, 100% { box-shadow: 0 0 0 rgba(47, 99, 246, 0); }
-  50% { box-shadow: 0 0 12px rgba(47, 99, 246, 0.18); }
+  0%, 100% { box-shadow: 0 0 0 rgba(208, 133, 107, 0); }
+  50% { box-shadow: 0 0 12px rgba(208, 133, 107, 0.18); }
 }
 .tl-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .tl-left { display: flex; align-items: center; gap: 6px; min-width: 0; }
@@ -2192,8 +2214,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 0 8px;
 }
 .settings-nav .sn-title {
-  font-size: 16px;
-  font-weight: 700;
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 600;
+  font-variation-settings: 'SOFT' 60, 'opsz' 44;
   padding: 20px 12px 8px;
 }
 .sn-item {
@@ -2352,7 +2376,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 0 16px;
 }
 
-.page-title { font-size: 22px; font-weight: 700; letter-spacing: -0.4px; }
+.page-title {
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 600;
+  font-variation-settings: 'SOFT' 60, 'opsz' 48;
+  letter-spacing: -0.4px;
+}
 .page-sub { font-size: 12px; color: var(--text-3); }
 
 .section-title { font-size: 11px; font-weight: 700; letter-spacing: 1px; color: var(--text-3); margin-bottom: 2px; }
@@ -2396,15 +2426,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .brand-logo {
   position: relative;
-  /* v2.4：蓝紫双色光晕（年轻活力的品牌辉光） */
-  filter: drop-shadow(0 6px 18px rgba(47, 99, 246, 0.35)) drop-shadow(0 14px 36px rgba(162, 119, 255, 0.28));
+  /* v4：暖陶/琥珀双色光晕（手作的暖辉光，弃蓝紫霓虹） */
+  filter: drop-shadow(0 6px 18px rgba(208, 133, 107, 0.30)) drop-shadow(0 14px 36px rgba(217, 164, 65, 0.22));
 }
 .brand-title {
   margin-top: 20px;
-  font-size: 26px;
-  font-weight: 800;
-  letter-spacing: 0.5px;
-  /* v2.4 品牌：三色渐变标题（蓝→紫→青），流光动效 */
+  font-family: var(--font-display);
+  font-size: 34px;
+  font-weight: 600;
+  font-variation-settings: 'SOFT' 70, 'WONK' 0, 'opsz' 60;
+  letter-spacing: -0.5px;
+  /* v4 品牌：暖陶→琥珀→松绿渐变大标题（编辑部手作感，弃蓝紫） */
   background: var(--brand-gradient);
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -2416,10 +2448,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   from { background-position: 0% 0; }
   to { background-position: 200% 0; }
 }
+.brand-logo, .brand-slogan, .brand-kbd, .brand-note { text-shadow: 0 1px 3px rgba(24, 15, 10, 0.55); }
 .brand-slogan {
-  margin-top: 8px;
+  margin-top: 10px;
   font-size: 13px;
-  color: var(--text-3);
+  color: var(--text-2);
   text-align: center;
   line-height: 1.7;
 }
@@ -2438,12 +2471,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .brand-kbd .bk {
   font-family: var(--font-mono);
   font-weight: 700;
-  color: #ffffff;
-  /* v2.4 品牌：渐变键帽 */
+  color: var(--on-accent);
+  /* v4 品牌：暖陶渐变键帽 */
   background: var(--brand-gradient);
   border-radius: 5px;
   padding: 1px 7px;
-  box-shadow: 0 1px 6px rgba(47, 99, 246, 0.3);
+  box-shadow: 0 1px 6px rgba(208, 133, 107, 0.30);
 }
 .brand-note {
   margin-top: 10px;
@@ -2489,10 +2522,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .sess-banner .sb-btn:disabled { opacity: 0.5; cursor: default; }
 .sess-banner.resume { background: var(--blue-soft); border: 1px solid var(--accent); }
-.sess-banner.resume .sb-btn { background: var(--accent); color: #fff; }
+.sess-banner.resume .sb-btn { background: var(--accent); color: var(--on-accent); }
 .sess-banner.role { background: var(--purple-soft); border: 1px solid var(--purple); }
 .sess-banner.role .sb-btn { background: transparent; color: var(--purple); border: 1px solid var(--purple); }
-.sess-banner.budget { background: rgba(255, 77, 79, 0.08); border: 1px solid var(--red); }
+.sess-banner.budget { background: var(--red-soft); border: 1px solid var(--red); }
 .sess-banner.budget .sb-text { color: var(--red); }
 
 /* 消息操作（复制 / 重试）——hover 浮现，不占常驻空间 */
@@ -2544,7 +2577,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--text-4);
   margin-left: 10px;
   padding-left: 10px;
-  border-left: 1px solid var(--line);
+  border-left: 1px solid var(--border);
 }
 
 /* ================= TracePanel span 树（子任务下钻） ================= */

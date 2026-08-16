@@ -6,10 +6,10 @@ import type { TodoCard, TodoStatus } from '../types';
 import { IconExternal, IconRobot, IconUser, IconWarn } from './Icon';
 
 const COLS: { key: TodoStatus; label: string; color: string }[] = [
-  { key: 'todo', label: '待办', color: '#f0b429' },
-  { key: 'doing', label: '进行中', color: '#4aa3ff' },
-  { key: 'blocked', label: '受阻', color: '#ff6b6b' },
-  { key: 'done', label: '完成', color: '#2ecc8f' },
+  { key: 'todo', label: '待办', color: '#d9a441' },
+  { key: 'doing', label: '进行中', color: '#d0856b' },
+  { key: 'blocked', label: '受阻', color: '#d96856' },
+  { key: 'done', label: '完成', color: '#82a873' },
 ];
 
 const BOARD_API = '/api/plugins/todo/board/cards';

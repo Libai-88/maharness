@@ -3,11 +3,16 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>maharness</title>
+    <title>maharness · 驭能 · AI Agent Harness</title>
+    <meta name="description" content="maharness——时刻可观测的 AI Agent Harness。计划编排、工具调用、缓存命中与成本全程透明可视。" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="maharness · AI Agent Harness" />
+    <meta property="og:description" content="时刻可观测的 AI Agent Harness：计划编排、工具调用、缓存命中与成本全程透明可视。" />
+    <meta name="theme-color" content="#171310" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns%3D'http://www.w3.org/2000/svg' viewBox%3D'0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id%3D'g' x1%3D'0' y1%3D'0' x2%3D'1' y2%3D'1'%3E%3Cstop offset%3D'0' stop-color%3D'%232f63f6'/%3E%3Cstop offset%3D'1' stop-color%3D'%23a277ff'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width%3D'32' height%3D'32' rx%3D'8' fill%3D'url(%23g)'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.7' fill%3D'none' stroke-linecap%3D'round'%3E%3Cpath d%3D'M9.5 13.5 C 7 12, 5.9 9.7, 7.1 8.6 C 8.1 7.8, 9.3 8.6, 9.5 10'/%3E%3Cpath d%3D'M22.5 13.5 C 25 12, 26.1 9.7, 24.9 8.6 C 23.9 7.8, 22.7 8.6, 22.5 10'/%3E%3Cpath d%3D'M9.5 10.6 L 16 8.2 L 22.5 10.6' stroke-width%3D'1.4'/%3E%3C/g%3E%3Cpath d%3D'M8 13 h16 v11 a2 2 0 0 1 -2 2 H10 a2 2 0 0 1 -2 -2 Z' fill%3D'%23fff' opacity%3D'0.16'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.6' stroke-linecap%3D'round'%3E%3Cpath d%3D'M11.5 16.8 h3 M17.5 16.8 h3'/%3E%3Cpath d%3D'M12 21.5 q 4 3 8 0' stroke-width%3D'1.5'/%3E%3C/g%3E%3C/svg%3E" />
+    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns%3D'http://www.w3.org/2000/svg' viewBox%3D'0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id%3D'g' x1%3D'0' y1%3D'0' x2%3D'1' y2%3D'1'%3E%3Cstop offset%3D'0' stop-color%3D'%23d0856b'/%3E%3Cstop offset%3D'0.55' stop-color%3D'%23d9a441'/%3E%3Cstop offset%3D'1' stop-color%3D'%2382a873'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width%3D'32' height%3D'32' rx%3D'8' fill%3D'url(%23g)'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.7' fill%3D'none' stroke-linecap%3D'round'%3E%3Cpath d%3D'M9.5 13.5 C 7 12, 5.9 9.7, 7.1 8.6 C 8.1 7.8, 9.3 8.6, 9.5 10'/%3E%3Cpath d%3D'M22.5 13.5 C 25 12, 26.1 9.7, 24.9 8.6 C 23.9 7.8, 22.7 8.6, 22.5 10'/%3E%3Cpath d%3D'M9.5 10.6 L 16 8.2 L 22.5 10.6' stroke-width%3D'1.4'/%3E%3C/g%3E%3Cpath d%3D'M8 13 h16 v11 a2 2 0 0 1 -2 2 H10 a2 2 0 0 1 -2 -2 Z' fill%3D'%23fff' opacity%3D'0.16'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.6' stroke-linecap%3D'round'%3E%3Cpath d%3D'M11.5 16.8 h3 M17.5 16.8 h3'/%3E%3Cpath d%3D'M12 21.5 q 4 3 8 0' stroke-width%3D'1.5'/%3E%3C/g%3E%3C/svg%3E" />
     <script>
       // 首帧主题预置（避免深/浅色闪烁）
       (function () {

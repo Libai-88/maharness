@@ -11,7 +11,7 @@ interface Props {
   onAction: (id: string, action: 'enable' | 'disable' | 'reload') => Promise<void> | void;
 }
 
-const ICON_COLORS = ['#11d080', '#2f63f6', '#f0993e', '#a277ff', '#3a4350'];
+const ICON_COLORS = ['#82a873', '#d0856b', '#e0913f', '#d9a441', '#d96856', '#6b6053'];
 
 /** 插件贡献的前端面板（前端是插件的一部分：插件通过 api 能力提供 GET /panel → { title, html }） */
 function PluginPanel({ pluginId }: { pluginId: string }) {
