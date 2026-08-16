@@ -119,6 +119,13 @@ body {
   overflow: hidden;
 }
 
+/* 浅色主题：人物背景保留但遮罩换浅色（保持文字对比度） */
+:root[data-theme='light'] body {
+  background:
+    linear-gradient(180deg, rgba(243, 246, 252, 0.94) 0%, rgba(243, 246, 252, 0.86) 45%, rgba(243, 246, 252, 0.95) 100%),
+    url('/hero-char.png') center 30% / cover no-repeat fixed;
+}
+
 button {
   font-family: inherit;
   border: none;
@@ -213,14 +220,18 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   height: 100%;
   width: 100%;
-  background: var(--bg-deep);
+  /* 透明：人物背景由 body 提供（背景图可见的关键——实底会遮住） */
+  background: transparent;
 }
 
 /* ---------- 左侧边栏 ---------- */
 .sidebar {
   width: var(--sidebar-w);
   flex-shrink: 0;
-  background: var(--bg-panel);
+  /* 毛玻璃：半透明 + 模糊，人物背景透出而文字保持可读 */
+  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -542,7 +553,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   min-width: 0;
   display: flex;
   flex-direction: column;
-  background: var(--bg-deep);
+  background: transparent;
 }
 
 /* ---------- 顶部栏 ---------- */
@@ -1265,7 +1276,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .trail-panel {
   width: var(--trail-w);
   flex-shrink: 0;
-  background: var(--bg-panel);
+  /* 毛玻璃：与侧栏一致，人物背景透出 */
+  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;

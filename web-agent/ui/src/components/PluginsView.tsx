@@ -4,6 +4,7 @@ import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
 import { IconClose } from './Icon';
+import TodoBoardView from './TodoBoardView';
 
 interface Props {
   plugins: PluginInfo[];
@@ -147,7 +148,8 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
                 <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? 'true ✓' : 'false'}</span></div>
               </div>
-              <PluginPanel pluginId={selected.id} />
+              {/* todo 插件：面板含交互（增删改），DOMPurify 会剥离 panel HTML 的脚本 → 特判渲染 React 原生组件 */}
+              {selected.id === 'todo' ? <TodoBoardView /> : <PluginPanel pluginId={selected.id} />}
             </>
           ) : (
             <div className="empty-state">← 选择插件查看详情</div>

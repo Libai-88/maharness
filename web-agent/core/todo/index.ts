@@ -323,8 +323,8 @@ function render(cards) {
         '<div style="font-weight:600;margin-bottom:4px">' + esc(c.title) + (c.source === 'agent' ? ' <span style="font-size:10px;color:#7c6cff">🤖</span>' : ' <span style="font-size:10px;color:#8b8fa3">👤</span>') + '</div>' +
         (c.desc ? '<div style="color:#8b8fa3;margin-bottom:6px;white-space:pre-wrap">' + esc(c.desc) + '</div>' : '') +
         '<div style="display:flex;gap:4px;flex-wrap:wrap">' +
-          COLS.filter(x => x.key !== c.status).map(x => '<button onclick="todoSet(\'' + c.id + '\',\'' + x.key + '\')" style="background:#232a40;border:none;border-radius:5px;padding:2px 7px;font-size:10px;color:#aab0c5;cursor:pointer">' + x.label + '</button>').join('') +
-          '<button onclick="todoDel(\'' + c.id + '\')" style="background:#232a40;border:none;border-radius:5px;padding:2px 7px;font-size:10px;color:#ff6b6b;cursor:pointer">删除</button>' +
+          COLS.filter(x => x.key !== c.status).map(x => '<button class="t-act" data-id="' + c.id + '" data-status="' + x.key + '" style="background:#232a40;border:none;border-radius:5px;padding:2px 7px;font-size:10px;color:#aab0c5;cursor:pointer">' + x.label + '</button>').join('') +
+          '<button class="t-act" data-id="' + c.id + '" data-del="1" style="background:#232a40;border:none;border-radius:5px;padding:2px 7px;font-size:10px;color:#ff6b6b;cursor:pointer">删除</button>' +
         '</div>';
       colEl.appendChild(card);
     }
@@ -338,14 +338,14 @@ async function todoAdd() {
   document.getElementById('todo-new-title').value = '';
   loadTodos();
 }
-async function todoSet(id, status) {
-  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-  loadTodos();
-}
-async function todoDel(id) {
-  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'DELETE' });
-  loadTodos();
-}
+// 事件委托：任何 .t-act 按钮点击统一分发（data-id/data-status/data-del）
+document.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('button.t-act') : null;
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.del) { await todoDel(id); return; }
+  await todoSet(id, btn.dataset.status);
+});
 loadTodos();
 </script>`;
 }
@@ -457,12 +457,13 @@ async function load() {
     for (const c of list) {
       const card = document.createElement('div');
       card.className = 'card';
+      // 事件委托（不内联 onclick）：避免引号嵌套转义错误，动态生成安全
       card.innerHTML =
         '<div class="title">' + esc(c.title) + '<span class="src">' + (c.source === 'agent' ? '🤖 模型' : '👤 人类') + '</span></div>' +
         (c.desc ? '<div class="desc">' + esc(c.desc) + '</div>' : '') +
         '<div class="acts">' +
-          COLS.filter(x => x.key !== c.status).map(x => '<button onclick="set(\'' + c.id + '\',\'' + x.key + '\')">' + x.label + '</button>').join('') +
-          '<button class="del" onclick="del(\'' + c.id + '\')">删除</button>' +
+          COLS.filter(x => x.key !== c.status).map(x => '<button class="act" data-id="' + c.id + '" data-status="' + x.key + '">' + x.label + '</button>').join('') +
+          '<button class="act del" data-id="' + c.id + '" data-del="1">删除</button>' +
         '</div>';
       body.appendChild(card);
     }
@@ -470,6 +471,14 @@ async function load() {
     root.appendChild(el);
   }
 }
+// 事件委托：任何 .act 按钮点击统一分发（data-id/data-status/data-del）
+document.addEventListener('click', async (e) => {
+  const btn = e.target && e.target.closest ? e.target.closest('button.act') : null;
+  if (!btn) return;
+  const id = btn.dataset.id;
+  if (btn.dataset.del) { await del(id); return; }
+  await set(id, btn.dataset.status);
+});
 async function add() {
   const title = document.getElementById('new-title').value.trim();
   if (!title) return;
