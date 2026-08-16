@@ -22,8 +22,12 @@ async function isUp() {
   } catch { return false; }
 }
 
+/** 打开浏览器（幂等：启动日志触发 + 就绪轮询兜底可能都命中，只允许打开一次） */
+let opened = false;
 function openBrowser() {
-  if (process.env.MAHARNESS_NO_OPEN === '1') return;
+  if (process.env.MAHARNESS_DEBUG) console.log(`[maharness] openBrowser: ${opened ? 'skip（已打开过）' : 'open'} ${url}`);
+  if (opened || process.env.MAHARNESS_NO_OPEN === '1') return;
+  opened = true;
   try {
     const cmd = process.platform === 'win32' ? `start "" "${url}"` : `open "${url}"`;
     exec(cmd, { shell: true });
@@ -51,7 +55,7 @@ child.stdout.on('data', (d) => {
 });
 child.stderr.on('data', (d) => process.stderr.write(d));
 
-// 兜底：就绪检测（若启动日志模式变化）
+// 兜底：就绪检测（若启动日志模式变化；打开成功后即停，不再重复打开）
 (async () => {
   for (let i = 0; i < 60; i++) {
     await sleep(1000);
