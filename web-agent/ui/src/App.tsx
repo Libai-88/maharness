@@ -1,7 +1,7 @@
 // ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { approvalsApi, commandsApi, modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
-import type { ApprovalItem, BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
+import type { ApprovalItem, BusEvent, ChatMessage, CheckpointInfo, Message, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
 import Sidebar from './components/Sidebar';
 import type { MainTab } from './components/Sidebar';
 import ChatView from './components/ChatView';
@@ -87,7 +87,7 @@ export default function App() {
       if (initialId) {
         try {
           const msgs = await sessionApi.messages(initialId);
-          setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
+          setMessages(msgs.filter((m): m is Message & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m) => ({ id: m.id, role: m.role, content: m.content ?? '', reasoning: m.reasoning })));
         } catch { /* 忽略 */ }
       }
     } catch (err) {
@@ -106,7 +106,7 @@ export default function App() {
     setSessionCost(0);
     try {
       const [msgs, cp] = await Promise.all([sessionApi.messages(id), sessionApi.checkpoint(id).catch(() => null)]);
-      setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
+      setMessages(msgs.filter((m): m is Message & { role: 'user' | 'assistant' } => m.role === 'user' || m.role === 'assistant').map((m) => ({ id: m.id, role: m.role, content: m.content ?? '', reasoning: m.reasoning })));
       setCheckpoint(cp);
       setSessionCost(msgs.reduce((s, m) => s + (m.cost ?? 0), 0));
     } catch (err) {

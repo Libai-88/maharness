@@ -6,10 +6,12 @@ import { randomUUID } from 'node:crypto';
 import express from 'express';
 import type { Express, Response } from 'express';
 import type { Kernel } from '../kernel';
-import type { LLMMessage, ProviderDef } from '../kernel/types';
+import type { LLMMessage, LLMRole, ProviderDef } from '../kernel/types';
+import type { Message } from '../kernel/types';
 import type { AgentRunner } from '../core/chat/agent';
 import type { ProviderConfig } from '../core/chat/provider';
 import { resolveInSandbox, readTextSmart } from '../core/tools-fs/index';
+import { annotateToolDef, textualizeHistory } from '../core/chat/agent';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync, cpSync, rmSync, readFileSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -17,6 +19,101 @@ import { promisify } from 'node:util';
 import { truncateHistory, estimateTokens } from './context';
 import { compactHistory } from '../core/chat/compact';
 import type { Store } from './db';
+
+// ============ 缓存预热/保活（L3 前缀缓存主动维护） ============
+// 第一性原理：provider KV 缓存命中的充要条件是「请求前缀逐字节一致且缓存条目存活」。
+// harness 已保证前缀一致（发送序列快照同步）；但网关对含 tool_calls 请求的缓存建立
+// 存在延迟/条件限制，且前缀缓存有 TTL——跨 run 首轮因此可能全价 prefill。
+// 预热机制：run 结束后延迟发送与最后请求同前缀的极小请求（max_tokens=1，成本≈0），
+// 主动建立/刷新缓存条目；随后周期保活（默认 90s）维持缓存活性，直到会话长时间空闲。
+interface WarmupEntry {
+  timer: NodeJS.Timeout | null;
+  systemPrompt: string;
+  seq: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[];
+  provider: ProviderDef;
+  model: string;
+  rounds: number;
+  lastRunAt: number;
+}
+
+const warmups = new Map<string, WarmupEntry>();
+const CONTINUE_HINT = '【继续】请根据工具结果继续处理任务；如任务已完成，直接给出最终回答。';
+const WARMUP_DELAY_MS = 12_000;       // 首次预热延迟（网关缓存写入窗口）
+const WARMUP_INTERVAL_MS = 90_000;  // 保活间隔（缓存 TTL 刷新）
+const WARMUP_MAX_ROUNDS = 20;       // 最长保活 30 分钟（会话无新活动则停止）
+
+/** 会话 run 结束后调度预热（新 run 到达时重置保活轮次） */
+function scheduleWarmup(
+  sessionId: string,
+  systemPrompt: string,
+  seq: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[],
+  provider: ProviderDef,
+  model: string,
+  kernel: Kernel,
+): void {
+  const existing = warmups.get(sessionId);
+  if (existing) {
+    // 会话有新活动：重置保活轮次与计时
+    existing.systemPrompt = systemPrompt;
+    existing.seq = seq;
+    existing.provider = provider;
+    existing.model = model;
+    existing.rounds = 0;
+    existing.lastRunAt = Date.now();
+    if (existing.timer) clearTimeout(existing.timer);
+    existing.timer = setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_DELAY_MS);
+    return;
+  }
+  warmups.set(sessionId, {
+    timer: setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_DELAY_MS),
+    systemPrompt, seq, provider, model, rounds: 0, lastRunAt: Date.now(),
+  });
+}
+
+/** 执行一次预热 + 调度下一次保活 */
+async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
+  const entry = warmups.get(sessionId);
+  if (!entry) return;
+  entry.timer = null;
+  // 保活上限：会话长时间无新活动则停止（避免无限消耗）
+  if (entry.rounds >= WARMUP_MAX_ROUNDS) {
+    warmups.delete(sessionId);
+    return;
+  }
+  entry.rounds++;
+  // 预热序列 = 与真实发送完全同形态：原始 sync 消息 → 共享文本化（与 run 内/跨 run 一致）
+  // → 恒以 user（CONTINUE_HINT）结尾。网关只对纯文本 + user 结尾的请求稳定缓存。
+  const rawSeq: LLMMessage[] = [
+    { role: 'system', content: entry.systemPrompt },
+    ...entry.seq.map((m) => ({
+      role: m.role as LLMMessage['role'],
+      content: m.content,
+      ...(m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length ? { tool_calls: m.tool_calls as never } : {}),
+      ...(m.role === 'tool' && m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+    })),
+  ];
+  const msgs = textualizeHistory(rawSeq);
+  if (msgs[msgs.length - 1]?.role !== 'user') {
+    msgs.push({ role: 'user', content: CONTINUE_HINT });
+  }
+  try {
+    // 预热请求：与最后发送序列同前缀 + 相同 tools（网关缓存键含 tools 参数，
+    // 不带 tools 的预热建立的缓存对真实请求无效）；max_tokens=1 成本≈0
+    const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(annotateToolDef);
+    let hit = 0, miss = 0;
+    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: 64, tools })) {
+      if (chunk.type === 'usage') { hit = chunk.cachedInput ?? 0; miss = chunk.missInput ?? 0; }
+    }
+    console.log(`[warmup] ${sessionId.slice(0, 8)} 完成（round ${entry.rounds}，${msgs.length} 条，hit=${hit} miss=${miss}）`);
+  } catch (err) {
+    console.warn(`[warmup] ${sessionId.slice(0, 8)} 预热失败:`, err instanceof Error ? err.message.slice(0, 120) : String(err));
+  }
+  // 调度下一次保活（会话有新 run 时 scheduleWarmup 会重置）
+  const cur = warmups.get(sessionId);
+  if (cur) {
+    cur.timer = setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_INTERVAL_MS);
+  }
+}
 import type { ClientTracker } from './client-tracker';
 
 const execFileAsync = promisify(execFile);
@@ -436,7 +533,16 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   app.get('/api/sessions/:id/messages', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    res.json(store.listMessages(session.id));
+    // 前端展示过滤：隐藏发送序列中的注入消息（失败教训/长期记忆/英文提醒/角色移交）
+    // ——它们是 harness 内部上下文工程，不是用户可见的对话内容；
+    // 组装（chat 端点）保留它们以保证 L3 前缀缓存逐字节延续。
+    const visible = store.listMessages(session.id).filter((m) => {
+      const c = String(m.content ?? '');
+      if (m.role === 'system' && c.startsWith('Reason in ENGLISH')) return false;
+      if (c.startsWith('【失败教训】') || c.startsWith('【长期记忆】') || c.startsWith('【角色移交】') || c.startsWith('【继续】')) return false;
+      return true;
+    });
+    res.json(visible);
   });
 
   app.patch('/api/sessions/:id', (req, res) => {
@@ -554,7 +660,36 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       : undefined;
     const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : roleToolsOverride;
 
-    // 历史组装：DB 消息 → LLM 消息（工具中间消息不入库，历史保持干净）
+    // 历史组装：DB 消息 → LLM 消息（完整重建：assistant 的 tool_calls 与 tool 回填
+    // 全部保留——跨 run 请求序列字节级一致，L3 provider 前缀缓存持续命中；
+    // system 消息（【历史摘要】/截断说明）也保留：它们是压缩持久化的产物）。
+    // 配对修复：中断可能留下「assistant 带 tool_calls 但工具未执行」的残轮
+    // （onHistoryMessage 在工具执行前已入库）——未配对的 tool_calls 剥离，
+    // 否则 provider 校验失败（OpenAI 兼容要求 tool_calls 后有对应 tool 消息）。
+    function buildHistory(rows: Message[]): LLMMessage[] {
+      // 组装原始序列（system 保留、assistant 保留 tool_calls 配对、tool 保留 tool_call_id），
+      // 然后统一走共享 textualizeHistory——与 run 内发送形态完全一致（纯文本 + user 结尾）
+      const raw: LLMMessage[] = [];
+      for (const m of rows) {
+        if (m.role === 'system') {
+          raw.push({ role: 'system', content: m.content });
+          continue;
+        }
+        if (m.role === 'tool') {
+          raw.push({ role: 'tool', content: m.content, tool_call_id: m.toolCallId ?? '' });
+          continue;
+        }
+        const base: LLMMessage = { role: m.role, content: m.content };
+        if (m.role === 'assistant' && m.toolCalls?.length) {
+          // 配对修复：中断可能留下「assistant 带 tool_calls 但工具未执行」的残轮
+          const ids = new Set(rows.filter((x) => x.role === 'tool' && x.toolCallId).map((x) => x.toolCallId));
+          const paired = m.toolCalls.filter((c) => ids.has(c.id));
+          if (paired.length) base.tool_calls = paired;
+        }
+        raw.push(base);
+      }
+      return textualizeHistory(raw);
+    }
     let history: LLMMessage[];
     if (resume) {
       // 断点续跑：用 checkpoint 的完整历史（含工具回填），末尾加恢复提示——
@@ -574,10 +709,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' },
       ];
     } else {
-      history = store
-        .listMessages(session.id)
-        .map((m) => ({ role: m.role, content: m.content }))
-        .filter((m): m is LLMMessage => m.role === 'user' || m.role === 'assistant');
+      history = buildHistory(store.listMessages(session.id));
       history.push({ role: 'user', content: message });
       store.addMessage({ sessionId: session.id, role: 'user', content: message });
       if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
@@ -588,7 +720,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     // 上下文管理 v2：超预算时优先 LLM 摘要压缩（compact：旧对话变【历史摘要】，不丢事实），
     // 压缩不可用/失败才截断（truncate：丢弃较早消息并注入说明）。
     // 对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜。
-    const maxCtx = kernel.config.get<number>('context.maxTokens', 30000);
+    // 压缩结果持久化回 DB：长会话只在首次超预算时压缩一次，后续 run 直接复用
+    // （否则每次提问都重新压缩 = 每轮一次全量 LLM 调用 + 前缀重建，成本失控）。
+    const maxCtx = kernel.config.get<number>('context.maxTokens', 60000);
     const compactEnabled = kernel.config.get<boolean>('context.compact', true);
     let ctxHistory: LLMMessage[];
     let ctxMode: 'none' | 'compact' | 'truncate' = 'none';
@@ -608,6 +742,33 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: '上下文截断' })
         .finish({ outputSummary: `超出预算（${maxCtx} tokens），已丢弃 ${droppedMessages} 条较早消息` });
     }
+    // 压缩/截断持久化：把处理后的消息序列写回 DB（摘要/说明 + 保留消息，字段完整）。
+    // 下次 run 组装即得压缩后历史——不重复压缩、前缀在重建后持续稳定。
+    // 写回失败不阻断对话（仅损失一次压缩的复用）。
+    if (ctxMode !== 'none') {
+      try {
+        const oldRows = store.listMessages(session.id);
+        // 尽力复制原消息的 tokens/cost 统计（按 role+content 匹配，压缩后统计不丢）
+        const meta = new Map(oldRows.map((r) => [`${r.role}|${r.content}`, r]));
+        store.clearSessionMessages(session.id);
+        for (const m of ctxHistory) {
+          const old = meta.get(`${m.role}|${m.content}`);
+          store.addMessage({
+            sessionId: session.id,
+            role: m.role,
+            content: m.content,
+            ...(m.role === 'assistant' && m.tool_calls?.length ? { toolCalls: m.tool_calls } : {}),
+            ...(m.role === 'tool' ? { toolCallId: m.tool_call_id } : {}),
+            tokensIn: old?.tokensIn ?? 0,
+            tokensOut: old?.tokensOut ?? 0,
+            cost: old?.cost ?? 0,
+            traceId: old?.traceId,
+          });
+        }
+      } catch (err) {
+        console.warn('[routes] 压缩结果持久化失败（不影响本次对话）:', err instanceof Error ? err.message : String(err));
+      }
+    }
     // 客户端断开才中断（req close 在请求体读完即触发，不可用）
     res.on('close', () => { if (!res.writableEnded) ac.abort(); });
 
@@ -626,9 +787,22 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     let assistantReasoning = '';
     let usage = { input: 0, output: 0 };
     let cost = 0;
+    // 最终 assistant 消息已通过 onHistoryMessage 入库（id 记录于此）：
+    // run 结束后仅回填 tokens/cost/reasoning，避免同内容消息重复入库
+    let lastAssistantId: string | null = null;
+    // 发送序列累积（用于预热：run 结束后用同一前缀主动刷新网关缓存）
+    const seqAcc: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[] = [];
     try {
+      // 轮数上限按模式分配（配置可调）：目标模式=长任务（计划→执行→验证→总结），
+      // 上限显著放宽；普通模式防无限循环（默认 12）。超限后断点仍在，可继续推进。
+      const maxTurnsByMode: Record<string, number> = {
+        goal: kernel.config.get<number>('agent.maxTurnsGoal', 48),
+        plan: kernel.config.get<number>('agent.maxTurnsPlan', 24),
+        normal: kernel.config.get<number>('agent.maxTurns', 12),
+      };
       for await (const ev of chat.runner.run({
         provider, model: resolvedModel, messages: ctxHistory, traceId,
+        maxTurns: maxTurnsByMode[session.mode] ?? 12,
         // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
         // 不同会话互不串用（答案依赖工具观察时仅本会话可命中）
         scope: session.id,
@@ -646,6 +820,27 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
             role: m.role, content: m.content ?? null,
             tool_calls: m.tool_calls, tool_call_id: m.tool_call_id,
           })));
+        },
+        // 发送序列快照同步（assistant 含 tool_calls / tool 含 tool_call_id / 注入消息）：
+        // DB = 发送序列的忠实镜像 → 跨 run 组装与上 run 序列构成纯追加 → L3 前缀逐字节延续。
+        onHistorySync: (msgs) => {
+          try {
+            for (const m of msgs) {
+              // history[0]（system prompt）已被 syncedCount 排除；此处所有 system 消息
+              // （英文提醒/角色移交等）均为发送序列的忠实组成，全部入库
+              seqAcc.push({ role: m.role, content: m.content, tool_calls: m.tool_calls, tool_call_id: m.tool_call_id });
+              const saved = store.addMessage({
+                sessionId: session.id,
+                role: m.role as LLMRole,
+                content: m.content,
+                ...(m.role === 'assistant' && m.tool_calls?.length ? { toolCalls: m.tool_calls } : {}),
+                ...(m.role === 'tool' ? { toolCallId: m.tool_call_id } : {}),
+              });
+              if (m.role === 'assistant') lastAssistantId = saved.id;
+            }
+          } catch (err) {
+            console.warn('[routes] 发送序列同步入库失败:', err instanceof Error ? err.message : String(err));
+          }
         },
       })) {
         if (ev.type === 'delta') {
@@ -680,7 +875,14 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     } catch (err) {
       sse(res, 'error', { error: err instanceof Error ? err.message : String(err) });
     }
-    if (assistantText) {
+    if (assistantText && lastAssistantId) {
+      // 最终轮已入库（onHistoryMessage）：回填结算字段（tokens/cost/reasoning）
+      store.updateMessageStats(lastAssistantId, {
+        reasoning: assistantReasoning,
+        tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
+      });
+    } else if (assistantText) {
+      // L1 缓存命中路径（无 LLM 轮次，未走 onHistoryMessage）：直接入库
       store.addMessage({
         sessionId: session.id, role: 'assistant', content: assistantText,
         reasoning: assistantReasoning,
@@ -691,6 +893,17 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     if (session.mode === 'plan' && planPending === 1) store.updateSession(session.id, { planPending: 2 });
     else if (session.mode === 'plan' && planPending === 2) store.updateSession(session.id, { planPending: 0 });
     store.touchSession(session.id);
+    // 缓存预热/保活：run 结束后用同一前缀主动刷新网关前缀缓存——
+    // 网关对「含 tool_calls 的请求」的缓存建立有延迟/条件限制，且前缀缓存有 TTL；
+    // 预热请求（max_tokens=1，成本≈0）主动建立/刷新缓存，把下一次提问的 turn0
+    // 也拉入缓存窗口（跨 run 首轮不再全价 prefill）。
+    // 预热仅在发送序列足够长时触发（≥5 条消息才有缓存价值；L1 命中的短序列跳过）
+    if (seqAcc.length >= 5 && kernel.config.get<boolean>('cache.warmup', false)) {
+      // 预热/保活（默认关闭）：实测本网关（opencode.ai/zen/go）对含 tool_calls 的
+      // 请求缓存建立有延迟/条件限制，预热请求反而会占用/污染缓存条目；
+      // 保留实现供兼容 provider 的网关启用（配置 cache.warmup=true）。
+      scheduleWarmup(session.id, systemPrompt, seqAcc, provider, resolvedModel, kernel);
+    }
     sse(res, 'end', {});
     res.end();
   });
@@ -895,7 +1108,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   app.get('/api/config', (_req, res) => {
     res.json({
       context: {
-        maxTokens: kernel.config.get<number>('context.maxTokens', 30000),
+        maxTokens: kernel.config.get<number>('context.maxTokens', 60000),
         truncateInject: kernel.config.get<boolean>('context.truncateInject', true),
         compact: kernel.config.get<boolean>('context.compact', true),
       },
@@ -939,6 +1152,16 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       }
       if (agent?.thinkInEnglish !== undefined) {
         kernel.config.set('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
+      }
+      // 轮数上限（按模式可调）：超限后断点保留，可继续推进
+      if (agent?.maxTurns !== undefined) {
+        kernel.config.set('agent.maxTurns', Math.max(1, Math.min(200, Number(agent.maxTurns))));
+      }
+      if (agent?.maxTurnsPlan !== undefined) {
+        kernel.config.set('agent.maxTurnsPlan', Math.max(1, Math.min(400, Number(agent.maxTurnsPlan))));
+      }
+      if (agent?.maxTurnsGoal !== undefined) {
+        kernel.config.set('agent.maxTurnsGoal', Math.max(1, Math.min(400, Number(agent.maxTurnsGoal))));
       }
       res.json({ ok: true });
     } catch (err) {
@@ -1022,7 +1245,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     const trace = kernel.trace.stats();
     const cache = kernel.cache.stats();
     const overview = store.statsOverview();
-    const maxCtx = kernel.config.get<number>('context.maxTokens', 30000);
+    const maxCtx = kernel.config.get<number>('context.maxTokens', 60000);
     const rate = (hits: number, misses: number): { hits: number; misses: number; rate: number } => {
       const total = hits + misses;
       return { hits, misses, rate: total > 0 ? Math.round((hits / total) * 1000) / 10 : 0 };

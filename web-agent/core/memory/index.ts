@@ -72,9 +72,13 @@ export default {
     // 普通记忆走下方 context provider（按任务动态组装）。
     // ctx.on = 自动退订的事件订阅（可逆效应）：重载/卸载时监听器随作用域回收，
     // 不会出现「旧监听器残留 → 教训双重注入」的泄漏。
+    // 去重：发送序列快照同步后教训已入库，历史中已有【失败教训】则跳过——
+    // 否则每次 run 重新注入会插在历史中段，破坏 L3 前缀缓存（跨 run 前缀断裂）。
     ctx.on('agent.before_llm', (e) => {
       const h = e.data as AgentHookCtx;
       if (!h || !Array.isArray(h.history) || h.scratchpad.memoryInjected) return;
+      const hasLesson = h.history.some((m) => m.role === 'user' && String(m.content ?? '').startsWith('【失败教训】'));
+      if (hasLesson) return;
       const lessons = facts.filter((f) => f.text.startsWith('【自动】')).slice(-LESSON_COUNT).reverse();
       if (lessons.length === 0) return;
       h.history.push({
@@ -87,6 +91,8 @@ export default {
     // ---- Context Provider：普通记忆按任务动态组装（上下文工程） ----
     // contentFn 用最后真实 user 消息检索相关记忆（bigram 相关匹配），
     // 无相关记忆返回 null → 零成本不注入；相关才注入 → 无关记忆隔离在外。
+    // 去重：发送序列快照同步后旧记忆已入库，历史已有【长期记忆】则跳过本次注入
+    // （缓存前缀稳定优先；新记忆可通过 recall_facts 主动查询获取）。
     ctx.register({
       kind: 'context',
       context: {
@@ -94,8 +100,10 @@ export default {
         description: '按当前任务检索相关长期记忆（字符 bigram 相关匹配，无关不注入）',
         weight: 10,
         contentFn({ history }) {
+          const hasMemory = history.some((m) => String(m.content ?? '').startsWith('【长期记忆】'));
+          if (hasMemory) return null;
           const lastUser = [...history].reverse()
-            .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
+            .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
           if (!lastUser?.content) return null;
           const task = lastUser.content.slice(0, 80);
           const hits = facts

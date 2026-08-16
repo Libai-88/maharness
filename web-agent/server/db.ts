@@ -327,6 +327,18 @@ export class Store {
     return msg;
   }
 
+  /** 消息结算回填：assistant 消息经 onHistoryMessage 先入库（保持历史字节一致），
+   *  run 结束后再补写 tokens/cost/reasoning（结算时才有的字段）。 */
+  updateMessageStats(id: string, patch: { reasoning?: string; tokensIn?: number; tokensOut?: number; cost?: number; traceId?: string }): void {
+    this.db
+      .prepare('UPDATE messages SET reasoning=?, tokens_in=?, tokens_out=?, cost=?, trace_id=? WHERE id=?')
+      .run(
+        patch.reasoning ?? null,
+        patch.tokensIn ?? 0, patch.tokensOut ?? 0, patch.cost ?? 0,
+        patch.traceId ?? null, id,
+      );
+  }
+
   // ---------- 断点续跑（checkpoint：turn 级自动保存完整历史，resume 从断点继续） ----------
 
   /** 保存会话最新断点（upsert：每会话只保留最新——长任务的恢复点是"最近完成的轮"）

@@ -71,6 +71,12 @@ export interface RunOptions {
   /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
    *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
   onCheckpoint?: (turn: number, history: LLMMessage[]) => void;
+  /** 发送序列快照同步（L3 前缀缓存逼近 100% 的关键）：每次 LLM 调用前，把
+   *  实际发送的消息序列中【尚未入库的增量】回调给 server 持久化。
+   *  覆盖全部消息类型（含钩子注入的教训/记忆/英文提醒）——DB 成为发送序列的
+   *  忠实镜像，跨 run 组装与上 run 序列构成纯追加关系，provider KV 缓存前缀
+   *  逐字节延续（注入消息不入库会插在历史中段导致整个历史区前缀断裂）。 */
+  onHistorySync?: (messages: { role: string; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }[]) => void;
 }
 
 const DEFAULT_SYSTEM_PROMPT = [
@@ -111,6 +117,49 @@ const REASONING_TOTAL_DEFAULT = 3000;
  *  与 system prompt 的思维宪章呼应；带英文思考示例（few-shot 引导强于纯指令，Wei22）：
  *  模型推理语言跟随上下文主导语言，中文消息会淹没英文指令——示例让模型进入英文推理语境。 */
 const EN_THINK_REMINDER = 'Reason in ENGLISH, start with "We need ...". Example: "We need to explain virtual memory. Known: it maps virtual addresses to physical frames. Unknown: the exact page-table mechanism. Plan: define the concept, then the mechanism, then why it matters." Chinese is only for the final answer.';
+
+/** 轮次继续提示（user 角色，固定内容）——请求结尾规整的关键：
+ *  实测网关（opencode.ai/zen/go）对「以 tool/system 消息结尾」的请求不建立前缀缓存
+ *  （跨 run 首轮全 miss 的根因），而对「以 user 结尾」的请求缓存正常。
+ *  工具轮后追加此提示使每次 LLM 请求恒以 user 结尾 → 前缀跨 run 逐字节延续。
+ *  带【继续】标记：L1 语义缓存查询/任务画像据此排除，不当作真实用户问题。 */
+const CONTINUE_HINT = '【继续】请根据工具结果继续处理任务；如任务已完成，直接给出最终回答。';
+
+/** 工具结果摘要（固定截断：同一内容 → 同一文本，保证前缀逐字节稳定） */
+export function summarizeToolResult(text: string): string {
+  const t = text.replace(/\s+/g, ' ').trim();
+  return t.length > 400 ? t.slice(0, 400) + '…' : t;
+}
+
+/**
+ * 工具轮文本化（L3 前缀缓存的关键形态，run 内与跨 run 共用）：
+ * 把历史中的 assistant{tc} + tool 消息对合并为一条 assistant 纯文本消息
+ * （工具名 + 结果摘要）——发送序列不含 tool_calls 结构、恒以 user 结尾，
+ * 网关（opencode.ai/zen/go）对纯文本序列的前缀缓存稳定，对含 tc 结构不稳定。
+ * 文本化产物字节级确定（同一消息 → 同一文本），run 内每轮与跨 run 组装
+ * 生成的序列完全一致 → 前缀逐字节延续。tool 消息不单独输出（合并进 assistant）。
+ */
+export function textualizeHistory(history: LLMMessage[]): LLMMessage[] {
+  const out: LLMMessage[] = [];
+  const toolById = new Map<string, string>();
+  for (const m of history) {
+    if (m.role === 'tool' && m.tool_call_id) toolById.set(m.tool_call_id, String(m.content ?? ''));
+  }
+  for (const m of history) {
+    if (m.role === 'tool') continue; // 工具消息合并进对应的 assistant 消息
+    if (m.role === 'assistant' && m.tool_calls?.length) {
+      const parts = [m.content ?? ''];
+      for (const c of m.tool_calls) {
+        const res = toolById.get(c.id);
+        parts.push(`\n【工具调用 ${String(c.function?.name ?? '')}】${res ? summarizeToolResult(res) : '(结果已省略)'}`);
+      }
+      out.push({ role: 'assistant', content: parts.join('\n') });
+      continue;
+    }
+    out.push({ ...m });
+  }
+  return out;
+}
 
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
  *  导出供 selftest 单测；LLM 收到的每个工具描述都带【风险:…|成本:…|…】前缀与输出格式说明 */
@@ -165,8 +214,8 @@ export class AgentRunner {
     // L1 会话级缓存作用域：优先使用调用方传入的稳定会话标识（session.id），
     // 缺省用 traceId（每次 run 唯一 → 天然隔离，子代理不串答案）
     const cacheScope = opts.scope ?? traceId;
-    // 12 轮：探索型任务（查代码/多工具协作）能走到最终总结轮，L1 语义缓存回填更可靠
-    const maxTurns = opts.maxTurns ?? 12;
+    // 轮数上限：调用方按模式传值（目标模式长任务更高），缺省用配置 agent.maxTurns
+    const maxTurns = opts.maxTurns ?? this.kernel.config.get<number>('agent.maxTurns', 12);
     const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
     const history: LLMMessage[] = [
       { role: 'system', content: systemPrompt },
@@ -183,6 +232,25 @@ export class AgentRunner {
     const reasoningBudget = reasoningBudgetFor(classifyTask(lastUserMsg0?.content ?? ''), baseBudget);
     const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
     const scratchpad: Record<string, unknown> = {};
+
+    // ---- 发送序列快照同步游标：DB = 发送序列的忠实镜像（L3 前缀缓存逼近 100% 的关键） ----
+    // history 数组只增不改；[0, syncedCount) 已入库。history[0] = system prompt
+    // （routes 每 run 组装，不入库）；history[1:] = DB 组装的历史（已在库中）——
+    // 因此 syncedCount 初始化为组装完成时的 history.length：只同步【本 run 新增】
+    // 的消息（钩子注入的教训/记忆/英文提醒、assistant 含 tool_calls、tool 结果）。
+    // 若从 1 开始会把已入库消息重复写回 → DB 翻倍 → 跨 run 序列与上 run 不同 → 前缀断裂。
+    let syncedCount = history.length;
+    const syncHistory = () => {
+      if (!opts.onHistorySync || history.length <= syncedCount) return;
+      const inc = history.slice(syncedCount);
+      syncedCount = history.length;
+      opts.onHistorySync(inc.map((m) => ({
+        role: m.role,
+        content: m.content ?? null,
+        ...(m.role === 'assistant' && m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
+        ...(m.role === 'tool' && m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
+      })));
+    };
 
     // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
     const inputCtx: AgentHookCtx = { traceId, turn: 0, model, history, systemPrompt, tools: toolDefs, scratchpad };
@@ -281,11 +349,19 @@ export class AgentRunner {
         }
       }
 
-      // ---- 英文思考提醒：紧贴决策点注入（位置稳定，不破坏 L3 前缀复用） ----
+      // ---- 英文思考提醒（首轮注入，随历史保留）----
       // 必须在 Context Provider 注入【之后】：记忆/上下文消息若追加在 reminder 后面，
       // 模型最后看到的是中文消息，思考语言会被带偏（思维链不稳定的根因）。
-      if (thinkInEnglish && (llmCtx.history[llmCtx.history.length - 1]?.content ?? '') !== EN_THINK_REMINDER) {
+      if (turn === 0 && thinkInEnglish && (llmCtx.history[llmCtx.history.length - 1]?.content ?? '') !== EN_THINK_REMINDER) {
         llmCtx.history.push({ role: 'system', content: EN_THINK_REMINDER });
+      }
+
+      // ---- 请求结尾规整（L3 前缀缓存的关键，见 CONTINUE_HINT 注释）----
+      // 每轮 LLM 调用前保证 history 末尾是 user 消息：网关对 tool/system 结尾的请求
+      // 不建立前缀缓存（跨 run 首轮全 miss 的根因）；user 结尾缓存正常。
+      // 固定内容 → 跨 run 逐字节一致 → 前缀纯追加延续。
+      if (llmCtx.history[llmCtx.history.length - 1]?.role !== 'user') {
+        llmCtx.history.push({ role: 'user', content: CONTINUE_HINT });
       }
 
       // ---- L1 语义缓存：问答命中直接返回缓存答案（跳过 LLM 调用，零成本） ----
@@ -297,9 +373,11 @@ export class AgentRunner {
       // promptKey = systemPrompt 指纹：人设/插件规则不同则隔离缓存空间。
       // 排除 before_llm 钩子注入的记忆/教训消息（【长期记忆】/【失败教训】），避免被当作"问题"
       const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content
-        && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
+        && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
       const lastUser = realUsers[realUsers.length - 1];
       q = lastUser?.content ?? '';
+      // 注入完成后、LLM 调用前：把发送序列增量同步入库（教训/记忆/提醒/上一轮工具消息）
+      syncHistory();
       if (turn === 0 && q.length >= 8) {
         const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
         const cached = await this.kernel.cache.l1Get(q, promptKey, cacheScope);
@@ -356,19 +434,23 @@ export class AgentRunner {
         return null;
       };
       try {
+        // 发送序列 = 文本化形态（L3 前缀缓存关键）：工具轮合并为 assistant 文本、
+        // 恒以 user 结尾——与跨 run 组装（routes buildHistory）完全一致，
+        // 消除 tool_calls 结构导致的网关缓存不稳定（run 内与跨 run 前缀逐字节延续）。
+        const sendHistory = textualizeHistory(llmCtx.history);
         // L3 前缀复用统计：与上一轮调用共享的公共前缀 token（provider KV cache 直接命中）
         if (lastHistory) {
-          const shared = sharedPrefixTokens(lastHistory, llmCtx.history);
+          const shared = sharedPrefixTokens(lastHistory, sendHistory);
           if (shared > 0) this.kernel.cache.recordPrefixRepeat(shared);
         }
-        lastHistory = llmCtx.history.map((m) => ({ role: m.role, content: m.content }));
+        lastHistory = sendHistory.map((m) => ({ role: m.role, content: m.content }));
         let lastErr: unknown;
         for (let pi = 0; pi < providerChain.length; pi++) {
           activeProvider = providerChain[pi];
           let ok = false;
           for (let attempts = 0; attempts < 2 && !ok; attempts++) {
             try {
-              for await (const chunk of activeProvider.chat(llmCtx.history, { model, tools: llmCtx.tools, signal })) {
+              for await (const chunk of activeProvider.chat(sendHistory, { model, tools: llmCtx.tools, signal })) {
                 const ev = handleChunk(chunk);
                 if (ev) yield ev;
               }
@@ -391,6 +473,8 @@ export class AgentRunner {
         const errMsg = err instanceof Error ? err.message : String(err);
         await this.emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg });
         step.fail(errMsg);
+        // 已发送序列仍同步入库（失败中断也不丢已观察的上下文；下 run 从这里继续能命中前缀）
+        syncHistory();
         yield { type: 'error', error: errMsg };
         return;
       }
@@ -446,6 +530,8 @@ export class AgentRunner {
           failed: false,
           ts: Date.now(),
         });
+        // 最终 assistant 消息同步入库（下 run 组装与该轮序列纯追加 → 前缓存延续）
+        syncHistory();
         yield {
           type: 'assistant_done',
           content: text,
@@ -462,7 +548,8 @@ export class AgentRunner {
         let args: unknown = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = { _raw: tc.function.arguments }; }
         if (!tool) {
-          history.push({ role: 'tool', tool_call_id: tc.id, content: `工具不存在: ${tc.function.name}` });
+          const missMsg = `工具不存在: ${tc.function.name}`;
+          history.push({ role: 'tool', tool_call_id: tc.id, content: missMsg });
           yield { type: 'tool_result', name: tc.function.name, summary: '工具不存在', ok: false };
           continue;
         }
@@ -471,7 +558,8 @@ export class AgentRunner {
         const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args } };
         await this.emitHook('agent.before_tool', toolCtx);
         if (toolCtx.blocked) {
-          history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' }) });
+          const blockMsg = JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' });
+          history.push({ role: 'tool', tool_call_id: tc.id, content: blockMsg });
           yield { type: 'tool_result', name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
           continue;
         }
@@ -563,6 +651,7 @@ export class AgentRunner {
           this.kernel.budget.recordTask({
             type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: false, ts: Date.now(),
           });
+          syncHistory();
           yield { type: 'handoff', role: ho.role, objective: ho.objective };
           return;
         }
@@ -603,10 +692,11 @@ export class AgentRunner {
       opts.onCheckpoint?.(turn, history);
     }
 
+    syncHistory(); // 超限路径：最后一轮的工具/助理消息一并入库，续跑可命中前缀
     await this.emitHook('agent.on_error', { traceId, turn: maxTurns, model, history, systemPrompt, tools: toolDefs, scratchpad, error: `超过最大轮数 ${maxTurns}，已停止` });
     // 任务画像：截断/失败也算一次任务记录（失败率是自适应策略的输入）
     const lastUserMsg = [...history].reverse()
-      .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】'));
+      .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
     this.kernel.budget.recordTask({
       type: classifyTask(lastUserMsg?.content ?? ''),
       turns: maxTurns,
@@ -614,7 +704,8 @@ export class AgentRunner {
       failed: true,
       ts: Date.now(),
     });
-    yield { type: 'error', error: `超过最大轮数 ${maxTurns}，已停止` };
+    // 轮数上限不是任务失败：已完成的工作与断点均保留，可继续推进
+    yield { type: 'error', error: `本任务已达到轮数上限（${maxTurns} 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置` };
   }
 }
 

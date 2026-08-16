@@ -102,6 +102,10 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     defaultModel: cfg.model,
     prices: resolvedPrices,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
+      if (process.env.TRACE_LLM_BODY === 'on') {
+        const { appendFileSync } = await import('node:fs');
+        try { appendFileSync('llm-body.log', JSON.stringify(messages) + '\n'); } catch { /* ignore */ }
+      }
       const body: Record<string, unknown> = {
         model: opts.model,
         messages,
@@ -115,6 +119,10 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
           type: 'function',
           function: { name: t.name, description: t.description, parameters: t.parameters },
         }));
+      }
+      if (process.env.TRACE_LLM_BODY === 'on') {
+        const { appendFileSync } = await import('node:fs');
+        try { appendFileSync('llm-full.log', JSON.stringify(body) + '\n'); } catch { /* ignore */ }
       }
 
       const res = await fetch(`${baseUrl}/chat/completions`, {
