@@ -15,6 +15,7 @@ import { resolve, relative, join } from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { truncateHistory, estimateTokens } from './context';
+import { compactHistory } from '../core/chat/compact';
 import type { Store } from './db';
 import type { ClientTracker } from './client-tracker';
 
@@ -75,8 +76,36 @@ function maskKey(key: string): string {
 }
 
 function getChatService(kernel: Kernel): ChatService | undefined {
-  const cap = kernel.plugins.capabilities('service').find((c) => c.service.id === 'chat');
-  return cap?.service.instance as ChatService | undefined;
+  // 共效应解析（v2）：依赖注册表按 key 解析，只返回 ACTIVE 提供者的绑定——比扫描能力表更直接
+  return kernel.plugins.resolveService('service:chat') as ChatService | undefined;
+}
+
+/** 角色只读工具白名单（与 subagent 语义一致：侦查/搜索/记忆，不改变世界） */
+const ROLE_READONLY_TOOLS = new Set([
+  'list_dir', 'read_file', 'web_search', 'list_skills', 'get_skill',
+  'recall_facts', 'plugin_status',
+]);
+
+/**
+ * 断点历史完整性校验：恢复前必须保证 assistant 的 tool_calls 与 tool 回填配对完整、
+ * tool 消息带 tool_call_id——否则 provider 会拒绝请求（missing tool_call_id）。
+ * 返回 null = 完整可恢复；返回字符串 = 不一致原因（调用方应清除断点并明确告知）。
+ */
+function validateCheckpointHistory(history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]): string | null {
+  const pending = new Set<string>();
+  for (let i = 0; i < history.length; i++) {
+    const m = history[i];
+    if (m.role === 'assistant' && Array.isArray(m.tool_calls)) {
+      for (const tc of m.tool_calls as { id?: string }[]) {
+        if (tc?.id) pending.add(tc.id);
+      }
+    } else if (m.role === 'tool') {
+      if (!m.tool_call_id) return `断点第 ${i + 1} 条消息（工具回填）缺少 tool_call_id`;
+      pending.delete(m.tool_call_id);
+    }
+  }
+  if (pending.size > 0) return `断点存在 ${pending.size} 个未配对的工具调用（${[...pending].slice(0, 3).join(', ')}${pending.size > 3 ? '…' : ''}）`;
+  return null;
 }
 
 function sse(res: Response, event: string, data: unknown): void {
@@ -213,10 +242,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
 
   // ---------- Skills（内置 + 市场安装管理） ----------
   interface SkillService { list: () => { name: string; description: string; source: string }[]; get: (n: string) => { ok: boolean; content?: string; error?: string } }
-  const getSkillsService = (): SkillService | undefined => {
-    const cap = kernel.plugins.capabilities('service').find((c) => c.service.id === 'skills');
-    return cap?.service.instance as SkillService | undefined;
-  };
+  const getSkillsService = (): SkillService | undefined =>
+    kernel.plugins.resolveService('service:skills') as SkillService | undefined;
   const marketDir = join(kernel.rootDir, 'market');
   const userSkillsDir = join(kernel.rootDir, 'data', 'skills');
 
@@ -370,8 +397,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       case 'normal': {
         if (!sessionId) return fail('缺少会话');
         if (!store.getSession(sessionId)) return fail('会话不存在', 404);
-        store.updateSession(sessionId, { mode: name, planPending: name === 'plan' ? 1 : 0 });
-        return res.json({ ok: true, type: 'action', data: { action: 'set_mode', mode: name } });
+        // normal = 回到主代理（handoff 角色清空）+ 普通模式；plan/goal 保留角色（角色与模式正交）
+        const roleReset = name === 'normal' ? { role: '' } : {};
+        store.updateSession(sessionId, { mode: name, planPending: name === 'plan' ? 1 : 0, ...roleReset });
+        return res.json({ ok: true, type: 'action', data: { action: 'set_mode', mode: name, roleReset: name === 'normal' } });
       }
       case 'model': {
         if (!sessionId) return fail('缺少会话');
@@ -413,7 +442,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   app.patch('/api/sessions/:id', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { title, model, mode, archived, pinned } = req.body ?? {};
+    const { title, model, mode, role, archived, pinned } = req.body ?? {};
     if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
       return res.status(400).json({ error: 'mode 仅支持 normal / plan / goal' });
     }
@@ -426,6 +455,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       ...(typeof title === 'string' ? { title } : {}),
       ...(typeof model === 'string' ? { model } : {}),
       ...(typeof mode === 'string' ? { mode, planPending: mode === 'plan' ? 1 : 0 } : {}),
+      ...(typeof role === 'string' ? { role } : {}),
       ...(archived !== undefined ? { archived: archived ? 1 : 0 } : {}),
       ...(pinned !== undefined ? { pinned: pinned ? 1 : 0 } : {}),
     });
@@ -448,14 +478,27 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     res.json({ ok: true, removed });
   });
 
-  // ---------- 对话（SSE 流式） ----------
+  // ---------- 断点状态查询（前端可据此显示「继续任务」入口） ----------
+  app.get('/api/sessions/:id/checkpoint', (req, res) => {
+    const session = store.getSession(req.params.id);
+    if (!session) return res.status(404).json({ error: '会话不存在' });
+    const cp = store.loadCheckpoint(session.id);
+    res.json({
+      exists: !!cp,
+      turn: cp?.turn ?? 0,
+      historyMessages: cp?.history.length ?? 0,
+      createdAt: cp?.createdAt ?? 0,
+    });
+  });
+  // ---------- 对话（SSE 流式；body.resume=true 时从断点历史继续） ----------
   app.post('/api/sessions/:id/chat', async (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { message, model, provider: providerId, systemPrompt: systemPromptParam } = req.body ?? {};
-    if (!message?.trim()) return res.status(400).json({ error: '消息不能为空' });
+    const { message, model, provider: providerId, systemPrompt: systemPromptParam, resume } = req.body ?? {};
+    // 断点续跑：resume=true 时不需要新消息，从断点历史继续（中断的任务不白跑）
+    if (!resume && !message?.trim()) return res.status(400).json({ error: '消息不能为空' });
     // 编码防御：拒绝含替换符/孤立代理项的消息（防外部工具写入乱码）
-    if (/\uFFFD/.test(message) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\uDC00-\uDFFF](?<![\uD800-\uDBFF])/.test(message)) {
+    if (!resume && (/\uFFFD/.test(message) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\uDC00-\uDFFF](?<![\uD800-\uDBFF])/.test(message))) {
       return res.status(400).json({ error: '消息包含无法识别的编码字符，请检查输入编码（应为 UTF-8）' });
     }
 
@@ -468,6 +511,9 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     // （不是"请 LLM 自觉节约"，而是 harness 直接告诉它预算边界）
     const sessionCost = store.listMessages(session.id).reduce((s, m) => s + (m.cost ?? 0), 0);
     const costBudget = kernel.config.get<number>('budget.maxSessionCost', 0);
+    // 会话级成本硬上限（实时熔断）：总预算 - 会话历史累计 = 本任务剩余预算。
+    // 剩余 ≤ 0 时不传（runner 不熔断——历史已超预算时由下方警告提示收敛，避免卡死续跑）。
+    const remainingBudget = costBudget > 0 ? costBudget - sessionCost : 0;
     const costWarning = costBudget > 0 && sessionCost > costBudget
       ? `\n【成本预算警告】本会话累计成本 $${sessionCost.toFixed(5)} 已超过预算 $${costBudget.toFixed(5)}：请立即收敛——停止探索性工具调用，直接给出结论；如需继续深入，请告知用户新建会话。`
       : '';
@@ -487,33 +533,81 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       `- 会话模式: ${session.mode}${modePrompt ? `（${modePrompt.replace(/^【当前模式：[^】]+】/, '').slice(0, 40)}…）` : ''}`,
       `- 模型: ${resolvedModel}`,
     ].join('\n');
-    const systemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
+    const baseSystemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
       : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '') + `\n\n${worldState}` + costWarning;
 
+    // 角色接管（handoff）：会话处于某角色时，角色提示词置于最前（引导力最强），
+    // 通用规则保留在后；角色工具集按声明过滤（readonly=只读白名单）。
+    // 角色与模式正交：plan/goal 模式提示词照常注入，角色只管身份与工具边界。
+    const roleDef = session.role
+      ? kernel.plugins.capabilities('role').find((c) => c.role.id === session.role)?.role
+      : undefined;
+    const systemPrompt = roleDef
+      ? `${roleDef.systemPrompt}\n\n（以下为通用规则，与角色纪律冲突时以角色纪律为准）\n${baseSystemPrompt}`
+      : baseSystemPrompt;
+
     // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
     const planPending = session.planPending ?? 0;
-    const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : undefined;
+    const roleToolsOverride = roleDef?.tools === 'readonly'
+      ? kernel.plugins.capabilities('tool').map((c) => c.tool).filter((t) => ROLE_READONLY_TOOLS.has(t.name))
+      : undefined;
+    const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : roleToolsOverride;
 
     // 历史组装：DB 消息 → LLM 消息（工具中间消息不入库，历史保持干净）
-    const history: LLMMessage[] = store
-      .listMessages(session.id)
-      .map((m) => ({ role: m.role, content: m.content }))
-      .filter((m): m is LLMMessage => m.role === 'user' || m.role === 'assistant');
-    history.push({ role: 'user', content: message });
-
-    store.addMessage({ sessionId: session.id, role: 'user', content: message });
-    if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
+    let history: LLMMessage[];
+    if (resume) {
+      // 断点续跑：用 checkpoint 的完整历史（含工具回填），末尾加恢复提示——
+      // 恢复语义 = 从最后一轮继续决策，不追加用户消息、不落库（续跑结果由后续轮次落库）
+      const cp = store.loadCheckpoint(session.id);
+      if (!cp || !cp.history.length) return res.status(404).json({ error: '该会话没有可恢复的断点（任务已完成或从未中断）' });
+      // 断点完整性校验：assistant 的 tool_calls 必须与 tool 回填配对、tool 消息必须带
+      // tool_call_id——否则 provider 校验失败（旧版本遗留的缺字段断点直接报错白跑）。
+      // 不一致 → 清除该断点并明确告知（用户重新发起任务即可），而不是把坏数据发给 LLM。
+      const invalid = validateCheckpointHistory(cp.history);
+      if (invalid) {
+        store.clearCheckpoint(session.id);
+        return res.status(400).json({ error: `${invalid}——该断点已清除，请重新发起任务` });
+      }
+      history = [
+        ...cp.history as LLMMessage[],
+        { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' },
+      ];
+    } else {
+      history = store
+        .listMessages(session.id)
+        .map((m) => ({ role: m.role, content: m.content }))
+        .filter((m): m is LLMMessage => m.role === 'user' || m.role === 'assistant');
+      history.push({ role: 'user', content: message });
+      store.addMessage({ sessionId: session.id, role: 'user', content: message });
+      if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
+    }
 
     const traceId = randomUUID();
-    // 上下文管理：超预算截断较早历史（保留 system 与最新消息，丢弃部分注入说明）
+    const ac = new AbortController();
+    // 上下文管理 v2：超预算时优先 LLM 摘要压缩（compact：旧对话变【历史摘要】，不丢事实），
+    // 压缩不可用/失败才截断（truncate：丢弃较早消息并注入说明）。
+    // 对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜。
     const maxCtx = kernel.config.get<number>('context.maxTokens', 30000);
-    const { messages: ctxHistory, truncated, droppedMessages } = truncateHistory(history, maxCtx);
-    if (truncated) {
+    const compactEnabled = kernel.config.get<boolean>('context.compact', true);
+    let ctxHistory: LLMMessage[];
+    let ctxMode: 'none' | 'compact' | 'truncate' = 'none';
+    let droppedMessages = 0;
+    if (compactEnabled) {
+      const r = await compactHistory(history, maxCtx, { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace });
+      ctxHistory = r.messages;
+      ctxMode = r.mode;
+      droppedMessages = r.droppedMessages;
+    } else {
+      const r = truncateHistory(history, maxCtx);
+      ctxHistory = r.messages;
+      ctxMode = r.truncated ? 'truncate' : 'none';
+      droppedMessages = r.droppedMessages;
+    }
+    if (ctxMode === 'truncate') {
       kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: '上下文截断' })
         .finish({ outputSummary: `超出预算（${maxCtx} tokens），已丢弃 ${droppedMessages} 条较早消息` });
     }
-    const ac = new AbortController();
     // 客户端断开才中断（req close 在请求体读完即触发，不可用）
     res.on('close', () => { if (!res.writableEnded) ac.abort(); });
 
@@ -543,6 +637,16 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         signal: ac.signal, systemPrompt, tools: toolsOverride,
         // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
         fallbackProviders: chat.providers.filter((p) => p.id !== provider.id),
+        // 成本实时熔断：剩余预算传执行器，超限强制停止（harness 硬边界）
+        costBudget: remainingBudget > 0 ? remainingBudget : undefined,
+        // 断点续跑：每轮工具执行完自动持久化完整历史（中断不白跑；resume 从断点继续）。
+        // 必须存完整字段（tool_calls/tool_call_id 配对），否则恢复时 provider 校验失败。
+        onCheckpoint: (turn, hist) => {
+          store.saveCheckpoint(session.id, turn, hist.map((m) => ({
+            role: m.role, content: m.content ?? null,
+            tool_calls: m.tool_calls, tool_call_id: m.tool_call_id,
+          })));
+        },
       })) {
         if (ev.type === 'delta') {
           assistantText += ev.text;
@@ -554,11 +658,20 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
           sse(res, 'tool_start', { name: ev.name, args: ev.args });
         } else if (ev.type === 'approval_required') {
           sse(res, 'approval_required', { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args });
+        } else if (ev.type === 'budget_hit') {
+          // 成本熔断：harness 硬边界触发（SSE 推送，前端可展示）
+          sse(res, 'budget_hit', { cost: ev.cost, budget: ev.budget });
+        } else if (ev.type === 'handoff') {
+          // 角色移交：会话控制权交给目标角色（后续对话由该角色提示词/工具集接管）
+          store.updateSession(session.id, { role: ev.role });
+          sse(res, 'handoff', { role: ev.role, objective: ev.objective });
         } else if (ev.type === 'tool_result') {
-          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok });
+          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok, stored: ev.stored ?? false });
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;
+          // 任务正常完成 → 断点失效（恢复点只对未完成任务有意义）
+          store.clearCheckpoint(session.id);
           sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost, cached: ev.cached ?? false });
         } else if (ev.type === 'error') {
           sse(res, 'error', { error: ev.error });
@@ -784,6 +897,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       context: {
         maxTokens: kernel.config.get<number>('context.maxTokens', 30000),
         truncateInject: kernel.config.get<boolean>('context.truncateInject', true),
+        compact: kernel.config.get<boolean>('context.compact', true),
       },
       cache: {
         l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.58),
@@ -805,6 +919,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         kernel.config.set('context.maxTokens', Math.max(2000, Math.min(200_000, Number(context.maxTokens))));
       }
       if (context?.truncateInject !== undefined) kernel.config.set('context.truncateInject', Boolean(context.truncateInject));
+      if (context?.compact !== undefined) kernel.config.set('context.compact', Boolean(context.compact));
       if (cache?.l1Threshold !== undefined) {
         const v = Math.min(1, Math.max(0.5, Number(cache.l1Threshold)));
         kernel.config.set('cache.l1Threshold', v);

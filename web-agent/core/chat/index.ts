@@ -11,6 +11,7 @@
 import type { PersonaDef, Plugin } from '../../kernel/types';
 import { AgentRunner } from './agent';
 import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig } from './provider';
+import { resultStore, sessionKeyOf } from './result-store';
 
 /**
  * L0 内核框架：不可修改的执行纪律（提示词系统 v1.0 定稿，见 docs/提示词系统定稿.md）。
@@ -129,18 +130,100 @@ export default {
       approveApproval: (approvalId: string, approved: boolean) => runner.approveApproval(approvalId, approved),
     };
 
-    // 插件加载/卸载/重载 → 自动重装系统提示词（L2 层随插件增减）
-    const refresh = () => service.refreshPrompt();
-    ctx.bus.on('plugin.loaded', refresh);
-    ctx.bus.on('plugin.unloaded', refresh);
-    ctx.bus.on('plugin.reloaded', refresh);
-    // 配置变更（如 agent.thinkInEnglish 切换思考语言）→ 热重装系统提示词
-    ctx.bus.on('config.changed', refresh);
+    // 反应性共效应（时空可组合性 v2）：声明「依赖什么」，运行时在变化时通知——
+    // 取代手写监听 plugin.loaded/unloaded/reloaded + config.changed 的旧式做法：
+    //  - onCapabilities('persona')：persona 能力集变化（插件加载/卸载/重载带人设）→ 自动重装；
+    //  - watchConfig('agent.thinkInEnglish')：配置键变化（最小干预，只关注自己关心的键）→ 自动重装。
+    // 两者均自动退订（可逆效应）：chat 卸载时订阅随作用域回收，无监听器泄漏。
+    ctx.onCapabilities('persona', () => service.refreshPrompt());
+    ctx.watchConfig('agent.thinkInEnglish', () => service.refreshPrompt());
+
+    // ---- 角色注册表：内置主代理角色 + handoff_to 移交工具 ----
+    // 角色=插件（万物皆插件）：任意插件可注册角色，角色注册表动态枚举进移交路径。
+    // 移交语义（OpenAI Agents SDK handoff 的 maharness 版）：执行器识别 handoff 返回 →
+    // 终止当前循环 → 会话记录新角色 → 后续对话由新角色提示词/工具集接管（热切换，无需重启）。
+    const roleDefs = () => ctx.kernel.plugins.capabilities('role').map((c) => c.role);
+    ctx.register({
+      kind: 'role',
+      role: {
+        id: 'main',
+        name: '主代理',
+        description: '默认主代理：通用对话、文件操作、规划与执行。任务完成后交回主代理用 role=main。',
+        systemPrompt: makeBasePrompt(ctx.config.get<boolean>('agent.thinkInEnglish', true)),
+        tools: 'all',
+      },
+    });
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'handoff_to',
+        risk: 'low',
+        costHint: 'low',
+        output: '{handedOff, role, name}',
+        description: '把当前任务移交给指定角色（专业化分工）：移交后本代理立即停止，后续对话由目标角色接管（其提示词与工具集热切换，无需重启）。' +
+          '适用：任务类型超出本角色定位（如深度编码/审查/规划）；移交时说明任务目标、已完成与未完成的部分、对新角色的要求。' +
+          '角色不存在时错误信息会列出当前全部可用角色。交回主代理：role=main。',
+        parameters: {
+          type: 'object',
+          properties: {
+            role: { type: 'string', description: '目标角色 id（可用角色见错误提示）' },
+            objective: { type: 'string', description: '移交说明：任务目标、已完成部分、未完成部分、对新角色的要求（≤500 字）' },
+          },
+          required: ['role', 'objective'],
+        },
+        async handler(args: { role?: string; objective?: string }) {
+          const role = String(args.role ?? '').trim();
+          const objective = String(args.objective ?? '').trim();
+          if (!role) return { ok: false, error: '缺少 role' };
+          if (!objective) return { ok: false, error: '缺少 objective（说明任务目标与已完成/未完成部分）' };
+          const defs = roleDefs();
+          const def = defs.find((r) => r.id === role);
+          if (!def) {
+            return { ok: false, error: `角色不存在: ${role}。可用角色: ${defs.map((r) => `${r.id}(${r.name})`).join('、') || '无（仅主代理可用 main）'}` };
+          }
+          return {
+            ok: true,
+            data: { handedOff: true, role: def.id, name: def.name },
+            handoff: { role: def.id, objective },
+          };
+        },
+      },
+    });
 
     ctx.register({
       kind: 'service',
       service: { id: 'chat', instance: service },
     });
+
+    // ---- 工具结果重读：大结果存于结果存储（回填只留摘要+引用），按 id 零副作用重读 ----
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'recall_tool_result',
+        risk: 'low',
+        costHint: 'low',
+        output: '{id, length, content}',
+        description: '重读本会话中已存储的工具完整结果（工具结果过大时回填只含摘要与 id，用此工具按 id 重读原文——零副作用、不重算工具）。id 从工具回填的【工具结果已存入结果存储】标注中获取。',
+        parameters: {
+          type: 'object',
+          properties: { id: { type: 'string', description: '结果存储 id（即 tool_call_id，从回填标注中读取）' } },
+          required: ['id'],
+        },
+        outputSchema: {
+          type: 'object',
+          required: ['id', 'length', 'content'],
+          properties: { id: { type: 'string' }, length: { type: 'integer', minimum: 0 }, content: { type: 'string' } },
+        },
+        async handler(args: { id?: string }, tctx) {
+          const id = String(args.id ?? '').trim();
+          if (!id) return { ok: false, error: '缺少 id' };
+          const content = resultStore.get(sessionKeyOf(tctx), id);
+          if (content === undefined) return { ok: false, error: `结果不存在或已淘汰: ${id}（仅本会话内可读；若结果已超出存储容量，请重新调用原工具获取）` };
+          return { ok: true, data: { id, length: content.length, content } };
+        },
+      },
+    });
+
     ctx.logger.info(
       providers.length
         ? `已加载 Provider: ${providers.map((p) => `${p.label}(${p.defaultModel})`).join(', ')}`

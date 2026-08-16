@@ -76,6 +76,10 @@ export class Store {
       CREATE TABLE IF NOT EXISTS workspaces (
         id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS agent_checkpoints (
+        session_id TEXT PRIMARY KEY, turn INTEGER NOT NULL,
+        history TEXT NOT NULL, created_at INTEGER NOT NULL
+      );
     `);
     // 迁移：reasoning 列（旧库无此列）
     const cols = this.db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
@@ -97,6 +101,10 @@ export class Store {
     }
     if (!sCols.some((c) => c.name === 'pinned')) {
       this.db.exec('ALTER TABLE sessions ADD COLUMN pinned INTEGER NOT NULL DEFAULT 0');
+    }
+    // 迁移：sessions.role 列（handoff 角色移交：当前接管角色，空 = 主代理）
+    if (!sCols.some((c) => c.name === 'role')) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT ''");
     }
   }
 
@@ -179,11 +187,12 @@ export class Store {
 
   listSessions(): Session[] {
     const rows = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
       .all() as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string, title: r.title as string, model: r.model as string,
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      role: (r.role as string) || undefined,
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
     }));
@@ -191,12 +200,13 @@ export class Store {
 
   getSession(id: string): Session | undefined {
     const r = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
+      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
       .get(id) as Record<string, unknown> | undefined;
     if (!r) return undefined;
     return {
       id: r.id as string, title: r.title as string, model: r.model as string,
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
+      role: (r.role as string) || undefined,
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
     };
@@ -214,12 +224,18 @@ export class Store {
     return s;
   }
 
-  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending' | 'archived' | 'pinned'>>): void {
+  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending' | 'role' | 'archived' | 'pinned'>>): void {
     const cur = this.getSession(id);
     if (!cur) return;
     this.db
-      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
-      .run(patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode, patch.planPending ?? cur.planPending, patch.archived ?? cur.archived, patch.pinned ?? cur.pinned, Date.now(), id);
+      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, role = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
+      .run(
+        patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode,
+        patch.planPending ?? cur.planPending,
+        // role 允许显式清空（'' = 交回主代理）：不能用 ??（空串是合法值）
+        patch.role !== undefined ? patch.role : cur.role ?? '',
+        patch.archived ?? cur.archived, patch.pinned ?? cur.pinned, Date.now(), id,
+      );
   }
 
   touchSession(id: string): void {
@@ -309,6 +325,36 @@ export class Store {
         msg.traceId ?? null, msg.createdAt,
       );
     return msg;
+  }
+
+  // ---------- 断点续跑（checkpoint：turn 级自动保存完整历史，resume 从断点继续） ----------
+
+  /** 保存会话最新断点（upsert：每会话只保留最新——长任务的恢复点是"最近完成的轮"）
+   *  history 必须保存完整字段（role/content/tool_calls/tool_call_id）——恢复时
+   *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。 */
+  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]): void {
+    this.db
+      .prepare(`INSERT INTO agent_checkpoints (session_id, turn, history, created_at) VALUES (?,?,?,?)
+                ON CONFLICT(session_id) DO UPDATE SET turn=excluded.turn, history=excluded.history, created_at=excluded.created_at`)
+      .run(sessionId, turn, JSON.stringify(history), Date.now());
+  }
+
+  /** 读取会话断点（无断点返回 undefined） */
+  loadCheckpoint(sessionId: string): { turn: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number } | undefined {
+    const r = this.db.prepare('SELECT turn, history, created_at FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
+      | { turn: number; history: string; created_at: number }
+      | undefined;
+    if (!r) return undefined;
+    try {
+      return { turn: r.turn, history: JSON.parse(r.history), createdAt: r.created_at };
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** 清除会话断点（任务完成/新任务开始时） */
+  clearCheckpoint(sessionId: string): void {
+    this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(sessionId);
   }
 
   // ---------- 统计 ----------

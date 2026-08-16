@@ -7,6 +7,7 @@
 import { Kernel } from '../kernel';
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
+import type { LLMMessage, ToolDef } from '../kernel/types';
 
 // 基于模块路径定位 web-agent 根，不依赖调用方 cwd（任意目录运行均正确）
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -607,6 +608,566 @@ export default {
   const sysSteps = kernel.trace.query(undefined, { type: 'system' });
   console.log('[trace] 类型过滤（llm_call/system）:', llmSteps.length > 0 && sysSteps.length > 0 ? '✓' : '✗',
     `(${llmSteps.length}/${sysSteps.length})`);
+}
+
+// ---- 时空可组合性：可逆效应引擎（LIFO 逆元栈 + 幂等 dispose） ----
+{
+  const { EffectScope } = await import('../kernel/scope');
+  const order: string[] = [];
+  const s = new EffectScope();
+  s.add(() => { order.push('a'); });
+  s.add(() => { order.push('b'); });
+  s.add(() => { order.push('c'); });
+  await s.dispose();
+  const lifo = order.join(',') === 'c,b,a';
+  const before = order.length;
+  await s.dispose(); // 幂等：armed=false 后不再执行
+  console.log('[scope] 可逆效应 LIFO 恢复 + 幂等 dispose:', lifo && order.length === before ? '✓' : '✗', `(顺序=${order.join(',')})`);
+  // 单独撤销：add 返回的 unregister 可从栈中移除（不随 dispose 执行）
+  const s2 = new EffectScope();
+  const ran: string[] = [];
+  const un = s2.add(() => { ran.push('x'); });
+  un();
+  await s2.dispose();
+  console.log('[scope] 逆元可单独撤销:', ran.length === 0 ? '✓' : '✗');
+}
+
+// ---- 时空可组合性：卸载完全恢复 + 重新部署（可逆效应 × 插件） ----
+// tmp-compose：工具 + 服务（coeffect provide）+ 事件监听（ctx.on）+ 配置对账（watchConfig）
+// 断言：disable 后四者全部自动恢复（能力消失/服务撤回/监听退订/配置监听退订）；
+//       enable 后重新部署全部可用（onLoad 重跑重建，无需重启）。
+{
+  const { mkdirSync, writeFileSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const dir = join(rootDir, 'plugins', 'tmp-compose');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-compose', name: '可组合性测试', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(dir, 'index.ts'), `
+import type { Plugin } from '../../kernel/types';
+export default {
+  id: 'tmp-compose', name: '可组合性测试', version: '0.1.0',
+  onLoad(ctx) {
+    // 事件监听（自动退订）
+    ctx.on('compose.ping', (e) => {
+      const { traceId } = e.data as { traceId: string };
+      ctx.trace.startStep({ traceId, turn: 0, type: 'system', name: 'compose-ping' }).finish({});
+    });
+    // 服务提供（coeffect provide：started 后发布，卸载自动撤回）
+    ctx.register({ kind: 'service', service: { id: 'compose-svc', instance: { hello: 'world' } } });
+    // 工具能力
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'compose_probe',
+        description: '可组合性探针',
+        parameters: { type: 'object', properties: {} },
+        async handler() { return { ok: true, data: { hello: 'world' } }; },
+      },
+    });
+    // 声明式配置对账（自动退订）
+    ctx.watchConfig('compose.testKey', (v) => {
+      ctx.trace.startStep({ traceId: 'compose-cfg', turn: 0, type: 'system', name: 'compose-config' }).finish({ outputSummary: String(v) });
+    });
+  },
+} satisfies Plugin;
+`);
+  await new Promise((r) => setTimeout(r, 1200)); // 等热扫描注册+启动
+  const started = kernel.plugins.get('tmp-compose')?.state === 'started';
+  const toolVisible = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
+  const svcResolvable = kernel.plugins.resolveService('service:compose-svc') !== undefined;
+  const pingBefore = kernel.trace.query(undefined, { name: 'compose-ping' }).length;
+  await kernel.bus.emitAsync({ type: 'compose.ping', data: { traceId: 'compose-t1' }, ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 50));
+  const pingSeen = kernel.trace.query(undefined, { name: 'compose-ping' }).length > pingBefore;
+  const cfgBefore = kernel.trace.query(undefined, { name: 'compose-config' }).length;
+  kernel.config.set('compose.testKey', 'hello');
+  await new Promise((r) => setTimeout(r, 50));
+  const cfgSeen = kernel.trace.query(undefined, { name: 'compose-config' }).length > cfgBefore;
+  console.log('[compose] 插件启动: 工具/服务/监听/配置对账全部生效:',
+    started && toolVisible && svcResolvable && pingSeen && cfgSeen ? '✓' : '✗',
+    `(state=${kernel.plugins.get('tmp-compose')?.state} tool=${toolVisible} svc=${svcResolvable} ping=${pingSeen} cfg=${cfgSeen})`);
+
+  // ---- 卸载 = 完全恢复（可逆效应：四项副作用全部自动撤回） ----
+  await kernel.plugins.disable('tmp-compose');
+  const toolGone = !kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
+  const svcWithdrawn = kernel.plugins.resolveService('service:compose-svc') === undefined;
+  const ping2Before = kernel.trace.query(undefined, { name: 'compose-ping' }).length;
+  await kernel.bus.emitAsync({ type: 'compose.ping', data: { traceId: 'compose-t2' }, ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 50));
+  const pingSilent = kernel.trace.query(undefined, { name: 'compose-ping' }).length === ping2Before;
+  const cfg2Before = kernel.trace.query(undefined, { name: 'compose-config' }).length;
+  kernel.config.set('compose.testKey', 'after-disable');
+  await new Promise((r) => setTimeout(r, 50));
+  const cfgSilent = kernel.trace.query(undefined, { name: 'compose-config' }).length === cfg2Before;
+  console.log('[compose] 卸载完全恢复（能力消失/服务撤回/监听退订/配置监听退订）:',
+    toolGone && svcWithdrawn && pingSilent && cfgSilent ? '✓' : '✗',
+    `(tool=${toolGone} svc=${svcWithdrawn} ping=${pingSilent} cfg=${cfgSilent})`);
+
+  // ---- 重新部署：enable = 重新加载（onLoad 重跑，全部能力重建） ----
+  await kernel.plugins.enable('tmp-compose');
+  const toolBack = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
+  const svcBack = kernel.plugins.resolveService('service:compose-svc') !== undefined;
+  const ping3Before = kernel.trace.query(undefined, { name: 'compose-ping' }).length;
+  await kernel.bus.emitAsync({ type: 'compose.ping', data: { traceId: 'compose-t3' }, ts: Date.now() });
+  await new Promise((r) => setTimeout(r, 50));
+  const pingBack = kernel.trace.query(undefined, { name: 'compose-ping' }).length > ping3Before;
+  console.log('[compose] 重新部署（enable 重建能力）:', toolBack && svcBack && pingBack ? '✓' : '✗',
+    `(tool=${toolBack} svc=${svcBack} ping=${pingBack})`);
+}
+
+// ---- 时空可组合性：事务性热重载（坏版本自动回滚，永不半加载） ----
+// 对 self-extend 是保命机制：agent 自己写的插件坏了，旧版本自动顶上，
+// 不会出现「坏自我修改禁用了恢复所需的进程」。
+{
+  const { writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const dir = join(rootDir, 'plugins', 'tmp-compose');
+  const errEvents: string[] = [];
+  const offErr = kernel.bus.on('plugin.error', (e) => {
+    const d = e.data as { id?: string; rollback?: boolean; error?: string };
+    if (d?.id === 'tmp-compose') errEvents.push(d.rollback ? `rollback:${d.error}` : `error:${d.error}`);
+  });
+  // 写入坏版本（语法错误）→ 事务回滚：旧工具仍在
+  writeFileSync(join(dir, 'index.ts'), `export default { this is not valid typescript !!!`);
+  await kernel.plugins.reload('tmp-compose');
+  const rolledBack = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
+  const errNoted = errEvents.some((e) => e.startsWith('rollback'));
+  console.log('[compose] 事务性热重载（坏版本回滚）:', rolledBack && errNoted ? '✓' : '✗',
+    `(旧工具存活=${rolledBack} 回滚事件=${errNoted} 事件=${errEvents.join(' | ') || '无'})`);
+  // 写入好版本 v2（新工具）→ 正常替换：v2 在、v1 不在
+  writeFileSync(join(dir, 'index.ts'), `
+import type { Plugin } from '../../kernel/types';
+export default {
+  id: 'tmp-compose', name: '可组合性测试', version: '0.2.0',
+  onLoad(ctx) {
+    ctx.register({ kind: 'tool', tool: { name: 'compose_probe_v2', description: '探针 v2',
+      parameters: { type: 'object', properties: {} },
+      async handler() { return { ok: true, data: { v: 2 } }; } } });
+  },
+} satisfies Plugin;
+`);
+  await kernel.plugins.reload('tmp-compose');
+  const v2In = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe_v2');
+  const v1Gone = !kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
+  console.log('[compose] 好版本正常替换（v2 生效、v1 回收）:', v2In && v1Gone ? '✓' : '✗', `(v2=${v2In} v1残=${!v1Gone})`);
+  offErr();
+  // 清理
+  rmSync(dir, { recursive: true, force: true });
+  await new Promise((r) => setTimeout(r, 1200));
+  const cleaned = !kernel.plugins.list().some((p) => p.manifest.id === 'tmp-compose');
+  console.log('[compose] 删除目录自动卸载:', cleaned ? '✓' : '✗');
+}
+
+// ---- 时空可组合性：反应性依赖（coeffect）——提供者停用，依赖方自动降级；恢复自动可用 ----
+// 两个插件：提供者（service:compose-svc）+ 消费者（inject 订阅）；消费者无需重启即可感知提供者生死。
+{
+  const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const pdir = join(rootDir, 'plugins', 'tmp-provider');
+  mkdirSync(pdir, { recursive: true });
+  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ id: 'tmp-provider', name: '提供者', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(pdir, 'index.ts'), `
+import type { Plugin } from '../../kernel/types';
+export default {
+  id: 'tmp-provider', name: '提供者', version: '0.1.0',
+  onLoad(ctx) { ctx.register({ kind: 'service', service: { id: 'coeffect-svc', instance: { ready: true } } }); },
+} satisfies Plugin;
+`);
+  const cdir = join(rootDir, 'plugins', 'tmp-consumer');
+  mkdirSync(cdir, { recursive: true });
+  writeFileSync(join(cdir, 'plugin.json'), JSON.stringify({ id: 'tmp-consumer', name: '消费者', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(cdir, 'index.ts'), `
+import type { Plugin } from '../../kernel/types';
+export default {
+  id: 'tmp-consumer', name: '消费者', version: '0.1.0',
+  onLoad(ctx) {
+    let svc: { ready: boolean } | undefined;
+    const dep = ctx.inject('service:coeffect-svc', (v) => { svc = v as { ready: boolean } | undefined; });
+    svc = dep.value as { ready: boolean } | undefined;
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'consumer_probe',
+        description: '消费者探针',
+        parameters: { type: 'object', properties: {} },
+        async handler() { return { ok: true, data: { provided: svc?.ready === true } }; },
+      },
+    });
+  },
+} satisfies Plugin;
+`);
+  await new Promise((r) => setTimeout(r, 1200));
+  const probe = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'consumer_probe')?.tool;
+  const initial = probe ? (await probe.handler({}, { traceId: 'c-t0', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).data : { provided: false };
+  // 停用提供者：消费者无需任何操作，感知依赖消失（优雅降级，不报错）
+  await kernel.plugins.disable('tmp-provider');
+  const probe2 = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'consumer_probe')?.tool;
+  const degraded = probe2 ? (await probe2.handler({}, { traceId: 'c-t1', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).data : { provided: true };
+  // 恢复提供者：消费者自动恢复（无需重启）
+  await kernel.plugins.enable('tmp-provider');
+  const probe3 = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'consumer_probe')?.tool;
+  const recovered = probe3 ? (await probe3.handler({}, { traceId: 'c-t2', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).data : { provided: false };
+  console.log('[coeffect] 反应性依赖（提供者停用→降级；恢复→自动可用）:',
+    (initial as { provided: boolean }).provided === true && (degraded as { provided: boolean }).provided === false && (recovered as { provided: boolean }).provided === true ? '✓' : '✗',
+    `(初始=${(initial as { provided: boolean }).provided} 停用=${(degraded as { provided: boolean }).provided} 恢复=${(recovered as { provided: boolean }).provided})`);
+  rmSync(pdir, { recursive: true, force: true });
+  rmSync(cdir, { recursive: true, force: true });
+  await new Promise((r) => setTimeout(r, 1200));
+}
+
+// ---- 上下文压缩 v2（compact）：LLM 摘要替代纯截断（对标 Anthropic context compaction） ----
+{
+  const { compactHistory, SUMMARY_MARK } = await import('../core/chat/compact');
+  // 构造超预算历史：system + 多轮长对话
+  const long = '这是一条很长的消息内容，'.repeat(60); // ~600 token
+  const history = [
+    { role: 'user' as const, content: `问题一：${long}` },
+    { role: 'assistant' as const, content: `回答一：${long}` },
+    { role: 'user' as const, content: `问题二：${long}` },
+    { role: 'assistant' as const, content: `回答二：${long}` },
+    { role: 'user' as const, content: '问题三：最新问题' },
+  ];
+  // 1) 无 provider（如离线/降级）：超预算走 truncate 兜底，且不丢最新消息
+  const r1 = await compactHistory(history, 1500, {});
+  const truncateOk = r1.mode === 'truncate' && r1.droppedMessages > 0
+    && r1.messages[r1.messages.length - 1].content === '问题三：最新问题';
+  console.log('[compact] 无 provider 降级截断（保最新消息）:', truncateOk ? '✓' : '✗',
+    `(mode=${r1.mode} 丢弃=${r1.droppedMessages} 保留=${r1.messages.length})`);
+  // 2) 有 mock provider：LLM 摘要压缩旧轮（输出必须带标记，否则降级）
+  const mockCompact = {
+    id: 'mock-c', label: 'C', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat(messages: { role: string; content: string | null }[]) {
+      const last = messages[messages.length - 1]?.content ?? '';
+      const userCount = last.split('用户:').length - 1;
+      yield { type: 'delta' as const, text: `${SUMMARY_MARK} 早期 ${userCount} 条消息的要点：任务上下文与已定结论。` };
+      yield { type: 'done' as const };
+    },
+  };
+  const r2 = await compactHistory(history, 1500, { provider: mockCompact, model: 'm' });
+  const compactOk = r2.mode === 'compact' && r2.compactedMessages > 0
+    && String(r2.messages[0].content).startsWith(SUMMARY_MARK)
+    && r2.messages[r2.messages.length - 1].content === '问题三：最新问题';
+  console.log('[compact] LLM 摘要压缩旧轮（保留最新）:', compactOk ? '✓' : '✗',
+    `(mode=${r2.mode} 压缩=${r2.compactedMessages} 摘要=${String(r2.messages[0].content ?? '').slice(0, 20)}…)`);
+  // 3) 已压缩防重复：历史已有【历史摘要】→ 不再 LLM 总结（不会每轮重复花钱）
+  let mockCalls = 0;
+  const mockCounter = {
+    id: 'mock-c2', label: 'C2', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() { mockCalls++; yield { type: 'delta' as const, text: 'x' }; yield { type: 'done' as const }; },
+  };
+  const already = [
+    { role: 'system' as const, content: `${SUMMARY_MARK} 已压缩的早期对话` },
+    { role: 'user' as const, content: long },
+    { role: 'assistant' as const, content: long },
+    { role: 'user' as const, content: '问题三：最新问题' },
+  ];
+  const r3 = await compactHistory(already, 900, { provider: mockCounter, model: 'm' });
+  console.log('[compact] 已摘要不重复压缩（防重复花钱）:', mockCalls === 0 && r3.mode === 'truncate' ? '✓' : '✗',
+    `(LLM 调用=${mockCalls} mode=${r3.mode})`);
+}
+
+// ---- 嵌套 Trace（span 树）：子任务步骤挂到父工具步骤下（对标 OpenAI tracing） ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const mock = (tag: string) => {
+    let calls = 0;
+    return {
+      id: `mock-${tag}`, label: tag, defaultModel: 'm', prices: { in: 0, out: 0 },
+      async *chat() {
+        calls++;
+        if (tag === 'parent' && calls === 1) {
+          // 第一轮：调用 mock_sub（子任务）
+          yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'mock_sub', arguments: '{}' } } };
+        } else {
+          yield { type: 'delta' as const, text: `${tag} 完成` };
+          yield { type: 'usage' as const, input: 10, output: 10 };
+        }
+        yield { type: 'done' as const };
+      },
+    };
+  };
+  const subTool: ToolDef = {
+    name: 'mock_sub', description: '模拟子代理', parameters: { type: 'object', properties: {} },
+    async handler(_a, tctx) {
+      // 子任务：带 parentStepId 再开一个 Agent 循环（span 树下钻）
+      let ans = '';
+      for await (const _ev of runner.run({
+        provider: mock('child'), model: 'm', messages: [{ role: 'user', content: '子任务' }],
+        traceId: `child-${Date.now()}`, parentStepId: tctx.stepId,
+      })) { /* 消费 */ }
+      return { ok: true, data: { answer: ans } };
+    },
+  };
+  const parentTraceId = `parent-${Date.now()}`;
+  for await (const _ev of runner.run({
+    provider: mock('parent'), model: 'm', messages: [{ role: 'user', content: '主任务' }],
+    traceId: parentTraceId, tools: [subTool],
+  })) { /* 消费事件 */ }
+  // 找到父工具步骤，验证子轨迹步骤挂在它下面
+  const toolSteps = kernel.trace.query(undefined, { type: 'tool_call', name: 'mock_sub' });
+  const lastTool = toolSteps[toolSteps.length - 1];
+  const children = kernel.trace.query(undefined, { parentId: lastTool?.id });
+  const spanOk = !!lastTool && children.length >= 1
+    && children.some((s) => s.type === 'llm_call') && children.some((s) => s.traceId !== parentTraceId);
+  console.log('[trace] span 树（子代理步骤挂父工具步骤下）:', spanOk ? '✓' : '✗',
+    `(父=${lastTool?.id} 子步骤=${children.length} 跨 traceId=${children.some((s) => s.traceId !== parentTraceId)})`);
+  // 顶层步骤本身不挂 parentId（根节点）
+  const rootSteps = kernel.trace.query(undefined, { name: 'mock_sub' });
+  console.log('[trace] 顶层工具步骤为根（无 parentId）:', rootSteps.every((s) => !s.parentId) ? '✓' : '✗');
+}
+
+// ---- 工具输出机器校验（outputSchema）：声明即校验，不符标注回填 + 入 Trace ----
+{
+  const { validateAgainstSchema } = await import('../kernel/validate');
+  // 校验器正确性：通过 / 缺字段 / 类型错 / 枚举越界 / 整数越界
+  const schema = {
+    type: 'object',
+    required: ['answer', 'count'],
+    properties: {
+      answer: { type: 'string', minLength: 1 },
+      count: { type: 'integer', minimum: 0 },
+      status: { type: 'string', enum: ['ok', 'partial'] },
+    },
+  };
+  const pass = validateAgainstSchema({ answer: '完成', count: 3, status: 'ok' }, schema);
+  const missField = validateAgainstSchema({ answer: '完成' }, schema);
+  const badType = validateAgainstSchema({ answer: '完成', count: '3' }, schema);
+  const badEnum = validateAgainstSchema({ answer: '完成', count: 1, status: '其他' }, schema);
+  const badMin = validateAgainstSchema({ answer: '完成', count: -1 }, schema);
+  console.log('[validate] JSONSchema 子集校验: 通过=0 缺字段=1 类型错=1 枚举越界=1 下限越界=1:',
+    pass.length === 0 && missField.length === 1 && badType.length >= 1 && badEnum.length === 1 && badMin.length === 1 ? '✓' : '✗',
+    `(通过=${pass.length} 缺字段=${missField.length} 类型=${badType.length} 枚举=${badEnum.length} 下限=${badMin.length})`);
+  // Agent 循环集成：声明了 outputSchema 的工具返回坏结构 → 回填带标注 + output-validate 步骤入 Trace
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const mock = (tag: string) => ({
+    id: `mock-${tag}`, label: tag, defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() {
+      yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'bad_shape', arguments: '{}' } } };
+      yield { type: 'done' as const };
+    },
+  });
+  const badShapeTool: ToolDef = {
+    name: 'bad_shape', description: '坏结构工具',
+    parameters: { type: 'object', properties: {} },
+    outputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
+    async handler() { return { ok: true, data: { wrong: true } }; }, // 缺 id
+  };
+  let sawToolResult = false;
+  for await (const ev of runner.run({
+    provider: mock('v'), model: 'm', messages: [{ role: 'user', content: 'hi' }],
+    traceId: `ov-${Date.now()}`, tools: [badShapeTool],
+  })) {
+    if (ev.type === 'tool_result') sawToolResult = true;
+  }
+  const ovSteps = kernel.trace.query(undefined, { name: 'output-validate' });
+  const annotated = sawToolResult && ovSteps.length > 0 && ovSteps[ovSteps.length - 1].status === 'error';
+  console.log('[validate] 坏结构回填标注 + output-validate 步骤入 Trace:', annotated ? '✓' : '✗',
+    `(步骤=${ovSteps.length} 状态=${ovSteps[ovSteps.length - 1]?.status})`);
+}
+
+// ---- 工具结果摘要化存储：大结果入存储（历史只留摘要+引用），recall_tool_result 零副作用重读 ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const big = 'A'.repeat(3000); // 超 2000 阈值
+  const mock = () => {
+    let calls = 0;
+    return {
+      id: 'mock-rs', label: 'RS', defaultModel: 'm', prices: { in: 0, out: 0 },
+      async *chat() {
+        calls++;
+        if (calls === 1) {
+          yield { type: 'tool_call' as const, toolCall: { id: 'rs1', type: 'function' as const, function: { name: 'big_result', arguments: '{}' } } };
+        } else {
+          yield { type: 'delta' as const, text: '完成' };
+          yield { type: 'usage' as const, input: 10, output: 10 };
+        }
+        yield { type: 'done' as const };
+      },
+    };
+  };
+  const bigTool: ToolDef = {
+    name: 'big_result', description: '大结果工具', parameters: { type: 'object', properties: {} },
+    async handler() { return { ok: true, data: { content: big } }; },
+  };
+  const cap = { history: null as LLMMessage[] | null };
+  const sessionId = `rs-sess-${Date.now()}`;
+  for await (const _ev of runner.run({
+    provider: mock(), model: 'm', messages: [{ role: 'user', content: '读取大文件' }],
+    traceId: `rs-${Date.now()}`, tools: [bigTool], sessionId,
+    onCheckpoint: (_t, h) => { cap.history = h; },
+  })) { /* 消费 */ }
+  const toolMsg = cap.history?.find((m) => m.role === 'tool');
+  const storedRef = toolMsg && String(toolMsg.content).includes('结果存储') && String(toolMsg.content).includes('rs1');
+  const noFullText = toolMsg && !String(toolMsg.content).includes(big);
+  // recall_tool_result 重读（chat 插件注册的真实工具）
+  const recall = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'recall_tool_result')?.tool;
+  const recalled = recall ? await recall.handler({ id: 'rs1' }, { traceId: 'rs-r', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
+  const recallOk = recalled.ok === true && (recalled.data as { content: string }).content === JSON.stringify({ ok: true, data: { content: big } });
+  const missOk = recall ? (await recall.handler({ id: 'nope' }, { traceId: 'rs-r2', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).ok === false : false;
+  console.log('[result-store] 大结果入存储+摘要回填:', storedRef && noFullText ? '✓' : '✗',
+    `(引用=${storedRef} 无全文=${noFullText} 回填长度=${toolMsg ? String(toolMsg.content).length : 0})`);
+  console.log('[result-store] recall_tool_result 零副作用重读 + 缺失报错:', recallOk && missOk ? '✓' : '✗',
+    `(重读=${recallOk} 缺失=${missOk})`);
+  // 小结果（≤2000）全文回填，不折腾存储
+  const smallTool: ToolDef = {
+    name: 'small_result', description: '小结果工具', parameters: { type: 'object', properties: {} },
+    async handler() { return { ok: true, data: { v: '小' } }; },
+  };
+  const mock2 = () => {
+    let calls = 0;
+    return {
+      id: 'mock-rs2', label: 'RS2', defaultModel: 'm', prices: { in: 0, out: 0 },
+      async *chat() {
+        calls++;
+        if (calls === 1) yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'small_result', arguments: '{}' } } };
+        else yield { type: 'delta' as const, text: '完成' };
+        yield { type: 'done' as const };
+      },
+    };
+  };
+  const smallCap = { history: null as LLMMessage[] | null };
+  for await (const _ev of runner.run({
+    provider: mock2(), model: 'm', messages: [{ role: 'user', content: 'x' }],
+    traceId: `rs2-${Date.now()}`, tools: [smallTool], sessionId,
+    onCheckpoint: (_t, h) => { smallCap.history = h; },
+  })) { /* 消费 */ }
+  const smallMsg = smallCap.history?.find((m) => m.role === 'tool');
+  console.log('[result-store] 小结果全文回填（不折腾存储）:', smallMsg && String(smallMsg.content).includes('小') && !String(smallMsg.content).includes('结果存储') ? '✓' : '✗');
+}
+
+// ---- 会话级成本实时熔断：预算耗尽 → harness 硬停止（不再发起新 LLM 调用） ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  let llmCalls = 0;
+  const priceyMock = {
+    id: 'mock-cost', label: 'COST', defaultModel: 'm', prices: { in: 1, out: 1 }, // $1/百万 token
+    async *chat() {
+      llmCalls++;
+      if (llmCalls === 1) {
+        yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'noop', arguments: '{}' } } };
+      } else {
+        yield { type: 'delta' as const, text: '第二轮' };
+      }
+      yield { type: 'usage' as const, input: 1000, output: 1000 }; // 每轮 $0.002
+      yield { type: 'done' as const };
+    },
+  };
+  const noopTool: ToolDef = {
+    name: 'noop', description: '无操作', parameters: { type: 'object', properties: {} },
+    async handler() { return { ok: true, data: { done: true } }; },
+  };
+  const evs: string[] = [];
+  for await (const ev of runner.run({
+    provider: priceyMock, model: 'm', messages: [{ role: 'user', content: 'hi' }],
+    traceId: `cb-${Date.now()}`, tools: [noopTool],
+    costBudget: 0.0015, // 第一轮 $0.002 后即超
+  })) {
+    evs.push(ev.type);
+  }
+  const breakerSteps = kernel.trace.query(undefined, { name: 'cost-breaker' });
+  const broke = evs.includes('budget_hit') && evs.includes('error') && llmCalls === 1 && breakerSteps.length > 0;
+  console.log('[cost-breaker] 预算耗尽硬熔断（无第二轮调用）:', broke ? '✓' : '✗',
+    `(事件=${evs.join(',')} LLM 调用=${llmCalls} 熔断步骤=${breakerSteps.length})`);
+}
+
+// ---- checkpoint 断点：turn 级完整历史（含工具回填），可恢复续跑 ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const mk = (tag: string) => {
+    let calls = 0;
+    return {
+      id: `mock-${tag}`, label: tag, defaultModel: 'm', prices: { in: 0, out: 0 },
+      async *chat() {
+        calls++;
+        if (calls === 1) {
+          yield { type: 'tool_call' as const, toolCall: { id: 'cc1', type: 'function' as const, function: { name: 'cp_probe', arguments: '{}' } } };
+        } else {
+          yield { type: 'delta' as const, text: `${tag} 最终答案` };
+          yield { type: 'usage' as const, input: 10, output: 10 };
+        }
+        yield { type: 'done' as const };
+      },
+    };
+  };
+  const cpTool: ToolDef = {
+    name: 'cp_probe', description: '断点探针', parameters: { type: 'object', properties: {} },
+    async handler() { return { ok: true, data: { observed: '文件内容' } }; },
+  };
+  // 第一次跑：第一轮工具调用后触发 checkpoint（onCheckpoint 捕获完整历史）
+  const savedCap = { history: null as LLMMessage[] | null };
+  let cpTurn = -1;
+  for await (const _ev of runner.run({
+    provider: mk('a'), model: 'm', messages: [{ role: 'user', content: '分析文件' }],
+    traceId: `cp-${Date.now()}`, tools: [cpTool],
+    onCheckpoint: (turn, h) => { cpTurn = turn; savedCap.history = h; },
+  })) { /* 消费 */ }
+  const saved = savedCap.history;
+  const toolPaired = !!saved && saved.some((m) => m.role === 'assistant' && m.tool_calls?.length)
+    && saved.some((m) => m.role === 'tool' && m.tool_call_id === 'cc1');
+  console.log('[checkpoint] turn 级完整历史（工具回填配对）:', toolPaired && cpTurn === 0 ? '✓' : '✗',
+    `(turn=${cpTurn} 消息数=${saved?.length ?? 0} 配对=${toolPaired})`);
+  // 模拟恢复：checkpoint 历史 + 恢复提示 → 再次进入循环 → 能继续到最终答案（不丢已观察事实）
+  let resumedAnswer = '';
+  for await (const ev of runner.run({
+    provider: mk('b'), model: 'm',
+    messages: [...(saved ?? []), { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' }],
+    traceId: `cp2-${Date.now()}`, tools: [cpTool],
+  })) {
+    if (ev.type === 'delta') resumedAnswer += ev.text;
+  }
+  console.log('[checkpoint] 断点续跑（恢复历史继续决策）:', resumedAnswer.includes('最终答案') ? '✓' : '✗', `(答案=${resumedAnswer || '无'})`);
+  // DB 持久化往返（Store 层）
+  const { Store } = await import('../server/db');
+  const store = new Store(join(rootDir, 'data', 'selftest-checkpoint.db'));
+  store.saveCheckpoint('sess-cp', 2, [{ role: 'user', content: 'u' }, { role: 'tool', content: 't' }]);
+  const loaded = store.loadCheckpoint('sess-cp');
+  const persisted = loaded?.turn === 2 && loaded.history.length === 2 && loaded.history[1].content === 't';
+  const cleared = (store.clearCheckpoint('sess-cp'), store.loadCheckpoint('sess-cp') === undefined);
+  console.log('[checkpoint] DB 持久化往返（保存/读取/清除）:', persisted && cleared ? '✓' : '✗',
+    `(turn=${loaded?.turn} 条数=${loaded?.history.length} 清除=${cleared})`);
+}
+
+// ---- handoff 角色移交：执行器识别 → 终止循环 → 移交事件（角色=插件注册表） ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  // 角色注册表：chat 内置 main + goal-plan 的 planner 应可见
+  const roles = kernel.plugins.capabilities('role').map((c) => c.role);
+  const hasMain = roles.some((r) => r.id === 'main');
+  const hasPlanner = roles.some((r) => r.id === 'planner');
+  const handoffTool = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'handoff_to')?.tool;
+  console.log('[handoff] 角色注册表（main 主代理 + planner 计划专家）:', hasMain && hasPlanner ? '✓' : '✗',
+    `(角色=${roles.map((r) => r.id).join(',')})`);
+  // 非法角色 → 明确报错（错误信息列可用角色）
+  const bad = handoffTool ? await handoffTool.handler({ role: 'no-such', objective: 'x' }, { traceId: 'h0', turn: 0, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
+  console.log('[handoff] 非法角色报错（列可用角色）:', bad.ok === false && String(bad.error ?? '').includes('可用角色') ? '✓' : '✗',
+    `(错误=${String(bad.error ?? '').slice(0, 40)}…)`);
+  // 执行器集成：mock 第一轮调用 handoff_to → 收到 handoff 事件、循环终止（无第二轮）
+  let llmCalls = 0;
+  const mk = {
+    id: 'mock-ho', label: 'HO', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() {
+      llmCalls++;
+      yield { type: 'tool_call' as const, toolCall: { id: 'h1', type: 'function' as const, function: { name: 'handoff_to', arguments: JSON.stringify({ role: 'planner', objective: '重构模块 X：已完成调研，待规划步骤' }) } } };
+      yield { type: 'usage' as const, input: 10, output: 10 };
+      yield { type: 'done' as const };
+    },
+  };
+  const evs: { type: string; role?: string }[] = [];
+  for await (const ev of runner.run({
+    provider: mk, model: 'm', messages: [{ role: 'user', content: '帮我重构模块 X' }],
+    traceId: `ho-${Date.now()}`, tools: handoffTool ? [handoffTool] : [],
+  })) {
+    const hoRole = ev.type === 'handoff' ? (ev as { type: 'handoff'; role: string; objective: string }).role : undefined;
+    evs.push({ type: ev.type, role: hoRole });
+  }
+  const handed = evs.some((e) => e.type === 'handoff' && e.role === 'planner') && llmCalls === 1 && !evs.some((e) => e.type === 'assistant_done');
+  console.log('[handoff] 移交终止循环 + 事件上报:', handed ? '✓' : '✗', `(事件=${evs.map((e) => e.type).join(',')} LLM 调用=${llmCalls})`);
 }
 
 await kernel.stop();
