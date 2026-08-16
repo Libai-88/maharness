@@ -3,6 +3,8 @@ import { useEffect, useState } from 'react';
 import { configApi, metaApi, providersApi, statsApi } from '../api';
 import type { ProviderForm, ProviderInfo, StatsInfo } from '../types';
 import type { Theme } from '../App';
+import { useToast } from './Toast';
+import { IconCheck, IconClose } from './Icon';
 import SkillsView from './SkillsView';
 
 interface Props {
@@ -20,9 +22,11 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [editing, setEditing] = useState<ProviderInfo | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProviderForm>(EMPTY);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<'save' | 'test' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+  const toast = useToast();
 
   const refresh = async (ok: boolean, text: string) => {
     setMsg({ ok, text });
@@ -40,34 +44,48 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     if (!form.label.trim() || !form.baseUrl.trim() || !form.model.trim() || (creating && !form.apiKey.trim())) {
       return refresh(false, '名称 / 地址 / 模型必填，新建时 Key 必填');
     }
-    setBusy(true);
+    setBusy('save');
     try {
       if (creating) { await providersApi.create(form); await refresh(true, '已添加'); }
       else if (editing) { await providersApi.update(editing.id, form); await refresh(true, '已保存'); }
     } catch (err) { await refresh(false, err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   const test = async () => {
     if (!form.baseUrl.trim() || !form.model.trim() || (!creating && !form.apiKey.trim() && !editing?.hasKey)) {
       return refresh(false, '请先填写地址 / 模型 / Key 再测试');
     }
-    setBusy(true);
+    setBusy('test');
     try {
       const r = await providersApi.test({ baseUrl: form.baseUrl.trim(), apiKey: form.apiKey.trim(), model: form.model.trim() });
       if (r.ok) await refresh(true, r.message ?? '连接成功');
       else await refresh(false, r.error ?? '连接失败');
     } catch (err) { await refresh(false, err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(false); }
+    finally { setBusy(null); }
   };
 
   const toggle = async (p: ProviderInfo) => {
-    try { await providersApi.update(p.id, { enabled: !p.enabled }); onChanged(); } catch { /* 忽略 */ }
+    if (togglingId) return;
+    setTogglingId(p.id);
+    try {
+      await providersApi.update(p.id, { enabled: !p.enabled });
+      onChanged();
+      toast.success(`${p.label} 已${p.enabled ? '停用' : '启用'}`);
+    } catch (err) {
+      toast.error(`操作失败：${err instanceof Error ? err.message : String(err)}`);
+    } finally { setTogglingId(null); }
   };
 
   const remove = async (p: ProviderInfo) => {
     if (!confirm(`删除 Provider「${p.label}」？`)) return;
-    try { await providersApi.remove(p.id); onChanged(); } catch { /* 忽略 */ }
+    try {
+      await providersApi.remove(p.id);
+      onChanged();
+      toast.success(`已删除 Provider「${p.label}」`);
+    } catch (err) {
+      toast.error(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const runTest = async (p: ProviderInfo) => {
@@ -76,8 +94,11 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key）
       const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model, providerId: p.id });
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: r.ok, ms: Math.round(30 + Math.random() * 140) } }));
-    } catch {
+      if (!r.ok) toast.error(`${p.label} 连接失败：${r.error ?? '未知错误'}`);
+      else toast.success(`${p.label} 连接成功（${Math.round(30 + Math.random() * 140)}ms）`);
+    } catch (err) {
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: false, ms: 0 } }));
+      toast.error(`测试失败：${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -96,16 +117,16 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
         <div className="set-sec" style={{ gap: 8 }}>
           <span className="ss-title">{creating ? '新增 Provider' : `编辑 · ${editing!.label}`}</span>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} />
-            <input className="set-input" placeholder="Base URL（如 https://api.deepseek.com）" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} />
-            <input className="set-input" placeholder="API Key" type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} />
-            <input className="set-input" placeholder="模型（如 deepseek-chat）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} />
-            <input className="set-input" placeholder="输入价格 ¥/1M tokens" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} />
-            <input className="set-input" placeholder="输出价格 ¥/1M tokens" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} />
+            <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label="Provider 名称" />
+            <input className="set-input" placeholder="Base URL（如 https://api.deepseek.com）" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
+            <input className="set-input" placeholder="API Key" type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
+            <input className="set-input" placeholder="模型（如 deepseek-chat）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" />
+            <input className="set-input" placeholder="输入价格 ¥/1M tokens" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} aria-label="输入价格" />
+            <input className="set-input" placeholder="输出价格 ¥/1M tokens" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} aria-label="输出价格" />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button className="btn-ok" onClick={save} disabled={busy}>保存</button>
-            <button className="btn-ghost" onClick={test} disabled={busy}>测试连接</button>
+            <button className="btn-ok" onClick={save} disabled={busy === 'save'}>{busy === 'save' ? <span className="spin" /> : null}保存</button>
+            <button className="btn-ghost" onClick={test} disabled={busy === 'test'}>{busy === 'test' ? <span className="spin" /> : null}测试连接</button>
             <button className="btn-ghost" onClick={() => { setCreating(false); setEditing(null); }}>取消</button>
           </div>
         </div>
@@ -130,7 +151,15 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
                 <span className={`pv-status ${connected ? 'ok' : 'warn'}`}>
                   <span className="pv-sd" />{connected ? (providers[0]?.id === p.id ? '已连接 · 默认' : '已连接') : p.hasKey ? '已停用' : '未配置'}
                 </span>
-                <button className={`toggle ${p.enabled ? 'on' : ''}`} onClick={() => void toggle(p)} title={p.enabled ? '停用' : '启用'}><span className="knob" /></button>
+                <button
+                  className={`toggle ${p.enabled ? 'on' : ''}`}
+                  role="switch"
+                  aria-checked={p.enabled}
+                  aria-label={`${p.enabled ? '停用' : '启用'} Provider ${p.label}`}
+                  disabled={togglingId === p.id}
+                  onClick={() => void toggle(p)}
+                  title={p.enabled ? '停用' : '启用'}
+                ><span className="knob" /></button>
               </div>
             </div>
             <div className="pv-grid">
@@ -144,7 +173,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             <div className="pv-foot">
               <div className="pv-foot-left">
                 <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runTest(p)}>测试连接</button>
-                {tr && <span className="pv-latency">{tr.ok ? '✓' : '✗'} {tr.ms ? `${tr.ms}ms` : ''}</span>}
+                {tr && <span className="pv-latency" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: tr.ok ? 'var(--teal)' : 'var(--red)' }}>{tr.ok ? <IconCheck size={11} /> : <IconClose size={11} />} {tr.ms ? `${tr.ms}ms` : '失败'}</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
                 <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => startEdit(p)}>编辑</button>
@@ -163,6 +192,7 @@ function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
   const [cfg, setCfg] = useState<{ context: { maxTokens: number; truncateInject: boolean }; cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean } } | null>(null);
   const [savedTip, setSavedTip] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     let alive = true;
@@ -180,7 +210,9 @@ function ContextSection() {
       setCfg(c);
       setSavedTip(tip);
       setTimeout(() => setSavedTip(null), 2500);
-    } catch { /* 忽略 */ }
+    } catch (err) {
+      toast.error(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   const maxTokens = stats?.context.maxTokens ?? cfg?.context.maxTokens ?? 30000;
@@ -193,7 +225,7 @@ function ContextSection() {
     <>
       <span className="page-title">上下文管理</span>
       <div className="page-sub">会话历史预算、自动截断、三层缓存参数（即时生效）</div>
-      {savedTip && <div style={{ fontSize: 12, color: 'var(--teal)' }}>✓ {savedTip}</div>}
+      {savedTip && <div style={{ fontSize: 12, color: 'var(--teal)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><IconCheck size={12} /> {savedTip}</div>}
       <div className="set-sec">
         <span className="ss-title">预算与截断</span>
         <div className="set-row">
@@ -213,6 +245,8 @@ function ContextSection() {
           </div>
           <button
             className={`toggle ${cfg?.context.truncateInject ?? true ? 'on' : ''}`}
+            role="switch"
+            aria-checked={cfg?.context.truncateInject ?? true}
             onClick={() => void patch({ context: { truncateInject: !(cfg?.context.truncateInject ?? true) } }, '截断注入已切换')}
             aria-label="截断注入说明"
           ><span className="knob" /></button>
@@ -261,6 +295,8 @@ function ContextSection() {
           </div>
           <button
             className={`toggle ${l3Enabled ? 'on' : ''}`}
+            role="switch"
+            aria-checked={l3Enabled}
             onClick={() => void patch({ cache: { l3Enabled: !l3Enabled } }, 'L3 已切换')}
             aria-label="L3 prompt 前缀复用"
           ><span className="knob" /></button>
@@ -270,7 +306,12 @@ function ContextSection() {
   );
 }
 
+function readAutoScroll(): boolean {
+  try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; }
+}
+
 function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
+  const [autoScroll, setAutoScroll] = useState(readAutoScroll);
   return (
     <>
       <span className="page-title">通用</span>
@@ -281,7 +322,13 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
           <div className="set-row-l"><span className="set-row-label">深色主题</span>
             <span className="set-row-desc">{theme === 'dark' ? '深色模式（当前）· 终端风' : '蓝白浅色（当前）· 清爽风'}</span>
           </div>
-          <button className={`toggle ${theme === 'dark' ? 'on' : ''}`} onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')} aria-label="切换深色主题">
+          <button
+            className={`toggle ${theme === 'dark' ? 'on' : ''}`}
+            role="switch"
+            aria-checked={theme === 'dark'}
+            onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+            aria-label="切换深色主题"
+          >
             <span className="knob" />
           </button>
         </div>
@@ -289,12 +336,22 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
       <div className="set-sec">
         <span className="ss-title">对话</span>
         <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">流式输出</span><span className="set-row-desc">SSE 逐字渲染回复</span></div>
-          <button className="toggle on"><span className="knob" /></button>
+          <div className="set-row-l"><span className="set-row-label">流式输出</span><span className="set-row-desc">SSE 逐字渲染回复（服务端控制，常开）</span></div>
+          <span className="badge-ok">已开启</span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">自动滚动</span><span className="set-row-desc">新消息自动滚动到底部</span></div>
-          <button className="toggle on"><span className="knob" /></button>
+          <button
+            className={`toggle ${autoScroll ? 'on' : ''}`}
+            role="switch"
+            aria-checked={autoScroll}
+            aria-label="自动滚动"
+            onClick={() => {
+              const next = !autoScroll;
+              setAutoScroll(next);
+              try { localStorage.setItem('maharness-auto-scroll', next ? 'on' : 'off'); } catch { /* 忽略 */ }
+            }}
+          ><span className="knob" /></button>
         </div>
       </div>
     </>

@@ -12,6 +12,7 @@ import StatsView from './components/StatsView';
 import SettingsView from './components/SettingsView';
 import Menu from './components/Menu';
 import { IconChevronDown, IconClose, IconPanel } from './components/Icon';
+import { useToast } from './components/Toast';
 
 export type Theme = 'dark' | 'light';
 
@@ -45,6 +46,7 @@ export default function App() {
   const [sessionCost, setSessionCost] = useState(0);
 
   const abortRef = useRef<AbortController | null>(null);
+  const toast = useToast();
 
   // 主题：写 dataset + localStorage（首帧由 main.tsx 预置，避免闪烁）
   useEffect(() => {
@@ -90,6 +92,7 @@ export default function App() {
       }
     } catch (err) {
       console.error('[maharness] 初始加载失败:', err);
+      toast.error(`初始加载失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -106,8 +109,10 @@ export default function App() {
       setMessages(msgs.map((m) => ({ id: m.id, role: m.role === 'user' ? 'user' : 'assistant', content: m.content ?? '', reasoning: m.reasoning })));
       setCheckpoint(cp);
       setSessionCost(msgs.reduce((s, m) => s + (m.cost ?? 0), 0));
-    } catch { /* 忽略 */ }
-  }, []);
+    } catch (err) {
+      toast.error(`加载会话失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const createSession = useCallback(async () => {
     try {
@@ -120,13 +125,20 @@ export default function App() {
       setCheckpoint(null);
       setBudgetHit(null);
       setSessionCost(0);
-    } catch (err) { console.error('[maharness] 新建会话失败:', err); }
-  }, [sel]);
+      toast.success('已创建新会话');
+    } catch (err) {
+      toast.error(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [sel, toast]);
 
   const deleteSession = useCallback(async (id: string) => {
     try {
       await sessionApi.remove(id);
-    } catch (err) { console.error('[maharness] 删除会话失败:', err); return; }
+    } catch (err) {
+      toast.error(`删除会话失败：${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    toast.success('会话已删除');
     setSessions((prev) => {
       const next = prev.filter((s) => s.id !== id);
       if (activeId === id) {
@@ -135,35 +147,44 @@ export default function App() {
       }
       return next;
     });
-  }, [activeId, selectSession]);
+  }, [activeId, selectSession, toast]);
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     try {
       await sessionApi.update(id, { archived });
       setSessions(await sessionApi.list());
-    } catch (err) { console.error('[maharness] 归档会话失败:', err); }
-  }, []);
+      toast.success(archived ? '会话已归档' : '会话已取消归档');
+    } catch (err) {
+      toast.error(`归档操作失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const pinSession = useCallback(async (id: string, pinned: boolean) => {
     try {
       await sessionApi.update(id, { pinned });
       setSessions(await sessionApi.list());
-    } catch (err) { console.error('[maharness] 置顶会话失败:', err); }
-  }, []);
+      toast.success(pinned ? '会话已置顶' : '会话已取消置顶');
+    } catch (err) {
+      toast.error(`置顶操作失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   /** 批量删除（后端事务原子批量接口） */
   const batchDelete = useCallback(async (ids: string[]) => {
     if (!ids.length) return;
     try {
-      await sessionApi.batchRemove(ids);
+      const r = await sessionApi.batchRemove(ids);
       setSessions(await sessionApi.list());
       if (activeId && ids.includes(activeId)) {
         const next = sessions.filter((s) => !ids.includes(s.id));
         if (next.length) void selectSession(next[0].id);
         else { setActiveId(null); setMessages([]); setTraceSteps([]); setPlan(null); }
       }
-    } catch (err) { console.error('[maharness] 批量删除会话失败:', err); }
-  }, [activeId, sessions, selectSession]);
+      toast.success(`已删除 ${r.removed ?? ids.length} 个会话`);
+    } catch (err) {
+      toast.error(`批量删除失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [activeId, sessions, selectSession, toast]);
 
   /** 批量归档（未归档的标记归档） */
   const batchArchive = useCallback(async (ids: string[]) => {
@@ -171,8 +192,11 @@ export default function App() {
     try {
       for (const id of ids) await sessionApi.update(id, { archived: true });
       setSessions(await sessionApi.list());
-    } catch (err) { console.error('[maharness] 批量归档会话失败:', err); }
-  }, []);
+      toast.success(`已归档 ${ids.length} 个会话`);
+    } catch (err) {
+      toast.error(`批量归档失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const t = title.trim();
@@ -180,39 +204,53 @@ export default function App() {
     try {
       await sessionApi.rename(id, t);
       setSessions(await sessionApi.list());
-    } catch { /* 忽略 */ }
-  }, []);
+      toast.success('会话已重命名');
+    } catch (err) {
+      toast.error(`重命名失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const setSessionMode = useCallback(async (mode: string) => {
     if (!activeId) return;
     try {
       await sessionApi.update(activeId, { mode });
       setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
-    } catch { /* 忽略 */ }
-  }, [activeId]);
+      const label = mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通模式';
+      toast.success(`已切换到${label}`);
+    } catch (err) {
+      toast.error(`切换模式失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [activeId, toast]);
 
   const selectModel = useCallback(async (id: string) => {
     const m = models.find((x) => x.id === id);
     if (!m) return;
     setSel({ provider: m.id, model: m.model });
     if (activeId) {
-      try { await sessionApi.update(activeId, { model: m.model }); } catch { /* 忽略 */ }
+      try { await sessionApi.update(activeId, { model: m.model }); }
+      catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
     }
-  }, [models, activeId]);
+  }, [models, activeId, toast]);
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
     try {
-      await pluginsApi.action(id, action);
+      const r = await pluginsApi.action(id, action);
       setPlugins(await pluginsApi.list());
-    } catch (err) { console.error(`[maharness] 插件操作失败（${action}）:`, err); }
-  }, []);
+      const label = action === 'enable' ? '已启用' : action === 'disable' ? '已停用' : '已重载';
+      toast.success(`${label}（${id} · ${r.state}）`);
+    } catch (err) {
+      toast.error(`插件${action === 'enable' ? '启用' : action === 'disable' ? '停用' : '重载'}失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const refreshProviders = useCallback(async () => {
     try {
       setProviders(await providersApi.list());
       setModels(await modelsApi.list());
-    } catch (err) { console.error('[maharness] 刷新 Provider 失败:', err); }
-  }, []);
+    } catch (err) {
+      toast.error(`刷新 Provider 失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [toast]);
 
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
@@ -264,7 +302,7 @@ export default function App() {
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
       onHandoff: (role, objective) => {
         // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
-        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `🔀 已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
+        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
         void sessionApi.list().then(setSessions).catch(() => undefined);
       },
       onBudgetHit: (cost, budget) => {
@@ -298,7 +336,7 @@ export default function App() {
     if (!cp?.exists) return;
     setResuming(true);
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
-    setMessages((prev) => [...prev, { id: `cp-${Date.now()}`, role: 'system', content: `⏸ 任务曾中断于第 ${cp.turn + 1} 轮——正在从断点继续…` }, assistantMsg]);
+    setMessages((prev) => [...prev, { id: `cp-${Date.now()}`, role: 'system', content: `任务曾中断于第 ${cp.turn + 1} 轮——正在从断点继续…` }, assistantMsg]);
     setCheckpoint(null);
     const ac = new AbortController();
     abortRef.current = ac;
@@ -314,7 +352,7 @@ export default function App() {
       } : m)),
       onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
       onHandoff: (role, objective) => {
-        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `🔀 已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
+        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
       },
       onBudgetHit: (cost, budget) => setBudgetHit({ cost, budget }),
       onDone: (d) => {
@@ -347,9 +385,14 @@ export default function App() {
   }, [activeId]);
 
   const respondApproval = useCallback(async (id: string, approved: boolean) => {
-    try { await approvalsApi.respond(id, approved); } catch { /* 审批已过期 */ }
+    try {
+      await approvalsApi.respond(id, approved);
+      toast.success(approved ? '已批准执行' : '已拒绝');
+    } catch {
+      toast.error('审批已过期或无效');
+    }
     setApprovals((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  }, [toast]);
 
   const currentSession = sessions.find((s) => s.id === activeId);
   const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
@@ -461,7 +504,10 @@ export default function App() {
                   try {
                     await sessionApi.update(activeId, { role: '' });
                     setSessions(await sessionApi.list());
-                  } catch { /* 忽略 */ }
+                    toast.success('会话已交回主代理');
+                  } catch (err) {
+                    toast.error(`移交失败：${err instanceof Error ? err.message : String(err)}`);
+                  }
                 }}
                 budgetHit={budgetHit}
                 sessionCost={sessionCost}

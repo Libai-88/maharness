@@ -91,16 +91,23 @@ export const IconLock = (p: IconProps) => (
   <Svg {...p}><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10 V7 a4 4 0 0 1 8 0 v3" /><circle cx="12" cy="15" r="1.5" /></Svg>
 );
 
-/** 羊（品牌）：极简羊头——弯角 + 卷毛 + 微笑 */
+/** 羊（品牌吉祥物 v2 · M 角星羊）：M 形羊角（品牌首字母双关）+ 圆角方块脸（积木感）+ 终端光标眼 + 能量火花 */
 export const IconSheep = (p: IconProps) => (
   <Svg {...p}>
-    <path d="M8.5 10 C 5.5 8.5, 4.5 5, 7 3.8 C 8.8 3, 9.5 4.5, 9 6" />
-    <path d="M15.5 10 C 18.5 8.5, 19.5 5, 17 3.8 C 15.2 3, 14.5 4.5, 15 6" />
-    <circle cx="8.2" cy="11.5" r="2.8" />
-    <circle cx="15.8" cy="11.5" r="2.8" />
-    <circle cx="12" cy="15" r="5.4" />
-    <path d="M9.6 14.4 h.01 M14.4 14.4 h.01" strokeWidth="2.6" />
-    <path d="M10.2 16.8 q1.8 1.5 3.6 0" />
+    {/* 双角外卷：M 的两条竖笔（自研「M 角」——maharness 首字母 × 羊角） */}
+    <path d="M8.6 7.4 C 5.6 5.8, 4.2 3, 5.9 1.5 C 7.1 0.5, 8.7 1.6, 8.9 3.5" />
+    <path d="M15.4 7.4 C 18.4 5.8, 19.8 3, 18.1 1.5 C 16.9 0.5, 15.3 1.6, 15.1 3.5" />
+    {/* 头顶 V 形分界：M 的中缝（两角之间构成完整 M） */}
+    <path d="M8.9 7.4 L 12 5.6 L 15.1 7.4" strokeWidth="1.5" />
+    {/* 脸：圆角方块（积木可组合） */}
+    <rect x="5.4" y="7" width="13.2" height="11.8" rx="4" />
+    {/* 终端光标眼（代码在思考） */}
+    <path d="M9 10.5 h2.6 M12.4 10.5 h2.6" strokeWidth="2.2" />
+    {/* 上扬微笑（年轻活力） */}
+    <path d="M9.4 14.8 q 2.6 2 5.2 0" strokeWidth="1.6" />
+    {/* 能量火花 ×2（角尖迸发） */}
+    <path d="M3 4.4 l.8 2.2 2.2 .8 -2.2 .8 -.8 2.2 -.8 -2.2 -2.2 -.8 2.2 -.8 Z" strokeWidth="0.9" fill="currentColor" stroke="none" />
+    <path d="M21 4.4 l.8 2.2 2.2 .8 -2.2 .8 -.8 2.2 -.8 -2.2 -2.2 -.8 2.2 -.8 Z" strokeWidth="0.9" fill="currentColor" stroke="none" />
   </Svg>
 );
 
@@ -217,4 +224,93 @@ export const IconBox = (p: IconProps) => (
 /** 文件：单页文档 */
 export const IconFileText = (p: IconProps) => (
   <Svg {...p}><path d="M7 3 h7 l5 5 v13 a1 1 0 0 1 -1 1 H7 a1 1 0 0 1 -1 -1 V4 a1 1 0 0 1 1 -1 Z" /><path d="M14 3 v5 h5" /><path d="M9 12 h6 M9 15.5 h6" /></Svg>
+);
+
+/* ============================================================
+   v2.3 补充图标（emoji 图标替代 → 全 SVG，统一 1.8 线宽）
+   ============================================================ */
+
+/** 暂停（断点/中断）：双竖条 */
+export const IconPause = (p: IconProps) => (
+  <Svg {...p}><path d="M9 6 v12 M15 6 v12" /></Svg>
+);
+
+/** 沙漏（恢复中）：等待 */
+export const IconHourglass = (p: IconProps) => (
+  <Svg {...p}><path d="M7 3 h10 M7 21 h10" /><path d="M7 3 c0 4 10 4 10 0 M7 21 c0 -4 10 -4 10 0" /></Svg>
+);
+
+/** 移交（角色接管）：双向箭头 */
+export const IconSwitch = (p: IconProps) => (
+  <Svg {...p}><path d="M4 8 h13 M14 5 l3 3 -3 3" /><path d="M20 16 h-13 M10 13 l-3 3 3 3" /></Svg>
+);
+
+/** 成本/预算：硬币 */
+export const IconCoin = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5 v9 M9.5 9.5 h5.5 M9.5 13.5 h5.5" /></Svg>
+);
+
+/** 回形针（结果已存储） */
+export const IconPaperclip = (p: IconProps) => (
+  <Svg {...p}><path d="M20.5 11.5 L12 20 a5.5 5.5 0 0 1 -7.8 -7.8 L14.8 2.6 a3.6 3.6 0 0 1 5.1 5.1 L9.3 18.3 a1.8 1.8 0 0 1 -2.6 -2.6 L16 6.5" /></Svg>
+);
+
+/** 机器人（模型生成的待办） */
+export const IconRobot = (p: IconProps) => (
+  <Svg {...p}><rect x="5" y="7.5" width="14" height="12" rx="3" /><path d="M9 7.5 V4.5 a1.5 1.5 0 0 1 3 0 V7.5 M15 7.5 V4.5 a1.5 1.5 0 0 0 -3 0" /><circle cx="9.5" cy="13" r="1.1" fill="currentColor" stroke="none" /><circle cx="14.5" cy="13" r="1.1" fill="currentColor" stroke="none" /><path d="M9.5 16.5 h5" /><path d="M2 11 v5 M22 11 v5" /></Svg>
+);
+
+/** 人类（人工创建的待办） */
+export const IconUser = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="8" r="3.6" /><path d="M4.5 20 c0.8 -4 4 -6 7.5 -6 s6.7 2 7.5 6" /></Svg>
+);
+
+/** 外链（独立窗口） */
+export const IconExternal = (p: IconProps) => (
+  <Svg {...p}><path d="M13 5 h6 v6 M19 5 L11 13" /><path d="M18 13 v5 a2 2 0 0 1 -2 2 H6 a2 2 0 0 1 -2 -2 V8 a2 2 0 0 1 2 -2 h5" /></Svg>
+);
+
+/** 播放（进行中/继续） */
+export const IconPlay = (p: IconProps) => (
+  <Svg {...p}><path d="M8 5.5 v13 l11 -6.5 Z" /></Svg>
+);
+
+/** 空心圆（待办未开始） */
+export const IconCircle = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8" /></Svg>
+);
+
+/** 受阻（禁止） */
+export const IconBlock = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M7 7 l10 10" /></Svg>
+);
+
+/** 回车（命令面板执行键） */
+export const IconReturn = (p: IconProps) => (
+  <Svg {...p}><path d="M20 6 v4 a2 2 0 0 1 -2 2 H5" /><path d="M9 8 l-4 4 4 4" /></Svg>
+);
+
+/** 时钟（耗时） */
+export const IconClock = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 7.5 V12 l3 2.5" /></Svg>
+);
+
+/** 信息（提示横幅） */
+export const IconInfo = (p: IconProps) => (
+  <Svg {...p}><circle cx="12" cy="12" r="8.5" /><path d="M12 11 v5" /><path d="M12 7.8 h.01" /></Svg>
+);
+
+/** 眼睛（预览/查看） */
+export const IconEye = (p: IconProps) => (
+  <Svg {...p}><path d="M2.5 12 c3 -5.5 16 -5.5 19 0 c-3 5.5 -16 5.5 -19 0 Z" /><circle cx="12" cy="12" r="2.8" /></Svg>
+);
+
+/** 上箭头（chevron up） */
+export const IconChevronUp = (p: IconProps) => (
+  <Svg {...p}><path d="M6 14.5 l6 -6 6 6" /></Svg>
+);
+
+/** 拖拽（看板移动） */
+export const IconGrip = (p: IconProps) => (
+  <Svg {...p}><path d="M8.5 6.5 h.01 M12 6.5 h.01 M15.5 6.5 h.01 M8.5 12 h.01 M12 12 h.01 M15.5 12 h.01 M8.5 17.5 h.01 M12 17.5 h.01 M15.5 17.5 h.01" strokeWidth="2.4" /></Svg>
 );

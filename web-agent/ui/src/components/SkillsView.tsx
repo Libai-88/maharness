@@ -12,6 +12,9 @@ export default function SkillsView() {
   const [selected, setSelected] = useState<SkillInfo | null>(null);
   const [guide, setGuide] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const [q, setQ] = useState('');
+  const [installing, setInstalling] = useState<string | null>(null);
+  const [uninstalling, setUninstalling] = useState<string | null>(null);
 
   const load = async () => {
     try {
@@ -25,13 +28,23 @@ export default function SkillsView() {
   useEffect(() => { void load(); }, []);
 
   const install = async (name: string) => {
-    try { await skillsApi.install(name); await load(); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    if (installing) return;
+    setInstalling(name);
+    try { await skillsApi.install(name); await load(); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setInstalling(null); }
   };
 
   const uninstall = async (s: SkillInfo) => {
     if (!confirm(`卸载技能 ${s.name}？`)) return;
-    try { await skillsApi.uninstall(s.name); if (selected?.name === s.name) { setSelected(null); setGuide(null); } await load(); }
+    setUninstalling(s.name);
+    try {
+      await skillsApi.uninstall(s.name);
+      if (selected?.name === s.name) { setSelected(null); setGuide(null); }
+      await load();
+    }
     catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    finally { setUninstalling(null); }
   };
 
   const readGuide = async (s: SkillInfo) => {
@@ -41,10 +54,21 @@ export default function SkillsView() {
     catch (e) { setGuide(`读取失败：${e instanceof Error ? e.message : String(e)}`); }
   };
 
+  const kw = q.trim().toLowerCase();
+  const match = (s: SkillInfo) => !kw || s.name.toLowerCase().includes(kw) || s.description.toLowerCase().includes(kw);
+
   const renderCard = (s: SkillInfo, i: number) => {
     const color = COLORS[i % COLORS.length];
     return (
-      <div key={s.name} className={`skill-card ${selected?.name === s.name ? 'selected' : ''}`} onClick={() => void readGuide(s)}>
+      <div
+        key={s.name}
+        className={`skill-card ${selected?.name === s.name ? 'selected' : ''}`}
+        onClick={() => void readGuide(s)}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected?.name === s.name}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void readGuide(s); } }}
+      >
         <span className="skill-icon" style={{ background: `${color}26`, color }}>{s.name[0]?.toUpperCase()}</span>
         <div className="skill-info">
           <div className="skill-info-top">
@@ -56,7 +80,11 @@ export default function SkillsView() {
         <div className="skill-right">
           <span className="skill-status">可用</span>
           {s.source === 'user' && (
-            <button className="btn-sm ghost" onClick={(e) => { e.stopPropagation(); void uninstall(s); }}>卸载</button>
+            <button
+              className="btn-sm ghost"
+              disabled={uninstalling === s.name}
+              onClick={(e) => { e.stopPropagation(); void uninstall(s); }}
+            >{uninstalling === s.name ? <span className="spin" /> : null}卸载</button>
           )}
         </div>
       </div>
@@ -70,23 +98,29 @@ export default function SkillsView() {
           <span className="page-title">技能系统</span>
           <span className="msg-tag">已安装 {installed.length}</span>
           <span style={{ marginLeft: 'auto' }}>
-            <input className="set-input" style={{ width: 180, height: 32 }} placeholder="搜索技能…" />
+            <input
+              className="set-input" style={{ width: 180, height: 32 }}
+              placeholder="搜索技能…" value={q}
+              onChange={(e) => setQ(e.target.value)}
+              aria-label="搜索技能"
+            />
           </span>
         </div>
         {err && <div style={{ fontSize: 12, color: 'var(--red)', marginBottom: 8 }}>{err}</div>}
 
         <div className="plugin-group">已安装 · 内置</div>
-        {installed.filter((s) => s.source === 'builtin').map((s, i) => renderCard(s, i))}
-        {installed.some((s) => s.source === 'user') && (
+        {installed.filter((s) => s.source === 'builtin' && match(s)).map((s, i) => renderCard(s, i))}
+        {installed.some((s) => s.source === 'user' && match(s)) && (
           <>
             <div className="plugin-group" style={{ marginTop: 12 }}>已安装 · 用户</div>
-            {installed.filter((s) => s.source === 'user').map((s, i) => renderCard(s, installed.filter((x) => x.source === 'builtin').length + i))}
+            {installed.filter((s) => s.source === 'user' && match(s)).map((s, i) => renderCard(s, installed.filter((x) => x.source === 'builtin').length + i))}
           </>
         )}
+        {installed.filter(match).length === 0 && kw !== '' && <div className="empty-state" style={{ padding: '24px 12px' }}>没有匹配「{q.trim()}」的技能</div>}
         {market.length > 0 && (
           <>
             <div className="plugin-group" style={{ marginTop: 12 }}>技能市场 · 可安装</div>
-            {market.map((m) => (
+            {market.filter((m) => !kw || m.name.toLowerCase().includes(kw) || m.description.toLowerCase().includes(kw)).map((m) => (
               <div key={m.name} className="skill-card">
                 <span className="skill-icon" style={{ background: 'var(--blue-soft)', color: 'var(--accent)' }}><IconSpark size={15} /></span>
                 <div className="skill-info">
@@ -96,7 +130,9 @@ export default function SkillsView() {
                   </div>
                   <span className="skill-desc">{m.description}</span>
                 </div>
-                <button className="btn-sm primary" onClick={() => void install(m.name)}>安装</button>
+                <button className="btn-sm primary" disabled={installing === m.name} onClick={() => void install(m.name)}>
+                  {installing === m.name ? <span className="spin" /> : null}安装
+                </button>
               </div>
             ))}
           </>

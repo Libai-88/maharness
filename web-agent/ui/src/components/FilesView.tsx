@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { fileApi, gitApi, workspacesApi } from '../api';
 import type { GitStatus } from '../api';
-import { IconBox, IconCheck, IconChevronRight, IconClose, IconExpand, IconFileText, IconFolder, IconGitBranch, IconPlus, IconRefresh, IconSearch, IconSync } from './Icon';
+import { IconBox, IconCheck, IconChevronDown, IconChevronRight, IconClose, IconExpand, IconFileText, IconFolder, IconGitBranch, IconPlus, IconRefresh, IconSearch, IconSync } from './Icon';
 
 interface TreeEntry { name: string; type: 'dir' | 'file'; size: number }
 
@@ -32,6 +32,11 @@ function TreeNode({ entry, path, depth, onOpenFile, selected, onSelect }: {
           className={`tree-item dir ${open ? 'open' : ''}`}
           style={{ paddingLeft: depth * 14 + 6 }}
           onClick={() => void toggle()}
+          role="button"
+          tabIndex={0}
+          aria-expanded={open}
+          aria-label={`目录 ${entry.name}`}
+          onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void toggle(); } }}
         >
           <span className="ti-chev" style={{ display: 'inline-flex', transform: open ? 'rotate(90deg)' : 'none', transition: 'transform .15s' }}><IconChevronRight size={10} /></span>
           <span className="ti-icon"><IconFolder size={13} /></span>
@@ -50,6 +55,10 @@ function TreeNode({ entry, path, depth, onOpenFile, selected, onSelect }: {
       style={{ paddingLeft: depth * 14 + 20 }}
       onClick={() => { onSelect(rel); onOpenFile(rel); }}
       title={rel}
+      role="button"
+      tabIndex={0}
+      aria-selected={isSel}
+      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onSelect(rel); onOpenFile(rel); } }}
     >
       <span className="ti-icon" style={{ color: 'var(--text-4)', display: 'inline-flex' }}><IconFileText size={12} /></span>
       {entry.name}
@@ -66,8 +75,8 @@ const GIT_STATUS_LABEL: Record<string, { icon: string; cls: string }> = {
   '??': { icon: 'U', cls: 'a' },
 };
 
-/** Git 变更面板：真实状态 / 提交 / 推送 */
-function GitPanel() {
+/** Git 变更面板：真实状态 / 提交 / 推送 / 点击变更在查看器打开 */
+function GitPanel({ onOpen }: { onOpen: (path: string) => void }) {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [msg, setMsg] = useState('');
   const [busy, setBusy] = useState(false);
@@ -89,7 +98,7 @@ function GitPanel() {
       await gitApi.commit(m);
       setMsg('');
       await load();
-      tip('已提交 ✓');
+      tip('已提交');
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
@@ -100,7 +109,7 @@ function GitPanel() {
     try {
       await gitApi.push();
       await load();
-      tip('已推送 ✓');
+      tip('已推送');
     } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
     finally { setBusy(false); }
   };
@@ -124,14 +133,22 @@ function GitPanel() {
       </div>
       <div className="git-scroll">
         {!status && <div className="empty-state" style={{ padding: '20px 12px' }}>加载中…</div>}
-        {status?.repo && items.length === 0 && <div className="empty-state" style={{ padding: '20px 12px' }}>工作区干净 ✓</div>}
+        {status?.repo && items.length === 0 && <div className="empty-state" style={{ padding: '20px 12px' }}><IconCheck size={13} /> 工作区干净</div>}
         {status?.repo && items.length > 0 && (
           <>
             <div className="git-section">CHANGES <span className="gs-count">· {items.length}</span></div>
             {items.map((c, i) => {
               const g = GIT_STATUS_LABEL[c.status] ?? { icon: c.status, cls: 'm' };
               return (
-                <div key={`${c.path}-${i}`} className="git-change">
+                <div
+                  key={`${c.path}-${i}`}
+                  className="git-change"
+                  role="button"
+                  tabIndex={0}
+                  title={`查看 ${c.path}`}
+                  onClick={() => onOpen(c.path)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onOpen(c.path); } }}
+                >
                   <span className={`gc-icon ${g.cls}`}>{g.icon}</span>
                   <span className="gc-name">{c.path}</span>
                 </div>
@@ -153,8 +170,12 @@ function GitPanel() {
         />
         <span className="gcb-hint">Enter 提交 · 全部变更 add -A</span>
         <div className="gcb-actions">
-          <button className="gcb-push" onClick={() => void push()} disabled={!status?.repo || busy || !status.ahead}>推送 ↑</button>
-          <button className="gcb-commit" onClick={() => void commit()} disabled={!status?.repo || busy || !msg.trim()}>提交 ✓</button>
+          <button className="gcb-push" onClick={() => void push()} disabled={!status?.repo || busy || !status.ahead}>
+            {busy && !msg.trim() ? <span className="spin" /> : null}推送 ↑
+          </button>
+          <button className="gcb-commit" onClick={() => void commit()} disabled={!status?.repo || busy || !msg.trim()}>
+            {busy && msg.trim() ? <span className="spin" /> : null}提交 <IconCheck size={12} />
+          </button>
         </div>
       </div>
     </aside>
@@ -163,6 +184,9 @@ function GitPanel() {
 
 export default function FilesView() {
   const [current, setCurrent] = useState<string>('');
+  const [workspaces, setWorkspaces] = useState<{ id: string; path: string }[]>([]);
+  const [wsMenuOpen, setWsMenuOpen] = useState(false);
+  const [newWsPath, setNewWsPath] = useState('');
   const [roots, setRoots] = useState<TreeEntry[] | null>(null);
   const [preview, setPreview] = useState<{ path: string; text: string } | null>(null);
   const [selected, setSelected] = useState('');
@@ -176,10 +200,30 @@ export default function FilesView() {
   const [fullscreen, setFullscreen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const wsInputRef = useRef<HTMLInputElement>(null);
+  const wsWrapRef = useRef<HTMLDivElement>(null);
+
+  // 工作区下拉：点击外部 / Escape 关闭（与顶栏 Menu 行为一致）
+  useEffect(() => {
+    if (!wsMenuOpen) return;
+    const onDoc = (e: MouseEvent) => {
+      if (wsWrapRef.current && !wsWrapRef.current.contains(e.target as Node)) setWsMenuOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setWsMenuOpen(false);
+    };
+    document.addEventListener('mousedown', onDoc);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDoc);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [wsMenuOpen]);
 
   const loadWorkspaces = useCallback(async () => {
     try {
       const ws = await workspacesApi.list();
+      setWorkspaces(ws);
       const cur = ws.find((w) => w.current);
       setCurrent(cur?.path ?? ws[0]?.path ?? '');
     } catch { /* 忽略 */ }
@@ -216,13 +260,19 @@ export default function FilesView() {
       await workspacesApi.switchTo(path);
       setCurrent(path);
       await loadWorkspaces();
+      setWsMenuOpen(false);
     } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
   };
 
-  const addWs = async () => {
-    const path = prompt('添加工作区目录（绝对路径）');
-    if (!path?.trim()) return;
-    try { await workspacesApi.add(path.trim()); await loadWorkspaces(); } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
+  const addWs = async (path: string) => {
+    const p = path.trim();
+    if (!p) return;
+    try {
+      await workspacesApi.add(p);
+      await loadWorkspaces();
+      setNewWsPath('');
+      setMsg(null);
+    } catch (err) { setMsg(err instanceof Error ? err.message : String(err)); }
   };
 
   const openFile = async (rel: string) => {
@@ -252,18 +302,64 @@ export default function FilesView() {
     <div className="files-layout">
       <div className="file-tree-pane">
         <div className="ft-head">EXPLORER</div>
-        <div className="ws-picker" onClick={() => void switchWs(prompt('切换工作区（绝对路径）') ?? current)}>
-          <div className="ws-picker-left">
-            <span className="ws-picker-icon"><IconBox size={13} /></span>
-            <div>
-              <div className="ws-picker-name">{current.split(/[\\/]/).pop() || 'DEEPSEEK'}</div>
-              <div className="ws-picker-path">{current || '选择工作区…'}</div>
+        <div className="ws-menu-wrap" ref={wsWrapRef}>
+          <div
+            className="ws-picker"
+            onClick={() => { setWsMenuOpen((v) => !v); if (!wsMenuOpen) setTimeout(() => wsInputRef.current?.focus(), 30); }}
+            role="button"
+            tabIndex={0}
+            aria-expanded={wsMenuOpen}
+            aria-haspopup="menu"
+            aria-label="切换工作区"
+            onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setWsMenuOpen((v) => !v); } if (e.key === 'Escape') setWsMenuOpen(false); }}
+          >
+            <div className="ws-picker-left">
+              <span className="ws-picker-icon"><IconBox size={13} /></span>
+              <div>
+                <div className="ws-picker-name">{current.split(/[\\/]/).pop() || '选择工作区…'}</div>
+                <div className="ws-picker-path">{current || '选择工作区…'}</div>
+              </div>
             </div>
+            <span style={{ color: 'var(--text-4)', display: 'inline-flex', transition: 'transform .15s', transform: wsMenuOpen ? 'none' : 'rotate(-90deg)' }}><IconChevronDown size={11} /></span>
           </div>
-          <span style={{ color: 'var(--text-4)', fontSize: 10 }}>▾</span>
+          {wsMenuOpen && (
+            <div className="ws-menu" role="menu" aria-label="工作区列表">
+              <div className="ws-menu-title">工作区</div>
+              {workspaces.length === 0 && <div className="menu-empty">暂无工作区</div>}
+              {workspaces.map((w) => (
+                <div
+                  key={w.id}
+                  className={`ws-menu-item ${w.path === current ? 'current' : ''}`}
+                  role="menuitem"
+                  tabIndex={0}
+                  onClick={() => void switchWs(w.path)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void switchWs(w.path); } }}
+                  title={w.path}
+                >
+                  <span className="wsi-name">{w.path.split(/[\\/]/).pop() || w.path}</span>
+                  <span className="wsi-path">{w.path}</span>
+                  {w.path === current && <IconCheck size={12} />}
+                </div>
+              ))}
+              <div className="ws-menu-add">
+                <input
+                  ref={wsInputRef}
+                  placeholder="添加目录（绝对路径）…"
+                  value={newWsPath}
+                  onChange={(e) => setNewWsPath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') void addWs(newWsPath);
+                    if (e.key === 'Escape') setWsMenuOpen(false);
+                    e.stopPropagation();
+                  }}
+                  aria-label="添加工作区目录路径"
+                />
+                <button className="ft-tool" style={{ height: 28 }} onClick={() => void addWs(newWsPath)} title="添加工作区" aria-label="添加工作区"><IconPlus size={13} /></button>
+              </div>
+            </div>
+          )}
         </div>
         <div className="ft-tools">
-          <button className="ft-tool" onClick={() => void addWs()} title="添加工作区" aria-label="添加工作区"><IconPlus size={13} /></button>
           <button className="ft-tool" onClick={() => void loadRoot()} title="刷新" aria-label="刷新"><IconRefresh size={13} /></button>
           <button className={`ft-tool ${searching ? 'active' : ''}`} onClick={() => { setSearching((v) => !v); setSearchQ(''); setSearchResults(null); }} title="搜索文件" aria-label="搜索文件"><IconSearch size={13} /></button>
         </div>
@@ -282,7 +378,15 @@ export default function FilesView() {
                 <div className="search-results">
                   {searchResults.length === 0 && <div className="empty-state" style={{ padding: '12px 8px' }}>无匹配文件</div>}
                   {searchResults.map((r) => (
-                    <div key={r.path} className="search-result" onClick={() => void openFile(r.path)} title={r.path}>
+                    <div
+                      key={r.path}
+                      className="search-result"
+                      onClick={() => void openFile(r.path)}
+                      title={r.path}
+                      role="button"
+                      tabIndex={0}
+                      onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); void openFile(r.path); } }}
+                    >
                       <IconFileText size={11} />
                       <span className="sr-path">{r.path}</span>
                       <span className="sr-size">{r.size >= 1024 ? `${(r.size / 1024).toFixed(0)}k` : `${r.size}B`}</span>
@@ -320,7 +424,17 @@ export default function FilesView() {
           </div>
         </div>
         <div className="viewer-tabs">
-          <div className="v-tab active"><span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled'}{preview && <IconClose size={11} />}</div>
+          <div className="v-tab active">
+            <span className="vtd" />{preview?.path.split('/').pop() ?? 'untitled'}
+            {preview && (
+              <button
+                className="vtx"
+                title="关闭文件"
+                aria-label="关闭文件"
+                onClick={() => { setPreview(null); setSelected(''); setEditing(false); }}
+              ><IconClose size={11} /></button>
+            )}
+          </div>
         </div>
         {saveTip && <div className="save-tip"><IconCheck size={12} /> {saveTip}</div>}
         <div className="code-viewer">
@@ -365,7 +479,7 @@ export default function FilesView() {
         </div>
       </div>
 
-      <GitPanel />
+      <GitPanel onOpen={openFile} />
     </div>
   );
 }

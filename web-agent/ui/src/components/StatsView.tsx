@@ -40,7 +40,7 @@ export default function StatsView() {
           <span className="tb-live"><span className="live-dot" />实时</span>
         </span>
       </div>
-      <div className="page-sub">本周节省 ¥{cost(cache.savedCost ?? 0)} · 三层缓存命中即可见</div>
+      <div className="page-sub">本周节省 {cost(cache.savedCost ?? 0)} · 三层缓存命中即可见</div>
 
       <div className="stats-row">
         <div className="hero-card">

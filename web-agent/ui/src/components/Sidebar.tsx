@@ -96,6 +96,13 @@ export default function Sidebar({
       onMouseEnter={() => setHoverId(s.id)}
       onMouseLeave={() => setHoverId(null)}
       title={s.title || '新会话'}
+      role="button"
+      tabIndex={0}
+      aria-current={s.id === activeId ? 'true' : undefined}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (managing) toggleSelect(s.id); else onSelect(s.id); }
+        if (e.key === 'F2' && !managing) { setEditingId(s.id); setDraft(s.title || ''); }
+      }}
     >
       {managing ? (
         <span className={`sb-check ${selected.has(s.id) ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(s.id); }} role="checkbox" aria-checked={selected.has(s.id)} aria-label={`选择 ${s.title || '新会话'}`} />

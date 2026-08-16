@@ -4,7 +4,7 @@ import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
-import { IconBrain, IconCheck, IconChevronDown, IconCopy, IconLock, IconPlan, IconPlugin, IconRefresh, IconSend, IconSettings, IconSheep, IconStop, IconWarn } from './Icon';
+import { IconBlock, IconBolt, IconBrain, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -52,7 +52,16 @@ function ToolCard({ t }: { t: ToolStep }) {
   const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
-    <div className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'}`} onClick={() => { if (!running) setOpen((v) => !v); }} style={{ cursor: running ? 'default' : 'pointer' }}>
+    <div
+      className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'}`}
+      onClick={() => { if (!running) setOpen((v) => !v); }}
+      style={{ cursor: running ? 'default' : 'pointer' }}
+      role="button"
+      tabIndex={running ? -1 : 0}
+      aria-expanded={show}
+      aria-label={`工具 ${t.name}（${statusTxt}）——点击${show ? '收起' : '展开'}详情`}
+      onKeyDown={(e) => { if (!running && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); setOpen((v) => !v); } }}
+    >
       <div className="tool-head">
         <div className="tool-head-left">
           <span className={`tool-icon ${statusCls}`}>
@@ -60,12 +69,12 @@ function ToolCard({ t }: { t: ToolStep }) {
           </span>
           <span className="tool-name">{t.name}</span>
           <span className="tool-path">{t.args ? argsSummary(t.args) : ''}</span>
-          {t.stored && <span className="tool-stored" title="大结果已存入结果存储——Agent 可用 recall_tool_result 零副作用重读全文">📎 已存</span>}
+          {t.stored && <span className="tool-stored" title="大结果已存入结果存储——Agent 可用 recall_tool_result 零副作用重读全文"><IconPaperclip size={10} /> 已存</span>}
         </div>
         <div className="tool-head-right">
           <span className={`tool-status ${statusCls}`}><span className="sd" />{statusTxt}</span>
           <span className="tool-dur">{fmtMs(t.durationMs)}</span>
-          <span style={{ fontSize: 10, color: 'var(--text-4)', transform: show ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▾</span>
+          <span style={{ color: 'var(--text-4)', display: 'inline-flex', transform: show ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }}><IconChevronDown size={11} /></span>
         </div>
       </div>
       {show && t.summary && (
@@ -75,6 +84,25 @@ function ToolCard({ t }: { t: ToolStep }) {
         </div>
       )}
     </div>
+  );
+}
+
+/** 复制按钮（带瞬时 ✓ 反馈，hover 浮现于消息操作区） */
+function CopyButton({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      className="ma-btn"
+      title={copied ? '已复制' : '复制回复'}
+      aria-label={copied ? '已复制' : '复制回复'}
+      onClick={() => {
+        navigator.clipboard?.writeText(text).catch(() => undefined);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1200);
+      }}
+    >
+      {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+    </button>
   );
 }
 
@@ -121,6 +149,7 @@ function renderContent(text: string) {
 export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [pendingApprovals, setPendingApprovals] = useState<Record<string, 'approve' | 'reject'>>({});
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdIdx, setCmdIdx] = useState(0);
@@ -130,7 +159,12 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [inputHist, setInputHist] = useState<string[]>([]);
   const histIdxRef = useRef(-1);
 
-  useEffect(() => { bottomRef.current?.scrollIntoView({ behavior: 'smooth' }); }, [messages]);
+  useEffect(() => {
+    // 自动滚动（设置页可关）：新消息/流式内容自动滚到底部
+    let auto = true;
+    try { auto = localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { /* 忽略 */ }
+    if (auto) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
   useEffect(() => { commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined); }, []);
 
   const submit = (textOverride?: string) => {
@@ -197,27 +231,27 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
         <div className="session-banners">
           {checkpoint?.exists && !streaming && !resuming && (
             <div className="sess-banner resume">
-              <span className="sb-icon">⏸</span>
+              <span className="sb-icon"><IconPause size={13} /></span>
               <span className="sb-text">任务中断于第 {checkpoint.turn + 1} 轮（{checkpoint.historyMessages} 条上下文已存档）——可无缝继续，不丢已完成的工作</span>
               <button className="sb-btn" onClick={onResume} disabled={resuming}>继续任务</button>
             </div>
           )}
           {resuming && (
             <div className="sess-banner resume">
-              <span className="sb-icon">⏳</span>
+              <span className="sb-icon"><span className="spin" style={{ borderColor: 'var(--accent)' }} /></span>
               <span className="sb-text">正在从断点恢复…</span>
             </div>
           )}
           {role && (
             <div className="sess-banner role">
-              <span className="sb-icon">🔀</span>
+              <span className="sb-icon"><IconSwitch size={13} /></span>
               <span className="sb-text">会话由「<b>{role}</b>」角色接管（专业化分工）</span>
               <button className="sb-btn" onClick={onRoleReset}>交回主代理</button>
             </div>
           )}
           {budgetHit && (
             <div className="sess-banner budget">
-              <span className="sb-icon">💰</span>
+              <span className="sb-icon"><IconCoin size={13} /></span>
               <span className="sb-text">成本预算已耗尽（${budgetHit.cost.toFixed(4)} / 预算 ${budgetHit.budget.toFixed(4)}）——harness 已熔断，不再发起新调用；已完成的结果保留在会话中</span>
             </div>
           )}
@@ -230,7 +264,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               <div className="p-title"><IconPlan size={14} /> {plan.completed ? '目标已完成' : '目标计划'}：{plan.objective}</div>
               {plan.steps.map((s, i) => (
                 <div key={i} className={`plan-step ${s.status}`}>
-                  <span className="ps-num">{s.status === 'done' ? '✓' : s.status === 'in_progress' ? '▶' : s.status === 'blocked' ? '!' : i + 1}</span>
+                  <span className="ps-num">
+                    {s.status === 'done' ? <IconCheck size={10} /> : s.status === 'in_progress' ? <IconPlay size={10} /> : s.status === 'blocked' ? <IconBlock size={10} /> : i + 1}
+                  </span>
                   <span>{i + 1}. {s.title}</span>
                 </div>
               ))}
@@ -242,7 +278,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               <div className="p-title"><IconCheck size={14} /> To Do List · {todos.filter((t) => t.status === 'done').length}/{todos.length} 完成</div>
               {todos.map((t) => (
                 <div key={t.id} className={`plan-step ${t.status}`}>
-                  <span className="ps-num">{t.status === 'done' ? '✓' : t.status === 'doing' ? '▶' : t.status === 'blocked' ? '!' : '○'}</span>
+                  <span className="ps-num">
+                    {t.status === 'done' ? <IconCheck size={10} /> : t.status === 'doing' ? <IconPlay size={10} /> : t.status === 'blocked' ? <IconBlock size={10} /> : <IconCircle size={10} />}
+                  </span>
                   <span>{t.title}</span>
                   {t.desc && <span className="todo-note">{t.desc}</span>}
                 </div>
@@ -272,10 +310,10 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     <div className="msg-meta">
                       <span className="msg-author">maharness</span>
                       <span className="msg-tag">{modelTag || 'AI'}</span>
-                      <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? '⚡ 缓存命中' : ''}</span>
+                      <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? <><IconBolt size={11} /> 缓存命中</> : ''}</span>
                       {!m.streaming && m.content && (
                         <span className="msg-actions">
-                          <button className="ma-btn" title="复制回复" aria-label="复制回复" onClick={() => { navigator.clipboard?.writeText(m.content ?? '').catch(() => undefined); }}><IconCopy size={12} /></button>
+                          <CopyButton text={m.content} />
                         </span>
                       )}
                     </div>
@@ -285,10 +323,11 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                         <div className="think-head">
                           <span className="think-dot"><IconBrain size={12} /></span>
                           <span className="think-label">{m.streaming ? '推理中' : '思考'}</span>
-                          <span className="think-dur">{m.streaming ? '推理中…' : expanded[m.id] ? '▾' : '▸'}</span>
+                          <span className="think-dur">{m.streaming ? '推理中…' : expanded[m.id] ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}</span>
                           <button
                             style={{ marginLeft: 'auto', color: 'var(--text-4)', fontSize: 11 }}
                             onClick={() => setExpanded((e) => ({ ...e, [m.id]: !e[m.id] }))}
+                            aria-expanded={!!expanded[m.id]}
                           >
                             {m.streaming ? '流式' : expanded[m.id] ? '收起' : '展开'}
                           </button>
@@ -311,7 +350,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     {m.usage && (
                       <div className="msg-extra">
                         ↑{m.usage.input} · ↓{m.usage.output} tokens · ¥{(m.cost ?? 0).toFixed(4)}
-                        {m.cached && <span style={{ color: 'var(--teal)' }}> · ⚡ 秒回（缓存）</span>}
+                        {m.cached && <span style={{ color: 'var(--teal)' }}> · <IconBolt size={11} /> 秒回（缓存）</span>}
                       </div>
                     )}
                   </div>
@@ -343,8 +382,20 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               <div className="a-title"><span className="a-lock"><IconLock size={13} /></span> 需要审批 · {a.name}<span className="a-pulse" /></div>
               <pre className="a-summary">{a.summary}</pre>
               <div className="approval-actions">
-                <button className="btn-primary" onClick={() => onApproval(a.id, true)}>批准执行</button>
-                <button className="btn-ghost" onClick={() => onApproval(a.id, false)}>拒绝</button>
+                <button
+                  className="btn-primary"
+                  disabled={!!pendingApprovals[a.id]}
+                  onClick={() => { setPendingApprovals((p) => ({ ...p, [a.id]: 'approve' })); onApproval(a.id, true); }}
+                >
+                  {pendingApprovals[a.id] === 'approve' ? <span className="spin" /> : null}批准执行
+                </button>
+                <button
+                  className="btn-ghost"
+                  disabled={!!pendingApprovals[a.id]}
+                  onClick={() => { setPendingApprovals((p) => ({ ...p, [a.id]: 'reject' })); onApproval(a.id, false); }}
+                >
+                  {pendingApprovals[a.id] === 'reject' ? <span className="spin" /> : null}拒绝
+                </button>
               </div>
             </div>
           ))}
@@ -360,11 +411,13 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 <span className="cmd-typed">{input.slice(1)}</span>
                 <span className="cmd-cursor" />
               </div>
-              <div className="cmd-list">
+              <div className="cmd-list" role="listbox" aria-label="斜杠命令">
                 {matched.map((c, i) => (
                   <div
                     key={c.name}
                     className={`cmd-item ${i === cmdIdx ? 'selected' : ''}`}
+                    role="option"
+                    aria-selected={i === cmdIdx}
                     onMouseEnter={() => setCmdIdx(i)}
                     onClick={() => applyCommand(c)}
                   >
@@ -373,7 +426,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     </span>
                     <span className="ci-name">/{c.name}{c.usage ? ` ${c.usage}` : ''}</span>
                     <span className="ci-desc">{c.description}</span>
-                    {i === cmdIdx && <span className="ci-badge">⏎ 执行</span>}
+                    {i === cmdIdx && <span className="ci-badge"><IconReturn size={9} /> 执行</span>}
                     <span className="ci-kbd">{c.source === 'builtin' ? '内置' : '插件'}</span>
                   </div>
                 ))}

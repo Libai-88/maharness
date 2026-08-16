@@ -3,12 +3,12 @@ import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
-import { IconClose } from './Icon';
+import { IconCheck, IconClose } from './Icon';
 import TodoBoardView from './TodoBoardView';
 
 interface Props {
   plugins: PluginInfo[];
-  onAction: (id: string, action: 'enable' | 'disable' | 'reload') => void;
+  onAction: (id: string, action: 'enable' | 'disable' | 'reload') => Promise<void> | void;
 }
 
 const ICON_COLORS = ['#11d080', '#2f63f6', '#f0993e', '#a277ff', '#3a4350'];
@@ -42,6 +42,7 @@ function PluginPanel({ pluginId }: { pluginId: string }) {
 export default function PluginsView({ plugins, onAction }: Props) {
   const [selected, setSelected] = useState<PluginInfo | null>(null);
   const [q, setQ] = useState('');
+  const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   // 当选中项被停用时清除
   useEffect(() => {
@@ -50,6 +51,12 @@ export default function PluginsView({ plugins, onAction }: Props) {
       if (cur) setSelected(cur);
     }
   }, [plugins]); // eslint-disable-line
+
+  const act = async (id: string, action: 'enable' | 'disable' | 'reload') => {
+    if (busy[id]) return;
+    setBusy((b) => ({ ...b, [id]: true }));
+    try { await onAction(id, action); } finally { setBusy((b) => ({ ...b, [id]: false })); }
+  };
 
   const kw = q.trim().toLowerCase();
   const match = (p: PluginInfo) => !kw || p.name.toLowerCase().includes(kw) || (p.caps?.some((c) => c.toLowerCase().includes(kw)) ?? false) || (p.error ?? '').toLowerCase().includes(kw);
@@ -67,6 +74,10 @@ export default function PluginsView({ plugins, onAction }: Props) {
         key={p.id}
         className={`plugin-card ${isRun ? '' : 'stopped'} ${selected?.id === p.id ? 'selected' : ''}`}
         onClick={() => setSelected(p)}
+        role="button"
+        tabIndex={0}
+        aria-pressed={selected?.id === p.id}
+        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(p); } }}
       >
         <span className="plugin-icon" style={{ background: `${color}26`, color }}>{p.name[0]?.toUpperCase()}</span>
         <div className="plugin-info">
@@ -84,7 +95,11 @@ export default function PluginsView({ plugins, onAction }: Props) {
           </span>
           <button
             className={`toggle ${isRun ? 'on' : ''}`}
-            onClick={(e) => { e.stopPropagation(); onAction(p.id, isRun ? 'disable' : 'enable'); }}
+            role="switch"
+            aria-checked={isRun}
+            aria-label={`${isRun ? '停用' : '启用'}插件 ${p.name}`}
+            disabled={!!busy[p.id]}
+            onClick={(e) => { e.stopPropagation(); void act(p.id, isRun ? 'disable' : 'enable'); }}
             title={isRun ? '停用' : '启用'}
           >
             <span className="knob" />
@@ -134,9 +149,11 @@ export default function PluginsView({ plugins, onAction }: Props) {
                   {(selected.state === 'started' || selected.state === 'loaded') ? '运行中 · 热重载已启用' : selected.state === 'error' ? '出错' : '已停止'}
                 </div>
                 <div className="pd-actions">
-                  <button className="pd-btn ghost" onClick={() => onAction(selected.id, 'reload')}>重载</button>
+                  <button className="pd-btn ghost" onClick={() => void act(selected.id, 'reload')} disabled={!!busy[selected.id]}>
+                    {busy[selected.id] ? <span className="spin" /> : null}重载
+                  </button>
                   <button className="pd-btn ghost" onClick={() => void pluginsApi.open(selected.id)}>打开目录</button>
-                  <button className="pd-btn danger" onClick={() => onAction(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')}>
+                  <button className="pd-btn danger" onClick={() => void act(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')} disabled={!!busy[selected.id]}>
                     {(selected.state === 'started' || selected.state === 'loaded') ? '停用' : '启用'}
                   </button>
                 </div>
@@ -146,7 +163,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <div className="pm-row"><span className="k">id</span><span className="v">{selected.id}</span></div>
                 <div className="pm-row"><span className="k">state</span><span className="v">{selected.state === 'started' ? 'started（运行中）' : selected.state === 'stopped' ? 'stopped（已停止）' : selected.state === 'error' ? 'error（出错）' : selected.state === 'loaded' ? 'loaded（已加载）' : selected.state}</span></div>
                 <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
-                <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? 'true ✓' : 'false'}</span></div>
+                <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? <>true <IconCheck size={10} /></> : 'false'}</span></div>
               </div>
               {/* todo 插件：面板含交互（增删改），DOMPurify 会剥离 panel HTML 的脚本 → 特判渲染 React 原生组件 */}
               {selected.id === 'todo' ? <TodoBoardView /> : <PluginPanel pluginId={selected.id} />}

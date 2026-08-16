@@ -1,27 +1,28 @@
 /* ============================================================
-   maharness UI v2 —— 设计系统（VS Code Dark + Warp accent）
-   基于 Ardot 设计稿（Screen 1–8）
+   maharness UI v3 —— 设计系统（OLED Slate Dark × Warp accent）
+   v2.3 升级：对齐 ui-ux-pro-max 设计系统输出（Dark OLED / 高对比 /
+   IBM Plex Sans + JetBrains Mono）；修复对比度与反馈完整性
    ============================================================ */
 
 :root {
-  /* 基础色板（深色主题 · 默认） */
-  --bg-deep: #0e1116;
-  --bg-panel: #161b22;
-  --bg-elev: #1e242d;
-  --bg-input: #0b0e13;
-  --bg-hover: rgba(255, 255, 255, 0.04);
-  --bg-active: #1f2733;
-  --border: #30363d;
-  --border-soft: #232a33;
+  /* 基础色板（深色主题 · 默认）——slate 深底系（OLED，低亮度护眼） */
+  --bg-deep: #0d1424;
+  --bg-panel: #141d31;
+  --bg-elev: #1b2438;
+  --bg-input: #0a1120;
+  --bg-hover: rgba(255, 255, 255, 0.05);
+  --bg-active: #26304a;
+  --border: #2d3a55;
+  --border-soft: #232e46;
 
-  /* 文字 */
-  --text-1: #e6edf2;
-  --text-2: #aab3bf;
-  --text-3: #7d8594;
-  --text-4: #4a5260;
-  --muted: #5a6474;
+  /* 文字（对比度 ≥ 4.5:1 正文 / 4.4:1 微型标签，均在深底实测） */
+  --text-1: #e9eef7;
+  --text-2: #a9b5ca;
+  --text-3: #8b98af;
+  --text-4: #7584a0;
+  --muted: #6b7a96;
 
-  /* 强调色 */
+  /* 强调色（品牌蓝 selection + warp teal 运行语义，与 v2 一致） */
   --accent: #2f63f6;        /* selection blue */
   --teal: #11d080;          /* warp teal：成功/缓存命中 */
   --purple: #a277ff;        /* warp purple：思考/语义缓存 */
@@ -29,22 +30,22 @@
   --red: #f85149;           /* 错误/破坏性 */
   --teal-soft: rgba(17, 208, 128, 0.14);
   --purple-soft: rgba(162, 119, 255, 0.14);
-  --blue-soft: rgba(47, 99, 246, 0.14);
+  --blue-soft: rgba(47, 99, 246, 0.16);
   --orange-soft: rgba(240, 153, 62, 0.14);
   --red-soft: rgba(248, 81, 73, 0.14);
 
   /* 派生色（按钮文字 / 遮罩 / 滚动条 / hover，需随主题翻转） */
   --on-accent: #ffffff;
   --on-teal: #0b0e13;
-  --overlay: rgba(11, 14, 19, 0.6);
-  --scroll-thumb: #2a313b;
-  --scroll-thumb-hover: #3a4350;
-  --btn-hover: #232b37;
-  --toggle-off: #3a4350;
+  --overlay: rgba(8, 12, 22, 0.66);
+  --scroll-thumb: #2a3550;
+  --scroll-thumb-hover: #3a4a6d;
+  --btn-hover: #232e46;
+  --toggle-off: #3a4a6d;
   --toggle-knob: #ffffff;
 
-  /* 字体 */
-  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  /* 字体（Google Fonts 加载，离线回退系统字体） */
+  --font-sans: 'IBM Plex Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
 
   /* 尺寸 */
@@ -53,7 +54,11 @@
   --radius: 10px;
   --radius-sm: 7px;
   --radius-lg: 14px;
-  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --shadow-pop: 0 16px 40px rgba(0, 0, 0, 0.55);
+
+  /* 品牌渐变（v2.4 品牌元素：蓝→紫→青，年轻活力主色带） */
+  --brand-gradient: linear-gradient(100deg, var(--accent) 0%, var(--purple) 52%, var(--teal) 100%);
+  --brand-gradient-soft: linear-gradient(100deg, var(--blue-soft), var(--purple-soft) 52%, var(--teal-soft));
 
   color-scheme: dark;
 }
@@ -73,8 +78,8 @@
 
   --text-1: #18213a;
   --text-2: #44506e;
-  --text-3: #6b7896;
-  --text-4: #98a4bf;
+  --text-3: #66748f;
+  --text-4: #6b7894;
   --muted: #8b95ab;
 
   --accent: #2f63f6;
@@ -144,6 +149,15 @@ button {
   color: inherit;
   cursor: pointer;
 }
+
+/* v2.3 按压反馈：所有按钮按下立即变暗（80-150ms 内的触觉确认，不位移布局） */
+button:active:not(:disabled) { filter: brightness(0.9); }
+button:active:not(:disabled).sb-tab.active,
+button:active:not(:disabled).send-btn,
+button:active:not(:disabled).btn-primary,
+button:active:not(:disabled).btn-solid,
+button:active:not(:disabled).btn-ok,
+button:active:not(:disabled).gcb-commit { filter: brightness(1.15); }
 
 input, select, textarea {
   font-family: inherit;
@@ -261,13 +275,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .sb-logo-mark {
   width: 26px; height: 26px;
-  border-radius: 7px;
-  background: var(--teal);
+  border-radius: 8px;
+  /* v2.4 品牌：渐变底（蓝→紫→青）+ 白色 M 角羊，年轻活力 */
+  background: var(--brand-gradient);
   display: flex; align-items: center; justify-content: center;
-  color: var(--on-teal);
+  color: #ffffff;
   font-weight: 800;
   font-size: 15px;
   font-family: var(--font-mono);
+  box-shadow: 0 2px 10px rgba(47, 99, 246, 0.35);
 }
 
 .sb-logo-title { font-weight: 700; font-size: 15px; letter-spacing: -0.2px; }
@@ -656,14 +672,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .msg-avatar {
   width: 28px; height: 28px;
-  border-radius: 7px;
-  background: var(--teal);
-  color: var(--on-teal);
+  border-radius: 8px;
+  /* v2.4 品牌：AI 头像 = 渐变底 + 白色 M 角羊 */
+  background: var(--brand-gradient);
+  color: #ffffff;
   font-weight: 800;
   display: flex; align-items: center; justify-content: center;
   font-family: var(--font-mono);
   font-size: 14px;
   flex-shrink: 0;
+  box-shadow: 0 2px 8px rgba(47, 99, 246, 0.28);
 }
 .msg-avatar.user-av { background: var(--toggle-off); color: var(--text-1); font-size: 12px; border-radius: 50%; }
 
@@ -1257,6 +1275,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   border-radius: 4px;
   padding: 0 8px;
   display: flex; align-items: center;
+  gap: 4px;
   flex-shrink: 0;
 }
 
@@ -1611,7 +1630,15 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .v-tab.active { background: var(--blue-soft); color: var(--text-1); }
 .v-tab .vtd { width: 6px; height: 6px; border-radius: 50%; background: var(--orange); }
 .v-tab .vtd.clean { background: var(--text-4); }
-.v-tab .vtx { font-size: 13px; color: var(--text-4); }
+.v-tab .vtx {
+  font-size: 13px;
+  color: var(--text-4);
+  width: 18px; height: 18px;
+  border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.v-tab .vtx:hover { background: var(--bg-hover); color: var(--text-1); }
 
 .code-viewer {
   flex: 1;
@@ -1763,6 +1790,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .gcb-hint { font-size: 10px; font-family: var(--font-mono); color: var(--text-4); }
 .gcb-actions { display: flex; align-items: center; justify-content: space-between; }
+.gcb-push, .gcb-commit { display: inline-flex; align-items: center; gap: 5px; }
 .gcb-push {
   height: 28px;
   border-radius: 6px;
@@ -1985,6 +2013,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   flex-shrink: 0;
   border: none;
 }
+.toggle:disabled { opacity: 0.5; cursor: default; }
 .toggle .knob {
   position: absolute;
   top: 2px;
@@ -1996,6 +2025,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .toggle.on { background: var(--teal); }
 .toggle.on .knob { left: 18px; }
+
+/* 静态状态徽标（不可交互但表达状态——替代「看起来可点」的假开关） */
+.badge-ok {
+  height: 24px;
+  border-radius: 6px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 12px;
+  display: inline-flex;
+  align-items: center;
+}
 
 /* 插件详情 */
 .plugin-detail-card {
@@ -2354,17 +2396,25 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .brand-logo {
   position: relative;
-  filter: drop-shadow(0 8px 24px rgba(47, 99, 246, 0.28));
+  /* v2.4：蓝紫双色光晕（年轻活力的品牌辉光） */
+  filter: drop-shadow(0 6px 18px rgba(47, 99, 246, 0.35)) drop-shadow(0 14px 36px rgba(162, 119, 255, 0.28));
 }
 .brand-title {
   margin-top: 20px;
   font-size: 26px;
   font-weight: 800;
   letter-spacing: 0.5px;
-  background: linear-gradient(90deg, var(--accent), var(--purple));
+  /* v2.4 品牌：三色渐变标题（蓝→紫→青），流光动效 */
+  background: var(--brand-gradient);
+  background-size: 200% 100%;
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
+  animation: brandTitleFlow 6s linear infinite;
+}
+@keyframes brandTitleFlow {
+  from { background-position: 0% 0; }
+  to { background-position: 200% 0; }
 }
 .brand-slogan {
   margin-top: 8px;
@@ -2388,10 +2438,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .brand-kbd .bk {
   font-family: var(--font-mono);
   font-weight: 700;
-  color: var(--accent);
-  background: var(--blue-soft);
+  color: #ffffff;
+  /* v2.4 品牌：渐变键帽 */
+  background: var(--brand-gradient);
   border-radius: 5px;
   padding: 1px 7px;
+  box-shadow: 0 1px 6px rgba(47, 99, 246, 0.3);
 }
 .brand-note {
   margin-top: 10px;
@@ -2474,6 +2526,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 1px 6px;
   margin-left: 6px;
   flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 .tool-stored-note {
   display: block;
@@ -2513,3 +2568,209 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* 渲染性能：长会话屏外消息跳过渲染（浏览器原生，零 JS 开销） */
 .msg-row { content-visibility: auto; contain-intrinsic-size: auto 120px; }
+
+/* ============================================================
+   v2.3 全局操作反馈（Toast）——每次用户操作都有结果可见
+   ============================================================ */
+.toast-stack {
+  position: fixed;
+  right: 18px;
+  bottom: 18px;
+  z-index: 300;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(420px, calc(100vw - 36px));
+  pointer-events: none;
+}
+.toast {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow-pop);
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-1);
+  animation: msgIn 0.18s ease;
+}
+.toast-icon {
+  width: 22px; height: 22px;
+  border-radius: 6px;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.toast-success .toast-icon { background: var(--teal-soft); color: var(--teal); }
+.toast-success { border-color: color-mix(in srgb, var(--teal) 45%, var(--border)); }
+.toast-error .toast-icon { background: var(--red-soft); color: var(--red); }
+.toast-error { border-color: color-mix(in srgb, var(--red) 50%, var(--border)); }
+.toast-info .toast-icon { background: var(--blue-soft); color: var(--accent); }
+.toast-info { border-color: color-mix(in srgb, var(--accent) 45%, var(--border)); }
+.toast-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.toast-close {
+  width: 20px; height: 20px;
+  border-radius: 5px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-4);
+  flex-shrink: 0;
+}
+.toast-close:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* ============================================================
+   v2.3 忙碌指示（按钮内联 spinner + 禁用态）
+   ============================================================ */
+.spin {
+  display: inline-block;
+  width: 12px; height: 12px;
+  border: 1.8px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  vertical-align: -2px;
+}
+button:disabled .spin { opacity: 0.7; }
+
+/* ============================================================
+   v2.3 工作区切换下拉（替代 window.prompt —— 表单化、可点、有反馈）
+   ============================================================ */
+.ws-menu-wrap { position: relative; }
+.ws-menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  z-index: 60;
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-pop);
+  padding: 6px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  animation: msgIn 0.12s ease;
+}
+.ws-menu-title {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  color: var(--text-4);
+  padding: 6px 10px 4px;
+  text-transform: uppercase;
+}
+.ws-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 32px;
+  padding: 0 10px;
+  border-radius: 7px;
+  font-size: 12px;
+  color: var(--text-1);
+  cursor: pointer;
+  text-align: left;
+  transition: background 0.1s;
+}
+.ws-menu-item:hover { background: var(--bg-hover); }
+.ws-menu-item.current { background: var(--blue-soft); color: var(--accent); }
+.ws-menu-item .wsi-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-menu-item .wsi-path { font-size: 10px; font-family: var(--font-mono); color: var(--text-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-menu-add {
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  display: flex;
+  gap: 6px;
+}
+.ws-menu-add input {
+  flex: 1;
+  min-width: 0;
+  height: 28px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: var(--bg-input);
+  padding: 0 8px;
+  font-size: 11px;
+  font-family: var(--font-mono);
+  color: var(--text-1);
+}
+.ws-menu-add input:focus { border-color: var(--accent); }
+
+/* ============================================================
+   v2.3 Markdown 正文（LLM 输出渲染：表格/列表/引用/标题）
+   ============================================================ */
+.md { font-size: 14px; line-height: 1.65; color: var(--text-1); }
+.md > *:first-child { margin-top: 0; }
+.md > *:last-child { margin-bottom: 0; }
+.md p { margin: 8px 0; }
+.md h1, .md h2, .md h3, .md h4 { margin: 16px 0 8px; font-weight: 700; letter-spacing: -0.2px; }
+.md h1 { font-size: 20px; }
+.md h2 { font-size: 17px; }
+.md h3 { font-size: 15px; }
+.md h4 { font-size: 14px; }
+.md ul, .md ol { margin: 8px 0; padding-left: 22px; }
+.md li { margin: 3px 0; }
+.md li::marker { color: var(--text-3); }
+.md blockquote {
+  margin: 8px 0;
+  padding: 6px 14px;
+  border-left: 3px solid var(--purple);
+  background: var(--bg-input);
+  border-radius: 0 8px 8px 0;
+  color: var(--text-2);
+}
+.md code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  background: var(--bg-input);
+  border: 1px solid var(--border-soft);
+  border-radius: 4px;
+  padding: 1px 5px;
+  color: var(--teal);
+}
+.md pre {
+  margin: 10px 0;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  overflow-x: auto;
+}
+.md pre code { background: none; border: none; padding: 0; color: var(--text-2); }
+.md a { color: var(--accent); text-decoration: none; }
+.md a:hover { text-decoration: underline; }
+.md table {
+  margin: 10px 0;
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 13px;
+}
+.md th, .md td {
+  border: 1px solid var(--border);
+  padding: 6px 10px;
+  text-align: left;
+}
+.md th {
+  background: var(--bg-elev);
+  font-weight: 600;
+  color: var(--text-1);
+}
+.md tr:nth-child(even) td { background: color-mix(in srgb, var(--bg-input) 55%, transparent); }
+.md hr { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+.md input[type='checkbox'] { accent-color: var(--teal); margin-right: 6px; }
+
+/* ============================================================
+   v2.3 可访问性：尊重系统减弱动效（prefers-reduced-motion）
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -1,7 +1,7 @@
 // ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤（span 树）+ 缓存/成本统计
 import { useMemo, useState } from 'react';
 import type { TraceStep } from '../types';
-import { IconDownload, IconRefresh } from './Icon';
+import { IconCheck, IconChevronDown, IconDownload, IconRefresh } from './Icon';
 
 interface Props {
   steps: TraceStep[];
@@ -37,20 +37,32 @@ function exportJsonl(steps: TraceStep[]) {
 /** 单条步骤渲染（span 树：子步骤缩进 + 可折叠下钻，OpenAI/Anthropic agent 调试器风格） */
 function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: number; collapsed: boolean; onToggle: () => void }) {
   const b = TYPE_BADGE[s.type] ?? { label: s.type.toUpperCase(), cls: 'sys' };
+  const toggleable = depth > 0;
   return (
     <div
       className={`tl-item ${s.status === 'running' ? 'streaming' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
-      <div className="tl-head" onClick={depth > 0 ? onToggle : undefined} style={depth > 0 ? { cursor: 'pointer' } : undefined}>
+      <div
+        className="tl-head"
+        onClick={toggleable ? onToggle : undefined}
+        style={toggleable ? { cursor: 'pointer' } : undefined}
+        role={toggleable ? 'button' : undefined}
+        tabIndex={toggleable ? 0 : -1}
+        aria-expanded={toggleable ? !collapsed : undefined}
+        aria-label={toggleable ? `折叠/展开步骤 ${s.name ?? b.label}` : undefined}
+        onKeyDown={toggleable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
+      >
         <div className="tl-left">
-          {depth > 0 && <span className={`tl-arrow ${collapsed ? '' : 'open'}`}>▾</span>}
+          {depth > 0 && (
+            <span className={`tl-arrow ${collapsed ? '' : 'open'}`}><IconChevronDown size={9} /></span>
+          )}
           <span className={`tl-badge ${b.cls}`}>{b.label}</span>
           <span className="tl-title">{s.name ?? b.label}</span>
           {depth > 0 && s.traceId && <span className="tl-child-tag" title="子任务（span 树下钻：子代理/并行）">子任务</span>}
         </div>
         <div className="tl-right">
-          {s.cacheLayer && <span style={{ color: 'var(--teal)', fontSize: 10, fontFamily: 'var(--font-mono)' }}>L{s.cacheLayer} ✓</span>}
+          {s.cacheLayer && <span style={{ color: 'var(--teal)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>L{s.cacheLayer} <IconCheck size={9} /></span>}
           <span className="tl-dur">{fmtMs(s.durationMs)}</span>
         </div>
       </div>
