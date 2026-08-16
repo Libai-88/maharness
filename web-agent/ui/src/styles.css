@@ -107,10 +107,17 @@
 html, body, #root { height: 100%; }
 
 body {
-  /* 人物主题背景：角色插画铺底 + 深色渐变遮罩（保证文字可读性） */
+  /* 人物主题背景：角色插画铺底 + 四段渐变遮罩。
+     中段（40%-60%，人物主体区，原图最亮带）遮罩最浅——人物清晰可见；
+     顶部（顶栏文字区）与底部（输入区）稍深——UI 可读性优先。
+     实测：人物区亮度 ≈ 95（透出 70%），顶/底 ≈ 45-55（可读）。 */
   background:
-    linear-gradient(180deg, rgba(14, 17, 22, 0.92) 0%, rgba(14, 17, 22, 0.82) 40%, rgba(10, 12, 16, 0.94) 100%),
-    url('/hero-char.png') center 30% / cover no-repeat fixed;
+    linear-gradient(180deg,
+      rgba(10, 12, 18, 0.55) 0%,
+      rgba(10, 12, 18, 0.30) 40%,
+      rgba(10, 12, 18, 0.34) 60%,
+      rgba(10, 12, 18, 0.60) 100%),
+    url('/hero-char.png') center 32% / cover no-repeat fixed;
   color: var(--text-1);
   font-family: var(--font-sans);
   font-size: 14px;
@@ -119,11 +126,15 @@ body {
   overflow: hidden;
 }
 
-/* 浅色主题：人物背景保留但遮罩换浅色（保持文字对比度） */
+/* 浅色主题：人物背景保留但遮罩换浅色（保持文字对比度），中段最透 */
 :root[data-theme='light'] body {
   background:
-    linear-gradient(180deg, rgba(243, 246, 252, 0.94) 0%, rgba(243, 246, 252, 0.86) 45%, rgba(243, 246, 252, 0.95) 100%),
-    url('/hero-char.png') center 30% / cover no-repeat fixed;
+    linear-gradient(180deg,
+      rgba(243, 246, 252, 0.58) 0%,
+      rgba(243, 246, 252, 0.34) 40%,
+      rgba(243, 246, 252, 0.38) 60%,
+      rgba(243, 246, 252, 0.66) 100%),
+    url('/hero-char.png') center 32% / cover no-repeat fixed;
 }
 
 button {
@@ -229,9 +240,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: var(--sidebar-w);
   flex-shrink: 0;
   /* 毛玻璃：半透明 + 模糊，人物背景透出而文字保持可读 */
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg-panel) 62%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-right: 1px solid var(--border);
   display: flex;
   flex-direction: column;
@@ -999,8 +1010,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 /* 正文 / 代码块 */
 .assistant-text { font-size: 14px; line-height: 1.65; color: var(--text-1); }
+/* 正文浮在人物背景上：文字阴影保证中段遮罩较浅时的可读性（浅色主题用浅色阴影） */
+.assistant-text { text-shadow: 0 1px 3px rgba(10, 12, 18, 0.7), 0 0 8px rgba(10, 12, 18, 0.35); }
+:root[data-theme='light'] .assistant-text { text-shadow: 0 1px 3px rgba(243, 246, 252, 0.75), 0 0 8px rgba(243, 246, 252, 0.4); }
 .assistant-text p { margin-bottom: 8px; }
-
 .code-block {
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -1277,9 +1290,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: var(--trail-w);
   flex-shrink: 0;
   /* 毛玻璃：与侧栏一致，人物背景透出 */
-  background: color-mix(in srgb, var(--bg-panel) 78%, transparent);
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+  background: color-mix(in srgb, var(--bg-panel) 66%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
   border-left: 1px solid var(--border);
   display: flex;
   flex-direction: column;

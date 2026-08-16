@@ -367,10 +367,14 @@ function boardPageHtml(): string {
   body {
     font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
     color: #e8eaf2;
-    /* 人物主题：角色插画铺底 + 深色渐变遮罩（可读性优先） */
+    /* 人物主题：角色插画铺底 + 四段渐变遮罩（与主 UI 一致：中段最透、顶底保可读） */
     background:
-      linear-gradient(180deg, rgba(10, 12, 18, 0.88) 0%, rgba(10, 12, 18, 0.72) 45%, rgba(8, 10, 15, 0.92) 100%),
-      url('/hero-char.png') center 28% / cover no-repeat fixed;
+      linear-gradient(180deg,
+        rgba(10, 12, 18, 0.55) 0%,
+        rgba(10, 12, 18, 0.30) 40%,
+        rgba(10, 12, 18, 0.34) 60%,
+        rgba(10, 12, 18, 0.60) 100%),
+      url('/hero-char.png') center 32% / cover no-repeat fixed;
     overflow: hidden;
   }
   .app { height: 100%; display: flex; flex-direction: column; padding: 18px 22px; }
