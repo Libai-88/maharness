@@ -15,15 +15,26 @@ interface SearchResult {
   snippet: string;
 }
 
-/** 可选代理：搜索请求走 HTTP 代理（如 http://127.0.0.1:7897），直连受限时使用 */
-// 注意：必须用 undici 自带的 fetch + ProxyAgent（Node 全局 fetch 与其内嵌旧版 undici 不兼容）
-const dispatcher: import('undici').Dispatcher | undefined = process.env.SEARCH_PROXY
-  ? new ProxyAgent(process.env.SEARCH_PROXY)
-  : undefined;
+/** 可选代理：搜索请求走 HTTP 代理（如 http://127.0.0.1:7897），直连受限时使用
+ *  注意：必须用 undici 自带的 fetch + ProxyAgent（Node 全局 fetch 与其内嵌旧版 undici 不兼容）
+ *  v3.1 惰性化：不再做模块顶层常量——SEARCH_PROXY 变更后（.env 热更新）无需 reload 也取新值；
+ *  按 proxy 值缓存实例（同值复用，避免每次创建）。 */
+const dispatchers = new Map<string, import('undici').Dispatcher>();
+function getDispatcher(): import('undici').Dispatcher | undefined {
+  const proxy = process.env.SEARCH_PROXY;
+  if (!proxy) return undefined;
+  let d = dispatchers.get(proxy);
+  if (!d) {
+    d = new ProxyAgent(proxy);
+    dispatchers.set(proxy, d);
+  }
+  return d;
+}
 
 // ---------- Tavily ----------
 
 async function searchTavily(query: string, max: number): Promise<SearchResult[]> {
+  const dispatcher = getDispatcher();
   const res = await undiciFetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -50,6 +61,7 @@ async function searchTavily(query: string, max: number): Promise<SearchResult[]>
 const DDG_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 async function searchDdg(query: string, max: number): Promise<SearchResult[]> {
+  const dispatcher = getDispatcher();
   const res = await undiciFetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
     headers: { 'User-Agent': DDG_UA, Accept: 'text/html' },
     signal: AbortSignal.timeout(15000),
@@ -108,6 +120,11 @@ export default {
   name: '联网搜索',
   version: '0.1.0',
   onLoad(ctx) {
+    // v3.1 env 依赖声明：.env 变更（TAVILY_API_KEY / SEARCH_PROXY）→ reloadChanged 重载本插件
+    // （dispatcher 已惰性化，即使不重载请求也会拿到新值；声明使「改动即生效」的心智模型一致）
+    ctx.watchEnv('TAVILY_API_KEY');
+    ctx.watchEnv('SEARCH_PROXY');
+
     // L2 人设：约束 LLM 正确使用搜索
     ctx.register({
       kind: 'persona',

@@ -379,7 +379,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 网关对「含 tool_calls 的请求」的缓存建立有延迟/条件限制，且前缀缓存有 TTL；
     // 预热请求（max_tokens=1，成本≈0）主动建立/刷新缓存，把下一次提问的 turn0
     // 也拉入缓存窗口（跨 run 首轮不再全价 prefill）。
-    // 预热仅在发送序列足够长时触发（≥5 条消息才有缓存价值；L1 命中的短序列跳过）
+    // 预热仅在发送序列足够长时触发（≥3 条消息才有缓存价值；L1 命中的短序列跳过）
     const warmupMode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
     if (seqAcc.length >= 3 && warmupMode !== 'off') {
       scheduleWarmup(session.id, systemPrompt, seqAcc, provider, resolvedModel, kernel, [{ role: 'system', content: worldState }]);

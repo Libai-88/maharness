@@ -32,11 +32,15 @@ import { join, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './bus';
 import { EffectScope } from './scope';
+import { validateAgainstSchema } from './validate';
 import type {
   Capability, EventListener, Plugin, PluginContext, PluginManifest, TraceLike,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
+
+/** B6：config.changed → reloadChanged 的防抖窗口（ms）——连续配置写入合并为一次重载 */
+const CONFIG_RELOAD_DEBOUNCE_MS = 400;
 
 interface PluginInstance {
   manifest: PluginManifest;
@@ -57,6 +61,13 @@ interface PluginInstance {
   /** v3 智能重载：本插件当前依赖签名（由 depHooks 重算，与 factVersion 比对）；
    *  签名变化 → reloadChanged 重载；未变化 → 保留实例（零抖动） */
   depSignature: string;
+  /** v3.1 下次 reload 强制刷新 ESM 模块记录：依赖签名变化（如 env 变更）触发 reload
+   *  时，入口文件内容未变 → 默认 URL 命中 Node 模块缓存 → 新值不生效。
+   *  置位后 reloadInternal 给 entryUrl 追加 `&r=` 维度打破缓存，消费后立即复位。 */
+  forceFresh?: boolean;
+  /** 上次成功加载的入口内容 hash（B9 警告依据）：reload 时若入口内容已变而 tsx
+   *  复用模块记录（query 被 strip），提示用户代码改动可能未生效 */
+  entryHash?: string;
   /** 上下文配置拦截层，后注册层优先。 */
   configOverrides: Record<string, unknown>[];
   error?: string;
@@ -91,15 +102,36 @@ export class PluginLoader {
   /** 能力集版本（v3）：按 kind 递增——onCapabilities(kind) 的签名只随该 kind 变化，
    *  避免其余能力变化触发全局重载 */
   private capVersions = new Map<Capability['kind'], number>();
+  /** env 依赖版本（v3.1）：按变量名递增——watchEnv(name) 的签名分量随该变量变更；
+   *  server 在 .env 变更后经 bumpEnv 递增（智能重载的 env 维度） */
+  private envVersions = new Map<string, number>();
+  /** env 变化订阅：watchEnv(name, cb) —— .env 变更时立即回调（无需等 reload） */
+  private envSubs = new Map<string, Set<(v: string | undefined) => void>>();
+  /** B6：全局配置变更慢路径定时器——config.set 任意键都触发依赖驱动重载（防抖），
+   *  智能重载保证只动声明了相关 watchConfig 的插件（签名不变者零抖动） */
+  private configReloadTimer?: NodeJS.Timeout;
+  /** config.changed 监听退订句柄（dispose 时清理，防 loader 销毁后监听器泄漏） */
+  private offConfigWatch?: () => void;
   /** 服务绑定单调序号（提供者标识用，非事实版本，仅供追踪可视化排序） */
   private factSeq = 0;
 
   constructor(
     private bus: EventBus,
-    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'configWith' | 'effect'>,
+    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'watchEnv' | 'configWith' | 'effect'>,
     private coreDir: string,
     private userDir: string,
-  ) {}
+  ) {
+    // B6：任何配置变更（config.set → config.changed）→ 防抖后依赖驱动重载。
+    // 与 watchConfig 的「插件自处理」互补：这里保证「声明了配置依赖的插件」在配置
+    // 变化后自动 reload（重跑 onLoad 拿到新值），无需任何插件或调用方显式触发。
+    this.offConfigWatch = ctxBase.config.watch('*', () => {
+      if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
+      this.configReloadTimer = setTimeout(() => {
+        this.configReloadTimer = undefined;
+        void this.reloadChanged().catch(() => undefined);
+      }, CONFIG_RELOAD_DEBOUNCE_MS);
+    });
+  }
 
   /** 扫描并加载全部插件（core 在前，用户插件在后，确保依赖顺序），
    *  启动前按 requires 拓扑排序（Kahn）——依赖先于依赖方启动；
@@ -178,7 +210,7 @@ export class PluginLoader {
         return existing;
       }
       id = manifest.id;
-      const inst: PluginInstance = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve() };
+      const inst: PluginInstance = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry) };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -205,15 +237,32 @@ export class PluginLoader {
     }
   }
 
+  /** 入口文件内容 hash（B9 警告与 hash busting 共用）。不可读时返回 'unreadable'。 */
+  private entryHashOf(dir: string, entry: string): string {
+    try {
+      return createHash('sha256').update(readFileSync(join(dir, entry))).digest('hex').slice(0, 16);
+    } catch {
+      return 'unreadable';
+    }
+  }
+
   /**
    * 入口 URL（内容 hash busting）：入口文件内容不变 → URL 不变 → 命中 Node ESM 模块缓存，
    * 不产生新模块记录（旧实现 ?t=${Date.now()} 每次都生成新 URL/新模块记录——reload 未变更
    * 的插件也泄漏一份模块图）。
+   * forceFresh（v3.1）：依赖签名变化（如 .env 变更）触发的 reload 中，入口内容未变 →
+   * 默认 URL 命中旧模块记录（顶层常量读到的还是旧 env）→ 追加 `&r=${factVersion}`
+   * 维度强制生成新模块记录，onLoad/onStart 重新求值。
+   * 已知限制（重要）：tsx 运行时（dev/start 均为 tsx）的 loader 会 strip 模块 URL 的
+   * query——hash busting 与 forceFresh 在 tsx 下都不生效（import 命中 pathname 相同的旧
+   * 模块记录）。因此 tsx 下热重载的有效保证是「插件在 onLoad/onStart 内读 env/config、
+   * 不做模块顶层常量」：reload 重跑 onLoad 时读到当前值。forceFresh 仅对 Node 原生 ESM
+   * 运行时有效（如未来切换 node --experimental-strip-types）。
    * 残余限制：Node ESM registry 无法卸载模块——内容真正变化时新旧两份模块记录仍会并存
    * 常驻进程；hash 只消除「未变化却重复膨胀」的部分。且 hash 仅取入口文件本体：入口 import
    * 的依赖文件变化而入口未变时，命中的旧依赖图不会刷新（热重载粒度以入口文件为准）。
    */
-  private entryUrl(dir: string, entry: string): string {
+  private entryUrl(dir: string, entry: string, forceFresh = false): string {
     const filePath = join(dir, entry);
     let version: string;
     try {
@@ -221,11 +270,20 @@ export class PluginLoader {
     } catch {
       version = String(Date.now()); // 文件暂不可读（如编辑器写入中途）：时间戳兜底保证下次可重试
     }
-    return `${pathToFileURL(filePath).href}?v=${version}`;
+    return `${pathToFileURL(filePath).href}?v=${version}${forceFresh ? `&r=${this.factVersion}` : ''}`;
   }
 
-  /** 执行 onLoad（副作用全部进入实例的 EffectScope——卸载即自动恢复） */
+  /** 执行 onLoad（副作用全部进入实例的 EffectScope——卸载即自动恢复）。
+   *  配置 schema 校验前置：manifest.config 声明时，onLoad 前用 config.<id>.* 当前值校验，
+   *  不合规 → throw（register 失败清理 / 热重载回滚）——配置错误在进入插件逻辑前暴露。 */
   private async runLoad(inst: PluginInstance): Promise<void> {
+    const schema = inst.manifest.config;
+    if (schema && typeof schema === 'object') {
+      const issues = validateAgainstSchema(this.ctxBase.config.section(inst.manifest.id), schema);
+      if (issues.length) {
+        throw new Error(`插件 ${inst.manifest.id} 配置校验失败:\n` + issues.map((i) => `  - ${i}`).join('\n'));
+      }
+    }
     const ctx = this.buildContext(inst);
     await inst.plugin?.onLoad?.(ctx);
     inst.state = 'loaded';
@@ -334,6 +392,24 @@ export class PluginLoader {
             loader.bumpFact();
             cb(v);
           });
+          scope.add(off);
+          return off;
+        },
+        watchEnv: (name: string, cb?: (value: string | undefined) => void) => {
+          // v3.1 智能重载：登记 env 依赖（per-name 版本——.env 变更即重载该插件）。
+          // 先初始化 envVersions 的 key：bumpEnv() 无参时以此收集「全部已知 env 依赖」
+          if (!loader.envVersions.has(name)) loader.envVersions.set(name, 0);
+          inst.depHooks.push(() => `env:${name}@${loader.envVersions.get(name) ?? 0}`);
+          let off: () => void = () => {};
+          if (cb) {
+            let set = loader.envSubs.get(name);
+            if (!set) { set = new Set(); loader.envSubs.set(name, set); }
+            set.add(cb);
+            off = () => {
+              const s = loader.envSubs.get(name);
+              if (s) { s.delete(cb); if (s.size === 0) loader.envSubs.delete(name); }
+            };
+          }
           scope.add(off);
           return off;
         },
@@ -463,6 +539,31 @@ export class PluginLoader {
     return this.factVersion;
   }
 
+  /**
+   * 环境变量变更登记（v3.1，智能重载的 env 维度）：
+   * server 在 .env 变更后调用——bump 指定 key（不传则全部已知 env 依赖）的版本，
+   * 通知 watchEnv 订阅者立即收到新值，并递增依赖事实版本（reloadChanged 据此重载）。
+   * 注意：只 bump 不重载——调用方随后显式调 reloadChanged()。
+   */
+  bumpEnv(names?: string[]): void {
+    const keys = names?.length ? names : [...this.envVersions.keys()];
+    if (!keys.length) return;
+    for (const name of keys) {
+      this.envVersions.set(name, (this.envVersions.get(name) ?? 0) + 1);
+    }
+    // 订阅者即时通知（无需等 reload：惰性读 env 的插件直接拿到新值）
+    for (const name of keys) {
+      const subs = this.envSubs.get(name);
+      if (!subs) continue;
+      for (const cb of [...subs]) {
+        try { cb(process.env[name]); } catch (err) {
+          console.warn(`[loader] env 订阅通知失败 (${name}):`, err instanceof Error ? err.message : String(err));
+        }
+      }
+    }
+    this.bumpFact(); // env 变化 = 依赖事实变化（reloadChanged 快速路径需要）
+  }
+
   /** 递增依赖事实版本：任何可能改变插件运行观察面的事实变化（服务绑定/能力集/配置）
    *  都应调用，供 reloadChanged 做签名比对。返回新版本号。 */
   private bumpFact(): number {
@@ -526,6 +627,10 @@ export class PluginLoader {
     // 旧式钩子保留：有手工清理的插件仍可在此补位（自动回收已覆盖大部分场景）
     try { await inst.plugin?.onStop?.(this.buildContext(inst)); } catch { /* 忽略 */ }
     try { await inst.plugin?.onUnload?.(this.buildContext(inst)); } catch { /* 忽略 */ }
+    // 依赖声明清空（B3）：enable 重部署时 onLoad 会重新登记 depHooks——
+    // 不清空则新旧两代依赖声明叠加，残留分量（如已撤回服务的 @none）造成签名漂移
+    inst.depHooks = [];
+    inst.forceFresh = undefined;
     inst.state = 'stopped';
     // 换新作用域：enable 重新部署时（onLoad 重跑）副作用进入新作用域，与已回收的旧作用域隔离
     inst.scope = new EffectScope();
@@ -554,12 +659,14 @@ export class PluginLoader {
     const registryId = inst.manifest.id;
     const oldModule = inst.plugin;        // 备份旧模块（事务回滚用）
     const oldManifest = inst.manifest;
+    const forceFresh = !!inst.forceFresh; // 依赖签名变化触发的 reload：强制刷新模块记录
+    inst.forceFresh = false;              // 消费即复位（只刷一次）
     // 事务阶段 1：回收旧实例的全部效果（可逆恢复）——旧模块引用保留
     await this.stopInternal(inst);
     this.bus.emit(EventBus.event('plugin.unloaded', { id: registryId }));
 
     // 事务阶段 2：加载新版本（暂不进入注册表）
-    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain };
+    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, entryHash: inst.entryHash };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -570,7 +677,7 @@ export class PluginLoader {
       if (fresh.manifest.id !== registryId) {
         throw new Error(`新版本 plugin.json 的 id "${fresh.manifest.id}" 与已注册 id "${registryId}" 不一致（热重载不支持变更插件 id）`);
       }
-      const mod = await import(this.entryUrl(dir, fresh.manifest.entry));
+      const mod = await import(this.entryUrl(dir, fresh.manifest.entry, forceFresh));
       fresh.plugin = (mod.default ?? mod) as Plugin;
       await this.runLoad(fresh);
       if (start && fresh.manifest.enabled !== false && !fresh.manifest.lazy) {
@@ -578,6 +685,15 @@ export class PluginLoader {
       }
       // 双保险：即使 start 失败未通过异常呈现（如未来内部实现变化），error 态也不提交
       if (fresh.state === 'error') throw new Error(fresh.error ?? '新版本启动失败');
+      // B9 提示：入口内容已变（文件热重载）→ 当前运行时（tsx）复用旧模块记录，改动可能未生效
+      fresh.entryHash = this.entryHashOf(dir, fresh.manifest.entry);
+      if (!forceFresh && inst.entryHash && fresh.entryHash !== inst.entryHash) {
+        console.warn(
+          `[plugin] ${registryId} 入口文件内容已变化（${inst.entryHash} → ${fresh.entryHash}）。` +
+          '当前运行时（tsx）会复用旧模块记录，代码改动可能未生效——若未生效请重启进程；' +
+          '插件内请在 onLoad/onStart 中读取配置/环境变量，不要做成模块顶层常量。',
+        );
+      }
       // 提交：替换注册表（旧实例已无副作用残留）
       this.registry.set(registryId, fresh);
       this.bus.emit(EventBus.event('plugin.reloaded', { id: registryId }));
@@ -590,7 +706,7 @@ export class PluginLoader {
           manifest: oldManifest, dir, state: 'registered',
           caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
           depHooks: [], depSignature: inst.depSignature,
-          chain: inst.chain,
+          chain: inst.chain, entryHash: inst.entryHash,
         };
         await this.runLoad(rollback);
         if (start && rollback.manifest.enabled !== false && !rollback.manifest.lazy) {
@@ -656,6 +772,9 @@ export class PluginLoader {
       }
       if (signature === inst.depSignature) continue; // 依赖未变：保留实例，零抖动
       inst.depSignature = signature;
+      // 依赖签名变化（可能不含文件内容变化，如 env/config 变更）→ 强制刷新模块记录，
+      // 否则入口 hash 不变 → import 命中 ESM 缓存 → onLoad/onStart 读到的还是旧值
+      inst.forceFresh = true;
       try {
         const keepActive = !(inst.manifest.enabled === false || inst.manifest.lazy);
         await this.reload(inst.manifest.id, keepActive);
@@ -846,6 +965,8 @@ export class PluginLoader {
   }
 
   async dispose(): Promise<void> {
+    this.offConfigWatch?.();
+    if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
     this.watcher?.close();
     clearTimeout(this.reloadTimer);
     for (const inst of [...this.registry.values()].reverse()) await this.stop(inst);

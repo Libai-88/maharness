@@ -18,6 +18,7 @@
     "start": "tsx server/index.ts",
     "start:all": "npm run ui:build && npm start",
     "selftest": "tsx scripts/selftest.ts",
+    "test": "node --import tsx --test \"kernel/tests/**/*.spec.ts\"",
     "typecheck": "tsc -p tsconfig.json",
     "ui:dev": "npm --prefix ui run dev",
     "ui:build": "npm --prefix ui run build",

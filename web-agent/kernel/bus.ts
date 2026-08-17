@@ -3,7 +3,7 @@
  * 内核与插件、插件与插件之间的唯一通信通道。
  * 事件命名：域.对象.动作；支持通配符（agent.*）与优先级订阅。
  */
-import type { Event, EventListener } from './types';
+import type { Event, EventListener, KernelEvents } from './types';
 
 /** 通配符匹配：'agent.*' 匹配 'agent.turn.started'；'*' 匹配一切 */
 function match(pattern: string, eventType: string): boolean {
@@ -22,6 +22,13 @@ interface ListenerEntry {
 
 /** emitAsync 中单个监听器超过该时长仍未完成时告警一次（不中断、不取消） */
 const ASYNC_LISTENER_WARN_MS = 10_000;
+
+/** 递归深度保护错误标记：enter 抛错时附带，emit 据此识别并向上传播（而非被监听器错误隔离吞掉） */
+const DEPTH_ERROR = Symbol('bus.depth-error');
+
+function isDepthError(err: unknown): boolean {
+  return !!err && typeof err === 'object' && (err as Record<PropertyKey, unknown>)[DEPTH_ERROR] === true;
+}
 
 export class EventBus {
   /** 按 priority 降序维护的监听表（插入排序：订阅时定位，emit 时零排序开销）。
@@ -49,21 +56,33 @@ export class EventBus {
   }
 
   /** 同步发布：监听器抛错被记录，不影响其他监听器。
-   *  递归深度超限时抛错（由调用方决定如何呈现——打断事件风暴优先于静默）。 */
+   *  递归深度超限时抛错（由调用方决定如何呈现——打断事件风暴优先于静默）。
+   *  深度错误带 DEPTH_ERROR 标记：在监听器错误隔离（console.error）之外向上传播给
+   *  调用方——递归链已在深处中断，调用方应知道发生了风暴（否则只静默告警）。
+   *  类型化重载：事件名在 KernelEvents 契约内时，data 形状编译期检查；插件自定义
+   *  事件仍走宽松 string 重载（兼容过渡）。 */
+  emit<E extends keyof KernelEvents>(e: Event<KernelEvents[E]>): void;
+  emit(e: Event): void;
   emit(e: Event): void {
     this.enter(e.type);
+    let depthError: unknown;
     try {
       for (const en of this.entries) {
         if (!match(en.pattern, e.type)) continue;
         try {
           en.listener(e);
         } catch (err) {
-          console.error(`[bus] listener error on "${e.type}":`, err);
+          if (isDepthError(err)) {
+            depthError ??= err; // 深度保护错误：收集，emit 收尾后上抛
+          } else {
+            console.error(`[bus] listener error on "${e.type}":`, err);
+          }
         }
       }
     } finally {
       this.depth--;
     }
+    if (depthError) throw depthError;
   }
 
   /* ============================================================
@@ -198,7 +217,10 @@ export class EventBus {
   }
 
   /** 异步发布：等待所有监听器（含 async）完成后返回，用于生命周期等关键路径。
-   *  与 emit 共享递归深度计数；单个监听器超时未完成告警一次（不中断）。 */
+   *  与 emit 共享递归深度计数；单个监听器超时未完成告警一次（不中断）。
+   *  类型化重载同 emit（KernelEvents 契约内的事件 data 编译期检查）。 */
+  emitAsync<E extends keyof KernelEvents>(e: Event<KernelEvents[E]>): Promise<void>;
+  emitAsync(e: Event): Promise<void>;
   async emitAsync(e: Event): Promise<void> {
     this.enter(e.type);
     try {
@@ -227,11 +249,14 @@ export class EventBus {
     }) as Promise<void>;
   }
 
-  /** 进入一次分发：递归深度超限抛错（打断递归链，如 config.set ↔ config.changed 死循环） */
+  /** 进入一次分发：递归深度超限抛错（打断递归链，如 config.set ↔ config.changed 死循环）。
+   *  错误附带 DEPTH_ERROR 标记——emit 识别后向上传播给调用方（不被监听器隔离吞掉）。 */
   private enter(type: string): void {
     if (++this.depth > this.MAX_DEPTH) {
       this.depth--;
-      throw new Error(`[bus] 事件递归深度超过 ${this.MAX_DEPTH}："${type}"（疑似监听器联动死循环，如 config.set ↔ config.changed；请检查事件监听器是否无条件 re-emit）`);
+      const err = new Error(`[bus] 事件递归深度超过 ${this.MAX_DEPTH}："${type}"（疑似监听器联动死循环，如 config.set ↔ config.changed；请检查事件监听器是否无条件 re-emit）`) as Error & Record<PropertyKey, unknown>;
+      err[DEPTH_ERROR] = true;
+      throw err;
     }
   }
 

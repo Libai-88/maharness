@@ -6,7 +6,7 @@
  * AUTO_STOP_IDLE_MS（默认 30s，设 0 关闭）后优雅退出——「页面关了，后端就不该再跑」。
  */
 import dotenv from 'dotenv';
-import { existsSync, watch } from 'node:fs';
+import { existsSync, readFileSync, watch } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
@@ -129,24 +129,43 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
 
   // ---- .env 热更新：环境变量与插件文件走同一心智模型（改动即生效） ----
   // 第一性原理：API key 等配置与代码一样是「可变化的输入」，不应只活在启动快照里。
-  // 监听 .env → override 刷新 process.env → 重载全部插件（search 等插件重新读取新 key）。
+  // 监听 .env → diff 出变化的 key → bumpEnv（env 依赖版本递增 + 订阅者即时通知）→
+  // reloadChanged 只重载声明了 watchEnv 的插件（v3.1 修复：旧实现签名无 env 分量，
+  // reloadChanged 永远返回空——.env 变更实际不生效）。
   // L3：监听其所在目录而非单文件——Windows 编辑器普遍以「临时文件 + 重命名」保存，
   // 重命名后旧的文件级 watch 句柄失效（后续保存不再触发）；目录级监听 +
   // filename === '.env' 过滤在任何保存方式下都稳定，且 .env 不存在时也能感知创建。
   const envPath = join(process.cwd(), '.env');
   const envDir = dirname(envPath);
   let envTimer: NodeJS.Timeout | null = null;
+  // 上次 .env 解析快照（diff 用）：首帧读不到（文件不存在）也不报错
+  let lastEnv: Record<string, string> = {};
+  try {
+    lastEnv = dotenv.parse(readFileSync(envPath, 'utf-8'));
+  } catch { /* .env 尚不存在：以空快照起步 */ }
   try {
     watch(envDir, (_event, filename) => {
       if (filename !== '.env') return;
       if (envTimer) clearTimeout(envTimer);
       envTimer = setTimeout(() => {
+        let parsed: Record<string, string>;
+        try {
+          parsed = dotenv.parse(readFileSync(envPath, 'utf-8'));
+        } catch {
+          parsed = {}; // .env 被删除/暂不可读：视为全部 key 清空
+        }
+        // diff 变化 key（含新增/删除）：只 bump 真正变化的，避免无谓重载
+        const changed = [...new Set([...Object.keys(parsed), ...Object.keys(lastEnv)])]
+          .filter((k) => parsed[k] !== lastEnv[k]);
+        lastEnv = parsed;
+        if (!changed.length) return;
         dotenv.config({ override: true }); // 重新读取 .env 覆盖旧值
-        console.log('[env] .env 已变更，刷新环境变量并热重载受影响插件');
-        // v3 依赖驱动智能重载：只重载真正依赖变化的插件（而非全量 reloadAll）
+        console.log(`[env] .env 已变更（${changed.join(', ')}），刷新环境变量并热重载受影响插件`);
+        // v3.1 依赖驱动智能重载：env 依赖版本递增 → 只重载声明了 watchEnv 的插件
+        kernel.plugins.bumpEnv(changed);
         void kernel.plugins.reloadChanged()
-          .then((changed) => {
-            if (changed.length) console.log(`[env] 已重载依赖变化的插件: ${changed.join(', ')}`);
+          .then((changedIds) => {
+            if (changedIds.length) console.log(`[env] 已重载依赖变化的插件: ${changedIds.join(', ')}`);
           })
           .catch(() => undefined);
       }, 500);

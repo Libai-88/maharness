@@ -19,6 +19,7 @@ export { Trace } from './trace';
 export { Cache } from './cache';
 export { Budget, classifyTask } from './budget';
 export { EffectScope } from './scope';
+export { Service } from './service';
 export { PluginLoader } from './plugin-loader';
 export * from './types';
 

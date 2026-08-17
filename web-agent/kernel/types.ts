@@ -30,6 +30,11 @@ export interface PluginManifest {
   /** 声明本插件提供的服务键（coeffect provide 的声明式预览，供依赖图谱/插件面板可查；
    *  实际提供以运行时 ctx.provide 为准——声明只读，动态提供才算数） */
   provides?: string[];
+  /** 插件配置 schema（JSONSchema 子集，见 kernel/validate.ts——与工具 outputSchema 同一引擎）。
+   *  声明后，onLoad 前用 config.<pluginId>.* 的当前值做机器校验：不合规 → 注册失败/热重载回滚。
+   *  支持的子集：type(含 object/array/string/number/integer/boolean/null) / properties / required /
+   *  items / enum / minimum / maximum / minLength / maxLength。超出子集的声明按「不校验」处理（渐进增强）。 */
+  config?: Record<string, unknown>;
 }
 
 export interface Plugin {
@@ -71,6 +76,10 @@ export interface KernelLike {
     reloadChanged(): Promise<string[]>;
     /** v3 当前依赖事实版本（可观测：判断是否发生过依赖上下文变化） */
     getDependencyVersion(): number;
+    /** v3.1 环境变量变更登记：.env 变更后调用——
+     *  bump 指定 key（不传则全部已知 env 依赖）的版本并通知 watchEnv 订阅者，
+     *  使 reloadChanged 对声明了该 env 依赖的插件生效（智能重载的 env 维度）。 */
+    bumpEnv(names?: string[]): void;
   };
 }
 
@@ -101,6 +110,12 @@ export interface PluginContext {
    *  某键先查本上下文 overrides（最内层优先），再落回全局 config。
    *  overrides 以 effect 逆元注册，插件卸载/手动调用返回的 dispose 时自动撤销。 */
   configWith(overrides: Record<string, unknown>): () => void;
+  /** v3.1 环境变量依赖声明：登记「本插件运行依赖的 env 事实」。
+   *  - 依赖签名分量：.env 变更（bumpEnv）→ 本插件参与 reloadChanged 重载；
+   *  - 可选 cb：.env 变更时立即收到新值（无需等 reload）；
+   *  - 约定：插件必须在 onLoad/onStart 函数体内读取 env（不做模块顶层常量），
+   *    否则 reload 命中 ESM 模块缓存后新值仍不生效。 */
+  watchEnv(name: string, cb?: (value: string | undefined) => void): () => void;
   /** 原始可逆效应：执行 callback 并登记逆元（跨系统边界操作由调用方自备补偿） */
   effect<T>(callback: () => T | Promise<T>, makeInverse: (value: T) => () => void | Promise<void>): Promise<void>;
   logger: Logger;
@@ -406,6 +421,29 @@ export interface TraceStats {
   totalCost: number;
   /** JSONL 异步落盘失败次数（不再静默：首次失败 console.warn，此处累计可观测） */
   writeFailures: number;
+}
+
+// ============ 事件契约（类型化事件表，v3.2） ============
+
+/** 内核事件契约：核心事件的 data 形状编译期可查（EventBus.emit/emitAsync 泛型 overload）。
+ *  插件自定义事件仍可用 string 事件名（宽松 on/emit，兼容过渡）——
+ *  声明在此的事件名 = 内核承诺的契约，data 字段错型即编译报错。 */
+export interface KernelEvents {
+  'plugin.registered': { id: string; name: string; version: string; provides?: string[] };
+  'plugin.loaded': { id: string; caps: string[]; provides: string[] };
+  'plugin.started': { id: string };
+  'plugin.stopped': { id: string };
+  'plugin.unloaded': { id: string };
+  'plugin.reloaded': { id: string; rollback?: boolean };
+  'plugin.error': { id?: string; dir?: string; error: string; rollback?: boolean };
+  'plugin.reverted': { id: string; effects: number };
+  'plugin.capability': { pluginId: string; kind: string; name?: string };
+  'service.provided': { key: string; pluginId: string };
+  'service.withdrawn': { key: string; pluginId: string };
+  'kernel.started': { root: string; plugins: string[]; l1Cache: boolean };
+  'kernel.stopped': Record<string, never>;
+  'trace.step': TraceStep;
+  'config.changed': { key: string; value: unknown };
 }
 
 // ============ 缓存 ============
