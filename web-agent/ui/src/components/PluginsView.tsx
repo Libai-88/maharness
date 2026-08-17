@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
-import { IconCheck, IconClose } from './Icon';
+import { IconCheck, IconClose, PluginIcon } from './Icon';
 import TodoBoardView from './TodoBoardView';
 
 interface Props {
@@ -79,12 +79,14 @@ export default function PluginsView({ plugins, onAction }: Props) {
         aria-pressed={selected?.id === p.id}
         onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(p); } }}
       >
-        <span className="plugin-icon" style={{ background: `${color}26`, color }}>{p.name[0]?.toUpperCase()}</span>
+        <span className="plugin-icon" style={{ background: `${color}26`, color }}>
+          <PluginIcon id={p.name} size={20} />
+        </span>
         <div className="plugin-info">
           <div className="plugin-info-top">
             <span className="plugin-name">{p.name}</span>
             <span className="plugin-ver">v{p.version}</span>
-            <span className="plugin-tag hot">热重载</span>
+            {isRun && <span className="plugin-tag hot">热重载</span>}
             {p.error && <span className="plugin-tag" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>错误</span>}
           </div>
           <span className="plugin-desc">{p.caps?.join(' · ') || p.error || '插件（能力注册于 PluginLoader）'}</span>
@@ -93,6 +95,24 @@ export default function PluginsView({ plugins, onAction }: Props) {
           <span className={`plugin-status ${isRun ? 'running' : p.error ? 'error' : 'stopped-s'}`}>
             <span className="ps-dot" />{stateLabel}
           </span>
+          <div className="plugin-card-actions">
+            <button
+              className="pc-btn"
+              onClick={(e) => { e.stopPropagation(); void act(p.id, 'reload'); }}
+              disabled={!!busy[p.id]}
+              title="重新加载"
+            >
+              {busy[p.id] ? <span className="spin" /> : '↻'} Reload
+            </button>
+            <button
+              className={`pc-btn ${isRun ? '' : 'enable'}`}
+              onClick={(e) => { e.stopPropagation(); void act(p.id, isRun ? 'disable' : 'enable'); }}
+              disabled={!!busy[p.id]}
+              title={isRun ? '停用' : '启用'}
+            >
+              {isRun ? '停用' : '启用'}
+            </button>
+          </div>
           <button
             className={`toggle ${isRun ? 'on' : ''}`}
             role="switch"
@@ -112,20 +132,33 @@ export default function PluginsView({ plugins, onAction }: Props) {
   return (
     <div className="plugins-layout">
       <div className="plugins-list">
+        <div className="page-head">
+          <div className="ph-eyebrow">
+            <span className="ph-no">04</span>
+            <span className="ph-label">PLUGIN CENTER</span>
+            <span className="ph-rule" />
+            <span className="ph-cn">插件管理</span>
+          </div>
+          <span className="ph-title">用插件扩展 maharness 的能力边界</span>
+          <span className="ph-sub">智能重载 · 依赖签名 · 事务回滚——每个插件都是一次签名，bumpFact 即生效。</span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <span className="page-title">插件管理</span>
           <span className="msg-tag">{plugins.length} 个插件</span>
           <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
             <input className="set-input" style={{ width: 180, height: 32 }} placeholder="搜索插件…" value={q} onChange={(e) => setQ(e.target.value)} />
           </span>
         </div>
         <div className="plugin-group">运行中 · {running.length}</div>
-        {running.map((p, i) => renderCard(p, i))}
+        <div className="plugin-grid">
+          {running.map((p, i) => renderCard(p, i))}
+        </div>
         {none && <div className="empty-state" style={{ padding: '24px 12px' }}>没有匹配「{q.trim()}」的插件</div>}
         {stopped.length > 0 && (
           <>
             <div className="plugin-group" style={{ marginTop: 12 }}>已停止 · {stopped.length}</div>
-            {stopped.map((p, i) => renderCard(p, running.length + i))}
+            <div className="plugin-grid">
+              {stopped.map((p, i) => renderCard(p, running.length + i))}
+            </div>
           </>
         )}
       </div>
@@ -140,7 +173,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
             <>
               <div className="plugin-detail-card">
                 <span className="pd-icon" style={{ background: `${ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#3a4350'}26`, color: ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#3a4350' }}>
-                  {selected.name[0]?.toUpperCase()}
+                  <PluginIcon id={selected.name} size={24} />
                 </span>
                 <span className="pd-name">{selected.name}</span>
                 <span className="pd-ver">v{selected.version}</span>

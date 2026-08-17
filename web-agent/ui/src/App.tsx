@@ -12,7 +12,7 @@ import StatsView from './components/StatsView';
 import SettingsView from './components/SettingsView';
 import Menu from './components/Menu';
 import { IconChevronDown, IconClose, IconPanel } from './components/Icon';
-import { useToast } from './components/Toast';
+import { toast } from 'sonner';
 
 export type Theme = 'dark' | 'light';
 
@@ -46,11 +46,11 @@ export default function App() {
   const [sessionCost, setSessionCost] = useState(0);
 
   const abortRef = useRef<AbortController | null>(null);
-  const toast = useToast();
 
-  // 主题：写 dataset + localStorage（首帧由 main.tsx 预置，避免闪烁）
+  // 主题：写 dataset + localStorage + Sonner 主题同步（首帧由 main.tsx 预置，避免闪烁）
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.setAttribute('data-sonner-theme', theme);
     try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
   }, [theme]);
 
@@ -477,6 +477,7 @@ export default function App() {
           </div>
         </header>
 
+        <div className="tab-content" key={settingsOpen ? 'settings' : activeTab}>
         {settingsOpen ? (
           <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
         ) : activeTab === 'chat' ? (
@@ -530,6 +531,7 @@ export default function App() {
         ) : (
           <StatsView />
         )}
+        </div>
       </main>
     </div>
   );

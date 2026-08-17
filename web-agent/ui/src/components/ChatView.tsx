@@ -53,7 +53,7 @@ function ToolCard({ t }: { t: ToolStep }) {
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
     <div
-      className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'}`}
+      className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'} ${show ? 'expanded' : ''}`}
       onClick={() => { if (!running) setOpen((v) => !v); }}
       style={{ cursor: running ? 'default' : 'pointer' }}
       role="button"
@@ -77,7 +77,7 @@ function ToolCard({ t }: { t: ToolStep }) {
           <span style={{ color: 'var(--text-4)', display: 'inline-flex', transform: show ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }}><IconChevronDown size={11} /></span>
         </div>
       </div>
-      {show && t.summary && (
+      {t.summary && (
         <div className="tool-body">
           <span className="t-out">{t.summary}</span>
           {t.stored && <span className="tool-stored-note">完整结果已存入结果存储（本会话内 recall_tool_result 可重读，零副作用）</span>}
@@ -311,6 +311,11 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               </div>
               <div className="brand-kbd"><span className="bk">/</span> 调出命令面板 <span className="bk">Enter</span> 发送</div>
               {!hasModels && <div className="brand-note">尚未配置 LLM Provider —— 在左下角「设置」中添加。</div>}
+              <div className="hero-pills">
+                <button className="hero-pill" onClick={() => onSend('起草一份技术方案')}><span className="hp-ico">✦</span>起草一份技术方案</button>
+                <button className="hero-pill" onClick={() => onSend('追踪插件重载信号')}><span className="hp-ico">◆</span>追踪插件重载信号</button>
+                <button className="hero-pill" onClick={() => onSend('整理本周代码审查')}><span className="hp-ico">✚</span>整理本周代码审查</button>
+              </div>
             </div>
           )}
 
@@ -337,7 +342,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                     </div>
                     {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
                     {reasoning && reasoning.length > 0 && (
-                      <div className={`think-card ${m.streaming ? 'streaming' : ''}`}>
+                      <div className={`think-card ${(m.streaming || expanded[m.id]) ? 'expanded' : ''} ${m.streaming ? 'streaming' : ''}`}>
                         <div className="think-head">
                           <span className="think-dot"><IconBrain size={12} /></span>
                           <span className="think-label">{m.streaming ? '推理中' : '思考'}</span>
@@ -350,9 +355,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                             {m.streaming ? '流式' : expanded[m.id] ? '收起' : '展开'}
                           </button>
                         </div>
-                        {(m.streaming || expanded[m.id]) && (
-                          <div className="think-body">{reasoning}{m.streaming && <span className="stream-cursor" />}</div>
-                        )}
+                        <div className="think-body">{reasoning}{m.streaming && <span className="stream-cursor" />}</div>
                       </div>
                     )}
                     {content ? (

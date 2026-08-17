@@ -94,8 +94,17 @@ export default function SkillsView() {
   return (
     <div className="plugins-layout">
       <div className="plugins-list">
+        <div className="page-head">
+          <div className="ph-eyebrow">
+            <span className="ph-no">06</span>
+            <span className="ph-label">SKILL SYSTEM</span>
+            <span className="ph-rule" />
+            <span className="ph-cn">技能系统</span>
+          </div>
+          <span className="ph-title">让 maharness 学会你的手艺</span>
+          <span className="ph-sub">技能即扩展——Markdown 指南 + YAML 声明，装入即可被 Agent 调用。</span>
+        </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <span className="page-title">技能系统</span>
           <span className="msg-tag">已安装 {installed.length}</span>
           <span style={{ marginLeft: 'auto' }}>
             <input

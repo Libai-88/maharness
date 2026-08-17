@@ -13,6 +13,15 @@
 Thumbs.db
 .DS_Store
 
+# IDE / AI 工具本地配置（每个开发者的配置不同，不纳入版本库）
+.agents/
+.claude/
+.trae/
+.zcode/
+
+# 外部参考仓库（克隆到本地仅供查阅）
+cordis-main/
+
 # 工具/备份/参考文件（保留在工作区，不纳入版本库）
 .workbuddy/
 web-agent/ui.bak/

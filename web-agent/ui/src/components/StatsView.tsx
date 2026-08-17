@@ -34,13 +34,16 @@ export default function StatsView() {
 
   return (
     <div className="view-scroll">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-        <span className="page-title">缓存与成本</span>
-        <span style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center' }}>
-          <span className="tb-live"><span className="live-dot" />实时</span>
-        </span>
+      <div className="page-head">
+        <div className="ph-eyebrow">
+          <span className="ph-no">03</span>
+          <span className="ph-label">CACHE & COST</span>
+          <span className="ph-rule" />
+          <span className="ph-cn">缓存与成本</span>
+        </div>
+        <span className="ph-title">看得见的成本，看得见的缓存</span>
+        <span className="ph-sub">三层缓存命中即可见 · 本周节省 {cost(cache.savedCost ?? 0)}</span>
       </div>
-      <div className="page-sub">本周节省 {cost(cache.savedCost ?? 0)} · 三层缓存命中即可见</div>
 
       <div className="stats-row">
         <div className="hero-card">

@@ -79,11 +79,18 @@ export default function TodoBoardView() {
     <div className="pd-manifest">
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
         <span className="pm-title">PLUGIN PANEL · 待办看板</span>
-        <span style={{ fontSize: 12, color: 'var(--text-3)' }}>{done}/{cards.length} 完成</span>
+        <span className="status-badge run" title="模型 to do list 实时同步"><span className="sbd" />live</span>
         <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{done}/{cards.length} 完成</span>
         <button className="pd-btn ghost" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }} title="在独立窗口打开看板（完整页面）"
           onClick={() => window.open('/api/plugins/todo/board/page', '_blank')}><IconExternal size={12} /> 独立窗口</button>
       </div>
+      {/* v5：完成度进度条（陶土→松绿渐变） */}
+      {cards.length > 0 && (
+        <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-input)', overflow: 'hidden', marginBottom: 10 }}>
+          <div style={{ height: '100%', width: `${(done / cards.length) * 100}%`, background: 'linear-gradient(90deg, var(--accent), var(--teal))', borderRadius: 2, transition: 'width 0.4s ease' }} />
+        </div>
+      )}
       {err && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}><IconWarn size={12} /> {err}</div>}
       <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input

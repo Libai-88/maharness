@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { configApi, metaApi, providersApi, statsApi } from '../api';
 import type { ProviderForm, ProviderInfo, StatsInfo } from '../types';
 import type { Theme } from '../App';
-import { useToast } from './Toast';
+import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
 import SkillsView from './SkillsView';
 
@@ -26,7 +26,6 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
-  const toast = useToast();
 
   const refresh = async (ok: boolean, text: string) => {
     setMsg({ ok, text });
@@ -192,7 +191,6 @@ function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
   const [cfg, setCfg] = useState<{ context: { maxTokens: number; truncateInject: boolean }; cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean } } | null>(null);
   const [savedTip, setSavedTip] = useState<string | null>(null);
-  const toast = useToast();
 
   useEffect(() => {
     let alive = true;

@@ -314,3 +314,30 @@ export const IconChevronUp = (p: IconProps) => (
 export const IconGrip = (p: IconProps) => (
   <Svg {...p}><path d="M8.5 6.5 h.01 M12 6.5 h.01 M15.5 6.5 h.01 M8.5 12 h.01 M12 12 h.01 M15.5 12 h.01 M8.5 17.5 h.01 M12 17.5 h.01 M15.5 17.5 h.01" strokeWidth="2.4" /></Svg>
 );
+
+/** 记忆（memory 插件）：存档盒 + 记忆点 */
+export const IconMemory = (p: IconProps) => (
+  <Svg {...p}><path d="M4 5.5 h16 v11 a2 2 0 0 1 -2 2 H6 a2 2 0 0 1 -2 -2 Z" /><path d="M4 5.5 l1.6 -2 h12.8 l1.6 2" /><path d="M8 10.5 h.01 M12 10.5 h.01 M16 10.5 h.01" strokeWidth="2.4" /><path d="M9 15.5 h6" /></Svg>
+);
+
+/** 并行（parallel 插件）：分叉分支 */
+export const IconParallel = (p: IconProps) => (
+  <Svg {...p}><path d="M12 3 v6 M12 9 l-4 -4 4 -4 4 4" /><path d="M12 9 c3 3 3 6 0 9 c-3 -3 -3 -6 0 -9 Z" /><path d="M12 21 v-3" /></Svg>
+);
+
+/** 插件专属图标映射（v5：以语义图标替代首字母块） */
+const PLUGIN_ICONS: Record<string, (p: IconProps) => React.ReactElement> = {
+  chat: IconChat,
+  search: IconSearch,
+  memory: IconMemory,
+  skills: IconSpark,
+  parallel: IconParallel,
+  todo: IconPlan,
+};
+
+export function PluginIcon({ id, size = 20, className }: { id: string; size?: number; className?: string }) {
+  const C = PLUGIN_ICONS[id.toLowerCase()];
+  if (C) return <C size={size} className={className} />;
+  // 兜底：首字母（未映射的插件保持可辨识）
+  return <span className={className} style={{ fontSize: size * 0.62, lineHeight: 1, fontFamily: 'var(--font-display)', fontWeight: 700 }}>{id[0]?.toUpperCase()}</span>;
+}
