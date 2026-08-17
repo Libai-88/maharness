@@ -1,9 +1,28 @@
-// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + 4 Tab + 会话列表 + 批量管理 + Footer）
+// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话列表 + 批量管理 + Footer）
+// Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab
 import { useState } from 'react';
 import type { Session } from '../types';
 import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
-export type MainTab = 'chat' | 'files' | 'plugins' | 'stats';
+export type MainTab = string;
+
+/** Tab 定义：插件可通过注册 UI tab 扩展侧边栏导航 */
+export interface TabDef {
+  key: string;
+  label: string;
+  icon: React.ReactNode;
+}
+
+/** 内置 tab（核心功能，不可卸载） */
+export const BUILTIN_TABS: TabDef[] = [
+  { key: 'chat', label: '会话', icon: <IconChat size={14} /> },
+  { key: 'files', label: '文件', icon: <IconFolder size={14} /> },
+  { key: 'plugins', label: '插件', icon: <IconPlugin size={14} /> },
+  { key: 'stats', label: '统计', icon: <IconStats size={14} /> },
+];
+
+/** 插件扩展 tab（当前为空，插件可通过 API 注册） */
+export const PLUGIN_TABS: TabDef[] = [];
 
 interface Props {
   sessions: Session[];
@@ -150,18 +169,11 @@ export default function Sidebar({
       </div>
 
       <div className="sb-tabs">
-        <button className={`sb-tab ${activeTab === 'chat' ? 'active' : ''}`} onClick={() => onTab('chat')}>
-          <IconChat size={14} />会话
-        </button>
-        <button className={`sb-tab ${activeTab === 'files' ? 'active' : ''}`} onClick={() => onTab('files')}>
-          <IconFolder size={14} />文件
-        </button>
-        <button className={`sb-tab ${activeTab === 'plugins' ? 'active' : ''}`} onClick={() => onTab('plugins')}>
-          <IconPlugin size={14} />插件
-        </button>
-        <button className={`sb-tab ${activeTab === 'stats' ? 'active' : ''}`} onClick={() => onTab('stats')}>
-          <IconStats size={14} />统计
-        </button>
+        {BUILTIN_TABS.concat(PLUGIN_TABS).map((tab) => (
+          <button key={tab.key} className={`sb-tab ${activeTab === tab.key ? 'active' : ''}`} onClick={() => onTab(tab.key)}>
+            {tab.icon}{tab.label}
+          </button>
+        ))}
       </div>
 
       <div className="sb-divider" />

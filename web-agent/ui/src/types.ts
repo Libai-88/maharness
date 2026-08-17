@@ -234,14 +234,17 @@ export interface PlanState {
 
 /** todo 插件：待办看板 / 模型 to do list 卡片 */
 export type TodoStatus = 'todo' | 'doing' | 'done' | 'blocked';
+export type TodoPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface TodoCard {
   id: string;
   title: string;
   desc?: string;
   status: TodoStatus;
+  priority: TodoPriority;
   source: 'agent' | 'human';
   sessionId?: string;
+  order: number;
   createdAt: number;
   updatedAt: number;
 }

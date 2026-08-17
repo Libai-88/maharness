@@ -1,143 +1,326 @@
-// ui/src/components/TodoBoardView.tsx —— 待办看板（todo 插件专用 React 面板）
-// 背景：插件贡献的 panel HTML 经 DOMPurify 净化会剥离 <script>/onclick，
-// 交互全部失效——因此 todo 插件在 PluginsView 中特判渲染本组件（React 原生交互）。
-import { useCallback, useEffect, useState } from 'react';
-import type { TodoCard, TodoStatus } from '../types';
-import { IconExternal, IconRobot, IconUser, IconWarn } from './Icon';
+// ui/src/components/TodoBoardView.tsx —— 产品级待办看板（拖拽排序 + 详情编辑 + 搜索筛选 + SSE 实时）
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { DndContext, DragOverlay, closestCorners, PointerSensor, useSensor, useSensors, type DragStartEvent, type DragEndEvent } from '@dnd-kit/core';
+import { SortableContext, verticalListSortingStrategy, useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import { subscribeEvents } from '../api';
+import type { BusEvent, TodoCard, TodoPriority, TodoStatus } from '../types';
 
+// ─── 常量 ───────────────────────────────────────────────────
+const API = '/api/plugins/todo/board';
 const COLS: { key: TodoStatus; label: string; color: string }[] = [
   { key: 'todo', label: '待办', color: '#d9a441' },
   { key: 'doing', label: '进行中', color: '#d0856b' },
   { key: 'blocked', label: '受阻', color: '#d96856' },
   { key: 'done', label: '完成', color: '#82a873' },
 ];
+const PRIORITIES: { key: TodoPriority; label: string; color: string }[] = [
+  { key: 'low', label: '低', color: '#7d7162' },
+  { key: 'medium', label: '中', color: '#d9a441' },
+  { key: 'high', label: '高', color: '#d0856b' },
+  { key: 'urgent', label: '紧急', color: '#d96856' },
+];
+const PRIORITY_MAP = Object.fromEntries(PRIORITIES.map((p) => [p.key, p])) as Record<TodoPriority, typeof PRIORITIES[0]>;
 
-const BOARD_API = '/api/plugins/todo/board/cards';
-
-async function loadCards(): Promise<TodoCard[]> {
-  const r = await fetch(BOARD_API);
-  if (!r.ok) throw new Error(`HTTP ${r.status}`);
-  const d = (await r.json()) as { cards?: TodoCard[] };
-  return d.cards ?? [];
+// ─── 可排序卡片 ─────────────────────────────────────────────
+function SortableCard({ card, onOpen }: { card: TodoCard; onOpen: (c: TodoCard) => void }) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: card.id, data: { card } });
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.4 : 1,
+  };
+  const pri = PRIORITY_MAP[card.priority] ?? PRIORITY_MAP.medium;
+  return (
+    <div ref={setNodeRef} style={style} className={`tb-card ${isDragging ? 'dragging' : ''}`} {...attributes} {...listeners} onClick={() => onOpen(card)}>
+      <div className="tb-card-head">
+        <span className="tb-pri-dot" style={{ background: pri.color }} title={pri.label} />
+        <span className="tb-card-title">{card.title}</span>
+        {card.source === 'agent' && <span className="tb-card-src">🤖</span>}
+      </div>
+      {card.desc && <div className="tb-card-desc">{card.desc}</div>}
+    </div>
+  );
 }
 
+// ─── 拖拽预览卡片 ───────────────────────────────────────────
+function DragPreview({ card }: { card: TodoCard }) {
+  const pri = PRIORITY_MAP[card.priority] ?? PRIORITY_MAP.medium;
+  return (
+    <div className="tb-card tb-card-preview">
+      <div className="tb-card-head">
+        <span className="tb-pri-dot" style={{ background: pri.color }} />
+        <span className="tb-card-title">{card.title}</span>
+      </div>
+    </div>
+  );
+}
+
+// ─── 详情编辑面板 ───────────────────────────────────────────
+function DetailPanel({ card, onClose, onSave, onDelete }: {
+  card: TodoCard;
+  onClose: () => void;
+  onSave: (id: string, patch: Partial<TodoCard>) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [title, setTitle] = useState(card.title);
+  const [desc, setDesc] = useState(card.desc ?? '');
+  const [priority, setPriority] = useState<TodoPriority>(card.priority);
+  const [status, setStatus] = useState<TodoStatus>(card.status);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    document.addEventListener('keydown', handler);
+    return () => document.removeEventListener('keydown', handler);
+  }, [onClose]);
+
+  const handleSave = () => {
+    onSave(card.id, { title: title.trim() || card.title, desc: desc.trim() || undefined, priority, status });
+    onClose();
+  };
+
+  return (
+    <div className="tb-detail-overlay" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="tb-detail">
+        <div className="tb-detail-head">
+          <span className="tb-detail-title">编辑卡片</span>
+          <button className="tb-detail-close" onClick={onClose}>✕</button>
+        </div>
+        <div className="tb-detail-body">
+          <label className="tb-label">标题</label>
+          <input className="tb-input" value={title} onChange={(e) => setTitle(e.target.value)} autoFocus />
+
+          <label className="tb-label">描述</label>
+          <textarea className="tb-textarea" value={desc} onChange={(e) => setDesc(e.target.value)} rows={4} placeholder="补充说明（可选）" />
+
+          <label className="tb-label">优先级</label>
+          <div className="tb-pri-row">
+            {PRIORITIES.map((p) => (
+              <button key={p.key} className={`tb-pri-btn ${priority === p.key ? 'active' : ''}`} style={{ '--pri-color': p.color } as React.CSSProperties} onClick={() => setPriority(p.key)}>
+                <span className="tb-pri-dot" style={{ background: p.color }} />{p.label}
+              </button>
+            ))}
+          </div>
+
+          <label className="tb-label">状态</label>
+          <div className="tb-status-row">
+            {COLS.map((c) => (
+              <button key={c.key} className={`tb-status-btn ${status === c.key ? 'active' : ''}`} style={{ '--col-color': c.color } as React.CSSProperties} onClick={() => setStatus(c.key)}>
+                {c.label}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="tb-detail-foot">
+          <button className="tb-btn-danger" onClick={() => { onDelete(card.id); onClose(); }}>删除</button>
+          <div style={{ flex: 1 }} />
+          <button className="tb-btn-ghost" onClick={onClose}>取消</button>
+          <button className="tb-btn-primary" onClick={handleSave}>保存</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── 主组件 ─────────────────────────────────────────────────
 export default function TodoBoardView() {
   const [cards, setCards] = useState<TodoCard[]>([]);
   const [title, setTitle] = useState('');
-  const [err, setErr] = useState<string | null>(null);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [adding, setAdding] = useState(false);
+  const [search, setSearch] = useState('');
+  const [filterStatus, setFilterStatus] = useState<TodoStatus | 'all'>('all');
+  const [filterSource, setFilterSource] = useState<'all' | 'agent' | 'human'>('all');
+  const [editing, setEditing] = useState<TodoCard | null>(null);
+  const [activeCard, setActiveCard] = useState<TodoCard | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement>(null);
 
+  // ── 数据加载 ──
   const refresh = useCallback(async () => {
-    try { setCards(await loadCards()); setErr(null); } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+    try {
+      const r = await fetch(`${API}/cards`);
+      const d = await r.json();
+      setCards(d.cards ?? []);
+    } catch { /* 忽略 */ }
   }, []);
 
-  useEffect(() => {
-    void refresh();
-    const t = setInterval(() => void refresh(), 5000); // 轮询：模型 to do list 实时同步
-    return () => clearInterval(t);
-  }, [refresh]);
+  useEffect(() => { void refresh(); }, [refresh]);
 
-  const add = async () => {
+  // ── SSE 实时更新（替换 5 秒轮询） ──
+  useEffect(() => {
+    const off = subscribeEvents((e: BusEvent) => {
+      if (e.type === 'todo.updated') {
+        const data = e.data as { cards?: TodoCard[] } | undefined;
+        if (data?.cards) setCards(data.cards);
+      }
+    });
+    return off;
+  }, []);
+
+  // ── 搜索与筛选 ──
+  const filtered = useMemo(() => {
+    let list = cards;
+    if (filterStatus !== 'all') list = list.filter((c) => c.status === filterStatus);
+    if (filterSource !== 'all') list = list.filter((c) => c.source === filterSource);
+    if (search.trim()) {
+      const q = search.toLowerCase();
+      list = list.filter((c) => c.title.toLowerCase().includes(q) || (c.desc ?? '').toLowerCase().includes(q));
+    }
+    return list;
+  }, [cards, filterStatus, filterSource, search]);
+
+  const colCards = useMemo(() => {
+    const map: Record<TodoStatus, TodoCard[]> = { todo: [], doing: [], done: [], blocked: [] };
+    for (const c of filtered) map[c.status].push(c);
+    return map;
+  }, [filtered]);
+
+  const doneCount = cards.filter((c) => c.status === 'done').length;
+
+  // ── CRUD ──
+  const addCard = useCallback(async () => {
     const t = title.trim();
-    if (!t || adding) return;
-    setAdding(true);
+    if (!t || busy) return;
+    setBusy(true);
     try {
-      const r = await fetch(BOARD_API, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t }) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      await fetch(`${API}/cards`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: t }) });
       setTitle('');
       await refresh();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setAdding(false); }
-  };
+    } finally { setBusy(false); }
+  }, [title, busy, refresh]);
 
-  const setStatus = async (id: string, status: TodoStatus) => {
-    if (busyId) return;
-    setBusyId(id);
+  const saveCard = useCallback(async (id: string, patch: Partial<TodoCard>) => {
+    await fetch(`${API}/cards/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(patch) });
+    await refresh();
+  }, [refresh]);
+
+  const deleteCard = useCallback(async (id: string) => {
+    await fetch(`${API}/cards/${id}`, { method: 'DELETE' });
+    await refresh();
+  }, [refresh]);
+
+  // ── 拖拽 ──
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
+
+  const handleDragStart = useCallback((e: DragStartEvent) => {
+    const card = e.active.data.current?.card as TodoCard | undefined;
+    if (card) setActiveCard(card);
+  }, []);
+
+  const handleDragEnd = useCallback(async (e: DragEndEvent) => {
+    setActiveCard(null);
+    const { active, over } = e;
+    if (!over) return;
+
+    const activeId = active.id as string;
+    const overId = over.id as string;
+    if (activeId === overId) return;
+
+    // 确定目标列
+    let targetStatus: TodoStatus | null = null;
+    const overCard = cards.find((c) => c.id === overId);
+    if (overCard) {
+      targetStatus = overCard.status;
+    } else {
+      // over 可能是列占位 id（格式: "col-todo"）
+      const colKey = overId.replace('col-', '') as TodoStatus;
+      if (COLS.some((c) => c.key === colKey)) targetStatus = colKey;
+    }
+    if (!targetStatus) return;
+
+    // 乐观更新
+    setCards((prev) => {
+      const next = [...prev];
+      const aIdx = next.findIndex((c) => c.id === activeId);
+      if (aIdx === -1) return prev;
+      const card = { ...next[aIdx], status: targetStatus! };
+      next.splice(aIdx, 1);
+      const oIdx = next.findIndex((c) => c.id === overId);
+      if (oIdx >= 0) next.splice(oIdx, 0, card);
+      else {
+        const last = next.reduce((m, c, i) => c.status === targetStatus! ? i : m, -1);
+        next.splice(last + 1, 0, card);
+      }
+      // 重算 order
+      const orderMap: Record<TodoStatus, number> = { todo: 0, doing: 0, done: 0, blocked: 0 };
+      for (const c of next) c.order = orderMap[c.status]++;
+      return next;
+    });
+
+    // 同步后端
     try {
-      const r = await fetch(`${BOARD_API}/${id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      await refresh();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setBusyId(null); }
-  };
-
-  const remove = async (id: string) => {
-    if (busyId) return;
-    setBusyId(id);
-    try {
-      const r = await fetch(`${BOARD_API}/${id}`, { method: 'DELETE' });
-      if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      await refresh();
-    } catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setBusyId(null); }
-  };
-
-  const done = cards.filter((c) => c.status === 'done').length;
+      const payload = cards.map((c) => {
+        if (c.id === activeId) return { id: c.id, status: targetStatus!, order: c.order };
+        return { id: c.id, status: c.status, order: c.order };
+      });
+      // 重排
+      const aIdx = payload.findIndex((c) => c.id === activeId);
+      if (aIdx >= 0) {
+        const item = payload.splice(aIdx, 1)[0];
+        const oIdx = payload.findIndex((c) => c.id === overId);
+        if (oIdx >= 0) payload.splice(oIdx, 0, item);
+        else {
+          const last = payload.reduce((m, c, i) => c.status === targetStatus! ? i : m, -1);
+          payload.splice(last + 1, 0, item);
+        }
+        const orderMap: Record<TodoStatus, number> = { todo: 0, doing: 0, done: 0, blocked: 0 };
+        for (const c of payload) c.order = orderMap[c.status as TodoStatus]++;
+      }
+      await fetch(`${API}/cards/reorder`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ cards: payload }),
+      });
+    } catch { /* SSE 会推送正确状态 */ }
+  }, [cards]);
 
   return (
-    <div className="pd-manifest">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-        <span className="pm-title">PLUGIN PANEL · 待办看板</span>
-        <span className="status-badge run" title="模型 to do list 实时同步"><span className="sbd" />live</span>
-        <span style={{ flex: 1 }} />
-        <span style={{ fontSize: 12, color: 'var(--text-3)', fontFamily: 'var(--font-mono)' }}>{done}/{cards.length} 完成</span>
-        <button className="pd-btn ghost" style={{ fontSize: 12, display: 'inline-flex', alignItems: 'center', gap: 5 }} title="在独立窗口打开看板（完整页面）"
-          onClick={() => window.open('/api/plugins/todo/board/page', '_blank')}><IconExternal size={12} /> 独立窗口</button>
+    <div className="tb-root">
+      {/* ── 工具栏 ── */}
+      <div className="tb-toolbar">
+        <span className="tb-summary">{doneCount}/{cards.length} 完成</span>
+        <div className="tb-spacer" />
+        <input className="tb-search" placeholder="搜索…" value={search} onChange={(e) => setSearch(e.target.value)} />
+        <select className="tb-select" value={filterStatus} onChange={(e) => setFilterStatus(e.target.value as TodoStatus | 'all')}>
+          <option value="all">全部状态</option>
+          {COLS.map((c) => <option key={c.key} value={c.key}>{c.label}</option>)}
+        </select>
+        <select className="tb-select" value={filterSource} onChange={(e) => setFilterSource(e.target.value as 'all' | 'agent' | 'human')}>
+          <option value="all">全部来源</option>
+          <option value="human">👤 人类</option>
+          <option value="agent">🤖 模型</option>
+        </select>
+        <div className="tb-spacer" />
+        <input ref={inputRef} className="tb-add-input" placeholder="新任务…" value={title} onChange={(e) => setTitle(e.target.value)} onKeyDown={(e) => { if (e.key === 'Enter') void addCard(); }} />
+        <button className="tb-btn-add" onClick={() => void addCard()} disabled={busy || !title.trim()}>{busy ? '…' : '＋ 添加'}</button>
+        <button className="tb-btn-ghost" onClick={() => window.open(`${API}/page`, '_blank')} title="独立窗口">⛶</button>
       </div>
-      {/* v5：完成度进度条（陶土→松绿渐变） */}
-      {cards.length > 0 && (
-        <div style={{ height: 4, borderRadius: 2, background: 'var(--bg-input)', overflow: 'hidden', marginBottom: 10 }}>
-          <div style={{ height: '100%', width: `${(done / cards.length) * 100}%`, background: 'linear-gradient(90deg, var(--accent), var(--teal))', borderRadius: 2, transition: 'width 0.4s ease' }} />
-        </div>
-      )}
-      {err && <div style={{ color: 'var(--red)', fontSize: 12, marginBottom: 8 }}><IconWarn size={12} /> {err}</div>}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
-        <input
-          className="set-input" style={{ flex: 1, height: 32 }} placeholder="新任务标题…"
-          value={title} onChange={(e) => setTitle(e.target.value)}
-          onKeyDown={(e) => { if (e.key === 'Enter') void add(); }}
-          aria-label="新任务标题"
-        />
-        <button className="pd-btn" style={{ fontSize: 13, display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={() => void add()} disabled={!title.trim() || adding}>
-          {adding ? <span className="spin" /> : null}添加
-        </button>
-      </div>
-      <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start', minHeight: 200 }}>
-        {COLS.map((col) => {
-          const list = cards.filter((c) => c.status === col.key);
-          return (
-            <div key={col.key} style={{ flex: 1, minWidth: 0, background: 'var(--bg-input)', border: '1px solid var(--border)', borderRadius: 10, padding: 10 }}>
-              <div style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: col.color }}>
-                {col.label} <span style={{ color: 'var(--text-3)' }}>({list.length})</span>
+
+      {/* ── 看板 ── */}
+      <DndContext sensors={sensors} collisionDetection={closestCorners} onDragStart={handleDragStart} onDragEnd={handleDragEnd}>
+        <div className="tb-board">
+          {COLS.map((col) => (
+            <div key={col.key} className="tb-col">
+              <div className="tb-col-head" style={{ color: col.color }}>
+                <span className="tb-col-dot" style={{ background: col.color }} />
+                {col.label}
+                <span className="tb-col-count">{colCards[col.key].length}</span>
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 420, overflowY: 'auto' }}>
-                {list.map((c) => (
-                  <div key={c.id} style={{ background: 'var(--bg-elev)', border: '1px solid var(--border)', borderRadius: 8, padding: '8px 10px', fontSize: 12 }}>
-                    <div style={{ fontWeight: 600, marginBottom: 2 }}>
-                      {c.title}
-                      <span style={{ fontSize: 10, color: c.source === 'agent' ? 'var(--purple)' : 'var(--text-3)', marginLeft: 4, display: 'inline-flex', alignItems: 'center', gap: 3, verticalAlign: 'middle' }}>
-                        {c.source === 'agent' ? <IconRobot size={10} /> : <IconUser size={10} />}
-                        {c.source === 'agent' ? '模型' : '人类'}
-                      </span>
-                    </div>
-                    {c.desc && <div style={{ color: 'var(--text-3)', marginBottom: 6, whiteSpace: 'pre-wrap', fontSize: 11 }}>{c.desc}</div>}
-                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                      {COLS.filter((x) => x.key !== c.status).map((x) => (
-                        <button key={x.key} className="pd-btn ghost" style={{ padding: '2px 8px', fontSize: 10 }}
-                          disabled={busyId === c.id}
-                          onClick={() => void setStatus(c.id, x.key)}>{x.label}</button>
-                      ))}
-                      <button className="pd-btn danger" style={{ padding: '2px 8px', fontSize: 10 }} disabled={busyId === c.id} onClick={() => void remove(c.id)}>删除</button>
-                    </div>
-                  </div>
-                ))}
-                {list.length === 0 && <div style={{ color: 'var(--text-4)', fontSize: 11, textAlign: 'center', padding: '14px 0' }}>空</div>}
-              </div>
+              <SortableContext items={colCards[col.key].map((c) => c.id)} strategy={verticalListSortingStrategy}>
+                <div className="tb-col-body" data-col-id={`col-${col.key}`}>
+                  {colCards[col.key].map((card) => (
+                    <SortableCard key={card.id} card={card} onOpen={setEditing} />
+                  ))}
+                  {colCards[col.key].length === 0 && <div className="tb-col-empty">拖拽卡片到这里</div>}
+                </div>
+              </SortableContext>
             </div>
-          );
-        })}
-      </div>
+          ))}
+        </div>
+        <DragOverlay>{activeCard ? <DragPreview card={activeCard} /> : null}</DragOverlay>
+      </DndContext>
+
+      {/* ── 详情面板 ── */}
+      {editing && <DetailPanel card={editing} onClose={() => setEditing(null)} onSave={saveCard} onDelete={deleteCard} />}
     </div>
   );
 }

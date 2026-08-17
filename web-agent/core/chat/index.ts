@@ -9,7 +9,9 @@
  * 组装结果热更新：人设变更 / 插件加载卸载 / 重载，立即影响新对话，无需重启。
  */
 import type { PersonaDef, Plugin } from '../../kernel/types';
-import { AgentRunner } from './agent';
+import { AgentRunner, textualizeHistory, annotateToolDef } from './agent';
+import { compactHistory } from './compact';
+import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from './policy';
 import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig } from './provider';
 import { resultStore, sessionKeyOf } from './result-store';
 
@@ -89,6 +91,13 @@ export default {
       getSystemPrompt: () => string;
       refreshPrompt: () => void;
       approveApproval: (approvalId: string, approved: boolean) => boolean;
+      // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
+      textualizeHistory: typeof textualizeHistory;
+      compactHistory: typeof compactHistory;
+      annotateToolDef: typeof annotateToolDef;
+      MODE_PROMPTS: typeof MODE_PROMPTS;
+      ROLE_READONLY_TOOLS: typeof ROLE_READONLY_TOOLS;
+      validateCheckpointHistory: typeof validateCheckpointHistory;
     } = {
       providers,
       runner,
@@ -128,6 +137,13 @@ export default {
       },
       getSystemPrompt: () => service.systemPrompt,
       approveApproval: (approvalId: string, approved: boolean) => runner.approveApproval(approvalId, approved),
+      // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
+      textualizeHistory,
+      compactHistory,
+      annotateToolDef,
+      MODE_PROMPTS,
+      ROLE_READONLY_TOOLS,
+      validateCheckpointHistory,
     };
 
     // 反应性共效应（时空可组合性 v2）：声明「依赖什么」，运行时在变化时通知——

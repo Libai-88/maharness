@@ -16,19 +16,23 @@ import { randomUUID } from 'node:crypto';
 import type { Plugin, ToolContext } from '../../kernel/types';
 
 export type TodoStatus = 'todo' | 'doing' | 'done' | 'blocked';
+export type TodoPriority = 'low' | 'medium' | 'high' | 'urgent';
 
 export interface TodoCard {
   id: string;
   title: string;
   desc?: string;
   status: TodoStatus;
+  priority: TodoPriority;      // 优先级：low / medium / high / urgent
   source: 'agent' | 'human';   // 谁创建的：模型（to do list）还是人类（看板）
   sessionId?: string;          // 关联会话：模型建的卡片挂到当前会话
+  order: number;               // 列内排序（拖拽重排）
   createdAt: number;
   updatedAt: number;
 }
 
 const STATUSES: TodoStatus[] = ['todo', 'doing', 'done', 'blocked'];
+const PRIORITIES: TodoPriority[] = ['low', 'medium', 'high', 'urgent'];
 const MAX_CARDS = 500;
 
 // 项目根 = 本文件上溯两级（core/todo/index.ts → <root>/web-agent）
@@ -46,6 +50,11 @@ export default {
       if (existsSync(dataFile)) {
         const raw = JSON.parse(readFileSync(dataFile, 'utf8')) as { cards?: TodoCard[] };
         cards = Array.isArray(raw.cards) ? raw.cards : [];
+        // 迁移：旧卡片补全 priority + order 字段
+        cards.forEach((c, i) => {
+          if (!c.priority) c.priority = 'medium';
+          if (typeof c.order !== 'number') c.order = i;
+        });
         if (cards.length) console.log(`[todo] 已从磁盘恢复 ${cards.length} 张卡片`);
       }
     } catch (err) {
@@ -96,21 +105,26 @@ export default {
           properties: {
             title: { type: 'string', description: '任务标题（一句话，动词开头）' },
             desc: { type: 'string', description: '补充说明（可选）' },
+            priority: { type: 'string', enum: ['low', 'medium', 'high', 'urgent'], description: '优先级（默认 medium）' },
           },
           required: ['title'],
         },
-        async handler(args: { title?: string; desc?: string }, tctx: ToolContext) {
+        async handler(args: { title?: string; desc?: string; priority?: string }, tctx: ToolContext) {
           const title = String(args.title ?? '').trim();
           if (!title) return { ok: false, error: '缺少 title' };
           if (title.length > 200) return { ok: false, error: 'title 过长（≤200 字符）' };
           if (cards.length >= MAX_CARDS) return { ok: false, error: `卡片已达上限（${MAX_CARDS}），请先清理已完成项` };
+          const maxOrder = cards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
+          const priority = PRIORITIES.includes(args.priority as TodoPriority) ? args.priority as TodoPriority : 'medium';
           const card: TodoCard = {
             id: `td-${randomUUID().slice(0, 8)}`,
             title,
             desc: args.desc ? String(args.desc).slice(0, 500) : undefined,
             status: 'todo',
+            priority,
             source: 'agent',
             sessionId: tctx.sessionId,
+            order: maxOrder + 1,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
@@ -172,7 +186,7 @@ export default {
           return {
             ok: true,
             data: {
-              cards: sorted.map((c) => ({ id: c.id, title: c.title, status: c.status, desc: c.desc, source: c.source })),
+              cards: sorted.map((c) => ({ id: c.id, title: c.title, status: c.status, priority: c.priority, desc: c.desc, source: c.source })),
               summary: `${sorted.filter((c) => c.status === 'done').length}/${sorted.length} 完成`,
             },
           };
@@ -219,19 +233,23 @@ export default {
 
           // ---- REST：看板数据 ----
           if (req.method === 'GET' && p === '/cards') {
-            send({ cards: [...cards].sort((a, b) => a.createdAt - b.createdAt) });
+            send({ cards: [...cards].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) });
             return;
           }
           if (req.method === 'POST' && p === '/cards') {
             const title = String(body.title ?? '').trim();
             if (!title) return res.status(400).json({ error: '缺少 title' });
             if (cards.length >= MAX_CARDS) return res.status(400).json({ error: '卡片已达上限' });
+            const maxOrder = cards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
+            const priority = PRIORITIES.includes(body.priority as TodoPriority) ? body.priority as TodoPriority : 'medium';
             const card: TodoCard = {
               id: `td-${randomUUID().slice(0, 8)}`,
               title,
               desc: body.desc ? String(body.desc).slice(0, 500) : undefined,
               status: (STATUSES.includes(body.status as TodoStatus) ? body.status : 'todo') as TodoStatus,
+              priority,
               source: 'human',
+              order: maxOrder + 1,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             };
@@ -250,6 +268,8 @@ export default {
               if (body.status && STATUSES.includes(body.status as TodoStatus)) card.status = body.status as TodoStatus;
               if (body.title) card.title = String(body.title).slice(0, 200);
               if (typeof body.desc === 'string') card.desc = body.desc.slice(0, 500) || undefined;
+              if (body.priority && PRIORITIES.includes(body.priority as TodoPriority)) card.priority = body.priority as TodoPriority;
+              if (typeof body.order === 'number') card.order = body.order;
               card.updatedAt = Date.now();
               save();
               notify('human-update');
@@ -263,6 +283,22 @@ export default {
               send({ ok: true });
               return;
             }
+          }
+          // ---- 批量重排（拖拽后一次性提交） ----
+          if (req.method === 'PATCH' && p === '/cards/reorder') {
+            const updates = body.cards as { id: string; status?: string; order?: number }[] | undefined;
+            if (!Array.isArray(updates)) return res.status(400).json({ error: '缺少 cards 数组' });
+            for (const u of updates) {
+              const card = cards.find((c) => c.id === u.id);
+              if (!card) continue;
+              if (u.status && STATUSES.includes(u.status as TodoStatus)) card.status = u.status as TodoStatus;
+              if (typeof u.order === 'number') card.order = u.order;
+              card.updatedAt = Date.now();
+            }
+            save();
+            notify('human-reorder');
+            send({ ok: true });
+            return;
           }
           if (req.method === 'POST' && p === '/clear-done') {
             cards = cards.filter((c) => c.status !== 'done');
@@ -367,26 +403,22 @@ function boardPageHtml(): string {
   body {
     font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
     color: #e8eaf2;
-    /* 人物主题：角色插画铺底 + 四段渐变遮罩（与主 UI 一致：中段最透、顶底保可读） */
     background:
-      linear-gradient(180deg,
-        rgba(10, 12, 18, 0.55) 0%,
-        rgba(10, 12, 18, 0.30) 40%,
-        rgba(10, 12, 18, 0.34) 60%,
-        rgba(10, 12, 18, 0.60) 100%),
+      linear-gradient(180deg, rgba(10,12,18,.55) 0%, rgba(10,12,18,.30) 40%, rgba(10,12,18,.34) 60%, rgba(10,12,18,.60) 100%),
       url('/hero-char.png') center 32% / cover no-repeat fixed;
     overflow: hidden;
   }
   .app { height: 100%; display: flex; flex-direction: column; padding: 18px 22px; }
-  .head { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
-  .head h1 { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
-  .head .summary { font-size: 12px; color: #9aa1b8; background: rgba(20,24,38,.75); border: 1px solid #2c3350; border-radius: 99px; padding: 4px 12px; backdrop-filter: blur(8px); }
-  .head .spacer { flex: 1; }
-  .head input {
-    background: rgba(20,24,38,.8); border: 1px solid #333b5c; border-radius: 10px;
-    padding: 8px 14px; font-size: 13px; color: #e8eaf2; width: 260px; outline: none; backdrop-filter: blur(8px);
+  .toolbar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .toolbar h1 { font-size: 19px; font-weight: 700; letter-spacing: .5px; }
+  .toolbar .summary { font-size: 12px; color: #9aa1b8; background: rgba(20,24,38,.75); border: 1px solid #2c3350; border-radius: 99px; padding: 4px 12px; backdrop-filter: blur(8px); }
+  .toolbar .spacer { flex: 1; }
+  .toolbar input, .toolbar select {
+    background: rgba(20,24,38,.8); border: 1px solid #333b5c; border-radius: 8px;
+    padding: 7px 12px; font-size: 12px; color: #e8eaf2; outline: none; backdrop-filter: blur(8px);
   }
-  .head input:focus { border-color: #7c6cff; }
+  .toolbar input:focus, .toolbar select:focus { border-color: #7c6cff; }
+  .toolbar input[type=text] { width: 180px; }
   .btn {
     background: linear-gradient(135deg, #7c6cff, #5a4bd6); border: none; border-radius: 10px;
     padding: 8px 18px; font-size: 13px; font-weight: 600; color: #fff; cursor: pointer;
@@ -400,16 +432,20 @@ function boardPageHtml(): string {
     background: rgba(16,19,32,.72); border: 1px solid #2b3250; border-radius: 16px;
     padding: 12px; backdrop-filter: blur(12px); box-shadow: 0 8px 28px rgba(0,0,0,.35);
   }
+  .col.drag-over { border-color: #7c6cff; background: rgba(124,108,255,.08); }
   .col-head { font-size: 12.5px; font-weight: 700; margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
   .col-head .count { font-size: 11px; color: #8b93ad; background: rgba(255,255,255,.06); border-radius: 99px; padding: 1px 8px; }
-  .col-body { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; }
+  .col-body { overflow-y: auto; display: flex; flex-direction: column; gap: 8px; min-height: 40px; }
   .card {
     background: rgba(26,30,48,.82); border: 1px solid #333b5c; border-radius: 12px;
     padding: 10px 12px; font-size: 12.5px; backdrop-filter: blur(6px);
-    box-shadow: 0 2px 10px rgba(0,0,0,.25); transition: transform .1s;
+    box-shadow: 0 2px 10px rgba(0,0,0,.25); transition: transform .1s, opacity .15s;
+    cursor: grab; user-select: none;
   }
   .card:hover { transform: translateY(-1px); border-color: #4a5380; }
+  .card.dragging { opacity: .4; }
   .card .title { font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 6px; }
+  .card .pri { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .card .src { font-size: 10px; opacity: .75; }
   .card .desc { color: #9aa1b8; margin-bottom: 8px; white-space: pre-wrap; font-size: 11.5px; }
   .card .acts { display: flex; gap: 5px; flex-wrap: wrap; }
@@ -419,24 +455,55 @@ function boardPageHtml(): string {
   }
   .card .acts button:hover { background: #3a4368; }
   .card .acts .del { color: #ff7b7b; }
-  .col.todo .col-head { color: #f0b429; }
-  .col.doing .col-head { color: #4aa3ff; }
-  .col.blocked .col-head { color: #ff6b6b; }
-  .col.done .col-head { color: #2ecc8f; }
   .col.done .card .title { color: #7d8aa8; text-decoration: line-through; }
+  .empty { color: #5a6080; font-size: 11px; text-align: center; padding: 16px 0; border: 1px dashed #2b3250; border-radius: 8px; }
+  /* 编辑面板 */
+  .overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 100; display: flex; justify-content: flex-end; }
+  .panel { width: 380px; max-width: 90vw; height: 100%; background: #14172a; border-left: 1px solid #2b3250; display: flex; flex-direction: column; }
+  .panel-head { display: flex; align-items: center; justify-content: space-between; padding: 16px 20px; border-bottom: 1px solid #2b3250; }
+  .panel-head h3 { font-size: 14px; }
+  .panel-head button { background: none; border: none; color: #8b93ad; cursor: pointer; font-size: 16px; }
+  .panel-body { flex: 1; overflow-y: auto; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; }
+  .panel-body label { font-size: 11px; font-weight: 600; color: #8b93ad; text-transform: uppercase; letter-spacing: .5px; }
+  .panel-body input, .panel-body textarea {
+    width: 100%; padding: 8px 10px; font-size: 13px; background: #0f1220; border: 1px solid #333b5c;
+    border-radius: 7px; color: #e8eaf2; outline: none; resize: vertical;
+  }
+  .panel-body input:focus, .panel-body textarea:focus { border-color: #7c6cff; }
+  .pri-row, .status-row { display: flex; gap: 6px; flex-wrap: wrap; }
+  .pri-btn, .st-btn {
+    display: flex; align-items: center; gap: 5px; padding: 5px 12px; font-size: 12px;
+    border-radius: 7px; background: #0f1220; border: 1px solid #333b5c; color: #8b93ad; cursor: pointer;
+  }
+  .pri-btn.active, .st-btn.active { border-color: var(--pc); color: #e8eaf2; background: rgba(124,108,255,.12); }
+  .panel-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid #2b3250; }
+  .panel-foot .save { background: #7c6cff; color: #fff; border: none; border-radius: 7px; padding: 8px 18px; font-size: 12px; font-weight: 600; cursor: pointer; }
+  .panel-foot .cancel { background: none; border: 1px solid #333b5c; border-radius: 7px; padding: 8px 14px; font-size: 12px; color: #8b93ad; cursor: pointer; }
+  .panel-foot .danger { background: rgba(255,107,107,.12); border: 1px solid #ff6b6b; border-radius: 7px; padding: 8px 14px; font-size: 12px; color: #ff7b7b; cursor: pointer; }
 </style>
 </head>
 <body>
 <div class="app">
-  <div class="head">
+  <div class="toolbar">
     <h1>🗂 待办看板</h1>
     <span class="summary" id="summary"></span>
     <span class="spacer"></span>
-    <input id="new-title" placeholder="新任务标题…" onkeydown="if(event.key==='Enter')add()" />
+    <input type="text" id="search" placeholder="搜索…" oninput="render()" />
+    <select id="filter-status" onchange="render()">
+      <option value="all">全部状态</option>
+      <option value="todo">待办</option><option value="doing">进行中</option>
+      <option value="blocked">受阻</option><option value="done">完成</option>
+    </select>
+    <select id="filter-source" onchange="render()">
+      <option value="all">全部来源</option><option value="human">👤 人类</option><option value="agent">🤖 模型</option>
+    </select>
+    <span class="spacer"></span>
+    <input type="text" id="new-title" placeholder="新任务标题…" onkeydown="if(event.key==='Enter')add()" />
     <button class="btn" onclick="add()">＋ 添加</button>
   </div>
   <div class="cols" id="cols"></div>
 </div>
+<div id="edit-overlay"></div>
 <script>
 const COLS = [
   { key: 'todo', label: '待办', color: '#f0b429' },
@@ -444,26 +511,45 @@ const COLS = [
   { key: 'blocked', label: '受阻', color: '#ff6b6b' },
   { key: 'done', label: '完成', color: '#2ecc8f' },
 ];
+const PRIS = { low: '#5a6080', medium: '#f0b429', high: '#d0856b', urgent: '#ff6b6b' };
+const PRI_LABEL = { low: '低', medium: '中', high: '高', urgent: '紧急' };
+let ALL_CARDS = [];
+let dragId = null;
 const esc = (s) => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-async function load() {
-  const d = await (await fetch('/api/plugins/todo/board/cards')).json();
-  const cards = d.cards || [];
-  document.getElementById('summary').textContent = cards.filter(c=>c.status==='done').length + '/' + cards.length + ' 完成';
+
+function render() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const fs = document.getElementById('filter-status').value;
+  const fsrc = document.getElementById('filter-source').value;
+  let cards = ALL_CARDS;
+  if (fs !== 'all') cards = cards.filter(c => c.status === fs);
+  if (fsrc !== 'all') cards = cards.filter(c => c.source === fsrc);
+  if (q) cards = cards.filter(c => c.title.toLowerCase().includes(q) || (c.desc||'').toLowerCase().includes(q));
+  document.getElementById('summary').textContent = ALL_CARDS.filter(c=>c.status==='done').length + '/' + ALL_CARDS.length + ' 完成';
   const root = document.getElementById('cols');
   root.innerHTML = '';
   for (const col of COLS) {
     const list = cards.filter(c => c.status === col.key);
     const el = document.createElement('div');
     el.className = 'col ' + col.key;
+    el.dataset.col = col.key;
+    el.ondragover = (e) => { e.preventDefault(); el.classList.add('drag-over'); };
+    el.ondragleave = () => el.classList.remove('drag-over');
+    el.ondrop = async (e) => { e.preventDefault(); el.classList.remove('drag-over'); if (dragId) await moveTo(dragId, col.key); };
     el.innerHTML = '<div class="col-head"><span style="width:8px;height:8px;border-radius:50%;background:' + col.color + '"></span>' + col.label + '<span class="count">' + list.length + '</span></div>';
     const body = document.createElement('div');
     body.className = 'col-body';
+    if (!list.length) body.innerHTML = '<div class="empty">拖拽卡片到这里</div>';
     for (const c of list) {
       const card = document.createElement('div');
       card.className = 'card';
-      // 事件委托（不内联 onclick）：避免引号嵌套转义错误，动态生成安全
+      card.draggable = true;
+      card.ondragstart = () => { dragId = c.id; card.classList.add('dragging'); };
+      card.ondragend = () => { dragId = null; card.classList.remove('dragging'); };
+      card.ondblclick = () => openEdit(c);
+      const priColor = PRIS[c.priority] || PRIS.medium;
       card.innerHTML =
-        '<div class="title">' + esc(c.title) + '<span class="src">' + (c.source === 'agent' ? '🤖 模型' : '👤 人类') + '</span></div>' +
+        '<div class="title"><span class="pri" style="background:' + priColor + '"></span>' + esc(c.title) + '<span class="src">' + (c.source === 'agent' ? '🤖' : '👤') + '</span></div>' +
         (c.desc ? '<div class="desc">' + esc(c.desc) + '</div>' : '') +
         '<div class="acts">' +
           COLS.filter(x => x.key !== c.status).map(x => '<button class="act" data-id="' + c.id + '" data-status="' + x.key + '">' + x.label + '</button>').join('') +
@@ -475,13 +561,42 @@ async function load() {
     root.appendChild(el);
   }
 }
-// 事件委托：任何 .act 按钮点击统一分发（data-id/data-status/data-del）
+
+function openEdit(c) {
+  const overlay = document.getElementById('edit-overlay');
+  overlay.innerHTML = '<div class="overlay" onclick="if(event.target===this)closeEdit()"><div class="panel">' +
+    '<div class="panel-head"><h3>编辑卡片</h3><button onclick="closeEdit()">✕</button></div>' +
+    '<div class="panel-body">' +
+      '<label>标题</label><input id="ed-title" value="' + esc(c.title) + '" />' +
+      '<label>描述</label><textarea id="ed-desc" rows="4">' + esc(c.desc||'') + '</textarea>' +
+      '<label>优先级</label><div class="pri-row">' + ['low','medium','high','urgent'].map(p => '<button class="pri-btn' + (c.priority===p?' active':'') + '" style="--pc:' + PRIS[p] + '" data-pri="' + p + '" onclick="setPri(this,\\'' + p + '\\')"><span class="pri" style="background:' + PRIS[p] + '"></span>' + PRI_LABEL[p] + '</button>').join('') + '</div>' +
+      '<label>状态</label><div class="status-row">' + COLS.map(x => '<button class="st-btn' + (c.status===x.key?' active':'') + '" style="--pc:' + x.color + '" data-st="' + x.key + '" onclick="setSt(this,\\'' + x.key + '\\')">' + x.label + '</button>').join('') + '</div>' +
+    '</div>' +
+    '<div class="panel-foot"><button class="danger" onclick="del(\\'' + c.id + '\\');closeEdit()">删除</button><span style="flex:1"></span><button class="cancel" onclick="closeEdit()">取消</button><button class="save" onclick="saveEdit(\\'' + c.id + '\\')">保存</button></div>' +
+  '</div></div>';
+  window._editPri = c.priority; window._editSt = c.status;
+}
+function setPri(el, p) { document.querySelectorAll('.pri-btn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); window._editPri = p; }
+function setSt(el, s) { document.querySelectorAll('.st-btn').forEach(b=>b.classList.remove('active')); el.classList.add('active'); window._editSt = s; }
+function closeEdit() { document.getElementById('edit-overlay').innerHTML = ''; }
+async function saveEdit(id) {
+  const title = document.getElementById('ed-title').value.trim();
+  const desc = document.getElementById('ed-desc').value.trim();
+  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ title, desc: desc||undefined, priority: window._editPri, status: window._editSt }) });
+  closeEdit(); load();
+}
+
+async function moveTo(id, status) {
+  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
+  load();
+}
 document.addEventListener('click', async (e) => {
   const btn = e.target && e.target.closest ? e.target.closest('button.act') : null;
   if (!btn) return;
   const id = btn.dataset.id;
   if (btn.dataset.del) { await del(id); return; }
-  await set(id, btn.dataset.status);
+  await moveTo(id, btn.dataset.status);
 });
 async function add() {
   const title = document.getElementById('new-title').value.trim();
@@ -490,16 +605,16 @@ async function add() {
   document.getElementById('new-title').value = '';
   load();
 }
-async function set(id, status) {
-  await fetch('/api/plugins/todo/board/cards/' + id, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) });
-  load();
-}
 async function del(id) {
   await fetch('/api/plugins/todo/board/cards/' + id, { method: 'DELETE' });
   load();
 }
-load();
-setInterval(load, 5000); // 5s 轮询：模型 to do list 变化实时同步
+async function load() {
+  const d = await (await fetch('/api/plugins/todo/board/cards')).json();
+  ALL_CARDS = d.cards || [];
+  render();
+}
+load(); setInterval(load, 5000);
 </script>
 </body>
 </html>`;

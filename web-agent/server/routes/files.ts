@@ -1,13 +1,13 @@
 /**
  * server/routes/files.ts —— 文件 API（沙箱内）
- * 与 Agent 工具复用同一路径边界契约（core/tools-fs 导出）。
+ * 沙箱安全工具从 kernel/sandbox 导入（基础设施层，非插件耦合）。
  * isProtectedWritePath / isDeniedReadPath 契约：.env / data/ 读拒；
  * kernel/、core/chat/ 写拒；AGENT_ALLOW_CORE_EDIT=1 放行。
  */
 import type { Express } from 'express';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
-import { resolveInSandbox, readTextSmart, isProtectedWritePath, isDeniedReadPath } from '../../core/tools-fs/index';
+import { resolveInSandbox, readTextSmart, isProtectedWritePath, isDeniedReadPath } from '../../kernel/sandbox';
 import { openInExplorer, type RouteDeps } from './shared';
 
 export function registerFileRoutes(app: Express, deps: RouteDeps): void {

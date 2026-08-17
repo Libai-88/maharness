@@ -22,6 +22,8 @@ export { EffectScope } from './scope';
 export { Service } from './service';
 export { PluginLoader } from './plugin-loader';
 export * from './types';
+export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart } from './sandbox';
+export type { ReadResult } from './sandbox';
 
 export class Kernel {
   readonly bus = new EventBus();

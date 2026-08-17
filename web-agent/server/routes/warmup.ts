@@ -8,7 +8,7 @@
  */
 import type { Kernel } from '../../kernel';
 import type { LLMMessage, ProviderDef } from '../../kernel/types';
-import { annotateToolDef, textualizeHistory } from '../../core/chat/agent';
+import { getChatService } from './shared';
 
 interface WarmupEntry {
   timer: NodeJS.Timeout | null;
@@ -62,6 +62,7 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
   const entry = warmups.get(sessionId);
   if (!entry) return;
   entry.timer = null;
+  const chat = getChatService(kernel);
   // 保活上限：会话长时间无新活动则停止（避免无限消耗）
   if (entry.rounds >= WARMUP_MAX_ROUNDS) {
     warmups.delete(sessionId);
@@ -80,14 +81,14 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
     })),
     ...entry.contextMessages,
   ];
-  const msgs = textualizeHistory(rawSeq);
+  const msgs = chat.textualizeHistory(rawSeq);
   if (msgs[msgs.length - 1]?.role !== 'user') {
     msgs.push({ role: 'user', content: CONTINUE_HINT });
   }
   try {
     // 预热请求：与最后发送序列同前缀 + 相同 tools（网关缓存键含 tools 参数，
     // 不带 tools 的预热建立的缓存对真实请求无效）。auto 首轮使用 1 token 探针。
-    const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(annotateToolDef);
+    const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(chat.annotateToolDef);
     let hit = 0, miss = 0;
     const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
     if (mode === 'off') { warmups.delete(sessionId); return; }

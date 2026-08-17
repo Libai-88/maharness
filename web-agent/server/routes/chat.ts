@@ -2,16 +2,12 @@
  * server/routes/chat.ts —— 对话（SSE 流式）+ 断点状态查询
  * H3 同会话互斥：同一会话同时只允许一个 run；占用中直接 409（finally 释放）。
  * M3：beginRun/endRun 告知 index 的自动停止机制「有活跃 run」——页面全关也不腰斩任务。
- * 模式/角色/断点等对话策略从 core/chat/policy.ts 引入（能力层共享契约）；
- * L3 缓存预热/保活为 server 运维策略，集中在 warmup.ts。
+ * 对话策略通过 chat service interface 访问（kernel 服务注册表），不直接 import core/chat 子模块。
  */
 import { randomUUID } from 'node:crypto';
 import type { Express, Request, Response } from 'express';
 import type { LLMMessage, LLMRole } from '../../kernel/types';
 import type { Message, Session } from '../../kernel/types';
-import { textualizeHistory } from '../../core/chat/agent';
-import { compactHistory } from '../../core/chat/compact';
-import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from '../../core/chat/policy';
 import { truncateHistory } from '../context';
 import { beginRun, endRun } from '../index';
 import { getChatService, sse, type RouteDeps } from './shared';
@@ -91,7 +87,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         : hist
     );
     // 系统提示词：三层组装（L0 框架 + L1 用户人设 + L2 插件自述）+ 会话模式注入；body.systemPrompt 可临时覆盖（调试）
-    const modePrompt = MODE_PROMPTS[session.mode];
+    const modePrompt = chat.MODE_PROMPTS[session.mode];
     // 世界状态（context）：LLM 需要知道自己身处的世界——工作区、模式、可用工具、模型。
     // 内容只含会话内稳定事实（不含时间戳等易变项），同一会话内字节级稳定，
     // 不破坏 L3 前缀缓存；工作区/模式变更时内容随之更新（前缀失效一次，符合"世界变了"）。
@@ -123,7 +119,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
     const planPending = session.planPending ?? 0;
     const roleToolsOverride = roleDef?.tools === 'readonly'
-      ? kernel.plugins.capabilities('tool').map((c) => c.tool).filter((t) => ROLE_READONLY_TOOLS.has(t.name))
+      ? kernel.plugins.capabilities('tool').map((c) => c.tool).filter((t) => chat.ROLE_READONLY_TOOLS.has(t.name))
       : undefined;
     const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : roleToolsOverride;
 
@@ -155,7 +151,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         }
         raw.push(base);
       }
-      return textualizeHistory(raw);
+      return chat.textualizeHistory(raw);
     }
     let history: LLMMessage[];
     if (resume) {
@@ -166,7 +162,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       // 断点完整性校验：assistant 的 tool_calls 必须与 tool 回填配对、tool 消息必须带
       // tool_call_id——否则 provider 校验失败（旧版本遗留的缺字段断点直接报错白跑）。
       // 不一致 → 清除该断点并明确告知（用户重新发起任务即可），而不是把坏数据发给 LLM。
-      const invalid = validateCheckpointHistory(cp.history);
+      const invalid = chat.validateCheckpointHistory(cp.history);
       if (invalid) {
         store.clearCheckpoint(session.id);
         return res.status(400).json({ error: `${invalid}——该断点已清除，请重新发起任务` });
@@ -199,7 +195,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     let ctxMode: 'none' | 'compact' | 'truncate' = 'none';
     let droppedMessages = 0;
     if (compactEnabled) {
-      const r = await compactHistory(history, maxCtx, { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace });
+      const r = await chat.compactHistory(history, maxCtx, { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace });
       ctxHistory = r.messages;
       ctxMode = r.mode;
       droppedMessages = r.droppedMessages;
@@ -283,7 +279,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         // P 契约：注入 server 侧压缩能力（封装 compact.ts）——agent 每轮预算检查
         // 超限时调用 compactFn 就地压缩历史（长任务不被上下文窗口卡死）。
         // 契约签名：compactFn?: (history) => Promise<HistoryMsg[]>（agent 侧由并行任务实现调用）。
-        compactFn: (history: LLMMessage[]) => compactHistory(
+        compactFn: (history: LLMMessage[]) => chat.compactHistory(
           history,
           kernel.config.get<number>('context.maxTokens', 60000),
           { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace },

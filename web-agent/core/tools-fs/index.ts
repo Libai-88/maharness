@@ -6,118 +6,20 @@
  * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；写删成功后清空 L2（保一致性）
  *  并失效本会话 L1 语义缓存（防陈旧观察答案，H8）。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, realpathSync, readFileSync, rmSync } from 'node:fs';
-import { resolve, relative, join, sep } from 'node:path';
+import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
+import { resolve, join } from 'node:path';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
+import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart } from '../../kernel/sandbox';
+import type { ReadResult } from '../../kernel/sandbox';
 
-// ============ Windows 沙箱 ============
-
-/** 将相对路径解析到沙箱内；越界（含 .. 穿越、符号链接逃逸）一律拒绝。
- *  realpath 强化：校验通过后返回真实路径（已存在部分取 realpath，未创建尾部拼接），
- *  后续读写直接走真实路径——消除「词法校验通过、实际写入经符号链接逃逸」的 TOCTOU 窗口。
- *  跨层契约：server 侧文件 API 统一 import 本函数做沙箱校验。 */
-export function resolveInSandbox(sandboxRoot: string, relPath: string): string {
-  const root = resolve(sandboxRoot);
-  const target = resolve(root, relPath || '.');
-  const rootLower = root.toLowerCase();
-  const targetLower = target.toLowerCase();
-  if (targetLower !== rootLower && !targetLower.startsWith(rootLower + sep)) {
-    throw new Error(`路径越界（沙箱根目录: ${root}）: ${relPath}`);
-  }
-  // 防符号链接逃逸：逐级上溯最深已存在祖先，校验真实路径仍在沙箱内
-  let current = target;
-  for (;;) {
-    if (existsSync(current)) {
-      const real = resolveSync(current);
-      const realLower = real.toLowerCase();
-      if (realLower !== rootLower && !realLower.startsWith(rootLower + sep)) {
-        throw new Error(`路径指向沙箱外（符号链接）: ${relPath}`);
-      }
-      const tail = relative(current, target); // 未创建的尾部（write_file 新建文件场景）
-      return tail ? join(real, tail) : real;
-    }
-    const parent = resolve(current, '..');
-    if (parent === current) break;
-    current = parent;
-  }
-  return target;
-}
-
-/** 相对沙箱根的规范化相对路径（小写 + 正斜杠），供保护区/黑名单前缀匹配 */
-function normalizedRel(absPath: string, sandboxRoot: string): string {
-  return relative(resolve(sandboxRoot), resolve(absPath)).split(sep).join('/').toLowerCase();
-}
-
-// ============ C-R4 内核硬保护（机器强制，不依赖提示词） ============
-
-/** AGENT_ALLOW_CORE_EDIT=1 放行内核修改（首次读取后进程内缓存） */
-let allowCoreEditCache: boolean | null = null;
-
-/** kernel/ 与 core/chat/ 为 agent 运行时核心：写/删一律拒绝（AGENT_ALLOW_CORE_EDIT=1 可显式放行） */
-export function isProtectedWritePath(absPath: string, sandboxRoot: string): boolean {
-  if (allowCoreEditCache === null) allowCoreEditCache = process.env.AGENT_ALLOW_CORE_EDIT === '1';
-  if (allowCoreEditCache) return false;
-  const norm = normalizedRel(absPath, sandboxRoot);
-  return norm === 'kernel' || norm.startsWith('kernel/')
-    || norm === 'core/chat' || norm.startsWith('core/chat/');
-}
-
-// ============ C-S4/H10 密钥黑名单 ============
-
-/** .env（密钥/环境配置）与 data/（内部数据）不可读；list_dir 照常列出（可发现不可读） */
-export function isDeniedReadPath(absPath: string, sandboxRoot: string): boolean {
-  const norm = normalizedRel(absPath, sandboxRoot);
-  if (!norm || norm.startsWith('../')) return false; // 沙箱外由 resolveInSandbox 拒绝
-  if (norm === '.env' || norm.endsWith('/.env')) return true;
-  return norm === 'data' || norm.startsWith('data/');
-}
+// Re-export 沙箱工具（向后兼容，原有 import 路径仍可用）
+export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
+export type { ReadResult };
 
 /** H8：失效会话级 L1 语义缓存（契约方法由 kernel/cache.ts 提供；未上线时静默跳过） */
 function invalidateSessionL1(tctx: ToolContext): void {
   const c = tctx.cache as { l1InvalidateSession?: (sessionId?: string) => void };
   c.l1InvalidateSession?.(tctx.sessionId);
-}
-
-function resolveSync(p: string): string {
-  try { return realpathSync.native(p); } catch { return resolve(p); }
-}
-
-// ============ 编码识别（Windows 文件常见编码） ============
-
-export interface ReadResult {
-  text: string;
-  encoding: string;
-  isBinary: boolean;
-  size: number;
-  path: string;
-  /** 超大文件截断标记：text 仅为前 MAX_READ 字符，完整内容可用分段读取获取 */
-  truncated?: boolean;
-}
-
-/** read_file 单次返回上限（字符）：保护上下文预算；截断显式告知（观测完整性） */
-const MAX_READ = 100_000;
-
-export function readTextSmart(filePath: string): { text: string; encoding: string; isBinary: boolean } {
-  const buf = readFileSync(filePath);
-  // BOM 检测
-  if (buf.length >= 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf) {
-    return { text: buf.subarray(3).toString('utf8'), encoding: 'utf-8(BOM)', isBinary: false };
-  }
-  if (buf.length >= 2 && buf[0] === 0xff && buf[1] === 0xfe) {
-    return { text: buf.subarray(2).toString('utf16le'), encoding: 'utf-16le', isBinary: false };
-  }
-  // 二进制检测：内容含 NUL 且非 UTF-16
-  if (buf.includes(0)) return { text: '', encoding: 'binary', isBinary: true };
-  // 无 BOM：先严格 UTF-8，失败降级 GBK
-  try {
-    return { text: new TextDecoder('utf-8', { fatal: true }).decode(buf), encoding: 'utf-8', isBinary: false };
-  } catch {
-    try {
-      return { text: new TextDecoder('gbk').decode(buf), encoding: 'gbk', isBinary: false };
-    } catch {
-      return { text: buf.toString('utf8'), encoding: 'utf-8(宽松)', isBinary: false };
-    }
-  }
 }
 
 // ============ L2 缓存辅助 ============
