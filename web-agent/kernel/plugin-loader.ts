@@ -33,7 +33,7 @@ import { pathToFileURL } from 'node:url';
 import { EventBus } from './bus';
 import { EffectScope } from './scope';
 import type {
-  Capability, EventListener, Plugin, PluginContext, PluginManifest,
+  Capability, EventListener, Plugin, PluginContext, PluginManifest, TraceLike,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
@@ -51,7 +51,24 @@ interface PluginInstance {
   chain: Promise<void>;
   /** 动态提供的服务键（ctx.provide 登记，供依赖图谱可查） */
   provides: string[];
+  /** v3 智能重载：依赖声明收集器——插件在 buildContext 里通过 inject/onCapabilities/
+   *  watchConfig 登记「我依赖了哪些事实」；recomputeSignature 据此重算依赖签名。 */
+  depHooks: (() => string)[];
+  /** v3 智能重载：本插件当前依赖签名（由 depHooks 重算，与 factVersion 比对）；
+   *  签名变化 → reloadChanged 重载；未变化 → 保留实例（零抖动） */
+  depSignature: string;
+  /** 上下文配置拦截层，后注册层优先。 */
+  configOverrides: Record<string, unknown>[];
   error?: string;
+}
+
+/** 服务绑定：记录提供者身份与提供时刻（服务级调用追踪的数据底座） */
+interface ProviderBinding {
+  pluginId: string;
+  value: unknown;
+  /** 提供时刻 mono 序 + 墙钟（用于可视化「何时被谁提供」） */
+  seq: number;
+  ts: number;
 }
 
 export class PluginLoader {
@@ -65,13 +82,21 @@ export class PluginLoader {
   /** 能力集反应性订阅：onCapabilities(kind, cb)——某类能力集合变化时通知 */
   private capSubs = new Map<string, Set<() => void>>();
   /** 服务共效应注册表：key → 当前提供者绑定（每个键至多一个活动提供者） */
-  private providers = new Map<string, { pluginId: string; value: unknown }>();
+  private providers = new Map<string, ProviderBinding>();
   /** 依赖方注册表：key → 订阅者（绑定出现/消失/换主时通知） */
   private dependents = new Map<string, Set<(v: unknown | undefined) => void>>();
+  /** 依赖事实版本（v3 智能重载）：服务绑定/能力集/配置任何变化均递增——
+   *  插件 depSignature 基于它，reloadChanged 据此只重载真正依赖变化的插件 */
+  private factVersion = 0;
+  /** 能力集版本（v3）：按 kind 递增——onCapabilities(kind) 的签名只随该 kind 变化，
+   *  避免其余能力变化触发全局重载 */
+  private capVersions = new Map<Capability['kind'], number>();
+  /** 服务绑定单调序号（提供者标识用，非事实版本，仅供追踪可视化排序） */
+  private factSeq = 0;
 
   constructor(
     private bus: EventBus,
-    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'effect'>,
+    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'configWith' | 'effect'>,
     private coreDir: string,
     private userDir: string,
   ) {}
@@ -89,6 +114,7 @@ export class PluginLoader {
         await this.start(inst);
       }
     }
+    this.primeSignatures(); // v3：为已启动插件建立依赖签名快照（智能重载的比对基准）
   }
 
   /** 扫描单个插件目录（dir 下每个子目录 = 一个插件） */
@@ -152,7 +178,7 @@ export class PluginLoader {
         return existing;
       }
       id = manifest.id;
-      const inst: PluginInstance = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], chain: Promise.resolve() };
+      const inst: PluginInstance = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve() };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -210,11 +236,24 @@ export class PluginLoader {
   private buildContext(inst: PluginInstance): PluginContext {
     const scope = inst.scope;
     const loader = this;
+    const config = {
+      get: <T>(key: string, def?: T): T => this.getContextConfig(inst, key, def),
+      set: (key: string, value: unknown) => this.ctxBase.config.set(key, value),
+      section: (pluginId: string) => {
+        const base = { ...this.ctxBase.config.section(pluginId) };
+        for (const layer of inst.configOverrides) {
+          const value = this.readOverride(layer, pluginId);
+          if (value && typeof value === 'object' && !Array.isArray(value)) Object.assign(base, value);
+        }
+        return base;
+      },
+      watch: (pattern: string, cb: (key: string, value: unknown) => void) => this.ctxBase.config.watch(pattern, cb),
+    };
     return {
       pluginId: inst.manifest.id,
       kernel: this.ctxBase.kernel,
       bus: this.bus,
-      config: this.ctxBase.config,
+      config,
       trace: this.ctxBase.trace,
       cache: this.ctxBase.cache,
       register: (cap: Capability) => {
@@ -256,6 +295,8 @@ export class PluginLoader {
         return () => { remove(); inverse(); };
       },
       inject: (key: string, onChange?: (v: unknown | undefined) => void) => {
+        // v3 智能重载：登记依赖声明（用服务绑定 seq 做签名分量——绑定换主即 seq 变）
+        inst.depHooks.push(() => `service:${key}@${loader.providers.get(key)?.seq ?? 'none'}`);
         let off: () => void = () => {};
         if (onChange) {
           let set = loader.dependents.get(key);
@@ -268,26 +309,46 @@ export class PluginLoader {
           scope.add(off);
         }
         return {
-          value: this.providers.get(key)?.value,
+          value: loader.traceServiceGet(key, inst.manifest.id, this.ctxBase.trace)?.value,
           stop: off, // 显式退订（未退订时卸载随作用域回收；重复退订幂等）
         };
       },
       onCapabilities: (kind: Capability['kind'], cb: () => void) => {
-        let set = this.capSubs.get(kind);
-        if (!set) { set = new Set(); this.capSubs.set(kind, set); }
-        set.add(cb);
-        const off = () => {
-          const s = this.capSubs.get(kind);
-          if (s) { s.delete(cb); if (s.size === 0) this.capSubs.delete(kind); }
+          // v3 智能重载：登记依赖声明（per-kind 版本）
+          inst.depHooks.push(() => `caps:${kind}@${loader.capVersions.get(kind) ?? 0}`);
+          let set = loader.capSubs.get(kind);
+          if (!set) { set = new Set(); loader.capSubs.set(kind, set); }
+          set.add(cb);
+          const off = () => {
+            const s = loader.capSubs.get(kind);
+            if (s) { s.delete(cb); if (s.size === 0) loader.capSubs.delete(kind); }
+          };
+          scope.add(off);
+          return off;
+        },
+        watchConfig: (key: string, cb: (value: unknown) => void) => {
+          // v3 智能重载：登记配置依赖（读当前值，配置变化即 bumpFact）
+          inst.depHooks.push(() => `cfg:${key}@${String(loader.ctxBase.config.get(key))}`);
+          // 声明式配置对账：按「变了哪个键」分派（最小干预），并递增依赖事实版本
+          const off = loader.ctxBase.config.watch(key, (_k, v) => {
+            loader.bumpFact();
+            cb(v);
+          });
+          scope.add(off);
+          return off;
+        },
+      configWith: (overrides: Record<string, unknown>) => {
+        const layer = { ...overrides };
+        inst.configOverrides.push(layer);
+        const remove = scope.add(() => {
+          const i = inst.configOverrides.indexOf(layer);
+          if (i >= 0) inst.configOverrides.splice(i, 1);
+        });
+        return () => {
+          remove();
+          const i = inst.configOverrides.indexOf(layer);
+          if (i >= 0) inst.configOverrides.splice(i, 1);
         };
-        scope.add(off);
-        return off;
-      },
-      watchConfig: (key: string, cb: (value: unknown) => void) => {
-        // 声明式配置对账：按「变了哪个键」分派（最小干预），自动退订
-        const off = this.ctxBase.config.watch(key, (_k, v) => cb(v));
-        scope.add(off);
-        return off;
       },
       effect: <T>(fn: () => T | Promise<T>, makeInverse: (v: T) => () => void | Promise<void>) => {
         return scope.effect(fn, makeInverse);
@@ -301,11 +362,30 @@ export class PluginLoader {
     };
   }
 
+  private readOverride(layer: Record<string, unknown>, key: string): unknown {
+    if (Object.prototype.hasOwnProperty.call(layer, key)) return layer[key];
+    let value: unknown = layer;
+    for (const part of key.split('.')) {
+      if (!value || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, part)) return undefined;
+      value = (value as Record<string, unknown>)[part];
+    }
+    return value;
+  }
+
+  private getContextConfig<T>(inst: PluginInstance, key: string, def?: T): T {
+    for (let i = inst.configOverrides.length - 1; i >= 0; i--) {
+      const value = this.readOverride(inst.configOverrides[i], key);
+      if (value !== undefined && value !== null) return value as T;
+    }
+    return this.ctxBase.config.get(key, def);
+  }
+
   // ---------- 服务共效应注册表（反应性依赖） ----------
 
-  /** 发布绑定：键 → 提供者。通知依赖方（激活/换主）。 */
+  /** 发布绑定：键 → 提供者（带提供时刻 seq/ts）。通知依赖方（激活/换主）。 */
   private publish(key: string, inst: PluginInstance, value: unknown): void {
-    this.providers.set(key, { pluginId: inst.manifest.id, value });
+    this.providers.set(key, { pluginId: inst.manifest.id, value, seq: this.factSeq++, ts: Date.now() });
+    this.bumpFact(); // 服务绑定变化 = 依赖事实变化（智能重载依据）
     if (!inst.provides.includes(key)) inst.provides.push(key);
     this.bus.emit(EventBus.event('service.provided', { key, pluginId: inst.manifest.id }));
     this.notifyDependents(key, value);
@@ -316,6 +396,7 @@ export class PluginLoader {
     const cur = this.providers.get(key);
     if (!cur || cur.pluginId !== inst.manifest.id) return;
     this.providers.delete(key);
+    this.bumpFact();
     this.bus.emit(EventBus.event('service.withdrawn', { key, pluginId: inst.manifest.id }));
     this.notifyDependents(key, undefined);
   }
@@ -332,6 +413,8 @@ export class PluginLoader {
 
   /** 能力集变化通知（onCapabilities 订阅者） */
   private notifyCapSet(kind: Capability['kind']): void {
+    this.bumpFact(); // 能力集变化 = 依赖事实变化（依赖该 kind 的插件需重载）
+    this.capVersions.set(kind, (this.capVersions.get(kind) ?? 0) + 1); // per-kind 版本：签名精确定位
     const subs = this.capSubs.get(kind);
     if (!subs) return;
     for (const cb of [...subs]) {
@@ -341,9 +424,49 @@ export class PluginLoader {
     }
   }
 
-  /** 内核/服务端向插件外消费方暴露的同步解析（如 server 层取 chat 服务） */
-  resolveService(key: string): unknown | undefined {
-    return this.providers.get(key)?.value;
+  /** 内核/服务端向插件外消费方暴露的同步解析（如 server 层取 chat 服务）——自动埋服务调用追踪 */
+  resolveService(key: string, consumer?: string): unknown | undefined {
+    return this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace)?.value;
+  }
+
+  /** 服务解析的可观测形式：保留提供者身份，供调试/管理面使用。 */
+  resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined {
+    const binding = this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace);
+    return binding ? { provider: binding.pluginId, value: binding.value } : undefined;
+  }
+
+  /**
+   * 服务级调用追踪（v3）：解析服务绑定并记录「消费方 → 提供方」的 service_call Trace 步骤。
+   *  - providers 记录提供者插件 id + 提供时刻 seq/ts；
+   *  - 每次取值（inject / resolveService / capabilities 关联）都经此，记录到 Trace。
+   *  - consumer 缺省记 'external'（非插件消费方，如 server 层）。
+   */
+  traceServiceGet(key: string, consumer: string, trace?: TraceLike): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
+    const binding = this.providers.get(key);
+    if (!binding) return undefined;
+    // 服务调用入 Trace：可写盘、可前端口径的 span（复用现有三态输出）。
+    // 注意：本处无 traceId 上下文（非执行路径），用空串，step 仍会上环形缓冲与 SSE。
+    if (trace?.startStep) {
+      const step = trace.startStep({
+        traceId: '',
+        turn: 0,
+        type: 'service_call',
+        name: key,
+      });
+      step.finish({ outputSummary: `${consumer} → ${binding.pluginId} (${key})` });
+    }
+    return binding;
+  }
+
+  /** 依赖事实版本号（v3 智能重载：外部可读取，如 server 层判断是否需重载） */
+  getDependencyVersion(): number {
+    return this.factVersion;
+  }
+
+  /** 递增依赖事实版本：任何可能改变插件运行观察面的事实变化（服务绑定/能力集/配置）
+   *  都应调用，供 reloadChanged 做签名比对。返回新版本号。 */
+  private bumpFact(): number {
+    return ++this.factVersion;
   }
 
   // ---------- 生命周期（chain 串行队列：真排队，替代 check-then-act 惯性） ----------
@@ -436,7 +559,7 @@ export class PluginLoader {
     this.bus.emit(EventBus.event('plugin.unloaded', { id: registryId }));
 
     // 事务阶段 2：加载新版本（暂不进入注册表）
-    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], chain: inst.chain };
+    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -465,7 +588,8 @@ export class PluginLoader {
         await fresh.scope.dispose(); // 回收半成品副作用
         const rollback: PluginInstance = {
           manifest: oldManifest, dir, state: 'registered',
-          caps: [], scope: new EffectScope(), provides: [], plugin: oldModule,
+          caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
+          depHooks: [], depSignature: inst.depSignature,
           chain: inst.chain,
         };
         await this.runLoad(rollback);
@@ -495,6 +619,59 @@ export class PluginLoader {
         await this.reload(id);
       } catch (err) {
         console.warn(`[plugin] 重载失败 ${id}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
+  /**
+   * v3 依赖驱动智能重载（核心亮点，超越 Cordis）：
+   * 遍历全部插件，重算各自依赖签名（服务注入 seq / 能力集 per-kind 版本 / 配置快照），
+   * **仅对签名变化的插件执行 reload**；签名不变者保留原实例——服务绑定不断、
+   * 依赖方不反复收到停用/激活通知、零级联抖动。
+   * 签名比对以 factVersion 为前提：factVersion 未变 → 直接跳过（快速路径）。
+   */
+  private recomputeSignature(inst: PluginInstance): string {
+    // 收集 depHooks 当前分量；除依赖分量外，requires 插件的版本也算入（依赖升级 = 重载）
+    const parts = inst.depHooks.map((hook) => {
+      try { return hook(); } catch { return ''; }
+    });
+    for (const dep of inst.manifest.requires ?? []) {
+      const depInst = this.registry.get(dep);
+      parts.push(`req:${dep}@${depInst?.manifest.version ?? 'missing'}`);
+    }
+    return parts.sort().join('|');
+  }
+
+  /** v3：仅重载签名变化的插件（返回实际重载的 id 列表）。 */
+  async reloadChanged(): Promise<string[]> {
+    const changed: string[] = [];
+    for (const inst of [...this.registry.values()]) {
+      // 跳过未进入运行态的（registered/enabled=false/lazy 未启动者无运行依赖）
+      if (inst.state !== 'started') continue;
+      const signature = this.recomputeSignature(inst);
+      if (!inst.depSignature) {
+        // 首次建立快照（新启用/reload 提交后的新实例）：只登记，不重载
+        inst.depSignature = signature;
+        continue;
+      }
+      if (signature === inst.depSignature) continue; // 依赖未变：保留实例，零抖动
+      inst.depSignature = signature;
+      try {
+        const keepActive = !(inst.manifest.enabled === false || inst.manifest.lazy);
+        await this.reload(inst.manifest.id, keepActive);
+        changed.push(inst.manifest.id);
+      } catch (err) {
+        console.warn(`[plugin] 依赖驱动重载失败 ${inst.manifest.id}:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+    return changed;
+  }
+
+  /** v3：初始装载完成后为已启动插件建立依赖签名快照（供后续比对）。 */
+  private primeSignatures(): void {
+    for (const inst of this.registry.values()) {
+      if (inst.state === 'started' && !inst.depSignature) {
+        inst.depSignature = this.recomputeSignature(inst);
       }
     }
   }

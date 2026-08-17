@@ -10,9 +10,11 @@ export interface Event<T = unknown> {
   traceId?: string;      // 关联执行轨迹
   ts: number;            // 时间戳(ms)
   data?: T;
+  /** waterfall 派发时由 EventBus 注入；普通事件不存在。 */
+  next?: (data?: unknown) => unknown;
 }
 
-export type EventListener = (e: Event) => void | Promise<void>;
+export type EventListener = (e: Event) => unknown | Promise<unknown>;
 
 // ============ 插件 ============
 
@@ -62,7 +64,13 @@ export interface KernelLike {
     disable(id: string): Promise<void>;
     list(): { manifest: PluginManifest; state: string; error?: string }[];
     /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
-    resolveService(key: string): unknown | undefined;
+    resolveService(key: string, consumer?: string): unknown | undefined;
+    /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
+    resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined;
+    /** v3 依赖驱动智能重载：仅重载依赖签名变化的插件，返回实际重载的 id 列表 */
+    reloadChanged(): Promise<string[]>;
+    /** v3 当前依赖事实版本（可观测：判断是否发生过依赖上下文变化） */
+    getDependencyVersion(): number;
   };
 }
 
@@ -89,6 +97,10 @@ export interface PluginContext {
   onCapabilities(kind: Capability['kind'], cb: () => void): () => void;
   /** 声明式配置对账：配置键变化时回调（自动退订；替代手写 config.changed 监听） */
   watchConfig(key: string, cb: (value: unknown) => void): () => void;
+  /** v3 上下文配置合并（intercept 思想）：在 override 链之上读取配置——
+   *  某键先查本上下文 overrides（最内层优先），再落回全局 config。
+   *  overrides 以 effect 逆元注册，插件卸载/手动调用返回的 dispose 时自动撤销。 */
+  configWith(overrides: Record<string, unknown>): () => void;
   /** 原始可逆效应：执行 callback 并登记逆元（跨系统边界操作由调用方自备补偿） */
   effect<T>(callback: () => T | Promise<T>, makeInverse: (value: T) => () => void | Promise<void>): Promise<void>;
   logger: Logger;
@@ -98,6 +110,16 @@ export interface EventBusLike {
   on(event: string, listener: EventListener, priority?: number): () => void;
   emit(e: Event): void;
   emitAsync(e: Event): Promise<void>;
+  /** v3 五语义派发：短路 / 并发 / 洋葱中间件（详见 kernel/bus.ts） */
+  serial<T = unknown>(e: Event<T>): Promise<T | boolean | null | undefined>;
+  bail<T = unknown>(e: Event<T>): T | boolean | null | undefined;
+  parallel(e: Event): Promise<void>;
+  waterfall<T = unknown>(type: string, ...args: unknown[]): Promise<T>;
+  onPhase(pattern: string, phase: {
+    before?: (value: unknown) => void;
+    after?: (result: unknown, value: unknown) => void;
+    rewrite?: (value: unknown) => unknown;
+  }, priority?: number): () => void;
 }
 
 export interface ConfigLike {
@@ -331,7 +353,7 @@ export interface ChatOptions {
 
 // ============ Trace ============
 
-export type StepType = 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system';
+export type StepType = 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system' | 'service_call';
 
 export type StepStatus = 'running' | 'done' | 'error' | 'cancelled';
 

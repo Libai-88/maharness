@@ -104,7 +104,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     ].join('\n');
     const baseSystemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
-      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '') + `\n\n${worldState}`;
+      : chat.getSystemPrompt()) + (modePrompt ? `\n\n${modePrompt}` : '');
 
     // 角色接管（handoff）：会话处于某角色时，角色提示词置于最前（引导力最强），
     // 通用规则保留在后；角色工具集按声明过滤（readonly=只读白名单）。
@@ -272,7 +272,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         normal: kernel.config.get<number>('agent.maxTurns', 12),
       };
       for await (const ev of chat.runner.run({
-        provider, model: resolvedModel, messages: ctxHistory, traceId,
+        provider, model: resolvedModel, messages: ctxHistory, contextMessages: [{ role: 'system', content: worldState }], traceId,
         maxTurns: maxTurnsByMode[session.mode] ?? 12,
         // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
         // 不同会话互不串用（答案依赖工具观察时仅本会话可命中）
@@ -380,11 +380,9 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 预热请求（max_tokens=1，成本≈0）主动建立/刷新缓存，把下一次提问的 turn0
     // 也拉入缓存窗口（跨 run 首轮不再全价 prefill）。
     // 预热仅在发送序列足够长时触发（≥5 条消息才有缓存价值；L1 命中的短序列跳过）
-    if (seqAcc.length >= 5 && kernel.config.get<boolean>('cache.warmup', false)) {
-      // 预热/保活（默认关闭）：实测本网关（opencode.ai/zen/go）对含 tool_calls 的
-      // 请求缓存建立有延迟/条件限制，预热请求反而会占用/污染缓存条目；
-      // 保留实现供兼容 provider 的网关启用（配置 cache.warmup=true）。
-      scheduleWarmup(session.id, systemPrompt, seqAcc, provider, resolvedModel, kernel);
+    const warmupMode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
+    if (seqAcc.length >= 3 && warmupMode !== 'off') {
+      scheduleWarmup(session.id, systemPrompt, seqAcc, provider, resolvedModel, kernel, [{ role: 'system', content: worldState }]);
     }
     sse(res, 'end', {});
     res.end();

@@ -142,8 +142,13 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
       if (envTimer) clearTimeout(envTimer);
       envTimer = setTimeout(() => {
         dotenv.config({ override: true }); // 重新读取 .env 覆盖旧值
-        console.log('[env] .env 已变更，刷新环境变量并热重载全部插件');
-        void kernel.plugins.reloadAll();
+        console.log('[env] .env 已变更，刷新环境变量并热重载受影响插件');
+        // v3 依赖驱动智能重载：只重载真正依赖变化的插件（而非全量 reloadAll）
+        void kernel.plugins.reloadChanged()
+          .then((changed) => {
+            if (changed.length) console.log(`[env] 已重载依赖变化的插件: ${changed.join(', ')}`);
+          })
+          .catch(() => undefined);
       }, 500);
     });
     console.log(`[env] 监听 ${envDir}（.env 变更将热重载插件）`);

@@ -20,6 +20,7 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.58),
         l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
         l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
+        warmup: kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto'),
       },
       agent: {
         reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 800),
@@ -47,6 +48,9 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         kernel.config.set('cache.l2TtlMin', Math.max(1, Math.min(1440, Number(cache.l2TtlMin))));
       }
       if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
+      if (cache?.warmup !== undefined && ['off', 'light', 'auto'].includes(String(cache.warmup))) {
+        kernel.config.set('cache.warmup', String(cache.warmup));
+      }
       if (agent?.reasoningBudget !== undefined) {
         kernel.config.set('agent.reasoningBudget', Math.max(100, Math.min(16000, Number(agent.reasoningBudget))));
       }

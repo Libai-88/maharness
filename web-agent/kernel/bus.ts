@@ -66,6 +66,137 @@ export class EventBus {
     }
   }
 
+  /* ============================================================
+     v3 五语义派发：serial / bail / parallel / waterfall / onPhase
+     与 emit/on/priority/通配符完全兼容。设计目标：让插件能
+     「短路」「并发」「中间件化」任何事件，而不仅是广播。
+     ============================================================ */
+
+  /** 收集某事件所有匹配监听器的裸回调（内部共享） */
+  private listenersOf(type: string): EventListener[] {
+    const out: EventListener[] = [];
+    for (const en of this.entries) {
+      if (match(en.pattern, type)) out.push(en.listener);
+    }
+    return out;
+  }
+
+  /** 异步串行 + 短路：顺序 await，首个返回非 null/undefined/false 立即短路返回。
+   *  用于「从多个提供者中取一个结果」的链式场景。 */
+  async serial<T = unknown>(e: Event<T>): Promise<T | boolean | null | undefined> {
+    this.enter(e.type);
+    try {
+      for (const listener of this.listenersOf(e.type)) {
+        const r = await listener(e);
+        if (r !== null && r !== undefined && r !== false) return r as T;
+      }
+      return undefined;
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /** 同步短路：同步版本的首个非空返回。 */
+  bail<T = unknown>(e: Event<T>): T | boolean | null | undefined {
+    this.enter(e.type);
+    try {
+      for (const listener of this.listenersOf(e.type)) {
+        // listener 返回类型为 void | Promise<void>，但它可能是同步回调（返回同态真值）；
+        // 这里用 any 断开 TS 对 void/Promise 的约束（运行时按真值判定短路）
+        const r = (listener as (ev: Event) => any)(e);
+        if (r !== null && r !== undefined && r !== false) return r as T;
+      }
+      return undefined;
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /** 并发执行：Promise.allSettled，错误聚合成 AggregateError（不中途放弃其它监听器）。 */
+  async parallel(e: Event): Promise<void> {
+    this.enter(e.type);
+    try {
+      const results = await Promise.allSettled(this.listenersOf(e.type).map((l) => Promise.resolve().then(() => l(e))));
+      const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
+      if (rejected.length) {
+        throw new AggregateError(rejected.map((r) => r.reason), `[bus] "${e.type}" 有 ${rejected.length} 个监听器失败`);
+      }
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /**
+   * 洋葱式中间件（v3，兼容旧 hook 监听器）：
+   *  - 事件的 data 保持原对象（旧监听器用 e.data 读改写，天然兼容、字节级不破坏）；
+   *  - 另在每个事件上挂 `next`（可调用，实现底层串联/改写）；
+   *  - 监听器返回非 undefined → 视为短路接管（result），链停；
+   *  - 未返回 → 链自动继续（携带监听器对 data 的改写），落到底层 final。
+   *  语义：先注册的监听器在最外层（priority 降序 + seq 升序）。
+   */
+  async waterfall<T = unknown>(
+    type: string,
+    ...args: unknown[]
+  ): Promise<T> {
+    const finalArg = args[args.length - 1];
+    if (typeof finalArg !== 'function') throw new TypeError(`[bus] waterfall("${type}") 缺少 final 回调`);
+    const final = finalArg as (data: unknown) => T | Promise<T>;
+    const data = args.length === 2 ? args[0] : args.slice(0, -1);
+    this.enter(type);
+    try {
+      const listeners = this.listenersOf(type);
+      let i = 0;
+      const next = async (carry: unknown = data): Promise<T> => {
+        if (i >= listeners.length) return final(carry);
+        const listener = listeners[i++];
+        let called = false;
+        let downstream: Promise<T> | undefined;
+        const proceed = (value: unknown = carry): Promise<T> => {
+          called = true;
+          downstream ??= next(value);
+          return downstream;
+        };
+        const e = { type, data: carry, ts: Date.now(), next: proceed } as Event & { next: typeof proceed };
+        const r = await listener(e);
+        if (r !== undefined) return r as T;
+        return called ? (downstream as Promise<T>) : next(carry);
+      };
+      return next(data);
+    } finally {
+      this.depth--;
+    }
+  }
+
+  /** 声明式三阶段钩子：before(value)/after(result, value)/rewrite(value) 注入到 waterfall 链。
+   *  以 on 注册一个实监听器：before 前置、rewrite 改写 data、after 收尾。 */
+  onPhase(
+    pattern: string,
+    phase: {
+      before?: (value: unknown) => void;
+      after?: (result: unknown, value: unknown) => void;
+      rewrite?: (value: unknown) => unknown;
+    },
+    priority = 0,
+  ): () => void {
+    const listener: EventListener = async (e: Event) => {
+      const data = e.data;
+      const next = (e as Event & { next?: (d: unknown) => unknown }).next;
+      try {
+        phase.before?.(data);
+        const rewritten = phase.rewrite ? phase.rewrite(data) : data;
+        // onPhase 是纯观测/改写钩子，不短路——next 继续链，结果仅回传给 after 收尾
+        if (next) {
+          const result = await next(rewritten ?? data);
+          phase.after?.(result, rewritten ?? data);
+        }
+      } catch (err) {
+        console.error(`[bus] onPhase("${pattern}") hook error:`, err instanceof Error ? err.message : String(err));
+        if (next) await next(data);
+      }
+    };
+    return this.on(pattern, listener, priority);
+  }
+
   /** 异步发布：等待所有监听器（含 async）完成后返回，用于生命周期等关键路径。
    *  与 emit 共享递归深度计数；单个监听器超时未完成告警一次（不中断）。 */
   async emitAsync(e: Event): Promise<void> {
@@ -86,7 +217,7 @@ export class EventBus {
   }
 
   /** 慢监听器观察：超过 ASYNC_LISTENER_WARN_MS 仍未完成时 console.warn 一次，不中断 */
-  private watchSlowListener(p: Promise<void>, en: ListenerEntry, type: string): Promise<void> {
+  private watchSlowListener(p: Promise<unknown>, en: ListenerEntry, type: string): Promise<void> {
     let timer: NodeJS.Timeout | undefined = setTimeout(() => {
       timer = undefined;
       console.warn(`[bus] "${type}" 的监听器（pattern="${en.pattern}"）已执行超过 ${ASYNC_LISTENER_WARN_MS / 1000}s 仍未完成（仅告警，不中断）`);

@@ -55,6 +55,8 @@ export interface RunOptions {
   provider: ProviderDef;
   model: string;
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
+  /** 本轮临时上下文：发送给模型但不写回会话历史（如世界状态）。 */
+  contextMessages?: LLMMessage[];
   systemPrompt?: string;
   tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
   traceId: string;
@@ -207,9 +209,16 @@ export class AgentRunner {
 
   constructor(private kernel: KernelLike, private bus: EventBusLike) {}
 
-  /** 发布钩子事件（await 所有监听器；总线已隔离监听器错误） */
+  /** 发布钩子事件（v3 中间件语义）：走 waterfall 派发——每个监听器收到 (e)，
+   *  e.data 即钩子上下文（可改写 history/tools/scratchpad/blocked 等），
+   *  返回 undefined 自动继续下个监听器，落到底层 final（现状无底层，纯串联）。
+   *  与旧 emitAsync 兼容：现有插件 (e)=>void 直接可用，只是额外获得
+   *  「改写 data / 短路接管」的中间件能力（如 memory 插件可改写注入内容）。 */
   private emitHook(type: string, data: AgentHookCtx): Promise<void> {
-    return this.bus.emitAsync({ type, data, traceId: data.traceId, ts: Date.now() });
+    return this.bus.waterfall<void>(type, data, async () => {
+      /* 无底层实现：钩子链仅由监听器组成，串联即观察/改写 */
+      void type;
+    });
   }
 
   /** 外部（REST 接口）响应审批：批准或拒绝 */
@@ -233,6 +242,7 @@ export class AgentRunner {
     const history: LLMMessage[] = [
       { role: 'system', content: systemPrompt },
       ...messages,
+      ...(opts.contextMessages ?? []),
     ];
     const tools = this.kernel.plugins.capabilities('tool');
     const toolDefs = (opts.tools ?? tools.map((c) => c.tool)).map(annotateToolDef);
@@ -415,7 +425,7 @@ export class AgentRunner {
       // 注入完成后、LLM 调用前：把发送序列增量同步入库（教训/记忆/提醒/上一轮工具消息）
       syncHistory();
       if (turn === 0 && q.length >= 8) {
-        const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
+        const promptKey = createHash('sha256').update(`${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
         const cached = await this.kernel.cache.l1Get(q, promptKey, cacheScope);
         if (cached.hit && cached.answer) {
           // 命中学习：把当前措辞也回填（沿用来源条目的作用域，缓存簇同域扩展——同义改写可连续命中）
@@ -574,7 +584,7 @@ export class AgentRunner {
         // 的 system 均为注入）或超长问题（>2000 字符）同样意味着答案强依赖本会话上下文
         // → 强制会话级，不全局共享。
         if (q.length >= 8 && text.trim()) {
-          const promptKey = createHash('sha256').update(systemPrompt).digest('hex').slice(0, 16);
+          const promptKey = createHash('sha256').update(`${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
           const hasInjectedSystem = llmCtx.history.some((m, i) => i > 0 && m.role === 'system');
           const scope = (llmCtx.history.some((m) => m.role === 'tool') || hasInjectedSystem || q.length > 2000)
             ? cacheScope : undefined;

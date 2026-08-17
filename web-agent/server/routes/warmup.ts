@@ -16,6 +16,7 @@ interface WarmupEntry {
   seq: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[];
   provider: ProviderDef;
   model: string;
+  contextMessages: LLMMessage[];
   rounds: number;
   lastRunAt: number;
 }
@@ -34,6 +35,7 @@ export function scheduleWarmup(
   provider: ProviderDef,
   model: string,
   kernel: Kernel,
+  contextMessages: LLMMessage[] = [],
 ): void {
   const existing = warmups.get(sessionId);
   if (existing) {
@@ -42,6 +44,7 @@ export function scheduleWarmup(
     existing.seq = seq;
     existing.provider = provider;
     existing.model = model;
+    existing.contextMessages = contextMessages;
     existing.rounds = 0;
     existing.lastRunAt = Date.now();
     if (existing.timer) clearTimeout(existing.timer);
@@ -50,7 +53,7 @@ export function scheduleWarmup(
   }
   warmups.set(sessionId, {
     timer: setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_DELAY_MS),
-    systemPrompt, seq, provider, model, rounds: 0, lastRunAt: Date.now(),
+    systemPrompt, seq, contextMessages, provider, model, rounds: 0, lastRunAt: Date.now(),
   });
 }
 
@@ -75,6 +78,7 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
       ...(m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length ? { tool_calls: m.tool_calls as never } : {}),
       ...(m.role === 'tool' && m.tool_call_id ? { tool_call_id: m.tool_call_id } : {}),
     })),
+    ...entry.contextMessages,
   ];
   const msgs = textualizeHistory(rawSeq);
   if (msgs[msgs.length - 1]?.role !== 'user') {
@@ -82,13 +86,22 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
   }
   try {
     // 预热请求：与最后发送序列同前缀 + 相同 tools（网关缓存键含 tools 参数，
-    // 不带 tools 的预热建立的缓存对真实请求无效）；max_tokens=1 成本≈0
+    // 不带 tools 的预热建立的缓存对真实请求无效）。auto 首轮使用 1 token 探针。
     const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(annotateToolDef);
     let hit = 0, miss = 0;
-    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: 64, tools })) {
+    const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
+    if (mode === 'off') { warmups.delete(sessionId); return; }
+    const probe = mode === 'auto' && entry.rounds === 1;
+    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools })) {
       if (chunk.type === 'usage') { hit = chunk.cachedInput ?? 0; miss = chunk.missInput ?? 0; }
     }
     console.log(`[warmup] ${sessionId.slice(0, 8)} 完成（round ${entry.rounds}，${msgs.length} 条，hit=${hit} miss=${miss}）`);
+    if (probe && miss > 0) {
+      kernel.config.set('cache.warmup', 'off');
+      warmups.delete(sessionId);
+      console.log(`[warmup] ${sessionId.slice(0, 8)} 网关未报告前缀缓存命中，auto 已降级为 off`);
+      return;
+    }
   } catch (err) {
     console.warn(`[warmup] ${sessionId.slice(0, 8)} 预热失败:`, err instanceof Error ? err.message.slice(0, 120) : String(err));
   }
