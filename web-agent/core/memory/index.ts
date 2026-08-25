@@ -23,8 +23,17 @@ const memoryFile = join(dataDir, 'memory.json');
 const MAX_FACTS = 200;
 const LESSON_COUNT = 3;       // 失败教训固定注入条数（不重复犯错优先）
 const RELATED_BIGRAM_MIN = 3; // 记忆与当前任务共享 ≥3 个字符 bigram 视为相关
+const BLOCK_NAME_MAX = 32;    // 核心记忆块名长度上限
+const BLOCK_CONTENT_MAX = 1000; // 单个核心记忆块内容上限
 
 interface Fact { id: string; text: string; ts: number }
+
+/** 核心记忆块（Letta 式 core memory）：agent 用工具自管理、每次对话固定注入的常驻记忆。
+ *  对应 2026 记忆分层中的「语义/程序性核心记忆」——与 archive（facts 检索层）互补：
+ *  core = 高频、必须始终在场（用户偏好/项目约束/工作纪律）；archive = 大容量、按需检索。 */
+interface MemoryBlock { content: string; ts: number }
+
+interface MemoryData { facts: Fact[]; blocks: Record<string, MemoryBlock> }
 
 /** 记忆与任务相关性：字符 bigram 重叠数（与 L1 语义缓存同源思想） */
 function relatedToTask(task: string, factText: string): boolean {
@@ -35,19 +44,22 @@ function relatedToTask(task: string, factText: string): boolean {
   return inter >= RELATED_BIGRAM_MIN;
 }
 
-/** 加载/保存记忆（同步、容错） */
-function loadFacts(): Fact[] {
+/** 加载/保存记忆（同步、容错；向后兼容旧版仅 facts 的文件） */
+function loadMemory(): MemoryData {
   try {
-    if (!existsSync(memoryFile)) return [];
-    const raw = JSON.parse(readFileSync(memoryFile, 'utf-8')) as { facts?: Fact[] };
-    return Array.isArray(raw.facts) ? raw.facts : [];
-  } catch { return []; }
+    if (!existsSync(memoryFile)) return { facts: [], blocks: {} };
+    const raw = JSON.parse(readFileSync(memoryFile, 'utf-8')) as Partial<MemoryData>;
+    return {
+      facts: Array.isArray(raw.facts) ? raw.facts : [],
+      blocks: raw.blocks && typeof raw.blocks === 'object' ? raw.blocks : {},
+    };
+  } catch { return { facts: [], blocks: {} }; }
 }
 
-function saveFacts(facts: Fact[]): void {
+function saveMemory(data: MemoryData): void {
   try {
     mkdirSync(dataDir, { recursive: true });
-    writeFileSync(memoryFile, JSON.stringify({ facts }, null, 2), 'utf8');
+    writeFileSync(memoryFile, JSON.stringify(data, null, 2), 'utf8');
   } catch { /* 持久化失败不阻断对话 */ }
 }
 
@@ -56,9 +68,20 @@ export default {
   name: '长期记忆',
   version: '0.1.0',
   onLoad(ctx) {
-    const facts = loadFacts();
+    const { facts, blocks } = loadMemory();
 
-    const persist = () => saveFacts(facts);
+    const persist = () => saveMemory({ facts, blocks });
+    const setBlock = (name: string, content: string): MemoryBlock => {
+      blocks[name] = { content, ts: Date.now() };
+      persist();
+      return blocks[name];
+    };
+    const deleteBlock = (name: string): boolean => {
+      if (!(name in blocks)) return false;
+      delete blocks[name];
+      persist();
+      return true;
+    };
     const remember = (text: string): Fact => {
       const f: Fact = { id: randomUUID().slice(0, 8), text, ts: Date.now() };
       facts.push(f);
@@ -88,30 +111,39 @@ export default {
       h.scratchpad.memoryInjected = true;
     });
 
-    // ---- Context Provider：普通记忆按任务动态组装（上下文工程） ----
-    // contentFn 用最后真实 user 消息检索相关记忆（bigram 相关匹配），
-    // 无相关记忆返回 null → 零成本不注入；相关才注入 → 无关记忆隔离在外。
-    // 去重：发送序列快照同步后旧记忆已入库，历史已有【长期记忆】则跳过本次注入
+    // ---- Context Provider：分层记忆按需/常驻注入（上下文工程） ----
+    //  core（核心记忆块）= 每次对话固定注入（用户偏好/项目约束/工作纪律，Letta 式 core memory）；
+    //  archive（facts）= 按当前任务 bigram 相关检索注入，无关零成本。
+    // 去重：发送序列快照同步后旧记忆已入库，历史已有【核心记忆块】/【长期记忆】则跳过本次注入
     // （缓存前缀稳定优先；新记忆可通过 recall_facts 主动查询获取）。
     ctx.register({
       kind: 'context',
       context: {
         id: 'memory-recall',
-        description: '按当前任务检索相关长期记忆（字符 bigram 相关匹配，无关不注入）',
+        description: '注入核心记忆块（常驻）+ 按任务检索相关长期记忆（字符 bigram 相关匹配）',
         weight: 10,
         contentFn({ history }) {
           const hasMemory = history.some((m) => String(m.content ?? '').startsWith('【长期记忆】'));
-          if (hasMemory) return null;
+          const hasBlocks = history.some((m) => String(m.content ?? '').startsWith('【核心记忆块】'));
+          if (hasMemory || hasBlocks) return null;
+          const parts: string[] = [];
+          const blockEntries = Object.entries(blocks);
+          if (blockEntries.length > 0) {
+            parts.push(`【核心记忆块】（常驻记忆，始终生效）\n${blockEntries.map(([name, b]) => `- ${name}: ${b.content}`).join('\n')}`);
+          }
           const lastUser = [...history].reverse()
             .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
-          if (!lastUser?.content) return null;
-          const task = lastUser.content.slice(0, 80);
-          const hits = facts
-            .filter((f) => !f.text.startsWith('【自动】') && relatedToTask(task, f.text)) // 教训由钩子注入，这里不重复
-            .slice(-5)
-            .reverse();
-          if (hits.length === 0) return null;
-          return `【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- ${f.text}`).join('\n')}`;
+          if (lastUser?.content) {
+            const task = lastUser.content.slice(0, 80);
+            const hits = facts
+              .filter((f) => !f.text.startsWith('【自动】') && relatedToTask(task, f.text)) // 教训由钩子注入，这里不重复
+              .slice(-5)
+              .reverse();
+            if (hits.length > 0) {
+              parts.push(`【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- ${f.text}`).join('\n')}`);
+            }
+          }
+          return parts.length ? parts.join('\n\n') : null;
         },
       },
     });
@@ -144,10 +176,14 @@ export default {
           '长期记忆规则：',
           '1. 用户告知的偏好、重要事实、任务结论，用 remember_fact 记住（一句话一条）；',
           '2. 回答涉及先前信息时，先用 recall_facts 查询相关记忆，再回答；',
-          '3. 每轮对话开始会自动注入最近记忆（勿重复要求，也不要逐条复述）；',
+          '3. 每轮对话开始会自动注入核心记忆块与最近相关记忆（勿重复要求，也不要逐条复述）；',
           '4. 记忆与事实不符或用户否认时，用 forget_fact 删除，不要带着错误记忆回答；',
           '5. 不要记忆敏感信息（密码、密钥等）；',
           '6. 工具失败会自动记录教训（【自动】标记）；若教训已不适用，用 forget_fact 删除。',
+          '核心记忆块（分层记忆的 core 层）：',
+          '7. 高频且必须始终在场的记忆（用户偏好、项目约束、工作纪律、关键路径约定），用 set_memory_block 写入——每轮对话固定注入；',
+          '8. 一次性/低频事实用 remember_fact 存档案（archive 层，按需检索），不要占用常驻核心块；',
+          '9. 用 list_memory_blocks 查看已有块，delete_memory_block 删除过时块。',
         ].join('\n'),
       },
     });
@@ -221,6 +257,76 @@ export default {
       },
     });
 
-    ctx.logger.info(`工具就绪: remember_fact / recall_facts / forget_fact（已存 ${facts.length} 条记忆，before_llm 钩子注入）`);
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'set_memory_block',
+        risk: 'medium',
+        costHint: 'low',
+        output: '{name, ts}',
+        description: '写入/更新一个核心记忆块（分层记忆 core 层）：常驻记忆，每轮对话自动注入。' +
+          '用于高频且必须始终在场的记忆（用户偏好、项目约束、工作纪律、关键路径约定）。' +
+          '低频/一次性事实用 remember_fact 存档案层即可，不要占用常驻块。',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '块名（≤32 字符，如 user-profile / project-rules）' },
+            content: { type: 'string', description: '块内容（≤1000 字符，一句话一条，简洁明确）' },
+          },
+          required: ['name', 'content'],
+        },
+        async handler(args: { name?: string; content?: string }) {
+          const name = String(args.name ?? '').trim();
+          const content = String(args.content ?? '').trim();
+          if (!name) return { ok: false, error: '缺少 name' };
+          if (name.length > BLOCK_NAME_MAX) return { ok: false, error: `块名过长（≤${BLOCK_NAME_MAX} 字符）` };
+          if (!content) return { ok: false, error: '缺少 content' };
+          if (content.length > BLOCK_CONTENT_MAX) return { ok: false, error: `块内容过长（≤${BLOCK_CONTENT_MAX} 字符），请拆分` };
+          const b = setBlock(name, content);
+          return { ok: true, data: { name, ts: b.ts, blockCount: Object.keys(blocks).length } };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'list_memory_blocks',
+        risk: 'low',
+        costHint: 'low',
+        output: '{blocks: [{name, content, ts}]}',
+        description: '列出全部核心记忆块（常驻记忆，每轮自动注入）。',
+        parameters: { type: 'object', properties: {} },
+        async handler() {
+          const list = Object.entries(blocks)
+            .map(([name, b]) => ({ name, content: b.content, ts: b.ts }))
+            .sort((a, b) => b.ts - a.ts);
+          return { ok: true, data: { blocks: list } };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'delete_memory_block',
+        risk: 'medium',
+        costHint: 'low',
+        description: '删除一个核心记忆块（按 list_memory_blocks 返回的 name）。',
+        parameters: {
+          type: 'object',
+          properties: { name: { type: 'string', description: '块名' } },
+          required: ['name'],
+        },
+        async handler(args: { name?: string }) {
+          const name = String(args.name ?? '').trim();
+          if (!name) return { ok: false, error: '缺少 name' };
+          if (!deleteBlock(name)) return { ok: false, error: `记忆块不存在: ${name}（list_memory_blocks 查看）` };
+          return { ok: true, data: { removed: name, blockCount: Object.keys(blocks).length } };
+        },
+      },
+    });
+
+    ctx.logger.info(`工具就绪: remember_fact / recall_facts / forget_fact + set/list/delete_memory_block（facts ${facts.length} 条 · blocks ${Object.keys(blocks).length} 个，分层记忆已启用）`);
   },
 } satisfies Plugin;

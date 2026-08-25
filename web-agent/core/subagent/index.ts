@@ -28,6 +28,57 @@ const SUB_SYSTEM_PROMPT = [
   '4. 输出精炼：直接给出结论与关键证据，不要寒暄。',
 ].join('\n');
 
+/** 对抗审查（Writer/Reviewer 分离）：审查者在全新上下文中评估，不承袭写作者的自我偏好。
+ *  2026 共识：agent 对自己的作品评分过高——生成与评估必须分离。
+ *  审查纪律：只标记正确性与需求符合度缺陷（追逐每个发现会催生过度工程化）；
+ *  结论必须以证据（工具观察）为准；输出固定 JSON 结构。 */
+const REVIEWER_SYSTEM_PROMPT = [
+  '你是 maharness 的独立审查者（reviewer），由主代理委派在全新上下文中审查其产出。',
+  '审查纪律：',
+  '1. 只审查【正确性】与【需求符合度】两类缺陷，不追逐风格、表达或"可以更好"的建议——',
+  '   过度要求会导致不必要的过度工程化；',
+  '2. 结论必须以证据为准：需要核实时先调用只读工具（读文件/查记忆/搜索）取证，绝不臆测；',
+  '3. 无缺陷就明确判 pass，不要为了"显得有用"而凑问题；',
+  '4. 每条 issue 必须给出：严重度（critical/major/minor）、具体问题、证据或依据；',
+  '5. 最后以 JSON 输出（不要输出 JSON 之外的任何内容）：',
+  '   {"verdict":"pass|concern|fail","summary":"一句话结论","issues":[{"severity":"critical|major|minor","point":"问题描述","evidence":"证据或依据"}],"confidence":0-1}',
+].join('\n');
+
+/** 从审查者输出中稳健抽取 JSON（容忍代码围栏/前后废话）；抽取失败时降级为 concern */
+function parseReview(text: string): {
+  verdict: 'pass' | 'concern' | 'fail';
+  summary: string;
+  issues: { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string }[];
+  confidence: number;
+} {
+  try {
+    const start = text.indexOf('{');
+    const end = text.lastIndexOf('}');
+    if (start >= 0 && end > start) {
+      const obj = JSON.parse(text.slice(start, end + 1)) as {
+        verdict?: unknown; summary?: unknown; issues?: unknown; confidence?: unknown;
+      };
+      const verdict = obj.verdict === 'pass' || obj.verdict === 'fail' ? obj.verdict : 'concern';
+      const issues = Array.isArray(obj.issues)
+        ? obj.issues.filter((i): i is { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string } =>
+          !!i && typeof i === 'object' && typeof (i as { point?: unknown }).point === 'string')
+        : [];
+      return {
+        verdict,
+        summary: typeof obj.summary === 'string' ? obj.summary : '',
+        issues,
+        confidence: typeof obj.confidence === 'number' ? Math.max(0, Math.min(1, obj.confidence)) : 0.5,
+      };
+    }
+  } catch { /* 落入降级 */ }
+  return {
+    verdict: 'concern',
+    summary: '审查输出无法解析为结构化 JSON，请人工查看原文',
+    issues: [{ severity: 'major', point: '非结构化输出', evidence: text.slice(0, 500) }],
+    confidence: 0,
+  };
+}
+
 export default {
   id: 'subagent',
   name: '子代理',
@@ -146,6 +197,115 @@ export default {
       },
     });
 
+    // ---- 对抗审查：run_review（生成/评估分离——agent 对自己的作品评分过高） ----
+    // 全新上下文的独立审查者：只标记正确性与需求符合度缺陷，结论以只读取证为准；
+    // 输出固定 JSON（verdict/issues/confidence），供主代理据结果决定修订或接受。
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'run_review',
+        risk: 'low',
+        costHint: 'medium',
+        limits: '审查子代理最多 5 轮；成本 ≈ 多次 LLM 调用，重要产出才审查',
+        output: '{verdict, summary, issues: [{severity, point, evidence}], confidence, traceId}',
+        outputSchema: {
+          type: 'object',
+          required: ['verdict', 'summary', 'issues', 'confidence'],
+          properties: {
+            verdict: { type: 'string', enum: ['pass', 'concern', 'fail'] },
+            summary: { type: 'string' },
+            issues: { type: 'array', items: { type: 'object', required: ['severity', 'point'], properties: { severity: { type: 'string', enum: ['critical', 'major', 'minor'] }, point: { type: 'string' }, evidence: { type: 'string' } } } },
+            confidence: { type: 'number', minimum: 0, maximum: 1 },
+          },
+        },
+        timeoutMs: 240_000,
+        description: '用全新上下文的独立审查者审查产出（生成/评估分离，对抗偏见）：' +
+          '审查者只标记正确性与需求符合度缺陷（不追逐风格），结论以只读取证为准，输出 {verdict, issues, confidence}。' +
+          '用于：重要交付物在提交/告知用户前自查；对关键结论做独立复核；发现矛盾时裁决。',
+        parameters: {
+          type: 'object',
+          properties: {
+            target: { type: 'string', description: '要审查的产出内容或说明（≤2000 字符；涉及文件时给出路径，审查者会自己读取核验）' },
+            criteria: { type: 'string', description: '可选：审查标准（默认：正确性与需求符合度）' },
+          },
+          required: ['target'],
+        },
+        async handler(args: { target?: string; criteria?: string }, tctx: ToolContext) {
+          const target = String(args.target ?? '').trim();
+          if (!target) return { ok: false, error: '缺少 target' };
+          if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
+
+          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+          if (!quota.allowed) {
+            return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：请控制审查频率。` };
+          }
+          const provider = chatSvc?.providers?.[0];
+          if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
+
+          const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
+          const tools: ToolDef[] = allTools.filter((t) => READ_ONLY_TOOLS.has(t.name)); // 审查者只读世界
+          const runner = new AgentRunner(ctx.kernel, ctx.bus);
+          const traceId = `rev-${randomUUID().slice(0, 8)}`;
+          const criteria = args.criteria ? String(args.criteria).trim() : '正确性与需求符合度';
+          const objective = `审查以下产出。审查标准：${criteria}。\n\n【待审查产出/说明】\n${target}`;
+          let answer = '';
+          let usage = { input: 0, output: 0 };
+          let cost = 0;
+          let toolCalls = 0;
+          let error: string | undefined;
+          const remainingBudget = (tctx as ToolContext & { remainingBudget?: number }).remainingBudget;
+          try {
+            for await (const ev of runner.run({
+              provider,
+              model: provider.defaultModel,
+              messages: [{ role: 'user', content: objective }],
+              systemPrompt: REVIEWER_SYSTEM_PROMPT,
+              tools,
+              traceId,
+              maxTurns: 5,
+              parentStepId: tctx.stepId, // span 树：审查子任务挂到 run_review 工具步骤下
+              signal: tctx.signal,
+              costBudget: remainingBudget,
+            })) {
+              if (ev.type === 'delta') answer += ev.text;
+              else if (ev.type === 'tool_result') toolCalls++;
+              else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
+              else if (ev.type === 'error') error = ev.error;
+            }
+          } catch (err) {
+            error = err instanceof Error ? err.message : String(err);
+          }
+          if (error) return { ok: false, error: `审查失败: ${error}` };
+          const review = parseReview(answer);
+          return {
+            ok: true,
+            data: {
+              ...review,
+              toolCalls,
+              tokensIn: usage.input,
+              tokensOut: usage.output,
+              cost,
+              traceId,
+              // C5 成本回传：并入主循环成本核算（见 agent.ts C5 段）
+              subagentCost: { cost, tokensIn: usage.input, tokensOut: usage.output },
+            },
+          };
+        },
+      },
+    });
+
+    // ---- 审查者角色：handoff_to('reviewer') 可把会话控制权交给审查者（只读世界） ----
+    ctx.register({
+      kind: 'role',
+      role: {
+        id: 'reviewer',
+        name: '独立审查者',
+        description: '独立审查者：以全新上下文审查产出，只标记正确性与需求符合度缺陷，结论以只读取证为准。移交给 reviewer 后会话由审查者接管（只读工具）。',
+        systemPrompt: REVIEWER_SYSTEM_PROMPT,
+        tools: 'readonly',
+      },
+    });
+
     ctx.register({
       kind: 'persona',
       persona: {
@@ -159,6 +319,10 @@ export default {
           '2. 对重要结论可用子代理独立复核（新视角交叉审查）；',
           '3. 子代理只读世界（默认），需要写操作时自行完成或明确传 tools="all"；',
           '4. 子代理结果需要核对时，用 read_file 验证其引用的内容再采信。',
+          '对抗审查（run_review）：',
+          '5. 重要交付物在提交/告知用户前，用 run_review 让独立审查者自查（生成/评估分离）——',
+          '   审查者只标记正确性与需求符合度缺陷，输出 pass/concern/fail 与 issue 清单；',
+          '6. 审查结果为 fail 或含 critical 时，先修订再交付；concern 可说明取舍后交付。',
         ].join('\n'),
       },
     });

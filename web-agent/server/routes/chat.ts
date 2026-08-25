@@ -62,9 +62,21 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
 
     const chat = getChatService(kernel);
     if (!chat) return res.status(500).json({ error: '对话服务未加载' });
+    // 捕获非空引用供嵌套函数（buildHistory）使用：TS 对函数声明内的捕获变量不做收窄
+    const chatSvc = chat;
     const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
     const resolvedModel = model || session.model || provider.defaultModel;
+    // 任务复杂度模型路由（2026 实践 FrugalGPT/RouteLLM）：简单任务走便宜模型、复杂任务走强模型。
+    // 触发条件：用户未显式指定模型（body.model 空）且配置了 agent.modelRouting 映射；
+    // 未命中配置 / 目标 provider 不存在 → 回退默认 provider/model（可观测：model-route 入 Trace）。
+    const routing = kernel.config.get<Record<string, string>>('agent.modelRouting', {});
+    // 仅对新消息路由（resume 是继续原任务，沿用会话已定模型）
+    const routed = !model && !resume && Object.keys(routing).length > 0
+      ? chat.routeForTask(String(message ?? ''), routing, chat.providers)
+      : undefined;
+    const runProvider = routed?.provider ?? provider;
+    const runModel = routed?.model ?? resolvedModel;
     // 经济性（harness 管理认知资源）：会话累计成本超预算 → 注入成本警告
     // （不是"请 LLM 自觉节约"，而是 harness 直接告诉它预算边界）
     // M1：成本汇总走 SQL 聚合（不再全量 listMessages 拉消息正文）
@@ -96,7 +108,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       '【世界状态】',
       `- 沙箱根目录（工作区，文件工具路径相对此）: ${sandboxNow}`,
       `- 会话模式: ${session.mode}${modePrompt ? `（${modePrompt.replace(/^【当前模式：[^】]+】/, '').slice(0, 40)}…）` : ''}`,
-      `- 模型: ${resolvedModel}`,
+      `- 模型: ${runModel}`,
     ].join('\n');
     const baseSystemPrompt = (typeof systemPromptParam === 'string' && systemPromptParam.trim()
       ? systemPromptParam
@@ -151,7 +163,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         }
         raw.push(base);
       }
-      return chat.textualizeHistory(raw);
+      return chatSvc.textualizeHistory(raw);
     }
     let history: LLMMessage[];
     if (resume) {
@@ -184,6 +196,11 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
 
     const traceId = randomUUID();
     const ac = new AbortController();
+    // 模型路由可观测：命中路由时记录 model-route 步骤（谁被路由到了哪）
+    if (routed?.reason) {
+      kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: 'model-route' })
+        .finish({ outputSummary: routed.reason });
+    }
     // 上下文管理 v2：超预算时优先 LLM 摘要压缩（compact：旧对话变【历史摘要】，不丢事实），
     // 压缩不可用/失败才截断（truncate：丢弃较早消息并注入说明）。
     // 对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜。
@@ -195,7 +212,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     let ctxMode: 'none' | 'compact' | 'truncate' = 'none';
     let droppedMessages = 0;
     if (compactEnabled) {
-      const r = await chat.compactHistory(history, maxCtx, { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace });
+      const r = await chat.compactHistory(history, maxCtx, { provider: runProvider, model: runModel, signal: ac.signal, traceId, trace: kernel.trace });
       ctxHistory = r.messages;
       ctxMode = r.mode;
       droppedMessages = r.droppedMessages;
@@ -268,7 +285,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         normal: kernel.config.get<number>('agent.maxTurns', 12),
       };
       for await (const ev of chat.runner.run({
-        provider, model: resolvedModel, messages: ctxHistory, contextMessages: [{ role: 'system', content: worldState }], traceId,
+        provider: runProvider, model: runModel, messages: ctxHistory, contextMessages: [{ role: 'system', content: worldState }], traceId,
         maxTurns: maxTurnsByMode[session.mode] ?? 12,
         // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
         // 不同会话互不串用（答案依赖工具观察时仅本会话可命中）
@@ -282,10 +299,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         compactFn: (history: LLMMessage[]) => chat.compactHistory(
           history,
           kernel.config.get<number>('context.maxTokens', 60000),
-          { provider, model: resolvedModel, signal: ac.signal, traceId, trace: kernel.trace },
+          { provider: runProvider, model: runModel, signal: ac.signal, traceId, trace: kernel.trace },
         ).then((r) => r.messages),
         // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
-        fallbackProviders: chat.providers.filter((p) => p.id !== provider.id),
+        fallbackProviders: chat.providers.filter((p) => p.id !== runProvider.id),
         // 成本实时熔断：剩余预算传执行器，超限强制停止（harness 硬边界）
         costBudget: remainingBudget > 0 ? remainingBudget : undefined,
         // 断点续跑：每轮工具执行完自动持久化完整历史（中断不白跑；resume 从断点继续）。
@@ -378,7 +395,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 预热仅在发送序列足够长时触发（≥3 条消息才有缓存价值；L1 命中的短序列跳过）
     const warmupMode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
     if (seqAcc.length >= 3 && warmupMode !== 'off') {
-      scheduleWarmup(session.id, systemPrompt, seqAcc, provider, resolvedModel, kernel, [{ role: 'system', content: worldState }]);
+      scheduleWarmup(session.id, systemPrompt, seqAcc, runProvider, runModel, kernel, [{ role: 'system', content: worldState }]);
     }
     sse(res, 'end', {});
     res.end();

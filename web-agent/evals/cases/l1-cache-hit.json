@@ -1,0 +1,23 @@
+{
+  "name": "l1-cache-hit",
+  "description": "L1 语义缓存：同一问题重复两次，第二次应命中缓存（零 LLM 调用）",
+  "messages": [
+    { "role": "user", "content": "maharness 的核心设计理念是什么" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        { "type": "delta", "text": "maharness 的核心设计理念是薄内核、全插件化、全程可观测，agent 可以自己定义自己。" },
+        { "type": "usage", "input": 150, "output": 40 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "repeats": 2,
+    "answerContains": ["薄内核"],
+    "llmCalls": 1,
+    "cachedOn": [2],
+    "noErrors": true
+  }
+}

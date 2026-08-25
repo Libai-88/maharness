@@ -1,0 +1,36 @@
+{
+  "name": "tool-not-exist-then-answer",
+  "description": "容错：LLM 调用不存在的工具 → 不崩溃、回填失败信息 → 下一轮给出最终回答",
+  "messages": [
+    { "role": "user", "content": "请检查一下当前目录结构然后告诉我结果" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_r1_t1",
+            "type": "function",
+            "function": { "name": "definitely_not_a_tool", "arguments": "{}" }
+          }
+        },
+        { "type": "usage", "input": 110, "output": 20 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "我调用的工具不存在，无法检查目录结构。这是一个失败教训。最终回答：无法完成任务。" },
+        { "type": "usage", "input": 180, "output": 30 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "toolSequence": [],
+    "answerContains": ["无法"],
+    "llmCalls": 2,
+    "noErrors": true
+  }
+}

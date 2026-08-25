@@ -5,9 +5,10 @@
  */
 import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
-import type { ProviderDef } from '../../kernel/types';
+import type { LLMMessage, ProviderDef, ToolDef } from '../../kernel/types';
 import type { AgentRunner } from '../../core/chat/agent';
 import type { ProviderConfig } from '../../core/chat/provider';
+import type { CompactOptions, CompactResult } from '../../core/chat/compact';
 import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
 import { execFile } from 'node:child_process';
@@ -31,6 +32,16 @@ export interface ChatService {
   setPersonas: (list: { name: string; content: string }[]) => void;
   getSystemPrompt: () => string;
   approveApproval: (approvalId: string, approved: boolean) => boolean;
+  // 对话能力层共享方法（server 经服务接口访问，不直接 import core/chat 实现——
+  // 接口与 core/chat/index.ts 导出的 service 对象保持一致）
+  textualizeHistory: (history: LLMMessage[]) => LLMMessage[];
+  compactHistory: (history: LLMMessage[], maxTokens: number, opts?: CompactOptions) => Promise<CompactResult>;
+  annotateToolDef: (t: ToolDef) => ToolDef;
+  routeForTask: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) =>
+    { provider: ProviderDef; model: string; reason: string } | undefined;
+  MODE_PROMPTS: Record<string, string>;
+  ROLE_READONLY_TOOLS: ReadonlySet<string>;
+  validateCheckpointHistory: (history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]) => string | null;
 }
 
 export function getChatService(kernel: Kernel): ChatService | undefined {

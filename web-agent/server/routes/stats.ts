@@ -38,13 +38,30 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
         truncations: a?.truncations ?? 0,
       };
     });
+    // F：上下文质量监控（context rot 诊断）——从环形缓冲的系统步骤聚合近端上下文事件：
+    //   injections=context provider 注入次数；compactions=LLM 摘要压缩次数；
+    //   truncations=截断次数；modelRoutes=模型路由次数；reasoningHints=思考预算降级次数。
+    //   toolDefinitions/toolDefBytes：当前暴露给 LLM 的工具数量与描述体积（confusion 风险信号——
+    //   "工具定义塞满上下文"是 context rot 的已知诱因之一）。
+    const sysSteps = kernel.trace.query(undefined, { type: 'system' });
+    const countByName = (name: string): number => sysSteps.filter((s) => s.name === name).length;
+    const toolDefs = kernel.plugins.capabilities('tool').map((c) => c.tool);
+    const quality = {
+      injections: countByName('context-inject'),
+      compactions: countByName('上下文压缩'),
+      truncations: countByName('上下文截断'),
+      modelRoutes: countByName('model-route'),
+      reasoningHints: countByName('reasoning-budget'),
+      toolDefinitions: toolDefs.length,
+      toolDefBytes: toolDefs.reduce((s, t) => s + (t.description?.length ?? 0) + JSON.stringify(t.parameters ?? {}).length, 0),
+    };
     res.json({
       overview: { ...overview, cacheHitSteps: trace.cacheHits },
       process: {
         steps: trace.steps, llmCalls: trace.llmCalls, toolCalls: trace.toolCalls,
         tokensIn: trace.totalTokensIn, tokensOut: trace.totalTokensOut, cost: trace.totalCost,
       },
-      context: { maxTokens: maxCtx, perSession },
+      context: { maxTokens: maxCtx, perSession, quality },
       taskProfile: kernel.budget.taskProfile(),
       cache: {
         l1Enabled: kernel.cache.l1Enabled,

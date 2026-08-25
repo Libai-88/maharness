@@ -1,0 +1,67 @@
+{
+  "name": "tool-fail-streak-adaptive",
+  "description": "harness 自适应：连续 3 次工具失败 → 注入策略提示，agent 不无限重试，收敛给出回答",
+  "sandbox": {
+    "files": {}
+  },
+  "messages": [
+    { "role": "user", "content": "请帮我查看 no-such-file.txt 并处理其中的任务" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_f1",
+            "type": "function",
+            "function": { "name": "read_file", "arguments": "{\"path\":\"no-such-file.txt\"}" }
+          }
+        },
+        { "type": "usage", "input": 120, "output": 20 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_f2",
+            "type": "function",
+            "function": { "name": "read_file", "arguments": "{\"path\":\"no-such-file.txt\"}" }
+          }
+        },
+        { "type": "usage", "input": 200, "output": 20 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_f3",
+            "type": "function",
+            "function": { "name": "read_file", "arguments": "{\"path\":\"no-such-file.txt\"}" }
+          }
+        },
+        { "type": "usage", "input": 280, "output": 20 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "文件 no-such-file.txt 不存在，已连续失败并停止重试。建议确认路径，或换一种方式获取信息。" },
+        { "type": "usage", "input": 360, "output": 40 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "toolSequence": ["read_file", "read_file", "read_file"],
+    "answerContains": ["停止"],
+    "llmCalls": 4,
+    "noErrors": true
+  }
+}

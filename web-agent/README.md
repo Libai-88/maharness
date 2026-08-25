@@ -107,6 +107,19 @@ export default {
 
 工作闭环：**Agent 想要新能力 → create_plugin（或 write_file）写插件 → 保存即热加载 → plugin_status 验证 → 失败则读错误修复 → 下一轮对话即可使用新工具**。内核与 core/ 目录保持不变，扩展永远发生在外部插件空间。
 
+## 2026 迭代能力
+
+- **Agent 回归评测**（`npm run eval`）：确定性回放 golden 场景（`evals/cases/`），断言工具序列/最终答案/L1 缓存命中——agent 循环（决策-行动-观测/钩子/缓存）的回归保护，零 API 成本。可用 `npm run eval -- --record <name> <task>` 在真实 provider 下录制新场景。
+- **任务复杂度模型路由**：`config.json` 配置 `agent.modelRouting`（任务类型 → provider，如 `{ "问答": "deepseek", "代码": "deepseek@deepseek-reasoner" }`）——按 `classifyTask` 让简单任务走便宜模型、复杂任务走强模型；命中 `model-route` 入 Trace 可观测。
+- **对抗审查子代理**：`run_review` 工具用全新上下文的独立审查者审查产出（生成/评估分离），输出 `{verdict, issues, confidence}`；也可 `handoff_to('reviewer')` 把会话交给审查者角色。
+- **分层记忆**：核心记忆块（`set/list/delete_memory_block`，每轮常驻注入）+ 档案记忆（`remember/recall/forget_fact`，按需检索）——agent 用工具自管理的两级记忆。
+- **MCP 客户端**：`config.json` 配置 `mcp.servers`（stdio 或 http 传输），把 MCP 生态工具（filesystem/github/memory 等）拉进能力注册表（`mcp_*` 前缀）；`mcp_status` 查看连接状态。
+
+```json
+{ "agent": { "modelRouting": { "问答": "deepseek", "代码": "deepseek@deepseek-reasoner" } },
+  "mcp": { "servers": { "filesystem": { "type": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] } } } }
+```
+
 ## 环境变量
 
 | 变量 | 说明 |

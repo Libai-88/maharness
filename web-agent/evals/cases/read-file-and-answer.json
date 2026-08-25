@@ -1,0 +1,41 @@
+{
+  "name": "read-file-and-answer",
+  "description": "agent 循环基础：LLM 决定调用 read_file → 工具执行 → 回填 → 最终回答（工具序列 + 答案断言）",
+  "sandbox": {
+    "files": {
+      "notes.txt": "hello maharness"
+    }
+  },
+  "messages": [
+    { "role": "user", "content": "请读取 notes.txt 文件，然后告诉我里面的内容是什么" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_r1_t1",
+            "type": "function",
+            "function": { "name": "read_file", "arguments": "{\"path\":\"notes.txt\"}" }
+          }
+        },
+        { "type": "usage", "input": 120, "output": 30 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "文件 notes.txt 的内容为：hello maharness" },
+        { "type": "usage", "input": 200, "output": 24 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "toolSequence": ["read_file"],
+    "answerContains": ["hello maharness"],
+    "llmCalls": 2,
+    "noErrors": true
+  }
+}

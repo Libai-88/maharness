@@ -127,6 +127,16 @@ export interface StatsInfo {
   };
   context: {
     maxTokens: number;
+    /** F：上下文质量监控（context rot 诊断）——进程内近端上下文事件计数与工具面指标 */
+    quality: {
+      injections: number;
+      compactions: number;
+      truncations: number;
+      modelRoutes: number;
+      reasoningHints: number;
+      toolDefinitions: number;
+      toolDefBytes: number;
+    };
     perSession: {
       id: string;
       title: string;

@@ -11,6 +11,7 @@
 import type { PersonaDef, Plugin } from '../../kernel/types';
 import { AgentRunner, textualizeHistory, annotateToolDef } from './agent';
 import { compactHistory } from './compact';
+import { routeForTask } from './routing';
 import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from './policy';
 import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig } from './provider';
 import { resultStore, sessionKeyOf } from './result-store';
@@ -95,6 +96,7 @@ export default {
       textualizeHistory: typeof textualizeHistory;
       compactHistory: typeof compactHistory;
       annotateToolDef: typeof annotateToolDef;
+      routeForTask: typeof routeForTask;
       MODE_PROMPTS: typeof MODE_PROMPTS;
       ROLE_READONLY_TOOLS: typeof ROLE_READONLY_TOOLS;
       validateCheckpointHistory: typeof validateCheckpointHistory;
@@ -141,6 +143,7 @@ export default {
       textualizeHistory,
       compactHistory,
       annotateToolDef,
+      routeForTask,
       MODE_PROMPTS,
       ROLE_READONLY_TOOLS,
       validateCheckpointHistory,

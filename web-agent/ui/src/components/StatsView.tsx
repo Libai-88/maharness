@@ -26,7 +26,8 @@ export default function StatsView() {
   if (err) return <div className="view-scroll"><div className="empty-state">统计加载失败：{err}</div></div>;
   if (!stats) return <div className="view-scroll"><div className="empty-state">统计加载中…</div></div>;
 
-  const { overview, process, cache } = stats;
+  const { overview, process, cache, context } = stats;
+  const q = context?.quality ?? { injections: 0, compactions: 0, truncations: 0, modelRoutes: 0, reasoningHints: 0, toolDefinitions: 0, toolDefBytes: 0 };
   const overall = cache.overall;
   const l1 = cache.l1 ?? { hits: 0, misses: 0, rate: 0 };
   const l2 = cache.l2 ?? { hits: 0, misses: 0, rate: 0 };
@@ -167,6 +168,34 @@ export default function StatsView() {
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">本次成本</span><span className="set-row-desc">进程内累计（含缓存折扣）</span></div>
           <span className="sc-val teal" style={{ fontSize: 16 }}>{cost(process.cost)}</span>
+        </div>
+      </div>
+
+      <div className="set-sec">
+        <span className="ss-title">上下文质量（context rot 诊断）</span>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">上下文注入</span><span className="set-row-desc">context provider 按需注入次数</span></div>
+          <span className="sc-val" style={{ fontSize: 16 }}>{q.injections}</span>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">摘要压缩</span><span className="set-row-desc">LLM 摘要压缩早期历史（信息保鲜）</span></div>
+          <span className="sc-val" style={{ fontSize: 16 }}>{q.compactions}</span>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">截断</span><span className="set-row-desc">超预算物理丢弃较早消息</span></div>
+          <span className="sc-val orange" style={{ fontSize: 16 }}>{q.truncations}</span>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">模型路由</span><span className="set-row-desc">按任务复杂度切换模型次数</span></div>
+          <span className="sc-val" style={{ fontSize: 16 }}>{q.modelRoutes}</span>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">思考预算降级</span><span className="set-row-desc">reasoning 超限注入收敛提示次数</span></div>
+          <span className="sc-val" style={{ fontSize: 16 }}>{q.reasoningHints}</span>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l"><span className="set-row-label">工具面</span><span className="set-row-desc">{q.toolDefinitions} 个工具 · 描述+参数约 {fmt(q.toolDefBytes)} B（confusion 风险信号）</span></div>
+          <span className="sc-val" style={{ fontSize: 16 }}>{q.toolDefinitions}</span>
         </div>
       </div>
     </div>

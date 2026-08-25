@@ -6,8 +6,8 @@
  * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；写删成功后清空 L2（保一致性）
  *  并失效本会话 L1 语义缓存（防陈旧观察答案，H8）。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { resolve, relative } from 'node:path';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
 import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
@@ -26,6 +26,9 @@ function invalidateSessionL1(tctx: ToolContext): void {
 // 缓存键命名空间版本：工具实现变更（输出格式/行为）后递增，
 // 旧缓存自动失效——缓存值依赖工具版本，这是 L2 的第一性原理约束
 const TOOLS_FS_CACHE_VER = 'v2';
+
+/** 单次读取文本上限（字符）：超大文件返回前 100KB 并标注 truncated */
+const MAX_READ = 100_000;
 
 function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown): unknown {
   const hit = cache.l2Get(key);
