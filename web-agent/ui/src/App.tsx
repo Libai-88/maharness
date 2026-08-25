@@ -11,6 +11,8 @@ import PluginsView from './components/PluginsView';
 import StatsView from './components/StatsView';
 import SettingsView from './components/SettingsView';
 import Menu from './components/Menu';
+import { AnimatePresence, motion } from 'motion/react';
+import { pageVariants } from './motion';
 import { IconChevronDown, IconClose, IconPanel } from './components/Icon';
 import { toast } from 'sonner';
 
@@ -477,8 +479,16 @@ export default function App() {
           </div>
         </header>
 
-        <div className="tab-content" key={settingsOpen ? 'settings' : activeTab}>
-        {settingsOpen ? (
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div
+            className="tab-content"
+            key={settingsOpen ? 'settings' : activeTab}
+            variants={pageVariants}
+            initial="initial"
+            animate="enter"
+            exit="exit"
+          >
+          {settingsOpen ? (
           <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
         ) : activeTab === 'chat' ? (
           <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
@@ -531,7 +541,8 @@ export default function App() {
         ) : (
           <StatsView />
         )}
-        </div>
+          </motion.div>
+        </AnimatePresence>
       </main>
     </div>
   );

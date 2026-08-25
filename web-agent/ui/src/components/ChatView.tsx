@@ -1,9 +1,11 @@
 // ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
 import { commandsApi, onChatRetry } from '../api';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
+import { fadeUp, msgRow, popIn, springTransition, staggerContainer, toolCardIn, userMsg } from '../motion';
 import { IconBlock, IconBolt, IconBrain, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
 
 interface Props {
@@ -52,8 +54,12 @@ function ToolCard({ t }: { t: ToolStep }) {
   const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
   return (
-    <div
+    <motion.div
       className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'} ${show ? 'expanded' : ''}`}
+      variants={toolCardIn}
+      initial="initial"
+      animate="enter"
+      exit="exit"
       onClick={() => { if (!running) setOpen((v) => !v); }}
       style={{ cursor: running ? 'default' : 'pointer' }}
       role="button"
@@ -64,9 +70,15 @@ function ToolCard({ t }: { t: ToolStep }) {
     >
       <div className="tool-head">
         <div className="tool-head-left">
-          <span className={`tool-icon ${statusCls}`}>
+          <motion.span
+            className={`tool-icon ${statusCls}`}
+            key={t.status}
+            initial={{ scale: 0.5, opacity: 0 }}
+            animate={{ scale: 1, opacity: 1 }}
+            transition={springTransition}
+          >
             {t.status === 'done' ? <IconCheck size={12} /> : t.status === 'error' ? <IconWarn size={12} /> : <IconRefresh size={12} />}
-          </span>
+          </motion.span>
           <span className="tool-name">{t.name}</span>
           <span className="tool-path">{t.args ? argsSummary(t.args) : ''}</span>
           {t.stored && <span className="tool-stored" title="大结果已存入结果存储——Agent 可用 recall_tool_result 零副作用重读全文"><IconPaperclip size={10} /> 已存</span>}
@@ -83,7 +95,7 @@ function ToolCard({ t }: { t: ToolStep }) {
           {t.stored && <span className="tool-stored-note">完整结果已存入结果存储（本会话内 recall_tool_result 可重读，零副作用）</span>}
         </div>
       )}
-    </div>
+    </motion.div>
   );
 }
 
@@ -302,30 +314,43 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           )}
 
           {messages.length === 0 && (
-            <div className="brand-hero">
-              <BrandLogo size={96} />
-              <div className="brand-title">探索未至之境</div>
-              <div className="brand-slogan">
+            <motion.div
+              className="brand-hero"
+              variants={staggerContainer}
+              initial="initial"
+              animate="enter"
+            >
+              <motion.div variants={fadeUp}><BrandLogo size={96} /></motion.div>
+              <motion.div variants={fadeUp} className="brand-title">探索未至之境</motion.div>
+              <motion.div variants={fadeUp} className="brand-slogan">
                 万物皆插件，自我进化——maharness 是你的羊，也是你的牧羊犬。<br />
                 文件读写 · 命令执行 · 联网搜索 · 自我扩展
-              </div>
-              <div className="brand-kbd"><span className="bk">/</span> 调出命令面板 <span className="bk">Enter</span> 发送</div>
-              {!hasModels && <div className="brand-note">尚未配置 LLM Provider —— 在左下角「设置」中添加。</div>}
-              <div className="hero-pills">
+              </motion.div>
+              <motion.div variants={fadeUp} className="brand-kbd"><span className="bk">/</span> 调出命令面板 <span className="bk">Enter</span> 发送</motion.div>
+              {!hasModels && <motion.div variants={fadeUp} className="brand-note">尚未配置 LLM Provider —— 在左下角「设置」中添加。</motion.div>}
+              <motion.div variants={fadeUp} className="hero-pills">
                 <button className="hero-pill" onClick={() => onSend('起草一份技术方案')}><span className="hp-ico">✦</span>起草一份技术方案</button>
                 <button className="hero-pill" onClick={() => onSend('追踪插件重载信号')}><span className="hp-ico">◆</span>追踪插件重载信号</button>
                 <button className="hero-pill" onClick={() => onSend('整理本周代码审查')}><span className="hp-ico">✚</span>整理本周代码审查</button>
-              </div>
-            </div>
+              </motion.div>
+            </motion.div>
           )}
 
+          <AnimatePresence initial={false}>
           {messages.map((m) => {
             // retry 截断（C1）：流式中的 assistant 消息从最近一次 retry 边界起显示
             const mark = m.streaming && m.role === 'assistant' ? retryMarks[m.id] : undefined;
             const content = mark ? m.content.slice(mark.content) : m.content;
             const reasoning = mark ? (m.reasoning ?? '').slice(mark.reasoning) : m.reasoning;
             return (
-            <div key={m.id} className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}>
+            <motion.div
+              key={m.id}
+              className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}
+              variants={m.role === 'user' ? userMsg : msgRow}
+              initial="initial"
+              animate="enter"
+              exit="exit"
+            >
               {m.role !== 'user' ? (
                 <>
                   <div className="msg-avatar"><IconSheep size={16} /></div>
@@ -390,17 +415,27 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                   <div className="user-bubble">{m.content}</div>
                 </div>
               )}
-            </div>
+            </motion.div>
             );
           })}
+          </AnimatePresence>
           <div ref={bottomRef} />
         </div>
       </div>
 
       {approvals.length > 0 && (
         <div style={{ padding: '0 24px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+          <AnimatePresence initial={false}>
           {approvals.map((a) => (
-            <div key={a.id} className="approval-card" style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}>
+            <motion.div
+              key={a.id}
+              className="approval-card"
+              style={{ maxWidth: 760, margin: '0 auto', width: '100%' }}
+              variants={msgRow}
+              initial="initial"
+              animate="enter"
+              exit="exit"
+            >
               <div className="a-title"><span className="a-lock"><IconLock size={13} /></span> 需要审批 · {a.name}<span className="a-pulse" /></div>
               <pre className="a-summary">{a.summary}</pre>
               <div className="approval-actions">
@@ -419,15 +454,24 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                   {pendingApprovals[a.id] === 'reject' ? <span className="spin" /> : null}拒绝
                 </button>
               </div>
-            </div>
+            </motion.div>
           ))}
+          </AnimatePresence>
         </div>
       )}
 
       <div className="composer-area">
+        <AnimatePresence>
         {cmdOpen && matched.length > 0 && (
           <div className="cmd-overlay" onClick={() => setCmdOpen(false)}>
-            <div className="cmd-panel" onClick={(e) => e.stopPropagation()}>
+            <motion.div
+              className="cmd-panel"
+              onClick={(e) => e.stopPropagation()}
+              variants={popIn}
+              initial="initial"
+              animate="enter"
+              exit="exit"
+            >
               <div className="cmd-input-row">
                 <span className="cmd-slash">/</span>
                 <span className="cmd-typed">{input.slice(1)}</span>
@@ -459,9 +503,10 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 <span className="cf-item"><span className="cf-kbd">Tab</span><span className="cf-label">补全</span></span>
                 <span className="cf-item"><span className="cf-kbd">Esc</span><span className="cf-label">关闭</span></span>
               </div>
-            </div>
+            </motion.div>
           </div>
         )}
+        </AnimatePresence>
 
         <div className="composer">
           <textarea

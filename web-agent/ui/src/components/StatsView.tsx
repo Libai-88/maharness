@@ -1,12 +1,25 @@
 // ui/src/components/StatsView.tsx —— 统计视图（Screen 3）：三层缓存 + 全局概览（真实 statsApi）
 import { useEffect, useState } from 'react';
+import { animate, motion, useMotionValue, useTransform } from 'motion/react';
 import { statsApi } from '../api';
+import { fadeUp, staggerContainer } from '../motion';
 import type { StatsInfo } from '../types';
 
 const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 const cost = (n: number) => `¥${n.toFixed(2)}`;
 
 function pct(n: number) { return `${(n * 100).toFixed(1)}%`; }
+
+/** 数字 count-up（motion）：值变化时从 0 平滑滚动到目标值（Linear/Vercel 式 KPI 动效） */
+function AnimatedNumber({ value, format }: { value: number; format: (n: number) => string }) {
+  const mv = useMotionValue(0);
+  const text = useTransform(mv, (v) => format(v));
+  useEffect(() => {
+    const controls = animate(mv, value, { duration: 0.7, ease: [0.22, 1, 0.36, 1] });
+    return () => controls.stop();
+  }, [value]);
+  return <motion.span>{text}</motion.span>;
+}
 
 export default function StatsView() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
@@ -35,7 +48,8 @@ export default function StatsView() {
 
   return (
     <div className="view-scroll">
-      <div className="page-head">
+      <motion.div variants={staggerContainer} initial="initial" animate="enter">
+      <motion.div variants={fadeUp} className="page-head">
         <div className="ph-eyebrow">
           <span className="ph-no">03</span>
           <span className="ph-label">CACHE & COST</span>
@@ -44,15 +58,15 @@ export default function StatsView() {
         </div>
         <span className="ph-title">看得见的成本，看得见的缓存</span>
         <span className="ph-sub">三层缓存命中即可见 · 本周节省 {cost(cache.savedCost ?? 0)}</span>
-      </div>
+      </motion.div>
 
-      <div className="stats-row">
+      <motion.div variants={fadeUp} className="stats-row">
         <div className="hero-card">
           <div className="hero-head">
             <span className="hero-label">综合命中率 · HIT RATE</span>
             <span className="hero-badge">{cache.l3.realHits > 0 ? 'L3 真实命中' : cache.l1Enabled ? 'L1 已启用' : 'L1 关闭'}</span>
           </div>
-          <div className="hero-value">{pct(cache.l3.realHits > 0 ? cache.l3.realRate / 100 : (overall?.rate ?? 0) / 100)}</div>
+          <div className="hero-value"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate / 100 : (overall?.rate ?? 0) / 100} format={pct} /></div>
           <div className="hero-sub">
             {cache.l3.realHits > 0
               ? `provider 确认命中 ${fmt(cache.l3.realTokens)} tok · 折合 ${cost(cache.savedCost ?? 0)}`
@@ -69,29 +83,29 @@ export default function StatsView() {
         </div>
         <div className="saved-card">
           <span className="sc-label">本周节省调用</span>
-          <span className="sc-value">{overall?.served ?? 0}</span>
+          <span className="sc-value"><AnimatedNumber value={overall?.served ?? 0} format={fmt} /></span>
           <span className="sc-sub">次 · LLM call skipped</span>
           <div className="sc-divider" />
           <div className="sc-row">
             <div className="sc-row-left"><span className="sc-dot" style={{ background: 'var(--purple)' }} /><span className="sc-lbl">L1 语义缓存</span></div>
-            <span className="sc-val">{l1.hits}</span>
+            <span className="sc-val"><AnimatedNumber value={l1.hits} format={fmt} /></span>
           </div>
           <div className="sc-row">
             <div className="sc-row-left"><span className="sc-dot" style={{ background: 'var(--teal)' }} /><span className="sc-lbl">L2 工具结果</span></div>
-            <span className="sc-val">{l2.hits}</span>
+            <span className="sc-val"><AnimatedNumber value={l2.hits} format={fmt} /></span>
           </div>
           <div className="sc-row">
             <div className="sc-row-left"><span className="sc-dot" style={{ background: 'var(--accent)' }} /><span className="sc-lbl">L3 prompt 前缀</span></div>
-            <span className="sc-val">{l3.hits}</span>
+            <span className="sc-val"><AnimatedNumber value={l3.hits} format={fmt} /></span>
           </div>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="cache-cards">
+      <motion.div variants={fadeUp} className="cache-cards">
         <div className="cache-card c1">
           <div className="cc-head">
             <span className="cc-badge b1">L1 语义问答</span>
-            <span className="cc-rate">{pct(l1.rate ?? 0)}</span>
+            <span className="cc-rate"><AnimatedNumber value={l1.rate ?? 0} format={pct} /></span>
           </div>
           <span className="cc-desc">字符 bigram · Dice 相似度</span>
           <span className="cc-meta">命中 {l1.hits} · 完全跳过 LLM{cache.l1Enabled ? '' : ' · 已关闭'}</span>
@@ -101,7 +115,7 @@ export default function StatsView() {
         <div className="cache-card c2">
           <div className="cc-head">
             <span className="cc-badge b2">L2 工具结果</span>
-            <span className="cc-rate">{pct(l2.rate ?? 0)}</span>
+            <span className="cc-rate"><AnimatedNumber value={l2.rate ?? 0} format={pct} /></span>
           </div>
           <span className="cc-desc">hash(工具+参数) + mtime/size</span>
           <span className="cc-meta">命中 {l2.hits} · TTL 30 min · 重复调用不重算</span>
@@ -111,7 +125,7 @@ export default function StatsView() {
         <div className="cache-card c3">
           <div className="cc-head">
             <span className="cc-badge b3">L3 prompt 前缀</span>
-            <span className="cc-rate">{cache.l3.realHits > 0 ? pct(cache.l3.realRate / 100) : fmt(l3.hits)}</span>
+            <span className="cc-rate"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate / 100 : l3.hits} format={cache.l3.realHits > 0 ? pct : fmt} /></span>
           </div>
           <span className="cc-desc">消息只追加不重写 → KV cache</span>
           <span className="cc-meta">
@@ -121,83 +135,84 @@ export default function StatsView() {
           <div className="cc-bar"><div className="cc-bar-fill" /></div>
           <span className="cc-example">多轮对话输入成本按 provider 折扣计费</span>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="global-stats">
+      <motion.div variants={fadeUp} className="global-stats">
         <div className="gs-item">
           <span className="gsi-label">会话</span>
-          <span className="gsi-value">{overview.sessions}</span>
+          <span className="gsi-value"><AnimatedNumber value={overview.sessions} format={fmt} /></span>
           <span className="gsi-sub">历史累计</span>
         </div>
         <div className="gs-item">
           <span className="gsi-label">消息</span>
-          <span className="gsi-value">{fmt(overview.messages)}</span>
+          <span className="gsi-value"><AnimatedNumber value={overview.messages} format={fmt} /></span>
           <span className="gsi-sub">用户 + 助手</span>
         </div>
         <div className="gs-item">
           <span className="gsi-label">TOKENS</span>
-          <span className="gsi-value">{fmt(overview.tokensIn + overview.tokensOut)}</span>
+          <span className="gsi-value"><AnimatedNumber value={overview.tokensIn + overview.tokensOut} format={fmt} /></span>
           <span className="gsi-sub">in {fmt(overview.tokensIn)} · out {fmt(overview.tokensOut)}</span>
         </div>
         <div className="gs-item">
           <span className="gsi-label">成本</span>
-          <span className="gsi-value teal">{cost(overview.cost)}</span>
+          <span className="gsi-value teal"><AnimatedNumber value={overview.cost} format={cost} /></span>
           <span className="gsi-sub">已含缓存节省</span>
         </div>
         <div className="gs-item">
           <span className="gsi-label">截断次数</span>
-          <span className="gsi-value orange">{overview.truncations}</span>
+          <span className="gsi-value orange"><AnimatedNumber value={overview.truncations} format={fmt} /></span>
           <span className="gsi-sub">上下文超限自动截断</span>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="set-sec">
+      <motion.div variants={fadeUp} className="set-sec">
         <span className="ss-title">本次运行（进程内累计）</span>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">执行步骤</span><span className="set-row-desc">LLM 调用 + 工具调用 + 缓存命中</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{process.steps}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={process.steps} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">LLM 调用</span><span className="set-row-desc">实际请求模型次数</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{process.llmCalls}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={process.llmCalls} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">工具调用</span><span className="set-row-desc">Agent 执行工具次数</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{process.toolCalls}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={process.toolCalls} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">本次成本</span><span className="set-row-desc">进程内累计（含缓存折扣）</span></div>
-          <span className="sc-val teal" style={{ fontSize: 16 }}>{cost(process.cost)}</span>
+          <span className="sc-val teal" style={{ fontSize: 16 }}><AnimatedNumber value={process.cost} format={cost} /></span>
         </div>
-      </div>
+      </motion.div>
 
-      <div className="set-sec">
+      <motion.div variants={fadeUp} className="set-sec">
         <span className="ss-title">上下文质量（context rot 诊断）</span>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">上下文注入</span><span className="set-row-desc">context provider 按需注入次数</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{q.injections}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={q.injections} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">摘要压缩</span><span className="set-row-desc">LLM 摘要压缩早期历史（信息保鲜）</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{q.compactions}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={q.compactions} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">截断</span><span className="set-row-desc">超预算物理丢弃较早消息</span></div>
-          <span className="sc-val orange" style={{ fontSize: 16 }}>{q.truncations}</span>
+          <span className="sc-val orange" style={{ fontSize: 16 }}><AnimatedNumber value={q.truncations} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">模型路由</span><span className="set-row-desc">按任务复杂度切换模型次数</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{q.modelRoutes}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={q.modelRoutes} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">思考预算降级</span><span className="set-row-desc">reasoning 超限注入收敛提示次数</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{q.reasoningHints}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={q.reasoningHints} format={fmt} /></span>
         </div>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">工具面</span><span className="set-row-desc">{q.toolDefinitions} 个工具 · 描述+参数约 {fmt(q.toolDefBytes)} B（confusion 风险信号）</span></div>
-          <span className="sc-val" style={{ fontSize: 16 }}>{q.toolDefinitions}</span>
+          <span className="sc-val" style={{ fontSize: 16 }}><AnimatedNumber value={q.toolDefinitions} format={fmt} /></span>
         </div>
-      </div>
+      </motion.div>
+      </motion.div>
     </div>
   );
 }

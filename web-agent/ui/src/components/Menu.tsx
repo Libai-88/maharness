@@ -1,5 +1,7 @@
 // ui/src/components/Menu.tsx —— 通用下拉菜单（顶栏模式 / 模型选择）
 import { useEffect, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'motion/react';
+import { popIn } from '../motion';
 import { IconCheck } from './Icon';
 
 export interface MenuItem {
@@ -52,8 +54,17 @@ export default function Menu({ trigger, items, selectedKey, onSelect, title, wid
       >
         {trigger}
       </button>
+      <AnimatePresence>
       {open && (
-        <div className="menu-pop" style={{ width }} role="menu">
+        <motion.div
+          className="menu-pop"
+          style={{ width }}
+          role="menu"
+          variants={popIn}
+          initial="initial"
+          animate="enter"
+          exit="exit"
+        >
           {title && <div className="menu-title">{title}</div>}
           {items.length === 0 && <div className="menu-empty">暂无可用项</div>}
           {items.map((it) => (
@@ -69,8 +80,9 @@ export default function Menu({ trigger, items, selectedKey, onSelect, title, wid
               {it.key === selectedKey && <IconCheck size={12} />}
             </button>
           ))}
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
     </div>
   );
 }

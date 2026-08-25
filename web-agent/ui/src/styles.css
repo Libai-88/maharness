@@ -78,6 +78,17 @@
   color-scheme: dark;
   /* 主题切换过渡：全局颜色渐变（Apple: "materialize, don't just fade"） */
   transition: background-color 0.3s ease, color 0.3s ease;
+
+  /* 动效系统（2026 产品动效实践：进入一律 ease-out，时长分级，GPU-only transform/opacity）
+     与 src/motion.ts 的 EASE/DUR 常量保持一致；Motion 负责 JS 驱动动画，CSS 用 token 统一手感 */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-emph: cubic-bezier(0.2, 0, 0, 1);
+  --motion-fast: 120ms;    /* hover / 颜色 / 焦点环 */
+  --motion-base: 200ms;    /* 下拉 / 开关 / 标签切换 */
+  --motion-med: 280ms;     /* 弹层 / 抽屉 / 工具卡 */
+  --motion-slow: 400ms;    /* 页面过渡 */
+  --motion-slower: 600ms;  /* 入场 choreography（首屏 / 仪式感） */
 }
 
 /* ============================================================
@@ -237,21 +248,13 @@ input, select, textarea {
 ::-webkit-scrollbar-thumb:hover { background: var(--scroll-thumb-hover); }
 ::-webkit-scrollbar-track { background: transparent; }
 
-/* v5 Tab 切换过渡（@starting-style 可中断入场） */
+/* v6 Tab 切换过渡：由 Motion（src/motion.ts pageVariants）驱动淡入上移 + blur，
+   仅保留基础布局；transform/opacity 交 Motion 内联控制（避免 CSS/Motion 双驱动冲突） */
 .tab-content {
   flex: 1;
   display: flex;
   flex-direction: column;
   min-height: 0;
-  opacity: 1;
-  transform: translateY(0);
-  transition: opacity 0.2s ease-out, transform 0.2s ease-out;
-}
-@starting-style {
-  .tab-content {
-    opacity: 0;
-    transform: translateY(4px);
-  }
 }
 
 .mono { font-family: var(--font-mono); }
@@ -263,27 +266,9 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   border-radius: 6px;
 }
 
-/* 消息入场微动效（@starting-style 可中断入场 — Apple Fluid Interface 原则）
-   交错 stagger：前 5 条消息依次延迟 30ms，制造层次感 */
-.msg-row, .approval-card {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  transition: opacity 0.25s cubic-bezier(0.23, 1, 0.32, 1),
-              transform 0.25s cubic-bezier(0.23, 1, 0.32, 1);
-}
-@starting-style {
-  .msg-row, .approval-card {
-    opacity: 0;
-    transform: translateY(6px) scale(0.98);
-  }
-}
-@starting-style {
-  .msg-row:nth-child(1), .approval-card:nth-child(1) { transition-delay: 0ms; }
-  .msg-row:nth-child(2), .approval-card:nth-child(2) { transition-delay: 30ms; }
-  .msg-row:nth-child(3), .approval-card:nth-child(3) { transition-delay: 60ms; }
-  .msg-row:nth-child(4), .approval-card:nth-child(4) { transition-delay: 90ms; }
-  .msg-row:nth-child(5), .approval-card:nth-child(5) { transition-delay: 120ms; }
-}
+/* v6 消息入场编排：由 Motion（src/motion.ts msgRow/userMsg）驱动——
+   进入 ease-out 淡入上移 / 用户消息右滑入 / 工具卡 pop-in / 退出快速淡出；
+   prefers-reduced-motion 由 <MotionConfig reducedMotion="user"> 全局兜底 */
 
 /* ============================================================
    顶栏下拉菜单（模式 / 模型切换）
@@ -304,15 +289,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   gap: 2px;
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  transition: opacity 0.12s ease-out, transform 0.12s cubic-bezier(0.23, 1, 0.32, 1);
-}
-@starting-style {
-  .menu-pop {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.97);
-  }
+  /* v6 入场：由 Motion popIn（origin-aware scale-in，从触发器位置缩放展开）驱动 */
+  transform-origin: top right;
 }
 .menu-title {
   font-size: 10px;
@@ -1341,15 +1319,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  transition: opacity 0.2s cubic-bezier(0.23, 1, 0.32, 1),
-              transform 0.2s cubic-bezier(0.23, 1, 0.32, 1);
+  /* v6 入场：由 Motion popIn（origin-aware scale-in）驱动，transform-origin 居中缩放 */
+  transform-origin: center;
 }
 
 @starting-style {
   .cmd-overlay { opacity: 0; }
-  .cmd-panel { opacity: 0; transform: translateY(8px) scale(0.97); }
 }
 
 .cmd-input-row {

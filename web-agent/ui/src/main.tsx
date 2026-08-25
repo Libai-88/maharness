@@ -1,6 +1,7 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { Toaster } from 'sonner';
+import { MotionConfig } from 'motion/react';
 import App from './App';
 import './styles.css';
 
@@ -11,8 +12,9 @@ try {
 
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
-    <Toaster
+    <MotionConfig reducedMotion="user">
+      <App />
+      <Toaster
       theme="dark"
       richColors
       position="bottom-right"
@@ -34,5 +36,6 @@ createRoot(document.getElementById('root')!).render(
         },
       }}
     />
+    </MotionConfig>
   </React.StrictMode>,
 );
