@@ -3,7 +3,7 @@
  * append-only 结构：TraceSession(traceId) → Turn → Step。
  * 三态输出：① SSE 实时推送（trace.step 事件）② JSONL 审计落盘（异步批量）③ 内存环形缓冲。
  */
-import { appendFileSync, mkdirSync } from 'node:fs';
+import { appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventBus } from './bus';
 import type { StepHandle, TraceStats, TraceStep, TraceStepInit } from './types';
@@ -133,6 +133,39 @@ export class Trace {
     if (filter?.name) out = out.filter((s) => s.name === filter.name);
     if (filter?.parentId) out = out.filter((s) => s.parentId === filter.parentId);
     if (filter?.limit && filter.limit > 0) out = out.slice(-filter.limit);
+    return out;
+  }
+
+  /** 归档查询：ring 未命中时回退 JSONL 审计文件（跨重启/跨日期的历史可检索）。
+   *  只扫最近 maxFiles 个日志文件、每文件最近 maxLines 行（本机工具量级足够）。 */
+  queryArchive(traceId?: string, filter: { type?: string; name?: string; parentId?: string; limit?: number } = {},
+    opts: { maxFiles?: number; maxLinesPerFile?: number } = {}): TraceStep[] {
+    const maxFiles = opts.maxFiles ?? 14;
+    const maxLines = opts.maxLinesPerFile ?? 20_000;
+    let files: string[] = [];
+    try {
+      files = readdirSync(this.tracesDir).filter((f) => f.endsWith('.jsonl')).sort().slice(-maxFiles);
+    } catch { return []; }
+    const out: TraceStep[] = [];
+    for (const file of files) {
+      try {
+        const lines = readFileSync(join(this.tracesDir, file), 'utf-8').split('\n');
+        for (const line of lines.slice(-maxLines)) {
+          if (!line.trim()) continue;
+          let step: TraceStep;
+          try {
+            step = JSON.parse(line) as TraceStep;
+          } catch { continue; }
+          if (!step || typeof step !== 'object' || !step.id || typeof step.ts !== 'number') continue;
+          if (traceId && step.traceId !== traceId) continue;
+          if (filter.type && step.type !== filter.type) continue;
+          if (filter.name && step.name !== filter.name) continue;
+          if (filter.parentId && step.parentId !== filter.parentId) continue;
+          out.push(step);
+        }
+      } catch { /* 单文件读取失败跳过 */ }
+    }
+    if (filter.limit && filter.limit > 0) return out.slice(-filter.limit);
     return out;
   }
 

@@ -63,18 +63,36 @@ export class RecordingProvider implements ProviderDef {
   }
 }
 
-/** 确定性回放 provider：按录音顺序逐次返回响应（零 API 成本） */
+/** 确定性回放 provider：按录音顺序逐次返回响应（零 API 成本）
+ *  请求内容比对（v2）：回放时校验当前请求与录音的消息轮廓（角色序列/条数/最新
+ *  user 内容）——钩子注入、工具定义或上下文转换的回归会改变发送序列，从而暴露。
+ *  model 不比（由外部配置决定，不属于 agent 行为）；宽松模式（默认）只计数+告警，
+ *  strict 模式抛错（CI 强化回归门禁时开启）。 */
 export class ReplayProvider implements ProviderDef {
   id = 'replay';
   label = 'REPLAY';
   defaultModel = 'replay';
   /** 已消耗的 LLM 调用次数（断言用：如 L1 缓存命中时第二次 run 应为 0 次新调用） */
   callCount = 0;
+  /** 请求与录音不一致的累计次数（严格模式会抛错；宽松模式以此为可观测信号） */
+  mismatches = 0;
   private cursor = 0;
 
-  constructor(private recording: Recording) {}
+  constructor(private recording: Recording, private opts: { strict?: boolean } = {}) {}
 
-  async *chat(_messages: LLMMessage[], _opts: ChatOptions): AsyncIterable<LLMChunk> {
+  private mismatchReason(messages: LLMMessage[], req: RecordedRequest): string | undefined {
+    if (!req.messages) return undefined; // 旧格式录音无请求轮廓：跳过比对（无法对齐）
+    const norm = (msgs: LLMMessage[]) => msgs.map((m) => `${m.role}:${m.tool_call_id ?? ''}`).join('|');
+    const lastUser = (msgs: LLMMessage[]) => [...msgs].reverse().find((m) => m.role === 'user')?.content ?? '';
+    if (messages.length !== req.messages.length) {
+      return `消息条数不一致（录音 ${req.messages.length} 条 ≠ 当前 ${messages.length} 条）`;
+    }
+    if (norm(messages) !== norm(req.messages)) return '消息角色序列不一致';
+    if (lastUser(messages) !== lastUser(req.messages)) return '最新用户消息不一致';
+    return undefined;
+  }
+
+  async *chat(messages: LLMMessage[], _opts: ChatOptions): AsyncIterable<LLMChunk> {
     const req = this.recording.requests[this.cursor];
     if (!req) {
       throw new Error(
@@ -84,6 +102,13 @@ export class ReplayProvider implements ProviderDef {
     }
     this.cursor++;
     this.callCount++;
+    const reason = this.mismatchReason(messages, req);
+    if (reason) {
+      this.mismatches++;
+      const msg = `[replay] 第 ${this.callCount} 次请求与录音不一致：${reason}（agent 行为或钩子注入已偏离录制基线）`;
+      if (this.opts.strict) throw new Error(msg);
+      console.warn(msg);
+    }
     for (const chunk of req.chunks) yield chunk;
   }
 }

@@ -12,6 +12,7 @@ import { pathToFileURL } from 'node:url';
 import express from 'express';
 import { Kernel } from '../kernel';
 import { Store, DEFAULT_PERSONA } from './db';
+import { loadOrCreateSecretKey } from './secrets';
 import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './routes';
 import { discoverProviders } from '../core/chat/provider';
 import { ClientTracker } from './client-tracker';
@@ -58,7 +59,8 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
   await kernel.start();
 
-  const store = new Store(kernel.paths.dbFile);
+  // 凭据加密：data/secret.key 主密钥（首启生成）；api_key 加密落库，读取时解密
+  const store = new Store(kernel.paths.dbFile, { secretKey: loadOrCreateSecretKey(kernel.paths.data) });
   seedDefaults(store);
   // 种子工作区：当前沙箱根目录始终可选（沙箱可切换，切换后工具边界随之热更新）
   const sandbox = kernel.config.get<string>('sandboxRoot', rootDir);
@@ -107,8 +109,17 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     if (!inst || !api || api.kind !== 'api') {
       return res.status(404).json({ error: '插件不存在或未提供 API 能力' });
     }
-    const router = api.api.router as unknown as (req: express.Request, res: express.Response, next: express.NextFunction) => void;
-    router(req, res, next);
+    const router = api.api.router as unknown as (req: express.Request, res: express.Response, next: express.NextFunction) => unknown;
+    // 异步插件 router 的 rejected Promise 必须显式交给 Express 错误中间件——
+    // 手工分发调用链下 Express 不会自动捕获（否则未处理 rejection + 请求悬挂）
+    try {
+      const ret = router(req, res, next);
+      if (ret && typeof (ret as Promise<unknown>).catch === 'function') {
+        (ret as Promise<unknown>).catch(next);
+      }
+    } catch (err) {
+      next(err);
+    }
   });
 
   // 兜底错误处理：handler 异常返回 500 而非进程崩溃（安装/卸载/文件操作等异步路径）

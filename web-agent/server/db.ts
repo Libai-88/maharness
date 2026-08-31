@@ -5,6 +5,7 @@
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
+import { decryptSecret, encryptSecret, isEncrypted } from './secrets';
 
 /** 网页端管理的 Provider 配置行 */
 export interface ProviderRow {
@@ -44,8 +45,11 @@ export const DEFAULT_PERSONA = {
 
 export class Store {
   private db: Database.Database;
+  /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
+  private secretKey?: Buffer;
 
-  constructor(dbFile: string) {
+  constructor(dbFile: string, opts: { secretKey?: Buffer } = {}) {
+    this.secretKey = opts.secretKey;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(`
@@ -106,6 +110,18 @@ export class Store {
     if (!sCols.some((c) => c.name === 'role')) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT ''");
     }
+    // 凭据迁移：带主密钥首次启动时，已存在的明文 api_key 自动加密落库（幂等）
+    if (this.secretKey) {
+      const plainRows = this.db.prepare('SELECT id, api_key AS apiKey FROM providers').all() as { id: string; apiKey: string }[];
+      const upd = this.db.prepare('UPDATE providers SET api_key = ? WHERE id = ?');
+      for (const row of plainRows) {
+        if (!row.apiKey || isEncrypted(row.apiKey)) continue;
+        upd.run(this.encryptKey(row.apiKey), row.id);
+      }
+      if (plainRows.some((r) => r.apiKey && !isEncrypted(r.apiKey))) {
+        console.log('[store] 已迁移明文 api_key 为加密存储');
+      }
+    }
   }
 
   /** 关闭数据库连接（嵌入场景清理临时数据目录前调用，释放 Windows 文件句柄） */
@@ -113,19 +129,38 @@ export class Store {
     try { this.db.close(); } catch { /* 已关闭 */ }
   }
 
-  // ---------- providers（网页端管理，DB 为唯一来源） ----------
+  // ---------- providers（网页端管理，DB 为唯一来源；api_key 加密落库） ----------
+
+  /** 解密存储密钥（唯一出口）；无主密钥时原样透传（明文兜底） */
+  private decryptKey(blob: string): string {
+    if (!this.secretKey || !blob) return blob;
+    try {
+      return decryptSecret(blob, this.secretKey);
+    } catch (err) {
+      console.warn('[store] api_key 解密失败（密钥变更或密文损坏），该 Provider 将不可用:',
+        err instanceof Error ? err.message : String(err));
+      return '';
+    }
+  }
+
+  /** 加密落库（唯一入口）；无主密钥时明文写入（向后兼容测试/无密钥环境） */
+  private encryptKey(plain: string): string {
+    if (!this.secretKey || !plain) return plain;
+    return encryptSecret(plain, this.secretKey);
+  }
 
   listProviders(): ProviderRow[] {
     const rows = this.db
       .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
       .all() as ProviderRow[];
-    return rows;
+    return rows.map((r) => ({ ...r, apiKey: this.decryptKey(r.apiKey) }));
   }
 
   getProvider(id: string): ProviderRow | undefined {
-    return this.db
+    const r = this.db
       .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
       .get(id) as ProviderRow | undefined;
+    return r ? { ...r, apiKey: this.decryptKey(r.apiKey) } : undefined;
   }
 
   upsertProvider(p: {
@@ -133,15 +168,16 @@ export class Store {
     priceIn?: number; priceOut?: number; enabled?: number;
   }): void {
     const now = Date.now();
+    const storedKey = this.encryptKey(p.apiKey);
     const existing = this.getProvider(p.id);
     if (existing) {
       this.db
         .prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
-        .run(p.label, p.baseUrl, p.apiKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
+        .run(p.label, p.baseUrl, storedKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
     } else {
       this.db
         .prepare('INSERT INTO providers (id, label, base_url, api_key, model, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(p.id, p.label, p.baseUrl, p.apiKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
+        .run(p.id, p.label, p.baseUrl, storedKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
     }
   }
 

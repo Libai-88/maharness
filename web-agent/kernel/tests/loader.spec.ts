@@ -165,6 +165,33 @@ describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
     assert.deepEqual(changed, ['gamma']);
     delete process.env.FOO;
   });
+
+  test('R4 跨扫描顺序依赖：requires 指向后注册的插件不再误删（注册期只查存在性）', async (t) => {
+    // 目录/注册顺序：a-scan（依赖方）先于 b-scan（被依赖方）——修复前 a 在
+    // register 阶段因 b 尚未注册而被删除，topoSort 救不回来
+    const f = setup({
+      'a-scan': `ctx.inject('helper');`,
+      'b-scan': `ctx.provide('helper', { ok: true });`,
+    }, { 'a-scan': { requires: ['b-scan'] } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('a-scan')?.state, 'started', '依赖方应正常启动');
+    assert.equal(f.kernel.plugins.get('b-scan')?.state, 'started', '被依赖方应正常启动');
+    assert.ok(f.kernel.plugins.resolveService('helper'), '依赖插件的服务应已发布');
+  });
+
+  test('R4 requires 完全缺失：启动前置校验失败进 error 态，其余插件不受影响', async (t) => {
+    const f = setup({
+      'needs-missing': `ctx.on('x', () => {});`,
+      'ok-plugin': ``,
+    }, { 'needs-missing': { requires: ['never-exists'] } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const inst = f.kernel.plugins.get('needs-missing');
+    assert.equal(inst?.state, 'error', '缺失依赖的插件进 error 态（可查错误原因）');
+    assert.ok((inst?.error ?? '').includes('缺少依赖'), '错误信息可诊断');
+    assert.equal(f.kernel.plugins.get('ok-plugin')?.state, 'started', '其余插件正常启动');
+  });
 });
 
 describe('PluginLoader enable/disable 生命周期', () => {

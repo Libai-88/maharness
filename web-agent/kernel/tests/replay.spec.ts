@@ -87,6 +87,30 @@ describe('loadRecording 录音加载', () => {
   });
 });
 
+describe('ReplayProvider 请求内容比对（R5）', () => {
+  test('宽松模式：请求与录音不一致时计数 mismatch，回放不受影响', async () => {
+    const p = new ReplayProvider(rec);
+    const out: LLMChunk[] = [];
+    for await (const c of p.chat([], { model: 'm' })) out.push(c); // [] ≠ 录音的 [user q1]
+    assert.equal(p.mismatches, 1, '不一致应被计数（可观测信号）');
+    assert.equal(out[0].type, 'delta', '仍按录音回放');
+  });
+
+  test('消息轮廓一致时不产生 mismatch', async () => {
+    const p = new ReplayProvider(rec);
+    for await (const _ of p.chat(rec.requests[0].messages, { model: 'm' })) { /* 消费 */ }
+    assert.equal(p.mismatches, 0);
+  });
+
+  test('strict 模式：不一致直接抛错（CI 强化回归门禁）', async () => {
+    const p = new ReplayProvider(rec, { strict: true });
+    await assert.rejects(
+      () => (async () => { for await (const _ of p.chat([], { model: 'm' })) { /* 触发比对 */ } })(),
+      /请求与录音不一致/,
+    );
+  });
+});
+
 describe('RecordingProvider 录制', () => {
   test('包裹真实 provider：请求与响应被完整记录，输出原样透传', async () => {
     const inner = {

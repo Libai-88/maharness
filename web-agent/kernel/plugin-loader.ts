@@ -143,7 +143,12 @@ export class PluginLoader {
     for (const inst of this.topoSort([...this.registry.values()])) {
       if (inst.state !== 'started' && inst.state !== 'stopped') {
         if (inst.manifest.enabled === false || inst.manifest.lazy) continue;
-        await this.start(inst);
+        // 单插件启动失败不阻断其余（依赖缺失/onStart 抛错只影响自身）
+        try {
+          await this.start(inst);
+        } catch (err) {
+          console.error(`[plugin] 启动失败 ${inst.manifest.id}:`, err instanceof Error ? err.message : String(err));
+        }
       }
     }
     this.primeSignatures(); // v3：为已启动插件建立依赖签名快照（智能重载的比对基准）
@@ -215,13 +220,11 @@ export class PluginLoader {
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
-      // 依赖检查（requires 中的插件必须先 loaded；error 态视同缺失——上次失败的依赖不可被当作可用）
-      for (const dep of manifest.requires ?? []) {
-        const depInst = this.registry.get(dep);
-        if (!depInst || depInst.state === 'registered' || depInst.state === 'error') {
-          throw new Error(`缺少依赖插件: ${dep}`);
-        }
-      }
+      // 依赖检查全部后置（v3.4）：注册阶段只解析清单与加载入口——同批次扫描顺序
+      // 无保证（readdir 平台相关），requires 指向稍后扫描的插件在本阶段必然未注册，
+      // 在此判失败会误删合法插件；"依赖必须存在且已加载"的硬校验统一放在
+      // startInternal（启动前置），单个依赖失败只影响该插件自身（loadAll 不阻断）。
+      void manifest.requires;
 
       // 动态加载入口（入口内容 hash busting 模块缓存，实现热重载；见 entryUrl 注释）
       const mod = await import(this.entryUrl(dir, manifest.entry));
@@ -602,6 +605,16 @@ export class PluginLoader {
     if (inst.state === 'started') return;
     inst.state = 'loading';
     try {
+      // 依赖硬校验（启动前置）：requires 的插件必须已加载（loaded/started）——
+      // 注册期只校验存在性（跨扫描顺序合法），启动前确保依赖先于本插件就绪。
+      // 拓扑排序已保证启动顺序；此校验兜底 enable/热重载等单插件路径。
+      const missingDep = (inst.manifest.requires ?? []).find((dep) => {
+        const d = this.registry.get(dep);
+        return !d || d.state === 'registered' || d.state === 'error';
+      });
+      if (missingDep) {
+        throw new Error(`缺少依赖插件: ${missingDep}（依赖未加载，无法启动）`);
+      }
       await inst.plugin?.onStart?.(this.buildContext(inst));
       inst.state = 'started';
       this.bus.emit(EventBus.event('plugin.started', { id: inst.manifest.id }));

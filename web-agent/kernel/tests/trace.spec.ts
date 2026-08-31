@@ -55,4 +55,29 @@ describe('Trace 生命周期', () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+
+  test('queryArchive：ring 未命中时从 JSONL 归档检索（跨实例/跨重启历史可查）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-trace-'));
+    try {
+      const dir = join(root, 'traces');
+      const t1 = new Trace(new EventBus(), dir);
+      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'tool_call', name: 'read_file' }).finish({ outputSummary: 'ok' });
+      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'system', name: 'cost-breaker', parentId: 'par-9' }).fail('x');
+      t1.flush(); // 同步落盘
+      t1.dispose();
+
+      // 新实例（模拟重启后）：ring 为空，archive 命中
+      const t2 = new Trace(new EventBus(), dir);
+      const steps = t2.queryArchive('arch-1');
+      assert.equal(steps.length, 2, '归档应命中 2 条');
+      assert.equal(steps.every((s) => s.traceId === 'arch-1'), true);
+      const children = t2.queryArchive(undefined, { parentId: 'par-9' });
+      assert.equal(children.length, 1, 'parentId 过滤应命中 1 条');
+      const named = t2.queryArchive('arch-1', { name: 'read_file' });
+      assert.equal(named.length, 1, 'name 过滤生效');
+      t2.dispose();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
 });

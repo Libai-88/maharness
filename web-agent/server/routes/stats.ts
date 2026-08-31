@@ -79,11 +79,18 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
           })(),
         },
         savedCost: cache.savedCost,
-        // 综合命中率：L1 直接回答 + L2 工具结果 + L3 前缀复用 占总轮次比例
+        // 综合命中率口径（v3.3 修正）：L1/L2/L3 不同质（语义跳过调用/工具结果复用/
+        // prompt 前缀折扣），直接加总做分母会超过 100%——single number 改用纯 L1
+        // 请求命中率（语义缓存跳过的请求占比，天然 ≤100%）；served 保留"节省次数"
+        // 加总（无歧义的计数口径）供 UI 展示。
         overall: (() => {
           const served = cache.l1Hits + cache.l2Hits + cache.l3Hits;
-          const total = trace.llmCalls + trace.toolCalls + cache.l1Hits;
-          return { served, total, rate: total > 0 ? Math.round((served / total) * 1000) / 10 : 0 };
+          const l1Total = cache.l1Hits + cache.l1Misses;
+          return {
+            served,
+            total: l1Total,
+            rate: l1Total > 0 ? Math.round((cache.l1Hits / l1Total) * 1000) / 10 : 0,
+          };
         })(),
       },
     });
