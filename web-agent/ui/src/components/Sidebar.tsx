@@ -21,14 +21,13 @@ export const BUILTIN_TABS: TabDef[] = [
   { key: 'stats', label: '统计', icon: <IconStats size={14} /> },
 ];
 
-/** 插件扩展 tab（当前为空，插件可通过 API 注册） */
-export const PLUGIN_TABS: TabDef[] = [];
-
 interface Props {
   sessions: Session[];
   activeId: string | null;
   activeTab: MainTab;
   onTab: (t: MainTab) => void;
+  /** 插件扩展 tab：由 App 按插件运行状态动态计算（插件停用即消失） */
+  pluginTabs?: TabDef[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
@@ -54,7 +53,7 @@ function fmtTime(ts: number): string {
 }
 
 export default function Sidebar({
-  sessions, activeId, activeTab, onTab, onSelect, onCreate, onDelete, onArchive, onPin, onRename,
+  sessions, activeId, activeTab, onTab, pluginTabs = [], onSelect, onCreate, onDelete, onArchive, onPin, onRename,
   onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning,
 }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
@@ -169,7 +168,7 @@ export default function Sidebar({
       </div>
 
       <div className="sb-tabs">
-        {BUILTIN_TABS.concat(PLUGIN_TABS).map((tab) => (
+        {BUILTIN_TABS.slice(0, 2).concat(pluginTabs, BUILTIN_TABS.slice(2)).map((tab) => (
           <button key={tab.key} className={`sb-tab ${activeTab === tab.key ? 'active' : ''}`} onClick={() => onTab(tab.key)}>
             {tab.icon}{tab.label}
           </button>

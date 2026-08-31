@@ -258,3 +258,40 @@ export interface TodoCard {
   createdAt: number;
   updatedAt: number;
 }
+
+/** workbench 插件：办公工作台——日程任务 + 项目（跨会话长期数据） */
+export type WbRepeat = 'daily' | 'weekdays' | 'weekly';
+export type WbProjectStatus = 'active' | 'paused' | 'done';
+
+export interface WbTask {
+  id: string;
+  title: string;
+  notes?: string;
+  date: string;               // 'YYYY-MM-DD'
+  time?: string;              // 'HH:MM'（可选，24 小时制）
+  done: boolean;
+  doneAt?: number;
+  projectId?: string;
+  repeat?: WbRepeat;
+  order: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WbProject {
+  id: string;
+  name: string;
+  desc?: string;
+  color: string;
+  status: WbProjectStatus;
+  deadline?: string;
+  order: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WbState {
+  today: string;
+  tasks: WbTask[];
+  projects: WbProject[];
+}

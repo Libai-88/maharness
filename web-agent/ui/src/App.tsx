@@ -10,10 +10,11 @@ import FilesView from './components/FilesView';
 import PluginsView from './components/PluginsView';
 import StatsView from './components/StatsView';
 import SettingsView from './components/SettingsView';
+import WorkbenchView from './components/WorkbenchView';
 import Menu from './components/Menu';
 import { AnimatePresence, motion } from 'motion/react';
 import { pageVariants } from './motion';
-import { IconChevronDown, IconClose, IconPanel } from './components/Icon';
+import { IconChevronDown, IconClose, IconPanel, IconWorkbench } from './components/Icon';
 import { toast } from 'sonner';
 
 export type Theme = 'dark' | 'light';
@@ -63,6 +64,14 @@ export default function App() {
       if (e.type === 'trace.step') setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
       else if (e.type === 'plan.updated') setPlan(e.data as PlanState | null);
       else if (e.type === 'todo.updated') setTodos((e.data as { cards: TodoCard[] } | null)?.cards ?? []);
+      else if (e.type === 'approval.requested') {
+        // 子代理/并行任务的审批经全局事件广播（主执行器阻塞在子任务 handler 内，
+        // 审批事件无法从其 SSE 流到达）；按 id 去重合并进统一审批列表
+        const d = e.data as { approvalId: string; name: string; summary: string };
+        if (d?.approvalId) {
+          setApprovals((prev) => (prev.some((a) => a.id === d.approvalId) ? prev : [...prev, { id: d.approvalId, name: d.name, summary: d.summary }]));
+        }
+      }
     });
     const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
     return () => { off(); clearInterval(t); };
@@ -317,7 +326,10 @@ export default function App() {
       },
       onError: (e) => {
         setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
-        // 错误结束（如超轮数/熔断）→ 同步断点：未完成任务保留「继续任务」入口
+        // 错误结束（如超轮数/熔断/连接中断）→ 同步断点：未完成任务保留「继续任务」入口；
+        // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
+        // 不复位则输入区与停止按钮锁死在 streaming 状态
+        setStreaming(false);
         if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
       },
       onEnd: () => {
@@ -337,6 +349,9 @@ export default function App() {
     const cp = checkpoint;
     if (!cp?.exists) return;
     setResuming(true);
+    // 恢复期间置全局 streaming：输入区防重入（可再点发送会撞服务端 409）与
+    // 停止按钮可用——恢复任务同样可被用户中断
+    setStreaming(true);
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
     setMessages((prev) => [...prev, { id: `cp-${Date.now()}`, role: 'system', content: `任务曾中断于第 ${cp.turn + 1} 轮——正在从断点继续…` }, assistantMsg]);
     setCheckpoint(null);
@@ -363,6 +378,7 @@ export default function App() {
       },
       onError: (e) => {
         setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
+        setStreaming(false);
         if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
       },
       onEnd: () => {
@@ -414,6 +430,13 @@ export default function App() {
     setSettingsOpen(false);
   };
 
+  // 办公工作台（workbench 插件）：插件运行中才挂 Tab——插件停用/热重载中即从主导航消失，
+  // 正停留在该 Tab 时自动回落到会话页（随时可关停，不影响原功能）
+  const workbenchReady = plugins.some((p) => p.id === 'workbench' && (p.state === 'started' || p.state === 'loaded'));
+  useEffect(() => {
+    if (!workbenchReady && activeTab === 'workbench') setActiveTab('chat');
+  }, [workbenchReady, activeTab]);
+
   return (
     <div className="app">
       <Sidebar
@@ -421,6 +444,7 @@ export default function App() {
         activeId={activeId}
         activeTab={activeTab}
         onTab={onTab}
+        pluginTabs={workbenchReady ? [{ key: 'workbench', label: '工作台', icon: <IconWorkbench size={14} /> }] : []}
         onSelect={selectSession}
         onCreate={createSession}
         onDelete={deleteSession}
@@ -440,7 +464,7 @@ export default function App() {
             <div className="crumb">
               <span className="prev">DEEPSEEK</span>
               <span className="sep">/</span>
-              <span className="cur">{activeTab === 'chat' ? (currentSession?.title ?? '新会话') : activeTab === 'files' ? '文件工作区' : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}</span>
+              <span className="cur">{activeTab === 'chat' ? (currentSession?.title ?? '新会话') : activeTab === 'files' ? '文件工作区' : activeTab === 'workbench' ? '办公工作台' : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}</span>
             </div>
           </div>
           <div className="topbar-right">
@@ -536,6 +560,8 @@ export default function App() {
           </div>
         ) : activeTab === 'files' ? (
           <FilesView />
+        ) : activeTab === 'workbench' ? (
+          <WorkbenchView />
         ) : activeTab === 'plugins' ? (
           <PluginsView plugins={plugins} onAction={pluginAction} />
         ) : (

@@ -8,7 +8,8 @@ import type { StatsInfo } from '../types';
 const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n));
 const cost = (n: number) => `¥${n.toFixed(2)}`;
 
-function pct(n: number) { return `${(n * 100).toFixed(1)}%`; }
+/** 百分比格式化：后端 rate 已是 0-100 数值（42.5 = 42.5%），不再乘 100 */
+function pct(n: number) { return `${n.toFixed(1)}%`; }
 
 /** 数字 count-up（motion）：值变化时从 0 平滑滚动到目标值（Linear/Vercel 式 KPI 动效） */
 function AnimatedNumber({ value, format }: { value: number; format: (n: number) => string }) {
@@ -66,7 +67,7 @@ export default function StatsView() {
             <span className="hero-label">综合命中率 · HIT RATE</span>
             <span className="hero-badge">{cache.l3.realHits > 0 ? 'L3 真实命中' : cache.l1Enabled ? 'L1 已启用' : 'L1 关闭'}</span>
           </div>
-          <div className="hero-value"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate / 100 : (overall?.rate ?? 0) / 100} format={pct} /></div>
+          <div className="hero-value"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate : (overall?.rate ?? 0)} format={pct} /></div>
           <div className="hero-sub">
             {cache.l3.realHits > 0
               ? `provider 确认命中 ${fmt(cache.l3.realTokens)} tok · 折合 ${cost(cache.savedCost ?? 0)}`
@@ -125,12 +126,12 @@ export default function StatsView() {
         <div className="cache-card c3">
           <div className="cc-head">
             <span className="cc-badge b3">L3 prompt 前缀</span>
-            <span className="cc-rate"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate / 100 : l3.hits} format={cache.l3.realHits > 0 ? pct : fmt} /></span>
+            <span className="cc-rate"><AnimatedNumber value={cache.l3.realHits > 0 ? cache.l3.realRate : l3.hits} format={cache.l3.realHits > 0 ? pct : fmt} /></span>
           </div>
           <span className="cc-desc">消息只追加不重写 → KV cache</span>
           <span className="cc-meta">
             真实命中 {fmt(cache.l3.realTokens ?? 0)} tok
-            {cache.l3.realHits > 0 ? ` · 命中率 ${pct(cache.l3.realRate / 100)}` : ' · 估算 ' + fmt(l3.tokens ?? 0) + ' tok'}
+            {cache.l3.realHits > 0 ? ` · 命中率 ${pct(cache.l3.realRate)}` : ' · 估算 ' + fmt(l3.tokens ?? 0) + ' tok'}
           </span>
           <div className="cc-bar"><div className="cc-bar-fill" /></div>
           <span className="cc-example">多轮对话输入成本按 provider 折扣计费</span>

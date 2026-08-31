@@ -191,6 +191,11 @@ export const IconChevronRight = (p: IconProps) => (
   <Svg {...p}><path d="M9.5 6 l6 6 -6 6" /></Svg>
 );
 
+/** 左箭头（chevron） */
+export const IconChevronLeft = (p: IconProps) => (
+  <Svg {...p}><path d="M14.5 6 l-6 6 6 6" /></Svg>
+);
+
 /** 展开：对角箭头 */
 export const IconExpand = (p: IconProps) => (
   <Svg {...p}><path d="M9 4 H4 v5" /><path d="M15 4 h5 v5" /><path d="M9 20 H4 v-5" /><path d="M15 20 h5 v-5" /></Svg>
@@ -325,6 +330,11 @@ export const IconParallel = (p: IconProps) => (
   <Svg {...p}><path d="M12 3 v6 M12 9 l-4 -4 4 -4 4 4" /><path d="M12 9 c3 3 3 6 0 9 c-3 -3 -3 -6 0 -9 Z" /><path d="M12 21 v-3" /></Svg>
 );
 
+/** 办公工作台（workbench 插件）：公文包 */
+export const IconWorkbench = (p: IconProps) => (
+  <Svg {...p}><rect x="3" y="8" width="18" height="12" rx="2.5" /><path d="M9 8 V6.5 a2 2 0 0 1 2 -2 h2 a2 2 0 0 1 2 2 V8" /><path d="M3 12.5 h7 M14 12.5 h7" /><path d="M10 12.5 v2 h4 v-2" /></Svg>
+);
+
 /** 插件专属图标映射（v5：以语义图标替代首字母块） */
 const PLUGIN_ICONS: Record<string, (p: IconProps) => React.ReactElement> = {
   chat: IconChat,
@@ -333,6 +343,7 @@ const PLUGIN_ICONS: Record<string, (p: IconProps) => React.ReactElement> = {
   skills: IconSpark,
   parallel: IconParallel,
   todo: IconPlan,
+  workbench: IconWorkbench,
 };
 
 export function PluginIcon({ id, size = 20, className }: { id: string; size?: number; className?: string }) {

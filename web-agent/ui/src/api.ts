@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WbState, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -74,6 +74,10 @@ export async function streamChat(
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
   let buf = '';
+  // 服务端结束标记（'end' 事件）；流中途断开时据此兜底触发 onError——
+  // 否则全局 streaming 状态永远不复位（输入区卡死）
+  let endSeen = false;
+  let transportBroke = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -108,15 +112,20 @@ export async function streamChat(
             for (const fn of retryListeners) fn();
             break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
-          case 'end': h.onEnd(); break;
+          case 'end': endSeen = true; h.onEnd(); break;
         }
       }
     }
   } catch {
-    // 中断或网络异常
+    // 传输层中断（网络断开/代理掐断/用户停止）：不静默吞掉——错误需到达 UI
+    //（onError 复位 streaming 状态；onEnd 不再触发，避免清掉未完成任务的断点）
+    transportBroke = true;
+    h.onError('连接中断');
   } finally {
     reader.releaseLock();
   }
+  // 流读完但服务端未发 end（进程崩溃/连接被掐断）：同样兜底，streaming 不复位会锁死输入区
+  if (!endSeen && !transportBroke) h.onError('连接中断：未见结束标记');
 }
 
 // ---------- 全局事件订阅（Trace 实时面板） ----------
@@ -203,7 +212,8 @@ export interface GitStatus {
 export const gitApi = {
   status: () => api<GitStatus>('/api/git/status'),
   commit: (message: string) => api<{ ok: boolean }>('/api/git/commit', { method: 'POST', body: JSON.stringify({ message }) }),
-  push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST' }),
+  // 服务端契约：push 改变远端共享状态，要求显式 confirm:true 确认（不传必 400）
+  push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST', body: JSON.stringify({ confirm: true }) }),
 };
 
 /** 运行时配置（上下文管理 / 缓存参数 / 思维链预算与语言） */
@@ -261,4 +271,22 @@ export const pluginsApi = {
 export const traceApi = {
   stats: () => api<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean }>('/api/trace/stats'),
   byTraceId: (traceId: string) => api<{ steps: TraceStep[] }>(`/api/trace?trace_id=${encodeURIComponent(traceId)}`),
+};
+
+/** 办公工作台（workbench 插件）：全量状态一次取回，变更操作直接回传新状态（一轮刷新）。
+ *  插件停用后端点 404 → 调用方 catch 后展示「插件未启用」空态。 */
+export const workbenchApi = {
+  state: () => api<WbState>('/api/plugins/workbench/wb/state'),
+  rollover: () => api<{ ok: boolean; moved: number; state: WbState }>('/api/plugins/workbench/wb/rollover', { method: 'POST' }),
+  addTask: (b: { title: string; date?: string; time?: string; projectId?: string; repeat?: string; notes?: string }) =>
+    api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/tasks', { method: 'POST', body: JSON.stringify(b) }),
+  updateTask: (id: string, patch: Partial<{ title: string; done: boolean; date: string; time: string; notes: string; projectId: string; repeat: string }>) =>
+    api<{ ok: boolean; state: WbState }>(`/api/plugins/workbench/wb/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  removeTask: (id: string) => api<{ ok: boolean }>(`/api/plugins/workbench/wb/tasks/${id}`, { method: 'DELETE' }),
+  clearDone: (date: string) => api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/tasks/clear-done', { method: 'POST', body: JSON.stringify({ date }) }),
+  addProject: (b: { name: string; color?: string; deadline?: string; desc?: string }) =>
+    api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/projects', { method: 'POST', body: JSON.stringify(b) }),
+  updateProject: (id: string, patch: Partial<{ name: string; desc: string; color: string; status: string; deadline: string }>) =>
+    api<{ ok: boolean; state: WbState }>(`/api/plugins/workbench/wb/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  removeProject: (id: string) => api<{ ok: boolean }>(`/api/plugins/workbench/wb/projects/${id}`, { method: 'DELETE' }),
 };

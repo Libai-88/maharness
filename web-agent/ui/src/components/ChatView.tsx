@@ -118,18 +118,21 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+/** 单行代码高亮：先转义 HTML 特殊字符再着色。模型输出为不可信输入——
+ *  未转义文本直接注入会形成 XSS 面（<img onerror>、</span><script> 逃逸）；
+ *  着色 span 完全由本函数生成，原始文本只以纯文本形式进入 DOM。 */
+export function highlightLine(line: string): string {
+  const esc = line.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return esc
+    .replace(/(\/\/.*$)/, (m) => `<span class="cm">${m}</span>`)
+    .replace(/('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g, (m) => `<span class="st">${m}</span>`)
+    .replace(/\b(import|from|export|default|const|let|var|function|return|async|await|new|class|this|interface|type)\b/g, (m) => `<span class="kw">${m}</span>`);
+}
+
 /** 代码块：简化语言高亮（关键字/字符串/注释） */
 function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
-  const hl = code
-    .split('\n')
-    .map((line) =>
-      line
-        .replace(/(\/\/.*$)/, (m) => `<span class="cm">${m}</span>`)
-        .replace(/('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")/g, (m) => `<span class="st">${m}</span>`)
-        .replace(/\b(import|from|export|default|const|let|var|function|return|async|await|new|class|this|interface|type)\b/g, (m) => `<span class="kw">${m}</span>`),
-    )
-    .join('\n');
+  const hl = code.split('\n').map(highlightLine).join('\n');
   return (
     <div className="code-block">
       <div className="code-head">

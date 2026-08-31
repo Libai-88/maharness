@@ -1,0 +1,7 @@
+{
+  "id": "workbench",
+  "name": "办公工作台",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}
