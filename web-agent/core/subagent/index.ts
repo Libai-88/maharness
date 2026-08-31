@@ -174,6 +174,17 @@ export default {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
               else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
+              else if (ev.type === 'approval_required') {
+                // 子代理审批可达性：审批注册在共享 ApprovalBoard（/api/approvals/:id
+                // 经主 runner 可达）；事件经全局事件总线广播给 UI——父执行器阻塞在
+                // 本 handler 内，事件无法经其 yield 流透传，必须走带外通道。
+                ctx.bus.emit({
+                  type: 'approval.requested',
+                  traceId,
+                  ts: Date.now(),
+                  data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary },
+                });
+              }
               else if (ev.type === 'error') error = ev.error;
             }
           } catch (err) {

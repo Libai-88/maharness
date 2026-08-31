@@ -252,14 +252,17 @@ export class Store {
     this.deleteSessions([id]);
   }
 
-  /** 批量删除会话（事务原子：全部成功或全部失败） */
+  /** 批量删除会话（事务原子：全部成功或全部失败）
+   *  同步清理 agent_checkpoints——否则删除后 resume=true 会从孤儿断点"复活"已删会话 */
   deleteSessions(ids: string[]): number {
     if (ids.length === 0) return 0;
     const delMsg = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
+    const delCp = this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?');
     const delSess = this.db.prepare('DELETE FROM sessions WHERE id = ?');
     const tx = this.db.transaction((list: string[]) => {
       for (const id of list) {
         delMsg.run(id);
+        delCp.run(id);
         delSess.run(id);
       }
     });
@@ -267,9 +270,11 @@ export class Store {
     return ids.length;
   }
 
-  /** 清空会话消息（保留会话本身，/clear 命令用） */
+  /** 清空会话消息（保留会话本身，/clear 命令用）
+   *  同步清理断点：清空后 resume 不应再恢复旧任务历史 */
   clearSessionMessages(id: string): void {
     this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
+    this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(id);
   }
 
   // ---------- workspaces ----------

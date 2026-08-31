@@ -69,7 +69,7 @@ export class Kernel {
     this.budget = new Budget(this.config.get<number>('budget.subagentMaxTotal', 8));
     this.plugins = new PluginLoader(
       this.bus,
-      { kernel: this, config: this.config, trace: this.trace, cache: this.cache },
+      { kernel: this, paths: this.paths, config: this.config, trace: this.trace, cache: this.cache },
       join(rootDir, 'core'),
       opts.userPluginsDir ?? join(rootDir, 'plugins'),
     );
@@ -89,6 +89,7 @@ export class Kernel {
     await this.plugins.dispose();
     this.cache.save(); // 缓存落盘（跨重启保留命中）
     this.trace.flush(); // 轨迹队列兜底落盘（不必等定时器/进程退出钩子）
+    this.trace.dispose(); // 移除 exit 监听器（反复 start/stop 不累积）
     this.bus.emit(EventBus.event('kernel.stopped', {}));
   }
 }

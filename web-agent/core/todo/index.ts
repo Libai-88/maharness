@@ -9,9 +9,8 @@
  * 卡片按 sessionId 关联会话：模型建的卡片挂在当前会话（会话级 to do list），
  * 看板展示全部（跨会话视图）。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { randomUUID } from 'node:crypto';
 import type { Plugin, ToolContext } from '../../kernel/types';
 
@@ -35,15 +34,13 @@ const STATUSES: TodoStatus[] = ['todo', 'doing', 'done', 'blocked'];
 const PRIORITIES: TodoPriority[] = ['low', 'medium', 'high', 'urgent'];
 const MAX_CARDS = 500;
 
-// 项目根 = 本文件上溯两级（core/todo/index.ts → <root>/web-agent）
-const rootDir = fileURLToPath(new URL('../..', import.meta.url));
-const dataFile = join(rootDir, 'data', 'todo.json');
-
 export default {
   id: 'todo',
   name: '待办看板',
   version: '0.1.0',
   onLoad(ctx) {
+    // 数据目录跟随 Kernel 的 dataDir 覆盖（AGENT_DATA_DIR/测试隔离），不写死源码树 data/
+    const dataFile = join(ctx.paths.data, 'todo.json');
     // ---- 数据源：内存 + 落盘（data/todo.json，跨重启保留） ----
     let cards: TodoCard[] = [];
     try {
@@ -63,7 +60,10 @@ export default {
     const save = () => {
       try {
         mkdirSync(dirname(dataFile), { recursive: true });
-        writeFileSync(dataFile, JSON.stringify({ cards }, null, 2), 'utf8');
+        // 原子写：先临时文件再 rename——崩溃/断电不留下截断 JSON
+        const tmp = `${dataFile}.tmp`;
+        writeFileSync(tmp, JSON.stringify({ cards }, null, 2), 'utf8');
+        renameSync(tmp, dataFile);
       } catch (err) {
         console.warn('[todo] 持久化失败（不影响运行）:', err instanceof Error ? err.message : String(err));
       }

@@ -8,17 +8,12 @@
  * 持久化：data/memory.json（facts 列表，上限 200 条，最旧淘汰；重启不丢）。
  * 工具：remember_fact / recall_facts / forget_fact。
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { bigramSet } from '../../kernel/cache';
 import type { AgentHookCtx } from '../chat/agent';
 import type { Plugin } from '../../kernel/types';
-
-const rootDir = fileURLToPath(new URL('../..', import.meta.url));
-const dataDir = join(rootDir, 'data');
-const memoryFile = join(dataDir, 'memory.json');
 
 const MAX_FACTS = 200;
 const LESSON_COUNT = 3;       // 失败教训固定注入条数（不重复犯错优先）
@@ -44,8 +39,9 @@ function relatedToTask(task: string, factText: string): boolean {
   return inter >= RELATED_BIGRAM_MIN;
 }
 
-/** 加载/保存记忆（同步、容错；向后兼容旧版仅 facts 的文件） */
-function loadMemory(): MemoryData {
+/** 加载/保存记忆（同步、容错；向后兼容旧版仅 facts 的文件）。
+ *  文件路径由 onLoad 从 ctx.paths.data 解析（跟随 Kernel dataDir 覆盖，不写死源码树） */
+function loadMemory(memoryFile: string): MemoryData {
   try {
     if (!existsSync(memoryFile)) return { facts: [], blocks: {} };
     const raw = JSON.parse(readFileSync(memoryFile, 'utf-8')) as Partial<MemoryData>;
@@ -56,10 +52,13 @@ function loadMemory(): MemoryData {
   } catch { return { facts: [], blocks: {} }; }
 }
 
-function saveMemory(data: MemoryData): void {
+function saveMemory(memoryFile: string, data: MemoryData): void {
   try {
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(memoryFile, JSON.stringify(data, null, 2), 'utf8');
+    mkdirSync(dirname(memoryFile), { recursive: true });
+    // 原子写：先临时文件再 rename——崩溃/断电不留下截断 JSON（旧实现直接覆盖）
+    const tmp = `${memoryFile}.tmp`;
+    writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf8');
+    renameSync(tmp, memoryFile);
   } catch { /* 持久化失败不阻断对话 */ }
 }
 
@@ -68,9 +67,10 @@ export default {
   name: '长期记忆',
   version: '0.1.0',
   onLoad(ctx) {
-    const { facts, blocks } = loadMemory();
+    const memoryFile = join(ctx.paths.data, 'memory.json');
+    const { facts, blocks } = loadMemory(memoryFile);
 
-    const persist = () => saveMemory({ facts, blocks });
+    const persist = () => saveMemory(memoryFile, { facts, blocks });
     const setBlock = (name: string, content: string): MemoryBlock => {
       blocks[name] = { content, ts: Date.now() };
       persist();

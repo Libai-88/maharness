@@ -200,6 +200,7 @@ export class PluginLoader {
    *  空壳被 loadAll 误启动，也不留半初始化实例污染依赖检查。 */
   async register(dir: string): Promise<PluginInstance | undefined> {
     let id = '';
+    let inst: PluginInstance | undefined;
     try {
       const manifest = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf-8')) as PluginManifest;
       const existing = this.registry.get(manifest.id);
@@ -210,7 +211,7 @@ export class PluginLoader {
         return existing;
       }
       id = manifest.id;
-      const inst: PluginInstance = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry) };
+      inst = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry) };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -230,6 +231,11 @@ export class PluginLoader {
     } catch (err) {
       // 残骸清理：仅移除本目录注册进去的实例（并发场景下不误删他人）
       if (id && this.registry.get(id)?.dir === dir) this.registry.delete(id);
+      // 副作用回收：onLoad 已执行的 ctx.on/register/provide 等逆元全部清除——
+      // 否则加载失败的插件会残留事件订阅、能力与服务绑定（旧实现只删 registry）
+      if (inst) {
+        try { await inst.scope.dispose(); } catch { /* 忽略 */ }
+      }
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[plugin] 加载失败 ${basename(dir)}: ${msg}`);
       this.bus.emit(EventBus.event('plugin.error', { dir: basename(dir), error: msg }));
@@ -310,6 +316,7 @@ export class PluginLoader {
     return {
       pluginId: inst.manifest.id,
       kernel: this.ctxBase.kernel,
+      paths: this.ctxBase.kernel.paths,
       bus: this.bus,
       config,
       trace: this.ctxBase.trace,
@@ -606,6 +613,11 @@ export class PluginLoader {
       // 通知订阅者（如 chat 的 persona 集订阅），保证「启动即生效」而非等下次变化
       for (const kind of new Set(inst.caps.map((c) => c.kind))) this.notifyCapSet(kind);
     } catch (err) {
+      // 失败回收：onLoad/onStart 已入 scope 的副作用（订阅/能力/服务绑定）一并清除——
+      // stopInternal 对 error 态直接返回，不清理；不回收则 error 实例滞留监听器/服务，
+      // 热重载/enable 重试后出现旧副作用与新实例叠加
+      await inst.scope.dispose().catch(() => undefined);
+      inst.scope = new EffectScope();
       inst.state = 'error';
       inst.error = err instanceof Error ? err.message : String(err);
       this.bus.emit(EventBus.event('plugin.error', { id: inst.manifest.id, error: inst.error }));
@@ -771,13 +783,17 @@ export class PluginLoader {
         continue;
       }
       if (signature === inst.depSignature) continue; // 依赖未变：保留实例，零抖动
-      inst.depSignature = signature;
       // 依赖签名变化（可能不含文件内容变化，如 env/config 变更）→ 强制刷新模块记录，
       // 否则入口 hash 不变 → import 命中 ESM 缓存 → onLoad/onStart 读到的还是旧值
       inst.forceFresh = true;
       try {
         const keepActive = !(inst.manifest.enabled === false || inst.manifest.lazy);
         await this.reload(inst.manifest.id, keepActive);
+        // 提交成功才更新签名——reload 会以新实例替换 registry（新实例继承旧签名），
+        // 必须对 registry 中的当前实例写新值；失败回滚时保持旧值，后续同类依赖
+        // 变化仍能触发重载（旧实现先写后 reload，失败后签名已是新值导致重载失效）
+        const cur = this.registry.get(inst.manifest.id);
+        if (cur) cur.depSignature = signature;
         changed.push(inst.manifest.id);
       } catch (err) {
         console.warn(`[plugin] 依赖驱动重载失败 ${inst.manifest.id}:`, err instanceof Error ? err.message : String(err));

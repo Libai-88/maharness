@@ -6,9 +6,9 @@ import type { RouteDeps } from './shared';
 
 // ---- M2 /api/events 事件类型白名单 ----
 // 只转发前端实际消费的事件（ui/src/App.tsx 确认：trace.step / plan.updated /
-// todo.updated），宁少勿多——其余总线事件（plugin.*/config.changed/kernel.* 等）
-// 属于内部观测噪声，不进 SSE；前端将来需要新事件时在此显式登记。
-const SSE_EVENT_TYPES = new Set(['trace.step', 'plan.updated', 'todo.updated']);
+// todo.updated / workbench.updated），宁少勿多——其余总线事件（plugin.* /
+// config.changed / kernel.* 等）属于内部观测噪声，不进 SSE；前端将来需要新事件时在此显式登记。
+const SSE_EVENT_TYPES = new Set(['trace.step', 'plan.updated', 'todo.updated', 'workbench.updated', 'approval.requested']);
 /** SSE 单连接待发缓冲上限：write 返回 false（内核缓冲满）且超过该值 → 销毁连接（慢客户端背压保护） */
 const SSE_BACKPRESSURE_BYTES = 1_048_576;
 

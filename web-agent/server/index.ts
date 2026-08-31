@@ -49,7 +49,7 @@ function seedDefaults(store: Store): void {
   }
 }
 
-export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store }> {
+export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store; closeEnvWatcher: () => void }> {
   // 数据目录/用户插件目录可经环境变量覆盖（AGENT_DATA_DIR / AGENT_USER_PLUGINS_DIR）：
   // selftest 等嵌入场景用临时目录隔离，不污染生产 DB；不设置时与默认行为完全一致。
   const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir }, {
@@ -138,13 +138,21 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   const envPath = join(process.cwd(), '.env');
   const envDir = dirname(envPath);
   let envTimer: NodeJS.Timeout | null = null;
+  let envWatcher: ReturnType<typeof watch> | null = null;
+  /** 关闭 .env 监听（watcher + 防抖定时器）——嵌入场景（selftest/测试）多次
+   *  start/stop 需要显式清理，否则 watcher 句柄持续存在并保持事件循环存活 */
+  const closeEnvWatcher = () => {
+    if (envTimer) { clearTimeout(envTimer); envTimer = null; }
+    try { envWatcher?.close(); } catch { /* 忽略 */ }
+    envWatcher = null;
+  };
   // 上次 .env 解析快照（diff 用）：首帧读不到（文件不存在）也不报错
   let lastEnv: Record<string, string> = {};
   try {
     lastEnv = dotenv.parse(readFileSync(envPath, 'utf-8'));
   } catch { /* .env 尚不存在：以空快照起步 */ }
   try {
-    watch(envDir, (_event, filename) => {
+    envWatcher = watch(envDir, (_event, filename) => {
       if (filename !== '.env') return;
       if (envTimer) clearTimeout(envTimer);
       envTimer = setTimeout(() => {
@@ -191,7 +199,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
   // 监听成功后的运行期错误：记录不退出（进程存活状态由入口直跑场景的退出码体现）
   server.on('error', (err) => console.error('[server] 运行期错误:', err.message));
-  return { kernel, app, server, tracker, store };
+  return { kernel, app, server, tracker, store, closeEnvWatcher };
 }
 
 // 直接运行（tsx server/index.ts）
@@ -199,14 +207,16 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
 // 如通过另一个文件 import 本模块且其路径包含 argv[1] 片段时）
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const { server, kernel, tracker } = await startServer();
+    const { server, kernel, tracker, closeEnvWatcher, store } = await startServer();
     let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) return;
       shuttingDown = true;
       console.log('\n 正在关闭…');
       server.close();
+      closeEnvWatcher();
       await kernel.stop();
+      store.close(); // SQLite/WAL 句柄释放（Windows 下不关会阻止文件清理/重启）
       process.exit(0);
     };
     process.on('SIGINT', shutdown);

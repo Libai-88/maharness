@@ -16,6 +16,7 @@
  * 注意：录音按「调用顺序」回放，不做请求内容匹配——保证同一任务两次运行的行为
  * 若因钩子注入等导致调用次数/顺序不同，会以「序列耗尽/错位」的形式暴露（这正是回归要抓的）。
  */
+import { readFileSync } from 'node:fs';
 import type { LLMChunk, LLMMessage, ProviderDef, ChatOptions } from '../../kernel/types';
 
 export interface RecordedRequest {
@@ -89,7 +90,6 @@ export class ReplayProvider implements ProviderDef {
 
 /** 读取 golden 录音文件（JSON） */
 export function loadRecording(path: string): Recording {
-  const { readFileSync } = require('node:fs') as typeof import('node:fs');
   const raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<Recording>;
   if (raw.version !== 1 || !Array.isArray(raw.requests)) {
     throw new Error(`录音格式不合法: ${path}`);

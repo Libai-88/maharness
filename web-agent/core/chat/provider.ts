@@ -238,10 +238,12 @@ export function setupEmbedding(ctx: PluginContext): void {
   const model = process.env.EMBEDDING_MODEL;
   if (!baseUrl || !apiKey || !model) return;
   ctx.cache.setEmbeddingFn(async (text: string) => {
+    // 本地 embedding（本机 Ollama 等）常见，不做私网限制；超时防 L1 查询被无期限网络请求拖住
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, input: text }),
+      signal: AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`Embedding 请求失败 ${res.status}`);
     const json = (await res.json()) as { data: { embedding: number[] }[] };

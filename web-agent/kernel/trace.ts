@@ -143,4 +143,10 @@ export class Trace {
   statsSnapshot(): TraceStats {
     return this.stats();
   }
+
+  /** 释放进程级资源（移除 exit 监听器）。嵌入式多次 start/stop（测试/多实例）场景
+   *  防 listener 累积——调用前应已 flush（Kernel.stop 顺序：flush 后 dispose） */
+  dispose(): void {
+    process.removeListener('exit', this.exitFlush);
+  }
 }

@@ -63,9 +63,16 @@ interface ServerStatus {
 
 // ============ stdio 传输（JSON-RPC 2.0 over stdio） ============
 
+/** pending 条目携带超时 timer：settle 即 clearTimeout（不再让 timer 滞留到触发时刻） */
+interface PendingEntry {
+  resolve: (v: unknown) => void;
+  reject: (e: Error) => void;
+  timer?: NodeJS.Timeout;
+}
+
 class StdioConnection implements McpConnection {
   private proc: ReturnType<typeof spawn> | null = null;
-  private pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void }>();
+  private pending = new Map<number, PendingEntry>();
   private nextId = 1;
   private buf = '';
   private closed = false;
@@ -117,6 +124,7 @@ class StdioConnection implements McpConnection {
       if (typeof msg.id === 'number' && this.pending.has(msg.id)) {
         const p = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
+        if (p.timer) clearTimeout(p.timer);
         if (msg.error) p.reject(new Error(msg.error.message ?? 'JSON-RPC 错误'));
         else p.resolve(msg.result);
       }
@@ -126,12 +134,16 @@ class StdioConnection implements McpConnection {
   request(method: string, params: unknown): Promise<unknown> {
     return new Promise((resolve, reject) => {
       const id = this.nextId++;
-      this.pending.set(id, { resolve, reject });
+      const entry: PendingEntry = { resolve, reject };
+      this.pending.set(id, entry);
       this.write({ jsonrpc: '2.0', id, method, params });
       const timer = setTimeout(() => {
-        if (this.pending.delete(id)) reject(new Error(`MCP 请求超时: ${method}`));
+        if (this.pending.delete(id)) {
+          reject(new Error(`MCP 请求超时: ${method}`));
+        }
       }, 30_000);
       timer.unref?.();
+      entry.timer = timer;
     });
   }
 
@@ -141,7 +153,10 @@ class StdioConnection implements McpConnection {
 
   private failAll(err: Error): void {
     if (this.closed) return;
-    for (const p of this.pending.values()) p.reject(err);
+    for (const p of this.pending.values()) {
+      if (p.timer) clearTimeout(p.timer);
+      p.reject(err);
+    }
     this.pending.clear();
   }
 
@@ -269,8 +284,9 @@ export default {
 
     for (const [name, cfg] of Object.entries(servers ?? {})) {
       if (!cfg || (cfg.type !== 'stdio' && cfg.type !== 'http')) continue;
+      let conn: McpConnection | undefined;
       try {
-        const conn = cfg.type === 'stdio' ? new StdioConnection(name, cfg) : new HttpConnection(name, cfg);
+        conn = cfg.type === 'stdio' ? new StdioConnection(name, cfg) : new HttpConnection(name, cfg);
         await conn.initialize();
         const tools = await conn.toolsList();
         for (const mt of tools) {
@@ -278,11 +294,14 @@ export default {
         }
         connections.set(name, conn);
         // 可逆效应：插件停用/重载时关闭连接、工具随作用域自动消失
-        ctx.effect<void>(() => undefined, () => () => { conn.close(); });
+        ctx.effect<void>(() => undefined, () => () => { conn?.close(); });
         statuses.set(name, { state: 'connected', tools: tools.length });
         ctx.logger.info(`MCP server「${name}」已连接，注册 ${tools.length} 个工具`);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
+        // 初始化/工具列表失败也回收连接：stdio 子进程可能已 spawn（超时/部分失败），
+        // 不 close 则进程滞留（close 内有 proc.kill）
+        try { conn?.close(); } catch { /* 忽略 */ }
         statuses.set(name, { state: 'error', tools: 0, error: msg });
         console.warn(`[mcp] server「${name}」连接失败（不影响其他 server/插件）: ${msg.slice(0, 200)}`);
       }

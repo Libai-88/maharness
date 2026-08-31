@@ -9,6 +9,7 @@ import { classifyTask, reasoningBudgetFor } from '../../kernel/budget';
 import { validateAgainstSchema } from '../../kernel/validate';
 import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost } from './provider';
+import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
   EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
@@ -100,9 +101,6 @@ const DEFAULT_SYSTEM_PROMPT = [
   '5. 不要编造工具结果。',
 ].join('\n');
 
-/** 审批等待超时（毫秒）：10 分钟未响应自动拒绝 */
-const APPROVAL_TIMEOUT = 10 * 60 * 1000;
-
 /** 工具执行默认超时（毫秒；config agent.toolTimeoutMs 可调） */
 const TOOL_TIMEOUT_DEFAULT = 30_000;
 
@@ -190,12 +188,20 @@ export function annotateToolDef(t: ToolDef): ToolDef {
   return { ...t, description: `${head}${t.description}${tail}` };
 }
 
-/** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话（超时后 handler 仍可能在后台运行，由工具自行响应 signal 取消） */
-async function withToolTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
+/** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话。
+ *  超时时调用 onTimeout 发起取消信号（执行器为每次工具调用绑定独立 AbortController，
+ *  支持 signal 的工具据此真正中断；fs 类不响应 signal 的工具仍会跑完——JS 无法强杀）。 */
+async function withToolTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => void): Promise<T> {
   if (!ms || ms <= 0) return p;
+  // 超时后 handler 才 reject 的场景：race 已由 timeout 分支收场，迟到 rejection
+  // 无人消费会变 unhandledRejection——此处预标记为已处理（不改变正常路径传播）
+  p.catch(() => { /* 迟到 rejection 已处理 */ });
   let timer: NodeJS.Timeout | undefined;
   const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(() => reject(new Error(`工具执行超时（${ms / 1000}s）`)), ms);
+    timer = setTimeout(() => {
+      onTimeout?.();
+      reject(new Error(`工具执行超时（${ms / 1000}s）`));
+    }, ms);
   });
   try {
     return await Promise.race([p, timeout]);
@@ -205,9 +211,11 @@ async function withToolTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
 }
 
 export class AgentRunner {
-  private pendingApprovals = new Map<string, (approved: boolean) => void>();
+  private pendingApprovals: ApprovalBoard;
 
-  constructor(private kernel: KernelLike, private bus: EventBusLike) {}
+  constructor(private kernel: KernelLike, private bus: EventBusLike, approvals?: ApprovalBoard) {
+    this.pendingApprovals = approvals ?? globalApprovalBoard;
+  }
 
   /** 发布钩子事件（v3 中间件语义）：走 waterfall 派发——每个监听器收到 (e)，
    *  e.data 即钩子上下文（可改写 history/tools/scratchpad/blocked 等），
@@ -221,13 +229,9 @@ export class AgentRunner {
     });
   }
 
-  /** 外部（REST 接口）响应审批：批准或拒绝 */
+  /** 外部（REST 接口）响应审批：批准或拒绝（共享 ApprovalBoard——子 runner 的审批同样可达） */
   approveApproval(approvalId: string, approved: boolean): boolean {
-    const resolve = this.pendingApprovals.get(approvalId);
-    if (!resolve) return false;
-    this.pendingApprovals.delete(approvalId);
-    resolve(approved);
-    return true;
+    return this.pendingApprovals.approve(approvalId, approved);
   }
 
   /** 运行一轮完整对话（直到模型不再调用工具） */
@@ -663,10 +667,23 @@ export class AgentRunner {
             approvalSummary: `工具 ${tool.name} 声明需要用户审批。参数: ${summarize(toolArgs, 200)}`,
           };
         } else {
+          // 每次工具调用独立取消域：客户端断线（signal）与工具超时都经同一
+          // AbortController 传导给 handler——支持 signal 的工具（网络/等待类）
+          // 超时即真正中断；fs 类不响应 signal 的工具行为不变（JS 无法强杀）。
+          const ac = new AbortController();
+          const onClientAbort = () => ac.abort();
+          if (signal?.aborted) ac.abort();
+          else signal?.addEventListener('abort', onClientAbort, { once: true });
           try {
-            result = await withToolTimeout(tool.handler(toolArgs, tctx), tool.timeoutMs ?? toolTimeout);
+            result = await withToolTimeout(
+              tool.handler(toolArgs, { ...tctx, signal: ac.signal }),
+              tool.timeoutMs ?? toolTimeout,
+              () => ac.abort(),
+            );
           } catch (err) {
             result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+          } finally {
+            signal?.removeEventListener('abort', onClientAbort);
           }
         }
 
@@ -687,18 +704,14 @@ export class AgentRunner {
             summary: result.approvalSummary ?? result.error ?? '',
             args,
           };
+          // 审批挂起：注册进共享 ApprovalBoard（含 10 分钟超时自动拒绝）。
+          // 共享板使子代理/并行 runner 的审批对服务端 /api/approvals/:id 同样可达。
           const approved = await new Promise<boolean>((resolve) => {
-            // L5 定时器管理：保存引用、resolve 即 clearTimeout、创建后 unref()
-            // （不阻止进程退出；批准/拒绝即时到达时定时器句柄立刻释放）
-            const timer = setTimeout(() => {
-              this.pendingApprovals.delete(approvalId);
-              resolve(false);
-            }, APPROVAL_TIMEOUT);
-            timer.unref?.();
-            this.pendingApprovals.set(approvalId, (v) => {
-              clearTimeout(timer);
-              resolve(v);
-            });
+            this.pendingApprovals.register(approvalId, {
+              name: tool.name,
+              summary: result.approvalSummary ?? result.error ?? '',
+              args,
+            }, resolve);
           });
           if (!approved) {
             aStep.fail('用户拒绝或审批超时');
@@ -707,10 +720,20 @@ export class AgentRunner {
           } else {
             aStep.finish({ outputSummary: `已批准: ${tool.name}` });
             // 已批准：带 approved 标记重试执行（approved=true → 不再触发执行器侧审批拦截）
+            const ac = new AbortController();
+            const onClientAbort = () => ac.abort();
+            if (signal?.aborted) ac.abort();
+            else signal?.addEventListener('abort', onClientAbort, { once: true });
             try {
-              result = await withToolTimeout(tool.handler(args, { ...tctx, approved: true, approvalId }), tool.timeoutMs ?? toolTimeout);
+              result = await withToolTimeout(
+                tool.handler(args, { ...tctx, approved: true, approvalId, signal: ac.signal }),
+                tool.timeoutMs ?? toolTimeout,
+                () => ac.abort(),
+              );
             } catch (err) {
               result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            } finally {
+              signal?.removeEventListener('abort', onClientAbort);
             }
           }
         }

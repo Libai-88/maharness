@@ -1,0 +1,39 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+defaults:
+  run:
+    working-directory: web-agent
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web-agent/package-lock.json
+      - name: 安装依赖（含生产依赖校验：tsx 已入 dependencies，--omit=dev 可启动）
+        run: npm ci
+      - name: 单元测试（kernel + server）
+        run: npm test
+      - name: 后端类型检查
+        run: npm run typecheck
+      - name: 前端类型检查
+        run: npm run ui:typecheck
+      - name: 产品级冒烟（selftest：隔离数据目录，不触发 LLM）
+        run: npm run selftest
+      - name: golden 回归（ReplayProvider 确定性回放）
+        run: npm run eval
+      - name: 构建（UI + 类型检查）
+        run: npm run build
+      - name: 生产依赖安装可启动性
+        run: |
+          npm ci --omit=dev
+          node --import tsx -e "import('./server/index.ts').then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); })"

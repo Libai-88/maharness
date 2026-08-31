@@ -47,9 +47,21 @@ export interface Plugin {
   onUnload?(ctx: PluginContext): void | Promise<void>;  // 卸载
 }
 
+/** 常用路径投影（Kernel 构造时按 dataDir 覆盖解析；插件持久化文件应写 ctx.paths.data，
+ *  而不是源码树——AGENT_DATA_DIR/多实例/测试隔离才不互相污染） */
+export interface PathsLike {
+  root: string;
+  data: string;
+  traces: string;
+  configFile: string;
+  dbFile: string;
+  cacheFile: string;
+}
+
 /** 内核最小接口（插件可见范围）：禁止插件触及内核内部实现 */
 export interface KernelLike {
   rootDir: string;
+  paths: PathsLike;
   config: ConfigLike;
   trace: TraceLike;
   cache: CacheLike;
@@ -93,6 +105,8 @@ export interface PluginContext {
   config: ConfigLike;
   trace: TraceLike;
   cache: CacheLike;
+  /** 常用路径投影（Kernel 按 dataDir 覆盖解析）：插件持久化文件写 paths.data */
+  paths: PathsLike;
   /** 注册能力。返回 unregister：可单独撤销；未手动撤销时卸载自动回收（可逆效应） */
   register(cap: Capability): () => void;
   /** 事件订阅（自动退订：卸载时自动取消，杜绝监听器泄漏——旧 API ctx.bus.on 的替代） */

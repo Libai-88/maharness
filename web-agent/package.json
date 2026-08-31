@@ -18,24 +18,25 @@
     "start": "tsx server/index.ts",
     "start:all": "npm run ui:build && npm start",
     "selftest": "tsx scripts/selftest.ts",
-    "test": "node --import tsx --test \"kernel/tests/**/*.spec.ts\"",
+    "test": "node --import tsx --test \"kernel/tests/**/*.spec.ts\" \"server/tests/**/*.spec.ts\"",
     "eval": "tsx scripts/agent-eval.ts",
     "typecheck": "tsc -p tsconfig.json",
     "ui:dev": "npm --prefix ui run dev",
     "ui:build": "npm --prefix ui run build",
-    "build": "npm run ui:build && npm run typecheck"
+    "ui:typecheck": "npm --prefix ui run typecheck",
+    "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
     "dotenv": "^16.4.5",
     "express": "^5.1.0",
+    "tsx": "^4.19.0",
     "undici": "^8.10.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.0"
   }
 }

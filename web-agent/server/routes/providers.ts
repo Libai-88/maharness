@@ -16,10 +16,19 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     })));
   });
 
-  app.post('/api/providers', (req, res) => {
+  app.post('/api/providers', async (req, res) => {
     const { label, baseUrl, apiKey, model, priceIn, priceOut } = req.body ?? {};
     if (!label?.trim() || !baseUrl?.trim() || !apiKey?.trim() || !model?.trim()) {
       return res.status(400).json({ error: '名称 / 地址 / Key / 模型 均为必填' });
+    }
+    // H5 SSRF：保存路径与 /test 同规则校验（真实对话会按此地址服务端 fetch）。
+    // AGENT_ALLOW_PRIVATE_URLS=1 显式放行本地/内网地址（本机 Ollama 等本地模型场景）。
+    if (process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
+      try {
+        await assertPublicHttpUrl(String(baseUrl).trim());
+      } catch (err) {
+        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
     }
     const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'provider'}-${Math.random().toString(36).slice(2, 6)}`;
     store.upsertProvider({
@@ -32,10 +41,18 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey) });
   });
 
-  app.patch('/api/providers/:id', (req, res) => {
+  app.patch('/api/providers/:id', async (req, res) => {
     const existing = store.getProvider(req.params.id);
     if (!existing) return res.status(404).json({ error: '供应商不存在' });
     const { label, baseUrl, apiKey, model, priceIn, priceOut, enabled } = req.body ?? {};
+    // H5 SSRF：仅当地址被修改时校验（沿用已保存地址无需重复检查）
+    if (baseUrl?.trim() && baseUrl.trim() !== existing.baseUrl && process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
+      try {
+        await assertPublicHttpUrl(String(baseUrl).trim());
+      } catch (err) {
+        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+      }
+    }
     store.upsertProvider({
       id: existing.id,
       label: label?.trim() || existing.label,

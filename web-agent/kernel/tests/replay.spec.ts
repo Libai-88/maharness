@@ -6,7 +6,10 @@
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { ReplayProvider, RecordingProvider, type Recording } from '../../core/chat/replay-provider';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { ReplayProvider, RecordingProvider, loadRecording, type Recording } from '../../core/chat/replay-provider';
 import type { LLMChunk } from '../types';
 
 const rec: Recording = {
@@ -54,6 +57,33 @@ describe('ReplayProvider 确定性回放', () => {
       const gen = p.chat([], { model: 'm' });
       return (async () => { for await (const _ of gen) { /* 应抛错 */ } })();
     }, /序列耗尽/);
+  });
+});
+
+describe('loadRecording 录音加载', () => {
+  test('读取合法录音 JSON（顶层 ESM import——修复前 require 在 ESM 下抛错）', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-replay-'));
+    try {
+      const path = join(root, 'rec.json');
+      writeFileSync(path, JSON.stringify(rec));
+      const loaded = loadRecording(path);
+      assert.equal(loaded.version, 1);
+      assert.equal(loaded.requests.length, 2);
+      assert.equal(loaded.requests[0].chunks[0].type, 'delta');
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test('格式非法（缺 requests）时抛错', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-replay-'));
+    try {
+      const path = join(root, 'bad.json');
+      writeFileSync(path, JSON.stringify({ version: 1 }));
+      assert.throws(() => loadRecording(path), /录音格式不合法/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 

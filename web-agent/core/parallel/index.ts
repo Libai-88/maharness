@@ -27,6 +27,16 @@ const PARALLEL_SYSTEM_PROMPT = [
   '3. 输出精炼：直接给出结论与关键证据，不要寒暄。',
 ].join('\n');
 
+/** 共享预算均分（floor、余数归最后一项）：总消耗 ≤ 主任务剩余预算。
+ *  若把同一份预算拷贝 N 份，并行子任务各自熔断在"同一剩余额"上，总额最多超发 ~N 倍。 */
+export function splitBudget(budget: number | undefined, n: number): (number | undefined)[] {
+  if (budget === undefined || n <= 0) return Array.from({ length: n }, () => undefined);
+  const each = Math.floor(budget / n);
+  const shares = Array.from({ length: n }, () => each);
+  shares[n - 1] = each + (budget - each * n);
+  return shares;
+}
+
 export default {
   id: 'parallel',
   name: '多会话并行',
@@ -110,6 +120,9 @@ export default {
           // H3 中断/预算透传：主循环 abort 与剩余预算传导给每个并行子循环
           //（remainingBudget 为执行器在 ToolContext 上的局部扩展字段，kernel 契约尚未声明）
           const remainingBudget = (tctx as ToolContext & { remainingBudget?: number }).remainingBudget;
+          // 共享预算均分（floor、余数归最后一项）：总消耗 ≤ 主任务剩余预算。
+          // 若把同一份预算拷贝 N 份，并行子任务各自熔断在"同一剩余额"上，总额最多超发 ~N 倍。
+          const budgetShares = splitBudget(remainingBudget, tasks.length);
           const results = await Promise.allSettled(tasks.map(async (t, i) => {
             const taskId = `par-${randomUUID().slice(0, 6)}`;
             const traceId = `par-${randomUUID().slice(0, 8)}`;
@@ -131,11 +144,22 @@ export default {
                 maxTurns: 6, // M4：与子代理轮数上限统一（最多 6 轮）
                 parentStepId: tctx.stepId, // span 树：并行子任务全部步骤挂到 run_parallel 工具步骤下
                 signal: tctx.signal,
-                costBudget: remainingBudget,
+                costBudget: budgetShares[i],
               })) {
                 if (ev.type === 'delta') answer += ev.text;
                 else if (ev.type === 'tool_result') toolCalls++;
                 else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
+                else if (ev.type === 'approval_required') {
+                  // 并行子任务审批可达性：审批注册在共享 ApprovalBoard（/api/approvals/:id
+                  // 经主 runner 可达）；事件经全局事件总线广播给 UI——父执行器阻塞在
+                  // 本 handler 内，事件无法经其 yield 流透传，必须走带外通道。
+                  ctx.bus.emit({
+                    type: 'approval.requested',
+                    traceId,
+                    ts: Date.now(),
+                    data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary },
+                  });
+                }
                 else if (ev.type === 'error') error = ev.error;
               }
             } catch (err) {
