@@ -6,3 +6,4 @@
 
 - 实现与使用文档：[web-agent/](web-agent/)
 - 架构设计：[docs/ARCHITECTURE.md](web-agent/docs/ARCHITECTURE.md)
+- 学术智能体（ARS 技能包融合，上游零修改）：[docs/ARS-学术智能体融合.md](web-agent/docs/ARS-学术智能体融合.md)

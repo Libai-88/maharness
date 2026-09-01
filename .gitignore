@@ -28,3 +28,7 @@ web-agent/ui.bak/
 paper.pdf
 ui-before.png
 python_quick_sort.md
+
+# vendor 内第三方技能包（ARS）自带的 .claude 是技能路由纪律文件，属技能内容的一部分，需纳入版本库
+!web-agent/vendor/**/.claude/
+!web-agent/vendor/**/.claude/**

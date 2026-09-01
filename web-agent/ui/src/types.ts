@@ -83,7 +83,7 @@ export interface PluginInfo {
 export interface SkillInfo {
   name: string;
   description: string;
-  source: 'builtin' | 'user';
+  source: 'builtin' | 'user' | 'pack';
 }
 
 export interface WorkspaceInfo {

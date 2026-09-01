@@ -122,8 +122,9 @@ export function classifyTask(userText: string): string {
   const t = userText.slice(0, 80);
   if (/代码|bug|修复|重构|函数|实现|测试|报错|error/i.test(t)) return '代码';
   if (/文件|目录|读取|写入|删除|查看.*(文件|目录)|工作区/i.test(t)) return '文件操作';
-  if (/搜索|查一下|找一下|资料|信息|新闻/i.test(t)) return '检索';
-  if (/周报|总结|报告|文档|说明|计划|方案/i.test(t)) return '写作';
+  // 学术场景：文献类任务归检索（便宜模型），写作类归写作——modelRouting 可按类目配路由
+  if (/搜索|查一下|找一下|资料|信息|新闻|文献|综述|检索式|查新/i.test(t)) return '检索';
+  if (/周报|总结|报告|文档|说明|计划|方案|论文|投稿|摘要|审稿|参考文献/i.test(t)) return '写作';
   if (/介绍|是什么|怎么|为什么|解释/i.test(t)) return '问答';
   return '其他';
 }

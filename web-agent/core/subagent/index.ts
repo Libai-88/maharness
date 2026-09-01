@@ -98,7 +98,7 @@ export default {
         name: 'run_subagent',
         risk: 'low',
         costHint: 'high',
-        limits: '子代理最多 6 轮；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
+        limits: '子代理默认 6 轮（maxTurns 可放宽至 12）；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
         output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
         // 输出结构的机器校验（JSONSchema 子集）：声明后执行器对结果做运行时校验，
         // 不符即标注回填 + 入 Trace（structured output 的机器侧）
@@ -123,13 +123,16 @@ export default {
           properties: {
             objective: { type: 'string', description: '子代理目标（一句话，明确可交付）' },
             tools: { type: 'string', enum: ['read', 'all'], description: '工具白名单：read=只读（默认），all=全部工具' },
+            maxTurns: { type: 'integer', minimum: 1, maximum: 12, description: '最大轮数（默认 6；多步研究/评审类子任务可放宽到 8-12）' },
           },
           required: ['objective'],
         },
-        async handler(args: { objective?: string; tools?: string }, tctx: ToolContext) {
+        async handler(args: { objective?: string; tools?: string; maxTurns?: number }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
+          // maxTurns：默认 6；学术技能的子代理（检索席位/评审席位）常需更多轮，钳制 1-12 防失控
+          const maxTurns = Math.max(1, Math.min(12, Math.floor(Number(args.maxTurns) || 6)));
 
           // 认知资源管理（harness 强制，不是 LLM 自觉）：
           // M4 原子配额：consumeSubagentQuota 检查+消耗一步完成（并发调用不会超发）
@@ -166,7 +169,7 @@ export default {
               systemPrompt: SUB_SYSTEM_PROMPT,
               tools,
               traceId,
-              maxTurns: 6, // M4：与 limits 文案统一（最多 6 轮）
+              maxTurns, // M4：默认 6 轮，maxTurns 参数可放宽（钳制 1-12）
               parentStepId: tctx.stepId, // span 树：子代理全部步骤挂到 run_subagent 工具步骤下
               signal: tctx.signal,
               costBudget: remainingBudget,

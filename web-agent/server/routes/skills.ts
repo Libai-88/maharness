@@ -69,7 +69,12 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
 
   app.get('/api/skills/:source/:name/read', (req, res) => {
     const { source, name } = req.params;
-    const dir = source === 'builtin' ? join(kernel.rootDir, 'core', 'skills', 'builtin') : userSkillsDir;
+    // source：builtin=随产品分发的内置指南；pack=vendor 技能包（如 ARS）；user=用户安装
+    const dir = source === 'builtin'
+      ? join(kernel.rootDir, 'core', 'skills', 'builtin')
+      : source === 'pack'
+        ? join(kernel.rootDir, 'vendor', 'academic-research-skills')
+        : userSkillsDir;
     const mdPath = join(dir, String(name).replace(/[^a-zA-Z0-9_-]/g, ''), 'SKILL.md');
     if (!existsSync(mdPath)) return res.status(404).json({ error: '技能不存在' });
     res.json({ name, content: readFileSync(mdPath, 'utf-8') });

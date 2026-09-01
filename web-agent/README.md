@@ -41,7 +41,18 @@ npm run start:all  # 生产模式：构建前端后单端口启动 → http://lo
 - **斜杠命令**：输入框输入 `/` **弹出命令面板**——方向键选择、Enter 执行、Tab 补全、Esc 关闭；命令直接执行（不消耗 LLM）——`/help` 全部命令、`/new` 新会话、`/clear` 清空、`/plan` `/goal` `/normal` 切模式、`/model <名称>` 切模型。
 - **上下文管理**：会话历史超出预算（默认 30000 tokens，`context.maxTokens` 可调）时自动截断较早消息并注入说明，全程在轨迹面板可见。
 - **文件 Tab（工作区）**：左侧「文件」Tab —— 添加/切换工作区（Agent 文件工具的沙箱边界，切换立即生效），浏览文件树、点击文件预览内容。
-- **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` 按需读取技能指南，实现自我设计。
+- **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 技能包 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` / `get_skill_file` 按需读取技能指南与技能包内多文件资源（agents/references/templates/shared/scripts），实现自我设计。
+
+## 学术智能体（ARS 融合）
+
+maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad0202/academic-research-skills)（当前最热门的科研技能套件，上游内容**零修改**整体落位 `vendor/academic-research-skills/`），开箱即得四个学术技能（网页端「技能」页可见，source=技能包）：
+
+- **deep-research**：13 员研究团队——文献综述 / 系统性回顾(PRISMA) / 事实核查 / 苏格拉底式引导 / 三段式文献比较
+- **academic-paper**：12 员写作管线——大纲 / 修改 / 摘要 / 引用检查 / 格式转换(APA7/IEEE/…) / AI 使用披露
+- **academic-paper-reviewer**：5 席评审团——多视角同行评审 / 复审 / 方法学聚焦 / 审稿人校准
+- **academic-pipeline**：10 阶段全流程编排——研究→写作→完整性核查→评审→修改→定稿（强制人机确认检查点）
+
+直接用自然语言触发（如"帮我做 XX 的文献综述""写一篇关于 XX 的论文""审这篇稿子"），学术 persona（`core/academic`）自动路由到对应技能并按其工作流执行：技能正文与子代理角色定义经 `get_skill`/`get_skill_file` 读取，研究席位经 `run_subagent`/`run_parallel` 派发，产物写入当前工作区。完整设计与适配清单见 [docs/ARS-学术智能体融合.md](docs/ARS-学术智能体融合.md)。
 - **插件面板**：左侧「插件」Tab —— 查看所有插件状态，一键启用/停用/重载。
 - **统计面板**：左侧「统计」Tab —— 全局概览（会话/消息/tokens/成本/截断次数）、本次运行明细、每会话上下文用量（估算 token 与预算对比、截断状态）、三层缓存命中率（L1 语义问答 / L2 工具结果 / L3 prompt 前缀复用）与综合命中率。
 - **运行轨迹**：右上角「运行轨迹」—— 实时显示每次 LLM 调用与工具执行的耗时、token、成本、缓存命中（黑箱解药）。
@@ -137,7 +148,7 @@ export default {
 
 ```
 web-agent/
-├─ kernel/        # 内核 5 大件（薄）：bus / config / trace / cache / plugin-loader ← 内部，唯一不变
+├─ kernel/        # 内核 6 大件（薄）：bus / config / trace / cache / plugin-loader / scope ← 内部，唯一不变
 ├─ core/          # 核心插件（同样走插件机制）
 │  ├─ chat/       #   Agent 执行器 + 自研 OpenAI 兼容流式客户端
 │  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存）
@@ -145,12 +156,15 @@ web-agent/
 │  ├─ memory/     #   长期记忆（before_llm 钩子自动注入，跨会话）
 │  ├─ goal-plan/  #   多步目标计划模式
 │  ├─ powershell/ #   PowerShell 执行器（危险命令审批）
+│  ├─ academic/   #   ★ 学术智能体接线（ARS 路由 persona）
+│  ├─ skills/     #   技能系统（内置 + 技能包 + 用户；list/get/get_skill_file）
 │  └─ self-extend/#   ★ 自我扩展（agent 可自建插件，定义自己）
 ├─ plugins/       # ★ 现场插件目录（热加载；Agent 自我扩展的落点）
+├─ vendor/        # ★ ARS 学术技能包（上游零修改：deep-research / academic-paper / reviewer / pipeline）
 ├─ server/        # Express + SSE API（routes/ 按资源拆分；模式/角色策略在 core/chat/policy.ts）
 ├─ ui/            # React + Vite 前端
 ├─ data/          # SQLite 会话存储 + traces/ JSONL 审计日志
-└─ docs/          # 架构设计文档
+└─ docs/          # 架构设计文档（含 ARS 融合设计）
 ```
 
 ## 开发命令

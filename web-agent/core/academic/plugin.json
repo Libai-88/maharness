@@ -1,0 +1,7 @@
+{
+  "id": "academic",
+  "name": "学术智能体（ARS 融合）",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

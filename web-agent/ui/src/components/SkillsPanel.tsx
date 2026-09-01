@@ -75,7 +75,7 @@ export default function SkillsPanel({ onChanged }: Props) {
           {installed.map((s) => (
             <div key={s.name} className="provider-card">
               <div className="provider-head">
-                <span className="provider-name">{s.name} <em className="skill-src">{s.source === 'builtin' ? '内置' : '用户'}</em></span>
+                <span className="provider-name">{s.name} <em className="skill-src">{s.source === 'builtin' ? '内置' : s.source === 'pack' ? '技能包' : '用户'}</em></span>
               </div>
               <div className="provider-meta">{s.description}</div>
               <div className="provider-actions">

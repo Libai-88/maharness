@@ -73,7 +73,7 @@ export default function SkillsView() {
         <div className="skill-info">
           <div className="skill-info-top">
             <span className="skill-name">{s.name}</span>
-            <span className="skill-tag builtin">{s.source === 'builtin' ? '内置' : '用户'}</span>
+            <span className="skill-tag builtin">{s.source === 'builtin' ? '内置' : s.source === 'pack' ? '技能包' : '用户'}</span>
           </div>
           <span className="skill-desc">{s.description}</span>
         </div>
@@ -119,6 +119,12 @@ export default function SkillsView() {
 
         <div className="plugin-group">已安装 · 内置</div>
         {installed.filter((s) => s.source === 'builtin' && match(s)).map((s, i) => renderCard(s, i))}
+        {installed.some((s) => s.source === 'pack' && match(s)) && (
+          <>
+            <div className="plugin-group" style={{ marginTop: 12 }}>已安装 · 技能包（ARS 学术）</div>
+            {installed.filter((s) => s.source === 'pack' && match(s)).map((s, i) => renderCard(s, installed.filter((x) => x.source === 'builtin').length + i))}
+          </>
+        )}
         {installed.some((s) => s.source === 'user' && match(s)) && (
           <>
             <div className="plugin-group" style={{ marginTop: 12 }}>已安装 · 用户</div>
@@ -159,7 +165,7 @@ export default function SkillsView() {
               <div className="skill-detail-card">
                 <span className="pd-icon" style={{ background: 'var(--purple-soft)', color: 'var(--purple)' }}>{selected.name[0]?.toUpperCase()}</span>
                 <span className="pd-name">{selected.name}</span>
-                <span className="pd-ver">{selected.source === 'builtin' ? '内置' : '用户'} 技能 · 指南可读</span>
+                <span className="pd-ver">{selected.source === 'builtin' ? '内置' : selected.source === 'pack' ? '技能包' : '用户'} 技能 · 指南可读</span>
                 <span className="sd-desc">{selected.description}</span>
               </div>
               <div className="pd-manifest">
