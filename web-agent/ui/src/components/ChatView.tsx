@@ -4,7 +4,7 @@ import { commandsApi, onChatRetry } from '../api';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
-import { IconBlock, IconBolt, IconBrain, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
+import { IconBlock, IconBolt, IconBrain, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconEdit, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -51,6 +51,8 @@ function ToolCard({ t }: { t: ToolStep }) {
   const show = open || running;
   const statusCls = t.status === 'done' ? 'ok' : t.status === 'error' ? 'err' : 'run';
   const statusTxt = running ? '执行中…' : t.status === 'done' ? '完成' : '失败';
+  // 流式输出（tool.delta）：执行中实时渲染（带光标）；结束后无 summary 时保留展示
+  const liveDelta = t.delta?.trim();
   return (
     <div
       className={`tool-card ${running ? 'running' : t.status === 'done' ? 'done' : 'err'} ${show ? 'expanded' : ''}`}
@@ -77,10 +79,20 @@ function ToolCard({ t }: { t: ToolStep }) {
           <span style={{ color: 'var(--text-4)', display: 'inline-flex', transform: show ? 'none' : 'rotate(-90deg)', transition: 'transform .15s' }}><IconChevronDown size={11} /></span>
         </div>
       </div>
+      {liveDelta && running && (
+        <div className="tool-body">
+          <pre className="tool-delta">{liveDelta}<span className="stream-cursor" /></pre>
+        </div>
+      )}
       {t.summary && (
         <div className="tool-body">
           <span className="t-out">{t.summary}</span>
           {t.stored && <span className="tool-stored-note">完整结果已存入结果存储（本会话内 recall_tool_result 可重读，零副作用）</span>}
+        </div>
+      )}
+      {!t.summary && liveDelta && !running && (
+        <div className="tool-body">
+          <pre className="tool-delta">{liveDelta}</pre>
         </div>
       )}
     </div>
@@ -158,6 +170,9 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   // 输入历史（↑/↓ 回放，终端习惯——快速高效响应）
   const [inputHist, setInputHist] = useState<string[]>([]);
   const histIdxRef = useRef(-1);
+  // 消息编辑：点击用户消息的「编辑」进入编辑态，Enter 发送修改后的文本（等价重发）
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editText, setEditText] = useState('');
 
   // C1 前端适配：provider 重试（retry 事件）→ 作废当前流式渲染、从 retry 边界重新累积。
   // 消息状态归父组件所有（onDelta 持续向 content 追加），本组件在渲染层记录 retry 时刻
@@ -180,6 +195,13 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   }, [messages]);
   useEffect(() => { commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined); }, []);
 
+  // 全局快捷键聚焦输入框（App 派发 mh:focus-composer 自定义事件）
+  useEffect(() => {
+    const onFocus = () => inputRef.current?.focus();
+    window.addEventListener('mh:focus-composer', onFocus);
+    return () => window.removeEventListener('mh:focus-composer', onFocus);
+  }, []);
+
   const submit = (textOverride?: string) => {
     const text = (textOverride ?? input).trim();
     if (!text || streaming) return;
@@ -189,6 +211,14 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
     }
     setInput('');
     setCmdOpen(false);
+    onSend(text);
+  };
+
+  // 编辑态提交：修改后的文本作为新消息重发（与「重新发送」同路径）
+  const submitEdit = () => {
+    const text = editText.trim();
+    if (!text || streaming) return;
+    setEditingId(null);
     onSend(text);
   };
 
@@ -381,13 +411,34 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                   <div className="msg-meta" style={{ justifyContent: 'flex-end' }}>
                     <span className="msg-author">你</span>
                     <span className="msg-extra">刚刚</span>
-                    {!streaming && (
+                    {!streaming && editingId !== m.id && (
                       <span className="msg-actions">
+                        <button className="ma-btn" title="编辑并重新发送" aria-label="编辑并重新发送" onClick={() => { setEditingId(m.id); setEditText(m.content ?? ''); }}><IconEdit size={12} /></button>
                         <button className="ma-btn" title="重新发送（重试）" aria-label="重新发送" onClick={() => submit(m.content)}><IconRefresh size={12} /></button>
                       </span>
                     )}
                   </div>
-                  <div className="user-bubble">{m.content}</div>
+                  {editingId === m.id ? (
+                    <div className="user-edit">
+                      <textarea
+                        className="user-edit-input"
+                        value={editText}
+                        autoFocus
+                        rows={Math.min(6, Math.max(2, (editText.match(/\n/g)?.length ?? 0) + 1))}
+                        onChange={(e) => setEditText(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitEdit(); }
+                          else if (e.key === 'Escape') { e.preventDefault(); setEditingId(null); }
+                        }}
+                      />
+                      <div className="user-edit-actions">
+                        <button className="ma-btn" onClick={() => setEditingId(null)}>取消</button>
+                        <button className="btn-primary" onClick={submitEdit} disabled={!editText.trim() || streaming}>发送</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="user-bubble">{m.content}</div>
+                  )}
                 </div>
               )}
             </div>
@@ -495,7 +546,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
             </div>
           </div>
         </div>
-        <div className="composer-hint">按 <span className="mono">/</span> 调出命令面板 · <span className="mono">Enter</span> 发送 · <span className="mono">Shift + Enter</span> 换行 · <span className="mono">↑</span> 回放上一条 · <span className="mono">Esc</span> 停止</div>
+        <div className="composer-hint">按 <span className="mono">/</span> 调出命令面板 · <span className="mono">Enter</span> 发送 · <span className="mono">Shift + Enter</span> 换行 · <span className="mono">↑</span> 回放上一条 · <span className="mono">Esc</span> 停止 · <span className="mono">Ctrl+K</span> 聚焦 · <span className="mono">Ctrl+L</span> 搜索会话</div>
       </div>
     </div>
   );

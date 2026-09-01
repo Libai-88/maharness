@@ -31,9 +31,12 @@ function isDepthError(err: unknown): boolean {
 }
 
 export class EventBus {
-  /** 按 priority 降序维护的监听表（插入排序：订阅时定位，emit 时零排序开销）。
-   *  同 priority 按 seq 升序（先订阅先执行）。 */
-  private entries: ListenerEntry[] = [];
+  /** 桶结构（B8）：priority → 监听器数组（同 priority 按 seq 升序）。
+   *  替代旧插入排序数组——订阅 O(1) 追加，emit 按 priority 降序遍历桶；
+   *  监听器上千（trace.step 类高频事件）时不再有 O(n²) 累积。 */
+  private buckets = new Map<number, ListenerEntry[]>();
+  /** 已排序（降序）的 priority 列表：emit 遍历顺序（桶为空时同步移除） */
+  private priorities: number[] = [];
   private seq = 0;
   /** 实例级递归深度计数：emit 与 emitAsync 共享。
    *  进入 +1 / 退出 -1；监听器同步 re-emit（如 config.set 联动 config.changed 死循环）
@@ -45,14 +48,43 @@ export class EventBus {
   /** 订阅事件（pattern 支持通配符）。返回取消订阅函数。 */
   on(pattern: string, listener: EventListener, priority = 0): () => void {
     const entry: ListenerEntry = { pattern, listener, priority, seq: ++this.seq };
-    // 插入排序：从头找第一个 priority 严格更小的位置（同 priority 组的尾部 = seq 递增）
-    let i = 0;
-    while (i < this.entries.length && this.entries[i].priority >= priority) i++;
-    this.entries.splice(i, 0, entry);
+    let bucket = this.buckets.get(priority);
+    if (!bucket) {
+      bucket = [];
+      this.buckets.set(priority, bucket);
+      // 二分插入保持降序（O(log n)）：新 priority 桶就位
+      let lo = 0, hi = this.priorities.length;
+      while (lo < hi) {
+        const mid = (lo + hi) >> 1;
+        if (this.priorities[mid] > priority) lo = mid + 1;
+        else hi = mid;
+      }
+      this.priorities.splice(lo, 0, priority);
+    }
+    bucket.push(entry); // 同 priority 按 seq 升序（先订阅先执行）
     return () => {
-      const idx = this.entries.indexOf(entry);
-      if (idx >= 0) this.entries.splice(idx, 1);
+      const b = this.buckets.get(priority);
+      if (!b) return;
+      const idx = b.indexOf(entry);
+      if (idx >= 0) b.splice(idx, 1);
+      if (b.length === 0) {
+        this.buckets.delete(priority);
+        const pi = this.priorities.indexOf(priority);
+        if (pi >= 0) this.priorities.splice(pi, 1);
+      }
     };
+  }
+
+  /** 按 priority 降序 + seq 升序遍历所有匹配监听器（emit/emitAsync/listenersOf 共享）。
+   *  对桶做快照：监听器在分发中退订不跳过/不重复后续监听器。 */
+  private forEachMatching(type: string, cb: (en: ListenerEntry) => void): void {
+    for (const p of this.priorities) {
+      const bucket = this.buckets.get(p);
+      if (!bucket) continue;
+      for (const en of [...bucket]) {
+        if (match(en.pattern, type)) cb(en);
+      }
+    }
   }
 
   /** 同步发布：监听器抛错被记录，不影响其他监听器。
@@ -67,8 +99,7 @@ export class EventBus {
     this.enter(e.type);
     let depthError: unknown;
     try {
-      for (const en of this.entries) {
-        if (!match(en.pattern, e.type)) continue;
+      this.forEachMatching(e.type, (en) => {
         try {
           en.listener(e);
         } catch (err) {
@@ -78,7 +109,7 @@ export class EventBus {
             console.error(`[bus] listener error on "${e.type}":`, err);
           }
         }
-      }
+      });
     } finally {
       this.depth--;
     }
@@ -94,9 +125,7 @@ export class EventBus {
   /** 收集某事件所有匹配监听器的裸回调（内部共享） */
   private listenersOf(type: string): EventListener[] {
     const out: EventListener[] = [];
-    for (const en of this.entries) {
-      if (match(en.pattern, type)) out.push(en.listener);
-    }
+    this.forEachMatching(type, (en) => out.push(en.listener));
     return out;
   }
 
@@ -224,8 +253,10 @@ export class EventBus {
   async emitAsync(e: Event): Promise<void> {
     this.enter(e.type);
     try {
-      for (const en of this.entries) {
-        if (!match(en.pattern, e.type)) continue;
+      // 先快照匹配监听器（桶结构），再按序逐个 await——保持原有「串行等待」语义
+      const matched: ListenerEntry[] = [];
+      this.forEachMatching(e.type, (en) => matched.push(en));
+      for (const en of matched) {
         try {
           const r = en.listener(e);
           if (r instanceof Promise) await this.watchSlowListener(r, en, e.type);

@@ -1088,6 +1088,56 @@ export default {
     `(步骤=${ovSteps.length} 状态=${ovSteps[ovSteps.length - 1]?.status})`);
 }
 
+// ---- 流式工具输出（tool.delta）：工具通过 tctx.stream() 边执行边推送，执行器实时转发 ----
+{
+  const { AgentRunner } = await import('../core/chat/agent');
+  const runner = new AgentRunner(kernel, kernel.bus);
+  const mock = () => {
+    let calls = 0;
+    return {
+      id: 'mock-delta', label: 'DELTA', defaultModel: 'm', prices: { in: 0, out: 0 },
+      async *chat() {
+        calls++;
+        if (calls === 1) {
+          yield { type: 'tool_call' as const, toolCall: { id: 'c1', type: 'function' as const, function: { name: 'stream_tool', arguments: '{}' } } };
+        } else {
+          yield { type: 'delta' as const, text: '完成' };
+          yield { type: 'usage' as const, input: 10, output: 10 };
+        }
+        yield { type: 'done' as const };
+      },
+    };
+  };
+  const streamTool: ToolDef = {
+    name: 'stream_tool', description: '流式输出工具',
+    parameters: { type: 'object', properties: {} },
+    async handler(_args, tctx) {
+      // 边执行边推送增量（模拟命令实时输出）
+      tctx.stream?.({ text: '第一行\n' });
+      tctx.stream?.({ text: '第二行\n' });
+      tctx.stream?.({ text: '第三行' });
+      return { ok: true, data: { output: '完整结果' } };
+    },
+  };
+  const deltas: string[] = [];
+  let sawStart = false, sawResult = false, sawDone = false;
+  for await (const ev of runner.run({
+    provider: mock(), model: 'm', messages: [{ role: 'user', content: 'hi' }],
+    traceId: `dl-${Date.now()}`, tools: [streamTool],
+  })) {
+    if (ev.type === 'tool_start') sawStart = true;
+    if (ev.type === 'tool_delta') deltas.push(ev.text);
+    if (ev.type === 'tool_result') sawResult = true;
+    if (ev.type === 'assistant_done') sawDone = true;
+  }
+  const joined = deltas.join('');
+  const streamOk = sawStart && sawResult && sawDone
+    && joined.includes('第一行') && joined.includes('第二行') && joined.includes('第三行')
+    && deltas.length >= 3;
+  check('[tool.delta] 流式增量实时转发（顺序完整 + tool_result 收尾）', streamOk,
+    `(增量 ${deltas.length} 段: ${joined.slice(0, 20)}…)`);
+}
+
 // ---- 工具结果摘要化存储：大结果入存储（历史只留摘要+引用），recall_tool_result 零副作用重读 ----
 {
   const { AgentRunner } = await import('../core/chat/agent');

@@ -5,8 +5,9 @@
  */
 import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
-import type { ProviderDef } from '../../kernel/types';
+import type { LLMMessage, ProviderDef, ToolDef } from '../../kernel/types';
 import type { AgentRunner } from '../../core/chat/agent';
+import type { compactHistory } from '../../core/chat/compact';
 import type { ProviderConfig } from '../../core/chat/provider';
 import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
@@ -31,11 +32,19 @@ export interface ChatService {
   setPersonas: (list: { name: string; content: string }[]) => void;
   getSystemPrompt: () => string;
   approveApproval: (approvalId: string, approved: boolean) => boolean;
+  // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
+  textualizeHistory: (history: LLMMessage[]) => LLMMessage[];
+  compactHistory: typeof compactHistory;
+  annotateToolDef: (t: ToolDef) => ToolDef;
+  MODE_PROMPTS: Record<string, string>;
+  ROLE_READONLY_TOOLS: Set<string>;
+  validateCheckpointHistory: (history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]) => string | null;
 }
 
-export function getChatService(kernel: Kernel): ChatService | undefined {
+export function getChatService(kernel: Kernel, traceId?: string): ChatService | undefined {
   // 共效应解析（v2）：依赖注册表按 key 解析，只返回 ACTIVE 提供者的绑定——比扫描能力表更直接
-  return kernel.plugins.resolveService('service:chat') as ChatService | undefined;
+  // traceId 可选：会话 run 路径传入当前轨迹 id，service_call span 关联到具体会话（B5）
+  return kernel.plugins.resolveService('service:chat', 'server:chat', traceId) as ChatService | undefined;
 }
 
 /** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启） */

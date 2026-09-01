@@ -141,6 +141,16 @@ export const IconRefresh = (p: IconProps) => (
   <Svg {...p}><path d="M20 12 a8 8 0 1 1 -2.34 -5.66" /><path d="M20 3 v4 h-4" /></Svg>
 );
 
+/** 编辑：铅笔 */
+export const IconEdit = (p: IconProps) => (
+  <Svg {...p}><path d="M4 20 l1 -4.5 L16.5 4 a2.1 2.1 0 0 1 3 3 L8 18.5 Z" /><path d="M14 6.5 l3 3" /></Svg>
+);
+
+/** 菜单（侧边栏折叠开关）：三横线 */
+export const IconMenu = (p: IconProps) => (
+  <Svg {...p}><path d="M4 6.5 h16 M4 12 h16 M4 17.5 h16" /></Svg>
+);
+
 /** 下载：箭头入托盘 */
 export const IconDownload = (p: IconProps) => (
   <Svg {...p}><path d="M12 4 v10 M8 10 l4 4 4 -4" /><path d="M4 18 h16" /></Svg>

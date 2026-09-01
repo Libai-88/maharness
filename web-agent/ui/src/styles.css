@@ -366,7 +366,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   min-height: 0;
-  transition: background 0.3s ease, border-color 0.3s ease;
+  transition: background 0.3s ease, border-color 0.3s ease, width 0.22s ease;
 }
 
 .sb-logo {
@@ -468,6 +468,44 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .sb-manage-btn:hover { border-color: var(--text-3); color: var(--text-1); }
 .sb-manage-btn.active { background: var(--blue-soft); border-color: var(--accent); color: var(--accent); }
+
+/* 会话搜索框 */
+.sb-search {
+  margin: 0 12px 8px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-radius: 8px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  color: var(--text-4);
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+.sb-search:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--blue-soft);
+}
+.sb-search-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--text-1);
+  font-size: 12.5px;
+}
+.sb-search-input::placeholder { color: var(--text-4); }
+.sb-search-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-4);
+  border-radius: 4px;
+  padding: 2px;
+}
+.sb-search-clear:hover { color: var(--text-1); background: var(--bg-hover); }
 
 /* 批量管理模式：顶栏（全选/计数） */
 .sb-manage-bar {
@@ -653,6 +691,67 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: var(--blue-soft);
   border-color: var(--accent);
   color: var(--accent);
+}
+
+/* 折叠开关 + 设置（footer 操作行） */
+.sb-foot-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.sb-collapse-btn {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  border-radius: 7px;
+  display: flex; align-items: center; justify-content: center;
+  color: var(--text-3);
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+.sb-collapse-btn:hover { border-color: var(--text-3); color: var(--text-1); }
+
+/* ---------- 折叠态侧边栏（图标栏） ---------- */
+.sidebar.collapsed { width: 56px; }
+.sidebar.collapsed .sb-logo { justify-content: center; padding: 0; }
+.sidebar.collapsed .sb-logo-mark { width: 30px; height: 30px; }
+.sidebar.collapsed .sb-tabs { flex-direction: column; height: auto; padding: 8px 8px; gap: 6px; }
+.sidebar.collapsed .sb-tab { width: 40px; height: 36px; flex: none; }
+.sidebar.collapsed .sb-col-spacer { flex: 1; }
+.sidebar.collapsed .sb-footer { padding: 10px 8px; align-items: center; }
+.sidebar.collapsed .sb-footer-col .sb-settings-btn { width: 38px; padding: 0; justify-content: center; }
+
+/* ============================================================
+   响应式：窄窗口适配（侧边栏收窄 / 内边距压缩 / 消息宽度）
+   ============================================================ */
+@media (max-width: 1080px) {
+  :root { --sidebar-w: 232px; }
+  .messages-inner { max-width: 660px; }
+}
+
+@media (max-width: 860px) {
+  :root { --sidebar-w: 208px; }
+  .topbar { padding: 0 16px; }
+  .messages { padding: 20px 0 16px; }
+  .messages-inner { max-width: 100%; padding: 0 16px; }
+  .composer { padding: 0 16px; }
+  .composer-hint { padding: 0 16px; }
+  .brand-hero { padding: 32px 16px; }
+  .user-bubble, .user-edit { max-width: 88%; }
+  .session-banners { padding: 0 16px; }
+}
+
+@media (max-width: 640px) {
+  :root { --sidebar-w: 184px; }
+  .sb-tab { font-size: 11px; }
+  .sb-logo-title { font-size: 15px; }
+  .topbar { padding: 0 12px; }
+  .crumb .prev { display: none; }
+  .tb-live { display: none; }
+  .composer-hint { display: none; }
+  .msg-row { padding: 0 12px; }
+  .brand-title { font-size: 26px; }
 }
 
 /* ---------- 右侧管理面板（插件详情等） ---------- */
@@ -860,6 +959,34 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   line-height: 1.6;
 }
 
+/* 消息编辑态：输入框 + 操作条（Enter 发送 / Esc 取消） */
+.user-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: 78%;
+  width: 100%;
+}
+.user-edit-input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--accent);
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-1);
+  resize: vertical;
+  outline: none;
+}
+.user-edit-input:focus { box-shadow: 0 0 0 3px var(--blue-soft); }
+.user-edit-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* 思考块 */
 .think-card {
   border: 1px solid var(--border);
@@ -1050,6 +1177,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .tool-body .t-in { color: var(--text-2); }
 .tool-body .t-out { color: var(--text-3); }
+/* 工具流式输出（tool.delta）：等宽实时渲染，超长可滚动 */
+.tool-body .tool-delta {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: var(--text-2);
+  font-size: 12px;
+  line-height: 1.5;
+  max-height: 320px;
+  overflow-y: auto;
+}
 .tool-divider { height: 1px; background: var(--border); }
 
 /* 审批卡片：左侧警示渐变条 + 呼吸状态点 */

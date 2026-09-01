@@ -200,12 +200,16 @@ export interface ToolStep {
   summary?: string;
   ok?: boolean;
   status: 'running' | 'done' | 'error';
+  /** 工具调用 id（tool_call id）：并行执行时按 callId 路由增量/结果到对应卡片 */
+  callId?: string;
   /** 执行开始时间戳（前端计时用） */
   startedAt?: number;
   /** 执行耗时（毫秒，onToolResult 结算） */
   durationMs?: number;
   /** 大结果已存入结果存储（recall_tool_result 可零副作用重读） */
   stored?: boolean;
+  /** 流式输出增量（tool.delta）：工具边执行边推送的实时输出，卡片内边跑边渲染 */
+  delta?: string;
 }
 
 export interface ApprovalItem {

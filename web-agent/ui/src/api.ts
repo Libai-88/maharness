@@ -20,8 +20,10 @@ export interface ChatHandlers {
   onStart(traceId: string): void;
   onDelta(text: string): void;
   onReasoning(text: string): void;
-  onToolStart(name: string, args: unknown): void;
-  onToolResult(name: string, summary: string, ok: boolean, stored?: boolean): void;
+  onToolStart(name: string, args: unknown, callId?: string): void;
+  /** 工具流式输出增量（tool.delta）：工具边执行边推送的实时输出 */
+  onToolDelta?(name: string, text: string, callId?: string): void;
+  onToolResult(name: string, summary: string, ok: boolean, stored?: boolean, callId?: string): void;
   onApprovalRequired(approvalId: string, name: string, summary: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
   /** 角色移交（handoff）：会话控制权交给目标角色 */
@@ -96,9 +98,10 @@ export async function streamChat(
           case 'start': h.onStart(String(d.traceId ?? '')); break;
           case 'delta': h.onDelta(String(d.text ?? '')); break;
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
-          case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
+          case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args, d.callId ? String(d.callId) : undefined); break;
+          case 'tool_delta': h.onToolDelta?.(String(d.name ?? ''), String(d.text ?? ''), d.callId ? String(d.callId) : undefined); break;
           case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
-          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
+          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored), d.callId ? String(d.callId) : undefined); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
