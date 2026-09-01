@@ -1,8 +1,8 @@
-// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话列表 + 批量管理 + Footer）
+// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话搜索 + 会话列表 + 批量管理 + Footer）
 // Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Session } from '../types';
-import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
+import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconMenu, IconPin, IconPlugin, IconPlus, IconSearch, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
 export type MainTab = string;
 
@@ -40,6 +40,9 @@ interface Props {
   settingsOpen: boolean;
   onToggleSettings: () => void;
   pluginRunning: number;
+  /** 侧边栏折叠（窄窗口/专注模式）：收成图标栏 */
+  collapsed: boolean;
+  onToggleCollapse: () => void;
 }
 
 function fmtTime(ts: number): string {
@@ -56,12 +59,27 @@ function fmtTime(ts: number): string {
 export default function Sidebar({
   sessions, activeId, activeTab, onTab, onSelect, onCreate, onDelete, onArchive, onPin, onRename,
   onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning,
+  collapsed, onToggleCollapse,
 }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [managing, setManaging] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  // 会话搜索：按标题过滤（Ctrl/Cmd+L 聚焦）
+  const [search, setSearch] = useState('');
+  const searchRef = useRef<HTMLInputElement>(null);
+
+  // 全局快捷键聚焦搜索框（App 派发 mh:focus-search 自定义事件）
+  useEffect(() => {
+    const onFocus = () => searchRef.current?.focus();
+    window.addEventListener('mh:focus-search', onFocus);
+    return () => window.removeEventListener('mh:focus-search', onFocus);
+  }, []);
+
+  const q = search.trim().toLowerCase();
+  const searching = q.length > 0;
+  const filtered = searching ? sessions.filter((s) => (s.title || '').toLowerCase().includes(q)) : null;
 
   const pinned = sessions.filter((s) => s.pinned && !s.archived);
   const normal = sessions.filter((s) => !s.pinned && !s.archived);
@@ -159,6 +177,31 @@ export default function Sidebar({
     </div>
   );
 
+  // 折叠态：图标栏（窄窗口/专注模式）——仅 Logo 标记 + 图标 Tab + 设置
+  if (collapsed) {
+    return (
+      <aside className="sidebar collapsed">
+        <div className="sb-logo sb-logo-col">
+          <div className="sb-logo-mark"><IconSheep size={17} /></div>
+        </div>
+        <div className="sb-tabs sb-tabs-col">
+          {BUILTIN_TABS.concat(PLUGIN_TABS).map((tab) => (
+            <button key={tab.key} className={`sb-tab ${activeTab === tab.key ? 'active' : ''}`} title={tab.label} aria-label={tab.label} onClick={() => onTab(tab.key)}>
+              {tab.icon}
+            </button>
+          ))}
+        </div>
+        <div className="sb-divider" />
+        <div className="sb-col-spacer" />
+        <div className="sb-footer sb-footer-col">
+          <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings} title="设置" aria-label="设置">
+            <IconSettings size={14} />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside className="sidebar">
       <div className="sb-logo">
@@ -190,6 +233,21 @@ export default function Sidebar({
         </button>
       </div>
 
+      <div className="sb-search">
+        <IconSearch size={13} />
+        <input
+          ref={searchRef}
+          className="sb-search-input"
+          value={search}
+          placeholder="搜索会话…"
+          onChange={(e) => setSearch(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Escape') { setSearch(''); searchRef.current?.blur(); } }}
+        />
+        {searching && (
+          <button className="sb-search-clear" title="清除搜索" aria-label="清除搜索" onClick={() => setSearch('')}><IconClose size={12} /></button>
+        )}
+      </div>
+
       <div className="sb-session-scroll">
         {managing && (
           <div className="sb-manage-bar">
@@ -197,15 +255,24 @@ export default function Sidebar({
             <span className="sb-mg-count">{selected.size} 已选</span>
           </div>
         )}
-        {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>暂无会话</div>}
-        {pinned.length > 0 && <div className="sb-group-label">已置顶</div>}
-        {pinned.map(renderItem)}
-        {normal.length > 0 && <div className="sb-group-label">会话</div>}
-        {normal.map(renderItem)}
-        {archived.length > 0 && (
+        {searching ? (
           <>
-            <div className="sb-group-label">归档</div>
-            {archived.map(renderItem)}
+            {filtered!.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>未找到匹配的会话</div>}
+            {filtered!.map(renderItem)}
+          </>
+        ) : (
+          <>
+            {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>暂无会话</div>}
+            {pinned.length > 0 && <div className="sb-group-label">已置顶</div>}
+            {pinned.map(renderItem)}
+            {normal.length > 0 && <div className="sb-group-label">会话</div>}
+            {normal.map(renderItem)}
+            {archived.length > 0 && (
+              <>
+                <div className="sb-group-label">归档</div>
+                {archived.map(renderItem)}
+              </>
+            )}
           </>
         )}
       </div>
@@ -228,10 +295,13 @@ export default function Sidebar({
             </div>
             <span className="sb-foot-chip" style={{ color: 'var(--text-3)' }}>v0.1.2</span>
           </div>
-          <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
-            <IconSettings size={14} />
-            <span>设置</span>
-          </button>
+          <div className="sb-foot-actions">
+            <button className="sb-collapse-btn" onClick={onToggleCollapse} title="收起侧边栏" aria-label="收起侧边栏"><IconMenu size={14} /></button>
+            <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
+              <IconSettings size={14} />
+              <span>设置</span>
+            </button>
+          </div>
         </div>
       )}
     </aside>

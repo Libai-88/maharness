@@ -68,10 +68,11 @@ export interface KernelLike {
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
     list(): { manifest: PluginManifest; state: string; error?: string }[];
-    /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
-    resolveService(key: string, consumer?: string): unknown | undefined;
+    /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键。
+     *  traceId 可选：执行路径上的消费方传入当前轨迹 id，service_call span 关联到具体会话。 */
+    resolveService(key: string, consumer?: string, traceId?: string): unknown | undefined;
     /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
-    resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined;
+    resolveTraced(key: string, consumer?: string, traceId?: string): { provider: string; value: unknown } | undefined;
     /** v3 依赖驱动智能重载：仅重载依赖签名变化的插件，返回实际重载的 id 列表 */
     reloadChanged(): Promise<string[]>;
     /** v3 当前依赖事实版本（可观测：判断是否发生过依赖上下文变化） */
@@ -306,6 +307,10 @@ export interface ToolContext {
   trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
   approved?: boolean;       // 已通过用户审批（审批后重试时置 true）
   approvalId?: string;      // 本次审批 ID
+  /** 流式输出（tool.delta）：工具可边执行边推送增量文本（如命令实时输出/大文件分段读取），
+   *  执行器实时转发为 tool_delta 事件到达前端，工具卡片边跑边渲染；
+   *  不调用则维持一次性返回（向后兼容）。增量仅作实时预览，最终结果仍以返回值回填。 */
+  stream?: (chunk: { text: string }) => void;
 }
 
 export interface CommandDef {

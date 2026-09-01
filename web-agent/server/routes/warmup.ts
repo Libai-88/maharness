@@ -63,6 +63,7 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
   if (!entry) return;
   entry.timer = null;
   const chat = getChatService(kernel);
+  if (!chat) return;
   // 保活上限：会话长时间无新活动则停止（避免无限消耗）
   if (entry.rounds >= WARMUP_MAX_ROUNDS) {
     warmups.delete(sessionId);

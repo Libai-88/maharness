@@ -31,6 +31,10 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [activeTab, setActiveTab] = useState<MainTab>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // 侧边栏折叠（窄窗口/专注模式）：持久化到 localStorage
+  const [sidebarCollapsed, setSidebarCollapsed] = useState<boolean>(() => {
+    try { return localStorage.getItem('maharness-sidebar-collapsed') === '1'; } catch { return false; }
+  });
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
   const [traceOpen, setTraceOpen] = useState(true);
@@ -293,9 +297,12 @@ export default function App() {
       onStart: () => {},
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
-      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
-      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
+      onToolStart: (name, args, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, callId, status: 'running' as const, startedAt: Date.now() }] } : m)),
+      onToolDelta: (name, text, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => (callId ? t.callId === callId : t.name === name) && t.status === 'running' ? { ...t, delta: (t.delta ?? '') + text } : t),
+      } : m)),
+      onToolResult: (name, summary, ok, stored, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => (callId ? t.callId === callId : t.name === name) && t.status === 'running' ? {
           ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
         } : t),
       } : m)),
@@ -344,9 +351,12 @@ export default function App() {
       onStart: () => {},
       onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
       onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
-      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
-      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
+      onToolStart: (name, args, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, callId, status: 'running' as const, startedAt: Date.now() }] } : m)),
+      onToolDelta: (name, text, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => (callId ? t.callId === callId : t.name === name) && t.status === 'running' ? { ...t, delta: (t.delta ?? '') + text } : t),
+      } : m)),
+      onToolResult: (name, summary, ok, stored, callId) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
+        ...m, tools: (m.tools ?? []).map((t) => (callId ? t.callId === callId : t.name === name) && t.status === 'running' ? {
           ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
         } : t),
       } : m)),
@@ -412,6 +422,26 @@ export default function App() {
     setSettingsOpen(false);
   };
 
+  // 全局快捷键（交互效率）：Cmd/Ctrl+N 新会话 · Cmd/Ctrl+K 聚焦输入 · Cmd/Ctrl+L 搜索会话 · Alt+1-4 切换页 · Cmd/Ctrl+Shift+, 设置
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const mod = e.metaKey || e.ctrlKey;
+      if (mod && !e.shiftKey && !e.altKey) {
+        const k = e.key.toLowerCase();
+        if (k === 'n') { e.preventDefault(); void createSession(); return; }
+        if (k === 'k') { e.preventDefault(); window.dispatchEvent(new CustomEvent('mh:focus-composer')); return; }
+        if (k === 'l') { e.preventDefault(); window.dispatchEvent(new CustomEvent('mh:focus-search')); return; }
+      }
+      if (mod && e.shiftKey && e.key === ',') { e.preventDefault(); setSettingsOpen((v) => !v); return; }
+      if (!mod && e.altKey) {
+        const idx = ['1', '2', '3', '4'].indexOf(e.key);
+        if (idx >= 0) { e.preventDefault(); onTab(['chat', 'files', 'plugins', 'stats'][idx]); }
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [createSession]);
+
   return (
     <div className="app">
       <Sidebar
@@ -430,6 +460,13 @@ export default function App() {
         settingsOpen={settingsOpen}
         onToggleSettings={() => setSettingsOpen((v) => !v)}
         pluginRunning={pluginRunning}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={() => {
+          setSidebarCollapsed((v) => {
+            try { localStorage.setItem('maharness-sidebar-collapsed', v ? '0' : '1'); } catch { /* 忽略 */ }
+            return !v;
+          });
+        }}
       />
 
       <main className="main">

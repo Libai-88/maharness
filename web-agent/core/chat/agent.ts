@@ -10,7 +10,7 @@ import { validateAgainstSchema } from '../../kernel/validate';
 import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost } from './provider';
 import type {
-  EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
+  EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, StepHandle, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
 
 /**
@@ -40,8 +40,12 @@ export interface AgentHookCtx {
 export type AgentEvent =
   | { type: 'delta'; text: string }
   | { type: 'reasoning'; text: string }
-  | { type: 'tool_start'; name: string; args: unknown }
-  | { type: 'tool_result'; name: string; summary: string; ok: boolean; stored?: boolean }
+  /** 工具开始：callId = tool_call id（并行执行时前端按 callId 路由到对应卡片） */
+  | { type: 'tool_start'; name: string; args: unknown; callId?: string }
+  /** 工具流式输出增量（tool.delta）：工具通过 tctx.stream() 边执行边推送，
+   *  执行器实时转发——前端工具卡片边跑边渲染，无需等工具结束 */
+  | { type: 'tool_delta'; name: string; text: string; callId?: string }
+  | { type: 'tool_result'; name: string; summary: string; ok: boolean; stored?: boolean; callId?: string }
   | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
   | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
   | { type: 'budget_hit'; cost: number; budget: number }
@@ -201,6 +205,63 @@ async function withToolTimeout<T>(p: Promise<T>, ms: number): Promise<T> {
     return await Promise.race([p, timeout]);
   } finally {
     clearTimeout(timer);
+  }
+}
+
+/**
+ * 流式工具执行（tool.delta）：把工具 handler 与增量队列解耦——
+ *  - 注入 tctx.stream：工具边执行边推送增量文本（命令实时输出/大文件分段读取等）；
+ *  - 返回 { promise, deltas }：promise 为最终结果（含超时/异常兜底），
+ *    deltas 为 AsyncIterable，主循环 for await 实时转发为 tool_delta 事件；
+ *  - handler 结束（成功/失败/超时）即 finish 队列，残留增量排空后迭代终止。
+ *  工具不调用 stream 时队列恒空，for await 立即结束——零开销向后兼容。
+ */
+function runToolStreaming(
+  handler: (args: unknown, ctx: ToolContext) => Promise<ToolResult>,
+  args: unknown,
+  ctx: ToolContext,
+  timeoutMs: number,
+): { promise: Promise<ToolResult>; deltas: AsyncIterable<string> } {
+  const queue: string[] = [];
+  let done = false;
+  let notify: (() => void) | null = null;
+  const streamCtx: ToolContext = { ...ctx, stream: (chunk) => { queue.push(String(chunk?.text ?? '')); notify?.(); notify = null; } };
+  const promise = withToolTimeout(handler(args, streamCtx), timeoutMs).then(
+    (r) => { done = true; notify?.(); notify = null; return r; },
+    (err) => { done = true; notify?.(); notify = null; return { ok: false, error: err instanceof Error ? err.message : String(err) }; },
+  );
+  const deltas: AsyncIterable<string> = {
+    async *[Symbol.asyncIterator]() {
+      while (true) {
+        while (queue.length) yield queue.shift()!;
+        if (done) return;
+        await new Promise<void>((r) => { notify = r; });
+      }
+    },
+  };
+  return { promise, deltas };
+}
+
+/**
+ * 合并多个工具的流式增量（并行工具执行）：并发消费各工具 deltas 队列，
+ * 先到先发（Promise.race 竞速），每个增量带 callId 供前端路由到对应卡片。
+ * 全部流结束（handler 完成/超时/失败）即终止。
+ */
+async function* mergeToolStreams(streams: { callId: string; name: string; deltas: AsyncIterable<string> }[]): AsyncGenerator<{ callId: string; name: string; text: string }> {
+  if (!streams.length) return;
+  const iters = streams.map((s) => ({ callId: s.callId, name: s.name, it: s.deltas[Symbol.asyncIterator]() }));
+  const active = new Set(iters.map((_, i) => i));
+  const nexts = new Map<number, Promise<{ i: number; r: IteratorResult<string> }>>();
+  for (const i of active) nexts.set(i, iters[i].it.next().then((r) => ({ i, r })));
+  while (active.size) {
+    const { i, r } = await Promise.race([...nexts.values()]);
+    nexts.delete(i);
+    if (r.done) {
+      active.delete(i);
+    } else {
+      yield { callId: iters[i].callId, name: iters[i].name, text: r.value };
+      nexts.set(i, iters[i].it.next().then((r2) => ({ i, r: r2 })));
+    }
   }
 }
 
@@ -610,27 +671,45 @@ export class AgentRunner {
         return;
       }
 
-      // ---- 动作：逐个执行工具，结果回填 ----
+      // ---- 动作：并行执行工具，结果回填 ----
       // H7：本轮内命中角色移交时先记录，工具全部执行回填后再统一移交（不留孤儿 tool_calls）
+      // P1：并行工具执行（config agent.parallelTools 可关）——同一轮多个独立工具调用并发执行，
+      // 显著缩短多工具轮次的墙钟时间（IO 型工具互不阻塞）。
+      // 正确性保证：
+      //  - 钩子（before_tool/after_tool）与历史回填保持串行 + 按 tool_call 顺序（L3 前缀字节级稳定）；
+      //  - 只有 handler 本体并发（IO 密集的耗时部分）；
+      //  - 审批/输出校验/自适应/移交逻辑按原顺序逐项处理（结果确定性）。
       let pendingHandoff: { role: string; objective: string } | null = null;
+      const parallelTools = this.kernel.config.get<boolean>('agent.parallelTools', true);
+      interface ResolvedTool {
+        tc: ToolCall;
+        tool?: ToolDef;
+        args: unknown;
+        toolArgs?: unknown;
+        blocked?: boolean;
+        blockReason?: string;
+        tStep?: StepHandle;
+        tctx?: ToolContext & { remainingBudget?: number };
+        promise?: Promise<ToolResult>;
+        deltas?: AsyncIterable<string>;
+      }
+      const resolved: ResolvedTool[] = [];
+      // Phase A（串行，快）：解析每个 tool_call → 可执行描述符（before_tool 钩子/拦截判定）
       for (const tc of collected) {
         const tool = toolDefs.find((t) => t.name === tc.function.name);
         let args: unknown = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = { _raw: tc.function.arguments }; }
         if (!tool) {
-          const missMsg = `工具不存在: ${tc.function.name}`;
-          history.push({ role: 'tool', tool_call_id: tc.id, content: missMsg });
-          yield { type: 'tool_result', name: tc.function.name, summary: '工具不存在', ok: false };
+          resolved.push({ tc, args, blocked: true, blockReason: `工具不存在: ${tc.function.name}` });
+          yield { type: 'tool_start', name: tc.function.name, args, callId: tc.id };
           continue;
         }
-        yield { type: 'tool_start', name: tool.name, args };
+        yield { type: 'tool_start', name: tool.name, args, callId: tc.id };
         // ---- 钩子：工具执行前（权限策略 / 参数改写 / 拦截） ----
         const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args } };
         await this.emitHook('agent.before_tool', toolCtx);
         if (toolCtx.blocked) {
-          const blockMsg = JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' });
-          history.push({ role: 'tool', tool_call_id: tc.id, content: blockMsg });
-          yield { type: 'tool_result', name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
+          resolved.push({ tc, tool, args, blocked: true, blockReason: toolCtx.blockReason ?? '已被策略拦截' });
           continue;
         }
         const toolArgs = toolCtx.tool?.args ?? args;
@@ -652,24 +731,61 @@ export class AgentRunner {
           trace: this.kernel.trace,
           remainingBudget: opts.costBudget !== undefined ? Math.max(opts.costBudget - totalCost, 0) : undefined,
         };
-        let result: ToolResult;
-        if (tool.approval && !tctx.approved) {
+        resolved.push({ tc, tool, args, toolArgs, tStep, tctx });
+      }
+      // Phase B：启动 handler（并行：全部启动后合并转发增量；串行：逐个启动并转发）
+      const startTool = (r: ResolvedTool): void => {
+        if (r.blocked || !r.tool || !r.tctx) return;
+        if (r.tool.approval && !r.tctx.approved) {
           // C-S2 审批强制下沉执行器：声明 approval 的工具在未获批准前不进入 handler
           // （执行器不信任工具自觉）——直接构造 needsApproval 结果，走既有审批挂起流：
           // approval_required → 批准 → approved=true 重执行；拒绝 → governed 错误结果
-          result = {
+          r.promise = Promise.resolve({
             ok: false,
             needsApproval: true,
-            approvalSummary: `工具 ${tool.name} 声明需要用户审批。参数: ${summarize(toolArgs, 200)}`,
-          };
-        } else {
-          try {
-            result = await withToolTimeout(tool.handler(toolArgs, tctx), tool.timeoutMs ?? toolTimeout);
-          } catch (err) {
-            result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            approvalSummary: `工具 ${r.tool.name} 声明需要用户审批。参数: ${summarize(r.toolArgs, 200)}`,
+          });
+          return;
+        }
+        // 流式执行（tool.delta）：工具通过 tctx.stream() 边执行边推送增量，
+        // 主循环实时转发为 tool_delta 事件（前端工具卡片边跑边渲染）；
+        // 不调用 stream 的工具零开销兼容（队列恒空，for await 立即结束）
+        const { promise, deltas } = runToolStreaming(r.tool.handler, r.toolArgs, r.tctx, r.tool.timeoutMs ?? toolTimeout);
+        r.promise = promise;
+        r.deltas = deltas;
+      };
+      if (parallelTools) {
+        for (const r of resolved) startTool(r);
+        const streams = resolved
+          .filter((r) => r.deltas && r.tool)
+          .map((r) => ({ callId: r.tc.id, name: r.tool!.name, deltas: r.deltas! }));
+        for await (const { callId, name, text } of mergeToolStreams(streams)) {
+          yield { type: 'tool_delta', name, text, callId };
+        }
+      } else {
+        for (const r of resolved) {
+          startTool(r);
+          if (r.deltas) {
+            for await (const text of r.deltas) yield { type: 'tool_delta', name: r.tool!.name, text, callId: r.tc.id };
           }
         }
-
+      }
+      // Phase C（串行，确定性）：按 tool_call 顺序处理结果（审批/钩子/校验/回填）
+      for (const r of resolved) {
+        const { tc, tool, args } = r;
+        if (!tool) {
+          const missMsg = r.blockReason ?? `工具不存在: ${tc.function.name}`;
+          history.push({ role: 'tool', tool_call_id: tc.id, content: missMsg });
+          yield { type: 'tool_result', name: tc.function.name, summary: missMsg, ok: false, callId: tc.id };
+          continue;
+        }
+        if (r.blocked) {
+          const blockMsg = JSON.stringify({ ok: false, error: r.blockReason ?? '已被策略拦截' });
+          history.push({ role: 'tool', tool_call_id: tc.id, content: blockMsg });
+          yield { type: 'tool_result', name: tool.name, summary: r.blockReason ?? '已被策略拦截', ok: false, callId: tc.id };
+          continue;
+        }
+        let result = await r.promise!;
         // ---- 审批挂起：工具请求用户审批时，执行器暂停等待（安全机制，不可绕过） ----
         // 审批全程入 Trace（approval 步骤）：挂起/批准/拒绝可追溯——"权力"的使用必须可审计
         if (!result.ok && result.needsApproval) {
@@ -702,20 +818,20 @@ export class AgentRunner {
           });
           if (!approved) {
             aStep.fail('用户拒绝或审批超时');
-            tStep.cancel();
+            r.tStep?.cancel();
             result = { ok: false, error: '用户拒绝了该操作', governed: true };
           } else {
             aStep.finish({ outputSummary: `已批准: ${tool.name}` });
             // 已批准：带 approved 标记重试执行（approved=true → 不再触发执行器侧审批拦截）
-            try {
-              result = await withToolTimeout(tool.handler(args, { ...tctx, approved: true, approvalId }), tool.timeoutMs ?? toolTimeout);
-            } catch (err) {
-              result = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            const { promise, deltas } = runToolStreaming(tool.handler, args, { ...r.tctx!, approved: true, approvalId }, tool.timeoutMs ?? toolTimeout);
+            for await (const text of deltas) {
+              yield { type: 'tool_delta', name: tool.name, text, callId: tc.id };
             }
+            result = await promise;
           }
         }
         // ---- 钩子：工具执行后（结果过滤/改写） ----
-        const afterTCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args: toolArgs }, result };
+        const afterTCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args: r.toolArgs }, result };
         await this.emitHook('agent.after_tool', afterTCtx);
         const finalResult = afterTCtx.result ?? result;
         // ---- 输出校验（structured output 的机器侧）：声明了 outputSchema 的工具，
@@ -731,9 +847,9 @@ export class AgentRunner {
           }
         }
         if (finalResult.ok) {
-          tStep.finish({ outputSummary: summarize(finalResult.data) });
+          r.tStep?.finish({ outputSummary: summarize(finalResult.data) });
         } else {
-          tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
+          r.tStep?.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
         }
 
         // ---- C5 子代理成本并入熔断核算：run_subagent/run_parallel 在 data 中回传 ----
@@ -782,7 +898,7 @@ export class AgentRunner {
           content = rawResult;
         }
         history.push({ role: 'tool', tool_call_id: tc.id, content: content + outputNote });
-        yield { type: 'tool_result', name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok, stored: rawResult.length > RESULT_STORE_THRESHOLD };
+        yield { type: 'tool_result', name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok, stored: rawResult.length > RESULT_STORE_THRESHOLD, callId: tc.id };
       }
 
       // ---- H7 移交收尾：本轮工具全部执行回填后移交并终止（控制权交给目标角色） ----

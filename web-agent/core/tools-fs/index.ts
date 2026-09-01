@@ -6,11 +6,14 @@
  * 缓存：read_file/list_dir 按「路径 + mtime + size」做 L2 缓存；写删成功后清空 L2（保一致性）
  *  并失效本会话 L1 语义缓存（防陈旧观察答案，H8）。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, readFileSync, rmSync } from 'node:fs';
-import { resolve, join } from 'node:path';
+import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { resolve, relative } from 'node:path';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
 import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
+
+/** 单次读取上限：超大文件只返回前 100KB 并标注 truncated（防上下文爆炸） */
+const MAX_READ = 100 * 1024;
 
 // Re-export 沙箱工具（向后兼容，原有 import 路径仍可用）
 export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
@@ -134,8 +137,16 @@ export default {
           const r = readTextSmart(file);
           if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），v1 不支持读取` };
           const truncated = r.text.length > MAX_READ;
+          const text = truncated ? r.text.slice(0, MAX_READ) : r.text;
+          // 流式输出（tool.delta）：大文件内容分段推送，前端实时渲染读取进度
+          if (tctx.stream) {
+            const CHUNK = 2000;
+            for (let i = 0; i < text.length; i += CHUNK) {
+              tctx.stream({ text: text.slice(i, i + CHUNK) });
+            }
+          }
           const result: ReadResult = {
-            text: truncated ? r.text.slice(0, MAX_READ) : r.text,
+            text,
             encoding: r.encoding, isBinary: false,
             size: st.size, path: relative(tctx.sandboxRoot, file),
             truncated: truncated || undefined,

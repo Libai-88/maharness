@@ -59,8 +59,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     if (!resume && (/\uFFFD/.test(message) || /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|[\uDC00-\uDFFF](?<![\uD800-\uDBFF])/.test(message))) {
       return res.status(400).json({ error: '消息包含无法识别的编码字符，请检查输入编码（应为 UTF-8）' });
     }
+    // 轨迹 id 提前生成：服务解析（getChatService）也带 traceId，service_call span 关联到本会话（B5）
+    const traceId = randomUUID();
 
-    const chat = getChatService(kernel);
+    const chat = getChatService(kernel, traceId);
     if (!chat) return res.status(500).json({ error: '对话服务未加载' });
     const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
@@ -129,7 +131,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 配对修复：中断可能留下「assistant 带 tool_calls 但工具未执行」的残轮
     // （onHistoryMessage 在工具执行前已入库）——未配对的 tool_calls 剥离，
     // 否则 provider 校验失败（OpenAI 兼容要求 tool_calls 后有对应 tool 消息）。
-    function buildHistory(rows: Message[]): LLMMessage[] {
+    const buildHistory = (rows: Message[]): LLMMessage[] => {
       // 组装原始序列（system 保留、assistant 保留 tool_calls 配对、tool 保留 tool_call_id），
       // 然后统一走共享 textualizeHistory——与 run 内发送形态完全一致（纯文本 + user 结尾）
       const raw: LLMMessage[] = [];
@@ -182,7 +184,6 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       if (session.title === '新会话') store.updateSession(session.id, { title: message.slice(0, 30) });
     }
 
-    const traceId = randomUUID();
     const ac = new AbortController();
     // 上下文管理 v2：超预算时优先 LLM 摘要压缩（compact：旧对话变【历史摘要】，不丢事实），
     // 压缩不可用/失败才截断（truncate：丢弃较早消息并注入说明）。
@@ -325,7 +326,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           assistantReasoning += ev.text;
           sse(res, 'reasoning', { text: ev.text });
         } else if (ev.type === 'tool_start') {
-          sse(res, 'tool_start', { name: ev.name, args: ev.args });
+          sse(res, 'tool_start', { name: ev.name, args: ev.args, callId: ev.callId });
+        } else if (ev.type === 'tool_delta') {
+          // 工具流式输出增量（tool.delta）：实时转发，前端工具卡片边跑边渲染
+          sse(res, 'tool_delta', { name: ev.name, text: ev.text, callId: ev.callId });
         } else if (ev.type === 'approval_required') {
           sse(res, 'approval_required', { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args });
         } else if (ev.type === 'retry') {
@@ -339,7 +343,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           store.updateSession(session.id, { role: ev.role });
           sse(res, 'handoff', { role: ev.role, objective: ev.objective });
         } else if (ev.type === 'tool_result') {
-          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok, stored: ev.stored ?? false });
+          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok, stored: ev.stored ?? false, callId: ev.callId });
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;

@@ -42,6 +42,24 @@ type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' |
 /** B6：config.changed → reloadChanged 的防抖窗口（ms）——连续配置写入合并为一次重载 */
 const CONFIG_RELOAD_DEBOUNCE_MS = 400;
 
+/** 深合并（B7）：嵌套对象逐层合并，数组/标量整体替换；返回新对象，不修改入参。
+ *  用于 configWith override 链的 section() 组装——嵌套配置字段并存而非整体覆盖。 */
+function deepMerge<T extends Record<string, unknown>>(target: T, source: Record<string, unknown>): T {
+  const out: Record<string, unknown> = { ...target };
+  for (const [k, v] of Object.entries(source)) {
+    const existing = out[k];
+    if (
+      existing && typeof existing === 'object' && !Array.isArray(existing)
+      && v && typeof v === 'object' && !Array.isArray(v)
+    ) {
+      out[k] = deepMerge(existing as Record<string, unknown>, v as Record<string, unknown>);
+    } else {
+      out[k] = v;
+    }
+  }
+  return out as T;
+}
+
 interface PluginInstance {
   manifest: PluginManifest;
   dir: string;
@@ -298,10 +316,14 @@ export class PluginLoader {
       get: <T>(key: string, def?: T): T => this.getContextConfig(inst, key, def),
       set: (key: string, value: unknown) => this.ctxBase.config.set(key, value),
       section: (pluginId: string) => {
-        const base = { ...this.ctxBase.config.section(pluginId) };
+        // B7：override 链按「最内层优先」深合并（嵌套对象逐层合并，而非整体覆盖）——
+        // configWith({chat:{temperature:0.2}}) 与全局 chat 其余字段并存
+        let base: Record<string, unknown> = { ...this.ctxBase.config.section(pluginId) };
         for (const layer of inst.configOverrides) {
           const value = this.readOverride(layer, pluginId);
-          if (value && typeof value === 'object' && !Array.isArray(value)) Object.assign(base, value);
+          if (value && typeof value === 'object' && !Array.isArray(value)) {
+            base = deepMerge(base, value as Record<string, unknown>);
+          }
         }
         return base;
       },
@@ -500,14 +522,16 @@ export class PluginLoader {
     }
   }
 
-  /** 内核/服务端向插件外消费方暴露的同步解析（如 server 层取 chat 服务）——自动埋服务调用追踪 */
-  resolveService(key: string, consumer?: string): unknown | undefined {
-    return this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace)?.value;
+  /** 内核/服务端向插件外消费方暴露的同步解析（如 server 层取 chat 服务）——自动埋服务调用追踪。
+   *  traceId 可选：执行路径上的消费方（如会话 run）传入当前轨迹 id，service_call span 即可
+   *  关联到具体会话；非执行路径（配置刷新等）缺省空串。 */
+  resolveService(key: string, consumer?: string, traceId?: string): unknown | undefined {
+    return this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace, traceId)?.value;
   }
 
   /** 服务解析的可观测形式：保留提供者身份，供调试/管理面使用。 */
-  resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined {
-    const binding = this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace);
+  resolveTraced(key: string, consumer?: string, traceId?: string): { provider: string; value: unknown } | undefined {
+    const binding = this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace, traceId);
     return binding ? { provider: binding.pluginId, value: binding.value } : undefined;
   }
 
@@ -516,15 +540,16 @@ export class PluginLoader {
    *  - providers 记录提供者插件 id + 提供时刻 seq/ts；
    *  - 每次取值（inject / resolveService / capabilities 关联）都经此，记录到 Trace。
    *  - consumer 缺省记 'external'（非插件消费方，如 server 层）。
+   *  - traceId 缺省空串：执行路径上的消费方（会话 run）显式传入当前轨迹 id，
+   *    service_call span 即可下钻到具体会话（B5：服务调用边不再与轨迹脱钩）。
    */
-  traceServiceGet(key: string, consumer: string, trace?: TraceLike): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
+  traceServiceGet(key: string, consumer: string, trace?: TraceLike, traceId = ''): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
     const binding = this.providers.get(key);
     if (!binding) return undefined;
     // 服务调用入 Trace：可写盘、可前端口径的 span（复用现有三态输出）。
-    // 注意：本处无 traceId 上下文（非执行路径），用空串，step 仍会上环形缓冲与 SSE。
     if (trace?.startStep) {
       const step = trace.startStep({
-        traceId: '',
+        traceId,
         turn: 0,
         type: 'service_call',
         name: key,

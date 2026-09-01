@@ -76,8 +76,8 @@ const MAX_OUTPUT = 8000;
 
 interface PsResult { code: number; stdout: string; stderr: string }
 
-/** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根） */
-function runPowershell(command: string, timeoutMs: number, cwd: string): Promise<PsResult> {
+/** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根；onOutput 实时推送增量输出） */
+function runPowershell(command: string, timeoutMs: number, cwd: string, onOutput?: (text: string) => void): Promise<PsResult> {
   return new Promise((resolve, reject) => {
     // OutputEncoding 保证 stdout 按 UTF-8 输出（Windows 控制台默认 GBK）
     const full = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ErrorActionPreference='Continue'; ${command}`;
@@ -95,8 +95,9 @@ function runPowershell(command: string, timeoutMs: number, cwd: string): Promise
       try { spawn('taskkill', ['/PID', String(ps.pid), '/T', '/F'], { windowsHide: true }); } catch { /* 忽略 */ }
       reject(new Error(`命令执行超时（${timeoutMs / 1000}s），已终止`));
     }, timeoutMs);
-    ps.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
-    ps.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+    // 流式输出（tool.delta）：stdout/stderr 到达即推送，前端实时渲染命令输出
+    ps.stdout.on('data', (d: Buffer) => { const s = d.toString('utf8'); stdout += s; onOutput?.(s); });
+    ps.stderr.on('data', (d: Buffer) => { const s = d.toString('utf8'); stderr += s; onOutput?.(`[stderr] ${s}`); });
     ps.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } });
     ps.on('close', (code) => {
       if (settled) return;
@@ -176,7 +177,8 @@ export default {
           }
 
           try {
-            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot);
+            // 流式输出（tool.delta）：命令输出实时推送前端（工具卡片边跑边渲染）
+            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, (text) => tctx.stream?.({ text }));
             const combined = (r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '')).slice(0, MAX_OUTPUT);
             const truncated = combined.length >= MAX_OUTPUT;
             if (r.code === 0) {
