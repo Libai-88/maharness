@@ -113,6 +113,50 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   });
 
   // ---------- 模型 ----------
+  /** 拉取模型列表：GET {base}/models（OpenAI 兼容），网页端配置供应商时直接选择模型而非手敲。
+   *  编辑已保存供应商时可不传 key（providerId 回退用已保存的）；
+   *  SSRF 规则与保存路径一致（AGENT_ALLOW_PRIVATE_URLS=1 放行本地/内网——本机 Ollama 拉模型的主场景）。 */
+  app.post('/api/providers/models', async (req, res) => {
+    const { baseUrl, apiKey, providerId } = req.body ?? {};
+    let useKey = apiKey;
+    if (!useKey && providerId) {
+      const row = store.getProvider(String(providerId));
+      useKey = row?.apiKey;
+    }
+    if (!baseUrl?.trim() || !useKey?.trim()) {
+      return res.status(400).json({ ok: false, error: '地址 / Key 均为必填（编辑已保存供应商时 Key 可留空）' });
+    }
+    const base = String(baseUrl).trim().replace(/\/+$/, '');
+    if (process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
+      try {
+        await assertPublicHttpUrl(base);
+      } catch (err) {
+        return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    try {
+      const r = await fetch(`${base}/models`, {
+        headers: { Authorization: `Bearer ${useKey}` },
+        signal: AbortSignal.timeout(15000),
+      });
+      if (!r.ok) {
+        // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
+        return res.status(400).json({ ok: false, error: `HTTP ${r.status}${r.status === 401 || r.status === 403 ? '（Key 无效或无权限）' : ''}` });
+      }
+      const j = await r.json().catch(() => null) as { data?: unknown[] } | unknown[] | null;
+      const arr = Array.isArray(j) ? j : Array.isArray((j as { data?: unknown[] })?.data) ? (j as { data: unknown[] }).data : [];
+      const ids = arr
+        .map((m) => (m && typeof m === 'object' && typeof (m as { id?: unknown }).id === 'string' ? (m as { id: string }).id : ''))
+        .filter(Boolean);
+      if (ids.length === 0) {
+        return res.status(400).json({ ok: false, error: '响应中没有模型列表（data 为空或非 OpenAI 兼容格式）' });
+      }
+      res.json({ ok: true, models: [...new Set(ids)].sort((a, b) => a.localeCompare(b)).slice(0, 500) });
+    } catch (err) {
+      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
+  });
+
   app.get('/api/models', (_req, res) => {
     const chat = getChatService(kernel);
     if (!chat) return res.json([]);

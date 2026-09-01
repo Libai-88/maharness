@@ -251,6 +251,9 @@ export const providersApi = {
   remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
   test: (body: { baseUrl: string; apiKey: string; model: string; providerId?: string }) =>
     api<{ ok: boolean; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
+  /** 拉取供应商模型列表（OpenAI 兼容 GET {base}/models）：编辑已保存供应商时 Key 可留空（providerId 回退） */
+  fetchModels: (body: { baseUrl: string; apiKey: string; providerId?: string }) =>
+    api<{ ok: boolean; models: string[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
 };
 
 export const personasApi = {

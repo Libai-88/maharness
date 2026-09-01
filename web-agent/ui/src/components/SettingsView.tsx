@@ -22,10 +22,12 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [editing, setEditing] = useState<ProviderInfo | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProviderForm>(EMPTY);
-  const [busy, setBusy] = useState<'save' | 'test' | null>(null);
+  const [busy, setBusy] = useState<'save' | 'test' | 'pull' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
+  const [models, setModels] = useState<string[]>([]);
 
   const refresh = async (ok: boolean, text: string) => {
     setMsg({ ok, text });
@@ -33,9 +35,9 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     if (ok) { setCreating(false); setEditing(null); onChanged(); }
   };
 
-  const startCreate = () => { setCreating(true); setEditing(null); setForm(EMPTY); setMsg(null); };
+  const startCreate = () => { setCreating(true); setEditing(null); setForm(EMPTY); setMsg(null); setModels([]); };
   const startEdit = (p: ProviderInfo) => {
-    setEditing(p); setCreating(false); setMsg(null);
+    setEditing(p); setCreating(false); setMsg(null); setModels([]);
     setForm({ label: p.label, baseUrl: p.baseUrl, apiKey: '', model: p.model, priceIn: p.priceIn ? String(p.priceIn) : '', priceOut: p.priceOut ? String(p.priceOut) : '' });
   };
 
@@ -62,6 +64,28 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       else await refresh(false, r.error ?? '连接失败');
     } catch (err) { await refresh(false, err instanceof Error ? err.message : String(err)); }
     finally { setBusy(null); }
+  };
+
+  const pullModels = async () => {
+    if (!form.baseUrl.trim() || (!form.apiKey.trim() && !editing?.hasKey)) {
+      return refresh(false, '请先填写 Base URL 与 Key（编辑已保存 Provider 时 Key 可留空）');
+    }
+    setBusy('pull');
+    try {
+      // 编辑时传 providerId：后端用已存储的 Key 拉取（前端拿不到明文 Key）
+      const r = await providersApi.fetchModels({
+        baseUrl: form.baseUrl.trim(),
+        apiKey: form.apiKey.trim(),
+        ...(editing ? { providerId: editing.id } : {}),
+      });
+      setModels(r.models);
+      // 模型为空时自动选中第一个，减少一次点击
+      setForm((f) => (f.model.trim() ? f : { ...f, model: r.models[0] ?? '' }));
+      setMsg({ ok: true, text: `已拉取 ${r.models.length} 个模型——点击「模型」输入框选择` });
+      setTimeout(() => setMsg(null), 4000);
+    } catch (err) {
+      await refresh(false, err instanceof Error ? err.message : String(err));
+    } finally { setBusy(null); }
   };
 
   const toggle = async (p: ProviderInfo) => {
@@ -119,13 +143,17 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label="Provider 名称" />
             <input className="set-input" placeholder="Base URL（如 https://api.deepseek.com）" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
             <input className="set-input" placeholder="API Key" type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
-            <input className="set-input" placeholder="模型（如 deepseek-chat）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" />
+            <input className="set-input" placeholder="模型（如 deepseek-chat，可拉取列表选择）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" list="provider-model-options" />
+            <datalist id="provider-model-options">
+              {models.map((m) => <option key={m} value={m} />)}
+            </datalist>
             <input className="set-input" placeholder="输入价格 ¥/1M tokens" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} aria-label="输入价格" />
             <input className="set-input" placeholder="输出价格 ¥/1M tokens" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} aria-label="输出价格" />
           </div>
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button className="btn-ok" onClick={save} disabled={busy === 'save'}>{busy === 'save' ? <span className="spin" /> : null}保存</button>
-            <button className="btn-ghost" onClick={test} disabled={busy === 'test'}>{busy === 'test' ? <span className="spin" /> : null}测试连接</button>
+            <button className="btn-ok" onClick={save} disabled={busy !== null}>{busy === 'save' ? <span className="spin" /> : null}保存</button>
+            <button className="btn-ghost" onClick={() => void pullModels()} disabled={busy !== null}>{busy === 'pull' ? <span className="spin" /> : null}拉取模型列表</button>
+            <button className="btn-ghost" onClick={test} disabled={busy !== null}>{busy === 'test' ? <span className="spin" /> : null}测试连接</button>
             <button className="btn-ghost" onClick={() => { setCreating(false); setEditing(null); }}>取消</button>
           </div>
         </div>
