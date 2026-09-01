@@ -140,6 +140,14 @@ export function summarizeToolResult(text: string): string {
   return t.length > 400 ? t.slice(0, 400) + '…' : t;
 }
 
+/** 叙述化工具调用检测：模型把工具调用写成正文文本（【工具调用 X】参数/结果 …）而非原生
+ *  tool_calls。历史文本化（textualizeHistory）是 L3 前缀缓存的刻意取舍，但其示范会被弱模型
+ *  模仿——此检测供执行器纠偏重提示（harness 强制自修正，不依赖模型自觉）。导出供 selftest。 */
+export function detectNarratedToolCall(text: string): boolean {
+  if (!text) return false;
+  return /【工具调用\s*[a-zA-Z0-9_-]+\s*】/.test(text) && /(参数|结果)\s*[:：]/.test(text);
+}
+
 /**
  * 工具轮文本化（L3 前缀缓存的关键形态，run 内与跨 run 共用）：
  * 把历史中的 assistant{tc} + tool 消息对合并为一条 assistant 纯文本消息
@@ -288,6 +296,8 @@ export class AgentRunner {
     }
 
     let totalIn = 0, totalOut = 0, totalCost = 0;
+    // H8 叙述化纠偏计数：每次 run 最多纠 2 次（防"叙述→纠偏→再叙述"循环烧钱；第 3 次放行为最终答案）
+    let narrationFixes = 0;
     // L3 前缀缓存统计：记录上一轮实际发给 LLM 的 history 快照（钩子可能改写）
     let lastHistory: { role?: string; content?: string | null }[] | null = null;
     // 自适应：本会话连续工具失败计数（超阈值时注入建议，管理"认知资源"）
@@ -581,6 +591,21 @@ export class AgentRunner {
 
       // ---- 无工具调用：本轮结束 ----
       if (!collected.length) {
+        // H8 叙述化纠偏：弱模型会模仿历史文本化（textualizeHistory）的示范格式，把工具调用写成
+        // 正文文本而非原生 tool_calls——文本不会被执行，任务假性完成。harness 检测到即注入一次
+        // 纠偏提示重开一轮（限 2 次；retry 事件让前端清掉已流出的叙述化残段）。
+        if (detectNarratedToolCall(text) && narrationFixes < 2) {
+          narrationFixes++;
+          this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'narration-fix', parentId: opts.parentStepId })
+            .fail(`第 ${narrationFixes} 次叙述化纠偏`, { outputSummary: text.slice(0, 160) });
+          history.push({
+            role: 'user',
+            content: '【harness 纠偏】你的上一条回复把工具调用写成了正文文本（【工具调用 …】格式）。那只是历史日志的展示格式，写成文本不会被真正执行，你看到的"结果"也并不存在。请立即改用原生 tool_call 发起该调用；若确无工具可用或无需调用，再直接回答任务本身。',
+          });
+          syncHistory();
+          yield { type: 'retry' };
+          continue;
+        }
         // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）。
         // 作用域规则：本轮历史含工具消息 → 答案可能依赖本会话工具观察 → 会话级（仅本会话可命中，
         // 防跨会话复用陈旧观察）；纯问答（全程无工具）→ 全局可见，跨会话共享。

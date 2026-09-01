@@ -30,6 +30,8 @@ ARS 是一套 Claude Code 技能（4 个技能、27 种模式、30+ 子代理角
 | 7 | **pack 读取路由** | `server/routes/skills.ts` | `GET /api/skills/pack/:name/read` 网页端可查看技能全文 |
 | 8 | **UI 技能包分组** | `ui/src/types.ts`、`SkillsView.tsx`、`SkillsPanel.tsx` | 「已安装 · 技能包（ARS 学术）」分组 + 标签；卸载按钮仍仅限用户技能 |
 | 9 | **.gitignore 例外** | `maharness/.gitignore` | 全局 `.claude/` 忽略规则会误伤 vendor 内 ARS 的路由纪律文件（`.claude/CLAUDE.md`，4 个 SKILL.md 均引用），加 `!web-agent/vendor/**/.claude/` 例外 |
+| 10 | **叙述化纠偏（H8）** | `core/chat/agent.ts`、`core/chat/index.ts` | 真实测试发现：历史文本化（L3 前缀缓存的关键形态）的示范会被弱模型模仿——把工具调用写成正文文本而非原生 tool_calls（任务假性完成）。执行器检测该模式后注入纠偏提示重开一轮（每 run 限 2 次，trace 记 `narration-fix` 步骤，SSE retry 清屏）；BASE_PROMPT 行动纪律补「唯一调用方式是原生 tool_call」 |
+| 11 | **get_skill_file 自修正与 grep** | `core/skills/index.ts` | 真实测试发现模型会猜测形似文件名（如 `literature_search_agent.md` 不存在）：失败时错误信息附带「可用文件」清单，一步纠正；新增 `grep` 参数（匹配行+行号+上下文），数万字 SKILL.md 先定位章节再读，免走 powershell 审批绕路 |
 
 内核（kernel/）零改动——又一次验证「薄内核 + 全插件化」：学术化改造全部发生在能力层。
 
@@ -70,10 +72,13 @@ ARS 是一套 Claude Code 技能（4 个技能、27 种模式、30+ 子代理角
 
 ## 5. 验证记录（2026-09-01）
 
-- `npm run typecheck` 0 error；`ui: build` 通过；`npm test` 80/80。
-- 服务端冒烟：`/api/plugins` 可见 `academic(started)` 与 `skills`（3 工具）；`/api/skills` 列出 5 内置 + 4 技能包；`GET /api/skills/pack/deep-research/read` 返回 36.6KB 全文。
-- `get_skill_file` 运行时 7 例：技能根相对（52.7KB）、包根回退（`shared/` 11KB、`.claude/` 67KB）、`scripts/*.py` 可读、`..` 穿越拒绝、绝对路径拒绝、service 层 get/list 正常。
-- 上游保真：`diff -rq` vendor vs 上游克隆 → 保留文件零差异（仅缺 7 个有意剔除的基建目录）。
+**真实 LLM 端到端实测**（provider：opencode.ai/zen 真实 Key；Tavily 真实检索）：
+
+- **T1 学术路由**：「快速研究简报」→ agent 自主 `get_skill(deep-research)` → 按结果存储+recall 机制消化 37KB SKILL.md → 按 quick 模式产出结构化简报。检索失败时主动声明「不能虚构引用来源，外部核实标记为未执行」——引用纪律生效。
+- **T2 子代理编排**：读 `agents/bibliography_agent.md` 角色定义 → `run_subagent` 派发 → 子代理 6+ 次真实检索 → 主代理交叉核验，**剔除子代理初稿中 3 条无法溯源的 arXiv 引用**。整次编排 $0.027。
+- **T3 写作流**：`get_skill(academic-paper)` → 模板/规范目录探索 → outline-only 模式产出双语摘要 + IMRaD 大纲（6043 字符），引用只标注类型锚点不写未核实 DOI。审批挂起/断点/恢复链路同场验证。
+- **磨合发现与修复**（本轮）：① 模型两次把工具调用「叙述化」为正文 → H8 叙述化纠偏机制（检测+重提示，selftest 2 用例护航）；② 猜测技能文件名失败 → 可用清单随错误返回；③ 大文档检索走 powershell 触发审批 → get_skill_file 新增 grep 参数。
+- 质量门：typecheck 0 error；selftest 89/89；npm test 80/80；eval 4/4。
 
 ## 6. 已知边界
 

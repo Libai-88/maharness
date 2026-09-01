@@ -8,7 +8,7 @@
  * 设计原则：skills 不自动注入提示词（避免膨胀），Agent 按需读取——需要时精准，不需要时零成本。
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin } from '../../kernel/types';
 
@@ -154,16 +154,17 @@ export default {
         name: 'get_skill_file',
         risk: 'low',
         costHint: 'low',
-        description: '读取技能内任意资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能（如学术技能包）的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）等，用本工具按路径读取。',
+        description: '读取技能内资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能（如学术技能包）的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）。大文档（SKILL.md 常达数万字）先用 grep 参数定位章节再读，避免整文塞满上下文。',
         parameters: {
           type: 'object',
           properties: {
             skill: { type: 'string', description: '技能名称（list_skills 可查）' },
             path: { type: 'string', description: '技能内相对路径，如 agents/draft_writer_agent.md；shared/references/x.md 这类跨技能路径相对技能包根，自动解析' },
+            grep: { type: 'string', description: '可选：只在文件内搜索匹配行（大小写不敏感），返回匹配行+行号+各 2 行上下文——长文档（如 SKILL.md）先 grep 定位章节，再按需读全文' },
           },
           required: ['skill', 'path'],
         },
-        async handler(args: { skill?: string; path?: string }) {
+        async handler(args: { skill?: string; path?: string; grep?: string }) {
           const roots = skillRoots(String(args.skill ?? ''));
           if (roots.length === 0) return { ok: false, error: `技能不存在: ${args.skill}（用 list_skills 查看）` };
           const { root, packRoot } = roots[0];
@@ -174,13 +175,56 @@ export default {
             if (!p || !existsSync(p) || !statSync(p).isFile()) continue;
             let content = readFileSync(p, 'utf-8');
             let truncated = false;
+            // grep 模式：返回匹配行 + 行号 + 上下文（大技能文档的章节定位，免走 shell 审批）
+            const pattern = String(args.grep ?? '').trim();
+            if (pattern) {
+              const lines = content.split('\n');
+              const lower = pattern.toLowerCase();
+              const hits: number[] = [];
+              lines.forEach((ln, i) => { if (ln.toLowerCase().includes(lower)) hits.push(i); });
+              if (hits.length === 0) {
+                return { ok: true, data: { skill: args.skill, path: rel, grep: pattern, matches: 0, content: `（无匹配行: ${pattern}）` } };
+              }
+              const ctx = new Set<number>();
+              for (const h of hits.slice(0, 80)) for (let d = -2; d <= 2; d++) if (lines[h + d] !== undefined) ctx.add(h + d);
+              const out: string[] = [];
+              let prev = -2;
+              for (const i of [...ctx].sort((a, b) => a - b)) {
+                if (i !== prev + 1) out.push('…');
+                out.push(`${i + 1}: ${lines[i]}`);
+                prev = i;
+              }
+              const total = out.join('\n');
+              return {
+                ok: true,
+                data: {
+                  skill: args.skill, path: rel, grep: pattern, matches: hits.length,
+                  truncated: total.length > FILE_CHAR_LIMIT,
+                  content: total.length > FILE_CHAR_LIMIT ? total.slice(0, FILE_CHAR_LIMIT) : total,
+                },
+              };
+            }
             if (content.length > FILE_CHAR_LIMIT) {
               content = content.slice(0, FILE_CHAR_LIMIT);
               truncated = true;
             }
             return { ok: true, data: { skill: args.skill, path: rel, truncated, content } };
           }
-          return { ok: false, error: `文件不存在: ${rel}（技能内路径相对技能根；shared/ scripts/ docs/ .claude/ 相对技能包根，已自动尝试两者）` };
+          // 自修正友好：失败时带回可用文件清单——模型猜错文件名（技能包文件名来自技能作者的
+          // 命名习惯，LLM 极易编造形似名）时一步纠正，不必再花轮次 list_dir 摸索。
+          const listAvail = (base: string, relPath: string): string[] => {
+            const resolved = safeResolve(base, relPath);
+            if (!resolved) return [];
+            const dir = dirname(resolved);
+            const normBase = resolve(base);
+            if (!dir.startsWith(normBase) || !existsSync(dir) || !statSync(dir).isDirectory()) return [];
+            try {
+              return readdirSync(dir, { withFileTypes: true }).map((e) => e.name).slice(0, 40);
+            } catch { return []; }
+          };
+          const avail = [...new Set([...listAvail(root, rel), ...(packRoot ? listAvail(packRoot, rel) : [])])];
+          const availHint = avail.length ? `。可用文件: ${avail.join('、')}` : '';
+          return { ok: false, error: `文件不存在: ${rel}（技能内路径相对技能根；shared/ scripts/ docs/ .claude/ 相对技能包根，已自动尝试两者）${availHint}` };
         },
       },
     });

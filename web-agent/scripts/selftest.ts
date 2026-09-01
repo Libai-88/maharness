@@ -1293,6 +1293,53 @@ export default {
   check('[handoff] 移交终止循环 + 事件上报', handed, `(事件=${evs.map((e) => e.type).join(',')} LLM 调用=${llmCalls})`);
 }
 
+// ---- H8 叙述化纠偏：模型把工具调用写成正文文本 → harness 检测 + 纠偏重提示 + 原生重试 ----
+{
+  const { AgentRunner, detectNarratedToolCall } = await import('../core/chat/agent');
+  const runner2 = new AgentRunner(kernel, kernel.bus);
+  // 检测器单测：命中叙述化格式 / 不误伤普通正文
+  check('[narration-fix] 检测器命中叙述化格式',
+    detectNarratedToolCall('好的。\n【工具调用 list_dir】参数: {"path":"x"}\n结果: ...')
+    && detectNarratedToolCall('【工具调用 get_skill】参数: (空) 结果: 已读取')
+    && !detectNarratedToolCall('工具调用是 agent 改变世界的唯一途径。')
+    && !detectNarratedToolCall('【工具结果已存入结果存储（id=xxx）】'),
+    '');
+  // 执行器集成：第 1 轮叙述化（无原生 tool_calls）→ 纠偏 → 第 2 轮原生 tool_call → 第 3 轮最终答案
+  let llmCalls = 0;
+  const mk = {
+    id: 'mock-nf', label: 'NF', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() {
+      llmCalls++;
+      if (llmCalls === 1) {
+        // 叙述化：写成正文文本，不发起原生 tool_calls
+        yield { type: 'delta' as const, text: '我来列出目录。\n【工具调用 list_dir】参数: {"path":"x"}\n结果: (假装的结果)' };
+      } else if (llmCalls === 2) {
+        yield { type: 'tool_call' as const, toolCall: { id: 'nf1', type: 'function' as const, function: { name: 'nf_probe', arguments: '{}' } } };
+      } else {
+        yield { type: 'delta' as const, text: '目录列出完成，最终答案。' };
+      }
+      yield { type: 'usage' as const, input: 10, output: 10 };
+      yield { type: 'done' as const };
+    },
+  };
+  const nfTool: ToolDef = {
+    name: 'nf_probe', description: '叙述化纠偏探针', parameters: { type: 'object', properties: {} },
+    async handler() { return { ok: true, data: { entries: ['a.md'] } }; },
+  };
+  const evs2: string[] = [];
+  for await (const ev of runner2.run({
+    provider: mk, model: 'm', messages: [{ role: 'user', content: '列出目录' }],
+    traceId: `nf-${Date.now()}`, tools: [nfTool],
+  })) {
+    evs2.push(ev.type);
+  }
+  const fixSteps = kernel.trace.query(undefined, { name: 'narration-fix' });
+  const fixed = evs2.includes('retry') && evs2.includes('tool_result') && evs2.includes('assistant_done')
+    && llmCalls === 3 && fixSteps.length > 0;
+  check('[narration-fix] 叙述化被检测并纠偏（重提示后原生调用）', fixed,
+    `(事件=${evs2.join(',')} LLM 调用=${llmCalls} 纠偏步骤=${fixSteps.length})`);
+}
+
 await kernel.stop();
 
 // ---- 汇总（非 LLM 用例全绿 = exit 0；web_search 等外网依赖用例不计入） ----
