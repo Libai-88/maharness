@@ -448,10 +448,10 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               animate="enter"
             >
               <motion.div variants={fadeUp}><BrandLogo size={96} /></motion.div>
-              <motion.div variants={fadeUp} className="brand-title">探索未至之境</motion.div>
+              <motion.div variants={fadeUp} className="brand-title">嗨，我是 maharness</motion.div>
               <motion.div variants={fadeUp} className="brand-slogan">
-                万物皆插件，自我进化——maharness 是你的羊，也是你的牧羊犬。<br />
-                文件读写 · 命令执行 · 联网搜索 · 自我扩展
+                有什么可以帮你的？文件读写、命令执行、联网搜索，说一声就好。<br />
+                我会学习、会记忆、会自己写插件——越用越懂你。
               </motion.div>
               <motion.div variants={fadeUp} className="brand-kbd"><span className="bk">/</span> 调出命令面板 <span className="bk">Enter</span> 发送</motion.div>
               {!hasModels && <motion.div variants={fadeUp} className="brand-note">尚未配置 LLM Provider —— 在左下角「设置」中添加。</motion.div>}

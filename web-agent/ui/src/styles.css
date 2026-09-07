@@ -4415,6 +4415,82 @@ textarea:focus-visible, [tabindex]:focus-visible {
   border-bottom: 2px solid var(--ink);
 }
 
+/* ============================================================
+   手绘涂鸦装饰层：星星 · 箭头 · 涂鸦标记 · 手绘角标
+   纯 CSS 伪元素 + mask SVG，零资源依赖
+   ============================================================ */
+
+/* —— 品牌区手绘星星（logo 旁） —— */
+.brand-hero::before {
+  content: '';
+  position: absolute;
+  top: 30px; left: 12%;
+  width: 60px; height: 60px;
+  background: var(--ink-soft);
+  opacity: 0.25;
+  rotate: -12deg;
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6-6.3 4.6 2.3-7-6-4.6h7.6z' fill='%23fff'/%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M12 2l2.4 7.4h7.6l-6 4.6 2.3 7-6.3-4.6-6.3 4.6 2.3-7-6-4.6h7.6z' fill='%23fff'/%3E%3C/svg%3E") no-repeat center / contain;
+  animation: doodleSway 6s ease-in-out infinite;
+}
+
+/* —— 品牌区手绘箭头（指向贴纸） —— */
+.hero-sticker::after {
+  content: '←';
+  position: absolute;
+  bottom: -8px; left: -20px;
+  font-size: 28px;
+  color: var(--accent);
+  opacity: 0.5;
+  rotate: -15deg;
+  pointer-events: none;
+}
+
+/* —— 右面板顶部手绘涂鸦标记 —— */
+.trail-panel::before {
+  content: '✦';
+  position: absolute;
+  top: 8px; right: 12px;
+  font-size: 18px;
+  color: var(--accent);
+  opacity: 0.3;
+  rotate: 15deg;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* —— 输入框旁边手绘笑脸 —— */
+.composer::after {
+  content: '✎';
+  position: absolute;
+  top: -12px; right: 16px;
+  font-size: 20px;
+  color: var(--text-4);
+  opacity: 0.3;
+  rotate: -8deg;
+  pointer-events: none;
+}
+
+/* —— 发送按钮手绘箭头覆盖 —— */
+.send-btn::after {
+  content: '→';
+  position: absolute;
+  top: 50%; left: 50%;
+  translate: -50% -50%;
+  font-size: 16px;
+  color: var(--on-accent);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s;
+}
+
+/* —— 手绘涂鸦动画 —— */
+@keyframes doodleSway {
+  0%, 100% { translate: 0 0; rotate: -12deg; }
+  50% { translate: 3px -4px; rotate: -8deg; }
+}
+
 /* —— 减弱动效守卫 —— */
 @media (prefers-reduced-motion: reduce) {
   .brand-hero::before, .brand-hero::after { animation: none; }
