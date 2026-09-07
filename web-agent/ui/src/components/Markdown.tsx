@@ -1,5 +1,6 @@
 // ui/src/components/Markdown.tsx —— LLM 输出 Markdown 渲染（安全 + 代码高亮）
-import { useMemo } from 'react';
+// memo 化：已完成消息的 text 不再变化，父级（消息流）重渲染时跳过 marked+DOMPurify 结果的 reconcile
+import { memo, useMemo } from 'react';
 import { marked } from 'marked';
 import DOMPurify from 'dompurify';
 // 按需注册常用语言子集（全量 highlight.js ≈1MB；core + 15 语言 ≈几十 kB）
@@ -39,11 +40,11 @@ marked.use({
   },
 });
 
-export default function Markdown({ text }: { text: string }) {
+export default memo(function Markdown({ text }: { text: string }) {
   const html = useMemo(() => {
     const raw = marked.parse(text) as string;
     // LLM 输出为不可信输入：先清洗再注入
     return DOMPurify.sanitize(raw);
   }, [text]);
   return <div className="md" dangerouslySetInnerHTML={{ __html: html }} />;
-}
+});

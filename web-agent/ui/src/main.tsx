@@ -1,6 +1,5 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { Toaster } from 'sonner';
 import { MotionConfig } from 'motion/react';
 import App from './App';
 import './styles.css';
@@ -10,32 +9,11 @@ try {
   document.documentElement.dataset.theme = localStorage.getItem('maharness-theme') === 'dark' ? 'dark' : 'light';
 } catch { /* 忽略 */ }
 
+// Toaster 由 App 挂载（theme 跟随明暗主题切换，不再硬编码 dark）
 createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <MotionConfig reducedMotion="user">
       <App />
-      <Toaster
-      theme="dark"
-      richColors
-      position="bottom-right"
-      gap={8}
-      visibleToasts={4}
-      toastOptions={{
-        style: {
-          background: 'var(--bg-elev)',
-          border: '1px solid var(--border)',
-          color: 'var(--text-1)',
-          fontFamily: 'var(--font-sans)',
-          fontSize: '12.5px',
-          boxShadow: 'var(--shadow-pop)',
-        },
-        classNames: {
-          success: 'sonner-toast-success',
-          error: 'sonner-toast-error',
-          info: 'sonner-toast-info',
-        },
-      }}
-    />
     </MotionConfig>
   </React.StrictMode>,
 );

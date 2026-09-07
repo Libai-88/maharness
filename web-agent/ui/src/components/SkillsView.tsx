@@ -4,7 +4,7 @@ import { skillsApi } from '../api';
 import type { SkillInfo } from '../types';
 import { IconClose, IconSpark } from './Icon';
 
-const COLORS = ['#d9a441', '#82a873', '#d0856b', '#e0913f', '#d96856', '#6b6053'];
+const COLORS = ['#e8930f', '#43a047', '#e0512f', '#8a63e8', '#d94630', '#9c8d74'];
 
 export default function SkillsView() {
   const [installed, setInstalled] = useState<SkillInfo[]>([]);

@@ -1,6 +1,7 @@
 // ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话列表 + 批量管理 + Footer）
 // Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab
-import { useState } from 'react';
+// memo 化：配合 App 侧稳定引用回调，流式渲染期间（App 每 token 重渲染）跳过整个侧边栏 reconcile
+import { memo, useState } from 'react';
 import type { Session } from '../types';
 import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
@@ -52,7 +53,7 @@ function fmtTime(ts: number): string {
   return `${d.getMonth() + 1}/${d.getDate()}`;
 }
 
-export default function Sidebar({
+export default memo(function Sidebar({
   sessions, activeId, activeTab, onTab, pluginTabs = [], onSelect, onCreate, onDelete, onArchive, onPin, onRename,
   onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning,
 }: Props) {
@@ -225,7 +226,7 @@ export default function Sidebar({
             <div className="sb-foot-left">
               <span className="sb-foot-chip">{pluginRunning} running</span>
             </div>
-            <span className="sb-foot-chip" style={{ color: 'var(--text-3)' }}>v0.1.2</span>
+            <span className="sb-foot-chip ver">v0.1.2</span>
           </div>
           <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
             <IconSettings size={14} />
@@ -235,4 +236,4 @@ export default function Sidebar({
       )}
     </aside>
   );
-}
+});

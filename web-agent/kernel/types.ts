@@ -27,6 +27,9 @@ export interface PluginManifest {
   requires?: string[];      // 依赖的插件 id（先加载）
   lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
                             // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
+  /** 核心必要插件：即使 enabled=false 也不允许完全卸载（卸载=丧失关键能力）。
+   *  disable 时进入降级模式（服务返回 503），而非彻底移除。 */
+  essential?: boolean;
   /** 声明本插件提供的服务键（coeffect provide 的声明式预览，供依赖图谱/插件面板可查；
    *  实际提供以运行时 ctx.provide 为准——声明只读，动态提供才算数） */
   provides?: string[];
@@ -35,6 +38,15 @@ export interface PluginManifest {
    *  支持的子集：type(含 object/array/string/number/integer/boolean/null) / properties / required /
    *  items / enum / minimum / maximum / minLength / maxLength。超出子集的声明按「不校验」处理（渐进增强）。 */
   config?: Record<string, unknown>;
+  /** 插件资源配额与隔离参数 */
+  limits?: {
+    /** 生命周期方法（onLoad/onStart）超时（ms），默认 30000 */
+    lifecycleTimeoutMs?: number;
+    /** 连续失败次数阈值，超过后自动进入熔断态（默认 3，0 = 不熔断） */
+    circuitBreakerThreshold?: number;
+    /** 熔断态持续时间（ms），过后自动重试（默认 60000） */
+    circuitBreakerResetMs?: number;
+  };
 }
 
 export interface Plugin {

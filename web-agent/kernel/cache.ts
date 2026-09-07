@@ -17,7 +17,7 @@
  * 命中率不因进程重启归零（逼近 100% 的前提：缓存必须比进程活得久）。
  */
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type { CacheStats } from './types';
 
@@ -45,6 +45,52 @@ interface L1Entry {
 const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
 const L1_TTL = 24 * 3600_000;     // L1 答案 TTL 24h：时效性内容（天气/新闻/用户数据）不永久缓存
 const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
+const MIN_L1_ANSWER = 4;          // 低于该长度的答案不进 L1（"好的""完成"等无信息量）
+
+/**
+ * L1 入队质量过滤：低质量/不确定/无信息量的答案不进缓存，避免污染语义空间。
+ * 返回 true = 允许入队，false = 拒绝。
+ */
+function isAnswerCacheable(answer: string, question: string): boolean {
+  const trimmed = answer.trim();
+  // 1. 长度门槛：过短无信息量，过长可能包含大量工具输出（不适合语义匹配）
+  if (trimmed.length < MIN_L1_ANSWER || trimmed.length > MAX_L1_ANSWER) return false;
+
+  // 2. 不确定性模式：LLM 承认不确定/无法完成的回答不缓存
+  const uncertainPatterns = [
+    /我不(确定|知道|清楚|了解)/,
+    /抱歉.{0,10}(无法|不能|没办法|做不到)/,
+    /抱歉.{0,10}(我|暂时|目前)/,
+    /无法(完成|执行|处理|访问|读取)/,
+    /没有(权限|足够的|足够)/,
+    /出错[了]?:/,
+    /error[:\s]/i,
+    /失败[了]?:/,
+    /超时/,
+    /请(重新|再次|稍后)/,
+    /建议.{0,15}(尝试|检查|确认)/,
+  ];
+  for (const p of uncertainPatterns) {
+    if (p.test(trimmed)) return false;
+  }
+
+  // 3. 纯工具输出不缓存（包含 JSON 代码块或大量技术日志）
+  const toolOutputPatterns = [
+    /^\s*```/,                    // 以代码块开头
+    /\{[\s\S]{50,}\}/,           // 大段 JSON
+    /^\s*\</,                     // 以 HTML/XML 开头
+    /exit code[:\s]/i,
+    /stack trace/i,
+  ];
+  for (const p of toolOutputPatterns) {
+    if (p.test(trimmed)) return false;
+  }
+
+  // 4. 问答对质量比对：答案应该比问题长（纯重复问题的无信息量回答不缓存）
+  if (trimmed.length < question.length * 0.3) return false;
+
+  return true;
+}
 
 /**
  * 中文功能词（虚词/祈使词）：语义缓存的「内容词过滤」——忽略表面措辞，保留内容词。
@@ -125,6 +171,10 @@ export interface CacheConfig {
   l1TextThreshold?: number;
   /** L2 工具结果默认 TTL 毫秒（默认 30 分钟） */
   l2TtlMs?: number;
+  /** L1 语义缓存最大条目数（默认 500） */
+  maxL1?: number;
+  /** L2 工具结果缓存最大条目数（默认 2000） */
+  maxL2?: number;
 }
 
 export class Cache {
@@ -132,6 +182,8 @@ export class Cache {
   private l1 = new Map<string, L1Entry>(); // key = 归一化文本
   private l1TextThreshold = 0.58;
   private l2TtlMs = 30 * 60_000;
+  private maxL1 = 500;
+  private maxL2 = 2000;
   private saveTimer: NodeJS.Timeout | null = null;
   private counter: CacheStats = {
     l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
@@ -143,6 +195,8 @@ export class Cache {
   constructor(private embeddingFn?: EmbeddingFn, cfg: CacheConfig = {}, private persistFile?: string) {
     if (cfg.l1TextThreshold !== undefined) this.l1TextThreshold = cfg.l1TextThreshold;
     if (cfg.l2TtlMs !== undefined) this.l2TtlMs = cfg.l2TtlMs;
+    if (cfg.maxL1 !== undefined) this.maxL1 = cfg.maxL1;
+    if (cfg.maxL2 !== undefined) this.maxL2 = cfg.maxL2;
     if (persistFile) this.load();
   }
 
@@ -150,6 +204,8 @@ export class Cache {
   setConfig(cfg: CacheConfig): void {
     if (cfg.l1TextThreshold !== undefined) this.l1TextThreshold = cfg.l1TextThreshold;
     if (cfg.l2TtlMs !== undefined) this.l2TtlMs = cfg.l2TtlMs;
+    if (cfg.maxL1 !== undefined) this.maxL1 = cfg.maxL1;
+    if (cfg.maxL2 !== undefined) this.maxL2 = cfg.maxL2;
   }
 
   // ---------- 持久化（防抖落盘 / 启动加载） ----------
@@ -159,44 +215,71 @@ export class Cache {
     if (!this.persistFile) return;
     try {
       mkdirSync(dirname(this.persistFile), { recursive: true });
-      writeFileSync(this.persistFile, JSON.stringify({
+      const payload = JSON.stringify({
+        v: 2, // 版本号：升级时可做迁移
         l1: [...this.l1.entries()].map(([k, e]) => ({
           k, answer: e.answer, hits: e.hits, promptKey: e.promptKey,
           scope: e.scope, expiresAt: e.expiresAt,
           bigrams: [...e.bigrams], actions: e.actions, vector: e.vector ? [...e.vector] : undefined,
         })),
         l2: [...this.l2.entries()].map(([k, e]) => ({ k, value: e.value, expiresAt: e.expiresAt, hits: e.hits })),
-      }), 'utf8');
+      });
+      // 写入临时文件再原子替换，防止写入中途崩溃导致文件损坏
+      const tmp = this.persistFile + '.tmp';
+      writeFileSync(tmp, payload, 'utf8');
+      renameSync(tmp, this.persistFile);
     } catch (err) {
       console.warn('[cache] 持久化失败（不影响运行）:', err instanceof Error ? err.message : String(err));
     }
   }
 
-  /** 启动加载：恢复未过期的 L1/L2 条目（跨重启命中） */
+  /** 启动加载：恢复未过期的 L1/L2 条目（跨重启命中）。
+   *  v8 改进：逐条 try/catch——单条损坏不丢失其余；文件损坏时降级为空缓存而非崩溃。 */
   load(): void {
     if (!this.persistFile) return;
     try {
       if (!existsSync(this.persistFile)) return;
-      const data = JSON.parse(readFileSync(this.persistFile, 'utf8')) as {
-        l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[];
-        l2?: { k: string; value: unknown; expiresAt: number; hits: number }[];
-      };
+      const raw = readFileSync(this.persistFile, 'utf8');
+      let data: { l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; expiresAt: number; hits: number }[] };
+      try {
+        data = JSON.parse(raw) as typeof data;
+      } catch {
+        // 主文件损坏：尝试恢复 .tmp 备份
+        const tmpFile = this.persistFile + '.tmp';
+        if (existsSync(tmpFile)) {
+          console.warn('[cache] 主缓存文件损坏，尝试从 .tmp 备份恢复');
+          data = JSON.parse(readFileSync(tmpFile, 'utf8')) as typeof data;
+        } else {
+          console.warn('[cache] 缓存文件损坏且无备份，从空缓存开始');
+          return;
+        }
+      }
       const now = Date.now();
+      let l1Restored = 0, l2Restored = 0, l1Skipped = 0, l2Skipped = 0;
       for (const item of data.l1 ?? []) {
-        if (item.expiresAt < now) continue;
-        this.l1.set(item.k, {
-          answer: item.answer, hits: item.hits, promptKey: item.promptKey,
-          scope: item.scope, expiresAt: item.expiresAt,
-          bigrams: new Set(item.bigrams ?? []), actions: item.actions ?? [], vector: item.vector,
-        });
+        try {
+          if (item.expiresAt < now) { l1Skipped++; continue; }
+          if (!item.k || !item.answer || !item.bigrams) { l1Skipped++; continue; } // 必填字段缺失
+          this.l1.set(item.k, {
+            answer: item.answer, hits: item.hits ?? 0, promptKey: item.promptKey ?? '',
+            scope: item.scope, expiresAt: item.expiresAt,
+            bigrams: new Set(item.bigrams), actions: item.actions ?? [], vector: item.vector,
+          });
+          l1Restored++;
+        } catch { l1Skipped++; }
       }
       for (const item of data.l2 ?? []) {
-        if (item.expiresAt < now) continue;
-        this.l2.set(item.k, { value: item.value, expiresAt: item.expiresAt, hits: item.hits, lastAccess: now });
+        try {
+          if (item.expiresAt < now) { l2Skipped++; continue; }
+          if (!item.k) { l2Skipped++; continue; }
+          this.l2.set(item.k, { value: item.value, expiresAt: item.expiresAt, hits: item.hits ?? 0, lastAccess: now });
+          l2Restored++;
+        } catch { l2Skipped++; }
       }
-      if (data.l1?.length || data.l2?.length) {
-        console.log(`[cache] 已从磁盘恢复缓存：L1 ${data.l1?.length ?? 0} 条 / L2 ${data.l2?.length ?? 0} 条`);
-      }
+      const parts = [];
+      if (l1Restored) parts.push(`L1 ${l1Restored} 条`);
+      if (l2Restored) parts.push(`L2 ${l2Restored} 条`);
+      if (parts.length) console.log(`[cache] 已从磁盘恢复缓存：${parts.join(' / ')}${l1Skipped + l2Skipped ? `（跳过 ${l1Skipped + l2Skipped} 条过期/损坏）` : ''}`);
     } catch (err) {
       console.warn('[cache] 缓存加载失败（从空开始）:', err instanceof Error ? err.message : String(err));
     }
@@ -241,21 +324,22 @@ export class Cache {
       return { hit: false };
     }
     e.hits++;
-    e.lastAccess = Date.now();
     this.counter.l2Hits++;
+    // LRU O(1)：delete + set 将条目移到 Map 尾部（最新访问位）
+    // 淘汰时 keys().next() 取队首 = 最久未访问
+    this.l2.delete(key);
+    this.l2.set(key, e);
     return { hit: true, value: e.value };
   }
 
   l2Set(key: string, value: unknown, ttlMs = this.l2TtlMs): void {
+    // LRU O(1)：已有 key 先 delete 再 set（移到尾部）；新 key 直接 set
+    if (this.l2.has(key)) this.l2.delete(key);
     this.l2.set(key, { value, expiresAt: Date.now() + ttlMs, hits: 0, lastAccess: Date.now() });
-    // 防内存膨胀：上限 2000 条，超出淘汰最久未访问（LRU——按访问时间淘汰，而非插入序）
-    if (this.l2.size > 2000) {
-      let oldestKey: string | undefined;
-      let oldest = Infinity;
-      for (const [k, e] of this.l2) {
-        if (e.lastAccess < oldest) { oldest = e.lastAccess; oldestKey = k; }
-      }
-      if (oldestKey !== undefined) this.l2.delete(oldestKey);
+    // LRU 淘汰：超容量时删除队首（最久未访问）
+    if (this.l2.size > this.maxL2) {
+      const oldest = this.l2.keys().next().value;
+      if (oldest !== undefined) this.l2.delete(oldest);
     }
     this.scheduleSave();
   }
@@ -376,15 +460,21 @@ export class Cache {
    */
   async l1Set(question: string, answer: string, promptKey = '', scope?: string): Promise<void> {
     const norm = question.replace(/\s+/g, ' ').trim();
-    if (!norm || norm.length < 8 || !answer || answer.length > MAX_L1_ANSWER) return;
+    if (!norm || norm.length < 8) return;
+    // 质量门槛：低质量/不确定/无信息量的答案不入队
+    if (!isAnswerCacheable(answer, norm)) return;
+    const entryKey = `${promptKey}|${norm}`;
     const entry: L1Entry = {
       bigrams: bigramSet(contentWords(norm)), actions: [...actionGroups(norm)], answer, hits: 0, promptKey,
       scope: scope || undefined, expiresAt: Date.now() + L1_TTL,
     };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
-    this.l1.set(`${promptKey}|${norm}`, entry);
-    // LRU：命中路径已重插（队首 = 最久未访问），超容量直接淘汰队首
-    if (this.l1.size > 500) {
+    // LRU 修复：已有 key 必须先 delete 再 set，否则 Map 保留原位置（频繁写入的条目
+    // 停在队首，被误认为最久未访问而淘汰——这是高频问答命中率下降的根因）
+    if (this.l1.has(entryKey)) this.l1.delete(entryKey);
+    this.l1.set(entryKey, entry);
+    // LRU：超容量淘汰队首（最久未访问）
+    if (this.l1.size > this.maxL1) {
       const oldest = this.l1.keys().next().value;
       if (oldest !== undefined) this.l1.delete(oldest);
     }

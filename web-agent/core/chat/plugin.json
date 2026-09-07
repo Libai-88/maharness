@@ -3,5 +3,11 @@
   "name": "对话引擎",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "essential": true,
+  "limits": {
+    "lifecycleTimeoutMs": 60000,
+    "circuitBreakerThreshold": 5,
+    "circuitBreakerResetMs": 120000
+  }
 }

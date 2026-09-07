@@ -8,11 +8,17 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="maharness · AI Agent Harness" />
     <meta property="og:description" content="时刻可观测的 AI Agent Harness：计划编排、工具调用、缓存命中与成本全程透明可视。" />
-    <meta name="theme-color" content="#171310" />
+    <meta name="theme-color" content="#f5eee0" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400..900;1,9..144,400..900&family=IBM+Plex+Sans:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns%3D'http://www.w3.org/2000/svg' viewBox%3D'0 0 32 32'%3E%3Cdefs%3E%3ClinearGradient id%3D'g' x1%3D'0' y1%3D'0' x2%3D'1' y2%3D'1'%3E%3Cstop offset%3D'0' stop-color%3D'%23d0856b'/%3E%3Cstop offset%3D'0.55' stop-color%3D'%23d9a441'/%3E%3Cstop offset%3D'1' stop-color%3D'%2382a873'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width%3D'32' height%3D'32' rx%3D'8' fill%3D'url(%23g)'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.7' fill%3D'none' stroke-linecap%3D'round'%3E%3Cpath d%3D'M9.5 13.5 C 7 12, 5.9 9.7, 7.1 8.6 C 8.1 7.8, 9.3 8.6, 9.5 10'/%3E%3Cpath d%3D'M22.5 13.5 C 25 12, 26.1 9.7, 24.9 8.6 C 23.9 7.8, 22.7 8.6, 22.5 10'/%3E%3Cpath d%3D'M9.5 10.6 L 16 8.2 L 22.5 10.6' stroke-width%3D'1.4'/%3E%3C/g%3E%3Cpath d%3D'M8 13 h16 v11 a2 2 0 0 1 -2 2 H10 a2 2 0 0 1 -2 -2 Z' fill%3D'%23fff' opacity%3D'0.16'/%3E%3Cg stroke%3D'%23fff' stroke-width%3D'1.6' stroke-linecap%3D'round'%3E%3Cpath d%3D'M11.5 16.8 h3 M17.5 16.8 h3'/%3E%3Cpath d%3D'M12 21.5 q 4 3 8 0' stroke-width%3D'1.5'/%3E%3C/g%3E%3C/svg%3E" />
+    <!-- 字体非阻塞加载：Google Fonts 在部分网络环境（如大陆）不可达，
+         阻塞式 stylesheet 会让首屏白屏至超时。print→all 切换使其不阻塞渲染，
+         加载前使用系统回退字体（--font-sans 完整回退栈），加载后平滑换装。
+         涂鸦手账版：Caveat（马克笔手写·大标题/徽章）+ Kalam（正文手写）+ JetBrains Mono（代码技术层对比） -->
+    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
+    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" /></noscript>
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns%3D'http://www.w3.org/2000/svg' viewBox%3D'0 0 32 32'%3E%3Crect width%3D'32' height%3D'32' rx%3D'10 13 9 14' fill%3D'%23e0512f'/%3E%3Cpath d%3D'M12 21 C 8.5 21.5 7 19 8 17 C 6.5 16 6.8 13.6 8.8 13.2 C 9 11.5 11 10.2 12.8 11 C 13.6 9.8 15.6 9.8 16.4 11 C 18.2 10.2 20.2 11.5 20.4 13.2 C 22.4 13.6 22.7 16 21.2 17 C 22.2 19 20.7 21.5 17.2 21 C 16.8 22 14.6 22 14.2 21 C 13 21.4 12.6 21.4 12 21 Z' fill%3D'%23fff8ec' fill-opacity%3D'0.14' stroke%3D'%23fff8ec' stroke-width%3D'1.8' stroke-linejoin%3D'round'/%3E%3Cg stroke%3D'%23fff8ec' stroke-width%3D'1.9' fill%3D'none' stroke-linecap%3D'round'%3E%3Cpath d%3D'M11.5 12 C 9 10.5 8.2 7.6 9.8 6.2 C 11 5.2 12.4 6.2 12.2 7.8'/%3E%3Cpath d%3D'M20.5 12 C 23 10.5 23.8 7.6 22.2 6.2 C 21 5.2 19.6 6.2 19.8 7.8'/%3E%3C/g%3E%3Cg stroke%3D'%23fff8ec' stroke-width%3D'2' stroke-linecap%3D'round'%3E%3Cpath d%3D'M12.4 17 h2.3 M16.9 17 h2.3'/%3E%3Cpath d%3D'M13 19.5 q 3 2.2 6 0'/%3E%3Cpath d%3D'M13.2 21.6 L 13.2 26.6 M19 21.6 L 19 26.6' stroke-width%3D'1.7'/%3E%3C/g%3E%3C/svg%3E" />
     <script>
       // 首帧主题预置（避免深/浅色闪烁）
       (function () {
@@ -25,6 +31,15 @@
     </script>
   </head>
   <body>
+    <!-- 手绘涂鸦 SVG 滤镜：feTurbulence 抖动 + feDisplacementMap 位移 -->
+    <svg width="0" height="0" style="position:absolute">
+      <defs>
+        <filter id="sketchy" x="-3%" y="-3%" width="106%" height="106%">
+          <feTurbulence type="turbulence" baseFrequency="0.015" numOctaves="3" seed="2" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

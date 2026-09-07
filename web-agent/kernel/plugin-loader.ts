@@ -42,6 +42,67 @@ type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' |
 /** B6：config.changed → reloadChanged 的防抖窗口（ms）——连续配置写入合并为一次重载 */
 const CONFIG_RELOAD_DEBOUNCE_MS = 400;
 
+/** 生命周期方法默认超时（ms）——防止单个插件的 onLoad/onStart 永久挂起 */
+const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
+/** 熔断器默认阈值：连续失败 N 次后进入熔断态 */
+const DEFAULT_CB_THRESHOLD = 3;
+/** 熔断器默认重置时间（ms）：熔断态持续该时长后自动重试 */
+const DEFAULT_CB_RESET_MS = 60_000;
+
+/** 带超时的 Promise 执行：超时后抛出 AbortError，不取消原 Promise（无法真正取消） */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  if (ms <= 0) return p;
+  return Promise.race([
+    p,
+    new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error(`[plugin] ${label} 超时（${ms}ms）——插件可能挂起`)), ms),
+    ),
+  ]);
+}
+
+/**
+ * 常见错误 → 修复建议映射：将技术性错误信息翻译为用户可操作的指引。
+ * 返回建议文本；无匹配时返回 undefined（UI 不展示修复建议区域） */
+export function suggestFix(errorMsg: string): string | undefined {
+  if (!errorMsg) return undefined;
+  const lower = errorMsg.toLowerCase();
+  // 依赖缺失
+  if (lower.includes('缺少依赖') || lower.includes('missing dep') || lower.includes('依赖未加载')) {
+    const match = errorMsg.match(/依赖[插件:\s]+[:：]?\s*(\S+)/);
+    const dep = match?.[1] ?? 'xxx';
+    return `请先安装并启用依赖插件「${dep}」，然后重试。可在插件市场搜索或手动创建 plugins/${dep}/ 目录。`;
+  }
+  // 配置校验失败
+  if (lower.includes('配置校验失败') || lower.includes('config') && lower.includes('validation')) {
+    return '请检查 config.json 中该插件的配置项是否符合 schema 要求（类型/必填/范围），修正后重载插件。';
+  }
+  // 超时
+  if (lower.includes('超时') || lower.includes('timeout')) {
+    return '插件启动/加载超时，可能在 onLoad/onStart 中执行了耗时操作或死循环。请检查插件代码中的异步操作是否有 await 遗漏或无限循环。';
+  }
+  // 入口文件解析失败
+  if (lower.includes('plugin.json 解析失败') || lower.includes('syntax') && lower.includes('json')) {
+    return 'plugin.json 格式错误（JSON 语法），请用 JSON 校验器检查格式后修复。';
+  }
+  // 入口文件找不到
+  if (lower.includes('cannot find') || lower.includes('does not exist') || lower.includes('模块') && lower.includes('找不到')) {
+    return '入口文件不存在或路径错误，请检查 plugin.json 中 "entry" 字段指向的文件是否存在于插件目录中。';
+  }
+  // id 冲突
+  if (lower.includes('id 冲突') || lower.includes('id') && lower.includes('不一致')) {
+    return '插件 id 与已注册的插件冲突。请修改 plugin.json 中的 "id" 为唯一值（仅小写字母/数字/连字符）。';
+  }
+  // 熔断态
+  if (lower.includes('熔断') || lower.includes('circuit breaker')) {
+    return '插件连续失败已进入熔断保护。系统会在冷却期后自动重试。如需立即重试，请手动触发"重载"。';
+  }
+  // 权限/沙箱
+  if (lower.includes('permission') || lower.includes('eacces') || lower.includes('权限')) {
+    return '文件权限不足。请检查插件目录的读写权限，或以管理员身份运行。';
+  }
+  return undefined;
+}
+
 interface PluginInstance {
   manifest: PluginManifest;
   dir: string;
@@ -71,6 +132,12 @@ interface PluginInstance {
   /** 上下文配置拦截层，后注册层优先。 */
   configOverrides: Record<string, unknown>[];
   error?: string;
+  /** 熔断器状态：连续失败计数 + 熔断激活时间 */
+  circuitBreaker: {
+    failures: number;
+    /** 熔断激活的 mono timestamp（0 = 未激活） */
+    openedAt: number;
+  };
 }
 
 /** 服务绑定：记录提供者身份与提供时刻（服务级调用追踪的数据底座） */
@@ -216,7 +283,7 @@ export class PluginLoader {
         return existing;
       }
       id = manifest.id;
-      inst = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry) };
+      inst = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry), circuitBreaker: { failures: 0, openedAt: 0 } };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -284,7 +351,8 @@ export class PluginLoader {
 
   /** 执行 onLoad（副作用全部进入实例的 EffectScope——卸载即自动恢复）。
    *  配置 schema 校验前置：manifest.config 声明时，onLoad 前用 config.<id>.* 当前值校验，
-   *  不合规 → throw（register 失败清理 / 热重载回滚）——配置错误在进入插件逻辑前暴露。 */
+   *  不合规 → throw（register 失败清理 / 热重载回滚）——配置错误在进入插件逻辑前暴露。
+   *  v8 新增：超时保护——onLoad 挂起超过阈值则强制失败。 */
   private async runLoad(inst: PluginInstance): Promise<void> {
     const schema = inst.manifest.config;
     if (schema && typeof schema === 'object') {
@@ -294,7 +362,12 @@ export class PluginLoader {
       }
     }
     const ctx = this.buildContext(inst);
-    await inst.plugin?.onLoad?.(ctx);
+    const lifecycleTimeout = inst.manifest.limits?.lifecycleTimeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
+    await withTimeout(
+      Promise.resolve(inst.plugin?.onLoad?.(ctx)),
+      lifecycleTimeout,
+      `${inst.manifest.id}.onLoad`,
+    );
     inst.state = 'loaded';
     this.bus.emit(EventBus.event('plugin.loaded', { id: inst.manifest.id, caps: inst.caps.map((c) => c.kind), provides: [...inst.provides] }));
   }
@@ -600,10 +673,33 @@ export class PluginLoader {
 
   /** start 内部实现（不排队——已由 enqueue 保证串行，内部再排队会死锁）。
    *  失败：置 error 态后 rethrow——调用方（reload 事务/enable）据此走回滚/报错，
-   *  而不是把 error 态实例当成功提交。 */
+   *  而不是把 error 态实例当成功提交。
+   *  v8 新增：超时保护 + 熔断器——防止单个插件挂起或反复崩溃影响全局。 */
   private async startInternal(inst: PluginInstance): Promise<void> {
     if (inst.state === 'started') return;
+
+    // 熔断器检查：连续失败达阈值后进入熔断态，跳过启动
+    const cb = inst.circuitBreaker;
+    const threshold = inst.manifest.limits?.circuitBreakerThreshold ?? DEFAULT_CB_THRESHOLD;
+    const resetMs = inst.manifest.limits?.circuitBreakerResetMs ?? DEFAULT_CB_RESET_MS;
+    if (threshold > 0 && cb.failures >= threshold) {
+      const elapsed = Date.now() - cb.openedAt;
+      if (elapsed < resetMs) {
+        const remainSec = Math.ceil((resetMs - elapsed) / 1000);
+        console.warn(`[plugin] ${inst.manifest.id} 熔断态：连续失败 ${cb.failures} 次，${remainSec}s 后重试`);
+        inst.state = 'error';
+        inst.error = `熔断态：连续失败 ${cb.failures} 次，${remainSec}s 后自动重试`;
+        this.bus.emit(EventBus.event('plugin.error', { id: inst.manifest.id, error: inst.error, circuitBreaker: true }));
+        return;
+      }
+      // 熔断冷却期已过：重置计数器，允许重试
+      console.log(`[plugin] ${inst.manifest.id} 熔断冷却期已过，重置失败计数，允许重试`);
+      cb.failures = 0;
+      cb.openedAt = 0;
+    }
+
     inst.state = 'loading';
+    const lifecycleTimeout = inst.manifest.limits?.lifecycleTimeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
     try {
       // 依赖硬校验（启动前置）：requires 的插件必须已加载（loaded/started）——
       // 注册期只校验存在性（跨扫描顺序合法），启动前确保依赖先于本插件就绪。
@@ -615,8 +711,16 @@ export class PluginLoader {
       if (missingDep) {
         throw new Error(`缺少依赖插件: ${missingDep}（依赖未加载，无法启动）`);
       }
-      await inst.plugin?.onStart?.(this.buildContext(inst));
+      // 超时保护：onStart 挂起超过阈值则强制失败（不取消原 Promise，但标记错误）
+      await withTimeout(
+        Promise.resolve(inst.plugin?.onStart?.(this.buildContext(inst))),
+        lifecycleTimeout,
+        `${inst.manifest.id}.onStart`,
+      );
       inst.state = 'started';
+      // 启动成功：重置熔断器
+      cb.failures = 0;
+      cb.openedAt = 0;
       this.bus.emit(EventBus.event('plugin.started', { id: inst.manifest.id }));
       // 服务共效应发布：started 后插件提供的服务才对依赖方可见（绑定只在 ACTIVE 时有效）
       for (const cap of inst.caps) {
@@ -633,6 +737,12 @@ export class PluginLoader {
       inst.scope = new EffectScope();
       inst.state = 'error';
       inst.error = err instanceof Error ? err.message : String(err);
+      // 熔断器递增：记录失败
+      cb.failures++;
+      if (threshold > 0 && cb.failures >= threshold) {
+        cb.openedAt = Date.now();
+        console.warn(`[plugin] ${inst.manifest.id} 连续失败 ${cb.failures} 次，进入熔断态（${resetMs / 1000}s 后重试）`);
+      }
       this.bus.emit(EventBus.event('plugin.error', { id: inst.manifest.id, error: inst.error }));
       throw err;
     }
@@ -691,7 +801,7 @@ export class PluginLoader {
     this.bus.emit(EventBus.event('plugin.unloaded', { id: registryId }));
 
     // 事务阶段 2：加载新版本（暂不进入注册表）
-    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, entryHash: inst.entryHash };
+    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, entryHash: inst.entryHash, circuitBreaker: { ...inst.circuitBreaker } };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -732,6 +842,7 @@ export class PluginLoader {
           caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
           depHooks: [], depSignature: inst.depSignature,
           chain: inst.chain, entryHash: inst.entryHash,
+          circuitBreaker: { ...inst.circuitBreaker },
         };
         await this.runLoad(rollback);
         if (start && rollback.manifest.enabled !== false && !rollback.manifest.lazy) {
@@ -827,8 +938,13 @@ export class PluginLoader {
   // ---------- 对外管理 API ----------
 
   /** 插件清单投影（不暴露 scope/plugin/chain 等内部结构——内核实现细节不是公共 API） */
-  list(): { manifest: PluginManifest; state: string; error?: string }[] {
-    return [...this.registry.values()].map((i) => ({ manifest: i.manifest, state: i.state, error: i.error }));
+  list(): { manifest: PluginManifest; state: string; error?: string; circuitBreaker?: { failures: number; openedAt: number } }[] {
+    return [...this.registry.values()].map((i) => ({
+      manifest: i.manifest,
+      state: i.state,
+      error: i.error,
+      circuitBreaker: i.circuitBreaker.failures > 0 ? i.circuitBreaker : undefined,
+    }));
   }
 
   get(id: string): PluginInstance | undefined {
@@ -888,10 +1004,46 @@ export class PluginLoader {
   async disable(id: string): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
+    // essential 插件：允许 disable（进入降级模式），但记录警告
+    if (inst.manifest.essential) {
+      console.warn(`[plugin] ${id} 是核心必要插件（essential=true），disable 后进入降级模式（服务返回 503）`);
+    }
     return this.enqueue(inst, async () => {
       const cur = this.registry.get(id);
       if (!cur) return; // 等待期间已被卸载删除
       await this.stopInternal(cur);
+    });
+  }
+
+  /** 卸载插件：停止 → 回收副作用 → 删除插件目录 → 从注册表移除。
+   *  essential 插件禁止卸载（只能 disable 进入降级模式）。
+   *  仅允许卸载用户插件目录（plugins/）下的插件，core/ 插件不可卸载。 */
+  async uninstall(id: string): Promise<void> {
+    const inst = this.registry.get(id);
+    if (!inst) throw new Error(`插件不存在: ${id}`);
+    if (inst.manifest.essential) {
+      throw new Error(`插件 "${id}" 是核心必要插件（essential=true），不可卸载——如需停用请使用 disable`);
+    }
+    // 只允许卸载用户插件目录下的插件
+    if (!inst.dir.startsWith(this.userDir)) {
+      throw new Error(`插件 "${id}" 是内置插件（core），不可卸载`);
+    }
+    return this.enqueue(inst, async () => {
+      const cur = this.registry.get(id);
+      if (!cur) return;
+      // 停止 + 回收全部副作用
+      await this.stopInternal(cur);
+      // 删除插件目录
+      const { rmSync } = await import('node:fs');
+      try {
+        rmSync(cur.dir, { recursive: true, force: true });
+        console.log(`[plugin] 已卸载插件 ${id}（目录已删除: ${cur.dir}）`);
+      } catch (err) {
+        console.warn(`[plugin] 插件目录删除失败（插件已从注册表移除）: ${err instanceof Error ? err.message : String(err)}`);
+      }
+      // 从注册表移除
+      this.registry.delete(id);
+      this.bus.emit(EventBus.event('plugin.unloaded', { id }));
     });
   }
 

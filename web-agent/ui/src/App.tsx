@@ -1,21 +1,32 @@
 // ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { approvalsApi, commandsApi, modelsApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
 import type { ApprovalItem, BusEvent, ChatMessage, CheckpointInfo, Message, ModelInfo, PlanState, PluginInfo, ProviderInfo, Session, TodoCard, TraceStep } from './types';
 import Sidebar from './components/Sidebar';
 import type { MainTab } from './components/Sidebar';
 import ChatView from './components/ChatView';
 import TracePanel from './components/TracePanel';
-import FilesView from './components/FilesView';
-import PluginsView from './components/PluginsView';
-import StatsView from './components/StatsView';
-import SettingsView from './components/SettingsView';
-import WorkbenchView from './components/WorkbenchView';
 import Menu from './components/Menu';
 import { AnimatePresence, motion } from 'motion/react';
 import { pageVariants } from './motion';
 import { IconChevronDown, IconClose, IconPanel, IconWorkbench } from './components/Icon';
-import { toast } from 'sonner';
+import { Toaster, toast } from 'sonner';
+
+// 次要视图路由级代码分割：首屏只需 Chat 视图，文件/工作台/插件/统计/设置
+// 按需加载（首屏 JS 体积显著下降），挂载后 idle 时预取保证首次点击无感
+const FilesView = lazy(() => import('./components/FilesView'));
+const WorkbenchView = lazy(() => import('./components/WorkbenchView'));
+const PluginsView = lazy(() => import('./components/PluginsView'));
+const StatsView = lazy(() => import('./components/StatsView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
+
+function preloadSecondaryViews() {
+  void import('./components/FilesView');
+  void import('./components/WorkbenchView');
+  void import('./components/PluginsView');
+  void import('./components/StatsView');
+  void import('./components/SettingsView');
+}
 
 export type Theme = 'dark' | 'light';
 
@@ -47,21 +58,67 @@ export default function App() {
   const [budgetHit, setBudgetHit] = useState<{ cost: number; budget: number } | null>(null);
   // 会话累计成本（composer 区域实时显示：harness 管理认知资源的可见性）
   const [sessionCost, setSessionCost] = useState(0);
+  // provider 重试（retry）截断标记：流式消息从 retry 边界起显示，等价「清空重累积」。
+  // 标记由 App 记录（rAF 合帧缓冲的持有方，retry 时刻能算出含未冲刷增量的精确长度）
+  const [retryMarks, setRetryMarks] = useState<Record<string, { content: number; reasoning: number }>>({});
 
   const abortRef = useRef<AbortController | null>(null);
+  // 消息镜像 ref：retry 时刻同步读取（state 提交前也能拿到当前值）
+  const messagesRef = useRef(messages);
+  messagesRef.current = messages;
+
+  // ---- 流式文本 rAF 合帧缓冲 ----
+  // SSE 每 chunk 一次 setState 会让 App 整树以 chunk 频率全量重渲染（长会话下明显卡顿）。
+  // 增量先累积进缓冲，requestAnimationFrame 每帧只提交一次——渲染频率 ≤ 显示器刷新率，
+  // 输入法/滚动等交互不再被流式输出抢占主线程。
+  const pendingStreamRef = useRef<{ id: string; content: string; reasoning: string } | null>(null);
+  const streamRafRef = useRef(0);
+
+  const flushStreamBuffer = useCallback(() => {
+    if (streamRafRef.current) { cancelAnimationFrame(streamRafRef.current); streamRafRef.current = 0; }
+    const p = pendingStreamRef.current;
+    if (!p) return;
+    pendingStreamRef.current = null;
+    setMessages((prev) => prev.map((m) => m.id === p.id
+      ? { ...m, content: m.content + p.content, reasoning: (m.reasoning ?? '') + p.reasoning }
+      : m));
+  }, []);
+
+  const queueStreamText = useCallback((id: string, patch: { content?: string; reasoning?: string }) => {
+    const p = pendingStreamRef.current;
+    if (p && p.id === id) {
+      if (patch.content) p.content += patch.content;
+      if (patch.reasoning) p.reasoning += patch.reasoning;
+    } else {
+      if (p) flushStreamBuffer(); // 换消息前冲刷旧缓冲（正常时序下不会发生）
+      pendingStreamRef.current = { id, content: patch.content ?? '', reasoning: patch.reasoning ?? '' };
+    }
+    if (!streamRafRef.current) {
+      streamRafRef.current = requestAnimationFrame(() => { streamRafRef.current = 0; flushStreamBuffer(); });
+    }
+  }, [flushStreamBuffer]);
 
   // 主题：写 dataset + localStorage + Sonner 主题同步（首帧由 main.tsx 预置，避免闪烁）
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
     document.documentElement.setAttribute('data-sonner-theme', theme);
+    // 浏览器窗口 chrome（标题栏/状态栏）跟随明暗主题
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#f5eee0');
     try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
   }, [theme]);
 
   // 初始加载
   useEffect(() => { void loadAll(); }, []);
+
+  // 全局事件订阅：trace.step 仅在轨迹面板打开时入库——面板关闭时逐事件 setState
+  // 会让整个 App 树空转重渲染（流式运行时每秒可达数十次）
+  const traceOpenRef = useRef(traceOpen);
+  traceOpenRef.current = traceOpen;
   useEffect(() => {
     const off = subscribeEvents((e: BusEvent) => {
-      if (e.type === 'trace.step') setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
+      if (e.type === 'trace.step') {
+        if (traceOpenRef.current) setTraceSteps((prev) => [...prev.slice(-199), e.data as TraceStep]);
+      }
       else if (e.type === 'plan.updated') setPlan(e.data as PlanState | null);
       else if (e.type === 'todo.updated') setTodos((e.data as { cards: TodoCard[] } | null)?.cards ?? []);
       else if (e.type === 'approval.requested') {
@@ -73,8 +130,25 @@ export default function App() {
         }
       }
     });
+    return () => { off(); };
+  }, []);
+
+  // trace 统计轮询：只在轨迹面板可见时进行（关面板 = 零后台请求）
+  useEffect(() => {
+    if (!traceOpen || activeTab !== 'chat') return;
+    void traceApi.stats().then(setTraceStats).catch(() => undefined);
     const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
-    return () => { off(); clearInterval(t); };
+    return () => clearInterval(t);
+  }, [traceOpen, activeTab]);
+
+  // 次要视图 chunk 预取：首屏渲染完成后 idle 时拉取，首次切 Tab 无加载等待
+  useEffect(() => {
+    if (typeof window.requestIdleCallback === 'function') {
+      const id = window.requestIdleCallback(preloadSecondaryViews, { timeout: 2500 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(preloadSecondaryViews, 1500);
+    return () => window.clearTimeout(t);
   }, []);
 
   async function loadAll() {
@@ -243,14 +317,15 @@ export default function App() {
     }
   }, [models, activeId, toast]);
 
-  const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload') => {
+  const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
       const r = await pluginsApi.action(id, action);
       setPlugins(await pluginsApi.list());
-      const label = action === 'enable' ? '已启用' : action === 'disable' ? '已停用' : '已重载';
+      const label = action === 'enable' ? '已启用' : action === 'disable' ? '已停用' : action === 'uninstall' ? '已卸载' : '已重载';
       toast.success(`${label}（${id} · ${r.state}）`);
     } catch (err) {
-      toast.error(`插件${action === 'enable' ? '启用' : action === 'disable' ? '停用' : '重载'}失败：${err instanceof Error ? err.message : String(err)}`);
+      const label = action === 'enable' ? '启用' : action === 'disable' ? '停用' : action === 'uninstall' ? '卸载' : '重载';
+      toast.error(`插件${label}失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }, [toast]);
 
@@ -262,6 +337,67 @@ export default function App() {
       toast.error(`刷新 Provider 失败：${err instanceof Error ? err.message : String(err)}`);
     }
   }, [toast]);
+
+  /** 流式回复处理器（send 与断点续跑共用；文本增量经 rAF 合帧批量提交） */
+  const makeStreamHandlers = useCallback((assistantId: string) => ({
+    onStart: () => {},
+    onDelta: (t: string) => queueStreamText(assistantId, { content: t }),
+    onReasoning: (t: string) => queueStreamText(assistantId, { reasoning: t }),
+    onToolStart: (name: string, args: unknown) => {
+      flushStreamBuffer();
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m));
+    },
+    onToolResult: (name: string, summary: string, ok: boolean, stored?: boolean) => {
+      flushStreamBuffer();
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? {
+        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
+          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
+        } : t),
+      } : m));
+    },
+    onApprovalRequired: (id: string, name: string, summary: string) => setApprovals((prev) => prev.some((a) => a.id === id) ? prev : [...prev, { id, name, summary }]),
+    onHandoff: (role: string, objective: string) => {
+      // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
+      flushStreamBuffer();
+      setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
+      void sessionApi.list().then(setSessions).catch(() => undefined);
+    },
+    onBudgetHit: (cost: number, budget: number) => {
+      // 成本熔断：横幅展示（harness 硬边界）
+      setBudgetHit({ cost, budget });
+    },
+    onRetry: () => {
+      // provider 重试：记录截断边界（含未冲刷增量），流式消息从该边界起重新累积展示
+      const p = pendingStreamRef.current;
+      const base = messagesRef.current.find((m) => m.id === assistantId);
+      const pending = p?.id === assistantId ? p : null;
+      setRetryMarks((prev) => ({ ...prev, [assistantId]: {
+        content: (base?.content.length ?? 0) + (pending?.content.length ?? 0),
+        reasoning: (base?.reasoning?.length ?? 0) + (pending?.reasoning.length ?? 0),
+      } }));
+    },
+    onDone: (d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }) => {
+      flushStreamBuffer();
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
+      setSessionCost((prev) => prev + (d.cost ?? 0));
+    },
+    onError: (e: string) => {
+      flushStreamBuffer(); // 失败前已生成的部分内容保留可见
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, streaming: false, error: e } : m));
+      // 错误结束（如超轮数/熔断/连接中断）→ 同步断点：未完成任务保留「继续任务」入口；
+      // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
+      // 不复位则输入区与停止按钮锁死在 streaming 状态
+      setStreaming(false);
+      if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+    },
+    onEnd: () => {
+      flushStreamBuffer();
+      setStreaming(false);
+      // 任务正常完成 → 后端已清除断点
+      setCheckpoint(null);
+      setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
+    },
+  }), [activeId, queueStreamText, flushStreamBuffer]);
 
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
@@ -296,52 +432,15 @@ export default function App() {
     const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: text };
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [] };
     setMessages((prev) => [...prev, userMsg, assistantMsg]);
+    setRetryMarks({});
     setStreaming(true);
     const ac = new AbortController();
     abortRef.current = ac;
 
-    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider }, {
-      onStart: () => {},
-      onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
-      onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
-      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
-      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
-          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
-        } : t),
-      } : m)),
-      onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
-      onHandoff: (role, objective) => {
-        // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
-        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
-        void sessionApi.list().then(setSessions).catch(() => undefined);
-      },
-      onBudgetHit: (cost, budget) => {
-        // 成本熔断：横幅展示（harness 硬边界）
-        setBudgetHit({ cost, budget });
-      },
-      onDone: (d) => {
-        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
-        setSessionCost((prev) => prev + (d.cost ?? 0));
-      },
-      onError: (e) => {
-        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
-        // 错误结束（如超轮数/熔断/连接中断）→ 同步断点：未完成任务保留「继续任务」入口；
-        // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
-        // 不复位则输入区与停止按钮锁死在 streaming 状态
-        setStreaming(false);
-        if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
-      },
-      onEnd: () => {
-        setStreaming(false);
-        // 任务正常完成 → 后端已清除断点
-        setCheckpoint(null);
-        setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
-      },
-    }, ac.signal);
+    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
 
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
-  }, [activeId, sel, streaming, createSession]);
+  }, [activeId, sel, streaming, createSession, makeStreamHandlers]);
 
   /** 断点续跑（checkpoint）：从上次中断的轮次继续，复用完整对话流程 */
   const resumeTask = useCallback(async () => {
@@ -357,42 +456,14 @@ export default function App() {
     setCheckpoint(null);
     const ac = new AbortController();
     abortRef.current = ac;
-    await streamChat(activeId, { resume: true, model: sel?.model ?? '', provider: sel?.provider }, {
-      onStart: () => {},
-      onDelta: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: m.content + t } : m)),
-      onReasoning: (t) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, reasoning: (m.reasoning ?? '') + t } : m)),
-      onToolStart: (name, args) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, tools: [...(m.tools ?? []), { name, args, status: 'running' as const, startedAt: Date.now() }] } : m)),
-      onToolResult: (name, summary, ok, stored) => setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.name === name && t.status === 'running' ? {
-          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
-        } : t),
-      } : m)),
-      onApprovalRequired: (id, name, summary) => setApprovals((prev) => [...prev, { id, name, summary }]),
-      onHandoff: (role, objective) => {
-        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: `已移交给「${role}」角色：${objective.slice(0, 120)}` }]);
-      },
-      onBudgetHit: (cost, budget) => setBudgetHit({ cost, budget }),
-      onDone: (d) => {
-        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
-        setSessionCost((prev) => prev + (d.cost ?? 0));
-      },
-      onError: (e) => {
-        setMessages((prev) => prev.map((m) => m.id === assistantMsg.id ? { ...m, streaming: false, error: e } : m));
-        setStreaming(false);
-        if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
-      },
-      onEnd: () => {
-        setStreaming(false);
-        setCheckpoint(null);
-      },
-    }, ac.signal);
+    await streamChat(activeId, { resume: true, model: sel?.model ?? '', provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
     setResuming(false);
     try {
       const cp2 = await sessionApi.checkpoint(activeId).catch(() => null);
       setCheckpoint(cp2); // 恢复后若再次中断（如熔断），断点仍可继续
       setSessions(await sessionApi.list());
     } catch { /* 忽略 */ }
-  }, [activeId, streaming, resuming, checkpoint, sel]);
+  }, [activeId, streaming, resuming, checkpoint, sel, makeStreamHandlers]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -412,6 +483,24 @@ export default function App() {
     setApprovals((prev) => prev.filter((a) => a.id !== id));
   }, [toast]);
 
+  // 稳定引用回调：配合 memo 化的 Sidebar/TracePanel，流式渲染期间跳过无关子树 reconcile
+  const handleRoleReset = useCallback(async () => {
+    if (!activeId) return;
+    try {
+      await sessionApi.update(activeId, { role: '' });
+      setSessions(await sessionApi.list());
+      toast.success('会话已交回主代理');
+    } catch (err) {
+      toast.error(`移交失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  }, [activeId, toast]);
+
+  const refreshTraceStats = useCallback(() => {
+    void traceApi.stats().then(setTraceStats).catch(() => undefined);
+  }, []);
+
+  const toggleSettings = useCallback(() => setSettingsOpen((v) => !v), []);
+
   const currentSession = sessions.find((s) => s.id === activeId);
   const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
   const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
@@ -425,17 +514,30 @@ export default function App() {
     { key: 'goal', label: '目标模式', sub: '以目标驱动多轮', dot: 'var(--orange)' },
   ];
 
-  const onTab = (t: MainTab) => {
-    setActiveTab(t);
-    setSettingsOpen(false);
-  };
-
   // 办公工作台（workbench 插件）：插件运行中才挂 Tab——插件停用/热重载中即从主导航消失，
   // 正停留在该 Tab 时自动回落到会话页（随时可关停，不影响原功能）
   const workbenchReady = plugins.some((p) => p.id === 'workbench' && (p.state === 'started' || p.state === 'loaded'));
+  const pluginTabs = useMemo(() => (
+    workbenchReady ? [{ key: 'workbench', label: '工作台', icon: <IconWorkbench size={14} /> }] : []
+  ), [workbenchReady]);
   useEffect(() => {
     if (!workbenchReady && activeTab === 'workbench') setActiveTab('chat');
   }, [workbenchReady, activeTab]);
+
+  const onTab = useCallback((t: MainTab) => {
+    setActiveTab(t);
+    setSettingsOpen(false);
+  }, []);
+
+  // Suspense 兜底（lazy 视图 chunk 加载间隙）：与设计系统一致的极简加载态。
+  // 注意：边界必须包在 AnimatePresence 外面——mode="wait" 不支持会挂起的新子树
+  // （挂起会卡住交换，旧视图停留在透明退出态，内容"消失"）
+  const viewFallback = (
+    <div className="view-loading" aria-busy="true">
+      <span className="spin" style={{ color: 'var(--accent)' }} />
+      <span>加载中…</span>
+    </div>
+  );
 
   return (
     <div className="app">
@@ -444,7 +546,7 @@ export default function App() {
         activeId={activeId}
         activeTab={activeTab}
         onTab={onTab}
-        pluginTabs={workbenchReady ? [{ key: 'workbench', label: '工作台', icon: <IconWorkbench size={14} /> }] : []}
+        pluginTabs={pluginTabs}
         onSelect={selectSession}
         onCreate={createSession}
         onDelete={deleteSession}
@@ -454,7 +556,7 @@ export default function App() {
         onBatchDelete={batchDelete}
         onBatchArchive={batchArchive}
         settingsOpen={settingsOpen}
-        onToggleSettings={() => setSettingsOpen((v) => !v)}
+        onToggleSettings={toggleSettings}
         pluginRunning={pluginRunning}
       />
 
@@ -503,6 +605,7 @@ export default function App() {
           </div>
         </header>
 
+        <Suspense fallback={viewFallback}>
         <AnimatePresence mode="wait" initial={false}>
           <motion.div
             className="tab-content"
@@ -513,63 +616,79 @@ export default function App() {
             exit="exit"
           >
           {settingsOpen ? (
-          <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
-        ) : activeTab === 'chat' ? (
-          <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-              <ChatView
-                messages={messages}
-                streaming={streaming}
-                onSend={send}
-                onStop={stop}
-                hasModels={models.length > 0}
-                approvals={approvals}
-                onApproval={respondApproval}
-                plan={plan}
-                todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
-                modelLabel={modelLabel}
-                modelTag={modelTag}
-                // 会话状态感知（agent harness 前端特征）：断点恢复 / 角色接管 / 成本熔断 / 会话成本
-                checkpoint={checkpoint}
-                onResume={() => void resumeTask()}
-                resuming={resuming}
-                role={currentSession?.role}
-                onRoleReset={async () => {
-                  if (!activeId) return;
-                  try {
-                    await sessionApi.update(activeId, { role: '' });
-                    setSessions(await sessionApi.list());
-                    toast.success('会话已交回主代理');
-                  } catch (err) {
-                    toast.error(`移交失败：${err instanceof Error ? err.message : String(err)}`);
-                  }
-                }}
-                budgetHit={budgetHit}
-                sessionCost={sessionCost}
-              />
-            </div>
-            {traceOpen && (
-              <aside className="trail-panel">
-                <TracePanel
-                  steps={traceSteps}
-                  stats={traceStats}
-                  onRefresh={() => void traceApi.stats().then(setTraceStats).catch(() => undefined)}
+            <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
+          ) : activeTab === 'chat' ? (
+            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
+              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+                <ChatView
+                  messages={messages}
+                  streaming={streaming}
+                  onSend={send}
+                  onStop={stop}
+                  hasModels={models.length > 0}
+                  approvals={approvals}
+                  onApproval={respondApproval}
+                  plan={plan}
+                  todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
+                  modelLabel={modelLabel}
+                  modelTag={modelTag}
+                  retryMarks={retryMarks}
+                  // 会话状态感知（agent harness 前端特征）：断点恢复 / 角色接管 / 成本熔断 / 会话成本
+                  checkpoint={checkpoint}
+                  onResume={() => void resumeTask()}
+                  resuming={resuming}
+                  role={currentSession?.role}
+                  onRoleReset={handleRoleReset}
+                  budgetHit={budgetHit}
+                  sessionCost={sessionCost}
                 />
-              </aside>
-            )}
-          </div>
-        ) : activeTab === 'files' ? (
-          <FilesView />
-        ) : activeTab === 'workbench' ? (
-          <WorkbenchView />
-        ) : activeTab === 'plugins' ? (
-          <PluginsView plugins={plugins} onAction={pluginAction} />
-        ) : (
-          <StatsView />
-        )}
+              </div>
+              {traceOpen && (
+                <aside className="trail-panel">
+                  <TracePanel
+                    steps={traceSteps}
+                    stats={traceStats}
+                    onRefresh={refreshTraceStats}
+                  />
+                </aside>
+              )}
+            </div>
+          ) : activeTab === 'files' ? (
+            <FilesView />
+          ) : activeTab === 'workbench' ? (
+            <WorkbenchView />
+          ) : activeTab === 'plugins' ? (
+            <PluginsView plugins={plugins} onAction={pluginAction} />
+          ) : (
+            <StatsView />
+          )}
           </motion.div>
         </AnimatePresence>
+        </Suspense>
       </main>
+
+      <Toaster
+        theme={theme}
+        richColors
+        position="bottom-right"
+        gap={8}
+        visibleToasts={4}
+        toastOptions={{
+          style: {
+            background: 'var(--bg-elev)',
+            border: '1px solid var(--border)',
+            color: 'var(--text-1)',
+            fontFamily: 'var(--font-sans)',
+            fontSize: '12.5px',
+            boxShadow: 'var(--shadow-pop)',
+          },
+          classNames: {
+            success: 'sonner-toast-success',
+            error: 'sonner-toast-error',
+            info: 'sonner-toast-info',
+          },
+        }}
+      />
     </div>
   );
 }

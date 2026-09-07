@@ -9,16 +9,16 @@ import type { BusEvent, TodoCard, TodoPriority, TodoStatus } from '../types';
 // ─── 常量 ───────────────────────────────────────────────────
 const API = '/api/plugins/todo/board';
 const COLS: { key: TodoStatus; label: string; color: string }[] = [
-  { key: 'todo', label: '待办', color: '#d9a441' },
-  { key: 'doing', label: '进行中', color: '#d0856b' },
-  { key: 'blocked', label: '受阻', color: '#d96856' },
-  { key: 'done', label: '完成', color: '#82a873' },
+  { key: 'todo', label: '待办', color: '#e8930f' },
+  { key: 'doing', label: '进行中', color: '#e0512f' },
+  { key: 'blocked', label: '受阻', color: '#d94630' },
+  { key: 'done', label: '完成', color: '#43a047' },
 ];
 const PRIORITIES: { key: TodoPriority; label: string; color: string }[] = [
-  { key: 'low', label: '低', color: '#7d7162' },
-  { key: 'medium', label: '中', color: '#d9a441' },
-  { key: 'high', label: '高', color: '#d0856b' },
-  { key: 'urgent', label: '紧急', color: '#d96856' },
+  { key: 'low', label: '低', color: '#9c8d74' },
+  { key: 'medium', label: '中', color: '#e8930f' },
+  { key: 'high', label: '高', color: '#e0512f' },
+  { key: 'urgent', label: '紧急', color: '#d94630' },
 ];
 const PRIORITY_MAP = Object.fromEntries(PRIORITIES.map((p) => [p.key, p])) as Record<TodoPriority, typeof PRIORITIES[0]>;
 

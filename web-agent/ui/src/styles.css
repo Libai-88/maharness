@@ -1,79 +1,101 @@
 /* ============================================================
-   maharness UI v4 —— 设计系统「暖炭 · 手作风」（Warm Charcoal Studio）
-   v4 深度重设：破除 AI 泛化蓝紫渐变，回归暖陶人类质感。
-   基底 = 暖灰炭 / 奶油纸（双主题对等）；强调 = 陶土主色 +
-   琥珀 · 松绿 · 砖红（情绪语义）。无纯黑、无霓虹光晕、无赛博蓝紫。
-   字体 = Fraunces（衬线大标题，手作编辑部感）× IBM Plex Sans（正文）
-   ×  JetBrains Mono（代码）
+   maharness UI v7 —— 设计系统「手账涂鸦」（Doodle Notebook）
+   插画涂鸦风：不工整，但有设计感。
+   基底 = 点阵手账纸（light）/ 深夜炭纸（dark）；线条 = 钢笔墨 / 粉笔；
+   强调 = 蜡笔盒色盘（珊瑚红 · 草绿 · 紫罗兰 · 橘 · 砖红 + 荧光黄高亮）。
+   手法 = 歪扭墨线边框（asymmetric radius）· 贴纸硬阴影 · 微旋转 ·
+   胶带 · 荧光笔 swipe · 波浪下划线。
+   字体 = Caveat（马克笔手写大标题，中文落楷体）× Kalam（正文手写）
+   × JetBrains Mono（代码 = 纸上的技术层，保持工整以形成对比）
    ============================================================ */
 
 :root {
-  /* 基础色板（深色主题 · 默认）——暖灰炭底（含极微红棕，去纯黑冷感，护眼） */
-  --bg-deep: #171310;
-  --bg-panel: #1e1916;
-  --bg-elev: #26201b;
-  --bg-input: #12100d;
-  --bg-hover: rgba(255, 240, 225, 0.05);
-  --bg-active: #332a23;
-  --border: #382f28;
-  --border-soft: #2b241f;
+  /* 基础色板（深色主题 · 默认）——深夜手账：炭色纸 + 粉笔墨线 */
+  --bg-deep: #161411;
+  --bg-panel: #1f1c17;
+  --bg-elev: #29241c;
+  --bg-input: #13110d;
+  --bg-hover: rgba(255, 240, 220, 0.055);
+  --bg-active: #352e21;
+  --border: #463d2e;
+  --border-soft: #332b20;
 
-  /* 文字（暖白基调，对比度 ≥ 4.5:1 正文实测） */
-  --text-1: #ece3d5;
-  --text-2: #bdb09f;
-  --text-3: #9b8d7c;
-  --text-4: #7d7162;
-  --muted: #6b6053;
+  /* 墨线（涂鸦骨架：边框/描边随主题翻转为 chalk / pen ink） */
+  --ink: #f1e8d7;
+  --ink-soft: rgba(241, 232, 215, 0.82);
+  --dot: rgba(240, 228, 200, 0.06);
+  /* 手账本：横线格 + 红色页边线（侧栏本子感） */
+  --line: rgba(240, 228, 200, 0.055);
+  --margin: rgba(255, 106, 69, 0.20);
 
-  /* 强调色（陶土主色 + 暖情绪语义——琥珀/松绿/砖红，去紫蓝） */
-  --accent: #d0856b;        /* 陶土 terracotta：主色/选择/运行 */
-  --teal: #82a873;          /* 松绿 sage green：成功/缓存命中 */
-  --purple: #d9a441;        /* 琥珀 amber：思考/语义/计划 */
-  --orange: #e0913f;        /* 赭橙 umber：等待/警告 */
-  --red: #d96856;           /* 砖红 brick：错误/破坏性 */
-  --teal-soft: rgba(130, 168, 115, 0.15);
-  --purple-soft: rgba(217, 164, 65, 0.15);
-  --blue-soft: rgba(208, 133, 107, 0.17);
-  --orange-soft: rgba(224, 145, 63, 0.15);
-  --red-soft: rgba(217, 104, 86, 0.16);
+  /* 文字（暖白粉笔基调，正文对比度 ≥ 4.5:1） */
+  --text-1: #f1e8d7;
+  --text-2: #c9bda6;
+  --text-3: #a1927a;
+  --text-4: #7f715a;
+  --muted: #6d604c;
+
+  /* 蜡笔盒色盘（马克笔语义：主/成功/思考/警告/错误 + 荧光笔） */
+  --accent: #ff6a45;        /* 蜡笔珊瑚红：主色/选择/运行 */
+  --teal: #5ec46e;          /* 草地蜡笔绿：成功/缓存命中 */
+  --purple: #a58bff;        /* 紫罗兰蜡笔：思考/语义/计划 */
+  --orange: #ffab3d;        /* 橘子蜡笔：等待/警告 */
+  --red: #ff6252;           /* 砖红蜡笔：错误/破坏性 */
+  --hl: #ffe45c;            /* 荧光笔黄：swipe 高亮 */
+  --hl-soft: rgba(255, 228, 92, 0.15);
+  --teal-soft: rgba(94, 196, 110, 0.15);
+  --purple-soft: rgba(165, 139, 255, 0.15);
+  --blue-soft: rgba(255, 106, 69, 0.15);
+  --orange-soft: rgba(255, 171, 61, 0.15);
+  --red-soft: rgba(255, 98, 82, 0.14);
 
   /* 派生色（按钮文字 / 遮罩 / 滚动条 / hover，随主题翻转） */
-  --on-accent: #2b1c14;
-  --on-teal: #16200f;
-  --overlay: rgba(18, 13, 10, 0.66);
-  --scroll-thumb: #3b3129;
-  --scroll-thumb-hover: #4f4237;
-  --btn-hover: #2b241f;
-  --toggle-off: #4f4237;
+  --on-accent: #24100a;
+  --on-teal: #0e2011;
+  --overlay: rgba(10, 9, 6, 0.66);
+  --scroll-thumb: #463d2e;
+  --scroll-thumb-hover: #5d5140;
+  --btn-hover: #332c21;
+  --toggle-off: #5d5140;
   --toggle-knob: #f2e9dc;
 
-  /* 字体（Google Fonts 加载，离线回退系统字体） */
-  --font-sans: 'IBM Plex Sans', 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, 'PingFang SC', 'Microsoft YaHei', sans-serif;
-  --font-display: 'Fraunces', 'Times New Roman', Georgia, 'Songti SC', 'SimSun', serif;
+  /* 字体（Google Fonts 加载，离线回退系统字体）
+     中文手写：楷体必须排在 system-ui 之前，否则 CJK 被 Segoe/雅黑 拦截 */
+  --font-sans: 'Kalam', 'Kaiti SC', 'STKaiti', 'KaiTi', 'BiauKai', 'Microsoft YaHei', 'PingFang SC', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-display: 'Caveat', 'Kalam', 'Kaiti SC', 'STKaiti', 'KaiTi', 'DFKai-SB', 'BiauKai', cursive;
   --font-mono: 'JetBrains Mono', 'Cascadia Mono', Consolas, 'SF Mono', Menlo, monospace;
 
   /* 尺寸 */
   --sidebar-w: 260px;
   --trail-w: 380px;
-  /* v5 圆角分级（暖陶精修：7/10/14/24/999，从细到满） */
-  --radius-xs: 4px;
-  --radius-sm: 7px;
-  --radius: 10px;
-  --radius-lg: 14px;
-  --radius-xl: 24px;
+  /* 歪扭墨线半径（手绘盒经典手法：asymmetric radius，双相位交替）。
+     规整圆角全部废弃——「不工整」的骨架。 */
+  --radius-xs: 5px;
+  --radius-sm: 14px 5px 12px 7px / 7px 12px 5px 14px;
+  --radius: 255px 18px 225px 18px / 18px 225px 18px 255px;
+  --radius-lg: 18px 225px 20px 255px / 255px 20px 225px 18px;
+  --radius-xl: 255px 24px 235px 22px / 22px 235px 24px 255px;
   --radius-full: 999px;
-  /* 着色阴影：暖褐（呼应炭底与陶土，替代纯黑投影——去 AI 冷灰感）
-     v5 分级：xs 贴地 / sm 抬升 / md 浮动 / lg 弹层（多层级、更克制） */
-  --shadow-xs: 0 1px 2px rgba(24, 14, 8, 0.32);
-  --shadow-sm: 0 4px 10px rgba(24, 14, 8, 0.30);
-  --shadow-md: 0 8px 20px rgba(24, 14, 8, 0.36);
-  --shadow-lg: 0 16px 40px rgba(24, 14, 8, 0.50);
-  --shadow-pop: 0 16px 40px rgba(24, 14, 8, 0.55);
-  --shadow-soft: 0 2px 10px rgba(24, 14, 8, 0.28);
+  --r-wob: var(--radius);
+  --r-wob-alt: var(--radius-lg);
+  --r-wob-sm: var(--radius-sm);
+  --r-wob-xs: 9px 4px 8px 5px / 5px 8px 4px 9px;
+  /* 贴纸阴影：硬边单色偏移（sticker 感），柔影仅留给浮层兜底 */
+  --shadow-ink: rgba(0, 0, 0, 0.5);
+  --shadow-hard-xs: 1px 2px 0 var(--shadow-ink);
+  --shadow-hard-sm: 2px 3px 0 var(--shadow-ink);
+  --shadow-hard: 3px 4px 0 var(--shadow-ink);
+  --shadow-hard-lg: 5px 7px 0 var(--shadow-ink);
+  --shadow-xs: 0 1px 2px rgba(10, 8, 5, 0.4);
+  --shadow-sm: 0 4px 10px rgba(10, 8, 5, 0.38);
+  --shadow-md: 0 8px 20px rgba(10, 8, 5, 0.44);
+  --shadow-lg: 0 16px 40px rgba(10, 8, 5, 0.55);
+  --shadow-pop: 6px 8px 0 var(--shadow-ink);
+  --shadow-soft: 2px 3px 0 var(--shadow-ink);
 
-  /* 品牌渐变（v4 暖调和声：陶土 → 琥珀 → 松绿，暖色相生，弃蓝紫） */
-  --brand-gradient: linear-gradient(100deg, var(--accent) 0%, var(--purple) 52%, var(--teal) 100%);
-  --brand-gradient-soft: linear-gradient(100deg, var(--blue-soft), var(--purple-soft) 52%, var(--teal-soft));
+  /* 品牌渐变（蜡笔三色相生：珊瑚红 → 橘 → 草绿） */
+  --brand-gradient: linear-gradient(100deg, var(--accent) 0%, var(--orange) 52%, var(--teal) 100%);
+  --brand-gradient-soft: linear-gradient(100deg, var(--blue-soft), var(--orange-soft) 52%, var(--teal-soft));
 
   color-scheme: dark;
   /* 主题切换过渡：全局颜色渐变（Apple: "materialize, don't just fade"） */
@@ -92,50 +114,59 @@
 }
 
 /* ============================================================
-   暖浅色主题（奶油纸）· data-theme="light"
+   手账纸主题 · data-theme="light"（米白点阵纸 + 钢笔墨）
    ============================================================ */
 :root[data-theme='light'] {
-  --bg-deep: #f3ecdf;
-  --bg-panel: #fbf6ec;
-  --bg-elev: #fdf8f0;
-  --bg-input: #ece4d3;
-  --bg-hover: rgba(122, 74, 46, 0.06);
-  --bg-active: #e6d9c2;
-  --border: #ded1bb;
-  --border-soft: #e6dcc9;
+  --bg-deep: #f5eee0;
+  --bg-panel: #fbf6ea;
+  --bg-elev: #fffdf6;
+  --bg-input: #ede4d0;
+  --bg-hover: rgba(90, 70, 40, 0.06);
+  --bg-active: #e6d9c0;
+  --border: #c9b791;
+  --border-soft: #e0d3b6;
 
-  --text-1: #2b231b;
-  --text-2: #4e4134;
-  --text-3: #7c6d5b;
-  --text-4: #8f7f6b;
-  --muted: #a39581;
+  --ink: #3a332a;
+  --ink-soft: rgba(58, 51, 42, 0.8);
+  --dot: rgba(122, 100, 68, 0.16);
+  --line: rgba(150, 120, 80, 0.14);
+  --margin: rgba(216, 74, 38, 0.30);
 
-  --accent: #b4613f;
-  --teal: #5d8f50;
-  --purple: #a07c2a;
-  --orange: #bd7627;
-  --red: #c0483b;
-  --teal-soft: rgba(93, 143, 80, 0.13);
-  --purple-soft: rgba(160, 124, 42, 0.13);
-  --blue-soft: rgba(180, 97, 63, 0.13);
-  --orange-soft: rgba(189, 118, 39, 0.13);
-  --red-soft: rgba(192, 72, 59, 0.13);
+  --text-1: #2e2a21;
+  --text-2: #4f4636;
+  --text-3: #6f6350;
+  --text-4: #8d7f68;
+  --muted: #9c8d74;
 
-  --on-accent: #fdf6ea;
-  --on-teal: #f3faee;
-  --overlay: rgba(240, 231, 216, 0.72);
-  --scroll-thumb: #cfc1a6;
-  --scroll-thumb-hover: #b5a587;
-  --btn-hover: #e9dfc9;
-  --toggle-off: #cfc1a6;
+  --accent: #d84a26;
+  --teal: #2f9440;
+  --purple: #6f4fd0;
+  --orange: #e2820f;
+  --red: #cf3823;
+  --hl: #ffdf3f;
+  --hl-soft: rgba(255, 223, 63, 0.42);
+  --teal-soft: rgba(47, 148, 64, 0.12);
+  --purple-soft: rgba(111, 79, 208, 0.12);
+  --blue-soft: rgba(216, 74, 38, 0.12);
+  --orange-soft: rgba(226, 130, 15, 0.13);
+  --red-soft: rgba(207, 56, 35, 0.11);
+
+  --on-accent: #fff6ec;
+  --on-teal: #f2faee;
+  --overlay: rgba(238, 228, 208, 0.72);
+  --scroll-thumb: #c9b791;
+  --scroll-thumb-hover: #b09c72;
+  --btn-hover: #eee3cb;
+  --toggle-off: #c9b791;
   --toggle-knob: #ffffff;
 
+  --shadow-ink: rgba(58, 48, 32, 0.85);
   --shadow-xs: 0 1px 2px rgba(96, 62, 34, 0.10);
   --shadow-sm: 0 4px 10px rgba(96, 62, 34, 0.10);
   --shadow-md: 0 8px 20px rgba(96, 62, 34, 0.12);
   --shadow-lg: 0 16px 40px rgba(96, 62, 34, 0.17);
-  --shadow-pop: 0 16px 40px rgba(96, 62, 34, 0.17);
-  --shadow-soft: 0 2px 10px rgba(96, 62, 34, 0.10);
+  --shadow-pop: 6px 8px 0 var(--shadow-ink);
+  --shadow-soft: 2px 3px 0 var(--shadow-ink);
 
   color-scheme: light;
 }
@@ -145,39 +176,22 @@
 html, body, #root { height: 100%; }
 
 body {
-  /* 暖陶瓷像背景：角色插画铺底 + 暖炭四段遮罩。
-     中段（40%-60%，人物主体区）遮罩最浅——人物柔和透出；
-     顶部（顶栏）与底部（输入区）稍深——UI 可读性优先。 */
+  /* 手账点阵纸：细点网格铺满（纯 CSS 零资源），深浅主题由 --dot token 翻转。
+     人像插画不再全屏铺底——降格为 brand-hero 里的「胶带贴纸」（见涂鸦层）。 */
   background:
-    linear-gradient(180deg,
-      rgba(26, 18, 13, 0.52) 0%,
-      rgba(26, 18, 13, 0.28) 40%,
-      rgba(26, 18, 13, 0.32) 60%,
-      rgba(26, 18, 13, 0.58) 100%),
-    url('/hero-char.png') center 32% / cover no-repeat fixed;
+    radial-gradient(circle, var(--dot) 1.1px, transparent 1.2px) 0 0 / 26px 26px,
+    var(--bg-deep);
   color: var(--text-1);
   font-family: var(--font-sans);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   overflow: hidden;
 }
 
-/* 暖浅主题：遮罩换奶油纸（保持文字对比度），中段最透 */
-:root[data-theme='light'] body {
-  background:
-    linear-gradient(180deg,
-      rgba(243, 236, 223, 0.58) 0%,
-      rgba(243, 236, 223, 0.34) 40%,
-      rgba(243, 236, 223, 0.38) 60%,
-      rgba(243, 236, 223, 0.66) 100%),
-    url('/hero-char.png') center 32% / cover no-repeat fixed;
-}
-
 /* ============================================================
-   v4 质感：全局 grain 噪点层（固定、不挡交互）
-   以细微胶片颗粒破除纯扁平的「数字 AI 感」，制造手作温度。
-   用内联 SVG feTurbulence 做噪点，性能友好且无需外图。
+   纸张纤维噪点层（固定、不挡交互）——让点阵纸有实体纸感
+   内联 SVG feTurbulence 噪点，性能友好且无需外图。
    ============================================================ */
 body::after {
   content: '';
@@ -259,6 +273,91 @@ input, select, textarea {
 
 .mono { font-family: var(--font-mono); }
 
+/* lazy 视图 chunk 加载间隙的 Suspense 兜底（与设计系统一致的极简加载态） */
+/* ---- 办公工作台 v2：iframe 嵌壳 ---- */
+.workbench-embed { background: transparent; }
+
+/* 联动状态条 */
+.wb-status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 5px 14px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12px;
+  color: var(--text-3);
+  flex-shrink: 0;
+}
+.wb-status-left { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.wb-status-dot {
+  width: 8px; height: 8px; border-radius: 50%;
+  background: var(--text-4);
+  flex-shrink: 0;
+}
+.wb-status-dot.connected { background: var(--teal); }
+.wb-status-text { font-weight: 500; color: var(--text-2); }
+.wb-status-records { color: var(--text-3); }
+.wb-status-sync { color: var(--text-4); font-size: 11px; }
+.wb-status-right { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.wb-status-btn {
+  padding: 3px 10px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  color: var(--text-2);
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+.wb-status-btn:hover { background: var(--bg-hover); color: var(--text-1); }
+.wb-status-btn.guide { color: var(--purple); border-color: color-mix(in srgb, var(--purple) 30%, var(--border)); }
+
+/* 连接指引 */
+.wb-connect-guide {
+  padding: 14px 16px;
+  background: var(--bg-elev);
+  border-bottom: 1px solid var(--border-soft);
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.7;
+}
+.wb-guide-title { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-1); margin-bottom: 8px; }
+.wb-guide-step { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 4px; }
+.step-num {
+  flex-shrink: 0; width: 18px; height: 18px; border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent); font-size: 11px; font-weight: 700;
+  display: inline-flex; align-items: center; justify-content: center; margin-top: 1px;
+}
+.wb-guide-note { color: var(--text-4); font-size: 11.5px; margin-top: 6px; }
+.wb-guide-note code {
+  background: var(--bg-input); padding: 1px 5px; border-radius: 4px;
+  font-family: var(--font-mono); font-size: 11.5px; color: var(--text-2);
+}
+.wb-guide-copy {
+  margin-top: 8px; padding: 3px 10px; border-radius: 6px;
+  border: 1px solid var(--border); background: var(--bg-input);
+  color: var(--text-2); font-size: 11px; cursor: pointer;
+}
+.wb-guide-copy:hover { background: var(--bg-hover); color: var(--text-1); }
+
+/* iframe 容器 */
+.wb-iframe {
+  background: transparent;
+}
+
+.view-loading {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 13px;
+}
+
 /* 键盘可达性：统一 focus 环 */
 button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible, [tabindex]:focus-visible {
   outline: 2px solid var(--accent);
@@ -332,45 +431,97 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: transparent;
 }
 
-/* ---------- 左侧边栏 ---------- */
+/* ---------- 左侧边栏 · 手绘涂鸦本子 ---------- */
 .sidebar {
+  position: relative;
   width: var(--sidebar-w);
   flex-shrink: 0;
-  /* 毛玻璃：半透明 + 模糊，人物背景透出而文字保持可读 */
-  background: color-mix(in srgb, var(--bg-panel) 62%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-right: 1px solid var(--border);
+  /* 笔记本纸：横格线 + 左侧红色页边线 + 底纸 */
+  background:
+    linear-gradient(90deg, var(--margin) 0 1px, transparent 1px) 26px 0 / 100% 100%,
+    repeating-linear-gradient(var(--line) 0 1px, transparent 1px 34px) 0 26px / 100% 100%,
+    var(--bg-panel);
+  border-right: 2.5px solid var(--ink);
+  border-radius: 4px 18px 12px 6px / 6px 4px 18px 12px;
+  filter: url(#sketchy);
+  box-shadow: 3px 4px 0 var(--shadow-ink);
   display: flex;
   flex-direction: column;
   min-height: 0;
   transition: background 0.3s ease, border-color 0.3s ease;
+  overflow: hidden;
+}
+/* 顶部：和纸胶带（本子被贴住的第一印象） */
+.sidebar::before {
+  content: '';
+  position: absolute;
+  top: -3px; left: 50%;
+  translate: -50% 0;
+  width: 130px; height: 22px;
+  background: color-mix(in srgb, var(--hl) 46%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 26%, transparent);
+  rotate: -1.5deg;
+  z-index: 3;
+  pointer-events: none;
+}
+/* 右缘：装订缝线（虚线装订） */
+.sidebar::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0; right: 6px;
+  border-left: 2px dashed var(--border);
+  opacity: 0.55;
+  z-index: 0;
+  pointer-events: none;
 }
 
 .sb-logo {
-  height: 56px;
+  position: relative;
+  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 12px 0 16px;
+  padding: 0 14px 0 34px;
+  z-index: 2;
 }
 
-.sb-logo-left { display: flex; align-items: center; gap: 8px; }
+.sb-logo-left { display: flex; align-items: center; gap: 10px; }
 
 .sb-logo-mark {
-  width: 26px; height: 26px;
-  border-radius: 8px;
-  /* v2.4 品牌：渐变底（蓝→紫→青）+ 白色 M 角羊，年轻活力 */
+  width: 30px; height: 30px;
+  border-radius: 9px 6px 8px 7px / 7px 8px 6px 9px;
   background: var(--brand-gradient);
   display: flex; align-items: center; justify-content: center;
-  color: #ffffff;
+  color: #fff6ec;
   font-weight: 800;
   font-size: 15px;
   font-family: var(--font-mono);
-  box-shadow: 0 2px 10px rgba(208, 133, 107, 0.35);
+  border: 2px solid var(--ink-soft);
+  box-shadow: var(--shadow-hard-xs);
+  rotate: -5deg;
 }
 
-.sb-logo-title { font-family: var(--font-display); font-size: 17px; font-weight: 600; font-variation-settings: 'SOFT' 60, 'opsz' 36; letter-spacing: 0.2px; }
+.sb-logo-title {
+  position: relative;
+  font-family: var(--font-display);
+  font-size: 28px;
+  font-weight: 700;
+  letter-spacing: 0;
+  rotate: -1.5deg;
+  transform-origin: left;
+}
+/* 标题下：手绘波浪下划线 */
+.sb-logo-title::after {
+  content: '';
+  position: absolute;
+  left: 44px; bottom: -2px;
+  width: 106px; height: 7px;
+  background: var(--accent);
+  opacity: 0.75;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 Q 7 1 13 5 T 25 5 T 37 5 T 49 5 T 59 4' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 Q 7 1 13 5 T 25 5 T 37 5 T 49 5 T 59 4' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  pointer-events: none;
+}
 
 .sb-icon-btn {
   width: 28px; height: 28px;
@@ -381,31 +532,47 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 }
 .sb-icon-btn:hover { background: var(--bg-hover); }
 
-/* Tab 条 */
+/* Tab 条（涂鸦版：竖排目录行——给每个导航留足个性化空间） */
 .sb-tabs {
-  height: 40px;
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 0 12px;
+  flex-direction: column;
+  gap: 5px;
+  padding: 10px 12px 12px;
 }
 
 .sb-tab {
-  flex: 1;
-  height: 30px;
-  border-radius: 6px;
-  display: flex; align-items: center; justify-content: center;
-  gap: 5px;
-  font-size: 12px;
+  flex: none;
+  height: 36px;
+  border-radius: var(--r-wob-sm);
+  display: flex; align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  font-size: 13px;
   font-weight: 500;
   color: var(--text-3);
-  transition: background 0.15s ease, color 0.15s ease;
+  text-align: left;
+  /* 插件注册扩展 tab 后仍竖排——不换行 */
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, translate 0.15s ease, rotate 0.15s ease;
 }
-.sb-tab:hover { background: var(--bg-hover); color: var(--text-2); }
+.sb-tab svg {
+  width: 15px; height: 15px; flex-shrink: 0;
+  padding: 3px;
+  box-sizing: content-box;
+  border-radius: 7px 4px 6px 5px / 5px 6px 4px 7px;
+  background: var(--bg-elev);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-hard-xs);
+}
+.sb-tab:hover { background: var(--bg-hover); color: var(--text-1); translate: 2px 0; }
 .sb-tab.active {
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--hl-soft);
+  color: var(--text-1);
+  border-color: var(--ink-soft);
+  rotate: -0.5deg;
+  box-shadow: var(--shadow-hard-xs);
 }
+.sb-tab.active svg { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
 .sb-tab .tab-icon { font-size: 11px; line-height: 1; }
 
 .sb-divider { height: 1px; background: var(--border); flex-shrink: 0; }
@@ -414,18 +581,33 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sb-session-scroll { flex: 1; overflow-y: auto; min-height: 0; overscroll-behavior: contain; }
 
 .sb-new-chat {
+  position: relative;
   flex: 1;
-  height: 38px;
-  border-radius: 8px;
+  height: 40px;
+  border-radius: var(--r-wob-sm);
   background: var(--accent);
   color: var(--on-accent);
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 600;
   display: flex; align-items: center; justify-content: center;
   gap: 8px;
-  transition: filter 0.15s;
+  rotate: -0.8deg;
+  transition: filter 0.15s, rotate 0.15s, translate 0.15s;
 }
-.sb-new-chat:hover { filter: brightness(1.1); }
+.sb-new-chat:hover { filter: brightness(1.06); rotate: 0deg; translate: 0 -1px; }
+.sb-new-chat:hover::after { opacity: 1; }
+.sb-new-chat::before {
+  content: '';
+  position: absolute;
+  top: -8px; left: 50%;
+  translate: -50% 0;
+  width: 82px; height: 17px;
+  background: color-mix(in srgb, var(--hl) 62%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent);
+  rotate: -2.5deg;
+  z-index: 1;
+  pointer-events: none;
+}
 
 /* 新会话 + 批量管理入口 */
 .sb-new-row {
@@ -516,37 +698,75 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .sb-ma-btn.primary:hover:not(:disabled) { filter: brightness(1.1); }
 
 .sb-group-label {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
   font-size: 10px;
   font-weight: 700;
   letter-spacing: 1.2px;
   color: var(--text-4);
-  padding: 12px 16px 4px;
+  padding: 14px 16px 4px;
   text-transform: uppercase;
 }
+/* 分组小标签：手绘三角标 */
+.sb-group-label::before {
+  content: '';
+  width: 0; height: 0;
+  border-left: 5px solid transparent;
+  border-top: 6px solid var(--accent);
+  flex-shrink: 0;
+  border-radius: 2px;
+}
+.sb-group-label:nth-of-type(2)::before { border-top-color: var(--teal); }
+.sb-group-label:nth-of-type(3)::before { border-top-color: var(--purple); }
 
 .sb-session-item {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 8px;
-  height: 32px;
-  padding: 0 12px 0 16px;
-  margin: 1px 8px;
-  border-radius: 6px;
+  height: 34px;
+  padding: 0 12px 0 38px;
+  margin: 3px 8px;
+  border-radius: 10px 4px 9px 5px / 5px 9px 4px 10px;
   cursor: pointer;
   font-size: 13px;
   color: var(--text-2);
-  transition: background 0.12s;
+  transition: background 0.12s, transform 0.12s;
 }
-.sb-session-item:hover { background: var(--bg-hover); }
-.sb-session-item.active { background: var(--bg-active); color: var(--text-1); }
+.sb-session-item:hover { background: var(--bg-hover); transform: translateX(2px); }
+.sb-session-item.active { background: var(--bg-active); color: var(--text-1); transform: rotate(-0.6deg); }
+/* 激活 = 荧光笔行 + 折角便签 */
+.sb-session-item.active::after {
+  content: '';
+  position: absolute;
+  top: 0; right: 0;
+  border-top: 12px solid var(--ink-soft);
+  border-left: 12px solid transparent;
+  border-top-right-radius: 8px;
+  opacity: 0.9;
+  background: var(--bg-elev);
+  border-bottom-left-radius: 4px;
+}
+.sb-session-item.active .name {
+  background: linear-gradient(100deg, rgba(255, 223, 63, 0.42), rgba(255, 223, 63, 0.28) 92%, transparent);
+  border-radius: 3px;
+}
+:root[data-theme='dark'] .sb-session-item.active .name {
+  background: linear-gradient(100deg, rgba(255, 228, 92, 0.18), rgba(255, 228, 92, 0.10) 92%, transparent);
+}
 .sb-session-item .dot {
-  width: 6px; height: 6px; border-radius: 50%;
+  width: 7px; height: 7px;
+  border-radius: 54% 46% 50% 50% / 48% 56% 44% 52%;
   background: var(--teal);
+  box-shadow: 0 0 0 1.5px color-mix(in srgb, var(--teal) 45%, transparent);
   flex-shrink: 0;
 }
 .sb-session-item .name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sb-session-item .time { font-size: 11px; color: var(--text-4); font-family: var(--font-mono); }
-.sb-session-item .pin { font-size: 10px; color: var(--orange); }
+.sb-session-item .pin { font-size: 10px; color: var(--orange); display: inline-flex; }
 
 /* 会话项 hover 操作（置顶/归档/删除） */
 .sb-session-item .item-actions {
@@ -583,15 +803,17 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--text-1);
 }
 
-/* Sidebar footer */
+/* Sidebar footer · 手账本后页 */
 .sb-footer {
-  border-top: 1px solid var(--border);
-  background: var(--bg-input);
-  padding: 12px;
+  position: relative;
+  border-top: 2px dashed var(--border);
+  background: color-mix(in srgb, var(--bg-input) 78%, transparent);
+  padding: 12px 12px 14px;
   display: flex;
   flex-direction: column;
   gap: 8px;
   flex-shrink: 0;
+  z-index: 2;
 }
 
 .sb-foot-row {
@@ -611,26 +833,37 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 3px 8px;
   border-radius: 11px;
 }
+/* 版本号：手写图章 */
+.sb-foot-chip.ver {
+  font-family: var(--font-display);
+  font-size: 13px;
+  color: var(--text-3);
+  border: 1.5px solid var(--ink-soft);
+  border-radius: 50% 52% 48% 50% / 52% 48% 54% 46%;
+  rotate: -2deg;
+}
 
 .sb-settings-btn {
   display: flex;
   align-items: center;
   gap: 8px;
   height: 34px;
-  border-radius: 7px;
+  border-radius: var(--r-wob-sm);
   padding: 0 10px;
   font-size: 12px;
   font-weight: 500;
   color: var(--text-1);
   background: var(--bg-elev);
-  border: 1px solid var(--border);
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  border: 2px solid var(--ink-soft);
+  box-shadow: var(--shadow-hard-xs);
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, translate 0.15s ease, rotate 0.15s ease;
 }
-.sb-settings-btn:hover { border-color: var(--text-3); }
+.sb-settings-btn:hover { border-color: var(--ink); translate: 0 -1px; }
 .sb-settings-btn.active {
-  background: var(--blue-soft);
+  background: var(--hl-soft);
   border-color: var(--accent);
   color: var(--accent);
+  rotate: -1deg;
 }
 
 /* ---------- 右侧管理面板（插件详情等） ---------- */
@@ -678,7 +911,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   flex-shrink: 0;
   display: flex; align-items: center; justify-content: space-between;
   padding: 0 24px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 2.5px solid var(--ink);
+  border-radius: 2px 2px 0 0;
   gap: 12px;
   transition: border-color 0.3s ease;
 }
@@ -741,7 +975,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  /* 「回到底部」悬浮按钮的定位基准 */
+  position: relative;
 }
+
+/* 脱离底部时的回到底部按钮：居中悬浮于输入区上方（ChatGPT 式），不遮挡消息 */
+.jump-bottom {
+  position: absolute;
+  left: 50%;
+  bottom: 158px;
+  transform: translateX(-50%);
+  z-index: 5;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  color: var(--text-2);
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.jump-bottom:hover { color: var(--text-1); border-color: var(--accent); background: var(--bg-hover); }
 
 .messages {
   flex: 1;
@@ -831,11 +1089,16 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .user-bubble {
   background: var(--bg-elev);
+  border: 1px solid var(--border-soft);
   border-radius: 14px;
   padding: 14px 18px;
   max-width: 78%;
   font-size: 14px;
   line-height: 1.6;
+  /* 多行输入按原样换行（此前换行符被折叠成一行），长 URL/无空格串不撑破气泡 */
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: break-word;
 }
 
 /* 思考块 */
@@ -1139,10 +1402,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .plan-step.blocked .ps-num { background: var(--red-soft); color: var(--red); }
 
 /* 正文 / 代码块 */
-.assistant-text { font-size: 14px; line-height: 1.65; color: var(--text-1); }
-/* 正文浮在人物背景上：文字阴影保证中段遮罩较浅时的可读性（暖调，随主题翻转） */
-.assistant-text { text-shadow: 0 1px 3px rgba(24, 15, 10, 0.7), 0 0 8px rgba(24, 15, 10, 0.35); }
-:root[data-theme='light'] .assistant-text { text-shadow: 0 1px 3px rgba(243, 236, 223, 0.78), 0 0 8px rgba(243, 236, 223, 0.42); }
+.assistant-text { font-size: 15px; line-height: 1.7; color: var(--text-1); overflow-wrap: break-word; }
 .assistant-text p { margin-bottom: 8px; }
 .code-block {
   border: 1px solid var(--border);
@@ -1231,6 +1491,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   background: none;
   min-height: 24px;
   max-height: 200px;
+  /* 高度由 JS 随内容自动调整（上限后内部滚动） */
+  overflow-y: auto;
   color: var(--text-1);
 }
 
@@ -1428,11 +1690,12 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .trail-panel {
   width: var(--trail-w);
   flex-shrink: 0;
-  /* 毛玻璃：与侧栏一致，人物背景透出 */
-  background: color-mix(in srgb, var(--bg-panel) 66%, transparent);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
-  border-left: 1px solid var(--border);
+  /* 手绘涂鸦纸板：墨线边框 + 歪扭圆角 + 抖动滤镜 */
+  background: var(--bg-panel);
+  border-left: 2.5px solid var(--ink);
+  border-radius: 18px 4px 6px 14px / 14px 18px 4px 6px;
+  filter: url(#sketchy);
+  box-shadow: -3px 4px 0 var(--shadow-ink);
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -2835,7 +3098,8 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .kpi-card .k-sub.up { color: var(--teal); }
 
 /* ============================================================
-   品牌空状态（新会话首页）· 羊 Logo × 蓝白
+   品牌空状态（新会话首页）· 羊 Logo × 手账纸
+   （角标涂鸦 / 人像贴纸见文末涂鸦层）
    ============================================================ */
 .brand-hero {
   position: relative;
@@ -2846,31 +3110,19 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   padding: 64px 24px 48px;
   overflow: hidden;
 }
-.brand-hero::before {
-  content: '';
-  position: absolute;
-  top: -120px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: 420px;
-  height: 420px;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--blue-soft) 0%, var(--purple-soft) 45%, transparent 70%);
-  pointer-events: none;
-}
 .brand-logo {
   position: relative;
-  /* v4：暖陶/琥珀双色光晕（手作的暖辉光，弃蓝紫霓虹） */
-  filter: drop-shadow(0 6px 18px rgba(208, 133, 107, 0.30)) drop-shadow(0 14px 36px rgba(217, 164, 65, 0.22));
+  /* 蜡笔徽记：纸面轻投影（弃霓虹光晕） */
+  filter: drop-shadow(0 3px 0 var(--shadow-ink));
 }
 .brand-title {
   margin-top: 20px;
   font-family: var(--font-display);
-  font-size: 34px;
-  font-weight: 600;
-  font-variation-settings: 'SOFT' 70, 'WONK' 0, 'opsz' 60;
-  letter-spacing: -0.5px;
-  /* v4 品牌：暖陶→琥珀→松绿渐变大标题（编辑部手作感，弃蓝紫） */
+  font-size: 46px;
+  font-weight: 700;
+  letter-spacing: 0;
+  line-height: 1.1;
+  /* 品牌：蜡笔三色渐变大标题（马克笔手写体） */
   background: var(--brand-gradient);
   background-size: 200% 100%;
   -webkit-background-clip: text;
@@ -2882,7 +3134,6 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   from { background-position: 0% 0; }
   to { background-position: 200% 0; }
 }
-.brand-logo, .brand-slogan, .brand-kbd, .brand-note { text-shadow: 0 1px 3px rgba(24, 15, 10, 0.55); }
 .brand-slogan {
   margin-top: 10px;
   font-size: 13px;
@@ -3201,7 +3452,7 @@ button:disabled .spin { opacity: 0.7; }
 /* ============================================================
    v2.3 Markdown 正文（LLM 输出渲染：表格/列表/引用/标题）
    ============================================================ */
-.md { font-size: 14px; line-height: 1.65; color: var(--text-1); }
+.md { font-size: 14px; line-height: 1.65; color: var(--text-1); overflow-wrap: break-word; }
 .md > *:first-child { margin-top: 0; }
 .md > *:last-child { margin-bottom: 0; }
 .md p { margin: 8px 0; }
@@ -3480,3 +3731,703 @@ button:disabled .spin { opacity: 0.7; }
 }
 .wb-dot.pick:hover { transform: scale(1.18); }
 .wb-dot.pick.on { border-color: var(--text-2); }
+
+/* ============================================================
+   ═══ 涂鸦层 · Doodle Notebook Skin（v7 覆盖层）═══
+   歪扭墨线边框 · 贴纸硬阴影 · 微旋转归正 · 荧光笔 swipe ·
+   和纸胶带 · 手绘角标 · 人像贴纸 · 手写字号校准。
+   全部为纯视觉覆盖——不动结构 / props / 数据流。
+   ============================================================ */
+
+/* —— 1 · 卡片族：2px 墨线歪框 + 贴纸影 —— */
+.tool-card, .think-card, .plan-card, .approval-card, .code-block,
+.ts-card, .tl-item, .kpi-card, .hero-card, .saved-card, .cache-card,
+.global-stats, .plugin-card, .plugin-detail-card, .pd-manifest,
+.skill-card, .skill-detail-card, .provider-card, .tb-col, .tb-card,
+.set-sec, .wb-kpi, .wb-quick, .wb-task, .wb-section, .wb-side,
+.wb-proj-card, .wb-proj-stats {
+  border: 2px solid var(--ink-soft);
+  border-radius: var(--r-wob);
+  box-shadow: var(--shadow-hard-sm);
+}
+/* 双相位交替：相邻卡片歪向不同，打破网格秩序感 */
+.plugin-card:nth-child(even), .tl-item:nth-child(even), .tb-card:nth-child(even),
+.wb-task:nth-child(even), .wb-proj-card:nth-child(even), .skill-card:nth-child(even),
+.kpi-card:nth-child(even), .cache-card:nth-child(even) { border-radius: var(--r-wob-alt); }
+/* 语义标记 tab 保留（蜡笔粗边 = 手账里的分类贴条） */
+.think-card { border-left: 6px solid var(--purple); overflow: visible; }
+.plan-card { border-left: 6px solid var(--purple); }
+.approval-card { border-left: 6px solid var(--orange); }
+.tool-card.err { border-left: 6px solid var(--red); }
+.cache-card { border-top: 8px solid var(--purple); }
+.cache-card.c2 { border-top-color: var(--teal); }
+.cache-card.c3 { border-top-color: var(--orange); }
+.hero-card { border-color: color-mix(in srgb, var(--teal) 65%, var(--ink)); }
+
+/* 贴纸微旋 + hover「贴正」回弹 */
+.plugin-card:nth-child(odd) { rotate: -0.45deg; }
+.plugin-card:nth-child(even) { rotate: 0.4deg; }
+.tb-card:nth-child(3n+1) { rotate: 0.5deg; }
+.tb-card:nth-child(3n+2) { rotate: -0.4deg; }
+.wb-proj-card:nth-child(odd) { rotate: -0.35deg; }
+.wb-proj-card:nth-child(even) { rotate: 0.3deg; }
+.hero-card { rotate: -0.35deg; }
+.saved-card { rotate: 0.5deg; }
+.plugin-card:hover, .tb-card:hover, .wb-proj-card:hover, .skill-card:hover,
+.tool-card:hover, .think-card:hover { rotate: 0deg; }
+.plugin-card:hover, .skill-card:hover, .tb-card:hover { box-shadow: 4px 5px 0 var(--shadow-ink); }
+
+/* —— 2 · 按钮族：贴纸按嵌手感 —— */
+.tb-btn, .tb-icon-btn, .btn-primary, .btn-ghost, .btn-solid, .btn-ok,
+.send-btn, .sb-new-chat, .sb-manage-btn, .sb-ma-btn,
+.sb-settings-btn, .pc-btn, .pd-btn, .btn-sm, .gcb-commit, .gcb-push,
+.tb-btn-add, .tb-btn-primary, .tb-btn-danger, .tb-btn-ghost,
+.tb-pri-btn, .tb-status-btn, .wb-btn, .wb-status-btn, .wb-guide-copy,
+.wb-repeat-cycle, .tl-export, .manager-close, .tb-icon-btn {
+  border: 2px solid var(--ink-soft);
+  border-radius: var(--r-wob-sm);
+  box-shadow: var(--shadow-hard-sm);
+  transition: transform 0.12s ease-out, box-shadow 0.12s ease-out,
+    background 0.15s ease, color 0.15s ease, border-color 0.15s ease, rotate 0.15s ease;
+}
+.btn-primary:hover, .btn-solid:hover, .btn-ok:hover, .send-btn:hover,
+.sb-new-chat:hover, .tb-btn-add:hover, .tb-btn-primary:hover, .gcb-commit:hover,
+.wb-btn.primary:hover {
+  box-shadow: 4px 5px 0 var(--shadow-ink);
+  translate: -1px -1px;
+}
+.btn-primary:active, .btn-solid:active, .btn-ok:active, .send-btn:active,
+.sb-new-chat:active, .tb-btn-add:active, .tb-btn-primary:active,
+.gcb-commit:active, .wb-btn.primary:active, .pc-btn.enable:active {
+  box-shadow: none;
+  translate: 1px 2px;
+}
+/* 激活态 = 盖章歪一点 */
+.sb-tab { border-width: 1.5px; }
+.sb-tab.active { rotate: -0.5deg; }
+.tb-icon-btn.active { rotate: 1.6deg; }
+.send-btn { rotate: -3deg; }
+.jump-bottom { box-shadow: var(--shadow-hard-sm); }
+.jump-bottom:hover { translate: 0 -2px; }
+
+/* —— 3 · 输入与弹层：纸卡感 —— */
+.composer, .set-input, .search-input, .tb-search, .tb-select, .tb-add-input,
+.tb-input, .tb-textarea, .gcb-input, .ws-menu-add input, .sb-rename-input,
+.wb-input, .wb-edit-input {
+  border: 2px solid var(--ink-soft);
+  border-radius: var(--r-wob-sm);
+}
+.composer { box-shadow: var(--shadow-hard); transition: border-color 0.2s, rotate 0.18s ease; }
+.composer:focus-within { border-color: var(--accent); rotate: -0.3deg; }
+.menu-pop { border: 2px solid var(--ink-soft); border-radius: var(--r-wob); box-shadow: var(--shadow-pop); }
+.cmd-panel { border: 2px solid var(--ink-soft); border-radius: var(--r-wob-alt); box-shadow: var(--shadow-pop); }
+.ws-menu { border: 2px solid var(--ink-soft); border-radius: var(--r-wob); }
+.tb-detail { border-left: 2px solid var(--border); }
+
+/* —— 4 · 徽章贴纸：歪贴 1.5° —— */
+.status-badge, .msg-tag, .plugin-tag, .skill-tag, .cc-badge, .hero-badge,
+.gh-count, .vb-badge, .badge-ok, .wb-time, .wb-tag, .ci-badge,
+.cmd-item .ci-kbd, .cmd-foot .cf-kbd, .gc-icon, .tb-col-count, .wb-count {
+  border-radius: var(--r-wob-xs);
+}
+.status-badge, .msg-tag, .plugin-tag, .skill-tag, .cc-badge, .hero-badge,
+.badge-ok, .wb-tag, .wb-time, .vb-badge, .gh-count {
+  border: 1.5px solid var(--ink-soft);
+  rotate: -1.5deg;
+}
+.tl-badge, .step-num, .ps-num { border-radius: var(--r-wob-xs); }
+.step-num, .ps-num { border: 1.5px solid var(--ink-soft); }
+
+/* —— 5 · 荧光笔 swipe：小标签系统 —— */
+.sb-group-label, .menu-title, .ft-head, .git-section, .sd-title, .pm-title,
+.hero-label, .kpi-card .k-label, .section-title, .saved-card .sc-label,
+.ts-card .ts-label, .ph-label {
+  background-image: linear-gradient(100deg, transparent 1%, var(--hl-soft) 4%, var(--hl-soft) 96%, transparent 99%);
+  background-size: 102% 74%;
+  background-position: 0 62%;
+  background-repeat: no-repeat;
+  padding-left: 6px;
+  padding-right: 6px;
+}
+.ph-no { font-family: var(--font-display); font-size: 17px; rotate: -2deg; border-bottom: 2px solid var(--accent); }
+
+/* —— 6 · 和纸胶带 —— */
+.think-card::after {
+  content: '';
+  position: absolute;
+  top: -10px; right: 28px;
+  width: 76px; height: 20px;
+  background: color-mix(in srgb, var(--hl) 62%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 42%, transparent);
+  rotate: -4deg;
+  pointer-events: none;
+}
+.plan-card { overflow: visible; position: relative; }
+.plan-card::after {
+  content: '';
+  position: absolute;
+  top: -9px; left: 22px;
+  width: 60px; height: 18px;
+  background: color-mix(in srgb, var(--teal) 42%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 35%, transparent);
+  rotate: 3deg;
+  pointer-events: none;
+}
+.approval-card::after {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 7px;
+  background: repeating-linear-gradient(-55deg, var(--orange) 0 12px, transparent 12px 24px);
+  pointer-events: none;
+}
+
+/* —— 7 · 钢笔虚线分隔 —— */
+.sb-divider { height: 0; border-top: 2px dashed var(--border); background: none; }
+.tool-divider { height: 0; border-top: 2px dashed var(--border); background: none; }
+.topbar { border-bottom: 2px solid var(--border); }
+
+/* —— 8 · 消息：气泡与头像（内容保持平直——可读性优先，只歪框不歪文） —— */
+.user-bubble {
+  border: 2px solid var(--ink-soft);
+  border-radius: 18px 225px 18px 255px / 255px 18px 225px 18px;
+  box-shadow: var(--shadow-hard-sm);
+  font-size: 15px;
+}
+.msg-avatar { rotate: -4deg; border: 2px solid var(--ink-soft); box-shadow: none !important; }
+.msg-row.streaming .msg-avatar { animation: none; }
+.msg-avatar.user-av { border-radius: 52% 48% 55% 45% / 46% 55% 45% 54%; }
+.assistant-text { font-size: 15px; }
+.md { font-size: 15px; }
+.md a { text-decoration: underline wavy; text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+
+/* —— 9 · Hero pills：歪贴的胶囊贴纸 —— */
+.hero-pill {
+  border: 2px solid var(--ink-soft);
+  border-radius: 60px 22px 55px 24px / 24px 55px 22px 60px;
+  box-shadow: var(--shadow-hard-xs);
+  transition: background 0.15s, border-color 0.15s, color 0.15s, rotate 0.15s, box-shadow 0.15s, translate 0.15s;
+}
+.hero-pill:nth-child(1) { rotate: -1.4deg; }
+.hero-pill:nth-child(2) { rotate: 1deg; }
+.hero-pill:nth-child(3) { rotate: -0.8deg; }
+.hero-pill:hover { rotate: 0deg; box-shadow: var(--shadow-hard-sm); translate: 0 -2px; }
+.brand-kbd { border-style: dashed; border-width: 2px; }
+.brand-kbd .bk { box-shadow: var(--shadow-hard-xs); border-radius: var(--r-wob-xs); rotate: 2deg; }
+
+/* —— 10 · 侧栏：会话项 = 荧光笔选中行 —— */
+.sb-session-item { z-index: 1; }
+.sb-session-item:hover { border-color: var(--border); }
+.sb-session-item.active { box-shadow: var(--shadow-hard-xs); translate: 1px 1px; }
+.sb-logo-mark { border: 2px solid var(--ink-soft); border-radius: var(--r-wob-sm); box-shadow: var(--shadow-hard-xs); rotate: -4deg; }
+.sb-foot-chip { border: 1.5px solid var(--ink-soft); border-radius: var(--r-wob-xs); }
+.sn-item.active { background: var(--hl-soft); border: 2px solid var(--ink-soft); border-radius: var(--r-wob-sm); rotate: -0.5deg; }
+.cmd-item.selected { border: 2px solid var(--ink-soft); border-radius: var(--r-wob-sm); }
+.menu-item.selected { border-radius: var(--r-wob-xs); }
+.menu-item .menu-dot { border-radius: 45% 55% 50% 50% / 55% 45% 55% 45%; }
+
+/* —— 11 · 印章：橡皮章双圈 —— */
+.stamp {
+  background: transparent;
+  color: var(--accent);
+  border: 2.5px solid var(--accent);
+  outline: 2px dashed var(--accent);
+  outline-offset: 5px;
+  box-shadow: none;
+  rotate: -9deg;
+  border-radius: 48% 52% 46% 54% / 53% 47% 55% 45%;
+  font-size: 24px;
+}
+
+/* —— 12 · 看板列头 & 轨迹：小笔触 —— */
+.tb-col-head { text-underline-offset: 4px; }
+.tb-col-dot { border-radius: 48% 52% 55% 45% / 55% 48% 45% 52%; }
+.wb-status-dot, .tl-badge .sd { border-radius: 55% 45% 50% 50% / 48% 55% 45% 52%; }
+
+/* —— 13 · 人像贴纸：hero 右上「胶带拍立得」 —— */
+.hero-sticker {
+  position: absolute;
+  top: 26px; right: 5%;
+  width: 156px;
+  padding: 9px 9px 30px;
+  background: var(--bg-elev);
+  border: 2px solid var(--ink-soft);
+  border-radius: 8px;
+  box-shadow: var(--shadow-hard);
+  rotate: 4deg;
+  z-index: 2;
+  transition: rotate 0.2s ease, translate 0.2s ease;
+}
+.hero-sticker:hover { rotate: 2deg; translate: 0 -2px; }
+/* 相纸 = 换图按钮：整张可点，hover 浮出涂鸦提示 */
+.hs-photo {
+  position: relative;
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-radius: 3px;
+  overflow: hidden;
+}
+.hs-photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  object-position: center 26%;
+  border-radius: 3px;
+  filter: saturate(0.78) contrast(1.02);
+  transition: filter 0.2s ease, transform 0.2s ease;
+}
+.hero-sticker:hover .hs-photo img { filter: saturate(1) contrast(1.02); transform: scale(1.03); }
+.hs-hint {
+  position: absolute;
+  inset: auto 0 0 0;
+  display: flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 0 6px;
+  font-size: 11px;
+  font-weight: 600;
+  font-style: normal;
+  color: var(--on-accent);
+  background: linear-gradient(0deg, var(--accent), color-mix(in srgb, var(--accent) 60%, transparent));
+  opacity: 0;
+  translate: 0 100%;
+  transition: opacity 0.18s ease, translate 0.18s ease;
+}
+.hero-sticker:hover .hs-hint, .hero-sticker.custom .hs-hint { opacity: 1; translate: 0 0; }
+.hero-sticker.custom:hover .hs-hint { background: linear-gradient(0deg, var(--purple), color-mix(in srgb, var(--purple) 60%, transparent)); color: var(--on-accent); }
+/* 恢复默认：左上角小徽章 */
+.hs-reset {
+  position: absolute;
+  top: -9px; left: -9px;
+  width: 26px; height: 26px;
+  border: 2px solid var(--ink-soft);
+  border-radius: 9px 5px 8px 6px / 6px 8px 5px 9px;
+  background: var(--bg-elev);
+  color: var(--text-2);
+  display: flex; align-items: center; justify-content: center;
+  cursor: pointer;
+  box-shadow: var(--shadow-hard-xs);
+  rotate: -8deg;
+  transition: rotate 0.15s ease, transform 0.15s ease, color 0.15s ease;
+}
+.hs-reset:hover { rotate: 6deg; color: var(--accent); transform: scale(1.08); }
+.hero-sticker::before {
+  content: '';
+  position: absolute;
+  top: -13px; left: 50%;
+  translate: -50% 0;
+  rotate: -4deg;
+  width: 92px; height: 26px;
+  background: color-mix(in srgb, var(--hl) 68%, transparent);
+  border: 1px solid color-mix(in srgb, var(--ink) 25%, transparent);
+}
+.hero-sticker figcaption {
+  position: absolute;
+  bottom: 6px; left: 0; right: 0;
+  text-align: center;
+  font-family: var(--font-display);
+  font-size: 16px;
+  color: var(--text-2);
+}
+@media (max-width: 1180px) { .hero-sticker { display: none; } }
+
+/* —— 14 · 角标涂鸦：手绘星星 & 弯箭头（mask 随主题色） —— */
+.brand-hero::before {
+  content: '';
+  position: absolute;
+  top: 40px; left: 6%;
+  width: 118px; height: 118px;
+  background: var(--ink-soft);
+  opacity: 0.4;
+  rotate: -8deg;
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 8 L56 42 L88 50 L56 58 L50 92 L44 58 L12 50 L44 42 Z'/%3E%3Cpath d='M82 10 l2.5 7.5 7.5 2.5 -7.5 2.5 -2.5 7.5 -2.5 -7.5 -7.5 -2.5 7.5 -2.5 Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 8 L56 42 L88 50 L56 58 L50 92 L44 58 L12 50 L44 42 Z'/%3E%3Cpath d='M82 10 l2.5 7.5 7.5 2.5 -7.5 2.5 -2.5 7.5 -2.5 -7.5 -7.5 -2.5 7.5 -2.5 Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  animation: doodleSway 7s ease-in-out infinite;
+}
+.brand-hero::after {
+  content: '';
+  position: absolute;
+  top: 42%; right: 4.5%;
+  width: 118px; height: 82px;
+  background: var(--accent);
+  opacity: 0.5;
+  rotate: 14deg;
+  pointer-events: none;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M112 10 C 72 4 36 24 20 58'/%3E%3Cpath d='M12 38 L20 60 L42 50'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 80'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M112 10 C 72 4 36 24 20 58'/%3E%3Cpath d='M12 38 L20 60 L42 50'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
+  animation: doodleSway 7s ease-in-out 0.9s infinite;
+}
+@keyframes doodleSway {
+  0%, 100% { translate: 0 0; }
+  50% { translate: 0 -7px; }
+}
+
+/* —— 15 · 页头波浪尺 —— */
+.ph-rule {
+  height: 8px;
+  background: var(--border);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 Q 6 1 11 5 T 21 5 T 31 5 T 41 5 T 51 5 T 59 4' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 8' preserveAspectRatio='none'%3E%3Cpath d='M1 5 Q 6 1 11 5 T 21 5 T 31 5 T 41 5 T 51 5 T 59 4' fill='none' stroke='%23fff' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+}
+
+/* —— 16 · 手写字号校准（Caveat 视觉尺寸偏小，逐档上调） —— */
+.ph-title { font-size: 58px; font-variation-settings: normal; letter-spacing: 0; }
+.page-title { font-size: 38px; font-variation-settings: normal; letter-spacing: 0; }
+.ph-sub { font-size: 16px; }
+.hero-value { font-size: 76px; letter-spacing: 0; font-variation-settings: normal; }
+.kpi-card .k-value { font-size: 48px; font-variation-settings: normal; }
+.gs-item .gsi-value { font-size: 42px; font-variation-settings: normal; }
+.saved-card .sc-value { font-size: 58px; font-variation-settings: normal; }
+.ts-card .ts-value { font-size: 32px; font-variation-settings: normal; }
+.plugin-name { font-size: 27px; line-height: 1.18; overflow-wrap: break-word; }
+.sb-logo-title { font-size: 25px; rotate: -1.5deg; font-variation-settings: normal; }
+.settings-nav .sn-title { font-size: 28px; font-variation-settings: normal; }
+.wb-kpi-val { font-size: 28px; }
+.wb-proj-title { font-size: 28px; }
+.cmd-slash { font-family: var(--font-display); font-size: 30px; rotate: -6deg; }
+.menu-title, .sb-group-label { font-family: var(--font-mono); }
+
+/* —— 17 · 焦点 & 滚动条：马克笔圈 —— */
+button:focus-visible, input:focus-visible, select:focus-visible,
+textarea:focus-visible, [tabindex]:focus-visible {
+  outline: 2.5px dashed var(--accent);
+  outline-offset: 3px;
+}
+::-webkit-scrollbar-thumb { border-radius: 8px 4px 9px 5px / 5px 9px 4px 8px; }
+
+/* —— 18 · Toast：小贴纸 —— */
+[data-sonner-toaster] [data-sonner-toast] {
+  border: 2px solid var(--ink-soft) !important;
+  border-radius: 14px 5px 12px 7px / 7px 12px 5px 14px !important;
+  box-shadow: var(--shadow-hard) !important;
+  rotate: -0.5deg;
+}
+
+/* ============================================================
+   手绘涂鸦插画风 · v8 —— PurrCat 风格
+   核心：边框线本身是歪扭的，不是「方块+旋转」
+   手法：SVG feTurbulence 抖动 + 厚墨线 + 歪扭圆角 + 波浪分隔
+   ============================================================ */
+
+/* —— 侧栏导航贴纸：逐项歪扭 —— */
+.sb-tab {
+  filter: url(#sketchy);
+  border-width: 2px !important;
+  border-color: var(--ink) !important;
+}
+.sb-tab:nth-child(1) { rotate: -2.2deg; }
+.sb-tab:nth-child(2) { rotate: 1.8deg; }
+.sb-tab:nth-child(3) { rotate: -1.5deg; }
+.sb-tab:nth-child(4) { rotate: 2.3deg; }
+.sb-tab:nth-child(5) { rotate: -1.8deg; }
+.sb-tab.active { rotate: -2.8deg !important; }
+.sb-tab:hover { rotate: 0deg; }
+
+/* 活跃导航标签：顶部贴一条荧光胶带 */
+.sb-tab.active::before {
+  content: '';
+  position: absolute;
+  top: -6px; left: 50%;
+  translate: -50% 0;
+  width: 52px; height: 14px;
+  background: color-mix(in srgb, var(--hl) 58%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 35%, transparent);
+  rotate: -1.8deg;
+  pointer-events: none;
+  z-index: 1;
+}
+
+/* 会话项：逐个歪贴 */
+.sb-session-item:nth-child(4n+1) { rotate: -1.4deg; }
+.sb-session-item:nth-child(4n+2) { rotate: 0.9deg; }
+.sb-session-item:nth-child(4n+3) { rotate: -0.7deg; }
+.sb-session-item:nth-child(4n) { rotate: 1.6deg; }
+.sb-session-item.active { rotate: -1.8deg !important; }
+.sb-session-item:hover { rotate: 0deg; }
+
+/* —— 统计卡片：歪贴 + 顶部荧光胶带 —— */
+.ts-card {
+  filter: url(#sketchy);
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+}
+.ts-card:nth-child(1) { rotate: -1.8deg; }
+.ts-card:nth-child(2) { rotate: 2.2deg; }
+.ts-card:nth-child(3) { rotate: -1.4deg; }
+.ts-card:nth-child(4) { rotate: 1.6deg; }
+.ts-card:nth-child(odd)::before {
+  content: '';
+  position: absolute;
+  top: -7px; left: 50%;
+  translate: -50% 0;
+  width: 60px; height: 16px;
+  background: color-mix(in srgb, var(--hl) 55%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 32%, transparent);
+  rotate: -2.5deg;
+  pointer-events: none;
+  z-index: 1;
+}
+.ts-card:nth-child(even)::before {
+  content: '';
+  position: absolute;
+  top: -7px; right: 18px;
+  width: 50px; height: 15px;
+  background: color-mix(in srgb, var(--teal) 48%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 30%, transparent);
+  rotate: 3deg;
+  pointer-events: none;
+  z-index: 1;
+}
+.ts-card:hover { rotate: 0deg; }
+
+/* —— 追踪条目：歪贴阶梯 —— */
+.tl-item {
+  filter: url(#sketchy);
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+}
+.tl-item:nth-child(3n+1) { rotate: -1.2deg; }
+.tl-item:nth-child(3n+2) { rotate: 0.8deg; }
+.tl-item:nth-child(3n) { rotate: -0.6deg; }
+.tl-item:nth-child(odd)::before {
+  content: '';
+  position: absolute;
+  top: -6px; left: 20px;
+  width: 44px; height: 13px;
+  background: color-mix(in srgb, var(--hl) 52%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 28%, transparent);
+  rotate: -3.5deg;
+  pointer-events: none;
+  z-index: 1;
+}
+.tl-item:nth-child(even)::before {
+  content: '';
+  position: absolute;
+  top: -5px; right: 16px;
+  width: 38px; height: 12px;
+  background: color-mix(in srgb, var(--purple) 42%, transparent);
+  border: 1px dashed color-mix(in srgb, var(--ink) 28%, transparent);
+  rotate: 2.8deg;
+  pointer-events: none;
+  z-index: 1;
+}
+.tl-item:hover { rotate: 0deg; }
+
+/* —— 头部栏：歪斜 + 底部波浪分隔 —— */
+.topbar {
+  rotate: -0.4deg;
+  transform-origin: left center;
+  filter: url(#sketchy);
+  border-bottom: none !important;
+  position: relative;
+}
+.topbar::after {
+  content: '';
+  position: absolute;
+  bottom: -1px; left: 0; right: 0;
+  height: 10px;
+  background-color: var(--ink);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M0 5 Q 5 1 10 5 T 20 5 T 30 5 T 40 5 T 50 5 T 60 5 T 70 5 T 80 5 T 90 5 T 100 5 T 110 5 T 120 5' fill='none' stroke='%23fff' stroke-width='2.8' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 10' preserveAspectRatio='none'%3E%3Cpath d='M0 5 Q 5 1 10 5 T 20 5 T 30 5 T 40 5 T 50 5 T 60 5 T 70 5 T 80 5 T 90 5 T 100 5 T 110 5 T 120 5' fill='none' stroke='%23fff' stroke-width='2.8' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  pointer-events: none;
+}
+
+/* —— 面包屑标题歪一点 —— */
+.crumb .cur { rotate: -0.8deg; display: inline-block; }
+
+/* —— 模式/模型选择按钮歪贴 —— */
+.tb-btn {
+  filter: url(#sketchy);
+  border-width: 2px !important;
+  border-color: var(--ink) !important;
+}
+.tb-btn:nth-child(1) { rotate: -1.6deg; }
+.tb-btn:nth-child(2) { rotate: 1.2deg; }
+.tb-btn:hover { rotate: 0deg; }
+
+/* —— 输入框（composer）加强歪扭 —— */
+.composer {
+  rotate: -0.6deg;
+  filter: url(#sketchy);
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+}
+.composer:focus-within { rotate: -1.2deg; }
+
+/* —— 发送按钮更歪 —— */
+.send-btn {
+  rotate: -4.5deg !important;
+  filter: url(#sketchy);
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+}
+.send-btn:hover { rotate: -2deg !important; }
+
+/* —— 新会话按钮更歪 —— */
+.sb-new-chat {
+  rotate: -1.8deg !important;
+  filter: url(#sketchy);
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+}
+.sb-new-chat:hover { rotate: 0deg !important; }
+
+/* —— 统计数值歪斜手写感 —— */
+.ts-value { rotate: -1deg; display: inline-block; }
+.ts-value.teal { rotate: 1.2deg; }
+
+/* —— 轨迹面板标题歪斜 —— */
+.th-title { rotate: -0.6deg; display: inline-block; }
+
+/* —— 侧栏设置按钮歪贴 —— */
+.sb-settings-btn { rotate: 1.4deg; }
+.sb-settings-btn:hover { rotate: 0deg; }
+
+/* —— 批量管理按钮歪贴 —— */
+.sb-manage-btn { rotate: 2deg; }
+.sb-manage-btn:hover { rotate: 0deg; }
+
+/* —— 导出按钮歪贴 —— */
+.tl-export { rotate: -1.5deg; }
+.tl-export:hover { rotate: 0deg; }
+
+/* —— 徽章更歪 —— */
+.status-badge, .msg-tag, .plugin-tag, .skill-tag, .cc-badge, .hero-badge,
+.badge-ok, .wb-tag, .wb-time, .vb-badge, .gh-count {
+  rotate: -2.2deg !important;
+}
+
+/* —— Toast 贴纸更歪 —— */
+[data-sonner-toaster] [data-sonner-toast] {
+  rotate: -1.2deg !important;
+}
+
+/* —— 插件卡片旋转加大 —— */
+.plugin-card:nth-child(odd) { rotate: -1.2deg; }
+.plugin-card:nth-child(even) { rotate: 1deg; }
+.plugin-card:hover { rotate: 0deg; }
+
+/* —— Todo 卡片旋转加大 —— */
+.tb-card:nth-child(3n+1) { rotate: 1.2deg; }
+.tb-card:nth-child(3n+2) { rotate: -1deg; }
+.tb-card:nth-child(3n) { rotate: 0.8deg; }
+.tb-card:hover { rotate: 0deg; }
+
+/* —— Workbench 卡片旋转加大 —— */
+.wb-proj-card:nth-child(odd) { rotate: -1deg; }
+.wb-proj-card:nth-child(even) { rotate: 0.8deg; }
+.wb-proj-card:hover { rotate: 0deg; }
+
+/* —— Hero 卡片旋转加大 —— */
+.hero-card { rotate: -1deg; }
+.hero-card:hover { rotate: 0deg; }
+
+/* —— 已保存卡片旋转加大 —— */
+.saved-card { rotate: 1.2deg; }
+.saved-card:hover { rotate: 0deg; }
+
+/* —— Hero pills 旋转加大 —— */
+.hero-pill:nth-child(1) { rotate: -2.5deg; }
+.hero-pill:nth-child(2) { rotate: 2deg; }
+.hero-pill:nth-child(3) { rotate: -1.6deg; }
+
+/* —— 标签页旋转加大 —— */
+.sb-tab.active { rotate: -1.8deg !important; }
+.tb-icon-btn.active { rotate: 2.8deg !important; }
+
+/* —— Skill/provider 卡片旋转 —— */
+.skill-card:nth-child(odd) { rotate: -1deg; }
+.skill-card:nth-child(even) { rotate: 0.8deg; }
+.provider-card:nth-child(odd) { rotate: -0.8deg; }
+.provider-card:nth-child(even) { rotate: 0.6deg; }
+
+/* ============================================================
+   手绘涂鸦核心：边框线本身歪扭（非矩形+旋转）
+   SVG feTurbulence 抖动 + 厚墨线 + 歪扭圆角 + 波浪分隔
+   ============================================================ */
+
+/* —— 波浪分隔线（替代所有直线分隔） —— */
+.sb-divider {
+  height: 8px; border: none; background: none; flex-shrink: 0;
+  background-color: var(--ink-soft);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 8' preserveAspectRatio='none'%3E%3Cpath d='M0 4 Q 5 0 10 4 T 20 4 T 30 4 T 40 4 T 50 4 T 60 4 T 70 4 T 80 4 T 90 4 T 100 4 T 110 4 T 120 4' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 8' preserveAspectRatio='none'%3E%3Cpath d='M0 4 Q 5 0 10 4 T 20 4 T 30 4 T 40 4 T 50 4 T 60 4 T 70 4 T 80 4 T 90 4 T 100 4 T 110 4 T 120 4' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+}
+.tool-divider {
+  height: 8px; border: none; background: none;
+  background-color: var(--ink-soft);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 8' preserveAspectRatio='none'%3E%3Cpath d='M0 4 Q 5 0 10 4 T 20 4 T 30 4 T 40 4 T 50 4 T 60 4 T 70 4 T 80 4 T 90 4 T 100 4 T 110 4 T 120 4' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 120 8' preserveAspectRatio='none'%3E%3Cpath d='M0 4 Q 5 0 10 4 T 20 4 T 30 4 T 40 4 T 50 4 T 60 4 T 70 4 T 80 4 T 90 4 T 100 4 T 110 4 T 120 4' fill='none' stroke='%23fff' stroke-width='2.5' stroke-linecap='round'/%3E%3C/svg%3E") no-repeat center / 100% 100%;
+}
+
+/* —— 全局厚墨线边框：所有卡片/面板/输入框 —— */
+.tool-card, .think-card, .plan-card, .approval-card, .code-block,
+.ts-card, .tl-item, .kpi-card, .hero-card, .saved-card, .cache-card,
+.global-stats, .plugin-card, .plugin-detail-card, .pd-manifest,
+.skill-card, .skill-detail-card, .provider-card, .tb-col, .tb-card,
+.set-sec, .wb-kpi, .wb-quick, .wb-task, .wb-section, .wb-side,
+.wb-proj-card, .wb-proj-stats, .composer, .menu-pop, .cmd-panel,
+.ws-menu {
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+  border-style: solid !important;
+}
+
+/* —— 按钮族：厚墨线 + 歪扭圆角 —— */
+.tb-btn, .tb-icon-btn, .btn-primary, .btn-ghost, .btn-solid, .btn-ok,
+.send-btn, .sb-new-chat, .sb-manage-btn, .sb-ma-btn,
+.sb-settings-btn, .pc-btn, .pd-btn, .btn-sm, .gcb-commit, .gcb-push,
+.tb-btn-add, .tb-btn-primary, .tb-btn-danger, .tb-btn-ghost,
+.tb-pri-btn, .tb-status-btn, .wb-btn, .wb-status-btn, .wb-guide-copy,
+.wb-repeat-cycle, .tl-export, .manager-close {
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+  border-style: solid !important;
+}
+
+/* —— 输入框：厚墨线 + 歪扭圆角 —— */
+.set-input, .search-input, .tb-search, .tb-select, .tb-add-input,
+.tb-input, .tb-textarea, .gcb-input, .ws-menu-add input, .sb-rename-input,
+.wb-input, .wb-edit-input {
+  border-width: 2.5px !important;
+  border-color: var(--ink) !important;
+  border-style: solid !important;
+}
+
+/* —— 会话项：厚墨线 —— */
+.sb-session-item {
+  border: 2px solid var(--ink) !important;
+  filter: url(#sketchy);
+}
+
+/* —— 追踪面板头部：厚墨线 —— */
+.trail-head {
+  border-bottom: 2.5px solid var(--ink) !important;
+  filter: url(#sketchy);
+}
+
+/* —— Trace 统计区边框 —— */
+.trail-stats {
+  border-bottom: 2px solid var(--ink);
+}
+
+/* —— 减弱动效守卫 —— */
+@media (prefers-reduced-motion: reduce) {
+  .brand-hero::before, .brand-hero::after { animation: none; }
+  .plugin-card, .tb-card, .wb-proj-card, .hero-card, .saved-card,
+  .hero-pill, .sb-logo-mark, .msg-avatar, .stamp, .sb-tab.active,
+  .tb-icon-btn.active, .send-btn, .gh-count, .plugin-tag, .skill-tag,
+  .status-badge, .cc-badge, .hero-badge, .msg-tag, .wb-tag, .wb-time,
+  .vb-badge, .badge-ok, .bk, .ph-no,
+  .sb-tab, .sb-session-item, .ts-card, .tl-item, .topbar,
+  .crumb .cur, .tb-btn, .composer, .sb-new-chat, .sb-settings-btn,
+  .sb-manage-btn, .tl-export, .ts-value, .th-title,
+  .skill-card, .provider-card { rotate: 0deg; }
+  .sb-tab.active::before, .ts-card:nth-child(odd)::before,
+  .ts-card:nth-child(even)::before, .tl-item:nth-child(odd)::before,
+  .tl-item:nth-child(even)::before { display: none; }
+}

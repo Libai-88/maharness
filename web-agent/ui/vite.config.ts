@@ -11,14 +11,19 @@ export default defineConfig({
     outDir: 'dist',
     rollupOptions: {
       output: {
-        // vendor 分 chunk：第三方库拆出独立文件（缓存友好 + 首屏并行加载），
-        // 业务代码从 1.54MB 单体中脱离，消除 500kB 警告
-        manualChunks: {
-          // react 与业务代码共享模块图，强制拆分反而合并回主 chunk——交由 vite 自然处理
-          'vendor-motion': ['motion'],
-          'vendor-markdown': ['marked', 'dompurify', 'highlight.js'],
-          'vendor-sonner': ['sonner'],
-          'vendor-dnd': ['@dnd-kit/core', '@dnd-kit/sortable', '@dnd-kit/utilities'],
+        // vendor 分 chunk：第三方库拆出独立文件（缓存友好 + 首屏并行加载）。
+        // 函数形式精确匹配：object 形式 ['react-dom'] 只匹配包入口，
+        // 而 react-dom 实际经 react-dom/client 深层导入（main.tsx/sonner）——
+        // 不拆则整个 react-dom + scheduler 被吞进 vendor-sonner（约 +130kB），
+        // 应用主 chunk 反向依赖 toast 库缓存，sonner 更新即击穿 react-dom 缓存
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined;
+          if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
+          if (/node_modules[\\/]motion(-dom|-utils)?[\\/]/.test(id) || /node_modules[\\/]framer-motion[\\/]/.test(id)) return 'vendor-motion';
+          if (/node_modules[\\/](marked|dompurify|highlight\.js)[\\/]/.test(id)) return 'vendor-markdown';
+          if (/node_modules[\\/]sonner[\\/]/.test(id)) return 'vendor-sonner';
+          if (/node_modules[\\/]@dnd-kit[\\/]/.test(id)) return 'vendor-dnd';
+          return undefined;
         },
       },
     },

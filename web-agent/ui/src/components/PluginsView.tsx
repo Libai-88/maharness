@@ -8,10 +8,10 @@ import TodoBoardView from './TodoBoardView';
 
 interface Props {
   plugins: PluginInfo[];
-  onAction: (id: string, action: 'enable' | 'disable' | 'reload') => Promise<void> | void;
+  onAction: (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => Promise<void> | void;
 }
 
-const ICON_COLORS = ['#82a873', '#d0856b', '#e0913f', '#d9a441', '#d96856', '#6b6053'];
+const ICON_COLORS = ['#43a047', '#e0512f', '#e8930f', '#8a63e8', '#d94630', '#9c8d74'];
 
 /** 插件贡献的前端面板（前端是插件的一部分：插件通过 api 能力提供 GET /panel → { title, html }） */
 function PluginPanel({ pluginId }: { pluginId: string }) {
@@ -39,6 +39,42 @@ function PluginPanel({ pluginId }: { pluginId: string }) {
   );
 }
 
+/** 插件配置只读展示：从 API 读取 config.<id>.* 键值对 */
+function PluginConfig({ pluginId }: { pluginId: string }) {
+  const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
+  const [schema, setSchema] = useState<Record<string, unknown> | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    fetch(`/api/plugins/${pluginId}/config`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+      .then((d) => { if (alive) { setCfg(d.config ?? {}); setSchema(d.schema); } })
+      .catch(() => { if (alive) setCfg({}); });
+    return () => { alive = false; };
+  }, [pluginId]);
+
+  if (cfg === null) return null;
+  const keys = Object.keys(cfg);
+  if (keys.length === 0 && !schema) return null;
+
+  return (
+    <div className="pd-manifest">
+      <span className="pm-title">CONFIG</span>
+      {keys.length > 0 ? keys.map((k) => (
+        <div className="pm-row" key={k}>
+          <span className="k">{k}</span>
+          <span className="v mono" style={{ fontSize: 12 }}>{typeof cfg[k] === 'object' ? JSON.stringify(cfg[k]) : String(cfg[k] ?? '—')}</span>
+        </div>
+      )) : <div style={{ fontSize: 12, color: 'var(--text-4)' }}>暂无配置</div>}
+      {schema && (
+        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-4)' }}>
+          声明了 {Object.keys(schema as Record<string, unknown>).length} 个配置项（schema 已校验）
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function PluginsView({ plugins, onAction }: Props) {
   const [selected, setSelected] = useState<PluginInfo | null>(null);
   const [q, setQ] = useState('');
@@ -52,7 +88,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
     }
   }, [plugins]); // eslint-disable-line
 
-  const act = async (id: string, action: 'enable' | 'disable' | 'reload') => {
+  const act = async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     if (busy[id]) return;
     setBusy((b) => ({ ...b, [id]: true }));
     try { await onAction(id, action); } finally { setBusy((b) => ({ ...b, [id]: false })); }
@@ -86,10 +122,17 @@ export default function PluginsView({ plugins, onAction }: Props) {
           <div className="plugin-info-top">
             <span className="plugin-name">{p.name}</span>
             <span className="plugin-ver">v{p.version}</span>
+            {p.essential && <span className="plugin-tag" style={{ background: 'var(--purple-soft)', color: 'var(--purple)' }}>核心</span>}
             {isRun && <span className="plugin-tag hot">热重载</span>}
             {p.error && <span className="plugin-tag" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>错误</span>}
+            {p.circuitBreaker && p.circuitBreaker.failures > 0 && (
+              <span className="plugin-tag" style={{ background: 'var(--orange-soft)', color: 'var(--orange)' }}>
+                熔断 {p.circuitBreaker.failures}次
+              </span>
+            )}
           </div>
-          <span className="plugin-desc">{p.caps?.join(' · ') || p.error || '插件（能力注册于 PluginLoader）'}</span>
+          <span className="plugin-desc">{p.caps?.join(' · ') || '插件（能力注册于 PluginLoader）'}</span>
+          {p.error && <span className="plugin-desc" style={{ color: 'var(--red)', fontSize: 11, marginTop: 2, display: 'block' }}>{p.error.length > 60 ? p.error.slice(0, 60) + '…' : p.error}</span>}
         </div>
         <div className="plugin-right">
           <span className={`plugin-status ${isRun ? 'running' : p.error ? 'error' : 'stopped-s'}`}>
@@ -172,7 +215,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
           {selected ? (
             <>
               <div className="plugin-detail-card">
-                <span className="pd-icon" style={{ background: `${ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#3a4350'}26`, color: ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#3a4350' }}>
+                <span className="pd-icon" style={{ background: `${ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#9c8d74'}26`, color: ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#9c8d74' }}>
                   <PluginIcon id={selected.name} size={24} />
                 </span>
                 <span className="pd-name">{selected.name}</span>
@@ -186,10 +229,38 @@ export default function PluginsView({ plugins, onAction }: Props) {
                     {busy[selected.id] ? <span className="spin" /> : null}重载
                   </button>
                   <button className="pd-btn ghost" onClick={() => void pluginsApi.open(selected.id)}>打开目录</button>
-                  <button className="pd-btn danger" onClick={() => void act(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')} disabled={!!busy[selected.id]}>
+                  <button className="pd-btn ghost" onClick={() => void act(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')} disabled={!!busy[selected.id]}>
                     {(selected.state === 'started' || selected.state === 'loaded') ? '停用' : '启用'}
                   </button>
+                  {!selected.essential && (
+                    <button
+                      className="pd-btn danger"
+                      onClick={() => {
+                        if (confirm(`确定要卸载插件「${selected.name}」？\n\n此操作将删除插件目录，不可恢复。`)) {
+                          void act(selected.id, 'uninstall');
+                        }
+                      }}
+                      disabled={!!busy[selected.id]}
+                    >
+                      卸载
+                    </button>
+                  )}
                 </div>
+                {selected.error && (
+                  <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--red-soft)', borderRadius: 6, fontSize: 12, color: 'var(--red)', lineHeight: 1.5 }}>
+                    <strong>错误：</strong>{selected.error}
+                    {selected.circuitBreaker && selected.circuitBreaker.failures >= 3 && (
+                      <div style={{ marginTop: 4, color: 'var(--orange)' }}>
+                        连续失败 {selected.circuitBreaker.failures} 次，已进入熔断态。系统会在 60s 后自动重试。
+                      </div>
+                    )}
+                  </div>
+                )}
+                {selected.fixSuggestion && (
+                  <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--teal-soft)', borderRadius: 6, fontSize: 12, color: 'var(--teal)', lineHeight: 1.5 }}>
+                    <strong>修复建议：</strong>{selected.fixSuggestion}
+                  </div>
+                )}
               </div>
               <div className="pd-manifest">
                 <span className="pm-title">MANIFEST</span>
@@ -198,6 +269,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
                 <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? <>true <IconCheck size={10} /></> : 'false'}</span></div>
               </div>
+              <PluginConfig pluginId={selected.id} />
               {/* todo 插件：面板含交互（增删改），DOMPurify 会剥离 panel HTML 的脚本 → 特判渲染 React 原生组件 */}
               {selected.id === 'todo' ? <TodoBoardView /> : <PluginPanel pluginId={selected.id} />}
             </>

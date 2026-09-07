@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WbState, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -34,14 +34,8 @@ export interface ChatHandlers {
   onEnd(): void;
 }
 
-/** retry 事件广播（模块级订阅）：streamChat 解析到 retry 事件时通知全部订阅者。
- *  消息状态通常由父组件持有（handler 里不便清空），ChatView 等展示层据此
- *  在渲染上截掉 retry 时刻之前的残段，等价于「清空重累积」。 */
-const retryListeners = new Set<() => void>();
-export function onChatRetry(fn: () => void): () => void {
-  retryListeners.add(fn);
-  return () => { retryListeners.delete(fn); };
-}
+/** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
+ *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
 
 /** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研）
  *  body.resume=true 时从断点历史继续（checkpoint 断点续跑，不需要 message） */
@@ -107,9 +101,8 @@ export async function streamChat(
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
           case 'retry':
-            // provider 重试：透传给 handler 订阅方 + 广播模块级订阅者（ChatView 清空流式残段）
+            // provider 重试：透传给 handler（App 记录截断边界，展示层从该边界重新累积）
             h.onRetry?.();
-            for (const fn of retryListeners) fn();
             break;
           case 'error': h.onError(String(d.error ?? '未知错误')); break;
           case 'end': endSeen = true; h.onEnd(); break;
@@ -279,17 +272,6 @@ export const traceApi = {
 /** 办公工作台（workbench 插件）：全量状态一次取回，变更操作直接回传新状态（一轮刷新）。
  *  插件停用后端点 404 → 调用方 catch 后展示「插件未启用」空态。 */
 export const workbenchApi = {
-  state: () => api<WbState>('/api/plugins/workbench/wb/state'),
-  rollover: () => api<{ ok: boolean; moved: number; state: WbState }>('/api/plugins/workbench/wb/rollover', { method: 'POST' }),
-  addTask: (b: { title: string; date?: string; time?: string; projectId?: string; repeat?: string; notes?: string }) =>
-    api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/tasks', { method: 'POST', body: JSON.stringify(b) }),
-  updateTask: (id: string, patch: Partial<{ title: string; done: boolean; date: string; time: string; notes: string; projectId: string; repeat: string }>) =>
-    api<{ ok: boolean; state: WbState }>(`/api/plugins/workbench/wb/tasks/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  removeTask: (id: string) => api<{ ok: boolean }>(`/api/plugins/workbench/wb/tasks/${id}`, { method: 'DELETE' }),
-  clearDone: (date: string) => api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/tasks/clear-done', { method: 'POST', body: JSON.stringify({ date }) }),
-  addProject: (b: { name: string; color?: string; deadline?: string; desc?: string }) =>
-    api<{ ok: boolean; state: WbState }>('/api/plugins/workbench/wb/projects', { method: 'POST', body: JSON.stringify(b) }),
-  updateProject: (id: string, patch: Partial<{ name: string; desc: string; color: string; status: string; deadline: string }>) =>
-    api<{ ok: boolean; state: WbState }>(`/api/plugins/workbench/wb/projects/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
-  removeProject: (id: string) => api<{ ok: boolean }>(`/api/plugins/workbench/wb/projects/${id}`, { method: 'DELETE' }),
+  /** 文件桥状态（联动状态条轮询；替代旧 state/rollover 等 REST 端点） */
+  bridge: () => api<BridgeInfo>('/api/plugins/workbench/wb/bridge'),
 };

@@ -78,6 +78,9 @@ export interface PluginInfo {
   state: string;
   caps: string[];
   error?: string;
+  fixSuggestion?: string;
+  essential?: boolean;
+  circuitBreaker?: { failures: number; openedAt: number };
 }
 
 export interface SkillInfo {
@@ -259,16 +262,17 @@ export interface TodoCard {
   updatedAt: number;
 }
 
-/** workbench 插件：办公工作台——日程任务 + 项目（跨会话长期数据） */
+/** workbench 插件：办公工作台 v2（嵌入式全量应用 + 文件桥联动） */
 export type WbRepeat = 'daily' | 'weekdays' | 'weekly';
 export type WbProjectStatus = 'active' | 'paused' | 'done';
 
+/** 旧类型保留（向后兼容 /state 端点面板；WorkbenchView 已改用 iframe） */
 export interface WbTask {
   id: string;
   title: string;
   notes?: string;
-  date: string;               // 'YYYY-MM-DD'
-  time?: string;              // 'HH:MM'（可选，24 小时制）
+  date: string;
+  time?: string;
   done: boolean;
   doneAt?: number;
   projectId?: string;
@@ -294,4 +298,16 @@ export interface WbState {
   today: string;
   tasks: WbTask[];
   projects: WbProject[];
+}
+
+/** 文件桥状态（工作台联动状态条使用） */
+export interface BridgeInfo {
+  ok: boolean;
+  connected: boolean;
+  dir: string;
+  file: string;
+  records: { tasks: number; notes: number; projects: number };
+  lastSavedAt: string | null;
+  lastExternalAt: number;
+  mtimeMs: number;
 }

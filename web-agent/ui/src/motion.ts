@@ -18,11 +18,11 @@ export const DUR = {
   slower: 0.6,   // 入场 choreography（首屏 / 仪式感）
 } as const;
 
-/** 页面级切换：淡入上移 + 轻 blur（进入），淡出（退出）——操作型界面保持扫描速度 */
+/** 页面级切换：淡入上移 + 轻 blur + 微旋转归正（贴纸贴上去的瞬间）——操作型界面保持扫描速度 */
 export const pageVariants: Variants = {
-  initial: { opacity: 0, y: 14, filter: 'blur(4px)' },
+  initial: { opacity: 0, y: 14, rotate: 0.7, filter: 'blur(4px)' },
   enter: {
-    opacity: 1, y: 0, filter: 'blur(0px)',
+    opacity: 1, y: 0, rotate: 0, filter: 'blur(0px)',
     transition: { duration: DUR.slow, ease: EASE_OUT },
   },
   exit: {
@@ -45,30 +45,33 @@ export const fadeUp: Variants = {
   exit: { opacity: 0, transition: { duration: 0.12 } },
 };
 
-/** 消息行：assistant 淡入上移微缩放 / user 从右滑入；退出快速淡出 */
+/** 消息行：assistant 淡入上移微缩放（歪贴后归正） / user 从右滑入；退出快速淡出 */
 export const msgRow: Variants = {
-  initial: { opacity: 0, y: 10, scale: 0.99 },
-  enter: { opacity: 1, y: 0, scale: 1, transition: { duration: DUR.med, ease: EASE_OUT } },
+  initial: { opacity: 0, y: 10, scale: 0.99, rotate: -0.8 },
+  enter: { opacity: 1, y: 0, scale: 1, rotate: 0, transition: { duration: DUR.med, ease: EASE_OUT } },
   exit: { opacity: 0, y: -6, transition: { duration: 0.16, ease: EASE_OUT } },
 };
 
 export const userMsg: Variants = {
-  initial: { opacity: 0, x: 24 },
-  enter: { opacity: 1, x: 0, transition: { duration: DUR.med, ease: EASE_OUT } },
+  initial: { opacity: 0, x: 24, rotate: 1 },
+  enter: { opacity: 1, x: 0, rotate: 0, transition: { duration: DUR.med, ease: EASE_OUT } },
   exit: { opacity: 0, x: 12, transition: { duration: 0.16 } },
 };
 
-/** 工具卡：pop-in（新工具出现） */
+/** 工具卡：pop-in（新工具出现——歪着贴上，spring 归正） */
 export const toolCardIn: Variants = {
-  initial: { opacity: 0, y: 8, scale: 0.97 },
-  enter: { opacity: 1, y: 0, scale: 1, transition: { duration: 0.22, ease: EASE_OUT } },
+  initial: { opacity: 0, y: 8, scale: 0.97, rotate: 1.4 },
+  enter: {
+    opacity: 1, y: 0, scale: 1, rotate: 0,
+    transition: { type: 'spring', stiffness: 380, damping: 24, mass: 0.7 },
+  },
   exit: { opacity: 0, scale: 0.97, transition: { duration: 0.14 } },
 };
 
 /** 弹层 / 菜单：origin-aware scale-in（从触发器位置缩放展开，勿从中心冒出） */
 export const popIn: Variants = {
-  initial: { opacity: 0, scale: 0.96, y: -4 },
-  enter: { opacity: 1, scale: 1, y: 0, transition: { duration: 0.16, ease: EASE_OUT } },
+  initial: { opacity: 0, scale: 0.92, y: -4, rotate: -1.5 },
+  enter: { opacity: 1, scale: 1, y: 0, rotate: 0, transition: { duration: 0.16, ease: EASE_OUT } },
   exit: { opacity: 0, scale: 0.97, y: -2, transition: { duration: 0.1, ease: EASE_OUT } },
 };
 

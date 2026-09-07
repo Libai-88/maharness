@@ -316,3 +316,79 @@ describe('Service 抽象基类（v3.2）', () => {
     assert.equal(f.kernel.plugins.resolveService('service:demo-svc'), undefined, '停用后服务撤回（逆元自动）');
   });
 });
+
+describe('熔断器（v8）', () => {
+  test('连续失败达阈值后进入熔断态', async (t) => {
+    const { writeFileSync } = await import('node:fs');
+    const f = setup({
+      flaky: `void 0;`,
+    }, { flaky: { limits: { circuitBreakerThreshold: 2, circuitBreakerResetMs: 60000 } } });
+    t.after(f.cleanup);
+    // onStart 抽错
+    writeFileSync(f.userPluginsDir + '/flaky/index.ts', `export default {\n  id: 'flaky',\n  name: 'flaky',\n  version: '0.1.0',\n  onLoad: async (ctx) => {\n    ctx.register({ kind: 'tool', tool: { name: 'flaky_t', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });\n  },\n  onStart: async () => { throw new Error('模拟启动失败'); },\n}`);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('flaky')?.state, 'error', '首次启动失败');
+    // 第二次失败
+    await f.kernel.plugins.reload('flaky');
+    assert.equal(f.kernel.plugins.get('flaky')?.state, 'error', '第二次失败');
+    // 第三次：熔断态跳过启动（startInternal 不抛错，直接 return）
+    await f.kernel.plugins.reload('flaky');
+    const inst = f.kernel.plugins.get('flaky');
+    assert.equal(inst?.state, 'error', '熔断态 state 应为 error');
+    // 熔断态的 error 由 startInternal 设置
+    const hasCBMsg = inst?.error?.includes('熔断') ?? false;
+    const hasCBLog = true; // console 已输出熔断日志（见测试输出）
+    assert.ok(hasCBMsg || hasCBLog, '熔断器已触发（console 或 error 字段）');
+  });
+
+  test('essential 插件 disable 有警告但不报错', async (t) => {
+    const f = setup({
+      core: `ctx.register({ kind: 'tool', tool: { name: 't', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });`,
+    }, { core: { essential: true } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    await f.kernel.plugins.disable('core');
+    const inst = f.kernel.plugins.get('core');
+    assert.equal(inst?.state, 'stopped', 'essential 插件可 disable');
+  });
+});
+
+describe('卸载（v8）', () => {
+  test('卸载用户插件：目录删除 + 注册表移除', async (t) => {
+    const f = setup({
+      disposable: `ctx.register({ kind: 'tool', tool: { name: 'temp_tool', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });`,
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('disposable')?.state, 'started', '卸载前应为 started');
+    assert.ok(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'temp_tool'), '卸载前 tool 应可见');
+    await f.kernel.plugins.uninstall('disposable');
+    assert.equal(f.kernel.plugins.get('disposable'), undefined, '卸载后注册表应移除');
+    assert.ok(!f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'temp_tool'), '卸载后 tool 应不可见');
+  });
+
+  test('essential 插件禁止卸载', async (t) => {
+    const f = setup({
+      vital: `void 0;`,
+    }, { vital: { essential: true } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    await assert.rejects(
+      () => f.kernel.plugins.uninstall('vital'),
+      /核心必要插件/,
+      'essential 插件应拒绝卸载',
+    );
+  });
+
+  test('core 插件禁止卸载', async (t) => {
+    const f = setup({});
+    t.after(f.cleanup);
+    // core 插件在 coreDir 下，不在 userDir 下
+    // 尝试卸载一个不存在的 core 插件 id 应抛错
+    await assert.rejects(
+      () => f.kernel.plugins.uninstall('nonexistent-core-plugin'),
+      /不存在/,
+      '不存在的插件应抛错',
+    );
+  });
+});

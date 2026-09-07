@@ -1,5 +1,6 @@
 // ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤（span 树）+ 缓存/成本统计
-import { useMemo, useState } from 'react';
+// memo 化：配合 App 侧稳定 onRefresh，流式 token 渲染期间跳过面板 reconcile（仅新步骤/统计变化时更新）
+import { memo, useMemo, useState } from 'react';
 import type { TraceStep } from '../types';
 import { IconCheck, IconChevronDown, IconDownload, IconRefresh } from './Icon';
 
@@ -79,7 +80,7 @@ function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: numbe
   );
 }
 
-export default function TracePanel({ steps, stats, onRefresh }: Props) {
+export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
   const [typeFilter, setTypeFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   // span 树组装：root = 无 parentId 的步骤；children 按 parentId 索引。
@@ -202,4 +203,4 @@ export default function TracePanel({ steps, stats, onRefresh }: Props) {
       </div>
     </>
   );
-}
+});

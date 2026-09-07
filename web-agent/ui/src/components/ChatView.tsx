@@ -1,12 +1,15 @@
 // ui/src/components/ChatView.tsx —— 主对话（Screen 1）：消息流 + 思考块 + 工具卡片 + 代码块 + 输入区 + 斜杠命令面板
-import { useEffect, useRef, useState } from 'react';
+// 性能设计：流式 token 只重渲染当前流式行——历史消息行由 memo(MessageRow) 跳过 reconcile，
+// 文本增量由 App 侧 rAF 合帧后提交，渲染频率不超过显示器刷新率
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'motion/react';
-import { commandsApi, onChatRetry } from '../api';
+import { commandsApi } from '../api';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState, TodoCard, ToolStep } from '../types';
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
+import HeroSticker from './HeroSticker';
 import { fadeUp, msgRow, popIn, springTransition, staggerContainer, toolCardIn, userMsg } from '../motion';
-import { IconBlock, IconBolt, IconBrain, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
+import { IconBlock, IconBrain, IconBolt, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
 
 interface Props {
   messages: ChatMessage[];
@@ -21,6 +24,8 @@ interface Props {
   todos?: TodoCard[];
   modelLabel?: string;
   modelTag?: string;
+  /** provider 重试（retry）截断标记：流式消息从该边界起展示（App 侧记录，含未冲刷增量） */
+  retryMarks?: Record<string, { content: number; reasoning: number }>;
   /** 断点续跑（checkpoint）：任务中断后「继续任务」入口 */
   checkpoint?: CheckpointInfo | null;
   onResume?: () => void;
@@ -46,8 +51,9 @@ function argsSummary(args: unknown): string {
   } catch { return String(args); }
 }
 
-/** 工具调用卡片（Warp 命令块风格；stored=大结果已入结果存储，recall_tool_result 可重读） */
-function ToolCard({ t }: { t: ToolStep }) {
+/** 工具调用卡片（Warp 命令块风格；stored=大结果已入结果存储，recall_tool_result 可重读）
+ *  memo 化：流式期间行内重渲染时，状态未变的工具卡跳过 reconcile */
+const ToolCard = memo(function ToolCard({ t }: { t: ToolStep }) {
   const [open, setOpen] = useState(false);
   const running = t.status === 'running';
   const show = open || running;
@@ -97,7 +103,7 @@ function ToolCard({ t }: { t: ToolStep }) {
       )}
     </motion.div>
   );
-}
+});
 
 /** 复制按钮（带瞬时 ✓ 反馈，hover 浮现于消息操作区） */
 function CopyButton({ text }: { text: string }) {
@@ -129,10 +135,10 @@ export function highlightLine(line: string): string {
     .replace(/\b(import|from|export|default|const|let|var|function|return|async|await|new|class|this|interface|type)\b/g, (m) => `<span class="kw">${m}</span>`);
 }
 
-/** 代码块：简化语言高亮（关键字/字符串/注释） */
-function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
+/** 代码块：简化语言高亮（关键字/字符串/注释）；memo + useMemo——同一代码块不因流式渲染反复重新着色 */
+const CodeBlock = memo(function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
   const [copied, setCopied] = useState(false);
-  const hl = code.split('\n').map(highlightLine).join('\n');
+  const hl = useMemo(() => code.split('\n').map(highlightLine).join('\n'), [code]);
   return (
     <div className="code-block">
       <div className="code-head">
@@ -144,7 +150,7 @@ function CodeBlock({ code, lang = '' }: { code: string; lang?: string }) {
       <pre className="code-body" dangerouslySetInnerHTML={{ __html: hl }} />
     </div>
   );
-}
+});
 
 /** 渲染 assistant 消息内容：含代码块的轻量 markdown 分段 */
 function renderContent(text: string) {
@@ -161,7 +167,97 @@ function renderContent(text: string) {
   return parts;
 }
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
+/** 单条消息行。memo 化是流式渲染性能的关键：App 每帧提交一次文本增量时，
+ *  只有 content 变化的流式行重渲染，历史行（含 Markdown/代码块）整体跳过 reconcile。 */
+const MessageRow = memo(function MessageRow({ m, mark, canResend, expanded, onToggleExpand, onResend, modelTag }: {
+  m: ChatMessage;
+  /** retry 截断边界（仅流式中的 assistant 消息有值）：内容从该边界起展示 */
+  mark?: { content: number; reasoning: number };
+  canResend: boolean;
+  expanded: boolean;
+  onToggleExpand: (id: string) => void;
+  onResend: (text: string) => void;
+  modelTag: string;
+}) {
+  const content = mark ? m.content.slice(mark.content) : m.content;
+  const reasoning = mark ? (m.reasoning ?? '').slice(mark.reasoning) : m.reasoning;
+  return (
+    <motion.div
+      className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}
+      variants={m.role === 'user' ? userMsg : msgRow}
+      initial="initial"
+      animate="enter"
+      exit="exit"
+    >
+      {m.role !== 'user' ? (
+        <>
+          <div className="msg-avatar"><IconSheep size={16} /></div>
+          <div className="msg-col">
+            <div className="msg-meta">
+              <span className="msg-author">maharness</span>
+              <span className="msg-tag">{modelTag || 'AI'}</span>
+              <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? <><IconBolt size={11} /> 缓存命中</> : ''}</span>
+              {!m.streaming && m.content && (
+                <span className="msg-actions">
+                  <CopyButton text={m.content} />
+                </span>
+              )}
+            </div>
+            {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
+            {reasoning && reasoning.length > 0 && (
+              <div className={`think-card ${expanded ? 'expanded' : ''} ${m.streaming ? 'streaming' : ''}`}>
+                <div className="think-head">
+                  <span className="think-dot"><IconBrain size={12} /></span>
+                  <span className="think-label">{m.streaming ? '推理中' : '思考'}</span>
+                  <span className="think-dur">{m.streaming ? '推理中…' : expanded ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}</span>
+                  <button
+                    style={{ marginLeft: 'auto', color: 'var(--text-4)', fontSize: 11 }}
+                    onClick={() => onToggleExpand(m.id)}
+                    aria-expanded={expanded}
+                  >
+                    {m.streaming ? '流式' : expanded ? '收起' : '展开'}
+                  </button>
+                </div>
+                <div className="think-body">{reasoning}{m.streaming && <span className="stream-cursor" />}</div>
+              </div>
+            )}
+            {content ? (
+              m.streaming ? (
+                <div className="assistant-text">{content}<span className="stream-cursor" /></div>
+              ) : (
+                renderContent(content)
+              )
+            ) : m.streaming ? (
+              <div className="assistant-text" style={{ color: 'var(--text-3)' }}>思考中<span className="stream-cursor" /></div>
+            ) : null}
+            {m.error && <div className="assistant-text" style={{ color: 'var(--red)' }}>{m.error}</div>}
+            {m.usage && (
+              <div className="msg-extra">
+                ↑{m.usage.input} · ↓{m.usage.output} tokens · ¥{(m.cost ?? 0).toFixed(4)}
+                {m.cached && <span style={{ color: 'var(--teal)' }}> · <IconBolt size={11} /> 秒回（缓存）</span>}
+              </div>
+            )}
+          </div>
+        </>
+      ) : (
+        <div className="msg-col" style={{ alignItems: 'flex-end' }}>
+          <div className="msg-meta" style={{ justifyContent: 'flex-end' }}>
+            <span className="msg-author">你</span>
+            <span className="msg-extra">刚刚</span>
+            {canResend && (
+              <span className="msg-actions">
+                <button className="ma-btn" title="重新发送（重试）" aria-label="重新发送" onClick={() => onResend(m.content)}><IconRefresh size={12} /></button>
+              </span>
+            )}
+          </div>
+          <div className="user-bubble">{m.content}</div>
+        </div>
+      )}
+    </motion.div>
+  );
+});
+
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', retryMarks = {}, checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, 'approve' | 'reject'>>({});
@@ -169,30 +265,53 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   const [cmdOpen, setCmdOpen] = useState(false);
   const [cmdIdx, setCmdIdx] = useState(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const bottomRef = useRef<HTMLDivElement>(null);
   // 输入历史（↑/↓ 回放，终端习惯——快速高效响应）
   const [inputHist, setInputHist] = useState<string[]>([]);
   const histIdxRef = useRef(-1);
 
-  // C1 前端适配：provider 重试（retry 事件）→ 作废当前流式渲染、从 retry 边界重新累积。
-  // 消息状态归父组件所有（onDelta 持续向 content 追加），本组件在渲染层记录 retry 时刻
-  // 流式消息的内容/思考长度，展示时截掉该边界之前的残段——等价于"清空重累积"，
-  // 防止显示「上次失败残段 + 重试全文」的重复内容。仅对流式中的消息生效：
-  // done 后 content 被最终全文整体替换，无需（也不应）截断。
-  const [retryMarks, setRetryMarks] = useState<Record<string, { content: number; reasoning: number }>>({});
-  const messagesRef = useRef(messages);
-  messagesRef.current = messages;
-  useEffect(() => onChatRetry(() => {
-    const m = messagesRef.current.find((x) => x.streaming && x.role === 'assistant');
-    if (m) setRetryMarks((prev) => ({ ...prev, [m.id]: { content: m.content.length, reasoning: (m.reasoning ?? '').length } }));
-  }), []);
+  // ---- 智能滚动跟随 ----
+  // 贴底才跟随：用户上滚阅读时流式输出不抢屏（不再每个 token 触发 smooth scrollIntoView
+  // 反复重启动画）；脱离底部出现「回到底部」按钮。开关 maharness-auto-scroll 可关自动跟随。
+  const scrollBoxRef = useRef<HTMLDivElement>(null);
+  const pinnedRef = useRef(true);
+  const [pinned, setPinned] = useState(true);
+  const scrollRafRef = useRef(0);
+  const [autoFollow] = useState(() => { try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; } });
+
+  const handleScroll = useCallback(() => {
+    if (scrollRafRef.current) return;
+    scrollRafRef.current = requestAnimationFrame(() => {
+      scrollRafRef.current = 0;
+      const el = scrollBoxRef.current;
+      if (!el) return;
+      const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+      if (atBottom !== pinnedRef.current) { pinnedRef.current = atBottom; setPinned(atBottom); }
+    });
+  }, []);
 
   useEffect(() => {
-    // 自动滚动（设置页可关）：新消息/流式内容自动滚到底部
-    let auto = true;
-    try { auto = localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { /* 忽略 */ }
-    if (auto) bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
+    if (messages.length === 0) { pinnedRef.current = true; setPinned(true); return; }
+    if (!autoFollow || !pinnedRef.current) return;
+    const el = scrollBoxRef.current;
+    // 即时跟滚（scrollTop 直赋）：流式期间 smooth 动画会被下一次更新打断重启，抖动且费帧
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [messages, autoFollow]);
+
+  const jumpToBottom = useCallback(() => {
+    const el = scrollBoxRef.current;
+    if (el) el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+    pinnedRef.current = true;
+    setPinned(true);
+  }, []);
+
+  // 输入框随内容增高（CSS 上限 200px 内部滚动），发送/清空后回落
+  useEffect(() => {
+    const el = inputRef.current;
+    if (!el) return;
+    el.style.height = 'auto';
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
+
   useEffect(() => { commandsApi.list().then((r) => setCommands(r.commands)).catch(() => undefined); }, []);
 
   const submit = (textOverride?: string) => {
@@ -206,6 +325,11 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
     setCmdOpen(false);
     onSend(text);
   };
+
+  // 稳定引用回调（配合 memo(MessageRow)：打字/流式期间历史消息行不因回调身份变化重渲染）
+  const toggleExpand = useCallback((id: string) => setExpanded((e) => ({ ...e, [id]: !e[id] })), []);
+  // 重发不走输入历史（终端语义：历史回放只记录手动输入）
+  const resend = useCallback((text: string) => { if (text.trim() && !streaming) onSend(text); }, [streaming, onSend]);
 
   const matched = input.startsWith('/')
     ? commands.filter((c) => {
@@ -285,7 +409,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           )}
         </div>
       )}
-      <div className="messages">
+      <div className="messages" ref={scrollBoxRef} onScroll={handleScroll}>
         <div className="messages-inner">
           {plan && (
             <div className="plan-card">
@@ -336,95 +460,43 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
                 <button className="hero-pill" onClick={() => onSend('追踪插件重载信号')}><span className="hp-ico">◆</span>追踪插件重载信号</button>
                 <button className="hero-pill" onClick={() => onSend('整理本周代码审查')}><span className="hp-ico">✚</span>整理本周代码审查</button>
               </motion.div>
+              {/* 手账贴纸：可换图的胶带拍立得（点击相纸换本地照片） */}
+              <HeroSticker />
             </motion.div>
           )}
 
           <AnimatePresence initial={false}>
-          {messages.map((m) => {
-            // retry 截断（C1）：流式中的 assistant 消息从最近一次 retry 边界起显示
-            const mark = m.streaming && m.role === 'assistant' ? retryMarks[m.id] : undefined;
-            const content = mark ? m.content.slice(mark.content) : m.content;
-            const reasoning = mark ? (m.reasoning ?? '').slice(mark.reasoning) : m.reasoning;
-            return (
-            <motion.div
+          {messages.map((m) => (
+            <MessageRow
               key={m.id}
-              className={`msg-row ${m.streaming ? 'streaming' : ''} ${m.cached && !m.streaming ? 'cached' : ''}`}
-              variants={m.role === 'user' ? userMsg : msgRow}
-              initial="initial"
-              animate="enter"
-              exit="exit"
-            >
-              {m.role !== 'user' ? (
-                <>
-                  <div className="msg-avatar"><IconSheep size={16} /></div>
-                  <div className="msg-col">
-                    <div className="msg-meta">
-                      <span className="msg-author">maharness</span>
-                      <span className="msg-tag">{modelTag || 'AI'}</span>
-                      <span className="msg-extra">· {m.streaming ? '生成中…' : m.cached ? <><IconBolt size={11} /> 缓存命中</> : ''}</span>
-                      {!m.streaming && m.content && (
-                        <span className="msg-actions">
-                          <CopyButton text={m.content} />
-                        </span>
-                      )}
-                    </div>
-                    {m.tools && m.tools.length > 0 && m.tools.map((t, i) => <ToolCard key={`${t.name}-${i}`} t={t} />)}
-                    {reasoning && reasoning.length > 0 && (
-                      <div className={`think-card ${(m.streaming || expanded[m.id]) ? 'expanded' : ''} ${m.streaming ? 'streaming' : ''}`}>
-                        <div className="think-head">
-                          <span className="think-dot"><IconBrain size={12} /></span>
-                          <span className="think-label">{m.streaming ? '推理中' : '思考'}</span>
-                          <span className="think-dur">{m.streaming ? '推理中…' : expanded[m.id] ? <IconChevronDown size={11} /> : <IconChevronRight size={11} />}</span>
-                          <button
-                            style={{ marginLeft: 'auto', color: 'var(--text-4)', fontSize: 11 }}
-                            onClick={() => setExpanded((e) => ({ ...e, [m.id]: !e[m.id] }))}
-                            aria-expanded={!!expanded[m.id]}
-                          >
-                            {m.streaming ? '流式' : expanded[m.id] ? '收起' : '展开'}
-                          </button>
-                        </div>
-                        <div className="think-body">{reasoning}{m.streaming && <span className="stream-cursor" />}</div>
-                      </div>
-                    )}
-                    {content ? (
-                      m.streaming ? (
-                        <div className="assistant-text">{content}<span className="stream-cursor" /></div>
-                      ) : (
-                        renderContent(content)
-                      )
-                    ) : m.streaming ? (
-                      <div className="assistant-text" style={{ color: 'var(--text-3)' }}>思考中<span className="stream-cursor" /></div>
-                    ) : null}
-                    {m.error && <div className="assistant-text" style={{ color: 'var(--red)' }}>{m.error}</div>}
-                    {m.usage && (
-                      <div className="msg-extra">
-                        ↑{m.usage.input} · ↓{m.usage.output} tokens · ¥{(m.cost ?? 0).toFixed(4)}
-                        {m.cached && <span style={{ color: 'var(--teal)' }}> · <IconBolt size={11} /> 秒回（缓存）</span>}
-                      </div>
-                    )}
-                  </div>
-                </>
-              ) : (
-                <div className="msg-col" style={{ alignItems: 'flex-end' }}>
-                  <div className="msg-meta" style={{ justifyContent: 'flex-end' }}>
-                    <span className="msg-author">你</span>
-                    <span className="msg-extra">刚刚</span>
-                    {!streaming && (
-                      <span className="msg-actions">
-                        <button className="ma-btn" title="重新发送（重试）" aria-label="重新发送" onClick={() => submit(m.content)}><IconRefresh size={12} /></button>
-                      </span>
-                    )}
-                  </div>
-                  <div className="user-bubble">{m.content}</div>
-                </div>
-              )}
-            </motion.div>
-            );
-          })}
+              m={m}
+              mark={m.streaming && m.role === 'assistant' ? retryMarks[m.id] : undefined}
+              canResend={!streaming}
+              expanded={!!expanded[m.id]}
+              onToggleExpand={toggleExpand}
+              onResend={resend}
+              modelTag={modelTag}
+            />
+          ))}
           </AnimatePresence>
-          <div ref={bottomRef} />
         </div>
       </div>
+
+      {/* 脱离底部时的「回到底部」悬浮按钮（流式输出期间上滚阅读必备） */}
+      {!pinned && messages.length > 0 && (
+        <motion.button
+          className="jump-bottom"
+          onClick={jumpToBottom}
+          title="回到底部"
+          aria-label="回到底部"
+          variants={popIn}
+          initial="initial"
+          animate="enter"
+          exit="exit"
+        >
+          <IconChevronDown size={14} />
+        </motion.button>
+      )}
 
       {approvals.length > 0 && (
         <div style={{ padding: '0 24px 8px', display: 'flex', flexDirection: 'column', gap: 8 }}>
