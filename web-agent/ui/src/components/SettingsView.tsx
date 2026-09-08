@@ -1,7 +1,7 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useEffect, useState } from 'react';
-import { configApi, metaApi, providersApi, statsApi } from '../api';
-import type { RuntimeConfig } from '../api';
+import { configApi, metaApi, providersApi, rulesApi, statsApi } from '../api';
+import type { RulesView, RuntimeConfig } from '../api';
 import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
@@ -17,7 +17,7 @@ interface Props {
   onBrandChange: (b: Brand) => void;
 }
 
-type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'skills' | 'advanced';
+type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'rules' | 'skills' | 'advanced';
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
 
@@ -458,6 +458,136 @@ function RoutingSection() {
   );
 }
 
+/** 用户规则：全局/项目提示规则编辑 + 策略规则（免审批/禁止）表 */
+function RulesSection() {
+  const [view, setView] = useState<RulesView | null>(null);
+  const [scope, setScope] = useState<'global' | 'project'>('project');
+  const [file, setFile] = useState('AGENTS.md');
+  const [draft, setDraft] = useState('');
+  const [tip, setTip] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const load = async () => {
+    try { setView(await rulesApi.get()); } catch (e) { toast.error(`读取规则失败：${e instanceof Error ? e.message : String(e)}`); }
+  };
+  useEffect(() => { void load(); }, []);
+
+  const options = scope === 'global'
+    ? (view?.globalFiles ?? []).map(f => f.name)
+    : ['AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md', '.maharness/rules/'];
+  const pickFile = (name: string) => {
+    setFile(name);
+    if (scope === 'global') setDraft(view?.globalFiles.find(f => f.name === name)?.content ?? '');
+    else setDraft(view?.projectFiles.find(f => f.name.endsWith(name) || f.name === name)?.content ?? '');
+  };
+
+  const save = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (scope === 'global') await rulesApi.putGlobal(file.endsWith('.md') ? file : `${file}.md`, draft);
+      else await rulesApi.putProject(file, draft);
+      await load();
+      setTip('规则已写入并在下一轮对话生效');
+      setTimeout(() => setTip(null), 3000);
+    } catch (e) { toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`); }
+    finally { setBusy(false); }
+  };
+
+  const togglePolicy = async (idx: number, patch: Record<string, unknown>) => {
+    if (!view) return;
+    const next = view.policy.map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    if (!r.ok) { toast.error(r.error ?? '策略保存失败'); return; }
+    await load();
+  };
+
+  const addPolicy = async () => {
+    if (!view) return;
+    const next = [...view.policy, { id: `rule-${Date.now().toString(36)}`, effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run test', reason: '测试命令免审批', enabled: true }];
+    const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    if (!r.ok) { toast.error(r.error ?? '新增失败'); return; }
+    await load();
+  };
+
+  const removePolicy = async (idx: number) => {
+    if (!view) return;
+    const next = view.policy.filter((_, i) => i !== idx);
+    await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    await load();
+  };
+
+  if (!view) return <div className="empty-state">读取规则中…</div>;
+
+  return (
+    <>
+      <span className="page-title">用户规则</span>
+      <div className="page-sub">告诉 maharness 你/这个项目要求什么。规则文件即事实源，可 git 版本化；工作区切换自动重读</div>
+      {tip && <div style={{ fontSize: 12, color: 'var(--teal)' }}><IconCheck size={12} /> {tip}</div>}
+      {view.errors.length > 0 && <div style={{ fontSize: 12, color: 'var(--red)' }}>策略文件问题：{view.errors.join('；')}</div>}
+
+      <div className="set-sec">
+        <span className="ss-title">提示规则</span>
+        <div className="set-row">
+          <div className="set-row-l">
+            <span className="set-row-label">作用域</span>
+            <span className="set-row-desc">当前注入 {view.promptChars} 字符 · 生效路径：全局 data/rules/ + 项目 AGENTS.md/CLAUDE.md/.maharness/rules/</span>
+          </div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            {(['project', 'global'] as const).map((s) => (
+              <button key={s} className={`btn-ghost${scope === s ? ' on' : ''}`} style={{ height: 28, fontSize: 11 }} onClick={() => { setScope(s); const first = s === 'global' ? (view.globalFiles[0]?.name ?? 'maharness.md') : 'AGENTS.md'; pickFile(first); }}>
+                {s === 'project' ? '项目' : '全局'}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <select className="set-input" style={{ width: 240 }} value={options.includes(file) ? file : options[0] ?? ''} onChange={(e) => pickFile(e.target.value)} aria-label="规则文件">
+            {options.length === 0 && <option value="">（暂无文件）</option>}
+            {options.map(o => <option key={o} value={o}>{o}</option>)}
+          </select>
+          {scope === 'global' && (
+            <button className="btn-ghost" style={{ height: 30, fontSize: 11 }} onClick={() => { setFile('new-rule.md'); setDraft(''); }}>新建 .md</button>
+          )}
+        </div>
+        <textarea
+          className="set-input rule-editor" rows={12} value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder={'写自然语言即可，例如：\n- 提交信息用中文，遵循 feat/fix/chore 前缀\n- 改完代码必须跑 npm run typecheck\n- 不要动 src/legacy/ 下的文件'}
+          aria-label="规则正文"
+        />
+        <div>
+          <button className="btn-ok" onClick={() => void save()} disabled={busy}>{busy ? <span className="spin" /> : null}保存规则</button>
+        </div>
+      </div>
+
+      <div className="set-sec">
+        <span className="ss-title">策略规则（审批与拦截）</span>
+        <div className="page-sub">allow = 该类调用免审批（每次放行都进轨迹留痕）；deny = 直接拒绝；作用于 {scope === 'project' ? '本项目 .maharness/rules.json' : '全局 data/rules.json'}</div>
+        {view.policy.length === 0 && <div className="empty-state" style={{ padding: '12px' }}>尚无策略规则——默认按内置白名单判定（只读命令免审批）</div>}
+        {view.policy.map((r, i) => (
+          <div className="set-row" key={r.id ?? i}>
+            <div className="set-row-l">
+              <span className="set-row-label"><code>{r.tool}</code> {r.argPattern ? <code>/{r.argPattern}/</code> : null}</span>
+              <span className="set-row-desc">{r.reason || '（无说明）'}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+              <select className="set-input" style={{ width: 120, height: 28 }} value={r.effect} onChange={(e) => void togglePolicy(i, { effect: e.target.value })} aria-label="策略效果">
+                <option value="allow">allow</option>
+                <option value="deny">deny</option>
+                <option value="require-approval">需审批</option>
+              </select>
+              <button className={`toggle ${r.enabled === false ? '' : 'on'}`} role="switch" aria-checked={r.enabled !== false} aria-label="启用策略" onClick={() => void togglePolicy(i, { enabled: r.enabled === false })}><span className="knob" /></button>
+              <button className="pd-btn danger" style={{ height: 28, fontSize: 11, padding: '0 10px' }} onClick={() => void removePolicy(i)}>删</button>
+            </div>
+          </div>
+        ))}
+        <div><button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void addPolicy()}>+ 添加策略（npm run test 免审批）</button></div>
+      </div>
+    </>
+  );
+}
+
 function readAutoScroll(): boolean {
   try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; }
 }
@@ -543,6 +673,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
     { key: 'providers', label: '模型与 Provider' },
     { key: 'context', label: '上下文管理' },
     { key: 'routing', label: '模型路由' },
+    { key: 'rules', label: '用户规则' },
     { key: 'skills', label: '技能系统' },
     { key: 'advanced', label: '高级' },
   ];
@@ -563,6 +694,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
         {tab === 'context' && <ContextSection />}
         {tab === 'routing' && <RoutingSection />}
+        {tab === 'rules' && <RulesSection />}
         {tab === 'skills' && <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><SkillsView /></div>}
         {tab === 'advanced' && (
           <>

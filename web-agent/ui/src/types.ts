@@ -116,7 +116,45 @@ export interface PluginInfo {
 export interface SkillInfo {
   name: string;
   description: string;
-  source: 'builtin' | 'user' | 'pack';
+  source: 'builtin' | 'user' | 'pack' | 'project';
+  /** 同名技能被更高优先级来源覆盖时列出被覆盖的来源 */
+  shadowed?: string[];
+  license?: string;
+  allowedTools?: string[];
+  metadata?: Record<string, string>;
+  bodyChars?: number;
+}
+
+/** 自进化：任务后产出的技能提案（采纳才生效） */
+export interface SkillProposal {
+  id: string;
+  name: string;
+  description: string;
+  reason: string;
+  signals: string[];
+  status: 'pending' | 'accepted' | 'rejected';
+  createdAt: number;
+  updatedAt: number;
+  seen: number;
+  question?: string;
+  evidence?: string;
+}
+
+/** skills-lock.json 中一条可同步项 */
+export interface LockSkill {
+  name: string;
+  source: string;
+  sourceType: string;
+  skillPath: string;
+  computedHash?: string;
+  installed: boolean;
+}
+
+export interface SkillUsageRow {
+  indexShown: number;
+  reads: number;
+  bodyTokens: number;
+  lastReadAt?: number;
 }
 
 export interface WorkspaceInfo {

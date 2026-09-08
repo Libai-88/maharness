@@ -2741,6 +2741,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .skill-tag.builtin { background: var(--bg-elev); border: 1px solid var(--border); color: var(--text-2); }
 .skill-tag.user { background: var(--orange-soft); color: var(--orange); }
 .skill-desc { font-size: 12px; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skill-usage {
+  display: block; margin-top: 2px; font-size: 10px; font-family: var(--font-mono);
+  color: var(--text-4); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.skill-card.proposal-card { border-color: var(--orange); border-style: dashed; }
 .skill-right { display: flex; align-items: center; gap: 10px; flex-shrink: 0; }
 .skill-status { font-size: 11px; color: var(--teal); }
 .btn-sm {
@@ -2863,6 +2868,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   color: var(--text-1);
 }
 .set-input:focus { border-color: var(--accent); }
+.rule-editor {
+  width: 100%; min-height: 220px; resize: vertical; line-height: 1.7;
+  font-family: var(--font-mono); font-size: 12px;
+  white-space: pre-wrap; tab-size: 2;
+}
 
 .set-slider { display: flex; align-items: center; gap: 10px; }
 .set-slider input[type='range'] {

@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, PulledModel, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -176,6 +176,43 @@ export const skillsApi = {
   uninstall: (name: string) => api<{ ok: boolean }>(`/api/skills/${name}/uninstall`, { method: 'POST' }),
   read: (name: string, source: string) =>
     api<{ name: string; content: string }>(`/api/skills/${source}/${name}/read`),
+  /** skills-lock.json（GitHub 源 + 哈希锁）的可同步清单 */
+  lock: () => api<{ file: string | null; error?: string; count: number; skills: LockSkill[] }>('/api/skills/lock'),
+  /** 按锁文件安装（默认只装缺失项；force 覆盖并放行哈希不符） */
+  sync: (body?: { names?: string[]; force?: boolean }) =>
+    api<{ ok: boolean; results: { name: string; ok: boolean; installed?: boolean; skipped?: string; mismatch?: boolean; error?: string }[] }>(
+      '/api/skills/sync', { method: 'POST', body: JSON.stringify(body ?? {}) }),
+  usage: () => api<{ usage: Record<string, SkillUsageRow> }>('/api/skills/usage'),
+};
+
+/** 自进化：技能提案的确认回路 */
+export const evolveApi = {
+  list: () => api<{ proposals: SkillProposal[]; pending: number; toolStats: Record<string, { calls: number; fails: number; lastFailTs: number }> }>('/api/evolve/proposals'),
+  accept: (id: string) => api<{ ok: boolean; name?: string; error?: string }>(`/api/evolve/${id}/accept`, { method: 'POST' }),
+  reject: (id: string) => api<{ ok: boolean; error?: string }>(`/api/evolve/${id}/reject`, { method: 'POST' }),
+  remove: (id: string) => api<{ ok: boolean }>(`/api/evolve/${id}/delete`, { method: 'POST' }),
+};
+
+/** 用户规则：全局/项目提示规则文件 + 策略规则 */
+export interface RuleFileInfo { name: string; content: string }
+export interface RulesView {
+  paths: { globalDir: string; globalPolicy: string; projectRoot: string };
+  policy: { id: string; effect: string; tool: string; argPattern?: string; pathPattern?: string; reason?: string; enabled?: boolean }[];
+  policyFiles: string[];
+  errors: string[];
+  globalFiles: RuleFileInfo[];
+  projectFiles: RuleFileInfo[];
+  promptChars: number;
+}
+
+export const rulesApi = {
+  get: () => api<RulesView>('/api/rules'),
+  putGlobal: (name: string, content: string) =>
+    api<{ ok: boolean }>(`/api/rules/global/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
+  putProject: (path: string, content: string) =>
+    api<{ ok: boolean }>('/api/rules/project', { method: 'PUT', body: JSON.stringify({ path, content }) }),
+  putPolicy: (scope: 'global' | 'project', rules: RulesView['policy']) =>
+    api<{ ok: boolean; error?: string }>('/api/rules/policy', { method: 'PUT', body: JSON.stringify({ scope, rules }) }),
 };
 
 export const workspacesApi = {
