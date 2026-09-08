@@ -11,6 +11,10 @@
  */
 import { estimateTokens } from '../../kernel/tokens';
 import { inferCapabilities } from '../../kernel/modelCatalog';
+import {
+  buildBody as buildAnthropicBody, createStreamState as createAnthropicState,
+  reduceEvent as reduceAnthropicEvent, usageChunks,
+} from './anthropic';
 import type {
   ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
 } from '../../kernel/types';
@@ -145,6 +149,11 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     models: cfg.models,
     prices: resolvedPrices,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
+      const protocol = cfg.protocol ?? 'openai';
+      if (protocol === 'anthropic') {
+        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, opts);
+        return;
+      }
       if (process.env.TRACE_LLM_BODY === 'on') {
         const { appendFileSync } = await import('node:fs');
         try { appendFileSync('llm-body.log', JSON.stringify(messages) + '\n'); } catch { /* ignore */ }
@@ -271,6 +280,74 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       yield { type: 'done' };
     },
   };
+}
+
+/** Anthropic Messages API 原生流式调用（请求组装与事件归约见 anthropic.ts，均已单测）。
+ *  与 OpenAI 路径同契约：产出 delta/reasoning/tool_call/usage/done，异常一律抛出交给 failover。 */
+async function* anthropicStream(
+  providerId: string, baseUrl: string, apiKey: string,
+  messages: LLMMessage[], opts: ChatOptions,
+): AsyncGenerator<LLMChunk> {
+  const body = buildAnthropicBody(opts.model, messages, {
+    maxTokens: opts.maxTokens, temperature: opts.temperature, tools: opts.tools,
+  });
+  if (process.env.TRACE_LLM_BODY === 'on') {
+    const { appendFileSync } = await import('node:fs');
+    try { appendFileSync('llm-body.log', JSON.stringify(body) + '\n'); } catch { /* ignore */ }
+  }
+  const res = await fetch(`${baseUrl}/v1/messages`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Accept: 'text/event-stream',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify(body),
+    signal: opts.signal,
+  });
+  if (!res.ok) {
+    const text = await res.text().catch(() => '');
+    throw new Error(`LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`);
+  }
+  if (!res.body) throw new Error('LLM 响应无 body');
+
+  const reader = res.body.getReader();
+  const decoder = new TextDecoder();
+  const st = createAnthropicState();
+  let buf = '';
+  try {
+    while (!st.finished) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split('\n');
+      buf = lines.pop() ?? '';
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (!payload || payload === '[DONE]') continue;
+        let json: Record<string, unknown>;
+        try { json = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
+        for (const chunk of reduceAnthropicEvent(json, st)) yield chunk;
+        if (st.errored) throw new Error(`Anthropic 流错误 [${providerId}]: ${st.errored}`);
+        if (st.finished) break;
+      }
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  if (!st.finished) throw new Error(`LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);
+  const usage = usageChunks(st);
+  if (usage.input === 0 && usage.output === 0) {
+    const estIn = estimateTokens(messages.map(m => m.content ?? '').join('\n'));
+    console.warn(`[provider:${providerId}] Anthropic 流未回报 usage，按估算计费（in≈${estIn}）`);
+    yield { type: 'usage', input: estIn, output: 0 };
+  } else {
+    yield usage;
+  }
+  yield { type: 'done' };
 }
 
 /** 若配置了 EMBEDDING_* 环境变量，激活 L1 语义缓存 */
