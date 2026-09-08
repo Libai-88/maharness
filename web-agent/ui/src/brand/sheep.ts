@@ -24,12 +24,30 @@ const HORN_R_SM = 'M14.9 8.2 C 17 7.2 17.9 5.1 16.7 3.9';
 const EYES = 'M9.7 11.3 h2.1 M12.6 11.3 h2.1';
 /** 单眼光标（compact）：一个竖条，16px 下是唯一的"眼睛"信号 */
 const EYE_SM = 'M11.1 10.6 v2.6';
+/** 负空间剪影（C 方向）：挖空用的一对光标条（▍▍），mask 里黑色 = 挖空 */
+const EYE_BARS = 'M10.4 10.4 v3.0 M13.7 10.4 v3.0';
 const SMILE = 'M10.3 13.2 q 1.8 1.4 3.4 0';
 const LEGS = 'M9.7 17.1 L 9.7 20 M14.3 17.1 L 14.3 20';
 const LEGS_SM = 'M10.2 17.2 L 10.2 19.4 M13.8 17.2 L 13.8 19.4';
 /** 角尖能量火花（四角星） */
 const SPARK_L = 'M4 3.6 l.6 1.7 1.7 .6 -1.7 .6 -.6 1.7 -.6 -1.7 -1.7 -.6 1.7 -.6 Z';
 const SPARK_R = 'M20 3.6 l.6 1.7 1.7 .6 -1.7 .6 -.6 1.7 -.6 -1.7 -1.7 -.6 1.7 -.6 Z';
+
+/** 原始 path（供大图/插画层引用，与图标/favicon 同源不漂移） */
+export const SHEEP_PATHS = {
+  wool: WOOL,
+  hornL: HORN_L,
+  hornR: HORN_R,
+  hornLSm: HORN_L_SM,
+  hornRSm: HORN_R_SM,
+  eyeBars: EYE_BARS,
+  eyes: EYES,
+  smile: SMILE,
+  legs: LEGS,
+  legsSm: LEGS_SM,
+  sparkL: SPARK_L,
+  sparkR: SPARK_R,
+};
 
 export interface SheepParts {
   wool: string;
@@ -71,6 +89,29 @@ export const SHEEP_MARK: SheepParts = {
 export const SHEEP_COMPACT_BELOW = 28;
 
 export const pickSheep = (size: number): SheepParts => (size < SHEEP_COMPACT_BELOW ? SHEEP_COMPACT : SHEEP_FULL);
+
+/** 负空间剪影的内部结构（mask + 羊毛 + 双角），供 React <svg> 直接包裹 */
+export function sheepSolidInner(fg: string, opts: { id?: string; horns?: boolean; hornWidth?: number } = {}): string {
+  const id = opts.id ?? 'mh-neg';
+  const horns = opts.horns !== false;
+  const hw = opts.hornWidth ?? 2.3;
+  return `<mask id="${id}">
+<rect width="24" height="24" fill="white"/>
+<path d="${EYE_BARS}" stroke="black" stroke-width="2" stroke-linecap="round"/>
+</mask>
+<g mask="url(#${id})" fill="${fg}">
+<path d="${WOOL}"/>
+${horns ? `<path d="${HORN_L_SM}" fill="none" stroke="${fg}" stroke-width="${hw}" stroke-linecap="round"/>
+<path d="${HORN_R_SM}" fill="none" stroke="${fg}" stroke-width="${hw}" stroke-linecap="round"/>` : ''}
+</g>`;
+}
+
+export function sheepSolidSvg(fg: string, opts: { id?: string; horns?: boolean; hornWidth?: number; bg?: string } = {}): string {
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none">
+${opts.bg ? `<rect width="24" height="24" rx="5.5" fill="${opts.bg}"/>` : ''}
+${sheepSolidInner(fg, opts)}
+</svg>`;
+}
 
 /** 生成独立 SVG 字符串（favicon/静态资源用），颜色写死为两套 + prefers-color-scheme */
 export function sheepSvg(opts: { fg: string; bg?: string; size?: number; parts?: SheepParts }): string {

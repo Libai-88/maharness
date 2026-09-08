@@ -1,6 +1,7 @@
 // ui/src/components/Icon.tsx —— maharness 自研线性图标集（24×24，stroke=currentColor）
 // 全部手绘 path，统一 1.8 线宽 + 圆角端点，替代 emoji 图标（品牌化）
-import { pickSheep } from '../brand/sheep';
+import { useId } from 'react';
+import { sheepSolidInner } from '../brand/sheep';
 
 interface IconProps { size?: number; className?: string }
 
@@ -93,25 +94,16 @@ export const IconLock = (p: IconProps) => (
   <Svg {...p}><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10 V7 a4 4 0 0 1 8 0 v3" /><circle cx="12" cy="15" r="1.5" /></Svg>
 );
 
-/** 羊（品牌吉祥物）：几何单一源见 brand/sheep.ts。
- *  <28px 自动切三元素可辨识版（羊毛轮廓 + M 角 + 单眼光标），避免小尺寸糊成一团。 */
-export const IconSheep = (p: IconProps) => {
-  const s = pickSheep(p.size ?? 16);
+/** 羊（品牌负空间剪影 · C 方向）：实心羊毛 + M 角 + 挖空光标眼。
+ *  几何单一源见 brand/sheep.ts；React 侧与 favicon/样张共用同一份 inner 结构。 */
+export const IconSheep = (p: { size?: number; className?: string }) => {
+  const id = useId().replace(/[:]/g, '');
   return (
-    <Svg {...p}>
-      <path d={s.wool} fill="currentColor" fillOpacity={s.solid ? 1 : 0.10} strokeLinejoin="round" strokeWidth={s.stroke.wool} />
-      <path d={s.hornL} strokeWidth={s.stroke.horn} />
-      <path d={s.hornR} strokeWidth={s.stroke.horn} />
-      <path d={s.eyes} strokeWidth={s.stroke.eyes} />
-      {s.smile && <path d={s.smile} strokeWidth={s.stroke.smile} />}
-      <path d={s.legs} strokeWidth={s.stroke.legs} />
-      {s.sparks && (
-        <>
-          <path d={s.sparks[0]} strokeWidth={0.8} fill="currentColor" stroke="none" />
-          <path d={s.sparks[1]} strokeWidth={0.8} fill="currentColor" stroke="none" />
-        </>
-      )}
-    </Svg>
+    <svg
+      width={p.size ?? 16} height={p.size ?? 16} viewBox="0 0 24 24" fill="none" aria-hidden="true"
+      className={p.className}
+      dangerouslySetInnerHTML={{ __html: sheepSolidInner('currentColor', { id }) }}
+    />
   );
 };
 
