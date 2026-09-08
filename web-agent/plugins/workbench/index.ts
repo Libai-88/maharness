@@ -8,10 +8,9 @@
  *      Agent 工具（读→合并→写）与 HTML 应用（FileStore 写 + 轮询吸收）通过桥文件交换数据
  *   3) 合并语义与原版 JS 完全一致（LWW by updatedAt + 墓碑 + _s 示例剔除）
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, copyFileSync, watch, statSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { randomUUID } from 'node:crypto';
-import type { Plugin, ToolContext } from '../../kernel/types';
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, watch, statSync } from 'node:fs';
+import { join } from 'node:path';
+import type { Plugin } from '../../kernel/types';
 
 // ═══════════════════════════════════════════════════════════
 // 桥文件数据模型（workbench-data.json 的完整形状）
@@ -88,35 +87,49 @@ function mergeKindList<T extends { _s?: unknown }>(lArr: T[], rArr: T[]) {
   return { l, r };
 }
 
-export function mergeData(local: Partial<BridgeFile>, remote: Partial<BridgeFile>) {
-  const out: Pick<BridgeFile, 'tasks' | 'notes' | 'projects' | 'tomb'> = {
-    tasks: [], notes: [], projects: [], tomb: {},
-  };
-  const cut = Date.now() - 90 * 864e5;
+function mergeLists<T extends { id: string; updatedAt: number; _s?: unknown }>(
+  lArr: T[], rArr: T[], tomb: Record<string, number>,
+): T[] {
+  const { l, r } = mergeKindList(lArr, rArr);
+  const lm = new Map(l.map(x => [String(x.id), x]));
+  const rm = new Map(r.map(x => [String(x.id), x]));
+  const out: T[] = [];
+  new Set([...lm.keys(), ...rm.keys()]).forEach(id => {
+    const lx = lm.get(id), rx = rm.get(id);
+    const lT = lx ? Number(lx.updatedAt) || 0 : 0;
+    const rT = rx ? Number(rx.updatedAt) || 0 : 0;
+    const dT = Number(tomb[id]) || 0;
+    if (dT && dT >= Math.max(lT, rT)) return;   // 墓碑有效：记录仍被删除
+    if (dT) delete tomb[id];                    // 新编辑推翻删除 → 复活
+    if (!lx) out.push(rx!);
+    else if (!rx) out.push(lx);
+    else out.push(lT >= rT ? lx : rx);          // LWW by updatedAt
+  });
+  return out;
+}
+
+type Mergeable = { id: string; updatedAt: number; _s?: unknown };
+interface MergeInput<T1 extends Mergeable, T2 extends Mergeable, T3 extends Mergeable> {
+  tasks?: T1[];
+  notes?: T2[];
+  projects?: T3[];
+  tomb?: Record<string, number>;
+}
+
+export function mergeData<T1 extends Mergeable, T2 extends Mergeable, T3 extends Mergeable>(
+  local: MergeInput<T1, T2, T3>, remote: MergeInput<T1, T2, T3>,
+) {
   const tomb: Record<string, number> = { ...(local.tomb || {}), ...(remote.tomb || {}) };
+  const cut = Date.now() - 90 * 864e5;
   Object.keys(tomb).forEach(id => {
     if (Number(tomb[id]) && Number(tomb[id]) < cut) delete tomb[id];
   });
-  (['tasks', 'notes', 'projects'] as const).forEach(kind => {
-    const { l, r } = mergeKindList((local as Record<string, unknown>)[kind] as BridgeTask[] || [],
-                                    (remote as Record<string, unknown>)[kind] as BridgeTask[] || []);
-    const lm = new Map(l.map(x => [String(x.id), x]));
-    const rm = new Map(r.map(x => [String(x.id), x]));
-    const ids = new Set([...lm.keys(), ...rm.keys()]);
-    ids.forEach(id => {
-      const lx = lm.get(id), rx = rm.get(id);
-      const lT = lx ? Number((lx as Record<string, unknown>).updatedAt) || 0 : 0;
-      const rT = rx ? Number((rx as Record<string, unknown>).updatedAt) || 0 : 0;
-      const dT = Number(tomb[id]) || 0;
-      if (dT && dT >= Math.max(lT, rT)) return;   // 墓碑有效：记录仍被删除
-      if (dT) delete tomb[id];                       // 新编辑推翻删除 → 复活
-      if (!lx) { out[kind].push(rx!); return; }
-      if (!rx) { out[kind].push(lx); return; }
-      out[kind].push(lT >= rT ? lx : rx);           // LWW by updatedAt
-    });
-  });
-  out.tomb = tomb;
-  return out;
+  return {
+    tasks: mergeLists(local.tasks ?? [], remote.tasks ?? [], tomb),
+    notes: mergeLists(local.notes ?? [], remote.notes ?? [], tomb),
+    projects: mergeLists(local.projects ?? [], remote.projects ?? [], tomb),
+    tomb,
+  };
 }
 
 export function mergeDiary(localD: Record<string, string>, localTs: Record<string, number>,
@@ -134,7 +147,7 @@ export function mergeDiary(localD: Record<string, string>, localTs: Record<strin
   return { diary: out, diaryTs: ts };
 }
 
-export function mergeMeta(local: BridgeFile, remote: BridgeFile) {
+export function mergeMeta(local: { meta?: Record<string, unknown> }, remote: { meta?: Record<string, unknown> }) {
   const lm = local.meta || {}, rm = remote.meta || {};
   const pomoLog: Record<string, number> = { ...(lm.pomoLog as Record<string, number> || {}) };
   Object.entries(rm.pomoLog as Record<string, number> || {}).forEach(([d, c]) => {
@@ -330,15 +343,23 @@ export default {
       };
     }
 
-    // ---- 读→修改→写 模板 ----
+    // ---- 读→合并外部变更→修改→写 模板 ----
     function withBridge(fn: (data: BridgeFile) => boolean | void): BridgeFile {
-      let data = cached ?? readBridge();
-      if (!data) {
-        data = { v: 1, app: 'workbench', savedAt: new Date().toISOString(),
-                 tasks: [], notes: [], projects: [], diary: {}, tomb: {}, diaryTs: {}, bin: [], meta: {} };
+      const disk = readBridge();
+      let data: BridgeFile;
+      if (!disk) {
+        data = cached ?? { v: 1, app: 'workbench', savedAt: new Date().toISOString(),
+                           tasks: [], notes: [], projects: [], diary: {}, tomb: {}, diaryTs: {}, bin: [], meta: {} };
+      } else if (!cached) {
+        data = disk;
+      } else {
+        const m = mergeData(cached, disk);
+        const md = mergeDiary(cached.diary, cached.diaryTs, disk.diary, disk.diaryTs);
+        data = { ...cached, ...m, ...md, bin: disk.bin ?? cached.bin, meta: mergeMeta(cached, disk), savedAt: disk.savedAt };
       }
       const changed = fn(data);
       if (changed !== false) {
+        cached = data;
         try { writeBridge(data); } catch { /* 写入失败：内存已更新，下次读仍有效 */ }
       }
       return data;
@@ -753,7 +774,7 @@ export default {
                     <b style="font-size:15px">办公工作台</b>
                     <span style="font-size:12px;color:var(--text-3)">${done}/${todays.length} 今日完成${overdue ? ' · 过期 ' + overdue : ''}</span>
                     <span style="flex:1"></span>
-                    <span style="font-size:11px;color:var(--text-4)">${notesCount} 条灵感 · ${d?.projects?.length ?? 0} 个项目</span>
+                    <span style="font-size:11px;color:var(--text-4)">${notesCount} 条灵感 · ${d?.projects?.length ?? 0} 个项目${projs ? ` · 已完成 ${projs}` : ''}</span>
                   </div>
                   ${rows ? `<div style="margin-bottom:10px"><div style="font-size:11px;color:var(--text-3);margin-bottom:4px">今日待办</div>${rows}</div>` : '<div style="color:var(--text-4);margin-bottom:10px">今天暂无安排</div>'}
                   ${completed ? `<div style="margin-bottom:10px"><div style="font-size:11px;color:var(--text-3);margin-bottom:4px">已完成</div>${completed}</div>` : ''}
@@ -767,15 +788,12 @@ export default {
             if (req.method === 'GET' && p === '/state') {
               const d = cached ?? readBridge();
               const today = todayStr();
-              const projOf = (pid: string) => d?.projects?.find((p: BridgeProject) => p.id === pid);
               const tasks = (d?.tasks ?? []).map((t: BridgeTask) => ({
                 id: t.id, title: t.title, notes: t.note, date: t.due,
                 done: t.done, projectId: t.pid, repeat: t.repeat || undefined,
                 createdAt: t.createdAt, updatedAt: t.updatedAt,
               }));
               const projects = (d?.projects ?? []).map((p: BridgeProject) => {
-                const list = (d?.tasks ?? []).filter((t: BridgeTask) => t.pid === p.id);
-                const doneN = list.filter((t: BridgeTask) => t.done).length;
                 return { id: p.id, name: p.name, desc: p.stage, color: '#d0856b',
                          status: p.status, deadline: undefined, order: 0,
                          createdAt: p.updatedAt, updatedAt: p.updatedAt };

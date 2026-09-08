@@ -108,4 +108,11 @@ describe('文本工具函数', () => {
     const score = dice(a, b);
     assert.ok(score > 0.4 && score < 0.8, `Dice 系数应在合理范围，实际: ${score}`);
   });
+
+  it('bigramSet 对相近中文短语产生重叠', () => {
+    const near = dice(bigramSet('打开配置文件'), bigramSet('帮我打开配置文件'));
+    assert.ok(near > 0.3, `相近短语应有 bigram 重叠，实际: ${near}`);
+    assert.equal(dice(bigramSet('aaaa'), bigramSet('zzzz')), 0);
+    assert.equal(dice(bigramSet('单'), bigramSet('配置')), 0);
+  });
 });
