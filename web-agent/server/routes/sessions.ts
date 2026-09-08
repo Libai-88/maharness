@@ -11,7 +11,8 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
 
   app.post('/api/sessions', (req, res) => {
     const model = String(req.body?.model ?? '');
-    res.json(store.createSession(model));
+    const provider = String(req.body?.provider ?? '');
+    res.json(store.createSession(model, provider));
   });
 
   app.get('/api/sessions/:id/messages', (req, res) => {
@@ -32,7 +33,7 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
   app.patch('/api/sessions/:id', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    const { title, model, mode, role, archived, pinned } = req.body ?? {};
+    const { title, model, provider, mode, role, archived, pinned } = req.body ?? {};
     if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
       return res.status(400).json({ error: 'mode 仅支持 normal / plan / goal' });
     }
@@ -44,6 +45,7 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
     store.updateSession(session.id, {
       ...(typeof title === 'string' ? { title } : {}),
       ...(typeof model === 'string' ? { model } : {}),
+      ...(typeof provider === 'string' ? { provider } : {}),
       ...(typeof mode === 'string' ? { mode, planPending: mode === 'plan' ? 1 : 0 } : {}),
       ...(typeof role === 'string' ? { role } : {}),
       ...(archived !== undefined ? { archived: archived ? 1 : 0 } : {}),

@@ -3,6 +3,8 @@ export interface Session {
   id: string;
   title: string;
   model: string;
+  /** model 所属 provider id（发送/恢复时需与 model 匹配） */
+  provider?: string;
   mode: string;
   planPending: number;
   /** 当前接管角色（handoff）：空 = 主代理；有值 = 该角色接管会话 */

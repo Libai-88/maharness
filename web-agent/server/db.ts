@@ -74,7 +74,8 @@ export class Store {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新会话',
-        model TEXT NOT NULL DEFAULT '', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+        model TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '',
+        created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
@@ -142,6 +143,10 @@ export class Store {
     // 迁移：sessions.role 列（handoff 角色移交：当前接管角色，空 = 主代理）
     if (!sCols.some((c) => c.name === 'role')) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN role TEXT NOT NULL DEFAULT ''");
+    }
+    // 迁移：sessions.provider 列（模型所属 provider id，切模型时持久化）
+    if (!sCols.some((c) => c.name === 'provider')) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT ''");
     }
     // 凭据迁移：带主密钥首次启动时，已存在的明文 api_key 自动加密落库（幂等）
     if (this.secretKey) {
@@ -296,10 +301,11 @@ export class Store {
 
   listSessions(): Session[] {
     const rows = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
+      .prepare('SELECT id, title, model, provider, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
       .all() as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string, title: r.title as string, model: r.model as string,
+      provider: (r.provider as string) ?? '',
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
       role: (r.role as string) || undefined,
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
@@ -309,11 +315,12 @@ export class Store {
 
   getSession(id: string): Session | undefined {
     const r = this.db
-      .prepare('SELECT id, title, model, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
+      .prepare('SELECT id, title, model, provider, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
       .get(id) as Record<string, unknown> | undefined;
     if (!r) return undefined;
     return {
       id: r.id as string, title: r.title as string, model: r.model as string,
+      provider: (r.provider as string) ?? '',
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
       role: (r.role as string) || undefined,
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
@@ -321,25 +328,27 @@ export class Store {
     };
   }
 
-  createSession(model: string): Session {
+  createSession(model: string, provider: string = ''): Session {
     const s: Session = {
-      id: randomUUID(), title: '新会话', model, mode: 'normal', planPending: 0,
+      id: randomUUID(), title: '新会话', model, provider, mode: 'normal', planPending: 0,
       archived: 0, pinned: 0,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     this.db
-      .prepare('INSERT INTO sessions (id, title, model, mode, plan_pending, archived, pinned, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?)')
-      .run(s.id, s.title, s.model, s.mode, s.planPending, s.archived, s.pinned, s.createdAt, s.updatedAt);
+      .prepare('INSERT INTO sessions (id, title, model, provider, mode, plan_pending, archived, pinned, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .run(s.id, s.title, s.model, s.provider, s.mode, s.planPending, s.archived, s.pinned, s.createdAt, s.updatedAt);
     return s;
   }
 
-  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'mode' | 'planPending' | 'role' | 'archived' | 'pinned'>>): void {
+  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'provider' | 'mode' | 'planPending' | 'role' | 'archived' | 'pinned'>>): void {
     const cur = this.getSession(id);
     if (!cur) return;
     this.db
-      .prepare('UPDATE sessions SET title = ?, model = ?, mode = ?, plan_pending = ?, role = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
+      .prepare('UPDATE sessions SET title = ?, model = ?, provider = ?, mode = ?, plan_pending = ?, role = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
       .run(
-        patch.title ?? cur.title, patch.model ?? cur.model, patch.mode ?? cur.mode,
+        patch.title ?? cur.title, patch.model ?? cur.model,
+        patch.provider ?? cur.provider,
+        patch.mode ?? cur.mode,
         patch.planPending ?? cur.planPending,
         // role 允许显式清空（'' = 交回主代理）：不能用 ??（空串是合法值）
         patch.role !== undefined ? patch.role : cur.role ?? '',

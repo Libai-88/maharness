@@ -195,7 +195,18 @@ export default function App() {
       setModels(ms);
       setPlugins(pl);
       setProviders(pvs);
-      if (ms.length) setSel((prev) => prev ?? splitModelId(ms[0].id));
+      if (ms.length) setSel((prev) => {
+        if (prev) return prev;
+        // 优先用第一个会话保存的 provider + model（如果该 provider 存在且该模型属于它）
+        const firstSession = ss[0];
+        if (firstSession?.provider && firstSession.model) {
+          const m = ms.find((x) => x.provider === firstSession.provider && x.model === firstSession.model);
+          if (m) return { provider: m.provider, model: m.model };
+          const any = ms.find((x) => x.provider === firstSession.provider);
+          if (any) return { provider: any.provider, model: any.model };
+        }
+        return splitModelId(ms[0].id);
+      });
       let initialId: string | null = null;
       if (!ss.length) {
         const created = await sessionApi.create(ms[0]?.model ?? '');
@@ -354,7 +365,9 @@ export default function App() {
     }
     setSel(x);
     if (activeId) {
-      try { await sessionApi.update(activeId, { model: x.model }); }
+      try {
+        await sessionApi.update(activeId, { model: x.model, provider: x.provider });
+      }
       catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
     }
   }, [models, activeId, toast]);
@@ -479,7 +492,7 @@ export default function App() {
     const ac = new AbortController();
     abortRef.current = ac;
 
-    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
+    await streamChat(activeId, { message: text, model: sel?.model ?? '' }, makeStreamHandlers(assistantMsg.id), ac.signal);
 
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession, makeStreamHandlers]);

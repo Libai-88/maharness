@@ -64,7 +64,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     if (!chat) return res.status(500).json({ error: '对话服务未加载' });
     // 捕获非空引用供嵌套函数（buildHistory）使用：TS 对函数声明内的捕获变量不做收窄
     const chatSvc = chat;
-    const provider = chat.providers.find((p) => p.id === providerId) ?? chat.providers[0];
+    // provider 解析优先级：请求显式指定 > 会话保存的 provider > 第一个可用 provider
+    const provider = (providerId && chat.providers.find((p) => p.id === providerId))
+      ?? chat.providers.find((p) => p.id === session.provider)
+      ?? chat.providers[0];
     if (!provider) return res.status(500).json({ error: '未配置 LLM Provider，请先配置 .env' });
     const resolvedModel = model || session.model || provider.defaultModel;
     // 任务复杂度模型路由（2026 实践 FrugalGPT/RouteLLM）：简单任务走便宜模型、复杂任务走强模型。

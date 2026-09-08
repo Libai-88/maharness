@@ -552,9 +552,10 @@ export interface Session {
   id: string;
   title: string;
   model: string;
-  mode: string;             // normal / plan / goal（会话级 Agent 模式）
+  provider: string;
+  mode: string;             // normal / plan / goal：会话级 Agent 模式
   planPending: number;      // 计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认
-  /** 当前接管角色（handoff）：空 = 主代理（默认）；有值 = 该角色提示词/工具集接管会话 */
+  /** 当前接管角色（handoff）：空 = 主代理（默认）；有值 = 该角色接管会话 */
   role?: string;
   archived: number;         // 0/1 归档（会话管理）
   pinned: number;           // 0/1 置顶标记（会话管理）
