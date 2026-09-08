@@ -109,6 +109,24 @@ export function capabilityFor(provider: ProviderDef, model?: string): ModelCapab
   return { modelId: id, ...c, enabled: true, source: 'inferred' };
 }
 
+/** 请求体序列化：无图片时原样透传（零行为变化）；有图片时按 OpenAI content parts 组装。
+ *  images 是"仅本次请求"字段，序列化后必须剥离，不能泄漏成未知字段被严格网关拒绝。 */
+export function serializeMessages(messages: LLMMessage[]): unknown[] {
+  return messages.map((m) => {
+    if (!m.images?.length) return m;
+    const out: Record<string, unknown> = {
+      role: m.role,
+      content: [
+        ...(m.content ? [{ type: 'text', text: m.content }] : []),
+        ...m.images.map(url => ({ type: 'image_url', image_url: { url } })),
+      ],
+    };
+    if (m.tool_calls?.length) out.tool_calls = m.tool_calls;
+    if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
+    return out;
+  });
+}
+
 /** 由配置创建 ProviderDef（含流式 chat 实现） */
 export function createProvider(cfg: ProviderConfig): ProviderDef {
   const capFor = (model: string): ModelCapability | undefined => cfg.models?.find(m => m.modelId === model);
@@ -133,7 +151,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       }
       const body: Record<string, unknown> = {
         model: opts.model,
-        messages,
+        messages: serializeMessages(messages),
         stream: true,
         temperature: opts.temperature ?? 0.7,
         stream_options: { include_usage: true },

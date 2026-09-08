@@ -5,7 +5,8 @@
  * 按任务类型把整次 run 路由到配置指定的 provider/model；未命中配置则用默认模型。
  */
 import { classifyTask } from '../../kernel/budget';
-import type { ProviderDef } from '../../kernel/types';
+import { capabilityFor } from './provider';
+import type { ModelCapability, ProviderDef } from '../../kernel/types';
 
 export interface RouteDecision {
   provider: ProviderDef;
@@ -40,4 +41,73 @@ export function routeForTask(
     model: model || provider.defaultModel,
     reason: `任务复杂度路由：${taskType} → ${pid}${model ? `@${model}` : ''}`,
   };
+}
+
+/** 能力谓词（当前只用到 vision，预留 tools/reasoning/长上下文） */
+export interface CapabilityNeed {
+  vision?: boolean;
+  tools?: boolean;
+  reasoning?: boolean;
+  minContext?: number;
+}
+
+export interface CapabilityRoute {
+  provider: ProviderDef;
+  model: string;
+  reason: string;
+  /** 与请求方模型相同 = 无需切换 */
+  same: boolean;
+}
+
+/**
+ * 按能力需求选路：请求模型不满足能力时，从可用 provider 里挑一个满足的模型。
+ * 偏好顺序：① 同 provider 内的能力模型（切换代价最小）→ ② 其他 provider；
+ * 同层内按「上下文够用 + 价格低」排序。找不到返回 undefined（调用方如实报错）。
+ */
+export function routeForCapability(
+  need: CapabilityNeed,
+  providers: ProviderDef[],
+  current: { providerId: string; model: string },
+): CapabilityRoute | undefined {
+  const satisfies = (cap: ModelCapability): boolean =>
+    (need.vision === undefined || cap.vision === need.vision)
+    && (need.tools === undefined || cap.tools === need.tools)
+    && (need.reasoning === undefined || cap.reasoning === need.reasoning)
+    && (need.minContext === undefined || cap.contextWindow >= need.minContext);
+
+  const candidates: { provider: ProviderDef; cap: ModelCapability }[] = [];
+  for (const p of providers) {
+    for (const m of p.models ?? []) {
+      if (!m.enabled || m.modelId === current.model) continue;
+      if (satisfies(m)) candidates.push({ provider: p, cap: m });
+    }
+    // 未登记模型：默认模型按目录推断兜底
+    if (!(p.models ?? []).some(m => m.modelId === p.defaultModel) && p.defaultModel && p.defaultModel !== current.model) {
+      const cap = capabilityFor(p, p.defaultModel);
+      if (cap && satisfies(cap)) candidates.push({ provider: p, cap });
+    }
+  }
+  if (!candidates.length) return undefined;
+  const rank = (c: { provider: ProviderDef; cap: ModelCapability }): number => {
+    const sameProvider = c.provider.id === current.providerId ? 0 : 1;
+    const price = c.cap.priceIn + c.cap.priceOut;
+    return sameProvider * 1e6 + (need.minContext ? Math.max(0, need.minContext - c.cap.contextWindow) : 0) + price;
+  };
+  const best = candidates.sort((a, b) => rank(a) - rank(b))[0];
+  return {
+    provider: best.provider,
+    model: best.cap.modelId,
+    same: false,
+    reason: `能力路由：${need.vision ? '需要视觉' : ''}${need.tools ? ' 需要工具' : ''}${need.reasoning ? ' 需要推理' : ''} → ${best.provider.id}@${best.cap.modelId}`,
+  };
+}
+
+/** 当前模型是否已满足需求（满足则不路由） */
+export function capabilitySatisfied(need: CapabilityNeed, provider: ProviderDef, model: string): boolean {
+  const cap = capabilityFor(provider, model);
+  if (!cap) return false;
+  return (need.vision === undefined || cap.vision === need.vision)
+    && (need.tools === undefined || cap.tools === need.tools)
+    && (need.reasoning === undefined || cap.reasoning === need.reasoning)
+    && (need.minContext === undefined || cap.contextWindow >= need.minContext);
 }

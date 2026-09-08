@@ -737,6 +737,8 @@ export class AgentRunner {
           signal,
           cache: this.kernel.cache,
           trace: this.kernel.trace,
+          model,
+          providerId: provider.id,
           remainingBudget: opts.costBudget !== undefined ? Math.max(opts.costBudget - totalCost, 0) : undefined,
         };
         let result: ToolResult;

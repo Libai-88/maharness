@@ -338,6 +338,9 @@ export interface ToolContext {
   trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
   approved?: boolean;       // 已通过用户审批（审批后重试时置 true）
   approvalId?: string;      // 本次审批 ID
+  /** 本次 run 实际使用的模型与 provider id（能力路由据此判断"要不要借道多模态模型"） */
+  model?: string;
+  providerId?: string;
 }
 
 export interface CommandDef {
@@ -388,6 +391,9 @@ export interface ToolCall {
 export interface LLMMessage {
   role: LLMRole;
   content: string | null;
+  /** 多模态：data URL 图片列表（如 data:image/png;base64,…）。
+   *  仅在本次请求体里生效：不入库、不进 compact/回放的文本序列（发送序列仍是纯文本）。 */
+  images?: string[];
   tool_calls?: ToolCall[];
   tool_call_id?: string;
 }
