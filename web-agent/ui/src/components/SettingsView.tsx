@@ -1,6 +1,7 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useEffect, useState } from 'react';
 import { configApi, metaApi, providersApi, statsApi } from '../api';
+import type { RuntimeConfig } from '../api';
 import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Theme } from '../App';
 import { toast } from 'sonner';
@@ -14,7 +15,7 @@ interface Props {
   onThemeChange: (t: Theme) => void;
 }
 
-type SettingTab = 'general' | 'providers' | 'context' | 'skills' | 'advanced';
+type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'skills' | 'advanced';
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
 
@@ -270,7 +271,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
 
 function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
-  const [cfg, setCfg] = useState<{ context: { maxTokens: number; truncateInject: boolean }; cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean } } | null>(null);
+  const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [savedTip, setSavedTip] = useState<string | null>(null);
 
   useEffect(() => {
@@ -385,6 +386,76 @@ function ContextSection() {
   );
 }
 
+/** 模型路由：任务类型 → provider@model（下拉选目标，含能力标注，不再手改 config.json） */
+function RoutingSection() {
+  const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
+  const [tip, setTip] = useState<string | null>(null);
+
+  const load = async () => { try { setCfg(await configApi.get()); } catch { /* 忽略 */ } };
+  useEffect(() => { void load(); }, []);
+
+  const commit = async (routing: Record<string, string>) => {
+    try {
+      await configApi.patch({ agent: { modelRouting: routing } });
+      await load();
+      setTip('路由规则已保存并热生效');
+      setTimeout(() => setTip(null), 2500);
+    } catch (err) {
+      toast.error(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+    }
+  };
+
+  const routing = cfg?.agent.modelRouting ?? {};
+  const types = cfg?.taskTypes ?? ['默认', '代码', '文件操作', '检索', '写作', '问答', '其他'];
+  const targets = cfg?.routingTargets ?? [];
+  const used = Object.keys(routing).filter(k => !types.includes(k));
+
+  return (
+    <>
+      <span className="page-title">模型路由</span>
+      <div className="page-sub">按任务类型把整轮对话路由到指定模型；能力不符时（如需要视觉）harness 会自动借道多模态模型再回切</div>
+      {tip && <div style={{ fontSize: 12, color: 'var(--teal)' }}><IconCheck size={12} /> {tip}</div>}
+      {targets.length === 0 && <div className="empty-state">尚未配置 Provider——先在「模型与 Provider」中添加并拉取模型列表</div>}
+      <div className="set-sec">
+        {types.map((t) => {
+          const value = routing[t] ?? '';
+          const target = targets.find(x => x.value === value);
+          return (
+            <div className="set-row" key={t}>
+              <div className="set-row-l">
+                <span className="set-row-label">{t}</span>
+                <span className="set-row-desc">
+                  {value ? (target ? `${target.contextWindow ? `${Math.round(target.contextWindow / 1000)}k · ` : ''}${target.vision ? '支持视觉' : '不支持视觉'}` : `已配置 ${value}（该模型未在 Provider 中登记）`) : '未配置，使用右上角当前模型'}
+                </span>
+              </div>
+              <select
+                className="set-input" style={{ width: 260 }} value={value} aria-label={`${t} 路由目标`}
+                onChange={(e) => {
+                  const next = { ...routing };
+                  if (!e.target.value) delete next[t]; else next[t] = e.target.value;
+                  void commit(next);
+                }}
+              >
+                <option value="">（不路由）</option>
+                {targets.map((x) => <option key={x.value} value={x.value}>{x.vision ? '◉ ' : ''}{x.label}</option>)}
+              </select>
+            </div>
+          );
+        })}
+        {used.map((t) => (
+          <div className="set-row" key={t}>
+            <div className="set-row-l">
+              <span className="set-row-label">{t}</span>
+              <span className="set-row-desc">自定义类目（非内置任务类型，按 classifyTask 结果匹配）</span>
+            </div>
+            <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => { const next = { ...routing }; delete next[t]; void commit(next); }}>移除</button>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+}
+
 function readAutoScroll(): boolean {
   try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; }
 }
@@ -443,6 +514,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
     { key: 'general', label: '通用' },
     { key: 'providers', label: '模型与 Provider' },
     { key: 'context', label: '上下文管理' },
+    { key: 'routing', label: '模型路由' },
     { key: 'skills', label: '技能系统' },
     { key: 'advanced', label: '高级' },
   ];
@@ -462,6 +534,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         {tab === 'general' && <GeneralSection theme={theme} onThemeChange={onThemeChange} />}
         {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
         {tab === 'context' && <ContextSection />}
+        {tab === 'routing' && <RoutingSection />}
         {tab === 'skills' && <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><SkillsView /></div>}
         {tab === 'advanced' && (
           <>

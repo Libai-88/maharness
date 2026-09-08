@@ -26,7 +26,20 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 800),
         reasoningTotalBudget: kernel.config.get<number>('agent.reasoningTotalBudget', 3000),
         thinkInEnglish: kernel.config.get<boolean>('agent.thinkInEnglish', true),
+        modelRouting: kernel.config.get<Record<string, string>>('agent.modelRouting', {}),
       },
+      // 路由目标候选（provider@model 全清单，含能力标注）——前端下拉用，避免手敲
+      routingTargets: (kernel.plugins.resolveService('service:chat') as
+        { providers?: { id: string; label: string; defaultModel: string; models?: { modelId: string; vision: boolean; tools: boolean; reasoning: boolean; contextWindow: number }[] }[] } | undefined)
+        ?.providers?.flatMap((p) => {
+          const models = p.models?.length ? p.models : [{ modelId: p.defaultModel, vision: false, tools: true, reasoning: false, contextWindow: 0 }];
+          return models.map(m => ({
+            value: `${p.id}@${m.modelId}`,
+            label: `${p.label} · ${m.modelId}`,
+            vision: m.vision, tools: m.tools, reasoning: m.reasoning, contextWindow: m.contextWindow,
+          }));
+        }) ?? [],
+      taskTypes: ['默认', '代码', '文件操作', '检索', '写作', '问答', '其他'],
     });
   });
 
@@ -59,6 +72,21 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
       }
       if (agent?.thinkInEnglish !== undefined) {
         kernel.config.set('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
+      }
+      // 任务类型 → provider@model 路由表（值为空表示删除该类目路由）
+      if (agent?.modelRouting !== undefined) {
+        const raw = agent.modelRouting as Record<string, unknown>;
+        if (raw === null || typeof raw !== 'object') throw new Error('modelRouting 须为对象');
+        const clean: Record<string, string> = {};
+        for (const [k, v] of Object.entries(raw)) {
+          const key = String(k).trim().slice(0, 20);
+          const value = String(v ?? '').trim();
+          if (!key) continue;
+          if (!value) continue;
+          if (!/^[\w.\-]+(@[\w.\-:/]+)?$/.test(value)) throw new Error(`路由目标格式非法: ${value}（应为 providerId 或 providerId@model）`);
+          clean[key] = value;
+        }
+        kernel.config.set('agent.modelRouting', clean);
       }
       // 轮数上限（按模式可调）：超限后断点保留，可继续推进
       if (agent?.maxTurns !== undefined) {

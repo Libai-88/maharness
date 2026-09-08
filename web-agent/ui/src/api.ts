@@ -209,11 +209,22 @@ export const gitApi = {
   push: () => api<{ ok: boolean }>('/api/git/push', { method: 'POST', body: JSON.stringify({ confirm: true }) }),
 };
 
-/** 运行时配置（上下文管理 / 缓存参数 / 思维链预算与语言） */
+/** 运行时配置（上下文管理 / 缓存参数 / 思维链预算与语言 / 模型路由） */
+export interface RoutingTarget {
+  value: string;
+  label: string;
+  vision: boolean;
+  tools: boolean;
+  reasoning: boolean;
+  contextWindow: number;
+}
+
 export interface RuntimeConfig {
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
-  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean };
+  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean; modelRouting: Record<string, string> };
+  routingTargets?: RoutingTarget[];
+  taskTypes?: string[];
 }
 
 export const configApi = {
