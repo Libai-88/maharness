@@ -372,14 +372,14 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* ============================================================
    顶栏下拉菜单（模式 / 模型切换）
    ============================================================ */
-.menu { position: relative; display: inline-flex; }
+.menu { position: relative; display: inline-flex; z-index: 300; }
 .menu .tb-btn:disabled { opacity: 0.55; cursor: default; }
 
 .menu-pop {
   position: absolute;
   top: calc(100% + 6px);
   right: 0;
-  z-index: 90;
+  z-index: 300;
   background: var(--bg-panel);
   border: 1px solid var(--border);
   border-radius: 10px;
