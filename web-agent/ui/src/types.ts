@@ -26,7 +26,10 @@ export interface Message {
 }
 
 export interface ModelInfo {
+  /** provider@model（新旧 UI 兼容） */
   id: string;
+  /** 纯 provider id：旧版前端按此匹配，新前端也用它解析 */
+  provider: string;
   label: string;
   model: string;
 }

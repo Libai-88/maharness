@@ -293,6 +293,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       const list = p.models?.length ? p.models : [{ modelId: p.defaultModel, enabled: true, contextWindow: 0, maxOutput: 0, vision: false, tools: false, reasoning: false, priceIn: 0, priceOut: 0, source: 'inferred' }];
       return list.filter((m) => m.enabled).map((m) => ({
         id: `${p.id}@${m.modelId}`,
+        provider: p.id,
         label: p.label,
         model: m.modelId,
         vision: m.vision, tools: m.tools, reasoning: m.reasoning, contextWindow: m.contextWindow,

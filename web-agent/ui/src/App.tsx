@@ -345,14 +345,19 @@ export default function App() {
   }, [activeId, toast]);
 
   const selectModel = useCallback(async (id: string) => {
-    const x = splitModelId(id);
-    if (!x.model) return;
+    // 兼容两种 key：新格式 `provider@model`；旧格式纯 provider id（浏览器缓存旧 UI 时）
+    let x = splitModelId(id);
+    if (!x.model) {
+      const first = models.find((m) => m.provider === id || m.id === id);
+      if (!first) return;
+      x = { provider: first.provider, model: first.model };
+    }
     setSel(x);
     if (activeId) {
       try { await sessionApi.update(activeId, { model: x.model }); }
       catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
     }
-  }, [activeId, toast]);
+  }, [models, activeId, toast]);
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
