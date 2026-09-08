@@ -4057,20 +4057,7 @@ button:disabled .spin { opacity: 0.7; }
 }
 @media (max-width: 1180px) { .hero-sticker { display: none; } }
 
-/* —— 14 · 角标涂鸦：手绘星星 & 弯箭头（mask 随主题色） —— */
-.brand-hero::before {
-  content: '';
-  position: absolute;
-  top: 40px; left: 6%;
-  width: 118px; height: 118px;
-  background: var(--ink-soft);
-  opacity: 0.4;
-  rotate: -8deg;
-  pointer-events: none;
-  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 8 L56 42 L88 50 L56 58 L50 92 L44 58 L12 50 L44 42 Z'/%3E%3Cpath d='M82 10 l2.5 7.5 7.5 2.5 -7.5 2.5 -2.5 7.5 -2.5 -7.5 -7.5 -2.5 7.5 -2.5 Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
-  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cg fill='none' stroke='%23fff' stroke-width='5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M50 8 L56 42 L88 50 L56 58 L50 92 L44 58 L12 50 L44 42 Z'/%3E%3Cpath d='M82 10 l2.5 7.5 7.5 2.5 -7.5 2.5 -2.5 7.5 -2.5 -7.5 -7.5 -2.5 7.5 -2.5 Z'/%3E%3C/g%3E%3C/svg%3E") no-repeat center / contain;
-  animation: doodleSway 7s ease-in-out infinite;
-}
+/* —— 14 · 角标涂鸦：弯箭头（mask 随主题色）；星星涂鸦见后文「手绘装饰层」（同名规则曾重复定义，前者被完全覆盖已删） —— */
 .brand-hero::after {
   content: '';
   position: absolute;

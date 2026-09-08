@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { configApi, metaApi, providersApi, statsApi } from '../api';
 import type { RuntimeConfig } from '../api';
 import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
-import type { Theme } from '../App';
+import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
 import SkillsView from './SkillsView';
@@ -13,6 +13,8 @@ interface Props {
   onChanged: () => void;
   theme: Theme;
   onThemeChange: (t: Theme) => void;
+  brand: Brand;
+  onBrandChange: (b: Brand) => void;
 }
 
 type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'skills' | 'advanced';
@@ -460,7 +462,13 @@ function readAutoScroll(): boolean {
   try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; }
 }
 
-function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange: (t: Theme) => void }) {
+const BRANDS: { key: Brand; label: string; dots: string }[] = [
+  { key: 'doodle', label: '涂鸦手账（珊瑚红 · 草绿 · 橘）', dots: 'linear-gradient(90deg,#ff6a45,#4fb8a5,#ffa62b)' },
+  { key: 'ink', label: '墨线单色（低刺激，适合长时间编码）', dots: 'linear-gradient(90deg,#d8d2c8,#8f8a80,#b6afa3)' },
+  { key: 'moss', label: '苔绿（安静耐用）', dots: 'linear-gradient(90deg,#6fa87c,#4e9c8f,#d2a25c)' },
+];
+
+function GeneralSection({ theme, onThemeChange, brand, onBrandChange }: { theme: Theme; onThemeChange: (t: Theme) => void; brand: Brand; onBrandChange: (b: Brand) => void }) {
   const [autoScroll, setAutoScroll] = useState(readAutoScroll);
   return (
     <>
@@ -470,7 +478,7 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
         <span className="ss-title">外观</span>
         <div className="set-row">
           <div className="set-row-l"><span className="set-row-label">深色主题</span>
-            <span className="set-row-desc">{theme === 'dark' ? '深色模式（当前）· 终端风' : '蓝白浅色（当前）· 清爽风'}</span>
+            <span className="set-row-desc">{theme === 'dark' ? '深色（当前）· 深夜炭纸手账涂鸦' : '浅色（当前）· 米白点阵纸手账涂鸦'}</span>
           </div>
           <button
             className={`toggle ${theme === 'dark' ? 'on' : ''}`}
@@ -481,6 +489,26 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
           >
             <span className="knob" />
           </button>
+        </div>
+        <div className="set-row">
+          <div className="set-row-l">
+            <span className="set-row-label">品牌色板</span>
+            <span className="set-row-desc">同一套手账骨架下切换品牌身份，与明暗正交组合（3 套 × 2 明暗）</span>
+          </div>
+          <div className="brand-swatches">
+            {BRANDS.map((b) => (
+              <button
+                key={b.key}
+                type="button"
+                className={`brand-swatch${brand === b.key ? ' on' : ''}`}
+                style={{ background: b.dots }}
+                title={b.label}
+                aria-label={b.label}
+                aria-pressed={brand === b.key}
+                onClick={() => onBrandChange(b.key)}
+              />
+            ))}
+          </div>
         </div>
       </div>
       <div className="set-sec">
@@ -508,7 +536,7 @@ function GeneralSection({ theme, onThemeChange }: { theme: Theme; onThemeChange:
   );
 }
 
-export default function SettingsView({ providers, onChanged, theme, onThemeChange }: Props) {
+export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
     { key: 'general', label: '通用' },
@@ -531,7 +559,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         ))}
       </div>
       <div className="settings-content">
-        {tab === 'general' && <GeneralSection theme={theme} onThemeChange={onThemeChange} />}
+        {tab === 'general' && <GeneralSection theme={theme} onThemeChange={onThemeChange} brand={brand} onBrandChange={onBrandChange} />}
         {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
         {tab === 'context' && <ContextSection />}
         {tab === 'routing' && <RoutingSection />}

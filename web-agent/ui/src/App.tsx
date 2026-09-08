@@ -30,6 +30,7 @@ function preloadSecondaryViews() {
 }
 
 export type Theme = 'dark' | 'light';
+export type Brand = 'doodle' | 'ink' | 'moss';
 
 function readTheme(): Theme {
   try {
@@ -37,6 +38,14 @@ function readTheme(): Theme {
     if (saved === 'dark' || saved === 'light') return saved;
   } catch { /* 隐私模式等场景读不到 */ }
   return typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+}
+
+function readBrand(): Brand {
+  try {
+    const b = localStorage.getItem('maharness-brand');
+    if (b === 'ink' || b === 'moss' || b === 'doodle') return b;
+  } catch { /* 忽略 */ }
+  return 'doodle';
 }
 
 export default function App() {
@@ -57,6 +66,7 @@ export default function App() {
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
+  const [brand, setBrand] = useState<Brand>(readBrand);
   // 会话状态感知（agent harness 前端特征）：断点可恢复 / 角色接管 / 成本熔断
   const [checkpoint, setCheckpoint] = useState<CheckpointInfo | null>(null);
   const [resuming, setResuming] = useState(false);
@@ -112,6 +122,13 @@ export default function App() {
     applyFavicon(theme);
     try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
   }, [theme]);
+
+  // 品牌色板预设（与明暗正交）：写 dataset + localStorage，并让 favicon 取新主色
+  useEffect(() => {
+    document.documentElement.dataset.brand = brand;
+    try { localStorage.setItem('maharness-brand', brand); } catch { /* 忽略 */ }
+    applyFavicon(theme);
+  }, [brand, theme]);
 
   // 初始加载
   useEffect(() => { void loadAll(); }, []);
@@ -622,7 +639,7 @@ export default function App() {
             exit="exit"
           >
           {settingsOpen ? (
-            <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} />
+            <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} brand={brand} onBrandChange={setBrand} />
           ) : activeTab === 'chat' ? (
             <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
               <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>

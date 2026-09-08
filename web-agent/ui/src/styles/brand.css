@@ -1,0 +1,66 @@
+/**
+ * ui/src/styles/brand.css —— 品牌层 token（第三层：primitive → semantic → brand）
+ * styles.css 的 :root 是「纸/墨/蜡笔」原语与语义层；本文件在其之上定义**品牌身份**：
+ * 主色、渐变、羊标志的着色方式。同一套视觉骨架下可切换预设（data-brand），
+ * 与明暗（data-theme）正交组合：3 套品牌 × 2 套明暗 = 6 种外观，全部只改 token。
+ * 新增预设只需在此加一段 [data-brand='x']，不改任何组件。
+ */
+
+:root {
+  /* 品牌语义 token（缺省 = doodle 涂鸦手账，即现状） */
+  --brand-primary: var(--accent);
+  --brand-secondary: var(--teal);
+  --brand-accent: var(--orange);
+  --brand-highlight: var(--hl);
+  --brand-on-primary: var(--on-accent);
+  --brand-name: 'doodle';
+}
+
+/* —— doodle（默认）：珊瑚红 + 草绿 + 橘，蜡笔手账 —— */
+:root[data-brand='doodle'],
+:root:not([data-brand]) {
+  --brand-primary: #ff6a45;
+  --brand-secondary: #4fb8a5;
+  --brand-accent: #ffa62b;
+  --brand-highlight: #ffe66d;
+}
+
+/* —— ink：单色墨线，去掉糖果色，只留一处强调（适合长时间编码/截图汇报） —— */
+:root[data-brand='ink'] {
+  --brand-primary: #d8d2c8;
+  --brand-secondary: #8f8a80;
+  --brand-accent: #b6afa3;
+  --brand-highlight: #e8d9a6;
+  --accent: #d8d2c8;
+  --teal: #8f8a80;
+  --orange: #b6afa3;
+  --hl: #e8d9a6;
+  --brand-gradient: linear-gradient(135deg, #d8d2c8, #8f8a80);
+  --brand-gradient-soft: linear-gradient(135deg, rgba(216, 210, 200, 0.16), rgba(143, 138, 128, 0.1));
+}
+
+/* —— moss：苔绿为主，安静耐用型（羊的草食意象，替代糖果珊瑚） —— */
+:root[data-brand='moss'] {
+  --accent: #6fa87c;
+  --accent-soft: rgba(111, 168, 124, 0.16);
+  --teal: #4e9c8f;
+  --orange: #d2a25c;
+  --hl: #e6f0a8;
+  --on-accent: #10201a;
+  --brand-primary: #6fa87c;
+  --brand-secondary: #4e9c8f;
+  --brand-accent: #d2a25c;
+  --brand-highlight: #e6f0a8;
+  --brand-gradient: linear-gradient(120deg, #6fa87c 0%, #d2a25c 55%, #4e9c8f 100%);
+  --brand-gradient-soft: linear-gradient(120deg, rgba(111, 168, 124, 0.18), rgba(78, 156, 143, 0.1));
+}
+
+/* 品牌色板选择器（设置页「外观」用） */
+.brand-swatches { display: flex; gap: 8px; }
+.brand-swatch {
+  width: 34px; height: 22px; border-radius: 6px; cursor: pointer;
+  border: 1.5px solid var(--border); padding: 0;
+  transition: transform var(--motion-fast) var(--ease-out);
+}
+.brand-swatch:hover { transform: translateY(-1px) rotate(-1.5deg); }
+.brand-swatch.on { border-color: var(--brand-primary); box-shadow: 0 0 0 2px var(--brand-primary) inset; }
