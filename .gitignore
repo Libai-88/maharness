@@ -18,6 +18,7 @@ Thumbs.db
 .claude/
 .trae/
 .zcode/
+.openchamber/
 
 # 外部参考仓库（克隆到本地仅供查阅）
 cordis-main/
@@ -28,3 +29,4 @@ web-agent/ui.bak/
 paper.pdf
 ui-before.png
 python_quick_sort.md
+.bitfun/

@@ -1,7 +1,0 @@
-{
-  "id": "chat",
-  "name": "对话引擎",
-  "version": "0.1.0",
-  "entry": "index.ts",
-  "enabled": true
-}

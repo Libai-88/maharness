@@ -1,7 +1,0 @@
-{
-  "id": "powershell",
-  "name": "PowerShell 执行器",
-  "version": "0.1.0",
-  "entry": "index.ts",
-  "enabled": true
-}
