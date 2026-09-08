@@ -14,8 +14,9 @@ export const MODE_PROMPTS: Record<string, string> = {
 
 /** 角色只读工具白名单（与 subagent 语义一致：侦查/搜索/记忆，不改变世界） */
 export const ROLE_READONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'web_search', 'list_skills', 'get_skill',
-  'recall_facts', 'plugin_status',
+  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
+  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
+  'plugin_status', 'mcp_status', 'todo_list',
 ]);
 
 /**

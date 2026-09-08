@@ -76,6 +76,11 @@ export interface ReadResult {
   size: number;
   path: string;
   truncated?: boolean;
+  /** 分段读取元信息（read_file）：文件总行数、本次起始/结束行、续读游标 */
+  totalLines?: number;
+  startLine?: number;
+  endLine?: number;
+  nextOffset?: number;
 }
 
 /** 读取文本文件，自动识别编码（UTF-8/UTF-16/GBK/二进制） */

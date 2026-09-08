@@ -14,8 +14,9 @@ import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/typ
  *  M4 防递归：不含 run_subagent/run_parallel——子代理不得再开子代理
  *  （递归委派会造成不可控的成本与配额放大）。 */
 const READ_ONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'web_search', 'list_skills', 'get_skill',
-  'recall_facts', 'plugin_status',
+  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
+  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
+  'plugin_status', 'mcp_status', 'todo_list',
 ]);
 
 const SUB_SYSTEM_PROMPT = [
@@ -90,6 +91,12 @@ export default {
     const chatDep = ctx.inject('service:chat', (v) => {
       chatSvc = v as { providers: ProviderDef[] } | undefined;
     });
+    let rulesText = '';
+    ctx.inject('service:rules', (v) => {
+      rulesText = (v as { promptBlock?: () => string } | undefined)?.promptBlock?.() ?? '';
+    });
+    const withUserRules = (base: string): string =>
+      rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base;
     chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
 
     ctx.register({
@@ -166,7 +173,7 @@ export default {
               provider,
               model: provider.defaultModel,
               messages: [{ role: 'user', content: objective }],
-              systemPrompt: SUB_SYSTEM_PROMPT,
+              systemPrompt: withUserRules(SUB_SYSTEM_PROMPT),
               tools,
               traceId,
               maxTurns, // M4：默认 6 轮，maxTurns 参数可放宽（钳制 1-12）
@@ -273,7 +280,7 @@ export default {
               provider,
               model: provider.defaultModel,
               messages: [{ role: 'user', content: objective }],
-              systemPrompt: REVIEWER_SYSTEM_PROMPT,
+              systemPrompt: withUserRules(REVIEWER_SYSTEM_PROMPT),
               tools,
               traceId,
               maxTurns: 5,
@@ -315,7 +322,7 @@ export default {
         id: 'reviewer',
         name: '独立审查者',
         description: '独立审查者：以全新上下文审查产出，只标记正确性与需求符合度缺陷，结论以只读取证为准。移交给 reviewer 后会话由审查者接管（只读工具）。',
-        systemPrompt: REVIEWER_SYSTEM_PROMPT,
+        systemPrompt: withUserRules(REVIEWER_SYSTEM_PROMPT),
         tools: 'readonly',
       },
     });

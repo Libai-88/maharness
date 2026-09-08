@@ -3,8 +3,10 @@
  * LLM 不应该"学会"节约——harness 直接强制执行：
  *  1. 重工具配额：如 run_subagent 在时间窗口内的调用上限（"简单问题不需要召唤 3 个子代理"由 harness 保证）
  *  2. 任务画像：记录最近任务的类型/轮数/成本/成败，为自适应策略提供数据（agent skill graph 的起点）
- * 进程内状态（重启清零）——跨重启的持久策略数据后续可落盘。
+ * 进程内状态 + 可选落盘（persistFile：任务画像跨重启保留，失败率不再"重启即失忆"）。
  */
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 const TASK_PROFILE_MAX = 100;
 const SUBAGENT_WINDOW_MS = 10 * 60_000;
@@ -25,8 +27,33 @@ export class Budget {
   /** 进程级总池：全部会话合计的窗口内调用记录 */
   private totalCalls: { ts: number }[] = [];
   private tasks: TaskRecord[] = [];
+  /** 任务画像落盘路径（不传 = 纯内存，重启清零） */
+  private persistFile = '';
+  private saveTimer: ReturnType<typeof setTimeout> | null = null;
 
-  constructor(private maxTotalCalls: number = SUBAGENT_MAX_CALLS_TOTAL_DEFAULT) {}
+  constructor(private maxTotalCalls: number = SUBAGENT_MAX_CALLS_TOTAL_DEFAULT, persistFile?: string) {
+    if (persistFile) {
+      this.persistFile = persistFile;
+      try {
+        const raw = JSON.parse(readFileSync(persistFile, 'utf-8')) as { tasks?: TaskRecord[] };
+        if (Array.isArray(raw.tasks)) this.tasks = raw.tasks.slice(-TASK_PROFILE_MAX);
+      } catch { /* 无历史画像：首次启动或文件损坏，忽略 */ }
+    }
+  }
+
+  /** 防抖落盘（2s）：高频 recordTask 不逐条写盘 */
+  private scheduleSave(): void {
+    if (!this.persistFile) return;
+    if (this.saveTimer) return;
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      try {
+        mkdirSync(dirname(this.persistFile), { recursive: true });
+        writeFileSync(this.persistFile, JSON.stringify({ version: 1, tasks: this.tasks }), 'utf-8');
+      } catch { /* 写盘失败不影响对话主流程 */ }
+    }, 2000);
+    (this.saveTimer as { unref?: () => void }).unref?.();
+  }
 
   private inWindow(calls: { ts: number }[]): { ts: number }[] {
     const now = Date.now();
@@ -78,6 +105,7 @@ export class Budget {
   recordTask(record: TaskRecord): void {
     this.tasks.push(record);
     if (this.tasks.length > TASK_PROFILE_MAX) this.tasks.splice(0, this.tasks.length - TASK_PROFILE_MAX);
+    this.scheduleSave();
   }
 
   /** 任务画像：按类型聚合（次数/平均轮数/平均成本/失败率） */

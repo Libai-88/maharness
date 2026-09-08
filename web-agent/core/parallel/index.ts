@@ -12,8 +12,9 @@ import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/typ
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
 const READ_ONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'web_search', 'list_skills', 'get_skill',
-  'recall_facts', 'plugin_status',
+  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
+  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
+  'plugin_status', 'mcp_status', 'todo_list',
 ]);
 
 /** 单次并行任务的最大子任务数（认知资源配额：并行不等于无限） */
@@ -48,6 +49,12 @@ export default {
     const chatDep = ctx.inject('service:chat', (v) => {
       chatSvc = v as { providers: ProviderDef[] } | undefined;
     });
+    let rulesText = '';
+    ctx.inject('service:rules', (v) => {
+      rulesText = (v as { promptBlock?: () => string } | undefined)?.promptBlock?.() ?? '';
+    });
+    const withUserRules = (base: string): string =>
+      rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base;
     chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
 
     // ---- 并行进度事件（前端实时观测：并行任务开始/结束） ----
@@ -138,7 +145,7 @@ export default {
                 provider,
                 model: provider.defaultModel,
                 messages: [{ role: 'user', content: t.objective }],
-                systemPrompt: PARALLEL_SYSTEM_PROMPT,
+                systemPrompt: withUserRules(PARALLEL_SYSTEM_PROMPT),
                 tools: toolsFor(t),
                 traceId,
                 maxTurns: 6, // M4：与子代理轮数上限统一（最多 6 轮）

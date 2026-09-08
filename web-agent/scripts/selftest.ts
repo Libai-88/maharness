@@ -126,17 +126,20 @@ if (cp) {
   check('[sandbox] 绝对盘符 C:\\Windows 拒绝（绝不在根外）', tryEscape('C:\\Windows') !== 'ESCAPED', tryEscape('C:\\Windows'));
   check('[sandbox] UNC \\\\server\\share 拒绝（绝不在根外）', tryEscape('\\\\server\\share') !== 'ESCAPED', tryEscape('\\\\server\\share'));
 
-  // b) write_file 未审批不写盘（C-S2 回归）：approved:false → needsApproval 且文件不存在；
-  //    approved:true → 写入成功
+  // b) 写类审批语义：默认沙箱内免审批（tools-fs 用执行器侧 assessApproval 动态判定），
+  //    tools.writeRequiresApproval=true 时回到强制审批；delete_file 作为破坏性操作恒需审批。
   const wf = tools.find((t) => t.name === 'write_file');
   const target = join(sandbox, 'approval-test.txt');
   const ctxNo = { traceId: 'wf-approval', turn: 0, sandboxRoot: sandbox, cache: kernel.cache, trace: kernel.trace, approved: false };
-  const r1 = wf ? await wf.handler({ path: 'approval-test.txt', content: 'X' }, ctxNo) : { ok: true };
-  check('[approval] write_file 未审批返回 needsApproval 且不写盘',
-    wf !== undefined && r1.ok === false && (r1 as { needsApproval?: boolean }).needsApproval === true && !existsSync(target));
-  const ctxYes = { ...ctxNo, approved: true };
-  const r2 = wf ? await wf.handler({ path: 'approval-test.txt', content: '审批后内容' }, ctxYes) : { ok: false };
-  check('[approval] write_file 审批后写入成功',
+  const assess = (t: typeof wf, args: unknown) =>
+    t?.assessApproval ? t.assessApproval(args, ctxNo) : { needsApproval: !!t?.approval, reason: '' };
+  const gateDefault = wf ? assess(wf, { path: 'approval-test.txt' }) : { needsApproval: true, reason: '' };
+  check('[approval] write_file 默认沙箱内免审批', gateDefault.needsApproval === false,
+    `needsApproval=${gateDefault.needsApproval} reason=${gateDefault.reason}`);
+  const df = tools.find((t) => t.name === 'delete_file');
+  check('[approval] delete_file 仍恒需审批（破坏性）', !!df?.approval && !df?.assessApproval);
+  const r2 = wf ? await wf.handler({ path: 'approval-test.txt', content: '审批后内容' }, { ...ctxNo, approved: true }) : { ok: false };
+  check('[approval] write_file 写盘成功（免审批路径）',
     r2.ok === true && existsSync(target) && readFileSync(target, 'utf8') === '审批后内容');
 
   // c) 密钥读拒 / 保护区写拒（isDeniedReadPath / isProtectedWritePath 生效）
@@ -300,14 +303,16 @@ if (!sub) console.log('[subagent] ✗ 子代理未注册，检查 core/subagent 
 // ---- 能力发现：工具风险/成本元数据（harness 视角第 2/6/9 问） ----
 const wf = tools.find((t) => t.name === 'write_file');
 const lf = tools.find((t) => t.name === 'list_dir');
-const hasMeta = wf?.risk === 'high' && wf?.approval === true && wf?.costHint === 'low' && lf?.risk === 'low';
-check('[capabilities] 工具元数据（risk/approval/cost）', hasMeta === true,
-  `write_file=${wf?.risk}/${wf?.approval} list_dir=${lf?.risk}`);
+const dfMeta = tools.find((t) => t.name === 'delete_file');
+const hasMeta = wf?.risk === 'medium' && wf?.approval === true && wf?.assessApproval !== undefined
+  && wf?.costHint === 'low' && lf?.risk === 'low' && dfMeta?.risk === 'high';
+check('[capabilities] 工具元数据（risk/approval/动态审批）', hasMeta === true,
+  `write_file=${wf?.risk}/${wf?.approval}/assess=${!!wf?.assessApproval} list_dir=${lf?.risk} delete_file=${dfMeta?.risk}`);
 // annotateToolDef：LLM 收到的描述自动带【风险/成本】标签（能力发现 + 经济性提示）
 const { annotateToolDef } = await import('../core/chat/agent');
-const tagged = wf ? annotateToolDef(wf).description.includes('风险:high') : false;
+const tagged = dfMeta ? annotateToolDef(dfMeta).description.includes('风险:high') : false;
 const costTag = sub ? annotateToolDef(sub).description.includes('成本:high') : false;
-check('[capabilities] 描述自动打标签（风险/成本）', tagged && costTag, `write_file=${tagged} run_subagent=${costTag}`);
+check('[capabilities] 描述自动打标签（风险/成本）', tagged && costTag, `delete_file=${tagged} run_subagent=${costTag}`);
 // 输出格式显式化（output 字段 → 描述尾部）：LLM 拿到结果即知结构，减少试错型幻觉
 const outputTag = sub ? annotateToolDef(sub).description.includes('输出格式: {answer') : false;
 const rf2 = tools.find((t) => t.name === 'read_file');
@@ -407,7 +412,8 @@ export default {
   check('[L1] 计数 l1Hits>=2 l1Misses>=1', s1.l1Hits >= 2 && s1.l1Misses >= 1, JSON.stringify(s1).slice(0, 120));
 
   // promptKey 隔离：systemPrompt 指纹不同（人设/插件规则变更）→ 缓存空间隔离，不串用旧答案
-  await kernel.cache.l1Set('第一性原理测试问题', '答案A', 'prompt-v1');
+  // 注：答案须 ≥ MIN_L1_ANSWER(4) 且具备信息量，否则不入队（那是质量门槛，不是隔离逻辑）
+  await kernel.cache.l1Set('第一性原理测试问题', '答案A：从最小事实出发重建解法。', 'prompt-v1');
   const isoHit = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v1');
   const isoMiss = await kernel.cache.l1Get('第一性原理测试问题', 'prompt-v2');
   check('[L1] promptKey 隔离: 同指纹命中、异指纹不命中', isoHit.hit && !isoMiss.hit, `(${isoHit.hit}/${isoMiss.hit})`);
@@ -629,11 +635,14 @@ export default {
       tools: { name: string; risk: string; costHint: string; approval: boolean }[];
       byRisk: { high: string[] };
     };
-    const hasCaps = Array.isArray(caps.tools) && caps.tools.length >= 10
-      && caps.tools.some((t) => t.name === 'write_file' && t.risk === 'high' && t.approval)
-      && Array.isArray(caps.byRisk?.high) && caps.byRisk.high.includes('write_file');
-    check('[capabilities API] 注册表（风险/成本/审批）', hasCaps,
-      `tools=${caps.tools.length} high=${caps.byRisk?.high?.length} 个`);
+    const need = ['read_file', 'write_file', 'edit_file', 'glob', 'grep', 'delete_file', 'powershell_execute', 'env_probe'];
+    const hasCaps = Array.isArray(caps.tools) && caps.tools.length >= 12
+      && need.every((n) => caps.tools.some((t) => t.name === n))
+      && caps.tools.some((t) => t.name === 'write_file' && t.risk === 'medium' && t.approval)
+      && caps.tools.some((t) => t.name === 'list_dir' && t.risk === 'low')
+      && Array.isArray(caps.byRisk?.high) && caps.byRisk.high.includes('delete_file');
+    check('[capabilities API] 注册表（风险/成本/审批 + P1 工具齐备）', hasCaps,
+      `tools=${caps.tools.length} high=${caps.byRisk?.high?.length} 个 缺=${need.filter(n => !caps.tools.some(t => t.name === n)).join(',')}`);
 
     // todo 看板 REST：GET 列表 → POST 新建 → GET 可见 → PATCH 改状态 → DELETE 清理
     const boardBase = `${base}/api/plugins/todo/board`;

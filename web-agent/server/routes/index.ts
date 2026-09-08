@@ -13,6 +13,8 @@ import pkg from '../../package.json';
 import { registerProviderRoutes } from './providers';
 import { registerPersonaRoutes } from './personas';
 import { registerSkillRoutes } from './skills';
+import { registerEvolveRoutes } from './evolve';
+import { registerRulesRoutes } from './rules';
 import { registerSessionRoutes } from './sessions';
 import { registerChatRoutes } from './chat';
 import { registerWorkspaceRoutes } from './workspaces';
@@ -41,6 +43,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerProviderRoutes(app, deps);   // Provider 管理 + 模型列表
   registerPersonaRoutes(app, deps);    // 人设管理
   registerSkillRoutes(app, deps);      // Skills（内置 + 市场）
+  registerEvolveRoutes(app, deps);     // 技能提案（自进化）
+  registerRulesRoutes(app, deps);      // 用户规则（全局/项目/策略）
   registerSessionRoutes(app, deps);    // 会话 CRUD / 消息 / 批量删除
   registerChatRoutes(app, deps);       // 对话（SSE）+ 断点
   registerWorkspaceRoutes(app, deps);  // 工作区

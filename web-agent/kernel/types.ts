@@ -264,6 +264,8 @@ export interface PersonaDef {
   description: string;
   content: string;          // 提示词片段（自然语言规则）
   priority?: number;        // 排序，大者在前（默认 0）
+  /** 层级：'user' = 用户规则（与 DB 人设同层渲染，不加「插件规则」前缀）；缺省 'plugin' */
+  tier?: 'plugin' | 'user';
 }
 
 // ---------- 工具 ----------
@@ -278,6 +280,10 @@ export interface ToolDef {
   costHint?: 'low' | 'medium' | 'high';
   /** 明确要求审批（与 needsApproval 运行时返回值互补：声明式 vs 运行时） */
   approval?: boolean;
+  /** 动态审批判定：由执行器在调用 handler 之前评估（与 approval 一样不信任工具自觉），
+   *  用于「同一工具按参数区分风险」——如 powershell 只读命令免审批、写入命令仍需审批。
+   *  存在时以本函数结论为准（覆盖 approval 声明）；抛异常按需要审批处理（fail-closed）。 */
+  assessApproval?(args: unknown, ctx: ToolContext): { needsApproval: boolean; reason: string };
   /** 使用限制（如文件大小/并发/频率），注入 LLM 减少幻觉 */
   limits?: string;
   /** 输出格式描述：返回结构的显式说明（减少"靠猜/试错"型幻觉），注入 LLM */
@@ -449,6 +455,27 @@ export interface TraceStats {
   writeFailures: number;
 }
 
+/** 一次 run（用户一条消息到终态）的收尾摘要：自进化与统计的唯一事实源 */
+export interface AgentRunSummary {
+  traceId: string;
+  sessionId?: string;
+  model: string;
+  outcome: 'answered' | 'cached' | 'handoff' | 'budget-hit' | 'max-turns';
+  /** 触发本次 run 的用户原话 */
+  question: string;
+  /** 终态答案（可能为空，如 budget-hit） */
+  answer: string;
+  turns: number;
+  cost: number;
+  toolCalls: number;
+  toolFailures: number;
+  /** 各工具失败次数（自进化据此识别"高失败率环节"） */
+  failedTools: Record<string, number>;
+  /** 被用户拒绝/策略拦截的次数（区别于真实错误，不算教训） */
+  denied: number;
+  ts: number;
+}
+
 // ============ 事件契约（类型化事件表，v3.2） ============
 
 /** 内核事件契约：核心事件的 data 形状编译期可查（EventBus.emit/emitAsync 泛型 overload）。
@@ -470,6 +497,9 @@ export interface KernelEvents {
   'kernel.stopped': Record<string, never>;
   'trace.step': TraceStep;
   'config.changed': { key: string; value: unknown };
+  /** 一次 run 进入终态（answered/cached/handoff/budget-hit/max-turns）：
+   *  自进化（技能提案）、统计持久化、任务后回顾的唯一挂载点。插件只读不改。 */
+  'agent.run.finished': AgentRunSummary;
 }
 
 // ============ 缓存 ============

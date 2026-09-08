@@ -122,10 +122,12 @@ export default {
       refreshPrompt() {
         // L2 插件自述：按 priority 降序；L0 思维语言按配置（agent.thinkInEnglish 热切换）
         const thinkInEnglish = ctx.config.get<boolean>('agent.thinkInEnglish', true);
-        const pluginPersonas = ctx.kernel.plugins
+        const allPersonas = ctx.kernel.plugins
           .capabilities('persona')
           .map((c) => c.persona as PersonaDef)
           .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
+        const userTier = allPersonas.filter((p) => p.tier === 'user');
+        const pluginTier = allPersonas.filter((p) => p.tier !== 'user');
         const parts = [makeBasePrompt(thinkInEnglish)];
         // 插件挂载清单：模型的自我认知——知道自己挂载了哪些插件、什么状态
         // （能力边界是行动的边界；挂载清单随插件热加载自动刷新。
@@ -135,7 +137,8 @@ export default {
           .join('、');
         if (pluginList) parts.push(`【已挂载插件】当前已挂载 ${ctx.kernel.plugins.list().length} 个插件：${pluginList}。挂载状态以本清单为准（core/ 内置与 plugins/ 用户插件均计入，不要用文件目录判断挂载）。`);
         for (const p of service.userPersonas) parts.push(`【${p.name}】\n${p.content}`);
-        for (const p of pluginPersonas) parts.push(`【插件规则·${p.name}】\n${p.content}`);
+        for (const p of userTier) parts.push(`【${p.name}】\n${p.content}`);
+        for (const p of pluginTier) parts.push(`【插件规则·${p.name}】\n${p.content}`);
         service.systemPrompt = parts.join('\n\n');
       },
       getSystemPrompt: () => service.systemPrompt,

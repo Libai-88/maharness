@@ -66,7 +66,10 @@ export class Kernel {
         this.cache.setConfig({ l2TtlMs: value * 60_000 });
       }
     });
-    this.budget = new Budget(this.config.get<number>('budget.subagentMaxTotal', 8));
+    this.budget = new Budget(
+      this.config.get<number>('budget.subagentMaxTotal', 8),
+      join(this.paths.data, 'task-profile.json'),
+    );
     this.plugins = new PluginLoader(
       this.bus,
       { kernel: this, paths: this.paths, config: this.config, trace: this.trace, cache: this.cache },

@@ -11,7 +11,7 @@ import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost } from './provider';
 import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
-  EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
+  AgentRunSummary, EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
 
 /**
@@ -29,6 +29,8 @@ export interface AgentHookCtx {
   scratchpad: Record<string, unknown>;
   blocked?: boolean;                    // 置 true 拦截（agent.input.received / agent.before_tool）
   blockReason?: string;
+  /** agent.before_tool：用户策略规则显式放行本次调用（免审批），执行器据此跳过审批门并留痕 */
+  policyApproved?: boolean;
   tool?: { name: string; args: unknown };
   content?: string;                     // after_llm：模型输出（观测）
   reasoning?: string;
@@ -189,11 +191,31 @@ export function annotateToolDef(t: ToolDef): ToolDef {
   const tags: string[] = [];
   if (t.risk) tags.push(`风险:${t.risk}`);
   if (t.costHint) tags.push(`成本:${t.costHint}`);
-  if (t.approval) tags.push('需审批');
+  if (t.approval) tags.push(t.assessApproval ? '按参数判定是否审批' : '需审批');
   if (t.limits) tags.push(t.limits);
   const head = tags.length ? `【${tags.join('|')}】` : '';
   const tail = t.output ? `\n输出格式: ${t.output}` : '';
   return { ...t, description: `${head}${t.description}${tail}` };
+}
+
+/** 审批判定（执行器侧，不进 handler）：
+ *  - 工具声明 assessApproval → 按本次参数决定（只读命令免审批、写入命令仍拦）
+ *  - 否则 approval===true → 无条件拦
+ *  - 判定函数抛异常 → 按需要审批处理（fail-closed）
+ *  导出供单测。 */
+export function assessToolApproval(tool: ToolDef, args: unknown, tctx: ToolContext): { needsApproval: boolean; reason: string } {
+  if (tool.assessApproval) {
+    try {
+      const r = tool.assessApproval(args, tctx);
+      if (!r?.needsApproval) return { needsApproval: false, reason: '' };
+      return { needsApproval: true, reason: r.reason || `工具 ${tool.name} 本次调用需要用户审批` };
+    } catch (err) {
+      return { needsApproval: true, reason: `审批判定异常（按需审批处理）: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+  return tool.approval
+    ? { needsApproval: true, reason: `工具 ${tool.name} 声明需要用户审批` }
+    : { needsApproval: false, reason: '' };
 }
 
 /** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话。
@@ -232,9 +254,15 @@ export class AgentRunner {
    *  「改写 data / 短路接管」的中间件能力（如 memory 插件可改写注入内容）。 */
   private emitHook(type: string, data: AgentHookCtx): Promise<void> {
     return this.bus.waterfall<void>(type, data, async () => {
-      /* 无底层实现：钩子链仅由监听器组成，串联即观察/改写 */
+      /* 无底层实现：钩子语义由监听器完成（观察者改写 data / 短路接管——中间件链最内层直接返回） */
       void type;
     });
+  }
+
+  /** run 终态事件：自进化与统计的唯一挂载点；订阅者异常绝不影响主流程 */
+  private emitRunEnd(summary: AgentRunSummary): void {
+    try { this.bus.emit({ type: 'agent.run.finished', data: summary, ts: summary.ts }); }
+    catch (err) { console.warn('[agent] agent.run.finished 派发失败:', err instanceof Error ? err.message : String(err)); }
   }
 
   /** 外部（REST 接口）响应审批：批准或拒绝（共享 ApprovalBoard——子 runner 的审批同样可达） */
@@ -267,6 +295,32 @@ export class AgentRunner {
     const reasoningBudget = reasoningBudgetFor(classifyTask(lastUserMsg0?.content ?? ''), baseBudget);
     const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
     const scratchpad: Record<string, unknown> = {};
+    // run 收尾摘要累加器（自进化的事实源：哪个工具反复失败、用户强调过什么）
+    const runStats = { toolCalls: 0, toolFailures: 0, denied: 0, failedTools: {} as Record<string, number> };
+    const noteToolCall = (name: string, ok: boolean, governed = false) => {
+      runStats.toolCalls++;
+      if (governed) { runStats.denied++; return; }
+      if (!ok) {
+        runStats.toolFailures++;
+        runStats.failedTools[name] = (runStats.failedTools[name] ?? 0) + 1;
+      }
+    };
+    const emitFinish = (outcome: AgentRunSummary['outcome'], question: string, answer: string, turns: number) =>
+      this.emitRunEnd({
+        traceId,
+        sessionId: opts.sessionId,
+        model,
+        outcome,
+        question: question.slice(0, 2000),
+        answer: answer.slice(0, 4000),
+        turns,
+        cost: totalCost,
+        toolCalls: runStats.toolCalls,
+        toolFailures: runStats.toolFailures,
+        failedTools: { ...runStats.failedTools },
+        denied: runStats.denied,
+        ts: Date.now(),
+      });
 
     // ---- 发送序列快照同步游标：DB = 发送序列的忠实镜像（L3 前缀缓存逼近 100% 的关键） ----
     // history 数组只增不改；[0, syncedCount) 已入库。history[0] = system prompt
@@ -328,6 +382,7 @@ export class AgentRunner {
         this.kernel.budget.recordTask({
           type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now(),
         });
+        emitFinish('budget-hit', q, '', turn + 1);
         yield { type: 'budget_hit', cost: totalCost, budget: opts.costBudget };
         yield { type: 'error', error: `成本预算已耗尽（本任务累计 $${totalCost.toFixed(6)} ≥ 预算 $${opts.costBudget.toFixed(6)}），已停止。已完成的部分结果保留在会话中；如需继续请新建会话或提高预算。` };
         return;
@@ -452,15 +507,16 @@ export class AgentRunner {
           const step = this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'cache_hit', name: 'L1', cacheKey: cached.key ?? '' });
           step.finish({ outputSummary: `L1 语义缓存命中：${cached.answer.slice(0, 60)}…`, tokensIn: tIn, tokensOut: tOut });
           yield { type: 'delta', text: cached.answer };
-          yield {
-            type: 'assistant_done',
-            content: cached.answer,
-            reasoning: '',
-            usage: { input: tIn, output: tOut },
-            cost: 0,
-            cached: true,
-          };
-          return;
+           yield {
+             type: 'assistant_done',
+             content: cached.answer,
+             reasoning: '',
+             usage: { input: tIn, output: tOut },
+             cost: 0,
+             cached: true,
+           };
+           emitFinish('cached', q, cached.answer, turn);
+           return;
         }
       }
 
@@ -636,6 +692,7 @@ export class AgentRunner {
           usage: { input: totalIn, output: totalOut },
           cost: totalCost,
         };
+        emitFinish('answered', q, text, turn + 1);
         return;
       }
 
@@ -648,6 +705,7 @@ export class AgentRunner {
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = { _raw: tc.function.arguments }; }
         if (!tool) {
           const missMsg = `工具不存在: ${tc.function.name}`;
+          noteToolCall(tc.function.name, false);
           history.push({ role: 'tool', tool_call_id: tc.id, content: missMsg });
           yield { type: 'tool_result', name: tc.function.name, summary: '工具不存在', ok: false };
           continue;
@@ -682,14 +740,20 @@ export class AgentRunner {
           remainingBudget: opts.costBudget !== undefined ? Math.max(opts.costBudget - totalCost, 0) : undefined,
         };
         let result: ToolResult;
-        if (tool.approval && !tctx.approved) {
-          // C-S2 审批强制下沉执行器：声明 approval 的工具在未获批准前不进入 handler
+        const gate = assessToolApproval(tool, toolArgs, tctx);
+        if (gate.needsApproval && toolCtx.policyApproved && !tctx.approved) {
+          // 用户策略规则放行了一次本应审批的调用：必须留痕（权限被绕过要可审计）
+          this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'policy-allow', parentId: opts.parentStepId })
+            .finish({ outputSummary: `策略规则放行：${tool.name} ${summarize(toolArgs, 160)}` });
+        }
+        if (gate.needsApproval && !tctx.approved && !toolCtx.policyApproved) {
+          // C-S2 审批强制下沉执行器：需要审批的调用在未获批准前不进入 handler
           // （执行器不信任工具自觉）——直接构造 needsApproval 结果，走既有审批挂起流：
           // approval_required → 批准 → approved=true 重执行；拒绝 → governed 错误结果
           result = {
             ok: false,
             needsApproval: true,
-            approvalSummary: `工具 ${tool.name} 声明需要用户审批。参数: ${summarize(toolArgs, 200)}`,
+            approvalSummary: `${gate.reason}。参数: ${summarize(toolArgs, 200)}`,
           };
         } else {
           // 每次工具调用独立取消域：客户端断线（signal）与工具超时都经同一
@@ -805,6 +869,7 @@ export class AgentRunner {
         // 自适应性：连续工具失败 → harness 注入策略提示（管理"认知资源"，
         // 阻止 LLM 在错误路径上反复消耗 token）
         if (!finalResult.ok) {
+          noteToolCall(tool.name, false, !!finalResult.governed);
           toolFailStreak++;
           if (toolFailStreak >= ADAPT_FAIL_STREAK && !adaptHintInjected) {
             adaptHintInjected = true;
@@ -814,6 +879,7 @@ export class AgentRunner {
             });
           }
         } else {
+          noteToolCall(tool.name, true);
           toolFailStreak = 0; // 成功一次即重置连败
         }
         // observation 完整性 v2：小结果全文回填；大结果存入结果存储、历史只留摘要+引用
@@ -840,6 +906,7 @@ export class AgentRunner {
           type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: false, ts: Date.now(),
         });
         syncHistory();
+        emitFinish('handoff', q, '', turn + 1);
         yield { type: 'handoff', role: pendingHandoff.role, objective: pendingHandoff.objective };
         return;
       }
@@ -862,6 +929,7 @@ export class AgentRunner {
       failed: true,
       ts: Date.now(),
     });
+    emitFinish('max-turns', lastUserMsg?.content ?? '', '', maxTurns);
     // 轮数上限不是任务失败：已完成的工作与断点均保留，可继续推进
     yield { type: 'error', error: `本任务已达到轮数上限（${maxTurns} 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置` };
   }

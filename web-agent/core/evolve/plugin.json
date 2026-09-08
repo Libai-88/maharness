@@ -1,0 +1,8 @@
+{
+  "id": "evolve",
+  "name": "自进化提案",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true,
+  "requires": ["skills"]
+}
