@@ -391,6 +391,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   /* v6 入场：由 Motion popIn（origin-aware scale-in，从触发器位置缩放展开）驱动 */
   transform-origin: top right;
 }
+.menu-pop.drop-up {
+  top: auto;
+  bottom: calc(100% + 6px);
+  transform-origin: bottom right;
+}
 .menu-title {
   font-size: 10px;
   font-weight: 700;

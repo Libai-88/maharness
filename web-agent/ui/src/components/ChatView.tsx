@@ -8,6 +8,7 @@ import type { ApprovalItem, ChatMessage, CheckpointInfo, CommandInfo, PlanState,
 import Markdown from './Markdown';
 import BrandLogo from './BrandLogo';
 import HeroSticker from './HeroSticker';
+import Menu from './Menu';
 import { fadeUp, msgRow, popIn, springTransition, staggerContainer, toolCardIn, userMsg } from '../motion';
 import { IconBlock, IconBrain, IconBolt, IconCheck, IconChevronDown, IconChevronRight, IconCircle, IconCoin, IconCopy, IconLock, IconPaperclip, IconPause, IconPlan, IconPlay, IconPlugin, IconRefresh, IconReturn, IconSend, IconSettings, IconSheep, IconStop, IconSwitch, IconWarn } from './Icon';
 
@@ -24,6 +25,10 @@ interface Props {
   todos?: TodoCard[];
   modelLabel?: string;
   modelTag?: string;
+  /** 输入栏模型 pill 的可选项与切换回调（与顶栏共用同一数据源，保证两端一致） */
+  models?: { id: string; label: string; model: string }[];
+  onSelectModel?: (id: string) => void;
+  selectedModelId?: string;
   /** provider 重试（retry）截断标记：流式消息从该边界起展示（App 侧记录，含未冲刷增量） */
   retryMarks?: Record<string, { content: number; reasoning: number }>;
   /** 断点续跑（checkpoint）：任务中断后「继续任务」入口 */
@@ -257,7 +262,7 @@ const MessageRow = memo(function MessageRow({ m, mark, canResend, expanded, onTo
   );
 });
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', retryMarks = {}, checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', models = [], onSelectModel, selectedModelId, retryMarks = {}, checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0 }: Props) {
   const [input, setInput] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, 'approve' | 'reject'>>({});
@@ -606,7 +611,17 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
               )}
             </div>
             <div className="comp-right">
-              <span className="comp-model" title={modelLabel}>{modelLabel || '未选择模型'}<IconChevronDown size={10} /></span>
+              <Menu
+                trigger={<>{modelLabel || '未选择模型'}<IconChevronDown size={10} /></>}
+                items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
+                selectedKey={selectedModelId}
+                onSelect={(k) => onSelectModel?.(k)}
+                title="切换模型"
+                width={260}
+                triggerTitle="切换模型"
+                disabled={!hasModels || models.length === 0}
+                dropUp
+              />
               {streaming ? (
                 <button className="send-btn stop" onClick={onStop} title="停止" aria-label="停止"><IconStop size={14} /></button>
               ) : (

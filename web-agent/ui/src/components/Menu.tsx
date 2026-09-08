@@ -20,9 +20,11 @@ interface Props {
   width?: number;
   triggerTitle?: string;
   disabled?: boolean;
+  /** 向下空间不足时向上弹出（输入栏等贴底场景） */
+  dropUp?: boolean;
 }
 
-export default function Menu({ trigger, items, selectedKey, onSelect, title, width = 230, triggerTitle, disabled }: Props) {
+export default function Menu({ trigger, items, selectedKey, onSelect, title, width = 230, triggerTitle, disabled, dropUp }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -57,7 +59,7 @@ export default function Menu({ trigger, items, selectedKey, onSelect, title, wid
       <AnimatePresence>
       {open && (
         <motion.div
-          className="menu-pop"
+          className={dropUp ? 'menu-pop drop-up' : 'menu-pop'}
           style={{ width }}
           role="menu"
           variants={popIn}

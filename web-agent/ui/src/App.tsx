@@ -669,6 +669,9 @@ export default function App() {
                   todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
                   modelLabel={modelLabel}
                   modelTag={modelTag}
+                  models={models}
+                  onSelectModel={(k) => void selectModel(k)}
+                  selectedModelId={sel ? `${sel.provider}@${sel.model}` : undefined}
                   retryMarks={retryMarks}
                   // 会话状态感知（agent harness 前端特征）：断点恢复 / 角色接管 / 成本熔断 / 会话成本
                   checkpoint={checkpoint}
