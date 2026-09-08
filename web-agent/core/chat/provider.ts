@@ -10,8 +10,9 @@
  * 真实命中率只能由 provider 说了算，本地估算不可替代。
  */
 import { estimateTokens } from '../../kernel/tokens';
+import { inferCapabilities } from '../../kernel/modelCatalog';
 import type {
-  ChatOptions, LLMChunk, LLMMessage, PluginContext, ProviderDef, ToolDef,
+  ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
 } from '../../kernel/types';
 
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
@@ -50,6 +51,8 @@ export interface ProviderConfig {
   baseUrl: string;
   apiKey: string;
   model: string;
+  protocol?: string;
+  models?: ModelCapability[];
   inputPrice?: number;
   outputPrice?: number;
 }
@@ -89,18 +92,39 @@ export function estimateCost(provider: ProviderDef, input: number, output: numbe
   return (input / 1_000_000) * p.in + (output / 1_000_000) * p.out;
 }
 
+/** 按实际调用的模型取价（路由/视觉子调用可能与 provider 默认模型不同） */
+export function pricesFor(provider: ProviderDef, model?: string): { in: number; out: number } {
+  const cap = model ? provider.models?.find(m => m.modelId === model) : undefined;
+  if (cap) return { in: cap.priceIn, out: cap.priceOut };
+  return provider.prices ?? { in: 0, out: 0 };
+}
+
+/** 取模型能力（未登记时按目录推断，保证路由永不因缺数据而失败） */
+export function capabilityFor(provider: ProviderDef, model?: string): ModelCapability | undefined {
+  const id = model ?? provider.defaultModel;
+  const known = provider.models?.find(m => m.modelId === id);
+  if (known) return known;
+  if (!id) return undefined;
+  const c = inferCapabilities(id, provider.id);
+  return { modelId: id, ...c, enabled: true, source: 'inferred' };
+}
+
 /** 由配置创建 ProviderDef（含流式 chat 实现） */
 export function createProvider(cfg: ProviderConfig): ProviderDef {
-  const prices = PRICE_TABLE[cfg.model] ?? { in: cfg.inputPrice ?? 0.3, out: cfg.outputPrice ?? 1.2 };
+  const capFor = (model: string): ModelCapability | undefined => cfg.models?.find(m => m.modelId === model);
+  const cap = capFor(cfg.model);
+  const tablePrice = PRICE_TABLE[cfg.model];
   const resolvedPrices = {
-    in: cfg.inputPrice ?? prices.in,
-    out: cfg.outputPrice ?? prices.out,
+    in: cfg.inputPrice ?? cap?.priceIn ?? tablePrice?.in ?? 0.3,
+    out: cfg.outputPrice ?? cap?.priceOut ?? tablePrice?.out ?? 1.2,
   };
   const baseUrl = cfg.baseUrl.replace(/\/+$/, '');
   return {
     id: cfg.id,
     label: cfg.id.toUpperCase(),
     defaultModel: cfg.model,
+    protocol: cfg.protocol ?? 'openai',
+    models: cfg.models,
     prices: resolvedPrices,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
       if (process.env.TRACE_LLM_BODY === 'on') {

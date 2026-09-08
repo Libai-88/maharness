@@ -5,7 +5,8 @@
  */
 import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
-import type { LLMMessage, ProviderDef, ToolDef } from '../../kernel/types';
+import type { LLMMessage, ModelCapability, ProviderDef, ToolDef } from '../../kernel/types';
+import { inferCapabilities } from '../../kernel/modelCatalog';
 import type { AgentRunner } from '../../core/chat/agent';
 import type { ProviderConfig } from '../../core/chat/provider';
 import type { CompactOptions, CompactResult } from '../../core/chat/compact';
@@ -49,15 +50,37 @@ export function getChatService(kernel: Kernel): ChatService | undefined {
   return kernel.plugins.resolveService('service:chat') as ChatService | undefined;
 }
 
-/** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启） */
+/** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启）；一并带上协议与模型能力 */
 export function refreshChatProviders(kernel: Kernel, store: Store): void {
   const chat = getChatService(kernel);
   if (!chat) return;
   const rows = store.listProviders().filter((r) => r.enabled);
+  const allModels = store.listModels();
   chat.setProviders(rows.map((r) => ({
     id: r.id, baseUrl: r.baseUrl, apiKey: r.apiKey, model: r.model,
+    protocol: r.protocol ?? 'openai',
+    models: capabilitiesOf(r.id, r.model, allModels.filter(m => m.providerId === r.id)),
     inputPrice: r.priceIn ?? undefined, outputPrice: r.priceOut ?? undefined,
   })));
+}
+
+/** DB 模型行 → 运行时能力表；默认模型未登记时按目录推断补一条，保证路由永不缺数据 */
+function capabilitiesOf(providerId: string, defaultModel: string, rows: ReturnType<Store['listModels']>): ModelCapability[] {
+  const out: ModelCapability[] = rows.map((m) => {
+    const inferred = inferCapabilities(m.modelId, providerId);
+    return {
+      modelId: m.modelId,
+      contextWindow: m.contextWindow ?? inferred.contextWindow,
+      maxOutput: m.maxOutput ?? inferred.maxOutput,
+      vision: !!m.vision, tools: !!m.tools, reasoning: !!m.reasoning,
+      priceIn: m.priceIn ?? inferred.priceIn, priceOut: m.priceOut ?? inferred.priceOut,
+      enabled: !!m.enabled, source: m.source,
+    };
+  });
+  if (defaultModel && !out.some(m => m.modelId === defaultModel)) {
+    out.push({ modelId: defaultModel, ...inferCapabilities(defaultModel, providerId), enabled: true, source: 'inferred' });
+  }
+  return out;
 }
 
 /** 用 DB 中的启用人设刷新对话服务（L1 层，热生效） */

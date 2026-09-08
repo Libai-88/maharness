@@ -348,10 +348,29 @@ export interface CommandDef {
 
 // ---------- LLM Provider（v1 内置 OpenAI 兼容，预留多实现） ----------
 
+/** 运行时模型能力（由 models 表 + modelCatalog 推断合并而来，选路与预算的事实源） */
+export interface ModelCapability {
+  modelId: string;
+  contextWindow: number;
+  maxOutput: number;
+  vision: boolean;
+  tools: boolean;
+  reasoning: boolean;
+  priceIn: number;
+  priceOut: number;
+  enabled: boolean;
+  /** pulled | inferred | manual */
+  source: string;
+}
+
 export interface ProviderDef {
   id: string;               // 如 deepseek
   label: string;            // 显示名
   defaultModel: string;
+  /** 协议族：openai | anthropic | ollama（缺省按 openai 兼容处理） */
+  protocol?: string;
+  /** 该 Provider 已知模型及能力（含默认模型） */
+  models?: ModelCapability[];
   prices?: { in: number; out: number };  // USD / 百万 token，用于成本核算
   chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk>;
 }
