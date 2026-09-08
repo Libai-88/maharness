@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, PulledModel, Session, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -242,11 +242,14 @@ export const providersApi = {
   update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean }) =>
     api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
-  test: (body: { baseUrl: string; apiKey: string; model: string; providerId?: string }) =>
-    api<{ ok: boolean; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
-  /** 拉取供应商模型列表（OpenAI 兼容 GET {base}/models）：编辑已保存供应商时 Key 可留空（providerId 回退） */
-  fetchModels: (body: { baseUrl: string; apiKey: string; providerId?: string }) =>
-    api<{ ok: boolean; models: string[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
+  test: (body: { baseUrl: string; apiKey: string; model: string; protocol?: string; providerId?: string }) =>
+    api<{ ok: boolean; latencyMs?: number; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
+  /** 拉取供应商模型与能力（openai / anthropic / ollama 三协议）；编辑已保存供应商时 Key 可留空 */
+  fetchModels: (body: { baseUrl: string; apiKey: string; protocol?: string; providerId?: string; persist?: boolean }) =>
+    api<{ ok: boolean; protocol?: string; count?: number; models: PulledModel[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
+  /** 手改单个模型的能力位/价格 */
+  patchModel: (id: string, modelId: string, body: Record<string, unknown>) =>
+    api<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}/models/${encodeURIComponent(modelId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 export const personasApi = {
@@ -259,7 +262,7 @@ export const personasApi = {
 
 export const pluginsApi = {
   list: () => api<PluginInfo[]>('/api/plugins'),
-  action: (id: string, action: 'enable' | 'disable' | 'reload') =>
+  action: (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') =>
     api<{ ok: boolean; state: string }>(`/api/plugins/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
   open: (id: string) => api<{ ok: boolean; path: string }>(`/api/plugins/${id}/open`, { method: 'POST' }),
 };

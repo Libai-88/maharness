@@ -1,7 +1,7 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useEffect, useState } from 'react';
 import { configApi, metaApi, providersApi, statsApi } from '../api';
-import type { ProviderForm, ProviderInfo, StatsInfo } from '../types';
+import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Theme } from '../App';
 import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
@@ -16,7 +16,7 @@ interface Props {
 
 type SettingTab = 'general' | 'providers' | 'context' | 'skills' | 'advanced';
 
-const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', priceIn: '', priceOut: '' };
+const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
 
 function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[]; onChanged: () => void }) {
   const [editing, setEditing] = useState<ProviderInfo | null>(null);
@@ -27,7 +27,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
   // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
-  const [models, setModels] = useState<string[]>([]);
+  const [models, setModels] = useState<PulledModel[]>([]);
 
   const refresh = async (ok: boolean, text: string) => {
     setMsg({ ok, text });
@@ -38,7 +38,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const startCreate = () => { setCreating(true); setEditing(null); setForm(EMPTY); setMsg(null); setModels([]); };
   const startEdit = (p: ProviderInfo) => {
     setEditing(p); setCreating(false); setMsg(null); setModels([]);
-    setForm({ label: p.label, baseUrl: p.baseUrl, apiKey: '', model: p.model, priceIn: p.priceIn ? String(p.priceIn) : '', priceOut: p.priceOut ? String(p.priceOut) : '' });
+    setForm({ label: p.label, baseUrl: p.baseUrl, apiKey: '', model: p.model, protocol: p.protocol ?? 'openai', priceIn: p.priceIn ? String(p.priceIn) : '', priceOut: p.priceOut ? String(p.priceOut) : '' });
   };
 
   const save = async () => {
@@ -59,8 +59,11 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     }
     setBusy('test');
     try {
-      const r = await providersApi.test({ baseUrl: form.baseUrl.trim(), apiKey: form.apiKey.trim(), model: form.model.trim() });
-      if (r.ok) await refresh(true, r.message ?? '连接成功');
+      const r = await providersApi.test({
+        baseUrl: form.baseUrl.trim(), apiKey: form.apiKey.trim(), model: form.model.trim(),
+        protocol: form.protocol, ...(editing ? { providerId: editing.id } : {}),
+      });
+      if (r.ok) await refresh(true, r.message ?? `连接成功（${r.latencyMs ?? 0}ms）`);
       else await refresh(false, r.error ?? '连接失败');
     } catch (err) { await refresh(false, err instanceof Error ? err.message : String(err)); }
     finally { setBusy(null); }
@@ -76,13 +79,25 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       const r = await providersApi.fetchModels({
         baseUrl: form.baseUrl.trim(),
         apiKey: form.apiKey.trim(),
+        protocol: form.protocol,
         ...(editing ? { providerId: editing.id } : {}),
       });
-      setModels(r.models);
-      // 模型为空时自动选中第一个，减少一次点击
-      setForm((f) => (f.model.trim() ? f : { ...f, model: r.models[0] ?? '' }));
-      setMsg({ ok: true, text: `已拉取 ${r.models.length} 个模型——点击「模型」输入框选择` });
-      setTimeout(() => setMsg(null), 4000);
+      const list = r.models ?? [];
+      setModels(list);
+      // 选中即免手填：模型名 + 价格一并带入表单
+      setForm((f) => {
+        const pick = list.find(m => m.id === f.model.trim()) ?? list[0];
+        if (!pick) return f;
+        return {
+          ...f,
+          model: pick.id,
+          priceIn: f.priceIn?.trim() ? f.priceIn : String(pick.priceIn ?? ''),
+          priceOut: f.priceOut?.trim() ? f.priceOut : String(pick.priceOut ?? ''),
+        };
+      });
+      const vision = list.filter(m => m.vision).length;
+      setMsg({ ok: true, text: `已拉取 ${list.length} 个模型（其中 ${vision} 个支持视觉）——选择模型即自动带入能力与价格` });
+      setTimeout(() => setMsg(null), 6000);
     } catch (err) {
       await refresh(false, err instanceof Error ? err.message : String(err));
     } finally { setBusy(null); }
@@ -112,13 +127,13 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   };
 
   const runTest = async (p: ProviderInfo) => {
-    setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: Math.round(40 + Math.random() * 160) } }));
+    setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: 0 } }));
     try {
       // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key）
-      const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model, providerId: p.id });
-      setTestResult((prev) => ({ ...prev, [p.id]: { ok: r.ok, ms: Math.round(30 + Math.random() * 140) } }));
+      const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model, protocol: p.protocol, providerId: p.id });
+      setTestResult((prev) => ({ ...prev, [p.id]: { ok: r.ok, ms: r.latencyMs ?? 0 } }));
       if (!r.ok) toast.error(`${p.label} 连接失败：${r.error ?? '未知错误'}`);
-      else toast.success(`${p.label} 连接成功（${Math.round(30 + Math.random() * 140)}ms）`);
+      else toast.success(`${p.label} 连接成功（${r.latencyMs ?? 0}ms）`);
     } catch (err) {
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: false, ms: 0 } }));
       toast.error(`测试失败：${err instanceof Error ? err.message : String(err)}`);
@@ -143,13 +158,43 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label="Provider 名称" />
             <input className="set-input" placeholder="Base URL（如 https://api.deepseek.com）" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
             <input className="set-input" placeholder="API Key" type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
-            <input className="set-input" placeholder="模型（如 deepseek-chat，可拉取列表选择）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" list="provider-model-options" />
+            <select className="set-input" value={form.protocol ?? 'openai'} onChange={(e) => setForm({ ...form, protocol: e.target.value })} aria-label="协议类型">
+              <option value="openai">OpenAI 兼容（多数网关/国产）</option>
+              <option value="anthropic">Anthropic 原生</option>
+              <option value="ollama">Ollama 本地</option>
+            </select>
+            <input className="set-input" placeholder="模型（可拉取列表直接点选）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" list="provider-model-options" />
             <datalist id="provider-model-options">
-              {models.map((m) => <option key={m} value={m} />)}
+              {models.map((m) => <option key={m.id} value={m.id} />)}
             </datalist>
-            <input className="set-input" placeholder="输入价格 ¥/1M tokens" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} aria-label="输入价格" />
-            <input className="set-input" placeholder="输出价格 ¥/1M tokens" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} aria-label="输出价格" />
+            <input className="set-input" placeholder="输入价格 /1M tokens（拉取后自动填）" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} aria-label="输入价格" />
+            <input className="set-input" placeholder="输出价格 /1M tokens（拉取后自动填）" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} aria-label="输出价格" />
           </div>
+          {models.length > 0 && (
+            <div className="pv-model-list" role="listbox" aria-label="拉取到的模型">
+              {models.slice(0, 60).map((m) => (
+                <button
+                  key={m.id}
+                  type="button"
+                  className={`pv-model${form.model === m.id ? ' on' : ''}`}
+                  onClick={() => setForm({
+                    ...form, model: m.id,
+                    priceIn: form.priceIn?.trim() ? form.priceIn : String(m.priceIn ?? ''),
+                    priceOut: form.priceOut?.trim() ? form.priceOut : String(m.priceOut ?? ''),
+                  })}
+                  title={`上下文 ${m.contextWindow} · 最大输出 ${m.maxOutput} · $${m.priceIn}/$${m.priceOut} per 1M${m.source === 'pulled' ? '（供应商返回）' : '（按模型名推断）'}`}
+                >
+                  <span className="pvm-id">{m.id}</span>
+                  <span className="pvm-caps">
+                    {m.vision && <span className="pvm-cap vis">视觉</span>}
+                    {m.tools && <span className="pvm-cap">工具</span>}
+                    {m.reasoning && <span className="pvm-cap">推理</span>}
+                    <span className="pvm-cap ctx">{m.contextWindow >= 1_000_000 ? `${Math.round(m.contextWindow / 1_000_000)}M` : `${Math.round(m.contextWindow / 1000)}k`}</span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          )}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
             <button className="btn-ok" onClick={save} disabled={busy !== null}>{busy === 'save' ? <span className="spin" /> : null}保存</button>
             <button className="btn-ghost" onClick={() => void pullModels()} disabled={busy !== null}>{busy === 'pull' ? <span className="spin" /> : null}拉取模型列表</button>
@@ -195,6 +240,14 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
               <div className="pv-field" style={{ flex: '0 0 170px' }}>
                 <span className="pf-label">价格 / 1M tokens</span>
                 <span className="pf-value">¥{p.priceIn ?? '?'} in · ¥{p.priceOut ?? '?'} out</span>
+              </div>
+              <div className="pv-field" style={{ flex: '0 0 200px' }}>
+                <span className="pf-label">协议 / 能力</span>
+                <span className="pf-value pv-caps-inline">
+                  {p.protocol ?? 'openai'}
+                  {(p.models?.length ?? 0) > 0 && <span className="pvm-cap">{p.models!.length} 模型</span>}
+                  {(p.models ?? []).some((m) => !!m.vision) && <span className="pvm-cap vis">视觉</span>}
+                </span>
               </div>
             </div>
             <div className="pv-foot">

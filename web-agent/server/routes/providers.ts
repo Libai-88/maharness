@@ -11,6 +11,32 @@ const PROTOCOLS: ProviderProtocol[] = ['openai', 'anthropic', 'ollama'];
 
 interface PulledModel { id: string; label?: string; raw: unknown }
 
+/** 各协议的最小可用探测请求（URL + 头 + 体） */
+function buildPing(base: string, protocol: string, key: string, model: string): [string, RequestInit] {
+  if (protocol === 'anthropic') {
+    return [`${base}/v1/messages`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+      body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
+      signal: AbortSignal.timeout(15000),
+    }];
+  }
+  if (protocol === 'ollama') {
+    return [`${base}/api/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: 'ping' }] }),
+      signal: AbortSignal.timeout(30000),
+    }];
+  }
+  return [`${base}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
+    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
+    signal: AbortSignal.timeout(15000),
+  }];
+}
+
 /** 按协议拉取模型列表（三家端点/鉴权头各异）；HTTP 非 2xx 抛错且不回显远端 body */
 async function fetchProviderModels(base: string, protocol: ProviderProtocol, key: string): Promise<PulledModel[]> {
   const doFetch = async (url: string, headers: Record<string, string>): Promise<unknown> => {
@@ -129,7 +155,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     res.json({ ok: true });
   });
 
-  /** 连接测试：直连 OpenAI 兼容接口发最小请求验证 key/地址/模型可用（编辑时可不传 key，用已保存的） */
+  /** 连接测试：按协议发最小请求，返回真实往返延迟（替代前端伪造的 Math.random） */
   app.post('/api/providers/test', async (req, res) => {
     const { baseUrl, apiKey, model, providerId } = req.body ?? {};
     let useKey = apiKey;
@@ -137,8 +163,11 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       const row = store.getProvider(String(providerId));
       useKey = row?.apiKey;
     }
-    if (!baseUrl?.trim() || !useKey?.trim() || !model?.trim()) {
-      return res.status(400).json({ error: '地址 / Key / 模型 均为必填' });
+    if (!baseUrl?.trim() || !model?.trim()) {
+      return res.status(400).json({ error: '地址 / 模型 均为必填' });
+    }
+    if (!useKey?.trim() && String(req.body?.protocol ?? '') !== 'ollama') {
+      return res.status(400).json({ error: 'Key 为必填' });
     }
     const base = String(baseUrl).trim().replace(/\/+$/, '');
     // H5 SSRF 防护：协议白名单 + DNS 解析后拒绝私网/环回/链路本地段
@@ -148,20 +177,19 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     } catch (err) {
       return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
+    const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : 'openai';
+    const started = Date.now();
     try {
-      const r = await fetch(`${base}/chat/completions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${useKey}` },
-        body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
-        signal: AbortSignal.timeout(15000),
-      });
+      const r = await fetch(...buildPing(base, protocol, String(useKey ?? ''), String(model)));
+      const latencyMs = Date.now() - started;
       if (!r.ok) {
         // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
-        return res.status(400).json({ ok: false, error: `HTTP ${r.status}` });
+        return res.status(400).json({ ok: false, latencyMs, error: `HTTP ${r.status}` });
       }
-      res.json({ ok: true, message: '连接成功' });
+      await r.body?.cancel().catch(() => { /* 忽略 */ });
+      res.json({ ok: true, latencyMs, protocol, message: `连接成功（${latencyMs}ms）` });
     } catch (err) {
-      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+      res.status(400).json({ ok: false, latencyMs: Date.now() - started, error: err instanceof Error ? err.message : String(err) });
     }
   });
 

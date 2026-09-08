@@ -31,11 +31,25 @@ export interface ModelInfo {
   model: string;
 }
 
+export interface ModelCapabilityInfo {
+  modelId: string;
+  contextWindow: number | null;
+  maxOutput: number | null;
+  vision: number;
+  tools: number;
+  reasoning: number;
+  priceIn: number | null;
+  priceOut: number | null;
+  enabled: number;
+  source: string;
+}
+
 export interface ProviderInfo {
   id: string;
   label: string;
   baseUrl: string;
   model: string;
+  protocol?: string;
   priceIn?: number | null;
   priceOut?: number | null;
   enabled: boolean;
@@ -43,6 +57,21 @@ export interface ProviderInfo {
   hasKey: boolean;
   createdAt: number;
   updatedAt: number;
+  models?: ModelCapabilityInfo[];
+}
+
+/** /api/providers/models 拉取结果（含推断能力，用于免手填） */
+export interface PulledModel {
+  id: string;
+  label?: string;
+  contextWindow: number;
+  maxOutput: number;
+  vision: boolean;
+  tools: boolean;
+  reasoning: boolean;
+  priceIn: number;
+  priceOut: number;
+  source: string;
 }
 
 export interface ProviderForm {
@@ -50,6 +79,7 @@ export interface ProviderForm {
   baseUrl: string;
   apiKey: string;
   model: string;
+  protocol?: string;
   priceIn?: string;
   priceOut?: string;
 }
