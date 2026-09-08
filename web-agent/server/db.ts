@@ -14,10 +14,29 @@ export interface ProviderRow {
   baseUrl: string;
   apiKey: string;
   model: string;
+  /** 协议族：openai（含各家兼容端点）| anthropic | ollama */
+  protocol: string;
   priceIn?: number | null;
   priceOut?: number | null;
   enabled: number;
   createdAt: number;
+  updatedAt: number;
+}
+
+/** 模型能力行（一个 Provider 可挂多个模型，路由按能力谓词选路） */
+export interface ModelRow {
+  providerId: string;
+  modelId: string;
+  contextWindow: number | null;
+  maxOutput: number | null;
+  vision: number;
+  tools: number;
+  reasoning: number;
+  priceIn: number | null;
+  priceOut: number | null;
+  enabled: number;
+  /** pulled=拉取时顺带解析 / inferred=内置目录推断 / manual=用户手填 */
+  source: string;
   updatedAt: number;
 }
 
@@ -84,7 +103,21 @@ export class Store {
         session_id TEXT PRIMARY KEY, turn INTEGER NOT NULL,
         history TEXT NOT NULL, created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS models (
+        provider_id TEXT NOT NULL, model_id TEXT NOT NULL,
+        context_window INTEGER, max_output INTEGER,
+        vision INTEGER NOT NULL DEFAULT 0, tools INTEGER NOT NULL DEFAULT 0,
+        reasoning INTEGER NOT NULL DEFAULT 0,
+        price_in REAL, price_out REAL, enabled INTEGER NOT NULL DEFAULT 1,
+        source TEXT NOT NULL DEFAULT 'manual', updated_at INTEGER NOT NULL,
+        PRIMARY KEY (provider_id, model_id)
+      );
     `);
+    // 迁移：providers.protocol 列（协议族，旧库默认 openai 兼容）
+    const pCols = this.db.prepare(`PRAGMA table_info(providers)`).all() as { name: string }[];
+    if (!pCols.some((c) => c.name === 'protocol')) {
+      this.db.exec("ALTER TABLE providers ADD COLUMN protocol TEXT NOT NULL DEFAULT 'openai'");
+    }
     // 迁移：reasoning 列（旧库无此列）
     const cols = this.db.prepare(`PRAGMA table_info(messages)`).all() as { name: string }[];
     if (!cols.some((c) => c.name === 'reasoning')) {
@@ -151,42 +184,77 @@ export class Store {
 
   listProviders(): ProviderRow[] {
     const rows = this.db
-      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
+      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
       .all() as ProviderRow[];
     return rows.map((r) => ({ ...r, apiKey: this.decryptKey(r.apiKey) }));
   }
 
   getProvider(id: string): ProviderRow | undefined {
     const r = this.db
-      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
+      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
       .get(id) as ProviderRow | undefined;
     return r ? { ...r, apiKey: this.decryptKey(r.apiKey) } : undefined;
   }
 
   upsertProvider(p: {
     id: string; label: string; baseUrl: string; apiKey: string; model: string;
-    priceIn?: number; priceOut?: number; enabled?: number;
+    protocol?: string; priceIn?: number; priceOut?: number; enabled?: number;
   }): void {
     const now = Date.now();
     const storedKey = this.encryptKey(p.apiKey);
     const existing = this.getProvider(p.id);
+    const protocol = p.protocol ?? existing?.protocol ?? 'openai';
     if (existing) {
       this.db
-        .prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
-        .run(p.label, p.baseUrl, storedKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
+        .prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
+        .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
     } else {
       this.db
-        .prepare('INSERT INTO providers (id, label, base_url, api_key, model, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-        .run(p.id, p.label, p.baseUrl, storedKey, p.model, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
+        .prepare('INSERT INTO providers (id, label, base_url, api_key, model, protocol, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+        .run(p.id, p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
     }
   }
 
   deleteProvider(id: string): void {
     this.db.prepare('DELETE FROM providers WHERE id = ?').run(id);
+    this.db.prepare('DELETE FROM models WHERE provider_id = ?').run(id);
   }
 
   setProviderEnabled(id: string, enabled: number): void {
     this.db.prepare('UPDATE providers SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id);
+  }
+
+  // ---------- models（Provider 下的模型与能力，路由的事实源） ----------
+
+  listModels(providerId?: string): ModelRow[] {
+    const sql = 'SELECT provider_id AS providerId, model_id AS modelId, context_window AS contextWindow, max_output AS maxOutput, vision, tools, reasoning, price_in AS priceIn, price_out AS priceOut, enabled, source, updated_at AS updatedAt FROM models';
+    return providerId
+      ? this.db.prepare(`${sql} WHERE provider_id = ? ORDER BY model_id ASC`).all(providerId) as ModelRow[]
+      : this.db.prepare(`${sql} ORDER BY provider_id ASC, model_id ASC`).all() as ModelRow[];
+  }
+
+  upsertModel(m: Partial<ModelRow> & { providerId: string; modelId: string }): void {
+    this.db.prepare(`
+      INSERT INTO models (provider_id, model_id, context_window, max_output, vision, tools, reasoning, price_in, price_out, enabled, source, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+      ON CONFLICT(provider_id, model_id) DO UPDATE SET
+        context_window=COALESCE(excluded.context_window, context_window),
+        max_output=COALESCE(excluded.max_output, max_output),
+        vision=excluded.vision, tools=excluded.tools, reasoning=excluded.reasoning,
+        price_in=COALESCE(excluded.price_in, price_in),
+        price_out=COALESCE(excluded.price_out, price_out),
+        enabled=excluded.enabled,
+        source=CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE models.source END,
+        updated_at=excluded.updated_at
+    `).run(
+      m.providerId, m.modelId, m.contextWindow ?? null, m.maxOutput ?? null,
+      m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
+      m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual', Date.now(),
+    );
+  }
+
+  deleteModel(providerId: string, modelId: string): void {
+    this.db.prepare('DELETE FROM models WHERE provider_id = ? AND model_id = ?').run(providerId, modelId);
   }
 
   // ---------- personas（用户人设，网页端管理） ----------
