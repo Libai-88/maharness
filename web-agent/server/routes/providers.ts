@@ -287,6 +287,16 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/models', (_req, res) => {
     const chat = getChatService(kernel);
     if (!chat) return res.json([]);
-    res.json(chat.providers.map((p) => ({ id: p.id, label: p.label, model: p.defaultModel })));
+    // 每个 provider 的全部可用模型（不止 defaultModel），key = provider@model——
+    // 前端据此能在同一个 provider 内切换不同模型（含能力位不同的多模态/推理模型）
+    res.json(chat.providers.flatMap((p) => {
+      const list = p.models?.length ? p.models : [{ modelId: p.defaultModel, enabled: true, contextWindow: 0, maxOutput: 0, vision: false, tools: false, reasoning: false, priceIn: 0, priceOut: 0, source: 'inferred' }];
+      return list.filter((m) => m.enabled).map((m) => ({
+        id: `${p.id}@${m.modelId}`,
+        label: p.label,
+        model: m.modelId,
+        vision: m.vision, tools: m.tools, reasoning: m.reasoning, contextWindow: m.contextWindow,
+      }));
+    }));
   });
 }

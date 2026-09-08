@@ -29,6 +29,12 @@ function preloadSecondaryViews() {
   void import('./components/SettingsView');
 }
 
+/** 模型条目 id = provider@model（服务端 /api/models 约定） */
+function splitModelId(id: string): { provider: string; model: string } {
+  const i = id.lastIndexOf('@');
+  return i > 0 ? { provider: id.slice(0, i), model: id.slice(i + 1) } : { provider: id, model: '' };
+}
+
 export type Theme = 'dark' | 'light';
 export type Brand = 'doodle' | 'ink' | 'moss';
 
@@ -130,6 +136,14 @@ export default function App() {
     applyFavicon(theme);
   }, [brand, theme]);
 
+  // 供应商被删除后清理当前选择（防止已删除的 provider 残留在模型下拉/会话里）
+  useEffect(() => {
+    if (sel?.provider && !providers.some((p) => p.id === sel.provider)) {
+      setSel(models.length ? splitModelId(models[0].id) : null);
+    }
+    // 仅在 providers 变化时校正；sel 变化不触发，避免抖动
+  }, [providers]);
+
   // 初始加载
   useEffect(() => { void loadAll(); }, []);
 
@@ -181,7 +195,7 @@ export default function App() {
       setModels(ms);
       setPlugins(pl);
       setProviders(pvs);
-      if (ms.length) setSel((prev) => prev ?? { provider: ms[0].id, model: ms[0].model });
+      if (ms.length) setSel((prev) => prev ?? splitModelId(ms[0].id));
       let initialId: string | null = null;
       if (!ss.length) {
         const created = await sessionApi.create(ms[0]?.model ?? '');
@@ -331,14 +345,14 @@ export default function App() {
   }, [activeId, toast]);
 
   const selectModel = useCallback(async (id: string) => {
-    const m = models.find((x) => x.id === id);
-    if (!m) return;
-    setSel({ provider: m.id, model: m.model });
+    const x = splitModelId(id);
+    if (!x.model) return;
+    setSel(x);
     if (activeId) {
-      try { await sessionApi.update(activeId, { model: m.model }); }
+      try { await sessionApi.update(activeId, { model: x.model }); }
       catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
     }
-  }, [models, activeId, toast]);
+  }, [activeId, toast]);
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
@@ -528,8 +542,8 @@ export default function App() {
   const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
   const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
   const modeColor = currentSession?.mode === 'plan' ? 'var(--purple)' : currentSession?.mode === 'goal' ? 'var(--orange)' : 'var(--text-3)';
-  const selModel = models.find((m) => m.id === sel?.provider);
-  const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : (sel ? `${sel.provider} · ${sel.model}` : '');
+  const selModel = sel ? models.find((m) => m.id === `${sel.provider}@${sel.model}`) : undefined;
+  const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : (sel?.model ? `${sel.provider} · ${sel.model}` : '');
   const modelTag = selModel?.model ?? sel?.model ?? '';
   const modeItems = [
     { key: 'normal', label: '普通模式', sub: '自由对话', dot: 'var(--text-3)' },
@@ -607,7 +621,7 @@ export default function App() {
                 <Menu
                   trigger={<>{modelLabel || '未选择模型'}<IconChevronDown size={11} /></>}
                   items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
-                  selectedKey={sel?.provider}
+                  selectedKey={sel ? `${sel.provider}@${sel.model}` : undefined}
                   onSelect={(k) => void selectModel(k)}
                   title="切换模型"
                   width={280}

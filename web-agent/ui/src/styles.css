@@ -199,8 +199,8 @@ body::after {
   inset: 0;
   z-index: 999;
   pointer-events: none;
-  opacity: 0.05;
-  mix-blend-mode: overlay;
+  opacity: 0.028;
+  mix-blend-mode: normal;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }
 
@@ -437,13 +437,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   width: var(--sidebar-w);
   flex-shrink: 0;
   /* 笔记本纸：横格线 + 左侧红色页边线 + 底纸 */
+  /* 注意：不再整容器加 url(#sketchy) 位移滤镜——会连带位移所有文字导致发虚 */
   background:
     linear-gradient(90deg, var(--margin) 0 1px, transparent 1px) 26px 0 / 100% 100%,
     repeating-linear-gradient(var(--line) 0 1px, transparent 1px 34px) 0 26px / 100% 100%,
     var(--bg-panel);
   border-right: 2.5px solid var(--ink);
   border-radius: 4px 18px 12px 6px / 6px 4px 18px 12px;
-  filter: url(#sketchy);
   box-shadow: 3px 4px 0 var(--shadow-ink);
   display: flex;
   flex-direction: column;
@@ -1690,11 +1690,10 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .trail-panel {
   width: var(--trail-w);
   flex-shrink: 0;
-  /* 手绘涂鸦纸板：墨线边框 + 歪扭圆角 + 抖动滤镜 */
+  /* 手绘涂鸦纸板：墨线边框 + 歪扭圆角（整容器不做位移滤镜，保文字可读） */
   background: var(--bg-panel);
   border-left: 2.5px solid var(--ink);
   border-radius: 18px 4px 6px 14px / 14px 18px 4px 6px;
-  filter: url(#sketchy);
   box-shadow: -3px 4px 0 var(--shadow-ink);
   display: flex;
   flex-direction: column;
@@ -4259,9 +4258,8 @@ textarea:focus-visible, [tabindex]:focus-visible {
 /* —— 面包屑标题歪一点 —— */
 .crumb .cur { rotate: -0.8deg; display: inline-block; }
 
-/* —— 模式/模型选择按钮歪贴 —— */
+/* —— 模式/模型选择按钮歪贴（含文字，不做位移滤镜，保可读） —— */
 .tb-btn {
-  filter: url(#sketchy);
   border-width: 2px !important;
   border-color: var(--ink) !important;
 }
