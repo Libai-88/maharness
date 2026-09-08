@@ -633,6 +633,17 @@ export class AgentRunner {
         tokensIn: tIn, tokensOut: tOut, tokensCached: usage?.cachedInput, cost,
       });
 
+      // ---- 文本清洗：剥离混在正文中的思考标签（原生 reasoning 已分通道，此步兜底） ----
+      if (text && !reasoning) {
+        const { clean, extracted } = stripThinking(text, '');
+        if (extracted) {
+          text = clean;
+          reasoning = extracted;
+          this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'thinking-strip', parentId: opts.parentStepId })
+            .finish({ outputSummary: `从正文剥离思考内容 ${extracted.length} 字符` });
+        }
+      }
+
       // ---- 钩子：LLM 输出后（校验/观测；流出的输出暂不可改写） ----
       await this.emitHook('agent.after_llm', {
         traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad,
@@ -935,6 +946,27 @@ export class AgentRunner {
     // 轮数上限不是任务失败：已完成的工作与断点均保留，可继续推进
     yield { type: 'error', error: `本任务已达到轮数上限（${maxTurns} 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置` };
   }
+}
+
+/** 文本完整性：从输出文本中剥离常见思考标签（模型支持原生 reasoning 时此函数不触发），
+ *  防止不支持原生推理块的模型把思考过程混进 text 推给用户。
+ *  支持：<think>  、[思考] 、【思考】 ；剥离出的内容回填 reasoning（如果为空），
+ *  返回清洁后的正文。函数不会改变原文长度异常的文本（如全文仅思考没有正文 → 原样返回）。 */
+function stripThinking(text: string, reasoning: string): { clean: string; extracted: string } {
+  // 1. 全块式思考标签（最常见：DeepSeek/部分 ChatGPT 中文版）
+  const blockTags = /[\s\S]*?<\/?thinking>\s*/gim;
+  const noBlocks = text.replace(blockTags, '').trim();
+  // 2. 行级思考标签
+  const lineTags = noBlocks.replace(/^[\s]*(?:\[思考\]|【思考】)[\s\S]*$/gim, '').trim();
+  const clean = lineTags.trim();
+  // 提取思考内容（从原始文本中找到被剥离的部分）—— 仅当有思考内容且原有 reasoning 为空时回填
+  if (!clean || clean === text) return { clean: text, extracted: '' };
+  const hasThinking = /<thinking>|<\/thinking>|<\/?thinking>|^\[思考\]|^\【思考】/im.test(text);
+  if (!hasThinking) return { clean: text, extracted: '' };
+  if (reasoning) return { clean, extracted: '' };
+  // 粗粒度提取：取被剥离的部分作为 reasoning
+  const extracted = text.replace(clean, '').replace(blockTags, '').replace(/^[\s]*(?:\[思考\]|【思考】)/gim, '').trim();
+  return { clean, extracted: extracted.slice(0, 8000) };
 }
 
 /** 摘要化（Trace 用，防大对象撑爆记录） */
