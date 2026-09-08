@@ -258,9 +258,9 @@ export const providersApi = {
   /** 拉取供应商模型与能力（openai / anthropic / ollama 三协议）；编辑已保存供应商时 Key 可留空 */
   fetchModels: (body: { baseUrl: string; apiKey: string; protocol?: string; providerId?: string; persist?: boolean }) =>
     api<{ ok: boolean; protocol?: string; count?: number; models: PulledModel[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
-  /** 手改单个模型的能力位/价格 */
+  /** 手改单个模型的能力位/价格（模型名走 query，可含 / 与 : ） */
   patchModel: (id: string, modelId: string, body: Record<string, unknown>) =>
-    api<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}/models/${encodeURIComponent(modelId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    api<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}/models?model=${encodeURIComponent(modelId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
 };
 
 export const personasApi = {

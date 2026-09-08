@@ -11,6 +11,7 @@ import { AnimatePresence, motion } from 'motion/react';
 import { pageVariants } from './motion';
 import { IconChevronDown, IconClose, IconPanel, IconWorkbench } from './components/Icon';
 import { Toaster, toast } from 'sonner';
+import { applyFavicon } from './brand/favicon';
 
 // 次要视图路由级代码分割：首屏只需 Chat 视图，文件/工作台/插件/统计/设置
 // 按需加载（首屏 JS 体积显著下降），挂载后 idle 时预取保证首次点击无感
@@ -31,7 +32,11 @@ function preloadSecondaryViews() {
 export type Theme = 'dark' | 'light';
 
 function readTheme(): Theme {
-  try { return localStorage.getItem('maharness-theme') === 'dark' ? 'dark' : 'light'; } catch { return 'light'; }
+  try {
+    const saved = localStorage.getItem('maharness-theme');
+    if (saved === 'dark' || saved === 'light') return saved;
+  } catch { /* 隐私模式等场景读不到 */ }
+  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
 }
 
 export default function App() {
@@ -104,6 +109,7 @@ export default function App() {
     document.documentElement.setAttribute('data-sonner-theme', theme);
     // 浏览器窗口 chrome（标题栏/状态栏）跟随明暗主题
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#f5eee0');
+    applyFavicon(theme);
     try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
   }, [theme]);
 

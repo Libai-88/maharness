@@ -1,5 +1,7 @@
 // ui/src/components/Icon.tsx —— maharness 自研线性图标集（24×24，stroke=currentColor）
 // 全部手绘 path，统一 1.8 线宽 + 圆角端点，替代 emoji 图标（品牌化）
+import { pickSheep } from '../brand/sheep';
+
 interface IconProps { size?: number; className?: string }
 
 function Svg({ children, size = 16, className }: IconProps & { children: React.ReactNode }) {
@@ -91,30 +93,27 @@ export const IconLock = (p: IconProps) => (
   <Svg {...p}><rect x="5" y="10" width="14" height="10" rx="2" /><path d="M8 10 V7 a4 4 0 0 1 8 0 v3" /><circle cx="12" cy="15" r="1.5" /></Svg>
 );
 
-/** 羊（品牌吉祥物 v7 · 蜡笔涂鸦羊）：蓬松羊毛云朵身体 + M 角（品牌首字母双关）
- *  + 终端光标眼（代码在思考）+ 上扬嘴角 + 短腿 + 角尖火花。手绘有机轮廓，弃几何矩形脸。 */
-export const IconSheep = (p: IconProps) => (
-  <Svg {...p}>
-    {/* 蓬松羊毛身体：多段波浪云朵轮廓 */}
-    <path
-      d="M8.6 16.7 C 6.6 17.5 4.9 16.4 4.7 14.8 C 3.2 14.2 2.6 12.4 3.7 11.4 C 3.4 9.6 5 8.2 6.7 8.5 C 7.7 6.9 10 6.4 11.4 7.6 C 12.8 6.2 15.2 6.6 16 8.2 C 18 7.9 19.7 9.4 19.4 11.3 C 20.6 12.3 20 14.2 18.4 14.8 C 18.1 16.5 16.3 17.6 14.5 16.9 C 13.9 17.9 11.9 17.9 11.3 16.9 C 10.4 17.4 9 17.4 8.6 16.7 Z"
-      fill="currentColor"
-      fillOpacity="0.10"
-    />
-    {/* 双角外卷：M 的两条竖笔（maharness 首字母 × 羊角） */}
-    <path d="M9 8.3 C 6.4 7 5.2 4.6 6.8 3.2 C 8 2.2 9.4 3.2 9.2 5" strokeWidth="1.7" />
-    <path d="M15 8.3 C 17.6 7 18.8 4.6 17.2 3.2 C 16 2.2 14.6 3.2 14.8 5" strokeWidth="1.7" />
-    {/* 终端光标眼（代码在思考） */}
-    <path d="M9.7 11.3 h2.1 M12.6 11.3 h2.1" strokeWidth="2" />
-    {/* 上扬嘴角 */}
-    <path d="M10.3 13.2 q 1.8 1.4 3.4 0" strokeWidth="1.5" />
-    {/* 短腿 */}
-    <path d="M9.7 17.1 L 9.7 20 M14.3 17.1 L 14.3 20" strokeWidth="1.8" />
-    {/* 能量火花 ×2（角尖迸发） */}
-    <path d="M4 3.6 l.6 1.7 1.7 .6 -1.7 .6 -.6 1.7 -.6 -1.7 -1.7 -.6 1.7 -.6 Z" strokeWidth="0.8" fill="currentColor" stroke="none" />
-    <path d="M20 3.6 l.6 1.7 1.7 .6 -1.7 .6 -.6 1.7 -.6 -1.7 -1.7 -.6 1.7 -.6 Z" strokeWidth="0.8" fill="currentColor" stroke="none" />
-  </Svg>
-);
+/** 羊（品牌吉祥物）：几何单一源见 brand/sheep.ts。
+ *  <28px 自动切三元素可辨识版（羊毛轮廓 + M 角 + 单眼光标），避免小尺寸糊成一团。 */
+export const IconSheep = (p: IconProps) => {
+  const s = pickSheep(p.size ?? 16);
+  return (
+    <Svg {...p}>
+      <path d={s.wool} fill="currentColor" fillOpacity={s.solid ? 1 : 0.10} strokeLinejoin="round" strokeWidth={s.stroke.wool} />
+      <path d={s.hornL} strokeWidth={s.stroke.horn} />
+      <path d={s.hornR} strokeWidth={s.stroke.horn} />
+      <path d={s.eyes} strokeWidth={s.stroke.eyes} />
+      {s.smile && <path d={s.smile} strokeWidth={s.stroke.smile} />}
+      <path d={s.legs} strokeWidth={s.stroke.legs} />
+      {s.sparks && (
+        <>
+          <path d={s.sparks[0]} strokeWidth={0.8} fill="currentColor" stroke="none" />
+          <path d={s.sparks[1]} strokeWidth={0.8} fill="currentColor" stroke="none" />
+        </>
+      )}
+    </Svg>
+  );
+};
 
 /** 关闭：× */
 export const IconClose = (p: IconProps) => (

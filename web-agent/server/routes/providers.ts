@@ -260,11 +260,11 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     res.json({ models: store.listModels(req.params.id) });
   });
 
-  /** 手改单个模型的能力位/价格（用户是最终事实源） */
-  app.patch('/api/providers/:id/models/:model(*)', async (req, res) => {
+  /** 手改单个模型的能力位/价格（modelId 走 query：模型名含 / : 等字符，不能进路径） */
+  app.patch('/api/providers/:id/models', async (req, res) => {
     const provider = store.getProvider(req.params.id);
     if (!provider) return res.status(404).json({ error: '供应商不存在' });
-    const modelId = decodeURIComponent(String((req.params as Record<string, string>)['model(*)'] ?? ''));
+    const modelId = String(req.query.model ?? req.body?.modelId ?? '');
     const prev = store.listModels(provider.id).find(m => m.modelId === modelId);
     if (!prev) return res.status(404).json({ error: '模型未登记，请先拉取模型列表' });
     const b = req.body ?? {};

@@ -18,15 +18,18 @@
     <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
     <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" /></noscript>
-    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns%3D'http://www.w3.org/2000/svg' viewBox%3D'0 0 32 32'%3E%3Crect width%3D'32' height%3D'32' rx%3D'10 13 9 14' fill%3D'%23e0512f'/%3E%3Cpath d%3D'M12 21 C 8.5 21.5 7 19 8 17 C 6.5 16 6.8 13.6 8.8 13.2 C 9 11.5 11 10.2 12.8 11 C 13.6 9.8 15.6 9.8 16.4 11 C 18.2 10.2 20.2 11.5 20.4 13.2 C 22.4 13.6 22.7 16 21.2 17 C 22.2 19 20.7 21.5 17.2 21 C 16.8 22 14.6 22 14.2 21 C 13 21.4 12.6 21.4 12 21 Z' fill%3D'%23fff8ec' fill-opacity%3D'0.14' stroke%3D'%23fff8ec' stroke-width%3D'1.8' stroke-linejoin%3D'round'/%3E%3Cg stroke%3D'%23fff8ec' stroke-width%3D'1.9' fill%3D'none' stroke-linecap%3D'round'%3E%3Cpath d%3D'M11.5 12 C 9 10.5 8.2 7.6 9.8 6.2 C 11 5.2 12.4 6.2 12.2 7.8'/%3E%3Cpath d%3D'M20.5 12 C 23 10.5 23.8 7.6 22.2 6.2 C 21 5.2 19.6 6.2 19.8 7.8'/%3E%3C/g%3E%3Cg stroke%3D'%23fff8ec' stroke-width%3D'2' stroke-linecap%3D'round'%3E%3Cpath d%3D'M12.4 17 h2.3 M16.9 17 h2.3'/%3E%3Cpath d%3D'M13 19.5 q 3 2.2 6 0'/%3E%3Cpath d%3D'M13.2 21.6 L 13.2 26.6 M19 21.6 L 19 26.6' stroke-width%3D'1.7'/%3E%3C/g%3E%3C/svg%3E" />
+    <!-- favicon 由 src/brand/favicon.ts 在首帧按主题写入（几何与侧栏/头像/大图同源）；
+         此处仅留占位，避免 404 图标。 -->
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3C/svg%3E" />
     <script>
-      // 首帧主题预置（避免深/浅色闪烁）
+      // 首帧主题预置（避免深/浅色闪烁）；未显式选择过时跟随系统
       (function () {
-        try {
-          document.documentElement.dataset.theme = localStorage.getItem('maharness-theme') === 'dark' ? 'dark' : 'light';
-        } catch (e) {
-          document.documentElement.dataset.theme = 'light';
+        var t = null;
+        try { t = localStorage.getItem('maharness-theme'); } catch (e) { t = null; }
+        if (t !== 'dark' && t !== 'light') {
+          t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
         }
+        document.documentElement.dataset.theme = t;
       })();
     </script>
   </head>
