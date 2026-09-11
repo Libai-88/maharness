@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { evolveApi, skillsApi } from '../api';
 import type { LockSkill, SkillInfo, SkillProposal, SkillUsageRow } from '../types';
 import { IconClose, IconSpark } from './Icon';
+import Confirm, { type ConfirmRequest } from './Confirm';
 import { toast } from 'sonner';
 
 const COLORS = ['#e8930f', '#43a047', '#e0512f', '#8a63e8', '#d94630', '#9c8d74'];
@@ -24,6 +25,7 @@ export default function SkillsView() {
   const [usage, setUsage] = useState<Record<string, SkillUsageRow>>({});
   const [proposals, setProposals] = useState<SkillProposal[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
 
   const load = async () => {
     try {
@@ -79,15 +81,24 @@ export default function SkillsView() {
   };
 
   const uninstall = async (s: SkillInfo) => {
-    if (!confirm(`卸载技能 ${s.name}？`)) return;
-    setUninstalling(s.name);
-    try {
-      await skillsApi.uninstall(s.name);
-      if (selected?.name === s.name) { setSelected(null); setGuide(null); }
-      await load();
-    }
-    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
-    finally { setUninstalling(null); }
+    // 二步确认走应用内弹层（与侧栏删除会话一致；原生 confirm 会弹系统对话框）
+    setConfirmReq({
+      text: `卸载技能「${s.name}」？它的说明文件会一起删掉。`,
+      okText: '卸载',
+      danger: true,
+      onOk: () => {
+        void (async () => {
+          setUninstalling(s.name);
+          try {
+            await skillsApi.uninstall(s.name);
+            if (selected?.name === s.name) { setSelected(null); setGuide(null); }
+            await load();
+          }
+          catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+          finally { setUninstalling(null); }
+        })();
+      },
+    });
   };
 
   const readGuide = async (s: SkillInfo) => {
@@ -144,6 +155,7 @@ export default function SkillsView() {
 
   return (
     <div className="plugins-layout">
+      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
       <div className="plugins-list">
         <div className="page-head">
           <div className="ph-eyebrow">
@@ -178,7 +190,7 @@ export default function SkillsView() {
                 <div className="skill-info">
                   <div className="skill-info-top">
                     <span className="skill-name">{p.name}</span>
-                    {p.signals.map(sg => <span key={sg} className="skill-tag">{sg}</span>)}
+                    {(Array.isArray(p.signals) ? p.signals : []).map(sg => <span key={sg} className="skill-tag">{sg}</span>)}
                     {p.seen > 1 && <span className="skill-tag" title="同一信号再次出现">第 {p.seen} 次</span>}
                   </div>
                   <span className="skill-desc">{p.description}</span>

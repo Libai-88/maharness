@@ -3,5 +3,14 @@
   "name": "办公工作台",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "nav": {
+    "label": "工作台",
+    "icon": "workbench",
+    "order": 55,
+    "mode": "iframe",
+    "page": "/app",
+    "status": "/status",
+    "statusIntervalMs": 6000
+  }
 }

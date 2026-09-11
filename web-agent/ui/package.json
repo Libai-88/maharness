@@ -6,7 +6,16 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "e2e": "playwright test",
+    "e2e:headed": "playwright test --headed",
+    "diag": "node diagnose-regression.mjs",
+    "diag:sweep": "node diagnose-ui.mjs",
+    "diag:polish": "node diagnose-polish.mjs",
+    "diag:live": "node diagnose-live-shape.mjs",
+    "diag:stop": "node diagnose-stop-health.mjs",
+    "diag:batch2": "node diagnose-batch2.mjs",
+    "diag:plan": "node diagnose-plan.mjs"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
@@ -21,6 +30,7 @@
     "sonner": "^2.0.8"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
     "@vitejs/plugin-react": "^4.3.4",

@@ -13,12 +13,25 @@ export interface ApprovalInfo {
   name: string;
   summary: string;
   args?: unknown;
+  /** 审批所属会话：刷新/换会话后前端才知道该把这张卡放回哪段聊天里 */
+  sessionId?: string;
+}
+
+/** 挂起中的审批（对前端可见的形状：含"等了多久"与"什么时候自动作废"） */
+export interface PendingApproval extends ApprovalInfo {
+  id: string;
+  /** 注册时刻 */
+  createdAt: number;
+  /** 自动拒绝时刻（到点后服务端会 resolve(false)，前端据此把卡撤掉） */
+  expiresAt: number;
 }
 
 interface ApprovalRecord {
   resolve: (approved: boolean) => void;
   timer?: NodeJS.Timeout;
   info: ApprovalInfo;
+  createdAt: number;
+  expiresAt: number;
 }
 
 export class ApprovalBoard {
@@ -28,11 +41,13 @@ export class ApprovalBoard {
 
   /** 注册审批：登记即启动超时计时（到时自动拒绝，resolve(false)） */
   register(id: string, info: ApprovalInfo, resolve: (approved: boolean) => void): void {
+    const createdAt = Date.now();
+    const expiresAt = createdAt + this.timeoutMs;
     const timer = setTimeout(() => {
       if (this.map.delete(id)) resolve(false);
     }, this.timeoutMs);
     timer.unref?.();
-    this.map.set(id, { resolve, timer, info });
+    this.map.set(id, { resolve, timer, info, createdAt, expiresAt });
   }
 
   /** 批准/拒绝：命中返回 true 并解除挂起（含超时计时器清理）；未知 ID 返回 false */
@@ -49,12 +64,29 @@ export class ApprovalBoard {
     return this.map.has(id);
   }
 
+  /** 撤下挂起审批（不 resolve）：任务被停止时调用——清掉计时器、不留无人应答的条目。
+   *  与 approve 的区别正是"没人批准也没人拒绝，这件事已经不存在了"。 */
+  withdraw(id: string): void {
+    const rec = this.map.get(id);
+    if (!rec) return;
+    this.map.delete(id);
+    if (rec.timer) clearTimeout(rec.timer);
+  }
+
   get(id: string): ApprovalInfo | undefined {
     return this.map.get(id)?.info;
   }
 
   list(): { id: string; info: ApprovalInfo }[] {
     return [...this.map.entries()].map(([id, rec]) => ({ id, info: rec.info }));
+  }
+
+  /** 挂起清单（含时限）：GET /api/approvals 与新 SSE 连接的回放快照都用它——
+   *  刷新页面后审批卡能原位回来，而不是"卡没了但服务端还在等，10 分钟后说你拒绝了它"。 */
+  listPending(sessionId?: string): PendingApproval[] {
+    return [...this.map.entries()]
+      .filter(([, rec]) => !sessionId || rec.info.sessionId === sessionId)
+      .map(([id, rec]) => ({ id, ...rec.info, createdAt: rec.createdAt, expiresAt: rec.expiresAt }));
   }
 
   get size(): number {

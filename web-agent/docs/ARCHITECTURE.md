@@ -139,11 +139,11 @@ unregister，reload 时 `caps=[]` 直接丢弃；`ctx.bus.on` 的监听器无人
 **插件侧契约**（`PluginContext`，全部自动入作用域）：
 
 ```ts
-ctx.register(cap)              // 返回 unregister；未手动撤销时卸载自动回收
-ctx.on(event, listener)        // 自动退订的事件订阅（替代 ctx.bus.on，杜绝监听器泄漏）
-ctx.provide(key, value)        // 服务绑定（卸载自动撤回并通知依赖方）
-ctx.watchConfig(key, cb)       // 声明式配置对账（自动退订）
-ctx.effect(fn, makeInverse)    // 原始可逆效应
+ctx.register(cap)                     // 返回 unregister；未手动撤销时卸载自动回收
+ctx.on(event, listener)               // 自动退订的事件订阅（替代 ctx.bus.on，杜绝监听器泄漏）
+ctx.provide(key, value, priority?)    // 服务绑定（可接管；卸载自动撤回/回退并通知依赖方）
+ctx.watchConfig(key, cb)              // 声明式配置对账（自动退订）
+ctx.effect(fn, makeInverse)           // 原始可逆效应
 ```
 
 - 卸载（stop）顺序：**先标记停供**（依赖方先感知停用）→ LIFO 执行逆元 → 旧式 onStop/onUnload 钩子仍保留兜底。
@@ -173,6 +173,40 @@ ctx.effect(fn, makeInverse)    // 原始可逆效应
   消费者工具立即返回 provided=false；enable → 自动恢复 true。全程消费者零改动、零重启。
 - 附带修复 v1 启动期 bug：L2 人设层在插件 start 前刷新导致启动后缺失——start 时按能力
   种类通知订阅者，保证「启动即生效」。
+
+### 1.5.2b 服务接管：同键多提供者 + 优先级仲裁（v3.3，一切皆插件的最后闭环）
+
+**旧问题（v2）**：服务注册表是**单槽 Map**——同键第二个提供者**静默顶掉**第一个；
+先提供者卸载时 `delete` 键，把后来者的绑定一起带走。更要命的是 `ctx.provide` 在
+**onLoad 就发布**，于是 `enabled=false`/`lazy` 的插件在注册期就能顶掉活动插件的服务，
+而它自己从未启动。结果是：内核子系统（cache/trace/budget）与执行循环**无法被替换**——
+它们只能被"配置"，不能被"换实现"。
+
+**v3.3 机制**：每个服务键维护**候选集**（每键每插件至多一条绑定），生效者由仲裁决定：
+
+- **仲裁规则**：priority 大者胜；同优先级**先到者胜**（seq 全局单调，后到者不静默顶掉）；
+- **只仲裁已发布候选**：注册期登记的声明（`published=false`）是「意图」而非「生效」，
+  不参与竞争——这是「绑定只在提供者 ACTIVE 时可见」的真正实现（声明在注册期、生效在启动期）；
+- **卸载自动回退**：生效者撤销时重新仲裁，依赖方收到**次高提供者的值**而非 `undefined`
+  ——「接管者卸载后服务不消失」；
+- **事件语义按「生效者是否换人」判定**：`service.provided`（首次激活）/`service.overridden`
+  （接管，含休眠候选上线接管活动绑定）/`service.declared`（并存但未生效，不惊动依赖方）；
+- **内核是默认提供者**：`Kernel` 构造时把内置 cache/trace/budget 以 `providerId='kernel'`、
+  priority 0 注入同一仲裁体系；`kernel.cache` 等访问器走**解析层**（`resolveService` +
+  内置兜底），因此 137 处 `ctx.cache`/`kernel.trace` 调用点**零改动**即可被接管。
+  Trace 解析只在确有插件绑定时才写 service_call 步骤（无接管 = 零额外开销）。
+
+**执行循环即插件（service:runner）**：循环契约（`AgentEvent`/`RunOptions`/`AgentLoop`/
+`RunnerFactory`）定义在 `kernel/loop.ts`——内核承诺接口形状，实现归插件。
+默认实现 `defaultRunnerFactory`（core/chat/agent.ts）由 chat 插件以 `ctx.provide` 注册；
+顶层对话（server 的 `getRunner`）、子代理（`run_subagent`）、并行（`run_parallel`）
+**三条路径统一经 `makeRunner(kernel, bus)` 取循环**——替换一次即全局一致，
+不会出现「顶层换了、子代理还在跑旧循环」的割裂。
+
+- 实测（kernel/tests/services.spec.ts、runner-seam.spec.ts）：插件以 priority 10 接管
+  `service:cache` → `kernel.cache` 立即变为插件实现；disable → 自动回退内核内置。
+  装载**完整 core 插件栈**后由测试插件接管 `service:runner` → 顶层事件流、`run_subagent`、
+  `run_parallel`（两个子任务各一次）全部改用替身循环；替身停用 → 回退默认循环，服务不消失。
 
 ### 1.5.3 事务性热重载：坏版本自动回滚（HMR with rollback）
 

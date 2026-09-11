@@ -2,6 +2,7 @@
  * server/routes/sessions.ts —— 会话 CRUD / 消息查询 / 批量删除
  */
 import type { Express } from 'express';
+import { isHiddenMessage } from '../db';
 import type { RouteDeps } from './shared';
 
 export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
@@ -18,15 +19,11 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/sessions/:id/messages', (req, res) => {
     const session = store.getSession(req.params.id);
     if (!session) return res.status(404).json({ error: '会话不存在' });
-    // 前端展示过滤：隐藏发送序列中的注入消息（失败教训/长期记忆/英文提醒/角色移交）
+    // 前端展示过滤：隐藏发送序列中的注入消息（失败教训/长期记忆/英文提醒/角色移交/续跑提示）
     // ——它们是 harness 内部上下文工程，不是用户可见的对话内容；
     // 组装（chat 端点）保留它们以保证 L3 前缀缓存逐字节延续。
-    const visible = store.listMessages(session.id).filter((m) => {
-      const c = String(m.content ?? '');
-      if (m.role === 'system' && c.startsWith('Reason in ENGLISH')) return false;
-      if (c.startsWith('【失败教训】') || c.startsWith('【长期记忆】') || c.startsWith('【角色移交】') || c.startsWith('【继续】')) return false;
-      return true;
-    });
+    // 规则与侧栏摘要（db.listSessions 的 lastMsg）同源：HIDDEN_MSG_PREFIXES，避免两处漂移。
+    const visible = store.listMessages(session.id).filter((m) => !isHiddenMessage(m.role, m.content));
     res.json(visible);
   });
 

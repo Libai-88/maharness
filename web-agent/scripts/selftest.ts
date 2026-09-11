@@ -881,6 +881,29 @@ export default {
   const v2In = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe_v2');
   const v1Gone = !kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_probe');
   check('[compose] 好版本正常替换（v2 生效、v1 回收）', v2In && v1Gone, `(v2=${v2In} v1残=${!v1Gone})`);
+
+  // ---- 依赖文件变更：内容快照驱动的模块图重建（此前依赖级改动静默失效）----
+  writeFileSync(join(dir, 'dep.ts'), `export const depTag = () => 'compose_dep_v1';\n`);
+  writeFileSync(join(dir, 'index.ts'), `
+import { depTag } from './dep.ts';
+export default {
+  id: 'tmp-compose', name: '可组合性测试', version: '0.3.0',
+  onLoad(ctx) {
+    ctx.register({ kind: 'tool', tool: { name: depTag(), description: '依赖探针',
+      parameters: { type: 'object', properties: {} },
+      async handler() { return { ok: true, data: { v: 1 } }; } } });
+  },
+} satisfies Plugin;
+`);
+  await kernel.plugins.reload('tmp-compose');
+  const depV1 = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_dep_v1');
+  writeFileSync(join(dir, 'dep.ts'), `export const depTag = () => 'compose_dep_v2';\n`);
+  await kernel.plugins.reload('tmp-compose');
+  const depV2 = kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_dep_v2');
+  const depV1Gone = !kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'compose_dep_v1');
+  check('[compose] 依赖文件变更生效（模块图重建）', depV1 && depV2 && depV1Gone,
+    `(v1=${depV1} v2=${depV2} v1残=${!depV1Gone})`);
+
   offErr();
   // 清理
   rmSync(dir, { recursive: true, force: true });

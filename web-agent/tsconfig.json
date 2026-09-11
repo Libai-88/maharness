@@ -14,5 +14,6 @@
     "noUnusedLocals": true,
     "noUnusedParameters": true
   },
-  "include": ["kernel", "core", "server", "scripts", "plugins"]
+  "include": ["kernel", "core", "server", "scripts", "plugins"],
+  "exclude": ["node_modules", "**/*@*"]
 }

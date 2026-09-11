@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PluginInfo, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PlanState, PluginInfo, PluginNavItem, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
@@ -20,19 +20,26 @@ export interface ChatHandlers {
   onStart(traceId: string): void;
   onDelta(text: string): void;
   onReasoning(text: string): void;
-  onToolStart(name: string, args: unknown): void;
-  onToolResult(name: string, summary: string, ok: boolean, stored?: boolean): void;
+  /** id = tool_call_id：同名并发调用靠它配对，不会把两次 read_file 结算成一张卡 */
+  onToolStart(id: string | undefined, name: string, args: unknown): void;
+  onToolResult(id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean): void;
   onApprovalRequired(approvalId: string, name: string, summary: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
   /** 角色移交（handoff）：会话控制权交给目标角色 */
   onHandoff?(role: string, objective: string): void;
   /** 成本熔断（budget_hit）：harness 硬边界触发 */
   onBudgetHit?(cost: number, budget: number): void;
-  /** provider 重试（retry）：当前流式作废重新开始——调用方应清空流式内容重新累积 */
-  onRetry?(): void;
-  onError(e: string): void;
+  /** provider 重试（retry）：当前流式作废重新开始——调用方应清空流式内容重新累积。
+   *  reason 让"作废"不再无声：换线路 / 刚才没接上 / 重新用真方式调用。 */
+  onRetry?(reason: 'attempt' | 'failover' | 'narration', detail?: string): void;
+  /** 前置重活播报（如历史压缩）：让"开口前的十几秒"有话说 */
+  onStatus?(text: string): void;
+  /** kind=aborted：是用户自己按的停止，不是故障，调用方不得画成红色报错 */
+  onError(e: string, kind?: ErrorKind): void;
   onEnd(): void;
 }
+
+export type ErrorKind = 'aborted' | 'budget' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy';
 
 /** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
  *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
@@ -45,6 +52,10 @@ export async function streamChat(
   h: ChatHandlers,
   signal?: AbortSignal,
 ): Promise<void> {
+  /** 用户主动停止（abort）→ 温和收尾，不报"连接中断" */
+  const stopped = () => signal?.aborted === true;
+  const fail = (msg: string, kind: ErrorKind = 'upstream') => h.onError(msg, stopped() ? 'aborted' : kind);
+
   let res: Response;
   try {
     res = await fetch(`/api/sessions/${sessionId}/chat`, {
@@ -53,17 +64,19 @@ export async function streamChat(
       body: JSON.stringify(body),
       signal,
     });
-  } catch {
-    h.onError('网络错误或已中断');
+  } catch (err) {
+    if (stopped() || isAbortLike(err)) { h.onError('已停止', 'aborted'); return; }
+    fail('网络没接上', 'network');
     return;
   }
+  if (res.status === 409) { h.onError('该会话有任务进行中', 'busy'); return; }
   if (!res.ok) {
     let msg = `请求失败 ${res.status}`;
     try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
-    h.onError(msg);
+    fail(msg);
     return;
   }
-  if (!res.body) { h.onError('响应无内容'); return; }
+  if (!res.body) { fail('响应无内容'); return; }
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -72,6 +85,7 @@ export async function streamChat(
   // 否则全局 streaming 状态永远不复位（输入区卡死）
   let endSeen = false;
   let transportBroke = false;
+  let errSeen = false;
   try {
     for (;;) {
       const { done, value } = await reader.read();
@@ -92,39 +106,56 @@ export async function streamChat(
         const d = data as Record<string, unknown>;
         switch (event) {
           case 'start': h.onStart(String(d.traceId ?? '')); break;
+          case 'status': h.onStatus?.(String(d.text ?? '')); break;
           case 'delta': h.onDelta(String(d.text ?? '')); break;
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
-          case 'tool_start': h.onToolStart(String(d.name ?? ''), d.args); break;
+          case 'tool_start': h.onToolStart(d.id ? String(d.id) : undefined, String(d.name ?? ''), d.args); break;
           case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
-          case 'tool_result': h.onToolResult(String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
+          case 'tool_result': h.onToolResult(d.id ? String(d.id) : undefined, String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
           case 'retry':
             // provider 重试：透传给 handler（App 记录截断边界，展示层从该边界重新累积）
-            h.onRetry?.();
+            h.onRetry?.((d.reason as 'attempt' | 'failover' | 'narration') ?? 'attempt', d.detail ? String(d.detail) : undefined);
             break;
-          case 'error': h.onError(String(d.error ?? '未知错误')); break;
+          case 'error':
+            errSeen = true;
+            h.onError(String(d.error ?? '未知错误'), (d.kind as ErrorKind | undefined) ?? 'upstream');
+            break;
           case 'end': endSeen = true; h.onEnd(); break;
         }
       }
     }
-  } catch {
-    // 传输层中断（网络断开/代理掐断/用户停止）：不静默吞掉——错误需到达 UI
-    //（onError 复位 streaming 状态；onEnd 不再触发，避免清掉未完成任务的断点）
+  } catch (err) {
+    // 传输层中断：区分「用户按了停止」与「真的断线」——两者都该复位 streaming，
+    // 但只有后者才是错误（旧版一律报"连接中断"，等于把用户的取消说成系统故障）
     transportBroke = true;
-    h.onError('连接中断');
+    if (stopped() || isAbortLike(err)) h.onError('已停止', 'aborted');
+    else h.onError('连接中断', 'network');
   } finally {
     reader.releaseLock();
   }
   // 流读完但服务端未发 end（进程崩溃/连接被掐断）：同样兜底，streaming 不复位会锁死输入区
-  if (!endSeen && !transportBroke) h.onError('连接中断：未见结束标记');
+  if (!endSeen && !transportBroke && !errSeen) fail('话说到一半断了', 'network');
+}
+
+/** AbortError 判定：不同浏览器/实现下 name 与 message 都可能是取消信号 */
+function isAbortLike(err: unknown): boolean {
+  const name = err instanceof Error ? err.name : '';
+  const msg = err instanceof Error ? err.message : String(err ?? '');
+  return name === 'AbortError' || /abort(ed)?/i.test(msg);
 }
 
 // ---------- 全局事件订阅（Trace 实时面板） ----------
 
-export function subscribeEvents(onEvent: (e: BusEvent) => void): () => void {
+/** 全局事件订阅（Trace 实时面板 / plan / todo / 审批 / provider 健康）。
+ *  onState 把"这条常驻连接到底通不通"告诉调用方——断线时界面该有反应，
+ *  而不是"实时"灯常亮、数据其实早就不动了。浏览器会自动重连，这里只报状态。 */
+export function subscribeEvents(onEvent: (e: BusEvent) => void, onState?: (s: 'open' | 'down') => void): () => void {
   const es = new EventSource('/api/events');
+  es.addEventListener('open', () => onState?.('open'));
+  es.addEventListener('error', () => onState?.('down'));
   es.addEventListener('event', (ev) => {
     try { onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent); } catch { /* 忽略 */ }
   });
@@ -137,7 +168,7 @@ export const sessionApi = {
   list: () => api<Session[]>('/api/sessions'),
   create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
-  update: (id: string, patch: Partial<{ title: string; model: string; mode: string; role: string; archived: boolean | number; pinned: boolean | number }>) =>
+  update: (id: string, patch: Partial<{ title: string; model: string; provider: string; mode: string; role: string; archived: boolean | number; pinned: boolean | number }>) =>
     api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
   batchRemove: (ids: string[]) => api<{ ok: boolean; removed: number }>('/api/sessions/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
@@ -278,6 +309,10 @@ export const metaApi = {
 
 export const approvalsApi = {
   respond: (id: string, approved: boolean) => api<{ ok: boolean }>(`/api/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approved }) }),
+  /** 挂起清单：刷新页面后审批卡原位复原（可按会话过滤）——服务端在等，用户必须看得见 */
+  list: (sessionId?: string) =>
+    api<{ pending: { id: string; name: string; summary: string; sessionId?: string; createdAt: number; expiresAt: number; waitedMs: number; expiresInMs: number }[] }>(
+      sessionId ? `/api/approvals?sessionId=${encodeURIComponent(sessionId)}` : '/api/approvals'),
 };
 
 export const modelsApi = {
@@ -291,7 +326,7 @@ export const providersApi = {
     api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
   test: (body: { baseUrl: string; apiKey: string; model: string; protocol?: string; providerId?: string }) =>
-    api<{ ok: boolean; latencyMs?: number; message?: string; error?: string }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
+    api<{ ok: boolean; latencyMs?: number; message?: string; error?: string; authFailed?: boolean }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
   /** 拉取供应商模型与能力（openai / anthropic / ollama 三协议）；编辑已保存供应商时 Key 可留空 */
   fetchModels: (body: { baseUrl: string; apiKey: string; protocol?: string; providerId?: string; persist?: boolean }) =>
     api<{ ok: boolean; protocol?: string; count?: number; models: PulledModel[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
@@ -315,14 +350,25 @@ export const pluginsApi = {
   open: (id: string) => api<{ ok: boolean; path: string }>(`/api/plugins/${id}/open`, { method: 'POST' }),
 };
 
+/** 插件声明的前端标签页（声明式导航）：前端遍历它生成导航，不硬编码任何插件页面 */
+export const navApi = {
+  list: () => api<{ items: PluginNavItem[] }>('/api/nav'),
+  /** panel 模式：取插件的 HTML 片段 */
+  panel: (url: string) => api<{ title: string; html: string }>(url),
+};
+
 export const traceApi = {
   stats: () => api<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean }>('/api/trace/stats'),
   byTraceId: (traceId: string) => api<{ steps: TraceStep[] }>(`/api/trace?trace_id=${encodeURIComponent(traceId)}`),
 };
 
-/** 办公工作台（workbench 插件）：全量状态一次取回，变更操作直接回传新状态（一轮刷新）。
- *  插件停用后端点 404 → 调用方 catch 后展示「插件未启用」空态。 */
+/** 目标计划（goal-plan 插件）：计划只活在插件内存里，刷新后靠这个端点把卡找回来 */
+export const planApi = {
+  get: (sessionId: string) => api<{ plan: PlanState | null }>(`/api/plugins/goal-plan/plan?sessionId=${encodeURIComponent(sessionId)}`),
+};
+
+/** 办公工作台（workbench 插件）：桥接状态。
+ *  仅插件详情用途保留；工作台标签页由插件声明的 nav.status 端点驱动（前端通用轮询）。 */
 export const workbenchApi = {
-  /** 文件桥状态（联动状态条轮询；替代旧 state/rollover 等 REST 端点） */
   bridge: () => api<BridgeInfo>('/api/plugins/workbench/wb/bridge'),
 };

@@ -1,0 +1,4 @@
+test-results/
+playwright-report/
+# 前端遮挡/点击失效体检脚本的产物（截图 + JSON 报告）；脚本本身入库，作回归工具
+diag-out/

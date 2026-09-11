@@ -10,7 +10,7 @@ import type { LLMMessage, LLMRole } from '../../kernel/types';
 import type { Message, Session } from '../../kernel/types';
 import { truncateHistory } from '../context';
 import { beginRun, endRun } from '../index';
-import { getChatService, sse, type RouteDeps } from './shared';
+import { getChatService, getRunner, sse, type RouteDeps } from './shared';
 import { scheduleWarmup } from './warmup';
 
 // ---- H3 同会话互斥：同一会话同时只允许一个 run ----
@@ -199,6 +199,27 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
 
     const traceId = randomUUID();
     const ac = new AbortController();
+    // ---- 响应头与 start 事件先落地，再做压缩/截断等前置重活 ----
+    // 旧顺序是「压缩完才 writeHead」：compactHistory 命中时要整次 LLM 调用（上限 30s），
+    // 这期间前端连响应头都拿不到，界面只有一个本地造的「思考中」——长会话开口前先静默
+    // 十几秒，用户以为卡死了。现在首字节立即可用，重活期间用 status 事件说句人话。
+    // 客户端断开才中断（req close 在请求体读完即触发，不可用）
+    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    // SSE 心跳：审批等待等长挂起场景防代理/客户端超时断开
+    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
+    res.on('close', () => clearInterval(heartbeat));
+    sse(res, 'start', { traceId });
+    /** 前置重活期间的"我在做什么"播报：超过阈值才开口（短会话不该闪一句无意义的话） */
+    const announceWhile = async <T>(say: string, work: Promise<T>): Promise<T> => {
+      const timer = setTimeout(() => { try { sse(res, 'status', { text: say }); } catch { /* 已关闭 */ } }, 900);
+      try { return await work; } finally { clearTimeout(timer); }
+    };
     // 模型路由可观测：命中路由时记录 model-route 步骤（谁被路由到了哪）
     if (routed?.reason) {
       kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: 'model-route' })
@@ -215,7 +236,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     let ctxMode: 'none' | 'compact' | 'truncate' = 'none';
     let droppedMessages = 0;
     if (compactEnabled) {
-      const r = await chat.compactHistory(history, maxCtx, { provider: runProvider, model: runModel, signal: ac.signal, traceId, trace: kernel.trace });
+      const r = await announceWhile('这条有点长，我先翻翻我们之前聊过的记录…', chat.compactHistory(history, maxCtx, { provider: runProvider, model: runModel, signal: ac.signal, traceId, trace: kernel.trace }));
       ctxHistory = r.messages;
       ctxMode = r.mode;
       droppedMessages = r.droppedMessages;
@@ -256,20 +277,6 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         console.warn('[routes] 压缩结果持久化失败（不影响本次对话）:', err instanceof Error ? err.message : String(err));
       }
     }
-    // 客户端断开才中断（req close 在请求体读完即触发，不可用）
-    res.on('close', () => { if (!res.writableEnded) ac.abort(); });
-
-    res.writeHead(200, {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      Connection: 'keep-alive',
-      'X-Accel-Buffering': 'no',
-    });
-    // SSE 心跳：审批等待等长挂起场景防代理/客户端超时断开
-    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
-    res.on('close', () => clearInterval(heartbeat));
-    sse(res, 'start', { traceId });
-
     let assistantText = '';
     let assistantReasoning = '';
     let usage = { input: 0, output: 0 };
@@ -287,7 +294,11 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         plan: kernel.config.get<number>('agent.maxTurnsPlan', 24),
         normal: kernel.config.get<number>('agent.maxTurns', 12),
       };
-      for await (const ev of chat.runner.run({
+      // 执行循环经服务解析取得（service:runner）：循环是可替换的插件服务，
+      // 对话引擎只是默认实现的提供者——本路由不认识 AgentRunner 具体类型。
+      const runner = getRunner(kernel);
+      if (!runner) return res.status(503).json({ error: '执行循环服务（service:runner）未加载：请确认对话引擎插件已启用' });
+      for await (const ev of runner.run({
         provider: runProvider, model: runModel, messages: ctxHistory, contextMessages: [{ role: 'system', content: worldState }], traceId,
         maxTurns: maxTurnsByMode[session.mode] ?? 12,
         // L1 会话级缓存作用域：稳定会话 ID——同一会话多次提问共享"会话自产答案"，
@@ -345,12 +356,14 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           assistantReasoning += ev.text;
           sse(res, 'reasoning', { text: ev.text });
         } else if (ev.type === 'tool_start') {
-          sse(res, 'tool_start', { name: ev.name, args: ev.args });
+          // id = tool_call_id：前端按 id 配对 start/result（同名并发调用不再串成一张卡）
+          sse(res, 'tool_start', { id: ev.id, name: ev.name, args: ev.args });
         } else if (ev.type === 'approval_required') {
           sse(res, 'approval_required', { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args });
         } else if (ev.type === 'retry') {
-          // provider 重试/failover：前端作废当前流式残段重新累积（防止残段+全文重复渲染）
-          sse(res, 'retry', {});
+          // provider 重试/failover：前端作废当前流式残段重新累积（防止残段+全文重复渲染）；
+          // reason/detail 让"作废"不再无声——用户看得见是换了线路还是刚才没接上
+          sse(res, 'retry', { reason: ev.reason, detail: ev.detail ?? '' });
         } else if (ev.type === 'budget_hit') {
           // 成本熔断：harness 硬边界触发（SSE 推送，前端可展示）
           sse(res, 'budget_hit', { cost: ev.cost, budget: ev.budget });
@@ -359,7 +372,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           store.updateSession(session.id, { role: ev.role });
           sse(res, 'handoff', { role: ev.role, objective: ev.objective });
         } else if (ev.type === 'tool_result') {
-          sse(res, 'tool_result', { name: ev.name, summary: ev.summary, ok: ev.ok, stored: ev.stored ?? false });
+          sse(res, 'tool_result', { id: ev.id, name: ev.name, summary: ev.summary, ok: ev.ok, stored: ev.stored ?? false });
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;
@@ -367,11 +380,15 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           store.clearCheckpoint(session.id);
           sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost, cached: ev.cached ?? false });
         } else if (ev.type === 'error') {
-          sse(res, 'error', { error: ev.error });
+          // kind=aborted 是"用户自己停的"，前端不得画成红色报错
+          sse(res, 'error', { error: ev.error, kind: ev.kind ?? 'upstream' });
         }
       }
     } catch (err) {
-      sse(res, 'error', { error: err instanceof Error ? err.message : String(err) });
+      // 只看 ac.signal：本路由里唯一的取消源就是「客户端断开/用户按停止」
+      // （不 import core/chat 的子模块——路由只经 chat service interface 访问策略）
+      const aborted = ac.signal.aborted;
+      try { sse(res, 'error', { error: aborted ? '已停止' : (err instanceof Error ? err.message : String(err)), kind: aborted ? 'aborted' : 'upstream' }); } catch { /* 连接已断 */ }
     }
     if (assistantText && lastAssistantId) {
       // 最终轮已入库（onHistoryMessage）：回填结算字段（tokens/cost/reasoning）

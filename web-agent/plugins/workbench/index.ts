@@ -733,6 +733,30 @@ export default {
               return;
             }
 
+            // ---- 页头状态（nav.status 契约）：前端顶栏通用轮询 + 展示 text ----
+            // 这是「插件把状态显示在自己标签页的页头」的标准通道：通用字段 text，
+            // 附加字段供更强的前端展示（connected 决定状态点颜色、stats 是详情文本）。
+            if (req.method === 'GET' && p === '/status') {
+              const info = bridgeStatus() as unknown as {
+                connected?: boolean; records?: { tasks?: number; notes?: number; projects?: number };
+                lastExternalAt?: number; mtimeMs?: number; dir?: string;
+              };
+              const rec = info.records ?? {};
+              const total = (rec.tasks ?? 0) + (rec.notes ?? 0) + (rec.projects ?? 0);
+              const syncAt = info.lastExternalAt ?? info.mtimeMs ?? 0;
+              const mins = syncAt ? Math.max(0, Math.floor((Date.now() - syncAt) / 60000)) : 0;
+              const ago = !syncAt ? '—' : mins < 1 ? '刚刚' : mins < 60 ? `${mins} 分钟前` : `${Math.floor(mins / 60)} 小时前`;
+              res.json({
+                connected: !!info.connected,
+                text: info.connected ? '桥已连接' : '桥未连接',
+                detail: total > 0
+                  ? `${rec.tasks ?? 0} 任务 / ${rec.notes ?? 0} 灵感 / ${rec.projects ?? 0} 项目 · 最后同步：${ago}`
+                  : `暂无记录${syncAt ? ` · 最后同步：${ago}` : ''}`,
+                dir: info.dir ?? '',
+              });
+              return;
+            }
+
             // ---- HTML 应用（嵌入主入口） ----
             if (req.method === 'GET' && (p === '/app' || p === '/app/')) {
               try {

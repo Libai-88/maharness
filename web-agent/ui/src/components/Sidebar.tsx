@@ -1,8 +1,12 @@
 // ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话列表 + 批量管理 + Footer）
-// Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab
-// memo 化：配合 App 侧稳定引用回调，流式渲染期间（App 每 token 重渲染）跳过整个侧边栏 reconcile
-import { memo, useState } from 'react';
+// 微信式聊天列表：头像 + 名字 + 最后一句摘要 + 时间 + 未读点；
+// Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab；
+// memo 化：配合 App 侧稳定引用回调，流式渲染期间跳过整个侧边栏 reconcile。
+import { memo, useCallback, useEffect, useState } from 'react';
 import type { Session } from '../types';
+import { hueFrom } from '../types';
+import { AGENT_NAME, chatTime, displayTitle, previewOf } from '../voice';
+import Confirm, { type ConfirmRequest } from './Confirm';
 import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
 export type MainTab = string;
@@ -40,28 +44,41 @@ interface Props {
   settingsOpen: boolean;
   onToggleSettings: () => void;
   pluginRunning: number;
+  /** 正在流式回答的会话 id：列表里显示"正在输入…"（微信式在场感） */
+  streamingId?: string | null;
+  /** 版本号（来自 package.json，避免写死在 UI 里） */
+  version?: string;
 }
 
-function fmtTime(ts: number): string {
-  const d = new Date(ts);
-  const now = Date.now();
-  const diff = now - ts;
-  if (diff < 60_000) return '刚刚';
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)} 分钟`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)} 小时`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)} 天`;
-  return `${d.getMonth() + 1}/${d.getDate()}`;
+// ---- 已读水位：纯前端（localStorage），不落库、不增加后端口径 ----
+const READS_KEY = 'maharness-reads';
+function loadReads(): Record<string, number> {
+  try { return JSON.parse(localStorage.getItem(READS_KEY) ?? '{}') as Record<string, number>; } catch { return {}; }
 }
 
 export default memo(function Sidebar({
   sessions, activeId, activeTab, onTab, pluginTabs = [], onSelect, onCreate, onDelete, onArchive, onPin, onRename,
-  onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning,
+  onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning, streamingId, version,
 }: Props) {
   const [hoverId, setHoverId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [managing, setManaging] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [reads, setReads] = useState<Record<string, number>>(loadReads);
+
+  const markRead = useCallback((id: string | null) => {
+    if (!id) return;
+    setReads((prev) => {
+      const next = { ...prev, [id]: Date.now() };
+      try { localStorage.setItem(READS_KEY, JSON.stringify(next)); } catch { /* 隐私模式忽略 */ }
+      return next;
+    });
+  }, []);
+
+  // 打开哪个会话就算读过了（含首屏自动选中的那个）
+  useEffect(() => { markRead(activeId); }, [activeId, markRead]);
 
   const pinned = sessions.filter((s) => s.pinned && !s.archived);
   const normal = sessions.filter((s) => !s.pinned && !s.archived);
@@ -83,81 +100,109 @@ export default memo(function Sidebar({
     });
   };
 
-  const toggleAll = () => {
-    setSelected(allSelected ? new Set() : new Set(allIds));
-  };
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allIds));
 
-  const exitManage = () => {
-    setManaging(false);
-    setSelected(new Set());
-  };
+  const exitManage = () => { setManaging(false); setSelected(new Set()); };
 
+  // 危险操作一律走应用内确认（原来的 window.confirm 在微信式界面里非常出戏）
   const doBatchDelete = () => {
     if (!selected.size) return;
-    if (confirm(`删除选中的 ${selected.size} 个会话？该操作不可恢复。`)) {
-      onBatchDelete([...selected]);
-      exitManage();
-    }
+    const n = selected.size;
+    setConfirmReq({
+      text: `删掉这 ${n} 段对话？删了就找不回来了。`,
+      okText: '删除',
+      danger: true,
+      onOk: () => { onBatchDelete([...selected]); exitManage(); },
+    });
   };
-
   const doBatchArchive = () => {
     if (!selected.size) return;
-    onBatchArchive([...selected]);
-    exitManage();
+    const n = selected.size;
+    setConfirmReq({ text: `把这 ${n} 段对话收进归档？之后随时能翻出来。`, okText: '归档', onOk: () => { onBatchArchive([...selected]); exitManage(); } });
   };
 
-  const renderItem = (s: Session) => (
-    <div
-      key={s.id}
-      className={`sb-session-item ${s.id === activeId ? 'active' : ''} ${managing ? 'managing' : ''}`}
-      onClick={() => { if (managing) toggleSelect(s.id); else onSelect(s.id); }}
-      onDoubleClick={() => { if (!managing) { setEditingId(s.id); setDraft(s.title || ''); } }}
-      onMouseEnter={() => setHoverId(s.id)}
-      onMouseLeave={() => setHoverId(null)}
-      title={s.title || '新会话'}
-      role="button"
-      tabIndex={0}
-      aria-current={s.id === activeId ? 'true' : undefined}
-      onKeyDown={(e) => {
-        if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (managing) toggleSelect(s.id); else onSelect(s.id); }
-        if (e.key === 'F2' && !managing) { setEditingId(s.id); setDraft(s.title || ''); }
-      }}
-    >
-      {managing ? (
-        <span className={`sb-check ${selected.has(s.id) ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(s.id); }} role="checkbox" aria-checked={selected.has(s.id)} aria-label={`选择 ${s.title || '新会话'}`} />
-      ) : (
-        s.id === activeId && <span className="dot" />
-      )}
-      {editingId === s.id ? (
-        <input
-          className="sb-rename-input"
-          value={draft}
-          autoFocus
-          onChange={(e) => setDraft(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') commitRename();
-            else if (e.key === 'Escape') setEditingId(null);
-            e.stopPropagation();
-          }}
-          onBlur={commitRename}
-          onClick={(e) => e.stopPropagation()}
-        />
-      ) : (
-        <>
-          <span className="name">{s.title || '新会话'}</span>
-          {s.mode !== 'normal' && <span className="pin">{s.mode === 'plan' ? 'P' : 'G'}</span>}
-          <span className="time">{fmtTime(s.updatedAt)}</span>
-        </>
-      )}
-      {!managing && hoverId === s.id && (
-        <span className="item-actions" onClick={(e) => e.stopPropagation()}>
-          <button title="置顶" aria-label="置顶" onClick={() => onPin(s.id, !s.pinned)}><IconPin size={12} /></button>
-          <button title="归档" aria-label="归档" onClick={() => onArchive(s.id, !s.archived)}><IconArchive size={12} /></button>
-          <button title="删除" aria-label="删除" onClick={() => { if (confirm('删除该会话？')) onDelete(s.id); }}><IconTrash size={12} /></button>
-        </span>
-      )}
-    </div>
-  );
+  const askDelete = (s: Session) => setConfirmReq({
+    text: `删掉「${displayTitle(s.title)}」这段对话？删了就找不回来了。`,
+    okText: '删除',
+    danger: true,
+    onOk: () => onDelete(s.id),
+  });
+
+  // 微信聊天列表样式：涂鸦头像 + 标题行（名字/时间）+ 摘要行（最后一句话）
+  const renderItem = (s: Session) => {
+    const modeText = s.mode === 'plan' ? '计划模式' : s.mode === 'goal' ? '目标模式' : '';
+    const preview = previewOf(s.lastRole, s.lastMsg);
+    const typing = streamingId === s.id;
+    const unread = s.id !== activeId && !managing && s.lastRole === 'assistant' && s.updatedAt > (reads[s.id] ?? 0);
+    return (
+      <div
+        key={s.id}
+        className={`sb-session-item ${s.id === activeId ? 'active' : ''} ${managing ? 'managing' : ''} ${unread ? 'unread' : ''}`}
+        onClick={() => { if (managing) toggleSelect(s.id); else { markRead(s.id); onSelect(s.id); } }}
+        onDoubleClick={() => { if (!managing) { setEditingId(s.id); setDraft(s.title || ''); } }}
+        onMouseEnter={() => setHoverId(s.id)}
+        onMouseLeave={() => setHoverId(null)}
+        title={s.title || '新会话'}
+        role="button"
+        tabIndex={0}
+        aria-current={s.id === activeId ? 'true' : undefined}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (managing) toggleSelect(s.id); else { markRead(s.id); onSelect(s.id); } }
+          if (e.key === 'F2' && !managing) { setEditingId(s.id); setDraft(s.title || ''); }
+        }}
+      >
+        {managing ? (
+          <span className={`sb-check ${selected.has(s.id) ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(s.id); }} role="checkbox" aria-checked={selected.has(s.id)} aria-label={`选择 ${s.title || '新会话'}`} />
+        ) : (
+          <span className="wx-sb-avatar" style={{ '--h': hueFrom(s.id) } as React.CSSProperties} aria-hidden>
+            <IconSheep size={15} />
+            {unread && <span className="sb-unread-dot" aria-label="有新回复" />}
+          </span>
+        )}
+        {editingId === s.id ? (
+          <input
+            className="sb-rename-input"
+            value={draft}
+            autoFocus
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') commitRename();
+              else if (e.key === 'Escape') setEditingId(null);
+              e.stopPropagation();
+            }}
+            onBlur={commitRename}
+            onClick={(e) => e.stopPropagation()}
+          />
+        ) : (
+          <div className="wx-sb-main">
+            <div className="wx-sb-line1">
+              <span className="name">{displayTitle(s.title)}</span>
+              <span className="time">{chatTime(s.updatedAt)}</span>
+            </div>
+            <div className="wx-sb-line2">
+              {/* 摘要 = 最后一句真正说出口的话（微信的样子），而不是恒为「私聊」的死文本 */}
+              {typing
+                ? <span className="wx-sb-preview typing">{AGENT_NAME}正在输入…</span>
+                : preview
+                  ? <span className={`wx-sb-preview ${s.lastRole === 'user' ? 'mine' : ''}`}>{preview}</span>
+                  : s.role
+                    ? <span className="wx-sb-preview role">{s.role} 接手了</span>
+                    : modeText
+                      ? <span className="wx-sb-preview mode">{modeText}</span>
+                      : <span className="wx-sb-preview empty">还没聊过，打个招呼吧</span>}
+            </div>
+          </div>
+        )}
+        {!managing && hoverId === s.id && (
+          <span className="item-actions" onClick={(e) => e.stopPropagation()}>
+            <button title="置顶" aria-label="置顶" onClick={() => onPin(s.id, !s.pinned)}><IconPin size={12} /></button>
+            <button title="归档" aria-label="归档" onClick={() => onArchive(s.id, !s.archived)}><IconArchive size={12} /></button>
+            <button title="删除" aria-label="删除" onClick={() => askDelete(s)}><IconTrash size={12} /></button>
+          </span>
+        )}
+      </div>
+    );
+  };
 
   return (
     <aside className="sidebar">
@@ -197,7 +242,7 @@ export default memo(function Sidebar({
             <span className="sb-mg-count">{selected.size} 已选</span>
           </div>
         )}
-        {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>暂无会话</div>}
+        {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>还没有对话，点上面「新会话」开始</div>}
         {pinned.length > 0 && <div className="sb-group-label">已置顶</div>}
         {pinned.map(renderItem)}
         {normal.length > 0 && <div className="sb-group-label">会话</div>}
@@ -224,9 +269,9 @@ export default memo(function Sidebar({
         <div className="sb-footer">
           <div className="sb-foot-row">
             <div className="sb-foot-left">
-              <span className="sb-foot-chip">{pluginRunning} running</span>
+              <span className="sb-foot-chip" title="正在运行的插件数">{pluginRunning} 个插件在跑</span>
             </div>
-            <span className="sb-foot-chip ver">v0.1.2</span>
+            <span className="sb-foot-chip ver">v{version ?? '0.1.0'}</span>
           </div>
           <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
             <IconSettings size={14} />
@@ -234,6 +279,7 @@ export default memo(function Sidebar({
           </button>
         </div>
       )}
+      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
     </aside>
   );
 });

@@ -9,89 +9,16 @@ import { classifyTask, reasoningBudgetFor } from '../../kernel/budget';
 import { validateAgainstSchema } from '../../kernel/validate';
 import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost } from './provider';
+import { noteProviderFailure, noteProviderSuccess, isAbortError, TaskStoppedError } from './provider-health';
 import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
-  AgentRunSummary, EventBusLike, KernelLike, LLMChunk, LLMMessage, ProviderDef, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
+  AgentRunSummary, KernelLike, LLMChunk, LLMMessage, PluginBus, ProviderDef, RunnerFactory, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
+// 循环契约来自内核（kernel/loop.ts）：内核承诺接口形状，本文件只实现行为。
+import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
 
-/**
- * 钩子管线运行上下文（agent.* 事件负载）
- * 监听器通过改写字段影响流程：history（注入上下文/记忆）、tools、scratchpad（跨轮共享）、
- * blocked（拦截）、tool.args（改写参数）、result（改写结果）。约定俗成，不触碰内核。
- */
-export interface AgentHookCtx {
-  traceId: string;
-  turn: number;
-  model: string;
-  history: LLMMessage[];
-  systemPrompt: string;                 // 信息展示；改 history[0].content 才真正生效
-  tools: ToolDef[];
-  scratchpad: Record<string, unknown>;
-  blocked?: boolean;                    // 置 true 拦截（agent.input.received / agent.before_tool）
-  blockReason?: string;
-  /** agent.before_tool：用户策略规则显式放行本次调用（免审批），执行器据此跳过审批门并留痕 */
-  policyApproved?: boolean;
-  tool?: { name: string; args: unknown };
-  content?: string;                     // after_llm：模型输出（观测）
-  reasoning?: string;
-  toolCalls?: ToolCall[];
-  result?: ToolResult;                  // after_tool：结果（可改写）
-  error?: string;                       // on_error
-  reason?: string;                      // agent.stopped：停止原因（如 'max_turns'）
-}
-
-export type AgentEvent =
-  | { type: 'delta'; text: string }
-  | { type: 'reasoning'; text: string }
-  | { type: 'tool_start'; name: string; args: unknown }
-  | { type: 'tool_result'; name: string; summary: string; ok: boolean; stored?: boolean }
-  | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
-  | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
-  | { type: 'budget_hit'; cost: number; budget: number }
-  | { type: 'handoff'; role: string; objective: string }
-  /** provider 重试（内层瞬态重试 / 外层切换备用）：重试前执行器已清空上次失败流的
-   *  半截状态（C1），前端收到本事件应作废当前流式渲染、从零重新累积 */
-  | { type: 'retry' }
-  | { type: 'error'; error: string };
-
-export interface RunOptions {
-  provider: ProviderDef;
-  model: string;
-  messages: LLMMessage[];    // 会话历史（含最新用户消息）
-  /** 本轮临时上下文：发送给模型但不写回会话历史（如世界状态）。 */
-  contextMessages?: LLMMessage[];
-  systemPrompt?: string;
-  tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
-  traceId: string;
-  /** L1 会话级缓存作用域（如 session.id）：跨多次 run 的同一会话共享"会话自产答案"；
-   *  缺省用 traceId——子代理/独立循环天然隔离（每次 traceId 唯一）。 */
-  scope?: string;
-  /** 当前会话 ID：透传给工具（ToolContext.sessionId），工具可把状态挂到具体会话 */
-  sessionId?: string;
-  signal?: AbortSignal;
-  maxTurns?: number;
-  /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */
-  fallbackProviders?: ProviderDef[];
-  /** 父 Trace 步骤 id（span 树）：子代理/并行等子任务的全部步骤挂到调用方工具步骤下，
-   *  跨 traceId 可从父轨迹下钻（OpenAI tracing 的 span 层级）。由工具执行时 ToolContext.stepId 传入。 */
-  parentStepId?: string;
-  /** 本任务成本硬上限（美元）：累计成本 ≥ 该值时熔断——不再发起新 LLM 调用，保留已完成结果。
-   *  harness 管理认知资源的硬边界（软边界是 server 侧的成本警告注入）。 */
-  costBudget?: number;
-  /** 上下文压缩回调（M1 循环内预算检查）：每轮 before_llm 后估算 history，
-   *  超 context.maxTokens 时调用，返回压缩后的消息序列（由 server 注入 compactHistory
-   *  等实现）；缺失时维持现状（不在 run 内压缩，由 server 组装侧兜底）。 */
-  compactFn?: (history: LLMMessage[]) => Promise<LLMMessage[]>;
-  /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
-   *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
-  onCheckpoint?: (turn: number, history: LLMMessage[]) => void;
-  /** 发送序列快照同步（L3 前缀缓存逼近 100% 的关键）：每次 LLM 调用前，把
-   *  实际发送的消息序列中【尚未入库的增量】回调给 server 持久化。
-   *  覆盖全部消息类型（含钩子注入的教训/记忆/英文提醒）——DB 成为发送序列的
-   *  忠实镜像，跨 run 组装与上 run 序列构成纯追加关系，provider KV 缓存前缀
-   *  逐字节延续（注入消息不入库会插在历史中段导致整个历史区前缀断裂）。 */
-  onHistorySync?: (messages: { role: string; content: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }[]) => void;
-}
+// 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
+export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
 
 const DEFAULT_SYSTEM_PROMPT = [
   '你是运行在 Windows 上的自研 Web Agent，具备工具调用能力（文件读写、联网搜索等）。',
@@ -243,10 +170,9 @@ async function withToolTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => v
 export class AgentRunner {
   private pendingApprovals: ApprovalBoard;
 
-  constructor(private kernel: KernelLike, private bus: EventBusLike, approvals?: ApprovalBoard) {
+  constructor(private kernel: KernelLike, private bus: PluginBus, approvals?: ApprovalBoard) {
     this.pendingApprovals = approvals ?? globalApprovalBoard;
   }
-
   /** 发布钩子事件（v3 中间件语义）：走 waterfall 派发——每个监听器收到 (e)，
    *  e.data 即钩子上下文（可改写 history/tools/scratchpad/blocked 等），
    *  返回 undefined 自动继续下个监听器，落到底层 final（现状无底层，纯串联）。
@@ -345,7 +271,7 @@ export class AgentRunner {
     const inputCtx: AgentHookCtx = { traceId, turn: 0, model, history, systemPrompt, tools: toolDefs, scratchpad };
     await this.emitHook('agent.input.received', inputCtx);
     if (inputCtx.blocked) {
-      yield { type: 'error', error: inputCtx.blockReason ?? '已被策略拦截' };
+      yield { type: 'error', error: inputCtx.blockReason ?? '已被策略拦截', kind: 'policy' };
       return;
     }
 
@@ -362,6 +288,10 @@ export class AgentRunner {
     // 降级提示允许模型区分「空转」与「推进」——有新路径可继续思考，原地打转才收敛。
     let lastTurnReasoningTokens = 0;
     let totalReasoningTokens = 0;
+    // 全 run 的思考累计：与 server 侧落库口径（chat.ts 逐 reasoning chunk 拼接）逐字一致——
+    // 否则 assistant_done 带回首轮思考、DB 里存的却是全 run 思考，刷新前后「思考」卡
+    // 内容不同（同一条消息换个时间看是两段话，正是违和感的来源）。
+    let runReasoning = '';
     let budgetHintInjected = false;
     let costWarnInjected = false;
     // 最后真实 user 消息（任务画像/熔断记录用；L1 缓存查询块会更新它）
@@ -369,7 +299,7 @@ export class AgentRunner {
 
     for (let turn = 0; turn < maxTurns; turn++) {
       if (signal?.aborted) {
-        yield { type: 'error', error: '已中断' };
+        yield { type: 'error', error: '已停止', kind: 'aborted' };
         return;
       }
 
@@ -384,7 +314,7 @@ export class AgentRunner {
         });
         emitFinish('budget-hit', q, '', turn + 1);
         yield { type: 'budget_hit', cost: totalCost, budget: opts.costBudget };
-        yield { type: 'error', error: `成本预算已耗尽（本任务累计 $${totalCost.toFixed(6)} ≥ 预算 $${opts.costBudget.toFixed(6)}），已停止。已完成的部分结果保留在会话中；如需继续请新建会话或提高预算。` };
+        yield { type: 'error', error: `成本预算已耗尽（本任务累计 $${totalCost.toFixed(6)} ≥ 预算 $${opts.costBudget.toFixed(6)}），已停止。已完成的部分结果保留在会话中；如需继续请新建会话或提高预算。`, kind: 'budget' };
         return;
       }
 
@@ -534,20 +464,32 @@ export class AgentRunner {
       let reasoning = '';
       let usage: { input: number; output: number; cachedInput?: number; missInput?: number } | undefined;
       let collected: ToolCall[] = [];
-      const handleChunk = (chunk: LLMChunk): { type: 'delta' | 'reasoning'; text: string } | null => {
+      let pendingStream: { type: 'delta' | 'reasoning'; text: string }[] = [];
+      // 流式思考标签分流：`think 类标签（think/thinking/thought/reasoning）` 等块内文本实时走 reasoning 通道（UI 思考卡即时可见，
+      // 正文不再先漏屏再收敛）；跨 chunk 的标签碎片由状态机缓冲
+      let splitter = new ThinkTagStreamSplitter();
+      const wireSplitter = () => {
+        splitter.onOut = (t) => { if (t) { text += t; pendingStream.push({ type: 'delta', text: t }); } };
+        splitter.onThink = (t) => { if (t) { reasoning += t; pendingStream.push({ type: 'reasoning', text: t }); } };
+      };
+      wireSplitter();
+      const resetStreamState = () => {
+        splitter = new ThinkTagStreamSplitter();
+        wireSplitter();
+        pendingStream = [];
+      };
+      const handleChunk = (chunk: LLMChunk): { type: 'delta' | 'reasoning'; text: string }[] => {
+        pendingStream = [];
         if (chunk.type === 'delta') {
-          text += chunk.text;
-          return { type: 'delta', text: chunk.text };
-        }
-        if (chunk.type === 'reasoning') {
+          splitter.push(chunk.text);
+        } else if (chunk.type === 'reasoning') {
           reasoning += chunk.text;
-          return { type: 'reasoning', text: chunk.text };
-        }
-        if (chunk.type === 'tool_call') collected.push(chunk.toolCall);
+          pendingStream.push({ type: 'reasoning', text: chunk.text });
+        } else if (chunk.type === 'tool_call') collected.push(chunk.toolCall);
         else if (chunk.type === 'usage') {
           usage = { input: chunk.input, output: chunk.output, cachedInput: chunk.cachedInput, missInput: chunk.missInput };
         }
-        return null;
+        return pendingStream;
       };
       try {
         // 发送序列 = 文本化形态（L3 前缀缓存关键）：工具轮合并为 assistant 文本、
@@ -563,6 +505,10 @@ export class AgentRunner {
         let lastErr: unknown;
         for (let pi = 0; pi < providerChain.length; pi++) {
           activeProvider = providerChain[pi];
+          // Failover 模型解析：备用 provider 的网关上原模型名可能不存在（不同网关/模型族）——
+          // 原样打过去必然 403/400「无权访问该模型」，整条链耗尽报错。备用链路上
+          // 用该 provider 实际可用的模型（models 列表命中 → defaultModel 兜底）。
+          const chainModel = pi === 0 ? model : resolveFallbackModel(activeProvider, model);
           let ok = false;
           for (let attempts = 0; attempts < 2 && !ok; attempts++) {
             if (attempts > 0) {
@@ -574,20 +520,45 @@ export class AgentRunner {
               reasoning = '';
               usage = undefined;
               collected = [];
-              yield { type: 'retry' };
+              resetStreamState();
+              yield { type: 'retry', reason: 'attempt', detail: '这条线路刚才没接上，再试一次' };
             }
             try {
-              for await (const chunk of activeProvider.chat(sendHistory, { model, tools: llmCtx.tools, signal })) {
-                const ev = handleChunk(chunk);
-                if (ev) yield ev;
+              for await (const chunk of activeProvider.chat(sendHistory, { model: chainModel, tools: llmCtx.tools, signal })) {
+                for (const ev of handleChunk(chunk)) yield ev;
               }
+              splitter.end();
+              for (const ev of pendingStream) yield ev;
+              pendingStream = [];
               ok = true; // 成功结束
             } catch (err) {
               lastErr = err;
+              // ---- 停止即真停止：用户按了「停止」（或 signal 已 abort）时立刻上抛取消 ----
+              // 旧行为是"照样重试 + 记 provider 故障 + failover 换线路"，后果三连：
+              //   1) 前端被弹出「「deepseek」密钥失效（401/403）请更新密钥」——误归因；
+              //   2) 备用 provider 被真实调用一次，用户已取消的任务继续烧 token 计费；
+              //   3) 白等 1.2s 重试间隔，锁不释放，紧接着发消息撞 409。
+              if (signal?.aborted || isAbortError(err)) throw err instanceof TaskStoppedError ? err : new TaskStoppedError('已停止');
               if (attempts === 0) await new Promise((r) => setTimeout(r, 1200)); // 瞬态恢复缓冲
             }
           }
-          if (ok) break;
+          if (ok) {
+            // 健康回报：成功清除该 provider 的异常状态（key 换好后自动恢复）；
+            // 若确实清除了已有故障则广播，前端刷新 provider 健康标记
+            if (noteProviderSuccess(activeProvider.id)) {
+              this.bus.emit({ type: 'provider.ok', data: { providerId: activeProvider.id }, ts: Date.now() });
+            }
+            break;
+          }
+          // 健康回报：该 provider 重试耗尽——记录失败（401/403 归类为密钥失效）并广播，
+          // 前端即时提示，不等整条 failover 链耗尽才被发现
+          if (signal?.aborted || isAbortError(lastErr)) throw new TaskStoppedError('已停止');
+          const health = noteProviderFailure(activeProvider.id, lastErr);
+          if (health) this.bus.emit({
+            type: 'provider.error',
+            data: { providerId: activeProvider.id, providerLabel: activeProvider.label, authFailed: health.authFailed, error: health.lastError },
+            ts: Date.now(),
+          });
           if (pi < providerChain.length - 1) {
             // 备用路径：同样先重置状态（换 provider 从头开始）+ retry 事件，
             // 再记录切换（可观察），继续下一个 provider
@@ -595,20 +566,27 @@ export class AgentRunner {
             reasoning = '';
             usage = undefined;
             collected = [];
-            yield { type: 'retry' };
+            resetStreamState();
+            const nextProvider = providerChain[pi + 1];
+            const nextModel = resolveFallbackModel(nextProvider, model);
+            yield { type: 'retry', reason: 'failover', detail: `${activeProvider.label || activeProvider.id} 这条路走不通，换 ${nextProvider.label || nextProvider.id} 再说一遍` };
             this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'system', name: 'failover' })
-              .finish({ outputSummary: `${activeProvider.id} 连续失败，切换备用 ${providerChain[pi + 1].id}` });
+              .finish({ outputSummary: `${activeProvider.id} 连续失败，切换备用 ${nextProvider.id}（模型 → ${nextModel}）` });
           } else {
             throw lastErr; // 全部 provider 失败：抛给外层终止本轮
           }
         }
       } catch (err) {
-        const errMsg = err instanceof Error ? err.message : String(err);
+        // 取消（用户点「停止」/客户端断线）与真故障分道扬镳：
+        // 「已停止」不是错误，不该在温馨的聊天窗口里画成一条红字报错。
+        const aborted = signal?.aborted === true || err instanceof TaskStoppedError || isAbortError(err);
+        const errMsg = aborted ? '已停止' : (err instanceof Error ? err.message : String(err));
         await this.emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg });
-        step.fail(errMsg);
+        if (aborted) step.cancel();
+        else step.fail(errMsg);
         // 已发送序列仍同步入库（失败中断也不丢已观察的上下文；下 run 从这里继续能命中前缀）
         syncHistory();
-        yield { type: 'error', error: errMsg };
+        yield { type: 'error', error: errMsg, kind: aborted ? 'aborted' : 'upstream' };
         return;
       }
       const tIn = usage?.input ?? 0;
@@ -628,19 +606,21 @@ export class AgentRunner {
       // 思考预算统计：记录本轮 reasoning 长度并累计（下一轮 LLM 调用前消费）
       lastTurnReasoningTokens = estimateTokens(reasoning);
       totalReasoningTokens += lastTurnReasoningTokens;
+      runReasoning += reasoning;
       step.finish({
         outputSummary: text.slice(0, 200),
         tokensIn: tIn, tokensOut: tOut, tokensCached: usage?.cachedInput, cost,
       });
 
-      // ---- 文本清洗：剥离混在正文中的思考标签（原生 reasoning 已分通道，此步兜底） ----
-      if (text && !reasoning) {
-        const { clean, extracted } = stripThinking(text, '');
-        if (extracted) {
-          text = clean;
-          reasoning = extracted;
+      // ---- 文本清洗：剥离混在正文中的思考标签（流式分流器的最终兜底，
+      //      覆盖未走 splitter 的路径：缓存回放/异常流） ----
+      if (text) {
+        const { clean, extracted } = stripThinking(text, reasoning);
+        if (clean !== text || extracted) {
           this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'thinking-strip', parentId: opts.parentStepId })
             .finish({ outputSummary: `从正文剥离思考内容 ${extracted.length} 字符` });
+          text = clean;
+          if (!reasoning && extracted) reasoning = extracted;
         }
       }
 
@@ -670,7 +650,7 @@ export class AgentRunner {
             content: '【harness 纠偏】你的上一条回复把工具调用写成了正文文本（【工具调用 …】格式）。那只是历史日志的展示格式，写成文本不会被真正执行，你看到的"结果"也并不存在。请立即改用原生 tool_call 发起该调用；若确无工具可用或无需调用，再直接回答任务本身。',
           });
           syncHistory();
-          yield { type: 'retry' };
+          yield { type: 'retry', reason: 'narration', detail: '刚才把要做的事说成了文本，重新用真正的方式调用' };
           continue;
         }
         // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）。
@@ -699,7 +679,7 @@ export class AgentRunner {
         yield {
           type: 'assistant_done',
           content: text,
-          reasoning,
+          reasoning: runReasoning,
           usage: { input: totalIn, output: totalOut },
           cost: totalCost,
         };
@@ -711,6 +691,10 @@ export class AgentRunner {
       // H7：本轮内命中角色移交时先记录，工具全部执行回填后再统一移交（不留孤儿 tool_calls）
       let pendingHandoff: { role: string; objective: string } | null = null;
       for (const tc of collected) {
+        // 停止 = 剩余调用一个都不发起。旧行为是"轮与轮之间才看 abort"，
+        // 于是一按停止，本轮后面排队的 write_file / powershell_execute 照跑完
+        // （不响应 signal 的 fs/exec 类工具 JS 无法强杀）——取消必须发生在动手之前。
+        if (signal?.aborted) throw new TaskStoppedError('已停止');
         const tool = toolDefs.find((t) => t.name === tc.function.name);
         let args: unknown = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = { _raw: tc.function.arguments }; }
@@ -718,17 +702,18 @@ export class AgentRunner {
           const missMsg = `工具不存在: ${tc.function.name}`;
           noteToolCall(tc.function.name, false);
           history.push({ role: 'tool', tool_call_id: tc.id, content: missMsg });
-          yield { type: 'tool_result', name: tc.function.name, summary: '工具不存在', ok: false };
+          // 带 id：前端"孤儿 result"（只有结果没有开始）也能立一张卡，不再静默丢失
+          yield { type: 'tool_result', id: tc.id, name: tc.function.name, summary: `我没找到「${tc.function.name}」这个工具`, ok: false };
           continue;
         }
-        yield { type: 'tool_start', name: tool.name, args };
+        yield { type: 'tool_start', id: tc.id, name: tool.name, args };
         // ---- 钩子：工具执行前（权限策略 / 参数改写 / 拦截） ----
         const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args } };
         await this.emitHook('agent.before_tool', toolCtx);
         if (toolCtx.blocked) {
           const blockMsg = JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' });
           history.push({ role: 'tool', tool_call_id: tc.id, content: blockMsg });
-          yield { type: 'tool_result', name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
+          yield { type: 'tool_result', id: tc.id, name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
           continue;
         }
         const toolArgs = toolCtx.tool?.args ?? args;
@@ -808,13 +793,30 @@ export class AgentRunner {
           };
           // 审批挂起：注册进共享 ApprovalBoard（含 10 分钟超时自动拒绝）。
           // 共享板使子代理/并行 runner 的审批对服务端 /api/approvals/:id 同样可达。
-          const approved = await new Promise<boolean>((resolve) => {
-            this.pendingApprovals.register(approvalId, {
-              name: tool.name,
-              summary: result.approvalSummary ?? result.error ?? '',
-              args,
-            }, resolve);
-          });
+          // 可取消：用户「停止」/断线时必须立刻从挂起中醒来——否则执行器一直 await 在这
+          // 个 Promise 上，路由的会话互斥锁（chat.ts inFlightSessions）跟着挂 10 分钟，
+          // 用户按完停止再发一句话，只会收到「该会话有任务进行中」。
+          let approved = false;
+          if (!signal?.aborted) {
+            approved = await new Promise<boolean>((resolve) => {
+              let settled = false;
+              const settle = (v: boolean) => { if (settled) return; settled = true; signal?.removeEventListener('abort', onAbort); resolve(v); };
+              const onAbort = () => { this.pendingApprovals.withdraw(approvalId); settle(false); };
+              signal?.addEventListener('abort', onAbort, { once: true });
+              this.pendingApprovals.register(approvalId, {
+                name: tool.name,
+                summary: result.approvalSummary ?? result.error ?? '',
+                args,
+                // 会话归属：刷新后前端才能把这张卡放回正确的聊天窗口
+                sessionId: opts.sessionId,
+              }, settle);
+            });
+          }
+          if (signal?.aborted) {
+            aStep.cancel();
+            tStep.cancel();
+            throw new TaskStoppedError('已停止');
+          }
           if (!approved) {
             aStep.fail('用户拒绝或审批超时');
             tStep.cancel();
@@ -909,7 +911,7 @@ export class AgentRunner {
           content = rawResult;
         }
         history.push({ role: 'tool', tool_call_id: tc.id, content: content + outputNote });
-        yield { type: 'tool_result', name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok, stored: rawResult.length > RESULT_STORE_THRESHOLD };
+        yield { type: 'tool_result', id: tc.id, name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok, stored: rawResult.length > RESULT_STORE_THRESHOLD };
       }
 
       // ---- H7 移交收尾：本轮工具全部执行回填后移交并终止（控制权交给目标角色） ----
@@ -944,28 +946,113 @@ export class AgentRunner {
     });
     emitFinish('max-turns', lastUserMsg?.content ?? '', '', maxTurns);
     // 轮数上限不是任务失败：已完成的工作与断点均保留，可继续推进
-    yield { type: 'error', error: `本任务已达到轮数上限（${maxTurns} 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置` };
+    yield { type: 'error', error: `本任务已达到轮数上限（${maxTurns} 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置`, kind: 'max-turns' };
   }
 }
 
-/** 文本完整性：从输出文本中剥离常见思考标签（模型支持原生 reasoning 时此函数不触发），
- *  防止不支持原生推理块的模型把思考过程混进 text 推给用户。
- *  支持：<think>  、[思考] 、【思考】 ；剥离出的内容回填 reasoning（如果为空），
- *  返回清洁后的正文。函数不会改变原文长度异常的文本（如全文仅思考没有正文 → 原样返回）。 */
-function stripThinking(text: string, reasoning: string): { clean: string; extracted: string } {
-  // 1. 全块式思考标签（最常见：DeepSeek/部分 ChatGPT 中文版）
-  const blockTags = /[\s\S]*?<\/?thinking>\s*/gim;
-  const noBlocks = text.replace(blockTags, '').trim();
-  // 2. 行级思考标签
-  const lineTags = noBlocks.replace(/^[\s]*(?:\[思考\]|【思考】)[\s\S]*$/gim, '').trim();
-  const clean = lineTags.trim();
-  // 提取思考内容（从原始文本中找到被剥离的部分）—— 仅当有思考内容且原有 reasoning 为空时回填
-  if (!clean || clean === text) return { clean: text, extracted: '' };
-  const hasThinking = /<thinking>|<\/thinking>|<\/?thinking>|^\[思考\]|^\【思考】/im.test(text);
+/** Failover 模型解析：备用 provider 上原模型不可用（models 列表查不到）时，
+ *  退回该 provider 自己可用的模型（列表中首个启用项 → defaultModel），避免
+ *  「备用网关收到陌生模型名 → 403 无权访问 → 整条失败链报错」。
+ *  三级回退：models 命中原模型 → models 首个启用 → defaultModel → 原样。 */
+function resolveFallbackModel(p: ProviderDef, want: string): string {
+  if (p.models?.length) {
+    if (p.models.some((m) => m.modelId === want && m.enabled !== false)) return want;
+    const first = p.models.find((m) => m.enabled !== false);
+    return first?.modelId ?? p.defaultModel ?? want;
+  }
+  return p.defaultModel || want;
+}
+
+/** 思考标签流式分流器：把 think 类标签（think/thinking/thought/reasoning）等块内文本实时分流到 reasoning 通道，
+ *  正文照常通过。跨 chunk 安全（标签碎片会被缓冲，不会误放行半个标签）。
+ *  支持：think / thinking / thought / reasoning（大小写不敏感、开闭不成对容忍——
+ *  流被截断时未闭合块整体归入思考） */
+export class ThinkTagStreamSplitter {
+  private buf = '';
+  private inside: string | null = null; // 当前所处思考标签名（null = 正文态）
+  onOut: (t: string) => void = () => {};
+  onThink: (t: string) => void = () => {};
+
+  /** 追加一段输出增量（正文/思考各归其位） */
+  push(chunk: string) { this.buf += chunk; this.run(false); }
+
+  /** 流结束：清空缓冲（未闭合的思考块整体归思考） */
+  end() {
+    this.run(true);
+    this.buf = '';
+    this.inside = null;
+  }
+
+  private run(final: boolean) {
+    for (;;) {
+      if (this.inside) {
+        const close = `</${this.inside}`;
+        const lower = this.buf.toLowerCase();
+        const idx = lower.indexOf(close);
+        if (idx >= 0) {
+          this.onThink(this.buf.slice(0, idx));
+          const gt = lower.indexOf('>', idx);
+          this.buf = gt >= 0 ? this.buf.slice(gt + 1) : '';
+          this.inside = null;
+          continue;
+        }
+        if (final) { this.onThink(this.buf); this.buf = ''; this.inside = null; return; }
+        // 闭合标签可能跨 chunk：保留可能构成闭合前缀的尾部
+        const keep = close.length - 1;
+        if (this.buf.length > keep) {
+          const safe = this.buf.length - keep;
+          this.onThink(this.buf.slice(0, safe));
+          this.buf = this.buf.slice(safe);
+        }
+        return;
+      }
+      // 正文态：找下一个 '<'
+      const lt = this.buf.indexOf('<');
+      if (lt < 0) { this.onOut(this.buf); this.buf = ''; return; }
+      if (lt > 0) { this.onOut(this.buf.slice(0, lt)); this.buf = this.buf.slice(lt); }
+      // buf 以 '<' 开头：完整标签？
+      const m = /^<(\/?)([a-z]+)>/i.exec(this.buf);
+      const name = m?.[2]?.toLowerCase();
+      if (m && name && THINK_TAG_NAMES.includes(name)) {
+        if (m[1]) { this.buf = this.buf.slice(m[0].length); continue; } // 正文态孤立闭合标签：丢弃
+        this.inside = name;
+        this.buf = this.buf.slice(m[0].length);
+        if (this.buf.startsWith('\r')) this.buf = this.buf.slice(1);
+        if (this.buf.startsWith('\n')) this.buf = this.buf.slice(1);
+        continue;
+      }
+      // 标签碎片（可能补全成思考标签）→ 缓冲等待更多数据
+      if (!final && THINK_TAG_CANDIDATES.some((c) => c.startsWith(this.buf.toLowerCase()))) return;
+      // 字面 '<'
+      this.onOut('<');
+      this.buf = this.buf.slice(1);
+    }
+  }
+}
+
+const THINK_TAG_NAMES = ['think', 'thinking', 'thought', 'reasoning'];
+const THINK_TAG_CANDIDATES = THINK_TAG_NAMES.flatMap((t) => [`<${t}`, `</${t}`]);
+
+/** 文本完整性：从输出文本中剥离思考标签块（流式分流器之外的最终兜底，
+ *  防止不支持原生推理块的模型把思考过程混进 text 推给用户）。
+ *  支持：think/thinking/thought/reasoning（闭合块 + 流截断的未闭合块） 、[思考] 、【思考】 ；
+ *  剥离出的内容回填 reasoning（如果为空）。全文仅思考时正文为空（思考进 reasoning 通道）。 */
+export function stripThinking(text: string, reasoning: string): { clean: string; extracted: string } {
+  const hasThinking = /<(\/?)(?:think|thinking|thought|reasoning)>/im.test(text)
+    || /^[ \t]*(?:\[思考\]|【思考】)/im.test(text);
   if (!hasThinking) return { clean: text, extracted: '' };
+  let extracted = '';
+  const clean = text
+    .replace(/<(think|thinking|thought|reasoning)>[\s\S]*?(?:<\/\1>|$)/gim, (m0) => {
+      extracted += m0.replace(/<\/?(?:think|thinking|thought|reasoning)>/gim, '');
+      return '';
+    })
+    .replace(/<\/?(?:think|thinking|thought|reasoning)>/gim, '')
+    .replace(/^[ \t]*(?:\[思考\]|【思考】)[\s\S]*$/gim, (m0) => { extracted += m0; return ''; })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+  extracted = extracted.trim();
   if (reasoning) return { clean, extracted: '' };
-  // 粗粒度提取：取被剥离的部分作为 reasoning
-  const extracted = text.replace(clean, '').replace(blockTags, '').replace(/^[\s]*(?:\[思考\]|【思考】)/gim, '').trim();
   return { clean, extracted: extracted.slice(0, 8000) };
 }
 
@@ -980,3 +1067,15 @@ function summarize(v: unknown, max = 300): string {
 export function queryTraceSteps(steps: TraceStep[], traceId: string): TraceStep[] {
   return steps.filter((s) => s.traceId === traceId);
 }
+
+// ---------- 默认执行循环：注册为 service:runner 的内核级默认实现 ----------
+
+/**
+ * 默认执行循环工厂（决策→行动→观察 的贝叶斯信念更新循环）。
+ *
+ * 这是「循环即插件」的默认实现：内核不内含循环，只提供循环需要的原语；
+ * chat 插件在 onLoad 里用它注册 `service:runner`。任何插件用
+ * `ctx.provide(SERVICE_KEYS.runner, myFactory, priority > 0)` 即可整体替换——
+ * 顶层对话、子代理、并行三条路径统一经 `resolveRunner()` 取循环，替换一次全局生效。
+ */
+export const defaultRunnerFactory: RunnerFactory = (kernel, bus) => new AgentRunner(kernel, bus);

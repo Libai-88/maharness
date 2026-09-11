@@ -2,7 +2,8 @@
  * server/routes/plugins.ts —— 插件管理 + Capabilities Registry（能力发现）
  */
 import type { Express } from 'express';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { basename, join, sep } from 'node:path';
 import { openInExplorer, type RouteDeps } from './shared';
 
 /** 常见插件错误 → 修复建议（面向用户的技术指引） */
@@ -54,6 +55,56 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
         medium: tools.filter((t) => t.risk === 'medium').map((t) => t.name),
       },
     });
+  });
+
+  // ---------- 前端页面贡献（声明式导航） ----------
+  /**
+   * 插件声明的前端标签页清单。前端据此自动生成导航，不再为每个插件写组件与分支——
+   * 「前端是插件的一部分」的机制入口。只列已启动且注册了 api 能力的插件：
+   * 停用即页面下线（与能力可见性同一规则），声明了页面却没有数据通道的不产出死标签。
+   */
+  app.get('/api/nav', (_req, res) => {
+    const items = kernel.plugins.navContributions().map((c) => {
+      const base = `/api/plugins/${c.pluginId}/${c.mount}`;
+      return {
+        key: `plugin:${c.pluginId}`,
+        pluginId: c.pluginId,
+        pluginName: c.name,
+        label: c.nav.label,
+        icon: c.nav.icon ?? null,
+        order: c.nav.order ?? 0,
+        mode: c.nav.mode,
+        // 前端直接用这两个字段：iframe → src；panel → 取 JSON；module → 动态 import moduleUrl
+        url: c.nav.mode === 'iframe' ? `${base}${c.nav.page ?? '/page'}`
+          : c.nav.mode === 'panel' ? `${base}${c.nav.panel ?? '/panel'}`
+            : '',
+        moduleUrl: c.moduleUrl,
+        statusUrl: c.nav.status ? `${base}${c.nav.status}` : null,
+        statusIntervalMs: c.nav.statusIntervalMs ?? 6000,
+      };
+    });
+    res.json({ items });
+  });
+
+  /**
+   * 插件前端模块的静态托管（nav.mode='module'）：
+   * 只服务插件目录 ui/ 下的 js/css/map/json；路径规范化后必须落回该目录（防目录穿越）。
+   * 版本由 URL 上的内容哈希保证，故禁用缓存——模块热更新时不得拿到旧文件。
+   */
+  app.get(/^\/api\/plugins\/([^/]+)\/ui\/(.+)$/, (req, res) => {
+    const inst = kernel.plugins.get(req.params[0]);
+    const rel = String(req.params[1]).replace(/\\/g, '/');
+    if (!inst || !rel || rel.includes('..')) { res.status(404).end(); return; }
+    const root = join(inst.dir, 'ui');
+    const file = join(root, rel);
+    if (!file.startsWith(root + sep) || !/\.(js|mjs|css|map|json)$/.test(file)) { res.status(404).end(); return; }
+    try {
+      res.setHeader('Cache-Control', 'no-store');
+      res.type(basename(file));
+      res.send(readFileSync(file));
+    } catch {
+      res.status(404).end();
+    }
   });
 
   // ---------- 插件管理 ----------

@@ -47,6 +47,44 @@ export interface PluginManifest {
     /** 熔断态持续时间（ms），过后自动重试（默认 60000） */
     circuitBreakerResetMs?: number;
   };
+  /** 卸载时对插件私有存储（ctx.storage）的处理：
+   *  keep 保留（默认）/ archive 归档到 <data>/archive/<id>-<ts>/ / purge 清除 */
+  cleanup?: 'keep' | 'archive' | 'purge';
+  /** 前端页面贡献：声明一个顶层导航项 → 前端自动生成标签页（见 NavDef）。
+   *  「前端是插件的一部分」由此从口号变成机制：前端不再为每个插件写组件与分支。 */
+  nav?: NavDef;
+}
+
+/**
+ * 前端页面贡献（声明式）——插件在前端拥有自己的一页，而不需要前端为它写代码。
+ *
+ * 两种渲染模式对应两种真实形态，由插件自己选择：
+ *  - mode:'iframe' → 插件提供完整 HTML 页面（page）：脚本与交互完整保真，
+ *    适合看板/工作台这类富交互应用；
+ *  - mode:'panel'  → 插件返回 { title, html } 片段（panel）：前端净化后内联渲染，
+ *    适合纯展示或轻交互。
+ * status 供「需要在页头展示后端实时状态」的插件使用（如工作台桥接状态）。
+ */
+export interface NavDef {
+  /** 标签文字（前端顶栏显示） */
+  label: string;
+  /** 图标名（前端内置图标表；未知名回落通用图标——不阻断插件贡献页面） */
+  icon?: string;
+  /** 排序权重（大者靠前，默认 0）。内置标签页占位：chat=100 / files=60 / plugins=40 / stats=20 */
+  order?: number;
+  mode: 'iframe' | 'panel' | 'module';
+  /** mode:'iframe'：完整页面路径（挂载内相对路径，如 '/page'）；缺省 '/page' */
+  page?: string;
+  /** mode:'panel'：面板片段路径；缺省 '/panel' */
+  panel?: string;
+  /** mode:'module'：前端模块入口（插件目录 `ui/` 子目录内的相对路径，如 'index.js'）。
+   *  由内核经 /api/plugins/<id>/ui/* 托管，宿主注入 React 与能力接口后挂载——
+   *  与宿主同源同 realm，无沙箱，仅适用于受信任插件（不可信来源请用 iframe 模式）。 */
+  module?: string;
+  /** 可选：页头状态轮询端点（返回 JSON，取 text 字段显示）；相对挂载根，如 '/bridge' */
+  status?: string;
+  /** status 轮询间隔（毫秒，默认 6000；0 = 不轮询） */
+  statusIntervalMs?: number;
 }
 
 export interface Plugin {
@@ -93,8 +131,7 @@ export interface KernelLike {
     disable(id: string): Promise<void>;
     list(): { manifest: PluginManifest; state: string; error?: string }[];
     /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
-    resolveService(key: string, consumer?: string): unknown | undefined;
-    /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
+    resolveService(key: string, consumer?: string): unknown | undefined;    /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
     resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined;
     /** v3 依赖驱动智能重载：仅重载依赖签名变化的插件，返回实际重载的 id 列表 */
     reloadChanged(): Promise<string[]>;
@@ -110,10 +147,27 @@ export interface KernelLike {
 /** 插件运行时上下文：插件与内核通信的唯一句柄
  *  时空可组合性契约（借鉴 Cordis）：插件通过 ctx 做的一切都会留下逆元，
  *  卸载时按 LIFO 自动完全恢复——清理正确性由运行时保证，而非作者勤勉。 */
+/**
+ * 插件可见的事件门面：只出不进。
+ *
+ * 订阅必须走 `ctx.on`（自动退订、进入 EffectScope）；`on / once / onPhase` 一律不暴露——
+ * 裸监听会绕过逆元栈、卸载后残留，是「结构性可逆」承诺唯一的破口。
+ * 发射侧无需回收，故原样透传。
+ */
+export interface PluginBus {
+  emit(e: Event): void;
+  emitAsync(e: Event): Promise<void>;
+  /** v3 五语义派发：短路 / 并发 / 洋葱中间件 */
+  serial<T = unknown>(e: Event<T>): Promise<T | boolean | null | undefined>;
+  bail<T = unknown>(e: Event<T>): T | boolean | null | undefined;
+  parallel(e: Event): Promise<void>;
+  waterfall<T = unknown>(type: string, ...args: unknown[]): Promise<T>;
+}
+
 export interface PluginContext {
   pluginId: string;
   kernel: KernelLike;
-  bus: EventBusLike;
+  bus: PluginBus;
   config: ConfigLike;
   trace: TraceLike;
   cache: CacheLike;
@@ -123,8 +177,11 @@ export interface PluginContext {
   register(cap: Capability): () => void;
   /** 事件订阅（自动退订：卸载时自动取消，杜绝监听器泄漏——旧 API ctx.bus.on 的替代） */
   on(event: string, listener: EventListener, priority?: number): () => void;
-  /** 提供服务绑定（可逆效应：卸载时自动撤回并通知依赖方停用） */
-  provide(key: string, value: unknown): () => void;
+  /** 提供服务绑定（可逆效应：卸载时自动撤回并通知依赖方停用）。
+   *  priority 为「接管」语义：同一键可有多个提供者并存，优先级最高者生效；
+   *  生效者卸载时自动回退到次高者（或内核内置默认）——换实现无需先停旧的。
+   *  同优先级先提供者胜（不被后到者静默顶掉）。缺省 0。 */
+  provide(key: string, value: unknown, priority?: number): () => void;
   /** 反应性依赖注入（coeffect）：解析 key 当前绑定并订阅变化。
    *  依赖方在提供者激活/停用/替换时收到通知——"依赖不可用则保持等待，出现即激活"。 */
   inject(key: string, onChange?: (value: unknown | undefined) => void): { value: unknown | undefined; stop: () => void };
@@ -144,7 +201,38 @@ export interface PluginContext {
   watchEnv(name: string, cb?: (value: string | undefined) => void): () => void;
   /** 原始可逆效应：执行 callback 并登记逆元（跨系统边界操作由调用方自备补偿） */
   effect<T>(callback: () => T | Promise<T>, makeInverse: (value: T) => () => void | Promise<void>): Promise<void>;
+  /** 插件私有存储：持久化数据只写这里（内核创建该目录，卸载时按 manifest.cleanup 处理） */
+  storage: PluginStorage;
+  /** 界外发射台账：文件/HTTP/DB/子进程等不可逆动作登记在此，卸载时可枚举「它动过什么」 */
+  outbound: { record(rec: OutboundRecord): void };
   logger: Logger;
+}
+
+/**
+ * 插件私有存储。目录 = <data>/plugins/<pluginId>，插件独占。
+ * 写入不受沙箱限制（沙箱管的是 Agent 的文件工具），但目录位置固定——卸载时能被统一处理。
+ */
+export interface PluginStorage {
+  /** 插件专属目录（内核在首次访问时创建） */
+  readonly dir: string;
+  /** 读取文本文件；不存在返回 null */
+  read(name: string): string | null;
+  /** 写入文本文件（目录自动创建；name 只取文件名，防目录穿越） */
+  write(name: string, content: string): void;
+  /** 列出目录内的文件名 */
+  list(): string[];
+  /** 删除文件 */
+  remove(name: string): void;
+}
+
+/** 界外发射记录：EffectScope 管不了的部分（跨出进程独占边界），至少让它可见 */
+export interface OutboundRecord {
+  /** 发射类型 */
+  kind: 'file' | 'http' | 'db' | 'proc';
+  /** 人可读描述：路径 / URL / 表名 / 命令行 */
+  detail: string;
+  /** 是否可由插件自行补偿（有对应回退动作时为 true） */
+  compensable?: boolean;
 }
 
 export interface EventBusLike {
@@ -256,6 +344,23 @@ export interface ServiceDef {
   id: string;
   instance: unknown;
 }
+
+// ============ Agent 执行循环（可替换的运行时缝） ============
+//
+// 第一性原理：执行循环是 agent 的「心脏」，但心脏的形态不该由内核垄断。
+// 内核只提供循环所需的原语（事件总线/缓存/预算/审批/工具表），
+// 循环本身由插件经 `service:runner` 提供——默认实现来自 core/chat（AgentRunner），
+// 任何插件用 `ctx.provide(SERVICE_KEYS.runner, factory, priority > 0)` 即可整体替换它
+// （如换成 ReAct / Reflexion / 纯规划-执行两段式 / 带验证器的循环），
+// 且替换对顶层对话、子代理、并行三条路径同时生效（三者统一经 resolveRunner 取循环）。
+//
+// 契约形状定义在 kernel/loop.ts（此处只做转发，避免 types ↔ loop 循环依赖）。
+export {
+  SERVICE_KEYS, resolveRunnerFactory, makeRunner,
+} from './loop';
+export type {
+  AgentEvent, AgentHookCtx, AgentLoop, RunOptions, RunnerFactory,
+} from './loop';
 
 /** 人设能力：插件向 LLM 贡献的系统提示词片段（随插件加载/卸载自动增减） */
 export interface PersonaDef {
@@ -514,10 +619,19 @@ export interface KernelEvents {
   'plugin.unloaded': { id: string };
   'plugin.reloaded': { id: string; rollback?: boolean };
   'plugin.error': { id?: string; dir?: string; error: string; rollback?: boolean };
-  'plugin.reverted': { id: string; effects: number };
+  /** effects = 本次回收的界内逆元数；outbound = 本生命周期登记的界外发射数（不可逆，仅供审计） */
+  'plugin.reverted': { id: string; effects: number; outbound?: number };
+  /** 插件登记了一次界外发射（文件/HTTP/DB/子进程） */
+  'plugin.outbound': { id: string; kind: OutboundRecord['kind']; detail: string };
+  /** 插件彻底卸载时对其私有存储执行的清理策略 */
+  'plugin.cleanup': { id: string; strategy: 'keep' | 'archive' | 'purge'; dir: string; outbound: number };
   'plugin.capability': { pluginId: string; kind: string; name?: string };
-  'service.provided': { key: string; pluginId: string };
+  'service.provided': { key: string; pluginId: string; priority?: number };
   'service.withdrawn': { key: string; pluginId: string };
+  /** 高优先级提供者接管了原本生效的绑定（可接管语义的可观测点） */
+  'service.overridden': { key: string; pluginId: string; priority?: number };
+  /** 低优先级候选登记（并存但未生效）——不惊动依赖方 */
+  'service.declared': { key: string; pluginId: string; priority?: number };
   'kernel.started': { root: string; plugins: string[]; l1Cache: boolean };
   'kernel.stopped': Record<string, never>;
   'trace.step': TraceStep;
@@ -561,6 +675,11 @@ export interface Session {
   pinned: number;           // 0/1 置顶标记（会话管理）
   createdAt: number;
   updatedAt: number;
+  /** 列表派生字段（非 sessions 列）：最后一句"真正说出口的话"与其角色。
+   *  排除带 tool_calls 的过程轮（那是内心旁白，不是发给对方的消息），
+   *  供侧栏像微信一样显示摘要，而不是恒为「私聊」两个字的死文本。 */
+  lastMsg?: string;
+  lastRole?: 'user' | 'assistant';
 }
 
 export interface Message {

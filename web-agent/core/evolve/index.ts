@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync
 import { join } from 'node:path';
 import type { AgentRunSummary, Plugin } from '../../kernel/types';
 import { contentWords, bigramSet, dice } from '../../kernel/cache';
-import { parseFrontMatter, fmString } from '../../kernel/frontmatter';
+import { parseFrontMatter, fmString, fmList } from '../../kernel/frontmatter';
 
 const EMPHASIS_PATTERNS: { re: RegExp; why: string }[] = [
   { re: /(记住|记一下|以后(都|每次|再也?不|一定|务必)|下次(也|记得|一定))/, why: '用户给出了需要长期遵守的指示' },
@@ -36,8 +36,6 @@ export interface ProposalMeta {
   question?: string;
   evidence?: string;
 }
-
-let busOff: (() => void) | null = null;
 
 export default {
   id: 'evolve',
@@ -84,7 +82,7 @@ export default {
             name,
             description: fmString(fm.data, 'description'),
             reason: fmString(fm.data, 'reason'),
-            signals: (fm.data['signals'] as string[] | undefined) ?? String(fm.data['signals'] ?? '').split(',').filter(Boolean),
+            signals: fmList(fm.data, 'signals'),
             status: (fmString(fm.data, 'status') || 'pending') as ProposalMeta['status'],
             createdAt: Number(fmString(fm.data, 'created-at')) || Date.now(),
             updatedAt: Number(fmString(fm.data, 'updated-at')) || Date.now(),
@@ -204,10 +202,10 @@ export default {
         Object.keys(summary.failedTools).length ? `失败统计: ${JSON.stringify(summary.failedTools)}` : undefined);
     }
 
-    const off = ctx.bus.on('agent.run.finished', (e) => {
+    // 自动退订：卸载/停用时随 EffectScope 回收（无需手工持有 off 句柄）
+    ctx.on('agent.run.finished', (e) => {
       try { onRunFinished((e as { data: AgentRunSummary }).data); } catch { /* 进化失败绝不影响对话 */ }
     });
-    busOff = () => { try { off(); } catch { /* 已卸载 */ } };
 
     ctx.register({
       kind: 'persona',
@@ -298,9 +296,5 @@ export default {
 
     const pending = loadProposals().filter(p => p.status === 'pending').length;
     ctx.logger.info(`自进化就绪：${auto ? 'run 结束自动提案' : '自动提案已关闭'}，待确认提案 ${pending} 条（${dir}）`);
-  },
-  onStop() {
-    busOff?.();
-    busOff = null;
   },
 } satisfies Plugin;

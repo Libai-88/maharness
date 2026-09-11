@@ -58,6 +58,10 @@ export class Trace {
     if (init.type === 'llm_call') this.counter.llmCalls++;
     if (init.type === 'tool_call') this.counter.toolCalls++;
     if (init.type === 'cache_hit') this.counter.cacheHits++;
+    // 实时推送"开始"帧：只发 settle 的话，面板里一个步骤要等它**做完**才出现——
+    // 长工具（子代理/命令/联网抓取）执行期间轨迹面板是静止的，用户看不出"现在卡在哪一步"。
+    // 前端按 step.id 做 upsert（running 帧先占位，settle 帧原地覆盖成终态）。
+    this.bus.emit(EventBus.event('trace.step', { ...step }, step.traceId));
     return {
       id: step.id,
       finish: (extra) => this.settle(step, 'done', undefined, extra),

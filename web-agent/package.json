@@ -24,6 +24,7 @@
     "ui:dev": "npm --prefix ui run dev",
     "ui:build": "npm --prefix ui run build",
     "ui:typecheck": "npm --prefix ui run typecheck",
+    "e2e": "npm --prefix ui run e2e",
     "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck"
   },
   "dependencies": {

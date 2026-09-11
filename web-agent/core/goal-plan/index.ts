@@ -204,6 +204,27 @@ export default {
       },
     });
 
-    ctx.logger.info('工具就绪: create_plan / update_plan_progress / complete_goal');
+    // ---- 计划查询端点：GET /api/plugins/goal-plan/plan?sessionId=xxx ----
+    // 为什么必须有：计划只活在内存 Map 里、只经 plan.updated 事件推送——刷新页面后
+    // 计划卡要等下一次事件（可能整场对话都不再发生）才回来，而 todo 插件是有板子可查的。
+    // 计划是插件自己的状态，读取端点也就该由插件自己挂（与 todo 的 board 能力同构）。
+    ctx.register({
+      kind: 'api',
+      api: {
+        mount: 'plan',
+        router: (async (req: { method?: string; path?: string; query?: Record<string, unknown> }, res: {
+          json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void };
+        }) => {
+          const raw = (req.path ?? '/').replace(/\/+$/, '') || '/';
+          if (req.method && req.method !== 'GET') return res.status(405).json({ error: '仅支持 GET' });
+          if (raw !== '/' && raw !== '/plan') return res.status(404).json({ error: '未知路径' });
+          const sessionId = String(req.query?.sessionId ?? '').trim();
+          if (!sessionId) return res.json({ plan: null });
+          res.json({ plan: getPlan(sessionId) ?? null });
+        }) as never,
+      },
+    });
+
+    ctx.logger.info('工具就绪: create_plan / update_plan_progress / complete_goal（查询端点 /api/plugins/goal-plan/plan?sessionId=）');
   },
 } satisfies Plugin;

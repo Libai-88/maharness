@@ -1,7 +1,8 @@
 // ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤（span 树）+ 缓存/成本统计
 // memo 化：配合 App 侧稳定 onRefresh，流式 token 渲染期间跳过面板 reconcile（仅新步骤/统计变化时更新）
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { TraceStep } from '../types';
+import { toolDisplayName } from '../voice';
 import { IconCheck, IconChevronDown, IconDownload, IconRefresh } from './Icon';
 
 interface Props {
@@ -17,6 +18,25 @@ const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
   user_msg: { label: 'USER', cls: 'sys' },
   system: { label: 'SYS', cls: 'sys' },
 };
+
+/** 内部步骤名 → 人话（轨迹是给用户看的，不该混着一串英文函数名） */
+const STEP_NAMES: Record<string, string> = {
+  'model-route': '挑了条更合适的线路',
+  failover: '换备用线路',
+  'thinking-strip': '剥掉混进正文的思考',
+  'narration-fix': '纠正"把调用写成了文字"',
+  'cost-breaker': '成本熔断',
+  '上下文截断': '上下文截断',
+  'policy-allow': '规则放行',
+  approval: '等你点头',
+};
+
+/** 步骤显示名：工具用中文动作，系统步骤用上面的映射，其余原样（原始名进 title 可查） */
+function stepTitle(s: TraceStep): string {
+  if (s.type === 'tool_call' && s.name) return toolDisplayName(s.name);
+  if (s.name && STEP_NAMES[s.name]) return STEP_NAMES[s.name];
+  return s.name ?? '步骤';
+}
 
 function fmtMs(ms?: number): string {
   if (ms === undefined) return '—';
@@ -35,13 +55,15 @@ function exportJsonl(steps: TraceStep[]) {
   URL.revokeObjectURL(url);
 }
 
-/** 单条步骤渲染（span 树：子步骤缩进 + 可折叠下钻，OpenAI/Anthropic agent 调试器风格） */
-function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: number; collapsed: boolean; onToggle: () => void }) {
+/** 单条步骤渲染（span 树：子步骤缩进 + 可折叠下钻，OpenAI/Anthropic agent 调试器风格）
+ *  进行中的步骤显示跳动圆点 + 实时计时（旧版只推 settle 帧，长工具执行期间面板是静止的）。 */
+function StepRow({ s, depth, collapsed, onToggle, now }: { s: TraceStep; depth: number; collapsed: boolean; onToggle: () => void; now: number }) {
   const b = TYPE_BADGE[s.type] ?? { label: s.type.toUpperCase(), cls: 'sys' };
   const toggleable = depth > 0;
+  const running = s.status === 'running';
   return (
     <div
-      className={`tl-item ${s.status === 'running' ? 'streaming' : ''}`}
+      className={`tl-item ${running ? 'streaming running' : ''}`}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
       <div
@@ -51,7 +73,7 @@ function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: numbe
         role={toggleable ? 'button' : undefined}
         tabIndex={toggleable ? 0 : -1}
         aria-expanded={toggleable ? !collapsed : undefined}
-        aria-label={toggleable ? `折叠/展开步骤 ${s.name ?? b.label}` : undefined}
+        aria-label={toggleable ? `折叠/展开步骤 ${stepTitle(s)}` : undefined}
         onKeyDown={toggleable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
       >
         <div className="tl-left">
@@ -59,12 +81,13 @@ function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: numbe
             <span className={`tl-arrow ${collapsed ? '' : 'open'}`}><IconChevronDown size={9} /></span>
           )}
           <span className={`tl-badge ${b.cls}`}>{b.label}</span>
-          <span className="tl-title">{s.name ?? b.label}</span>
+          <span className="tl-title" title={s.name}>{stepTitle(s)}</span>
           {depth > 0 && s.traceId && <span className="tl-child-tag" title="子任务（span 树下钻：子代理/并行）">子任务</span>}
         </div>
         <div className="tl-right">
+          {running && <span className="tl-live" title="这一步正在做"><i /><i /><i /></span>}
           {s.cacheLayer && <span style={{ color: 'var(--teal)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>L{s.cacheLayer} <IconCheck size={9} /></span>}
-          <span className="tl-dur">{fmtMs(s.durationMs)}</span>
+          <span className="tl-dur">{running ? fmtMs(Math.max(0, now - s.ts)) : fmtMs(s.durationMs)}</span>
         </div>
       </div>
       {!collapsed && (
@@ -83,6 +106,15 @@ function StepRow({ s, depth, collapsed, onToggle }: { s: TraceStep; depth: numbe
 export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
   const [typeFilter, setTypeFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // 进行中步骤的实时计时：只在真的有 running 步骤时才起 1s 心跳（空闲零开销）
+  const runningCount = useMemo(() => steps.filter((s) => s.status === 'running').length, [steps]);
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!runningCount) return;
+    setNow(Date.now());
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [runningCount]);
   // span 树组装：root = 无 parentId 的步骤；children 按 parentId 索引。
   // 跨 traceId 也成立——子代理步骤的 parentId 指向调用方工具步骤（OpenAI tracing 层级）
   const tree = useMemo(() => {
@@ -122,6 +154,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
           s={s}
           depth={depth}
           collapsed={isCollapsed}
+          now={now}
           onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
         />,
       );
@@ -134,7 +167,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
     const known = new Set(steps.map((x) => x.id));
     for (const s of [...steps].reverse()) {
       if (s.parentId && !known.has(s.parentId)) {
-        out.push(<StepRow key={`or-${s.id}`} s={s} depth={1} collapsed={!!collapsed[s.id]} onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))} />);
+        out.push(<StepRow key={`or-${s.id}`} s={s} depth={1} collapsed={!!collapsed[s.id]} now={now} onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))} />);
       }
     }
     return out;
@@ -147,6 +180,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
           <span className="th-dot" />
           <span className="th-title">运行轨迹</span>
           {stats && <span className="msg-tag">{steps.length} 条</span>}
+          {runningCount > 0 && <span className="th-running" title="正在进行中的步骤"><i />{runningCount} 步在做</span>}
         </div>
         <div className="th-right" style={{ display: 'flex', gap: 4 }}>
           <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}><IconRefresh size={13} /></button>

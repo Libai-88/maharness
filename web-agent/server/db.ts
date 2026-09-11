@@ -7,6 +7,27 @@ import { randomUUID } from 'node:crypto';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
 import { decryptSecret, encryptSecret, isEncrypted } from './secrets';
 
+/**
+ * 不该出现在用户眼里的消息前缀——**单一出处**。
+ * 这些是 harness 的上下文工程产物，但它们是以 user/system 行真实入库的
+ * （发送序列忠实镜像，为的是 L3 前缀缓存逐字节延续）：
+ *   【继续】      agent 每轮结尾规整补的续跑提示
+ *   【失败教训】  失败反思注入
+ *   【长期记忆】  分层记忆注入
+ *   【角色移交】  角色接管的提示词
+ *   Reason in ENGLISH  英文思考提醒
+ * 消息接口（GET /api/sessions/:id/messages）与侧栏摘要（listSessions 的 lastMsg）
+ * 必须用同一份规则过滤，否则会出现"聊天里没有、侧栏摘要却是它"的错位。
+ */
+export const HIDDEN_MSG_PREFIXES = ['【继续】', '【失败教训】', '【长期记忆】', '【角色移交】', 'Reason in ENGLISH'] as const;
+
+/** 该内容是否属于"内部上下文工程"（不进用户可见的对话流） */
+export function isHiddenMessage(role: string, content: string | null | undefined): boolean {
+  const c = String(content ?? '');
+  if (role === 'system' && c.startsWith('Reason in ENGLISH')) return true;
+  return HIDDEN_MSG_PREFIXES.some((p) => p !== 'Reason in ENGLISH' && c.startsWith(p));
+}
+
 /** 网页端管理的 Provider 配置行 */
 export interface ProviderRow {
   id: string;
@@ -300,8 +321,28 @@ export class Store {
   // ---------- sessions ----------
 
   listSessions(): Session[] {
+    // lastMsg/lastRole：侧栏摘要用「最后一句真正说出口的话」——
+    // 只取 user / assistant，且排除带 tool_calls 的过程轮（那是旁白不是消息）、
+    // 排除空正文（纯工具调用轮的 content 为 null，会渲染成空白气泡/空白摘要）、
+    // 排除 harness 注入的"假 user 消息"（【继续】/【长期记忆】等，见 HIDDEN_MSG_PREFIXES）。
+    // 相关子查询按 session_id 走 messages_session_idx 反向取一行，会话数量级下开销可忽略。
+    const hidden = HIDDEN_MSG_PREFIXES.map((p) => `AND m.content NOT LIKE '${p.replace(/'/g, "''")}%'`).join('\n                           ');
     const rows = this.db
-      .prepare('SELECT id, title, model, provider, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions ORDER BY pinned DESC, updated_at DESC')
+      .prepare(`SELECT s.id, s.title, s.model, s.provider, s.mode, s.plan_pending AS planPending, s.role,
+                       s.archived, s.pinned, s.created_at AS createdAt, s.updated_at AS updatedAt,
+                       (SELECT SUBSTR(m.content, 1, 120) FROM messages m
+                         WHERE m.session_id = s.id AND m.role IN ('user','assistant')
+                           AND m.content IS NOT NULL AND m.content <> ''
+                           AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
+                           ${hidden}
+                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastMsg,
+                       (SELECT m.role FROM messages m
+                         WHERE m.session_id = s.id AND m.role IN ('user','assistant')
+                           AND m.content IS NOT NULL AND m.content <> ''
+                           AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
+                           ${hidden}
+                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastRole
+                FROM sessions s ORDER BY s.pinned DESC, s.updated_at DESC`)
       .all() as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string, title: r.title as string, model: r.model as string,
@@ -310,6 +351,8 @@ export class Store {
       role: (r.role as string) || undefined,
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
+      lastMsg: (r.lastMsg as string) ?? '',
+      lastRole: (r.lastRole as 'user' | 'assistant' | undefined) ?? undefined,
     }));
   }
 

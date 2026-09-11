@@ -331,8 +331,12 @@ export const IconWorkbench = (p: IconProps) => (
   <Svg {...p}><rect x="3" y="8" width="18" height="12" rx="2.5" /><path d="M9 8 V6.5 a2 2 0 0 1 2 -2 h2 a2 2 0 0 1 2 2 V8" /><path d="M3 12.5 h7 M14 12.5 h7" /><path d="M10 12.5 v2 h4 v-2" /></Svg>
 );
 
-/** 拍立得（贴纸卡片）：相机 + 相纸 */
-export const IconPolaroid = (p: IconProps) => (
+/** 待办看板（todo 插件）：清单 + 勾选 */
+export const IconTodo = (p: IconProps) => (
+  <Svg {...p}><rect x="3.5" y="4.5" width="17" height="15" rx="2.5" /><path d="M7.5 9.5 l1.6 1.6 L12.5 7.8" /><path d="M7.5 15.5 l1.6 1.6 L12.5 13.8" /><path d="M15 10 h3 M15 16 h3" /></Svg>
+);
+
+/** 拍立得（贴纸卡片）：相机 + 相纸 */export const IconPolaroid = (p: IconProps) => (
   <Svg {...p}><rect x="4.5" y="4.5" width="15" height="12.5" rx="2.5" /><path d="M8.5 4.5 V3.5 a1 1 0 0 1 1 -1 h5 a1 1 0 0 1 1 1 v1" /><path d="M12 8.5 v6 M9 11.5 h6" /></Svg>
 );
 

@@ -23,6 +23,16 @@ export const pageVariants: Variants = {
   initial: { opacity: 0, y: 14, rotate: 0.7, filter: 'blur(4px)' },
   enter: {
     opacity: 1, y: 0, rotate: 0, filter: 'blur(0px)',
+    /* 过渡一结束就把 filter 整个摘掉（遮挡类 bug 的根因位，勿删）：
+       blur(0px) 视觉上等价于无，但计算值仍非 none，而「非 none 的 filter」会同时
+       1) 让 .tab-content 成为层叠上下文——它在 DOM 里排在 .topbar 之后，于是整块聊天区
+          压住顶栏弹层（模式下拉/模型下拉点不动，实测点击落点被 .messages 抢走）；
+       2) 让它成为 position:fixed 后代的包含块——气泡长按菜单、斜杠命令面板、待办详情、
+          全屏代码查看器全部被劫持：遮罩从「视口」缩成内容区（实测 260,56 1180x844），
+          菜单按视口坐标算出的 left/top 被整体平移 (侧栏宽, 顶栏高)，并被 .chat-area 的
+          overflow:hidden 切掉一截。
+       动画期间保留模糊（blur 4→0），结束落回 filter:none，观感不变、层级恢复正交。 */
+    transitionEnd: { filter: 'none' },
     transition: { duration: DUR.slow, ease: EASE_OUT },
   },
   exit: {

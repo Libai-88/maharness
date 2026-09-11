@@ -25,16 +25,16 @@
  * ESM 残余限制：Node ESM loader 的模块注册表没有卸载 API——内容变化后旧模块记录
  * 常驻进程（见 entryUrl 的 hash 缓解策略），只能减缓无法根除。
  */
-import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, statSync, watch } from 'node:fs';
+import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { join, basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './bus';
 import { EffectScope } from './scope';
+import { dirDigest, fileDigest, materialize, pruneSnapshots, SNAPSHOT_SUFFIX, type Snapshot } from './plugin-snapshot';
 import { validateAgainstSchema } from './validate';
 import type {
-  Capability, EventListener, Plugin, PluginContext, PluginManifest, TraceLike,
+  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginManifest, PluginStorage, TraceLike,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
@@ -48,6 +48,10 @@ const DEFAULT_LIFECYCLE_TIMEOUT_MS = 30_000;
 const DEFAULT_CB_THRESHOLD = 3;
 /** 熔断器默认重置时间（ms）：熔断态持续该时长后自动重试 */
 const DEFAULT_CB_RESET_MS = 60_000;
+
+/** 内核内置实现的服务提供者标识：内核本体也是仲裁体系里的一个（最低优先级的）
+ *  提供者——「内核默认实现」与「插件实现」在解析层完全同构，没有特例分支。 */
+export const KERNEL_PROVIDER_ID = 'kernel';
 
 /** 带超时的 Promise 执行：超时后抛出 AbortError，不取消原 Promise（无法真正取消） */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
@@ -123,12 +127,17 @@ interface PluginInstance {
    *  签名变化 → reloadChanged 重载；未变化 → 保留实例（零抖动） */
   depSignature: string;
   /** v3.1 下次 reload 强制刷新 ESM 模块记录：依赖签名变化（如 env 变更）触发 reload
-   *  时，入口文件内容未变 → 默认 URL 命中 Node 模块缓存 → 新值不生效。
-   *  置位后 reloadInternal 给 entryUrl 追加 `&r=` 维度打破缓存，消费后立即复位。 */
+   *  时，目录内容未变 → 默认 URL 命中 Node 模块缓存 → 新值不生效。
+   *  置位后 reloadInternal 给入口 URL 追加 `&r=` 维度打破缓存，消费后立即复位。 */
   forceFresh?: boolean;
-  /** 上次成功加载的入口内容 hash（B9 警告依据）：reload 时若入口内容已变而 tsx
-   *  复用模块记录（query 被 strip），提示用户代码改动可能未生效 */
-  entryHash?: string;
+  /** 实际加载目录：插件目录的内容快照（见 plugin-snapshot）。dir 是身份目录
+   *  （manifest 读取 / 目录监听 / 展示），loadDir 是模块基址——内容一变即换目录，
+   *  整张模块图随之重建，依赖文件的改动由此真正生效。 */
+  loadDir: string;
+  /** 本次加载的内容聚合哈希（入口 URL 版本 + 快照清理依据） */
+  loadHash: string;
+  /** 本生命周期登记的界外发射数（ctx.outbound）：卸载摘要里可见，不随作用域回收 */
+  outboundCount?: number;
   /** 上下文配置拦截层，后注册层优先。 */
   configOverrides: Record<string, unknown>[];
   error?: string;
@@ -140,13 +149,20 @@ interface PluginInstance {
   };
 }
 
-/** 服务绑定：记录提供者身份与提供时刻（服务级调用追踪的数据底座） */
+/** 服务绑定：记录提供者身份与提供时刻（服务级调用追踪的数据底座）。
+ *  priority 为「可接管」语义的最小实现：同一服务键允许多个提供者并存（不再静默互相覆盖），
+ *  优先级最高者生效；生效者卸载时自动回退到次高者——「换实现」不需要先停掉旧的。 */
 interface ProviderBinding {
   pluginId: string;
   value: unknown;
   /** 提供时刻 mono 序 + 墙钟（用于可视化「何时被谁提供」） */
   seq: number;
   ts: number;
+  /** 接管优先级（大者胜；同值先到者胜）。缺省 0 = 与内核内置默认同权。 */
+  priority: number;
+  /** 是否已进入仲裁（发布过）。注册期登记的候选此位为 false，由 startInternal 统一激活；
+   *  防止「启动期补发布」把已生效的绑定再次当作新声明发布（重复事件/错误语义）。 */
+  published?: boolean;
 }
 
 export class PluginLoader {
@@ -159,8 +175,13 @@ export class PluginLoader {
   private dirMtimes = new Map<string, number>();
   /** 能力集反应性订阅：onCapabilities(kind, cb)——某类能力集合变化时通知 */
   private capSubs = new Map<string, Set<() => void>>();
-  /** 服务共效应注册表：key → 当前提供者绑定（每个键至多一个活动提供者） */
+  /** 服务共效应注册表：key → 当前【生效】提供者绑定（仲裁结果的视图，供解析与追踪读取） */
   private providers = new Map<string, ProviderBinding>();
+  /** 服务键 → 全部候选绑定（含未生效者）。生效者 = arbitrate(key) 的胜出者。
+   *  多提供者并存是可接管的实现基础：高优先级接管，卸载后自动回退次高者。
+   *  每个（键, 插件）至多一条绑定：同插件重复 provide 同一键时按最新一次语义生效——
+   *  「归属」因此无歧义（撤销/启动补发布都按插件唯一对应）。 */
+  private bindings = new Map<string, Map<string, ProviderBinding>>();
   /** 依赖方注册表：key → 订阅者（绑定出现/消失/换主时通知） */
   private dependents = new Map<string, Set<(v: unknown | undefined) => void>>();
   /** 依赖事实版本（v3 智能重载）：服务绑定/能力集/配置任何变化均递增——
@@ -184,10 +205,18 @@ export class PluginLoader {
 
   constructor(
     private bus: EventBus,
-    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'watchEnv' | 'configWith' | 'effect'>,
+    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'watchEnv' | 'configWith' | 'effect' | 'storage' | 'outbound'> & { budget: unknown },
     private coreDir: string,
     private userDir: string,
   ) {
+    // 内核内置子系统作为【同权优先级的默认提供者】进入仲裁体系：
+    // 内核不再是「不可替换的原语」，而是一个可被接管（provide 同键 + 更高 priority）
+    // 的默认实现。Kernel 的 cache/trace/budget 访问器统一从解析层取——
+    // 因此「换实现」不需要改任何调用点，也不需要内核知道谁接管了它。
+    this.publishBuiltin('service:cache', ctxBase.cache);
+    this.publishBuiltin('service:trace', ctxBase.trace);
+    this.publishBuiltin('service:budget', ctxBase.budget);
+
     // B6：任何配置变更（config.set → config.changed）→ 防抖后依赖驱动重载。
     // 与 watchConfig 的「插件自处理」互补：这里保证「声明了配置依赖的插件」在配置
     // 变化后自动 reload（重跑 onLoad 拿到新值），无需任何插件或调用方显式触发。
@@ -198,6 +227,14 @@ export class PluginLoader {
         void this.reloadChanged().catch(() => undefined);
       }, CONFIG_RELOAD_DEBOUNCE_MS);
     });
+  }
+
+  /** 登记并立即生效一条内核内置绑定（providerId = 内核本体）。
+   *  与插件提供者走完全相同的仲裁与事件路径——内置优先级的「特殊」只在于它先到场。 */
+  private publishBuiltin(key: string, value: unknown): void {
+    const binding: ProviderBinding = { pluginId: KERNEL_PROVIDER_ID, value, seq: this.factSeq++, ts: Date.now(), priority: 0 };
+    this.declareBinding(key, binding);
+    this.publish(key, binding);
   }
 
   /** 扫描并加载全部插件（core 在前，用户插件在后，确保依赖顺序），
@@ -227,11 +264,18 @@ export class PluginLoader {
     const entries = await readdir(root, { withFileTypes: true });
     for (const e of entries) {
       if (!e.isDirectory()) continue;
+      if (SNAPSHOT_SUFFIX.test(e.name)) { this.pruneOrphanSnapshot(root, e.name); continue; }
       const dir = join(root, e.name);
       const manifestPath = join(dir, 'plugin.json');
       if (!existsSync(manifestPath)) continue;
       await this.register(dir);
     }
+  }
+
+  /** 孤儿快照：插件目录已不在，其内容快照失去归属（扫描时顺带回收，避免磁盘累积） */
+  private pruneOrphanSnapshot(root: string, snapName: string): void {
+    const owner = snapName.replace(SNAPSHOT_SUFFIX, '');
+    if (!existsSync(join(root, owner))) rmSync(join(root, snapName), { recursive: true, force: true });
   }
 
   /** 按 requires 拓扑排序（Kahn）：入度 0 者先出队，初始队列按注册序（core 目录先于 plugins 目录）。
@@ -283,7 +327,8 @@ export class PluginLoader {
         return existing;
       }
       id = manifest.id;
-      inst = { manifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), entryHash: this.entryHashOf(dir, manifest.entry), circuitBreaker: { failures: 0, openedAt: 0 } };
+      const snap = this.snapshotOf(dir);
+      inst = { manifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), circuitBreaker: { failures: 0, openedAt: 0 } };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -293,8 +338,8 @@ export class PluginLoader {
       // startInternal（启动前置），单个依赖失败只影响该插件自身（loadAll 不阻断）。
       void manifest.requires;
 
-      // 动态加载入口（入口内容 hash busting 模块缓存，实现热重载；见 entryUrl 注释）
-      const mod = await import(this.entryUrl(dir, manifest.entry));
+      // 动态加载入口（从内容快照目录加载：目录内容变即换基址，整张模块图按内容重建）
+      const mod = await import(this.entryUrl(inst.loadDir, manifest.entry, inst.loadHash));
       inst.plugin = (mod.default ?? mod) as Plugin;
       await this.runLoad(inst);
       return inst;
@@ -313,40 +358,30 @@ export class PluginLoader {
     }
   }
 
-  /** 入口文件内容 hash（B9 警告与 hash busting 共用）。不可读时返回 'unreadable'。 */
-  private entryHashOf(dir: string, entry: string): string {
-    try {
-      return createHash('sha256').update(readFileSync(join(dir, entry))).digest('hex').slice(0, 16);
-    } catch {
-      return 'unreadable';
-    }
+  /**
+   * 插件目录的内容快照（见 plugin-snapshot）：目录内容变 → 换加载目录 → 整张模块图
+   * 按内容重建。目录内无可读源码时退回原目录（不产生快照目录，也不影响启动）。
+   */
+  private snapshotOf(dir: string): Snapshot {
+    const hash = dirDigest(dir);
+    if (!hash) return { dir, hash: 'no-source', skipped: true };
+    const snap = materialize(dir, hash);
+    if (snap.skipped) console.warn(`[plugin] ${basename(dir)} 体积超过快照上限，本次仅入口级热重载：${dir}`);
+    return snap;
   }
 
   /**
-   * 入口 URL（内容 hash busting）：入口文件内容不变 → URL 不变 → 命中 Node ESM 模块缓存，
+   * 入口 URL：版本取快照的内容聚合哈希——目录内容不变 → URL 不变 → 命中 Node ESM 模块缓存，
    * 不产生新模块记录（旧实现 ?t=${Date.now()} 每次都生成新 URL/新模块记录——reload 未变更
-   * 的插件也泄漏一份模块图）。
-   * forceFresh（v3.1）：依赖签名变化（如 .env 变更）触发的 reload 中，入口内容未变 →
+   * 的插件也泄漏一份模块图）；内容一变 → 目录名与 URL 同时变，入口与其依赖全部重建。
+   * forceFresh（v3.1）：依赖签名变化（如 .env 变更）触发的 reload 中目录内容未变 →
    * 默认 URL 命中旧模块记录（顶层常量读到的还是旧 env）→ 追加 `&r=${factVersion}`
    * 维度强制生成新模块记录，onLoad/onStart 重新求值。
-   * 已知限制（重要）：tsx 运行时（dev/start 均为 tsx）的 loader 会 strip 模块 URL 的
-   * query——hash busting 与 forceFresh 在 tsx 下都不生效（import 命中 pathname 相同的旧
-   * 模块记录）。因此 tsx 下热重载的有效保证是「插件在 onLoad/onStart 内读 env/config、
-   * 不做模块顶层常量」：reload 重跑 onLoad 时读到当前值。forceFresh 仅对 Node 原生 ESM
-   * 运行时有效（如未来切换 node --experimental-strip-types）。
-   * 残余限制：Node ESM registry 无法卸载模块——内容真正变化时新旧两份模块记录仍会并存
-   * 常驻进程；hash 只消除「未变化却重复膨胀」的部分。且 hash 仅取入口文件本体：入口 import
-   * 的依赖文件变化而入口未变时，命中的旧依赖图不会刷新（热重载粒度以入口文件为准）。
+   * 残余限制：Node ESM registry 无法卸载模块——内容变化时新旧模块记录并存于进程，
+   * 快照清理只回收磁盘，不回收内存。
    */
-  private entryUrl(dir: string, entry: string, forceFresh = false): string {
-    const filePath = join(dir, entry);
-    let version: string;
-    try {
-      version = createHash('sha256').update(readFileSync(filePath)).digest('hex').slice(0, 16);
-    } catch {
-      version = String(Date.now()); // 文件暂不可读（如编辑器写入中途）：时间戳兜底保证下次可重试
-    }
-    return `${pathToFileURL(filePath).href}?v=${version}${forceFresh ? `&r=${this.factVersion}` : ''}`;
+  private entryUrl(loadDir: string, entry: string, version: string, forceFresh = false): string {
+    return `${pathToFileURL(join(loadDir, entry)).href}?v=${version}${forceFresh ? `&r=${this.factVersion}` : ''}`;
   }
 
   /** 执行 onLoad（副作用全部进入实例的 EffectScope——卸载即自动恢复）。
@@ -372,6 +407,61 @@ export class PluginLoader {
     this.bus.emit(EventBus.event('plugin.loaded', { id: inst.manifest.id, caps: inst.caps.map((c) => c.kind), provides: [...inst.provides] }));
   }
 
+  /** 插件私有存储目录：<data>/plugins/<id> */
+  private storageDir(pluginId: string): string {
+    return join(this.ctxBase.paths.data, 'plugins', pluginId);
+  }
+
+  /** 私有存储门面：name 只取文件名，插件无法借此越出自身目录 */
+  private makeStorage(inst: PluginInstance): PluginStorage {
+    const dir = this.storageDir(inst.manifest.id);
+    const at = (name: string): string => join(dir, basename(name));
+    return {
+      dir,
+      read: (name) => { try { return readFileSync(at(name), 'utf-8'); } catch { return null; } },
+      write: (name, content) => { mkdirSync(dir, { recursive: true }); writeFileSync(at(name), content, 'utf-8'); },
+      list: () => { try { return readdirSync(dir); } catch { return []; } },
+      remove: (name) => { try { rmSync(at(name), { force: true }); } catch { /* 已不存在 */ } },
+    };
+  }
+
+  /**
+   * 界外发射台账：EffectScope 只回收界内效应；文件/HTTP/DB/子进程跨出了进程独占边界，
+   * 无法撤销——至少让它们可枚举：追加 <data>/outbound/<id>.jsonl 并广播事件，
+   * 卸载摘要（plugin.reverted）带上本生命周期的条数。
+   */
+  private makeOutbound(inst: PluginInstance): PluginContext['outbound'] {
+    const file = join(this.ctxBase.paths.data, 'outbound', `${inst.manifest.id}.jsonl`);
+    return {
+      record: (rec: OutboundRecord) => {
+        inst.outboundCount = (inst.outboundCount ?? 0) + 1;
+        try {
+          mkdirSync(dirname(file), { recursive: true });
+          appendFileSync(file, `${JSON.stringify({ ts: Date.now(), ...rec })}\n`, 'utf-8');
+        } catch { /* 台账写失败不影响插件运行 */ }
+        this.bus.emit(EventBus.event('plugin.outbound', { id: inst.manifest.id, kind: rec.kind, detail: rec.detail }));
+      },
+    };
+  }
+
+  /** 彻底卸载时按 manifest.cleanup 处理私有存储：keep 保留（默认）/ archive 归档 / purge 清除 */
+  private applyCleanup(inst: PluginInstance): void {
+    const strategy = inst.manifest.cleanup ?? 'keep';
+    const dir = this.storageDir(inst.manifest.id);
+    try {
+      if (strategy === 'purge') rmSync(dir, { recursive: true, force: true });
+      else if (strategy === 'archive' && existsSync(dir)) {
+        const target = join(this.ctxBase.paths.data, 'archive', `${inst.manifest.id}-${Date.now()}`);
+        mkdirSync(dirname(target), { recursive: true });
+        cpSync(dir, target, { recursive: true });
+        rmSync(dir, { recursive: true, force: true });
+      }
+    } catch (err) {
+      console.warn(`[plugin] ${inst.manifest.id} 私有存储清理失败（${strategy}）:`, err instanceof Error ? err.message : String(err));
+    }
+    this.bus.emit(EventBus.event('plugin.cleanup', { id: inst.manifest.id, strategy, dir, outbound: inst.outboundCount ?? 0 }));
+  }
+
   /** 构建插件上下文：一切副作用（register/on/provide/watchConfig）自动入 scope */
   private buildContext(inst: PluginInstance): PluginContext {
     const scope = inst.scope;
@@ -389,11 +479,23 @@ export class PluginLoader {
       },
       watch: (pattern: string, cb: (key: string, value: unknown) => void) => this.ctxBase.config.watch(pattern, cb),
     };
+    // 事件门面：只透传发射，不暴露订阅——订阅必须走 ctx.on 才进得了逆元栈，
+    // 裸监听会绕过 EffectScope 在卸载后残留（可逆性承诺的唯一破口在此封堵）。
+    const bus: PluginBus = {
+      emit: (e) => this.bus.emit(e),
+      emitAsync: (e) => this.bus.emitAsync(e),
+      serial: (e) => this.bus.serial(e),
+      bail: (e) => this.bus.bail(e),
+      parallel: (e) => this.bus.parallel(e),
+      waterfall: (type, ...args) => this.bus.waterfall(type, ...args),
+    };
     return {
       pluginId: inst.manifest.id,
       kernel: this.ctxBase.kernel,
       paths: this.ctxBase.kernel.paths,
-      bus: this.bus,
+      bus,
+      storage: this.makeStorage(inst),
+      outbound: this.makeOutbound(inst),
       config,
       trace: this.ctxBase.trace,
       cache: this.ctxBase.cache,
@@ -402,8 +504,11 @@ export class PluginLoader {
         inst.caps.push(cap);
         if (cap.kind === 'service' && inst.state === 'started') {
           // 运行期动态注册服务：立即发布（绑定只在提供者 ACTIVE 时对依赖方可见）
-          this.publish(`service:${cap.service.id}`, inst, cap.service.instance);
+          this.registerServiceCap(inst, cap.service.id, cap.service.instance);
         }
+        // 注册期（onLoad）声明的 service 能力不在此发布、也不登记 provides：
+        // 它由 startInternal 的 registerServiceCap 通道统一生效（两条通道各司其职，
+        // 不在 provides 里留悬空键——publishPendingFor 只负责 ctx.provide 的候选）。
         this.notifyCapSet(cap.kind);
         this.bus.emit(EventBus.event('plugin.capability', {
           pluginId: inst.manifest.id, kind: cap.kind,
@@ -429,8 +534,19 @@ export class PluginLoader {
         const remove = scope.add(off);
         return () => { remove(); off(); }; // 手动退订：先摘除逆元再退订（dispose 不再二次执行）
       },
-      provide: (key: string, value: unknown) => {
-        this.publish(key, inst, value);
+      provide: (key: string, value: unknown, priority = 0) => {
+        // 候选登记始终发生（谁提供了什么必须可见），但【生效】必须等本插件 ACTIVE——
+        // 「绑定只在提供者活动时对依赖方可见」是启动/停用语义的基石：否则一个
+        // enabled=false / lazy 的插件在注册期就能顶掉活动插件的服务。
+        const binding: ProviderBinding = { pluginId: inst.manifest.id, value, seq: this.factSeq++, ts: Date.now(), priority };
+        this.declareBinding(key, binding);
+        if (!inst.provides.includes(key)) inst.provides.push(key);
+        if (inst.state === 'started') this.publish(key, binding);
+        else {
+          // 声明登记：候选可见（可观测「谁声明了什么」），但不参与仲裁、不改变生效值
+          this.bus.emit(EventBus.event('service.declared', { key, pluginId: inst.manifest.id, priority }));
+        }
+        // 逆元：撤回本绑定（幂等——重复调用安全）。已发布的绑定被手动撤销时同样正确回退。
         const inverse = () => this.withdraw(key, inst);
         const remove = scope.add(inverse);
         return () => { remove(); inverse(); };
@@ -539,27 +655,121 @@ export class PluginLoader {
     return this.ctxBase.config.get(key, def);
   }
 
-  // ---------- 服务共效应注册表（反应性依赖） ----------
+  // ---------- 服务共效应注册表（反应性依赖 + 优先级接管） ----------
 
-  /** 发布绑定：键 → 提供者（带提供时刻 seq/ts）。通知依赖方（激活/换主）。 */
-  private publish(key: string, inst: PluginInstance, value: unknown): void {
-    this.providers.set(key, { pluginId: inst.manifest.id, value, seq: this.factSeq++, ts: Date.now() });
+  /**
+   * 仲裁：哪个绑定生效。规则极简且可预测——priority 大者胜；同优先级先到者胜
+   * （seq 全局单调，保证「先提供者不被后到者静默顶掉」这一稳定语义）。
+   *
+   * 关键：只仲裁【已发布】的候选。注册期登记的声明（published=false）是「意图」而非
+   * 「生效」——它们不参与竞争，否则一个 enabled=false / lazy 的插件在 onLoad 里声明
+   * 一句 provide 就能靠高优先级顶掉活动插件的服务，而它自己从未启动。
+   */
+  private arbitrate(key: string): ProviderBinding | undefined {
+    let best: ProviderBinding | undefined;
+    for (const b of this.bindings.get(key)?.values() ?? []) {
+      if (!b.published) continue;
+      if (!best || b.priority > best.priority || (b.priority === best.priority && b.seq < best.seq)) best = b;
+    }
+    return best;
+  }
+
+  /** 把仲裁结果落回 providers 视图；返回「生效者是否发生变化」。*/
+  private syncWinner(key: string): boolean {
+    const prev = this.providers.get(key);
+    const next = this.arbitrate(key);
+    if (!prev && !next) return false;
+    if (prev && next && prev === next) return false; // 同一绑定对象仍在生效：无变化
+    if (next) this.providers.set(key, next); else this.providers.delete(key);
+    return true;
+  }
+
+  /**
+   * 发布一个【已登记】的候选绑定：重新仲裁 → 生效者变化时通知依赖方。
+   * 可接管（priority 更高）时不打断提供方，只切换「谁对依赖方可见」。
+   */
+  private publish(key: string, binding: ProviderBinding): void {
+    const prev = this.providers.get(key); // 发布【前】的生效者，用于判定事件语义
+    binding.published = true; // 已进入仲裁：此后不再被当作「新声明」
+    const changed = this.syncWinner(key);
+    if (!changed) {
+      // 发布成功但未夺魁（本键已有更高优先级的活动提供者）：只是并存候选，不惊动依赖方
+      this.bus.emit(EventBus.event('service.declared', { key, pluginId: binding.pluginId, priority: binding.priority }));
+      return;
+    }
     this.bumpFact(); // 服务绑定变化 = 依赖事实变化（智能重载依据）
+    const winner = this.providers.get(key);
+    // 事件语义按「生效者是否换人」判定，而不是「发布者是否夺魁」：
+    //  - 此前无人生效 → provided（首次激活）
+    //  - 此前有别人生效 → overridden（接管，含从「休眠候选」上线接管活动绑定的情形）
+    const type = prev && prev !== winner ? 'service.overridden' : 'service.provided';
+    this.bus.emit(EventBus.event(type, {
+      key,
+      pluginId: winner?.pluginId ?? binding.pluginId,
+      priority: winner?.priority ?? binding.priority,
+    }));
+    this.notifyDependents(key, winner?.value);
+  }
+
+  /** 服务能力（kind:'service'）的发布：构造候选绑定并立即生效（调用点必在 started 之后）。
+   *  与 ctx.provide 共用同一候选集——两条注册通道语义一致，不产生旁路绑定。 */
+  private registerServiceCap(inst: PluginInstance, id: string, instance: unknown): void {
+    const key = `service:${id}`;
+    const binding: ProviderBinding = { pluginId: inst.manifest.id, value: instance, seq: this.factSeq++, ts: Date.now(), priority: 0 };
+    this.declareBinding(key, binding);
     if (!inst.provides.includes(key)) inst.provides.push(key);
-    this.bus.emit(EventBus.event('service.provided', { key, pluginId: inst.manifest.id }));
-    this.notifyDependents(key, value);
+    this.publish(key, binding);
   }
 
-  /** 撤回绑定（仅当当前提供者确实是本插件）。依赖方收到 undefined（停用通知）。 */
+  /** 启动期补发布：把该插件在注册期（onLoad）登记的候选此刻生效。
+   *  这是「声明在注册期、生效在启动期」的实现——两个阶段分离，停用插件不占服务。
+   *  按插件→候选精确取（每个键下每插件至多一条），不触碰其它插件的候选。 */
+  private publishPendingFor(inst: PluginInstance): void {
+    const id = inst.manifest.id;
+    for (const key of inst.provides) {
+      for (const [owner, b] of this.bindings.get(key) ?? []) {
+        if (owner === id && !b.published) this.publish(key, b);
+      }
+    }
+  }
+
+  /** 登记候选绑定（不生效）。绑定按（键, 插件）唯一：同插件重复 provide 覆盖前者。 */
+  private declareBinding(key: string, binding: ProviderBinding): void {
+    let byPlugin = this.bindings.get(key);
+    if (!byPlugin) { byPlugin = new Map(); this.bindings.set(key, byPlugin); }
+    byPlugin.set(binding.pluginId, binding);
+  }
+
+  /** 撤回绑定：移除本插件在该键的候选 → 重新仲裁。
+   *  若移除的是生效者且仍有候选（如被接管的原实现、或次高优先级），自动回退到胜出者，
+   *  依赖方收到新值而非 undefined——「接管者卸载后服务不消失」。 */
   private withdraw(key: string, inst: PluginInstance): void {
-    const cur = this.providers.get(key);
-    if (!cur || cur.pluginId !== inst.manifest.id) return;
-    this.providers.delete(key);
+    const byPlugin = this.bindings.get(key);
+    if (!byPlugin?.delete(inst.manifest.id)) return;
+    if (!byPlugin.size) this.bindings.delete(key);
+    const changed = this.syncWinner(key);
+    if (!changed) return;
     this.bumpFact();
-    this.bus.emit(EventBus.event('service.withdrawn', { key, pluginId: inst.manifest.id }));
-    this.notifyDependents(key, undefined);
+    const winner = this.providers.get(key);
+    this.bus.emit(EventBus.event(
+      winner ? 'service.provided' : 'service.withdrawn',
+      { key, pluginId: winner?.pluginId ?? inst.manifest.id },
+    ));
+    this.notifyDependents(key, winner?.value);
   }
 
+  /** 服务键下全部候选绑定（可观测：谁在提供、谁被接管、各自优先级） */
+  bindingCandidates(key: string): { pluginId: string; priority: number; active: boolean; published: boolean; seq: number; ts: number }[] {
+    const winner = this.providers.get(key);
+    return [...(this.bindings.get(key)?.values() ?? [])]
+      .sort((a, b) => b.priority - a.priority || a.seq - b.seq)
+      .map((b) => ({ pluginId: b.pluginId, priority: b.priority, active: b === winner, published: !!b.published, seq: b.seq, ts: b.ts }));
+  }
+
+  /** 当前全部服务键（服务注册表投影，供管理面/调试列出「已提供的服务」） */
+  serviceKeys(): string[] {
+    return [...this.bindings.keys()];
+  }
   private notifyDependents(key: string, value: unknown | undefined): void {
     const subs = this.dependents.get(key);
     if (!subs) return;
@@ -722,9 +932,11 @@ export class PluginLoader {
       cb.failures = 0;
       cb.openedAt = 0;
       this.bus.emit(EventBus.event('plugin.started', { id: inst.manifest.id }));
-      // 服务共效应发布：started 后插件提供的服务才对依赖方可见（绑定只在 ACTIVE 时有效）
+      // 服务共效应发布：started 后插件提供的服务才对依赖方可见（绑定只在 ACTIVE 时有效）。
+      // 注册期（onLoad）用 ctx.provide 登记的候选在此刻统一生效——声明与生效两阶段分离。
+      this.publishPendingFor(inst);
       for (const cap of inst.caps) {
-        if (cap.kind === 'service') this.publish(`service:${cap.service.id}`, inst, cap.service.instance);
+        if (cap.kind === 'service') this.registerServiceCap(inst, cap.service.id, cap.service.instance);
       }
       // 能力集反应性通知：started 后能力才对 capabilities() 可见——
       // 通知订阅者（如 chat 的 persona 集订阅），保证「启动即生效」而非等下次变化
@@ -755,9 +967,10 @@ export class PluginLoader {
     inst.state = 'unloading';
     // 可逆效应：LIFO 回收插件全部副作用（能力/订阅/服务绑定/配置变更一并恢复）
     const tracked = inst.scope.size;
+    const outbound = inst.outboundCount ?? 0;
     await inst.scope.dispose();
-    if (tracked > 0) {
-      this.bus.emit(EventBus.event('plugin.reverted', { id: inst.manifest.id, effects: tracked }));
+    if (tracked > 0 || outbound > 0) {
+      this.bus.emit(EventBus.event('plugin.reverted', { id: inst.manifest.id, effects: tracked, outbound }));
     }
     // 旧式钩子保留：有手工清理的插件仍可在此补位（自动回收已覆盖大部分场景）
     try { await inst.plugin?.onStop?.(this.buildContext(inst)); } catch { /* 忽略 */ }
@@ -792,16 +1005,18 @@ export class PluginLoader {
   private async reloadInternal(inst: PluginInstance, start: boolean): Promise<void> {
     const { dir } = inst;
     const registryId = inst.manifest.id;
-    const oldModule = inst.plugin;        // 备份旧模块（事务回滚用）
+    const oldModule = inst.plugin;        // 备份旧模块（事务回滚用；其依赖引用同样是旧版本）
     const oldManifest = inst.manifest;
+    const oldLoadDir = inst.loadDir;      // 旧快照目录：回滚期间保留，失败版本回收
     const forceFresh = !!inst.forceFresh; // 依赖签名变化触发的 reload：强制刷新模块记录
     inst.forceFresh = false;              // 消费即复位（只刷一次）
     // 事务阶段 1：回收旧实例的全部效果（可逆恢复）——旧模块引用保留
     await this.stopInternal(inst);
     this.bus.emit(EventBus.event('plugin.unloaded', { id: registryId }));
 
-    // 事务阶段 2：加载新版本（暂不进入注册表）
-    const fresh: PluginInstance = { manifest: oldManifest, dir, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, entryHash: inst.entryHash, circuitBreaker: { ...inst.circuitBreaker } };
+    // 事务阶段 2：加载新版本（内容快照 + 独立作用域，暂不进入注册表）
+    const snap = this.snapshotOf(dir);
+    const fresh: PluginInstance = { manifest: oldManifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, circuitBreaker: { ...inst.circuitBreaker } };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -812,7 +1027,7 @@ export class PluginLoader {
       if (fresh.manifest.id !== registryId) {
         throw new Error(`新版本 plugin.json 的 id "${fresh.manifest.id}" 与已注册 id "${registryId}" 不一致（热重载不支持变更插件 id）`);
       }
-      const mod = await import(this.entryUrl(dir, fresh.manifest.entry, forceFresh));
+      const mod = await import(this.entryUrl(fresh.loadDir, fresh.manifest.entry, fresh.loadHash, forceFresh));
       fresh.plugin = (mod.default ?? mod) as Plugin;
       await this.runLoad(fresh);
       if (start && fresh.manifest.enabled !== false && !fresh.manifest.lazy) {
@@ -820,17 +1035,9 @@ export class PluginLoader {
       }
       // 双保险：即使 start 失败未通过异常呈现（如未来内部实现变化），error 态也不提交
       if (fresh.state === 'error') throw new Error(fresh.error ?? '新版本启动失败');
-      // B9 提示：入口内容已变（文件热重载）→ 当前运行时（tsx）复用旧模块记录，改动可能未生效
-      fresh.entryHash = this.entryHashOf(dir, fresh.manifest.entry);
-      if (!forceFresh && inst.entryHash && fresh.entryHash !== inst.entryHash) {
-        console.warn(
-          `[plugin] ${registryId} 入口文件内容已变化（${inst.entryHash} → ${fresh.entryHash}）。` +
-          '当前运行时（tsx）会复用旧模块记录，代码改动可能未生效——若未生效请重启进程；' +
-          '插件内请在 onLoad/onStart 中读取配置/环境变量，不要做成模块顶层常量。',
-        );
-      }
-      // 提交：替换注册表（旧实例已无副作用残留）
+      // 提交：替换注册表（旧实例已无副作用残留），回收历史快照（只留当前版本）
       this.registry.set(registryId, fresh);
+      pruneSnapshots(dir, [fresh.loadDir]);
       this.bus.emit(EventBus.event('plugin.reloaded', { id: registryId }));
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -838,10 +1045,10 @@ export class PluginLoader {
       try {
         await fresh.scope.dispose(); // 回收半成品副作用
         const rollback: PluginInstance = {
-          manifest: oldManifest, dir, state: 'registered',
+          manifest: oldManifest, dir, loadDir: oldLoadDir, loadHash: inst.loadHash, state: 'registered',
           caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
           depHooks: [], depSignature: inst.depSignature,
-          chain: inst.chain, entryHash: inst.entryHash,
+          chain: inst.chain,
           circuitBreaker: { ...inst.circuitBreaker },
         };
         await this.runLoad(rollback);
@@ -849,6 +1056,7 @@ export class PluginLoader {
           await this.startInternal(rollback);
         }
         this.registry.set(registryId, rollback);
+        pruneSnapshots(dir, [oldLoadDir]); // 失败版本的快照一并回收
         console.warn(`[plugin] ${registryId} 新版本加载失败，已回滚到旧版本: ${msg}`);
         this.bus.emit(EventBus.event('plugin.error', { id: registryId, error: msg, rollback: true }));
         this.bus.emit(EventBus.event('plugin.reloaded', { id: registryId, rollback: true }));
@@ -976,6 +1184,48 @@ export class PluginLoader {
     return out;
   }
 
+  /**
+   * 前端页面贡献清单：插件在 plugin.json 声明 nav 即在前端拥有一个标签页。
+   *
+   * 只列【已启动】插件（停用即页面下线，与能力可见性同一规则）；同时要求插件确实
+   * 注册了 api 能力——声明了页面却没有数据通道是配置错误，不应产出死标签。
+   * mount 一并返回：前端据 /api/plugins/<id>/<mount><page|panel> 拼出真实地址。
+   */
+  navContributions(): {
+    pluginId: string;
+    name: string;
+    mount: string;
+    nav: NavDef;
+    /** module 模式的 UI 入口 URL（含内容哈希，UI 改动即时生效）；非 module 模式为 null */
+    moduleUrl: string | null;
+  }[] {
+    const out: { pluginId: string; name: string; mount: string; nav: NavDef; moduleUrl: string | null }[] = [];
+    for (const id of [...this.registry.keys()].sort()) {
+      const inst = this.registry.get(id);
+      if (!inst || inst.state !== 'started' || !inst.manifest.nav) continue;
+      const api = inst.caps.find((c) => c.kind === 'api');
+      if (!api || api.kind !== 'api') continue;
+      out.push({
+        pluginId: inst.manifest.id,
+        name: inst.manifest.name,
+        mount: api.api.mount,
+        nav: inst.manifest.nav,
+        moduleUrl: this.moduleUrlOf(inst),
+      });
+    }
+    return out;
+  }
+
+  /** module 模式的 UI 入口 URL：入口取插件目录 ui/ 子目录内、路径不得越界，版本取内容哈希 */
+  private moduleUrlOf(inst: PluginInstance): string | null {
+    const nav = inst.manifest.nav;
+    if (!nav || nav.mode !== 'module' || !nav.module) return null;
+    const rel = nav.module.replace(/^\/+/, '');
+    if (!rel || rel.includes('..')) return null;
+    const digest = fileDigest(join(inst.dir, 'ui', rel));
+    return digest ? `/api/plugins/${inst.manifest.id}/ui/${rel}?v=${digest}` : null;
+  }
+
   async enable(id: string): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
@@ -1034,7 +1284,6 @@ export class PluginLoader {
       // 停止 + 回收全部副作用
       await this.stopInternal(cur);
       // 删除插件目录
-      const { rmSync } = await import('node:fs');
       try {
         rmSync(cur.dir, { recursive: true, force: true });
         console.log(`[plugin] 已卸载插件 ${id}（目录已删除: ${cur.dir}）`);
@@ -1043,6 +1292,8 @@ export class PluginLoader {
       }
       // 从注册表移除
       this.registry.delete(id);
+      pruneSnapshots(cur.dir); // 连同内容快照一起清理
+      this.applyCleanup(cur);  // 私有存储按 manifest.cleanup 处理（数据归属可预期）
       this.bus.emit(EventBus.event('plugin.unloaded', { id }));
     });
   }
@@ -1068,6 +1319,8 @@ export class PluginLoader {
    *  rescanning 互斥：在途重扫/重载期间的新分派直接返回。 */
   private async onFileChange(filename: string | null): Promise<void> {
     if (this.rescanning) return;
+    // 内容快照的创建/删除同样落在监听目录里（快照与插件目录同级）：不是插件变更，直接忽略
+    if (filename && SNAPSHOT_SUFFIX.test(filename.split('/')[0])) return;
     this.rescanning = true;
     try {
       const first = filename?.split('/')[0] ?? '';
@@ -1117,6 +1370,7 @@ export class PluginLoader {
       const entries = await readdir(this.userDir, { withFileTypes: true });
       for (const e of entries) {
         if (!e.isDirectory()) continue;
+        if (SNAPSHOT_SUFFIX.test(e.name)) continue; // 内容快照目录不是插件
         if (!existsSync(join(this.userDir, e.name, 'plugin.json'))) continue;
         now.add(e.name);
         const existing = [...this.registry.values()].find((i) => basename(i.dir) === e.name);
@@ -1140,6 +1394,8 @@ export class PluginLoader {
         await this.stop(inst);
         this.registry.delete(inst.manifest.id);
         this.dirMtimes.delete(inst.dir);
+        pruneSnapshots(inst.dir); // 插件目录已删除：连它的内容快照一并清理（不留孤儿）
+        this.applyCleanup(inst);  // 私有存储按 manifest.cleanup 处理
         this.bus.emit(EventBus.event('plugin.unloaded', { id: inst.manifest.id }));
       }
     }

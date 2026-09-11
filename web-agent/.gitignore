@@ -6,3 +6,7 @@ ui/dist/
 ui/node_modules/
 *.log
 .DS_Store
+
+# 插件内容快照（kernel/plugin-snapshot.ts 生成，运行时按内容重建，不入库）
+core/*@*/
+plugins/*@*/

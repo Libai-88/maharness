@@ -4,7 +4,7 @@ import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
 import type { PluginInfo } from '../types';
 import { IconCheck, IconClose, PluginIcon } from './Icon';
-import TodoBoardView from './TodoBoardView';
+import Confirm, { type ConfirmRequest } from './Confirm';
 
 interface Props {
   plugins: PluginInfo[];
@@ -79,6 +79,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
   const [selected, setSelected] = useState<PluginInfo | null>(null);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
 
   // 当选中项被停用时清除
   useEffect(() => {
@@ -174,6 +175,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
 
   return (
     <div className="plugins-layout">
+      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
       <div className="plugins-list">
         <div className="page-head">
           <div className="ph-eyebrow">
@@ -236,9 +238,13 @@ export default function PluginsView({ plugins, onAction }: Props) {
                     <button
                       className="pd-btn danger"
                       onClick={() => {
-                        if (confirm(`确定要卸载插件「${selected.name}」？\n\n此操作将删除插件目录，不可恢复。`)) {
-                          void act(selected.id, 'uninstall');
-                        }
+                        // 不可逆操作：应用内二步确认（原生 confirm 在这套界面里最出戏）
+                        setConfirmReq({
+                          text: `卸载插件「${selected.name}」？插件目录会一起删掉，不可恢复。`,
+                          okText: '卸载',
+                          danger: true,
+                          onOk: () => void act(selected.id, 'uninstall'),
+                        });
                       }}
                       disabled={!!busy[selected.id]}
                     >
@@ -270,8 +276,10 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? <>true <IconCheck size={10} /></> : 'false'}</span></div>
               </div>
               <PluginConfig pluginId={selected.id} />
-              {/* todo 插件：面板含交互（增删改），DOMPurify 会剥离 panel HTML 的脚本 → 特判渲染 React 原生组件 */}
-              {selected.id === 'todo' ? <TodoBoardView /> : <PluginPanel pluginId={selected.id} />}
+              {/* 插件贡献的前端面板：统一走 /panel 通道（DOMPurify 净化后渲染）。
+                  此前 todo 被特判成 React 原生组件——那是「前端认识某个插件」的硬编码；
+                  看板这类富交互页面由插件声明 nav（mode:iframe）在顶层标签页完整保真呈现。 */}
+              <PluginPanel pluginId={selected.id} />
             </>
           ) : (
             <div className="empty-state">← 选择插件查看详情</div>

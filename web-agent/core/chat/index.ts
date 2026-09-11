@@ -9,12 +9,15 @@
  * 组装结果热更新：人设变更 / 插件加载卸载 / 重载，立即影响新对话，无需重启。
  */
 import type { PersonaDef, Plugin } from '../../kernel/types';
-import { AgentRunner, textualizeHistory, annotateToolDef } from './agent';
+import { SERVICE_KEYS } from '../../kernel/types';
+import { AgentRunner, defaultRunnerFactory, textualizeHistory, annotateToolDef } from './agent';
 import { compactHistory } from './compact';
 import { routeForTask } from './routing';
 import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from './policy';
 import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig } from './provider';
 import { resultStore, sessionKeyOf } from './result-store';
+// 审批共享板：挂起清单要能经服务接口暴露（刷新页面后审批卡原位复原，不再"卡没了但服务端还在等"）
+import { globalApprovalBoard, type PendingApproval } from './approvals';
 
 /**
  * L0 内核框架：不可修改的执行纪律（提示词系统 v1.0 定稿，见 docs/提示词系统定稿.md）。
@@ -83,6 +86,13 @@ export default {
     setupEmbedding(ctx); // 配置了 EMBEDDING_* 则激活 L1 语义缓存
     const runner = new AgentRunner(ctx.kernel, ctx.bus);
 
+    // ---- 执行循环即插件：把默认循环注册为 service:runner ----
+    // 内核不含循环，只提供原语；本插件提供【默认实现】。任何插件以更高优先级
+    // 提供同一键即可整体替换循环（ReAct/Reflexion/两段式…），顶层对话/子代理/并行
+    // 三条路径统一经 resolveRunner() 取循环——替换一次全局生效。
+    // priority 0 = 与内核内置子系统同权；后到者不静默顶掉（同优先级先到者胜）。
+    ctx.provide(SERVICE_KEYS.runner, defaultRunnerFactory, 0);
+
     const service: {
       providers: ReturnType<typeof createProvider>[];
       runner: AgentRunner;
@@ -92,7 +102,8 @@ export default {
       setPersonas: (list: { name: string; content: string }[]) => void;
       getSystemPrompt: () => string;
       refreshPrompt: () => void;
-      approveApproval: (approvalId: string, approved: boolean) => boolean;
+      /** 挂起审批清单（可按会话过滤）：前端刷新后据此恢复审批卡 */
+      listApprovals: (sessionId?: string) => PendingApproval[];
       // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
       textualizeHistory: typeof textualizeHistory;
       compactHistory: typeof compactHistory;
@@ -142,7 +153,8 @@ export default {
         service.systemPrompt = parts.join('\n\n');
       },
       getSystemPrompt: () => service.systemPrompt,
-      approveApproval: (approvalId: string, approved: boolean) => runner.approveApproval(approvalId, approved),
+      /** 挂起审批清单（可按会话过滤）：前端首屏/刷新后据此恢复审批卡 */
+      listApprovals: (sessionId?: string): PendingApproval[] => globalApprovalBoard.listPending(sessionId),
       // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
       textualizeHistory,
       compactHistory,

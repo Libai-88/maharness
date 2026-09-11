@@ -4,6 +4,7 @@
 import type { Express } from 'express';
 import { assertPublicHttpUrl, getChatService, maskKey, refreshChatProviders, type RouteDeps } from './shared';
 import { extractFromProviderMeta, resolveCapabilities } from '../../kernel/modelCatalog';
+import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError } from '../../core/chat/provider-health';
 
 /** 支持的协议族（本地/内网地址需 AGENT_ALLOW_PRIVATE_URLS=1） */
 type ProviderProtocol = 'openai' | 'anthropic' | 'ollama';
@@ -89,6 +90,8 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       apiKeyMasked: maskKey(r.apiKey), hasKey: !!r.apiKey,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
       models: models.filter(m => m.providerId === r.id),
+      // 健康状态（failover 链上的真实调用回报）：401/403 → authFailed，设置页红标 + 会话横幅
+      health: getProviderHealth(r.id),
     })));
   });
 
@@ -179,17 +182,25 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     }
     const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : 'openai';
     const started = Date.now();
+    // 验证结果联动 provider 健康状态：换 key 后点「验证密钥」立即确认恢复
+    // （成功清除 authFailed 红标/会话横幅；失败标记失效），不等下一条真实消息
+    const pid = providerId ? String(providerId) : undefined;
     try {
       const r = await fetch(...buildPing(base, protocol, String(useKey ?? ''), String(model)));
       const latencyMs = Date.now() - started;
       if (!r.ok) {
         // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
-        return res.status(400).json({ ok: false, latencyMs, error: `HTTP ${r.status}` });
+        const error = `HTTP ${r.status}`;
+        if (pid) noteProviderFailure(pid, error);
+        return res.status(400).json({ ok: false, latencyMs, error, authFailed: isAuthError(error) });
       }
       await r.body?.cancel().catch(() => { /* 忽略 */ });
-      res.json({ ok: true, latencyMs, protocol, message: `连接成功（${latencyMs}ms）` });
+      if (pid) noteProviderSuccess(pid);
+      res.json({ ok: true, latencyMs, protocol, message: `连接成功（${latencyMs}ms）——密钥有效，provider 已恢复健康` });
     } catch (err) {
-      res.status(400).json({ ok: false, latencyMs: Date.now() - started, error: err instanceof Error ? err.message : String(err) });
+      const error = err instanceof Error ? err.message : String(err);
+      if (pid) noteProviderFailure(pid, error);
+      res.status(400).json({ ok: false, latencyMs: Date.now() - started, error, authFailed: isAuthError(error) });
     }
   });
 

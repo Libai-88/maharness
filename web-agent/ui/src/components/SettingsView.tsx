@@ -6,6 +6,7 @@ import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../type
 import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
+import Confirm, { type ConfirmRequest } from './Confirm';
 import SkillsView from './SkillsView';
 
 interface Props {
@@ -29,6 +30,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  // 删除 Provider 的二步确认走应用内弹层（原生 confirm 在这套界面里最出戏）
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
   const [models, setModels] = useState<PulledModel[]>([]);
 
@@ -49,11 +52,19 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       return refresh(false, '名称 / 地址 / 模型必填，新建时 Key 必填');
     }
     setBusy('save');
+    let savedId: string | null = null;
     try {
-      if (creating) { await providersApi.create(form); await refresh(true, '已添加'); }
-      else if (editing) { await providersApi.update(editing.id, form); await refresh(true, '已保存'); }
-    } catch (err) { await refresh(false, err instanceof Error ? err.message : String(err)); }
-    finally { setBusy(null); }
+      if (creating) { const p = await providersApi.create(form); savedId = p.id; await refresh(true, '已添加'); }
+      else if (editing) { await providersApi.update(editing.id, form); savedId = editing.id; await refresh(true, '已保存'); }
+      else { return; }
+    } catch (err) {
+      await refresh(false, err instanceof Error ? err.message : String(err));
+      setBusy(null);
+      return;
+    }
+    setBusy(null);
+    // 保存（尤其是换 key）后立即验证：一次测试请求确认恢复，不等下一条真实消息
+    if (savedId) await verifyKey(savedId, form.baseUrl.trim(), form.model.trim(), form.protocol);
   };
 
   const test = async () => {
@@ -112,39 +123,70 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     try {
       await providersApi.update(p.id, { enabled: !p.enabled });
       onChanged();
-      toast.success(`${p.label} 已${p.enabled ? '停用' : '启用'}`);
+      toast.success(`「${p.label}」已${p.enabled ? '先歇着' : '开始干活'}`);
     } catch (err) {
-      toast.error(`操作失败：${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`「${p.label}」没切换成功：${err instanceof Error ? err.message : String(err)}`);
     } finally { setTogglingId(null); }
   };
 
   const remove = async (p: ProviderInfo) => {
-    if (!confirm(`删除 Provider「${p.label}」？`)) return;
+    // 二步确认：应用内弹层（原生 confirm 会弹出系统对话框，与手账界面完全两个世界）
+    setConfirmReq({
+      text: `删除 Provider「${p.label}」？这把钥匙的配置会一起删掉。`,
+      okText: '删除',
+      danger: true,
+      onOk: () => {
+        void (async () => {
+          try {
+            await providersApi.remove(p.id);
+            onChanged();
+            toast.success(`「${p.label}」已经删掉了`);
+          } catch (err) {
+            toast.error(`没删掉：${err instanceof Error ? err.message : String(err)}`);
+          }
+        })();
+      },
+    });
+  };
+
+  /** 验证密钥（用已存储的 Key 发一次测试请求）：结果联动 provider 健康——
+   *  成功清除 authFailed 红标与会话横幅；失败标记失效。 */
+  const verifyKey = async (id: string, base: string, model: string, protocol?: string) => {
+    setTestResult((r) => ({ ...r, [id]: { ok: false, ms: 0 } }));
     try {
-      await providersApi.remove(p.id);
-      onChanged();
-      toast.success(`已删除 Provider「${p.label}」`);
+      const r = await providersApi.test({ baseUrl: base, apiKey: '', model, protocol, providerId: id });
+      setTestResult((prev) => ({ ...prev, [id]: { ok: r.ok, ms: r.latencyMs ?? 0 } }));
+      if (r.ok) setMsg({ ok: true, text: `钥匙可用（往返 ${r.latencyMs ?? 0}ms）——这条线路已恢复` });
+      else setMsg({ ok: false, text: `钥匙没通过：${r.error ?? '连不上'}${r.authFailed ? '（密钥无效，检查后重新保存）' : ''}` });
     } catch (err) {
-      toast.error(`删除失败：${err instanceof Error ? err.message : String(err)}`);
+      setTestResult((prev) => ({ ...prev, [id]: { ok: false, ms: 0 } }));
+      setMsg({ ok: false, text: `验证没做成：${err instanceof Error ? err.message : String(err)}` });
     }
+    setTimeout(() => setMsg(null), 6000);
+    // 健康状态已变（清除/标记）——刷新列表让红标即时生效
+    onChanged();
   };
 
   const runTest = async (p: ProviderInfo) => {
     setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: 0 } }));
     try {
-      // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key）
+      // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key），
+      // 结果联动健康状态（成功恢复红标消失 / 失败标记失效）
       const r = await providersApi.test({ baseUrl: p.baseUrl, apiKey: '', model: p.model, protocol: p.protocol, providerId: p.id });
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: r.ok, ms: r.latencyMs ?? 0 } }));
-      if (!r.ok) toast.error(`${p.label} 连接失败：${r.error ?? '未知错误'}`);
-      else toast.success(`${p.label} 连接成功（${r.latencyMs ?? 0}ms）`);
+      if (!r.ok) toast.error(`「${p.label}」没连上：${r.error ?? '说不清原因'}${r.authFailed ? '（这把钥匙无效）' : ''}`);
+      else toast.success(`「${p.label}」钥匙可用（往返 ${r.latencyMs ?? 0}ms）`);
     } catch (err) {
       setTestResult((prev) => ({ ...prev, [p.id]: { ok: false, ms: 0 } }));
-      toast.error(`测试失败：${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`验证没做成：${err instanceof Error ? err.message : String(err)}`);
     }
+    // 红标即时更新（后端已联动健康状态）
+    onChanged();
   };
 
   return (
     <>
+      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
         <span className="page-title">模型与 Provider</span>
         <span style={{ marginLeft: 'auto' }}>
@@ -223,6 +265,9 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
                 </div>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                {p.health?.authFailed && (
+                  <span className="pv-auth-bad" title={p.health.lastError}>密钥失效</span>
+                )}
                 <span className={`pv-status ${connected ? 'ok' : 'warn'}`}>
                   <span className="pv-sd" />{connected ? (providers[0]?.id === p.id ? '已连接 · 默认' : '已连接') : p.hasKey ? '已停用' : '未配置'}
                 </span>
@@ -255,7 +300,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             </div>
             <div className="pv-foot">
               <div className="pv-foot-left">
-                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runTest(p)}>测试连接</button>
+                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runTest(p)} title="用已存储的 Key 发一次测试请求——验证密钥有效性并恢复健康状态">验证密钥</button>
                 {tr && <span className="pv-latency" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: tr.ok ? 'var(--teal)' : 'var(--red)' }}>{tr.ok ? <IconCheck size={11} /> : <IconClose size={11} />} {tr.ms ? `${tr.ms}ms` : '失败'}</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -293,7 +338,7 @@ function ContextSection() {
       setSavedTip(tip);
       setTimeout(() => setSavedTip(null), 2500);
     } catch (err) {
-      toast.error(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`这项设置没保存上：${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -403,7 +448,7 @@ function RoutingSection() {
       setTip('路由规则已保存并热生效');
       setTimeout(() => setTip(null), 2500);
     } catch (err) {
-      toast.error(`保存失败：${err instanceof Error ? err.message : String(err)}`);
+      toast.error(`路由规则没保存上：${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -468,7 +513,7 @@ function RulesSection() {
   const [busy, setBusy] = useState(false);
 
   const load = async () => {
-    try { setView(await rulesApi.get()); } catch (e) { toast.error(`读取规则失败：${e instanceof Error ? e.message : String(e)}`); }
+    try { setView(await rulesApi.get()); } catch (e) { toast.error(`规则没读到：${e instanceof Error ? e.message : String(e)}`); }
   };
   useEffect(() => { void load(); }, []);
 
@@ -490,7 +535,7 @@ function RulesSection() {
       await load();
       setTip('规则已写入并在下一轮对话生效');
       setTimeout(() => setTip(null), 3000);
-    } catch (e) { toast.error(`保存失败：${e instanceof Error ? e.message : String(e)}`); }
+    } catch (e) { toast.error(`规则没保存上：${e instanceof Error ? e.message : String(e)}`); }
     finally { setBusy(false); }
   };
 
@@ -498,7 +543,7 @@ function RulesSection() {
     if (!view) return;
     const next = view.policy.map((r, i) => (i === idx ? { ...r, ...patch } : r));
     const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
-    if (!r.ok) { toast.error(r.error ?? '策略保存失败'); return; }
+    if (!r.ok) { toast.error(r.error ?? '这条策略没保存上'); return; }
     await load();
   };
 
@@ -506,7 +551,7 @@ function RulesSection() {
     if (!view) return;
     const next = [...view.policy, { id: `rule-${Date.now().toString(36)}`, effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run test', reason: '测试命令免审批', enabled: true }];
     const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
-    if (!r.ok) { toast.error(r.error ?? '新增失败'); return; }
+    if (!r.ok) { toast.error(r.error ?? '这条规则没加上'); return; }
     await load();
   };
 

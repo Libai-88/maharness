@@ -7,7 +7,7 @@
  * 批量并行委派（多个独立子任务一次并发跑完，适合"拆分为 N 个独立部分"的任务）。
  */
 import { randomUUID } from 'node:crypto';
-import { AgentRunner } from '../chat/agent';
+import { makeRunner } from '../../kernel/types';
 import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
@@ -58,8 +58,10 @@ export default {
     chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
 
     // ---- 并行进度事件（前端实时观测：并行任务开始/结束） ----
-    const emit = (phase: 'start' | 'done' | 'fail', taskId: string, objective: string, detail?: unknown) => {
-      ctx.bus.emit({ type: 'parallel.progress', data: { phase, taskId, objective, detail }, ts: Date.now() });
+    // 带上 sessionId 与总数：前端据此把进度挂到正确的会话/正确的那张"小队"气泡上，
+    // 并显示 2/4 这样的分母（没有分母的进度条等于没有进度）。
+    const emit = (phase: 'start' | 'done' | 'fail', taskId: string, objective: string, detail?: unknown, extra?: { sessionId?: string; total?: number; index?: number }) => {
+      ctx.bus.emit({ type: 'parallel.progress', data: { phase, taskId, objective, detail, ...(extra ?? {}) }, ts: Date.now() });
     };
 
     ctx.register({
@@ -133,8 +135,16 @@ export default {
           const results = await Promise.allSettled(tasks.map(async (t, i) => {
             const taskId = `par-${randomUUID().slice(0, 6)}`;
             const traceId = `par-${randomUUID().slice(0, 8)}`;
-            emit('start', taskId, t.objective, { index: i });
-            const runner = new AgentRunner(ctx.kernel, ctx.bus);
+            emit('start', taskId, t.objective, { index: i }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
+            // 循环经服务解析取得（service:runner）：与顶层/子代理同一实现，替换循环即全局一致
+            const runner = makeRunner(ctx.kernel, ctx.bus);
+            if (!runner) {
+              emit('fail', taskId, t.objective, { error: 'service:runner 不可用' }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
+              return {
+                taskId, objective: t.objective, ok: false,
+                error: '执行循环服务（service:runner）不可用——对话引擎插件未加载', toolCalls: 0, tokensIn: 0, tokensOut: 0, cost: 0, traceId,
+              };
+            }
             let answer = '';
             let usage = { input: 0, output: 0 };
             let cost = 0;
@@ -151,6 +161,7 @@ export default {
                 maxTurns: 6, // M4：与子代理轮数上限统一（最多 6 轮）
                 parentStepId: tctx.stepId, // span 树：并行子任务全部步骤挂到 run_parallel 工具步骤下
                 signal: tctx.signal,
+                sessionId: tctx.sessionId,
                 costBudget: budgetShares[i],
               })) {
                 if (ev.type === 'delta') answer += ev.text;
@@ -164,7 +175,7 @@ export default {
                     type: 'approval.requested',
                     traceId,
                     ts: Date.now(),
-                    data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary },
+                    data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                   });
                 }
                 else if (ev.type === 'error') error = ev.error;
@@ -173,13 +184,13 @@ export default {
               error = err instanceof Error ? err.message : String(err);
             }
             if (error) {
-              emit('fail', taskId, t.objective, { error });
+              emit('fail', taskId, t.objective, { error }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
               return {
                 taskId, objective: t.objective, ok: false,
                 error: `并行子任务失败: ${error}`, toolCalls, tokensIn: 0, tokensOut: 0, cost: 0, traceId,
               };
             }
-            emit('done', taskId, t.objective, { toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost });
+            emit('done', taskId, t.objective, { toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
             return {
               taskId, objective: t.objective, ok: true,
               answer: answer.trim(), toolCalls,

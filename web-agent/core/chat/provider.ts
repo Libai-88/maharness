@@ -11,6 +11,8 @@
  */
 import { estimateTokens } from '../../kernel/tokens';
 import { inferCapabilities } from '../../kernel/modelCatalog';
+// 失败分类：带状态码的 HTTP 错误（provider-health 据此判定"密钥失效"，不再猜文本）
+import { LLMHttpError } from './provider-health';
 import {
   buildBody as buildAnthropicBody, createStreamState as createAnthropicState,
   reduceEvent as reduceAnthropicEvent, usageChunks,
@@ -188,7 +190,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new Error(`LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`);
+        throw new LLMHttpError(res.status, `LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`);
       }
       if (!res.body) throw new Error('LLM 响应无 body');
 
@@ -308,7 +310,7 @@ async function* anthropicStream(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new Error(`LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`);
+    throw new LLMHttpError(res.status, `LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`);
   }
   if (!res.body) throw new Error('LLM 响应无 body');
 

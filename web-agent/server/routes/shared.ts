@@ -7,7 +7,8 @@ import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
 import type { LLMMessage, ModelCapability, ProviderDef, ToolDef } from '../../kernel/types';
 import { inferCapabilities } from '../../kernel/modelCatalog';
-import type { AgentRunner } from '../../core/chat/agent';
+import type { AgentLoop } from '../../kernel/types';
+import { makeRunner } from '../../kernel/types';
 import type { ProviderConfig } from '../../core/chat/provider';
 import type { CompactOptions, CompactResult } from '../../core/chat/compact';
 import type { Store } from '../db';
@@ -28,11 +29,11 @@ export interface RouteDeps {
 
 export interface ChatService {
   providers: ProviderDef[];
-  runner: AgentRunner;
   setProviders: (cfgs: ProviderConfig[]) => void;
   setPersonas: (list: { name: string; content: string }[]) => void;
   getSystemPrompt: () => string;
-  approveApproval: (approvalId: string, approved: boolean) => boolean;
+  /** 挂起审批清单（可按会话过滤）：刷新页面后审批卡原位复原 */
+  listApprovals: (sessionId?: string) => { id: string; name: string; summary: string; args?: unknown; sessionId?: string; createdAt: number; expiresAt: number }[];
   // 对话能力层共享方法（server 经服务接口访问，不直接 import core/chat 实现——
   // 接口与 core/chat/index.ts 导出的 service 对象保持一致）
   textualizeHistory: (history: LLMMessage[]) => LLMMessage[];
@@ -48,6 +49,15 @@ export interface ChatService {
 export function getChatService(kernel: Kernel): ChatService | undefined {
   // 共效应解析（v2）：依赖注册表按 key 解析，只返回 ACTIVE 提供者的绑定——比扫描能力表更直接
   return kernel.plugins.resolveService('service:chat') as ChatService | undefined;
+}
+
+/**
+ * 造一个执行循环（service:runner）：server 层不再从 chat 服务里掏 runner——
+ * 循环是可被任意插件接管的独立服务，对话引擎只是它的【默认实现】提供者。
+ * 返回 undefined 表示无插件提供循环（如对话引擎被停用）：调用方据此返回可读错误。
+ */
+export function getRunner(kernel: Kernel): AgentLoop | undefined {
+  return makeRunner(kernel as unknown as Parameters<typeof makeRunner>[0]);
 }
 
 /** 用 DB 中的启用 Provider 刷新对话服务（热生效，无需重启）；一并带上协议与模型能力 */

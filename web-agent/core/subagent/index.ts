@@ -7,7 +7,7 @@
  *       默认只读工具白名单（子代理不改世界，只侦查与计算），成本上限 maxTurns=6。
  */
 import { randomUUID } from 'node:crypto';
-import { AgentRunner } from '../chat/agent';
+import { makeRunner } from '../../kernel/types';
 import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
 /** 只读白名单：子代理默认只能侦查世界，不能改变世界。
@@ -157,7 +157,10 @@ export default {
             ? allTools
             : allTools.filter((t) => READ_ONLY_TOOLS.has(t.name));
 
-          const runner = new AgentRunner(ctx.kernel, ctx.bus);
+          // 循环经服务解析取得（service:runner）——子代理与顶层用同一份循环实现，
+          // 插件替换循环后子代理同步改变（避免「顶层换了、子代理跑旧循环」的割裂）
+          const runner = makeRunner(ctx.kernel, ctx.bus);
+          if (!runner) return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法委派子代理' };
           const traceId = `sub-${randomUUID().slice(0, 8)}`;
           let answer = '';
           let usage = { input: 0, output: 0 };
@@ -179,6 +182,8 @@ export default {
               maxTurns, // M4：默认 6 轮，maxTurns 参数可放宽（钳制 1-12）
               parentStepId: tctx.stepId, // span 树：子代理全部步骤挂到 run_subagent 工具步骤下
               signal: tctx.signal,
+              // 会话归属透传：子代理的审批也要能归到具体会话（刷新后卡片才回得到原位）
+              sessionId: tctx.sessionId,
               costBudget: remainingBudget,
             })) {
               if (ev.type === 'delta') answer += ev.text;
@@ -192,7 +197,7 @@ export default {
                   type: 'approval.requested',
                   traceId,
                   ts: Date.now(),
-                  data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary },
+                  data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                 });
               }
               else if (ev.type === 'error') error = ev.error;
@@ -265,7 +270,9 @@ export default {
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const tools: ToolDef[] = allTools.filter((t) => READ_ONLY_TOOLS.has(t.name)); // 审查者只读世界
-          const runner = new AgentRunner(ctx.kernel, ctx.bus);
+          // 审查循环同样经服务解析取得：审查者与执行者跑同一个循环实现（可被插件统一替换）
+          const runner = makeRunner(ctx.kernel, ctx.bus);
+          if (!runner) return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法委派审查' };
           const traceId = `rev-${randomUUID().slice(0, 8)}`;
           const criteria = args.criteria ? String(args.criteria).trim() : '正确性与需求符合度';
           const objective = `审查以下产出。审查标准：${criteria}。\n\n【待审查产出/说明】\n${target}`;
@@ -286,6 +293,7 @@ export default {
               maxTurns: 5,
               parentStepId: tctx.stepId, // span 树：审查子任务挂到 run_review 工具步骤下
               signal: tctx.signal,
+              sessionId: tctx.sessionId,
               costBudget: remainingBudget,
             })) {
               if (ev.type === 'delta') answer += ev.text;
