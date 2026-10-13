@@ -283,17 +283,24 @@ describe('service_call 埋点口径（C1）', () => {
     assert.equal(countServiceCalls(f), 0, '无接管时热路径应零埋点（旧实现此处会产生 150 条噪声）');
   });
 
-  test('确有插件接管时才埋点，且能看出接管者是谁', async (t) => {
+  test('确有插件接管时才埋点，且每条依赖边只留痕一次（重复解析不刷屏）', async (t) => {
     const stub = `ctx.provide('service:cache', { l1Get: async () => undefined, mark: 'plugin-cache' }, 10);`;
     const f = setup({ overrideCache: stub });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
 
+    // 首次解析：登记这条依赖边并留痕
     void f.kernel.cache;
     const steps = f.kernel.trace.query(undefined, { type: 'service_call', limit: 50 });
-    assert.equal(steps.length, 1, '接管场景保留服务调用可观测性');
+    assert.ok(steps.length >= 1, '接管场景保留服务调用可观测性');
     assert.equal(steps[0].name, 'service:cache');
     assert.match(String(steps[0].outputSummary), /overrideCache/, 'summary 指明消费方 → 提供方');
+
+    // 再解析 200 次（模拟 UI 每 2s 轮询）：同一条 (key,provider,consumer) 边不得继续堆积
+    const before = countServiceCalls(f);
+    for (let i = 0; i < 200; i++) void f.kernel.cache;
+    assert.equal(countServiceCalls(f), before,
+      '依赖边只留痕一次（C1：旧实现每次解析都记，轮询即可灌满 ring）');
   });
 
   test('trace.serviceCall 可切口径：always 连内置也记，off 一律不记', async (t) => {

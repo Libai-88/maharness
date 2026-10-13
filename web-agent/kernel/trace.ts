@@ -98,6 +98,9 @@ export class Trace {
         this.flushTimer = null;
         this.flush();
       }, FLUSH_INTERVAL_MS);
+      // 落盘节流定时器不钉住事件循环（缺陷 C2）：兜底已经有 process.on('exit') 与
+      // Kernel.stop() 里的显式 flush()，脚本退出前不会丢队列。
+      this.flushTimer.unref?.();
     }
   }
 

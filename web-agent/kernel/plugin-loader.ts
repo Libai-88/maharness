@@ -53,15 +53,24 @@ const DEFAULT_CB_RESET_MS = 60_000;
  *  提供者——「内核默认实现」与「插件实现」在解析层完全同构，没有特例分支。 */
 export const KERNEL_PROVIDER_ID = 'kernel';
 
-/** 带超时的 Promise 执行：超时后抛出 AbortError，不取消原 Promise（无法真正取消） */
+/** 带超时的 Promise 执行：超时后抛出 AbortError，不取消原 Promise（无法真正取消）。
+ *
+ * 缺陷 B15 的修复：竞速用的定时器**必须随胜负立即清除**。旧实现只 `setTimeout` 从不
+ * `clearTimeout`——插件赢下竞速后定时器仍挂着到点，于是每个插件的 onLoad/onStart 各留下
+ * 一个 30s 的 ref'd 定时器（16 个 core 插件 = 32 个）。后果不是内存而是**进程退不掉**：
+ * `npm run selftest` / `npm run eval` 打印完汇总后还要空等几十秒（实测 activeResources
+ * 里挂着 32 个 Timeout），看起来就像验收门卡死；重载风暴期间还会不断叠加。 */
 function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
   if (ms <= 0) return p;
-  return Promise.race([
-    p,
-    new Promise<never>((_, reject) =>
-      setTimeout(() => reject(new Error(`[plugin] ${label} 超时（${ms}ms）——插件可能挂起`)), ms),
-    ),
-  ]);
+  let timer: NodeJS.Timeout | undefined;
+  const guard = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`[plugin] ${label} 超时（${ms}ms）——插件可能挂起`)), ms);
+    // 双保险：即使清除时机被绕过（例如调用方不再等待），也不钉住事件循环
+    timer.unref?.();
+  });
+  return Promise.race([p, guard]).finally(() => {
+    if (timer) clearTimeout(timer);
+  }) as Promise<T>;
 }
 
 /**
@@ -191,6 +200,9 @@ export class PluginLoader {
    *  「自上次比对以来是否有任何可能改变签名的事实变化」，避免每次配置写入/轮询
    *  都对全部 started 插件重算 depHooks 分量。 */
   private lastFactVersion = -1;
+  /** 已留痕的服务依赖边（`key|provider|consumer`）——takeover 口径的去重表。
+   *  规模 = 键数 × 提供者数 × 消费方数（个位数级），提供者撤换时整体失效重建。 */
+  private tracedEdges = new Set<string>();
   /** 能力集版本（v3）：按 kind 递增——onCapabilities(kind) 的签名只随该 kind 变化，
    *  避免其余能力变化触发全局重载 */
   private capVersions = new Map<Capability['kind'], number>();
@@ -818,23 +830,31 @@ export class PluginLoader {
   /**
    * 服务级调用追踪（v3）：解析服务绑定并记录「消费方 → 提供方」的 service_call Trace 步骤。
    *  - providers 记录提供者插件 id + 提供时刻 seq/ts；
-   *  - 每次取值（inject / resolveService / capabilities 关联）都经此，记录到 Trace。
    *  - consumer 缺省记 'external'（非插件消费方，如 server 层）。
+   *
+   * 埋点口径（缺陷 C1 的完整修复）——回答的问题是「谁依赖了谁」，不是「谁取值取了几千次」：
+   *  - takeover（默认）：内核内置提供者（providerId='kernel'）完全不记；插件提供者的依赖边
+   *    **每 (key, provider, consumer) 只在首次解析记一条**。旧实现每次取值都记，UI 的
+   *    /api/trace/stats(2s) 与 /api/stats(5s) 轮询就把 service_call 灌到占归档 96%~99.5%，
+   *    ring（1000 条）被簿记挤满、真实对话步骤被淘汰，可观测性反被观测实现破坏；
+   *  - always：逐次记录（调试服务抖动时用）；
+   *  - off：一律不记。
    */
   traceServiceGet(key: string, consumer: string, trace?: TraceLike): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
     const binding = this.providers.get(key);
     if (!binding) return undefined;
-    // 只在【确有插件接管】时埋点——内核内置子系统以 providerId='kernel'、priority 0
-    // 进入同一仲裁，对它埋点等于给每次 `kernel.cache/trace/budget` 属性访问都写一条
-    // service_call 步骤（UI 的 /api/trace/stats 每 2s、/api/stats 每 5s 轮询也会写）。
-    // 实测那样会让 service_call 占归档 96%~99.5%，把 ring（1000 条）里的真实对话
-    // 步骤挤掉，反而毁掉可观测性本身。这里是 ARCHITECTURE §1.5.2b 的兑现：
-    // 「Trace 解析只在确有插件绑定时才写 service_call 步骤（无接管 = 零额外开销）」。
-    // 调试口径可用配置 trace.serviceCall：takeover（默认）/ always / off。
     const mode = this.ctxBase.config.get<string>('trace.serviceCall', 'takeover');
-    const traced = mode === 'always' || (mode !== 'off' && binding.pluginId !== KERNEL_PROVIDER_ID);
-    // 服务调用入 Trace：可写盘、可前端口径的 span（复用现有三态输出）。
-    // 注意：本处无 traceId 上下文（非执行路径），用空串，step 仍会上环形缓冲与 SSE。
+    let traced = false;
+    if (mode === 'always') {
+      traced = true;
+    } else if (mode !== 'off' && binding.pluginId !== KERNEL_PROVIDER_ID) {
+      // 依赖边去重：同一条边只在上首次解析时留痕（提供者换人即视为新边）
+      const edge = `${key}|${binding.pluginId}|${consumer}`;
+      if (!this.tracedEdges.has(edge)) {
+        this.tracedEdges.add(edge);
+        traced = true;
+      }
+    }
     if (traced && trace?.startStep) {
       const step = trace.startStep({
         traceId: '',
@@ -880,6 +900,8 @@ export class PluginLoader {
   /** 递增依赖事实版本：任何可能改变插件运行观察面的事实变化（服务绑定/能力集/配置）
    *  都应调用，供 reloadChanged 做签名比对。返回新版本号。 */
   private bumpFact(): number {
+    // 事实变了，依赖边表随之失效：下一次解析重新留痕（接管/回退这类变化必须再次可见）
+    this.tracedEdges.clear();
     return ++this.factVersion;
   }
 
@@ -1341,6 +1363,9 @@ export class PluginLoader {
         const name = filename ? String(filename).replace(/\\/g, '/') : null;
         this.reloadTimer = setTimeout(() => void this.onFileChange(name), 500);
       });
+      // 目录监听不该钉住事件循环（缺陷 B15）：长驻 server 有自己的监听套接字保持存活；
+      // CLI 脚本（selftest / agent-eval / cache-check）在 kernel.stop() 之后必须能自然退出。
+      this.watcher.unref?.();
     } catch (err) {
       console.warn('[plugin] 目录监听不可用（Windows 递归监听失败时退化为手动 reload）:', err);
     }

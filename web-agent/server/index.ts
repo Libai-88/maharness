@@ -190,6 +190,9 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
       }, 500);
     });
     console.log(`[env] 监听 ${envDir}（.env 变更将热重载插件）`);
+    // 监听句柄不钉住事件循环（B16 防御）：句柄照常派发事件，但嵌入方（selftest / 测试 /
+    // 未来 CLI）若忘记 closeEnvWatcher，也不会导致「跑完了却退不出去」。
+    envWatcher?.unref?.();
   } catch (err) {
     console.warn('[env] .env 监听不可用（改动后需重启生效）:', err instanceof Error ? err.message : String(err));
   }

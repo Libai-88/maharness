@@ -674,6 +674,10 @@ export default {
   } finally {
     // L6：失败路径同样走此处——端口探测 reject 时 started 为 undefined，清理仍生效
     started?.server.close();
+    // B16：必须关 .env 目录监听——startServer 早已导出 closeEnvWatcher，此前从未被调用，
+    // 于是 fs.watch 句柄一直 ref 着事件循环：断言全部跑完、汇总也打印了，进程却不退出
+    // （表现为「npm run selftest 卡死」，Windows 上尤其明显）。
+    started?.closeEnvWatcher?.();
     started?.store.close();
     await started?.kernel.stop();
   }
