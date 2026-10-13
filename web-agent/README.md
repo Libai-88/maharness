@@ -59,11 +59,60 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
 
 ## 安全模型（机器强制，不依赖提示词）
 
-- **本机专用**：服务仅监听 `127.0.0.1`，Host/Origin 白名单校验（防局域网直连与 DNS rebinding）。
-- **审批强制**：声明 `approval:true` 的工具由执行器在调用前机器强制挂起（write_file/delete_file/powershell 等）；审批拒绝不会被记为"失败教训"。
-- **PowerShell 白名单模型**：默认需审批；仅整条命令每段都是只读白名单命令（Get-ChildItem/Get-Content/ls/dir/cat 等）免审批；`.env`/数据库等敏感目标即使只读命令也强制审批；进程 cwd 锚定沙箱根。
-- **内核写保护**：Agent 无法写 `kernel/`、`core/chat/`（自我接管防护）；`.env` 与 `data/` 不可读（密钥不进上下文）。开发时设 `AGENT_ALLOW_CORE_EDIT=1` 放行。
-- **沙箱边界**：文件工具与文件 API 共用同一校验（防穿越 + realpath）；工作区切换仅限已登记路径；同会话并发对话 409 互斥。
+下面每一条都落在**代码**里（执行器 / 内核 / server 中间件），不是写给模型看的规矩。
+本节只描述"当前确实生效"的行为；挡不住的部分写在末尾**已知边界**里，不粉饰。
+
+- **只绑回环 + Host/Origin 校验**：服务只监听 `127.0.0.1`，局域网与外网不可达；
+  `Host` 必须精确匹配本机回环主机名+端口（挡 DNS rebinding），`Origin` 存在时必须在白名单
+  （挡跨源页面）。校验注册在所有业务路由与插件 API 之前。
+- **审批下沉执行器，工具自觉不算数**：需要审批的调用在**进入 handler 之前**就被挂起
+  （`approval` 声明或 `assessApproval` 按参数动态判定，判定函数抛错按"需要审批"处理）；
+  高危工具的 handler 另做二次校验（`approved` / 用户策略放行 `policyApproved` 之外一律拒绝）。
+  审批全程入 Trace；用户拒绝不会被记成"失败教训"。
+- **PowerShell 默认需审批**：白名单是"每段首词是只读 cmdlet"**且**"参数位不含可执行构造"——
+  脚本块只允许 `$_` 属性 + 比较/逻辑运算符的安全子集，出现类型字面量 / `::` 静态成员 /
+  `$()` 子表达式 / 赋值 / 调用运算符即回到审批（否则 `Get-ChildItem | Where-Object { [IO.File]::Delete('x') }`
+  会借"只读 cmdlet"免审批执行任意 .NET 代码）。敏感目标（`.env`/密钥/库文件）即使只读也强制审批；
+  超时用 `taskkill /T /F` 杀进程树；cwd 锚定沙箱根。
+- **内核写保护 + 敏感清单（双基座）**：`kernel/`、`core/chat/` 写/删一律拒绝（自我接管防护）；
+  `.env` 与 `data/` 不可读（密钥不进上下文），写入则**必须用户批准**且不受
+  `tools.writeRequiresApproval` 开关影响。判定同时按**沙箱根**与**项目根**两个基座算相对路径——
+  只按沙箱根算时，`SANDBOX_ROOT` 指到别处会让这整条保护形同虚设。
+- **沙箱边界**：文件工具与文件 API 共用同一校验（防穿越 + `realpath`）；工作区登记/切换
+  拒绝文件系统根、家目录及其祖先、系统目录（且对历史已入库的危险路径复检）；同会话并发对话 409 互斥。
+- **SSRF 防护**：`web_fetch` 与 Provider 连通性检测逐跳复检（重定向不是免检通道）、
+  协议白名单、DNS 解析后拒私网/环回/链路本地，并正确还原 IPv4-mapped IPv6 的十六进制形式
+  （`[::ffff:7f00:1]` 等价于 127.0.0.1）；响应体流式限量。
+- **MCP 边界**：stdio server 默认只透传运行必需的环境变量（`*_API_KEY` 等不再外泄，
+  需要时写进该 server 自己的 `env` 配置）；MCP 工具**默认需要审批**；win32 回收 `npx` 的孙进程。
+- **凭据（可选，默认关闭）**：
+  - `MAHARNESS_API_TOKEN`：把"改变 agent 行为与审批语义"（批准危险命令 / 切沙箱根 / 注入
+    allow 策略）变成需要显式授权。凭据**由人在设置页录入本浏览器**，不经服务端下发——
+    服务端下发等于对本机所有进程公开，门会退化成装饰。
+  - `MAHARNESS_APPROVAL_TOKEN`：回答审批必须回带该次挂起的一次性凭据（单次有效，重放被拒）。
+  - 当前状态、主密钥是否可用、审批门是否已被通配 allow 策略整体放行，都在
+    **设置 → 高级 → 安全**如实显示（`GET /api/security`，不含任何密钥材料）。
+- **密钥存储**：Provider 的 api_key 以 AES-256-GCM 落库，API 只回掩码；主密钥文件在 Windows 上
+  用 `icacls` 收 DACL；解密失败标 `keyBroken` 并显示出来，不再静默当空串用；
+  已有密文时拒绝静默重建主密钥（重建须显式 `MAHARNESS_ALLOW_SECRET_KEY_RESET=1` 且先备份原文件）。
+- **技能供应链**：技能包同步先落临时目录、按锁文件清单逐文件校验，再原子换入——
+  不留半成品、不残留上一版；`force` 不等于放弃校验。
+
+### 已知边界（诚实版）
+
+1. **信任边界是 OS 用户，不是这套 HTTP。** 同用户身份的恶意进程本就能直接读写工作区与
+   `data/`，也能读服务端进程的环境变量；浏览器相对本机其它进程**没有任何额外特权**。
+   所以上面的凭据门挡的是"无意图的本机调用"（其它工具/脚本/端口扫描/被注入的插件），
+   不是也不是想要成为隔离边界——真正的隔离要靠单独的 OS 用户或容器。
+2. 无多用户/多租户模型，没有会话鉴权，不适合暴露到公网或局域网共享。
+3. 审批凭据目前同时经 `GET /api/approvals` 下发，因此它只把"代批"的门槛从
+   "知道 id"抬到"必须先列举且凭据单次有效"；要彻底关闭请启用 `MAHARNESS_API_TOKEN`。
+4. `MAHARNESS_API_TOKEN` 一旦启用，页面需在设置→高级→安全 录入同一个值，
+   否则修改类操作会全部 401（这是设计，不是故障）。
+5. DNS 重绑定之外的 TOCTOU 窗口仍在：SSRF 校验与真实连接各解析一次 DNS，未做 IP 钉扎。
+6. 插件是**完全信任**的：`module` 模式的前端模块与宿主同源同 realm、没有沙箱，
+   只应用于自己写或自己安装的插件；不可信来源请用 `iframe` 模式。
+7. `core/` 内置插件不在目录监听范围内（改动需重载或重启）；只有 `plugins/` 保存即生效。
 
 ## 缓存体系（三层，命中即可见）
 
@@ -135,16 +184,28 @@ export default {
 
 ## 环境变量
 
-| 变量 | 说明 |
-| --- | --- |
-| `DEEPSEEK_BASE_URL/API_KEY/MODEL` | DeepSeek Provider（任意命名，自动发现） |
-| `OPENAI_BASE_URL/API_KEY/MODEL` | OpenAI Provider |
-| `<NAME>_PRICE_IN/OUT` | 可选：覆盖价格（USD/百万 token，用于成本核算） |
-| `EMBEDDING_BASE_URL/API_KEY/MODEL` | 可选：激活 L1 语义缓存 |
-| `TAVILY_API_KEY` | 可选：联网搜索用 Tavily（更稳定）；未配置自动降级 DuckDuckGo |
-| `SEARCH_PROXY` | 可选：搜索请求走 HTTP 代理（如 `http://127.0.0.1:7897`），网络受限时使用 |
-| `SANDBOX_ROOT` | 文件工具沙箱根目录（默认启动目录；防目录穿越） |
-| `PORT` | 服务端口（默认 3000） |
+Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外，全部可选开关：
+
+| 变量 | 默认 | 说明 |
+| --- | --- | --- |
+| `<NAME>_PRICE_IN` / `_PRICE_OUT` | — | 覆盖价格（USD/百万 token，用于成本核算） |
+| `EMBEDDING_BASE_URL/API_KEY/MODEL` | 未设 | 三者齐备才激活 L1 向量召回；否则走自研 bigram Dice（始终可用） |
+| `TAVILY_API_KEY` | 未设 | 联网搜索用 Tavily；未配置自动降级 DuckDuckGo |
+| `SEARCH_PROXY` | 未设 | 搜索/抓取走 HTTP 代理（如 `http://127.0.0.1:7897`） |
+| `SANDBOX_ROOT` | 启动目录 | 文件工具与文件 API 的沙箱根（防穿越 + realpath） |
+| `PORT` | `3000` | 服务端口（始终只绑 127.0.0.1） |
+| `DEV_ORIGIN_PORT` | `5173` | 额外放行的 Origin（Vite 开发服务器） |
+| `AUTO_STOP_IDLE_MS` | `30000` | 所有前端页关闭多久后自动停止后端；`0` = 关闭该行为 |
+| `AGENT_DATA_DIR` / `AGENT_USER_PLUGINS_DIR` | — | 数据目录 / 用户插件目录覆盖（测试与多实例隔离） |
+| `AGENT_ALLOW_PRIVATE_URLS` | 未设 | 放行内网/回环地址（连本机 Ollama 等）；**会同时关闭 SSRF 防护**，仅在明确需要时开 |
+| `AGENT_ALLOW_CORE_EDIT` | 未设 | 放开 `kernel/`、`core/chat/` 写保护（开发 agent 自身时用；进程内首次判定后固化，改完需重启） |
+| `MAHARNESS_API_TOKEN` | 未设（关闭） | 变更类端点需带 `x-maharness-token`；启用后页面需在 设置→高级→安全 录入同值 |
+| `MAHARNESS_APPROVAL_TOKEN` | 未设（不强制） | 强制回答审批回带一次性凭据；前端已自动回带，设 `1` 即生效 |
+| `MAHARNESS_ALLOW_BLANKET_ALLOW` | 未设 | 允许经 HTTP 写入"对全部工具放行"的策略规则（默认需 `confirm:true` 显式确认） |
+| `MAHARNESS_ALLOW_SECRET_KEY_RESET` | 未设 | 允许在主密钥文件异常且库中已有密文时重建密钥（默认拒绝并备份原文件） |
+| `MAHARNESS_ALLOW_SKILL_HASH_MISMATCH` | 未设 | 允许技能同步时哈希不符仍落盘（默认拒绝并回报实际哈希） |
+| `MAHARNESS_SECRET_KEY_ACL` | 启用 | 设 `0` 跳过主密钥文件的 `icacls` 权限收紧（测试用） |
+| `TRACE_LLM_BODY` | 未设 | 设 `on` 把发给模型的请求体追加到 `llm-body.log`（调试前缀缓存用） |
 
 ## 项目结构
 

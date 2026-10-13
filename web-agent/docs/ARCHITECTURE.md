@@ -597,14 +597,56 @@ interface ToolDef {
 
 ### 4.7 沙箱与安全（Windows 重点）
 
-- 文件类工具锚定根目录 = 当前工作区（默认 `D:\DEEPSEEK`，config 可调整），所有路径先规范化（盘符/大小写/`..`）再校验必须在根目录内，防目录穿越；校验后返回 realpath 结果（消除校验-写入 TOCTOU 窗口）。文件 API 与 Agent 文件工具共用同一校验函数（`resolveInSandbox`），双侧语义一致。
-- **工作区热切换（白名单）**：网页端「文件」Tab 可添加/切换工作区——切换仅接受 workspaces 表已登记路径（一次 POST 无法把沙箱根切到 `C:\`）；`config.sandboxRoot` 运行时热更新，下一轮立即生效，无需重启。
-- 写入工具拒绝符号链接指向沙箱外；只读操作默认允许，写操作逐项审计入 Trace。
-- 工具参数只接受 JSONSchema 声明字段（防注入）。
-- **审批由执行器机器强制**：声明 `approval:true` 的工具，执行器在调用 handler 前检查——未批准直接挂起走审批流（不信任工具自觉；工具侧保留双保险）。审批拒绝结果带 `governed:true` 标记（memory 插件据此不把治理决策记为失败教训）。
-- **内核写保护（机器强制）**：write_file/delete_file 对 `kernel/`、`core/chat/` 前缀硬拒绝（环境变量 `AGENT_ALLOW_CORE_EDIT=1` 显式放行，供人工开发）；`.env` 与 `data/` 读硬拒绝（密钥与内部数据不进 LLM 上下文）。文件 API 同规则。
-- **PowerShell 白名单模型**：默认需审批；仅整条命令按 `|`/`;` 分段后每段首 token 都在只读白名单（Get-ChildItem/Get-Content/Select-String/ls/dir/cat/type 等只读集）才免审批；黑名单（Invoke-Expression 等）与敏感文件模式（`.env`/`agent.db`）兜底强制审批；进程 cwd 锚定沙箱根。
-- **服务面**：仅监听 `127.0.0.1`；Host 白名单（localhost/127.0.0.1/[::1]，防 DNS rebinding）+ Origin 白名单校验（无 Origin 的本机工具放行）；同会话并发 chat 互斥（409）；provider 连接测试防 SSRF（拒绝私网/环回目标）。
+> 完整的"当前确实生效的行为"清单与**已知边界**（哪些挡得住、哪些挡不住）以 `README.md`
+> 的〈安全模型〉〈已知边界（诚实版）〉为**唯一入口**，本节只讲架构落点，不重复叙述
+> ——此前正是两处各写一版，README 那句"机器强制"跑在了实现前面。
+
+- **路径沙箱**：文件类工具锚定当前工作区根，所有路径先规范化（盘符/大小写/`..`）再校验
+  "必须在根内"，防目录穿越；校验后返回 `realpath` 结果（消除校验-写入之间的符号链接 TOCTOU）；
+  向上寻找已存在祖先时**不得越过沙箱根**逃逸（根目录自身缺失时报错归因清楚，不再误报符号链接）。
+  Agent 文件工具与文件 API 共用同一函数（`resolveInSandbox`），双侧语义一致。
+- **保护与敏感清单按双基座判定**（A2）：`kernel/`、`core/chat/` 硬拒绝写/删（自我接管防护，
+  `AGENT_ALLOW_CORE_EDIT=1` 显式放行），`.env`/`data/` 读硬拒绝、写强制审批。
+  相对路径同时按**沙箱根**与**项目根**两个基座计算——只按沙箱根算时，一旦 `SANDBOX_ROOT`
+  指到别处，整条保护会同时失效（这是修过的真实缺陷，不是假想）。
+  `tools.writeRequiresApproval=false` 只放开普通文件，放开不了敏感目标与内核。
+- **工作区热切换（白名单 + 危险根拒绝）**：切换仅接受 `workspaces` 表已登记路径；登记与切换
+  两个入口都复检"文件系统根 / 盘符根 / 家目录及其祖先 / 系统目录"，对**修复前已入库**的
+  危险路径同样拒绝；种子工作区走同一判定（`.env` 里写错 `SANDBOX_ROOT=C:\` 不再能绕过
+  校验把保护基座打掉）；列表如实标出危险项。
+- **审批下沉执行器**（A8）：由执行器在调用 handler **之前**判定并挂起，不信任工具自觉；
+  判定函数（`assessApproval`）抛错按"需要审批"处理（fail-closed）；高危工具的 handler 另做
+  二次校验，并识别用户策略放行（`policyApproved`），避免"规则 allow 却被 handler 拦死"与
+  "绕过前端直接 POST 即免检"两个方向的不对称。审批拒绝带 `governed:true`，
+  memory 插件据此不把治理决策记为失败教训。
+- **PowerShell 只读白名单的边界**（A1/A10）：白名单是"每段首 token 是只读 cmdlet"
+  **且**"参数位不含可执行构造"——脚本块只允许 `$_` 属性 + 比较/逻辑运算符的安全子集，
+  出现类型字面量 / `::` 静态成员 / `$()` 子表达式 / 赋值 / 调用运算符即回到审批；
+  拆段按引号与脚本块感知（`'a;b'` 不再被误切）；危险特征在**去引号后**的命令位上匹配
+  （`'Remove-Item'` 不再误拦、`iex('...')` 不再漏过）；敏感目标即使只读命令也审批；
+  超时用 `taskkill /T /F` 杀进程树（Windows 上 `child.kill` 只杀 cmd 垫片，会留活口）。
+- **SSRF**（A3/A5）：`web_fetch`、Provider 连通性检测、MCP HTTP 传输共用同一私网判定——
+  逐组解析 IPv6（含压缩展开）、还原 IPv4-mapped / 6to4 / NAT64 内嵌的 IPv4 后再判，
+  补齐 CGNAT、基准测试、组播等段，IPv6 解析失败按私网处理（fail-closed）；
+  出网改逐跳校验（最多 5 跳，每跳重验协议与目标，跨源剥掉凭据头）；响应体流式限量。
+  `AGENT_ALLOW_PRIVATE_URLS` 会关闭这整层防护，四处消费点语义统一。
+- **MCP 边界**（A4/B18）：stdio server 默认只透传运行必需环境变量（`*_API_KEY`/`*_TOKEN`
+  不再外泄，`env` 配置与 `MAHARNESS_*` 一律排除），需要时该 server 显式写 `inheritEnv: true`；
+  MCP 工具默认需要审批（此前 `risk:'medium'` 只是展示标签，没有任何门读它）；
+  win32 用 `taskkill /T` 回收 `npx` 的孙进程，且非 `.exe` 命令经 `cmd.exe` 解析
+  （Node 因 CVE-2024-27980 禁止无 shell 启动 `.cmd`，否则 Windows 上 `npx` 类 server 根本起不来）。
+- **服务面与凭据**（A6/A7）：只绑 `127.0.0.1` + Host/Origin 白名单（注册在业务路由与插件 API
+  之前）；同会话并发 chat 互斥（409）；`MAHARNESS_API_TOKEN`（变更类端点显式授权）与
+  `MAHARNESS_APPROVAL_TOKEN`（一次性审批凭据）均为**默认关闭**的可选门，前端已接线
+  （变更凭据存本浏览器、由人录入；审批凭据经 SSE 下发并回带），
+  开启方式与"为什么不能由服务端下发 token"见 README〈安全模型〉。
+- **密钥存储**（A7）：api_key 以 AES-256-GCM 落库、API 只回掩码；主密钥文件在 Windows 上用
+  `icacls` 收 DACL（`chmod` 在 Windows 上不生效）；解密失败暴露 `keyBroken` 而非静默当空串；
+  已有密文时拒绝静默重建主密钥。状态见 `GET /api/security` 与 设置→高级→安全。
+- **技能供应链**（A9）：同步先落临时目录、按锁文件清单逐文件校验再原子换入，不留半成品、
+  不残留上一版；`force` 不等于放弃校验。
+
+工具参数只接受 JSONSchema 声明字段（防注入）；只读操作默认允许，写操作逐项审计入 Trace。
 
 ### 4.8 技能系统（skills：自我设计的知识底座）
 
