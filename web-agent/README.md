@@ -7,7 +7,7 @@
 
 | 信条 | 实现 |
 | --- | --- |
-| 内核极薄 | 内核仅 6 大件：EventBus / PluginLoader / Config / Trace / Cache / EffectScope，**连对话都是插件** |
+| 内核极薄 | 内核聚合 6 个状态件：EventBus / Config / PluginLoader / Trace / Cache / Budget（另有 EffectScope **逐插件实例**、types/loop/service 三份契约件），**连对话都是插件** |
 | 一切可插拔 | `plugins/` 目录现场写插件，保存即热加载，网页面板一键启停；**卸载即完全恢复**（可逆效应：能力/监听/服务/配置自动回收）；**坏版本自动回滚**（事务性热重载，永不半加载） |
 | 全部自研 | Agent 循环、工具协议、插件机制、SSE 流式、缓存全部手写，零 agent 框架依赖 |
 | 运行即轨迹 | 每次运行产生结构化 Trace：LLM 调用/工具调用/缓存命中，前端实时面板 + JSONL 审计 + 成本透明 |
@@ -39,7 +39,7 @@ npm run start:all  # 生产模式：构建前端后单端口启动 → http://lo
 - **模型切换**：右上角下拉切换已配置的 Provider 模型（DeepSeek/OpenAI/通义…）。
 - **会话模式**：右上角切换 普通 / 计划 / 目标。计划模式先出计划、确认后执行；目标模式自动建计划推进。
 - **斜杠命令**：输入框输入 `/` **弹出命令面板**——方向键选择、Enter 执行、Tab 补全、Esc 关闭；命令直接执行（不消耗 LLM）——`/help` 全部命令、`/new` 新会话、`/clear` 清空、`/plan` `/goal` `/normal` 切模式、`/model <名称>` 切模型。
-- **上下文管理**：会话历史超出预算（默认 30000 tokens，`context.maxTokens` 可调）时自动截断较早消息并注入说明，全程在轨迹面板可见。
+- **上下文管理**：会话历史超出预算（默认 60000 tokens，`context.maxTokens` 可调）时自动截断较早消息并注入说明，全程在轨迹面板可见。
 - **文件 Tab（工作区）**：左侧「文件」Tab —— 添加/切换工作区（Agent 文件工具的沙箱边界，切换立即生效），浏览文件树、点击文件预览内容。
 - **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 技能包 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` / `get_skill_file` 按需读取技能指南与技能包内多文件资源（agents/references/templates/shared/scripts），实现自我设计。
 
@@ -131,6 +131,8 @@ export default {
   "mcp": { "servers": { "filesystem": { "type": "stdio", "command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."] } } } }
 ```
 
+> 仓库已提供 `config.example.json`（含上述全部键的完整示例），复制为 `config.json`（与 package.json 同级）后按需修改；所有键都可省略——省略即用代码内默认值。网页端「设置」页的改动会自动写回 `config.json`。
+
 ## 环境变量
 
 | 变量 | 说明 |
@@ -148,16 +150,24 @@ export default {
 
 ```
 web-agent/
-├─ kernel/        # 内核 6 大件（薄）：bus / config / trace / cache / plugin-loader / scope ← 内部，唯一不变
-├─ core/          # 核心插件（同样走插件机制）
-│  ├─ chat/       #   Agent 执行器 + 自研 OpenAI 兼容流式客户端
-│  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存）
-│  ├─ search/     #   联网搜索（Tavily / DuckDuckGo 降级 + 可选代理）
-│  ├─ memory/     #   长期记忆（before_llm 钩子自动注入，跨会话）
-│  ├─ goal-plan/  #   多步目标计划模式
-│  ├─ powershell/ #   PowerShell 执行器（危险命令审批）
+├─ kernel/        # 薄内核（唯一不变）：bus / config / trace / cache / budget / plugin-loader / scope
+│                 #   + shared（跨模块副本的共享单例）+ 三份契约：types / loop / service
+├─ core/          # 核心插件（同样走插件机制；从内容快照目录加载，非用户插件目录）
+│  ├─ chat/       #   Agent 执行器（service:runner 默认实现）+ OpenAI/Anthropic/Ollama 三协议客户端
+│  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存 + 敏感写审批）
+│  ├─ search/     #   联网搜索（Tavily / DuckDuckGo 降级 + 可选代理 + SSRF 防护）
+│  ├─ memory/     #   长期记忆（分层：核心块 + 档案事实；失败教训自动记忆）
+│  ├─ goal-plan/  #   多步目标计划模式（+ planner 角色）
+│  ├─ powershell/ #   PowerShell 执行器（只读白名单 + 参数位代码检测 + 危险命令审批）
+│  ├─ subagent/   #   子代理与对抗审查（run_subagent / run_review，只读白名单）
+│  ├─ parallel/   #   并行小队（run_parallel：独立轨迹 + 预算均分）
+│  ├─ todo/       #   会话级待办 + 看板面板（api 能力 + nav 声明）
+│  ├─ mcp/        #   MCP 客户端（stdio / HTTP；env 白名单透传 + 默认需审批）
+│  ├─ vision/     #   图像：登记 + 借道多模态模型分析（图片不进主上下文）
+│  ├─ rules/      #   用户规则（提示规则 → persona；策略规则 → allow/deny/审批）
+│  ├─ skills/     #   技能系统（内置 + 技能包 + 项目 + 用户；相关性索引）
+│  ├─ evolve/     #   自进化（run 结束自动提案，人工采纳后入技能库）
 │  ├─ academic/   #   ★ 学术智能体接线（ARS 路由 persona）
-│  ├─ skills/     #   技能系统（内置 + 技能包 + 用户；list/get/get_skill_file）
 │  └─ self-extend/#   ★ 自我扩展（agent 可自建插件，定义自己）
 ├─ plugins/       # ★ 现场插件目录（热加载；Agent 自我扩展的落点）
 ├─ vendor/        # ★ ARS 学术技能包（上游零修改：deep-research / academic-paper / reviewer / pipeline）

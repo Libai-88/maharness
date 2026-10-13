@@ -425,6 +425,9 @@ export interface ApprovalItem {
   /** 提交时刻（"等了多久"）与自动作废时刻（服务端 10 分钟超时） */
   createdAt?: number;
   expiresAt?: number;
+  /** 该次挂起的一次性回答凭据（A6-c）：由 SSE 事件帧或挂起清单下发，回答时回带。
+   *  语义是「必须先看见这张卡才能答它」+ 单次有效（重放 403）。 */
+  approvalToken?: string;
 }
 
 /** 断点状态（checkpoint：任务中断后可继续） */

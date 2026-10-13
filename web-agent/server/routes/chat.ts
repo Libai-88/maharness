@@ -6,6 +6,8 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Express, Request, Response } from 'express';
+import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
+import { approvalTokens } from './approvals';
 import type { LLMMessage, LLMRole } from '../../kernel/types';
 import type { Message, Session } from '../../kernel/types';
 import { truncateHistory } from '../context';
@@ -359,7 +361,16 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
           // id = tool_call_id：前端按 id 配对 start/result（同名并发调用不再串成一张卡）
           sse(res, 'tool_start', { id: ev.id, name: ev.name, args: ev.args });
         } else if (ev.type === 'approval_required') {
-          sse(res, 'approval_required', { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args });
+          // A6-c：凭据随事件帧下发，前端回答时回带，语义是「必须先看见这张卡才能答它」，
+          // 且单次有效（重放 403）。**不是**「只有页面拿得到」——本机进程也能订阅 SSE 或
+          // 调 GET /api/approvals 取得同一凭据，所以这只是抬高门槛，真正关闭代批要靠
+          // MAHARNESS_API_TOKEN（见 server/index.ts 的 createApiTokenGuard 与 approvals.ts 注释）。
+          // 过期时刻取审批板里的真实值，不用本地近似常量（改了超时会铸出提前失效/超期的凭据）。
+          const pending = chat?.listApprovals(session.id).find((a) => a.id === ev.approvalId);
+          sse(res, 'approval_required', {
+            approvalId: ev.approvalId, name: ev.name, summary: ev.summary, args: ev.args,
+            approvalToken: approvalTokens.issue(ev.approvalId, session.id, pending?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT),
+          });
         } else if (ev.type === 'retry') {
           // provider 重试/failover：前端作废当前流式残段重新累积（防止残段+全文重复渲染）；
           // reason/detail 让"作废"不再无声——用户看得见是换了线路还是刚才没接上

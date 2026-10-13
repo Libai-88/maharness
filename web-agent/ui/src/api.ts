@@ -1,14 +1,57 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
 import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PlanState, PluginInfo, PluginNavItem, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
+// ---- 变更类端点的显式授权凭据（A6-b 的前端侧）----
+const TOKEN_KEY = 'maharness-api-token';
+
+
+/**
+ * 为什么 token 存在浏览器 localStorage、而**不是**由服务端下发：
+ * 本服务只监听 127.0.0.1，浏览器相对其它本机进程**没有任何额外特权**——
+ * 页面能读到的任何 HTTP 通道（GET /api/bootstrap、注入 index.html 的脚本变量）
+ * 本机进程同样读得到。所以「服务端把 token 交给前端」等于「token 对攻击者公开」，
+ * 这道门会退化成装饰。唯一有意义的来源是**人**把它录进来（设置页一次），
+ * 之后它只存在于浏览器 profile 里。
+ *
+ * 诚实边界：它挡的是"无意图的本机进程"（其它工具/脚本/端口扫描/被注入的插件）
+ * 一次 HTTP 调用就批准危险命令、切沙箱根、注入 allow 策略；挡不住同用户身份的
+ * 恶意代码（它本就能直接改 data/ 下的文件）。真正的隔离边界是 OS 用户与文件权限。
+ */
+export function getMutationToken(): string {
+  try { return localStorage.getItem(TOKEN_KEY) ?? ''; } catch { return ''; }
+}
+
+export function setMutationToken(token: string): void {
+  try {
+    if (token.trim()) localStorage.setItem(TOKEN_KEY, token.trim());
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch { /* 存不上（隐私模式等）就算了：门会退回未授权态，比假装安全诚实 */ }
+}
+
+/** 只有变更类方法带凭据头（GET/HEAD 不带，避免只读请求无谓失败） */
+const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+function authHeaders(method?: string): Record<string, string> {
+  if (!MUTATING_METHODS.has(String(method ?? 'GET').toUpperCase())) return {};
+  const t = getMutationToken();
+  return t ? { 'x-maharness-token': t } : {};
+}
+
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json' },
     ...opts,
+    headers: {
+      'Content-Type': 'application/json',
+      ...authHeaders(opts?.method),
+      ...(opts?.headers as Record<string, string> | undefined),
+    },
   });
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
+    // 401 要说清下一步做什么：不是"再试一次"，而是"把服务端设的那个值录进来"
+    if (res.status === 401 && !/设置/.test(msg)) {
+      throw new Error(`${msg}（若服务端已启用 MAHARNESS_API_TOKEN，请在 设置 → 高级 里录入同一个 token）`);
+    }
     throw new Error(msg);
   }
   return res.json() as Promise<T>;
@@ -23,7 +66,8 @@ export interface ChatHandlers {
   /** id = tool_call_id：同名并发调用靠它配对，不会把两次 read_file 结算成一张卡 */
   onToolStart(id: string | undefined, name: string, args: unknown): void;
   onToolResult(id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean): void;
-  onApprovalRequired(approvalId: string, name: string, summary: string): void;
+  /** 审批挂起：approvalToken 是该次挂起的一次性回答凭据（A6-c），存下并在回答时回带 */
+  onApprovalRequired(approvalId: string, name: string, summary: string, approvalToken?: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
   /** 角色移交（handoff）：会话控制权交给目标角色 */
   onHandoff?(role: string, objective: string): void;
@@ -110,7 +154,7 @@ export async function streamChat(
           case 'delta': h.onDelta(String(d.text ?? '')); break;
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
           case 'tool_start': h.onToolStart(d.id ? String(d.id) : undefined, String(d.name ?? ''), d.args); break;
-          case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? '')); break;
+          case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? ''), d.approvalToken ? String(d.approvalToken) : undefined); break;
           case 'tool_result': h.onToolResult(d.id ? String(d.id) : undefined, String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
@@ -302,21 +346,43 @@ export const configApi = {
 };
 
 /** 元信息（数据/审计目录路径） */
+/** 安全姿态（只读）：哪些门开着、主密钥是否可用、审批门是否被策略整体放行。
+ *  服务端保证不含任何密钥材料（token / api_key / secret.key 不外泄）。 */
+export interface SecurityPosture {
+  bind: string;
+  mutationAuthRequired: boolean;
+  mutationTokenHeader: string;
+  approvalTokenRequired: boolean;
+  masterKey: { state: string; available: boolean; path: string; message?: string | null; backupPath?: string | null };
+  credentials: { broken: { id: string; label: string; reason: string }[] };
+  policy: { available: boolean; files?: string[]; blanketAllow?: { file: string; tool: string; id: string }[] };
+}
+
+export const securityApi = {
+  get: () => api<SecurityPosture>('/api/security'),
+};
+
 export const metaApi = {
   paths: () => api<{ sandboxRoot: string; dbFile: string; tracesDir: string; configFile: string }>('/api/meta/paths'),
   open: (kind: string) => api<{ ok: boolean; kind: string; path: string }>('/api/meta/open', { method: 'POST', body: JSON.stringify({ kind }) }),
 };
 
 export const approvalsApi = {
-  respond: (id: string, approved: boolean) => api<{ ok: boolean }>(`/api/approvals/${id}`, { method: 'POST', body: JSON.stringify({ approved }) }),
+  /** 回答审批：带上该次挂起下发的一次性凭据（A6-c，头与 body 双通道，服务端任认其一）；
+   *  变更类凭据头 x-maharness-token 由 api() 统一注入（A6-b）。 */
+  respond: (id: string, approved: boolean, approvalToken?: string) =>
+    api<{ ok: boolean }>(`/api/approvals/${id}`, {
+      method: 'POST',
+      headers: approvalToken ? { 'x-maharness-approval-token': approvalToken } : undefined,
+      body: JSON.stringify({ approved, ...(approvalToken ? { approvalToken } : {}) }),
+    }),
   /** 挂起清单：刷新页面后审批卡原位复原（可按会话过滤）——服务端在等，用户必须看得见 */
   list: (sessionId?: string) =>
-    api<{ pending: { id: string; name: string; summary: string; sessionId?: string; createdAt: number; expiresAt: number; waitedMs: number; expiresInMs: number }[] }>(
+    api<{ pending: { id: string; name: string; summary: string; sessionId?: string; createdAt: number; expiresAt: number; waitedMs: number; expiresInMs: number; approvalToken?: string }[] }>(
       sessionId ? `/api/approvals?sessionId=${encodeURIComponent(sessionId)}` : '/api/approvals'),
 };
 
-export const modelsApi = {
-  list: () => api<ModelInfo[]>('/api/models'),
+export const modelsApi = {  list: () => api<ModelInfo[]>('/api/models'),
 };
 
 export const providersApi = {

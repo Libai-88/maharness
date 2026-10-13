@@ -140,6 +140,10 @@ export default function App() {
   // 消息镜像 ref：retry 时刻同步读取（state 提交前也能拿到当前值）
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
+  // 审批列表镜像：respondApproval 里同步读凭据（不进 useCallback 依赖，
+  // 否则每次挂起/回答都会重建回调，破坏 ChatView 的 memo —— 与 messagesRef 同一手法）
+  const approvalsRef = useRef(approvals);
+  approvalsRef.current = approvals;
   // 会话镜像 ref：全局事件回调里判断"这条是不是当前会话的"（避免闭包捕获旧 activeId）
   const activeIdRef = useRef<string | null>(activeId);
   activeIdRef.current = activeId;
@@ -275,11 +279,22 @@ export default function App() {
         // 子代理/并行任务的审批经全局事件广播（主执行器阻塞在子任务 handler 内，
         // 审批事件无法从其 SSE 流到达）；按 id 去重合并进统一审批列表。
         // sessionId/expiresAt 一并收下：刷新后卡片能回原位，也能显示"还剩几分钟"。
-        const d = e.data as { approvalId: string; name: string; summary: string; sessionId?: string; createdAt?: number; expiresAt?: number };
+        const d = e.data as { approvalId: string; name: string; summary: string; sessionId?: string; createdAt?: number; expiresAt?: number; approvalToken?: string };
         if (d?.approvalId) {
-          setApprovals((prev) => (prev.some((a) => a.id === d.approvalId)
-            ? prev
-            : [...prev, { id: d.approvalId, name: d.name, summary: d.summary, sessionId: d.sessionId, createdAt: d.createdAt ?? Date.now(), expiresAt: d.expiresAt }]));
+          setApprovals((prev) => {
+            const hit = prev.findIndex((a) => a.id === d.approvalId);
+            if (hit >= 0) {
+              // 已存在（例如先经会话 SSE 收到、后经全局事件重复播报）：只补缺失的凭据与时限
+              if (prev[hit].approvalToken === d.approvalToken && prev[hit].expiresAt === d.expiresAt) return prev;
+              const next = prev.slice();
+              next[hit] = { ...prev[hit], approvalToken: d.approvalToken ?? prev[hit].approvalToken, expiresAt: d.expiresAt ?? prev[hit].expiresAt };
+              return next;
+            }
+            return [...prev, {
+              id: d.approvalId, name: d.name, summary: d.summary, sessionId: d.sessionId,
+              createdAt: d.createdAt ?? Date.now(), expiresAt: d.expiresAt, approvalToken: d.approvalToken,
+            }];
+          });
         }
       }
       else if (e.type === 'provider.error') {
@@ -327,7 +342,13 @@ export default function App() {
       setApprovals((prev) => {
         const merged = new Map(prev.filter((a) => alive.has(a.id)).map((a) => [a.id, a]));
         for (const p of r.pending) {
-          if (!merged.has(p.id)) merged.set(p.id, { id: p.id, name: p.name, summary: p.summary, sessionId: p.sessionId, createdAt: p.createdAt, expiresAt: p.expiresAt });
+          const known = merged.get(p.id);
+          merged.set(p.id, {
+            id: p.id, name: p.name, summary: p.summary, sessionId: p.sessionId,
+            createdAt: p.createdAt, expiresAt: p.expiresAt,
+            // 清单是刷新/重连后的兜底通道：本地没有凭据时用它补上
+            approvalToken: known?.approvalToken ?? p.approvalToken,
+          });
         }
         return [...merged.values()];
       });
@@ -620,7 +641,17 @@ export default function App() {
         } : t),
       } : m));
     },
-    onApprovalRequired: (id: string, name: string, summary: string) => setApprovals((prev) => prev.some((a) => a.id === id) ? prev : [...prev, { id, name, summary }]),
+    onApprovalRequired: (id: string, name: string, summary: string, approvalToken?: string) => setApprovals((prev) => {
+      const hit = prev.findIndex((a) => a.id === id);
+      // 已存在则只补凭据（SSE 先到、清单后到的竞态里，后到的一定向导正确的凭据）
+      if (hit >= 0) {
+        if (!approvalToken || prev[hit].approvalToken === approvalToken) return prev;
+        const next = prev.slice();
+        next[hit] = { ...prev[hit], approvalToken };
+        return next;
+      }
+      return [...prev, { id, name, summary, approvalToken }];
+    }),
     onHandoff: (role: string, objective: string) => {
       // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
       flushStreamBuffer();
@@ -768,11 +799,13 @@ export default function App() {
   }, [activeId]);
 
   const respondApproval = useCallback(async (id: string, approved: boolean) => {
+    // 一次性凭据（A6-c）：随本次挂起下发，回答时回带；用过即作废，重放 403。
+    const token = approvalsRef.current.find((a) => a.id === id)?.approvalToken;
     try {
-      await approvalsApi.respond(id, approved);
+      await approvalsApi.respond(id, approved, token);
       toast.success(approved ? '已批准执行' : '已拒绝');
-    } catch {
-      toast.error('审批已过期或无效');
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : '审批已过期或无效');
     }
     setApprovals((prev) => prev.filter((a) => a.id !== id));
   }, [toast]);

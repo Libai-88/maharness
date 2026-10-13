@@ -56,7 +56,7 @@
 
 | # | 问题 | 本质结论 | maharness 落地 |
 | --- | --- | --- | --- |
-| 1 | **能力边界**：harness 替 LLM 决定什么？ | 内核只负责让 LLM 持续"感知-决策-行动-反馈"循环；一切具体能力（文件/记忆/搜索/计划/子代理）都是插件 | 内核 5 大件（bus/loader/config/trace/cache）不持有任何业务能力；对话本身是插件 |
+| 1 | **能力边界**：harness 替 LLM 决定什么？ | 内核只负责让 LLM 持续"感知-决策-行动-反馈"循环；一切具体能力（文件/记忆/搜索/计划/子代理）都是插件 | 内核聚合 6 个状态件（EventBus/Config/PluginLoader/Trace/Cache/Budget）+ EffectScope 逐插件实例 + 3 份契约件，不持有任何业务能力；对话本身是插件 |
 | 2 | **能力发现**：LLM 怎么知道自己能干什么？ | 需要动态 capabilities registry：能力/用途/成本/风险/审批/限制，LLM 直接读取而非猜测 | ToolDef 结构化元数据（risk/costHint/approval/limits/**output**）→ 描述自动打【风险/成本/需审批】标签 + **输出格式说明**注入 LLM；`GET /api/capabilities` 注册表人类可查；实测 LLM 零调用准确列出 4 个高风险工具、准确复述 read_file 返回结构（含截断语义） |
 | 3 | **能力组合**：插件间能否 1+1>2？ | 组合发生在 LLM 编排层：工具按能力语义描述，任意新插件注册即进入组合空间 | 工具描述互相引用 + 输出结构化（下游直接消费）；内置技能 `capability-composition`（组合范式：list_dir→read_file→总结、子代理审查→read_file 核验等）；plugin-authoring 契约含组合设计章节；实测新旧工具混合成链（read_file→count_words） |
 | 4 | **上下文工程**：插件怎么喂信息？ | 插件不应无脑塞 context；声明式 context provider + harness 按任务动态组装（预算控制） | 新能力类型 `context`：`contentFn(history)` 按需返回内容，weight 排序注入，总预算 1500 tokens 超限丢弃，每次注入记 Trace（context-inject）；memory 插件实战落地：普通记忆按任务 bigram 相关检索（无关零注入），失败教训经 before_llm 钩子固定注入（不重复犯错优先） |
@@ -74,7 +74,14 @@
 
 > 判据：内核只负责让 LLM **持续地感知-决策-行动-获得反馈**。凡是这个循环需要的基础设施，内核必须提供；凡是某个具体能力/策略/数据，内核绝不持有。这决定了系统会不会变臃肿。
 
-### 内核掌握（6 大件，各司循环一环）
+### 内核掌握（Kernel 聚合 6 个状态件，各司循环一环）
+
+> 口径（以 `kernel/index.ts` 的 Kernel 字段为准）：内核聚合 **6 个状态件**——
+> EventBus / Config / PluginLoader / Trace / Cache / Budget；
+> **EffectScope 不是 Kernel 的单例成员**，而是 PluginLoader 为**每个插件实例**各 new 一个
+> （`kernel/plugin-loader.ts` 的 `scope: new EffectScope()`）——它是逐插件的可逆效应引擎；
+> 另有 **3 份契约件**（`kernel/types.ts` / `kernel/loop.ts` / `kernel/service.ts`）只放形状不放行为。
+> 合计：**内核聚合 6 件 + EffectScope 逐插件 + 3 契约件**。
 
 | 内核件 | 服务循环的哪个环节 | 为什么必须在内核 |
 | --- | --- | --- |
@@ -83,7 +90,21 @@
 | Config | 感知（世界参数） | 沙箱边界、超时、预算等循环参数的分层配置（默认 → config.json → env → 运行时） |
 | Trace | 反馈（记录） | 循环不可黑箱：每次 LLM 调用/工具调用/缓存命中都入轨迹；这是"获得反馈"的审计面 |
 | Cache | 反馈（效率） | 重复劳动消解的基础设施：存储/命中统计/TTL。**匹配策略是可注入的**（embedding 向量注入即升级，默认自研 bigram 兜底）——内核提供机制，不焊死策略 |
-| EffectScope | 行动（副作用回收） | 可逆效应引擎：插件的一切副作用留下逆元，卸载按 LIFO 完全恢复——动态组合的时序可组合性由运行时结构性保证 |
+| Budget | 决策（认知资源） | 重工具配额与任务画像：子代理窗口限次、进程级总上限、任务类型/轮数/成本/成败记录——自适应策略的数据源 |
+
+**逐插件件（不在 Kernel 字段上）**：
+
+| 件 | 归属 | 说明 |
+| --- | --- | --- |
+| EffectScope | 每个插件实例一份（PluginLoader 在注册/重载/重新启用时 new） | 可逆效应引擎：插件的一切副作用留下逆元，卸载按 LIFO 完全恢复——动态组合的时序可组合性由运行时结构性保证 |
+
+**契约件（只放形状，不放行为）**：
+
+| 契约件 | 内容 |
+| --- | --- |
+| `kernel/types.ts` | 插件/能力/工具/Provider/消息等全部接口形状（能力层的唯一依赖面） |
+| `kernel/loop.ts` | 执行循环契约：`AgentEvent` / `RunOptions` / `AgentLoop` / `RunnerFactory` + `SERVICE_KEYS` 常量与 `resolveRunnerFactory` / `makeRunner` 解析口 |
+| `kernel/service.ts` | `Service` 抽象基类：构造即注册服务能力（逆元由 EffectScope 回收） |
 
 ### 内核绝不掌握
 
@@ -106,7 +127,7 @@
 
 ### 隔离的机器验证
 
-`selftest [boundary]`：扫描 kernel/*.ts 的 import，断言只允许 node 内置与 kernel 自身（`./`、`../kernel/`）——**内核一旦开始 import 能力层，即视为边界破坏**。当前 10 个内核文件零违规。能力层反向依赖内核（core/* → kernel/types）是单向合法的：能力可以被替换，内核不被能力绑架。
+`selftest [boundary]`：扫描 kernel/*.ts 的 import，断言只允许 node 内置与 kernel 自身（`./`、`../kernel/`）——**内核一旦开始 import 能力层，即视为边界破坏**。当前 21 个内核文件零违规。能力层反向依赖内核（core/* → kernel/types）是单向合法的：能力可以被替换，内核不被能力绑架。
 
 ---
 
@@ -312,7 +333,7 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 
 | # | 信条 | 含义 |
 | --- | --- | --- |
-| 1 | 内核极薄 | 内核只做 6 件事：事件总线、插件加载、配置、轨迹观测、缓存、可逆效应。**连"对话"都是插件** |
+| 1 | 内核极薄 | 内核聚合 6 个状态件：事件总线、插件加载、配置、轨迹观测、缓存、认知资源；可逆效应（EffectScope）为逐插件实例。**连"对话"都是插件** |
 | 2 | 一切可插拔 | 能力层全部为插件：现场写、现场加载、现场启停，不重启内核；卸载即完全恢复（可逆效应） |
 | 3 | 全部自研 | Agent 循环、工具协议、插件机制、缓存、观测全部手写，无 agent 框架依赖 |
 | 4 | 运行即轨迹 | 每次运行产生结构化 Trace，前端实时可见 + JSONL 审计，无黑箱 |
@@ -334,13 +355,15 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 │   parallel(多会话并行) · powershell(Shell) ·         │
 │   self-extend(自我扩展：agent 自建插件) · memory ...  │
 ├────────────────────────────────────────────────────┤
-│ 内核 Kernel（运行必备，仅 6 大件）                   │
+│ 内核 Kernel（运行必备，聚合 6 个状态件）             │
 │   EventBus  事件总线（一切通信走总线）                │
 │   PluginLoader  插件加载与热管理（事务性重载/共效应）  │
 │   Config  分层配置（defaults→文件→env→运行时）       │
 │   Trace  轨迹观测（事件采集/环形缓冲/审计落盘）       │
 │   Cache  三层缓存（语义/工具结果/prompt前缀）         │
-│   EffectScope  可逆效应引擎（副作用逆元 LIFO 回收）   │
+│   Budget  认知资源（重工具配额/任务画像）             │
+│   ＋ EffectScope 逐插件实例（逆元 LIFO 回收，非单例）  │
+│   ＋ 3 契约件 types/loop/service（只放形状）          │
 ├────────────────────────────────────────────────────┤
 │ Windows 底座                                        │
 │   Node 运行时 · 文件系统(编码/路径适配) · 进程 · SSE  │
@@ -351,16 +374,28 @@ error 态彻底消失，旧版本不可回滚。对 self-extend 是致命风险�
 
 ---
 
-## 3. 内核设计（Kernel，仅 5 大件）
+## 3. 内核设计（Kernel：聚合 6 个状态件 + EffectScope 逐插件 + 3 契约件）
+
+> 本节 3.1~3.5 展开 EventBus / PluginLoader / Config / Trace / Cache 五个状态件（第六个状态件
+> Budget 的职责见 §1.4 表与 §1.3 第 9、10 问：重工具配额 + 任务画像）；**EffectScope 不在此列**——
+> 它不是 Kernel 的单例成员，而是 PluginLoader 为每个插件实例新建的作用域（机制见 §1.5.1）；
+> 三份契约件 types/loop/service 的形状清单见 §1.4，循环契约的接管机制见 §1.5.2b。
 
 ### 3.1 EventBus（事件总线）
 
 - 全局唯一实例，发布/订阅模型，**事件是内核与插件之间的唯一契约**。
-- 事件命名：`域.对象.动作`，如 `plugin.loaded`、`agent.turn.started`、`tool.executed`、`cache.hit`、`chat.message.delta`。
+- 事件命名：`域.对象.动作`。真实存在的事件（内核契约见 `kernel/types.ts` 的 `KernelEvents`）：
+  `plugin.registered / loaded / started / stopped / unloaded / reloaded / error / reverted / cleanup / outbound / capability`、
+  `service.provided / withdrawn / overridden / declared`、`kernel.started / stopped`、
+  `trace.step`、`config.changed`、`agent.run.finished`；
+  钩子事件由对话插件定义：`agent.input.received`、`agent.before_llm`、`agent.after_llm`、
+  `agent.before_tool`、`agent.after_tool`、`agent.on_error`。
+  （此处曾列 `agent.turn.started` / `tool.executed` / `cache.hit` / `chat.message.delta` 等
+  **代码中并不存在**的示例名，核对后已换成上表的真实事件名。）
 - 每个事件携带 `traceId`，自动关联到当前执行轨迹。
 - 支持通配符订阅（`agent.*`）与优先级（数字越大越先执行）。
-- 发布分两种：
-  - `emitSync`：同步派发，监听器抛错被捕获并记录（不影响发布者）；
+- 发布分两种（另有 serial/bail/parallel/waterfall/onPhase 五语义派发，见 §1.5 与 §3.2 注）：
+  - `emit`：同步派发，监听器抛错被捕获并记录（不影响发布者，也不牵连其它监听器）；
   - `emitAsync`：等待所有监听器 Promise 完成后返回，用于生命周期等关键路径。
 - 防失控：**实例级递归深度计数**（emit/emitAsync 共享，同步链 >64 层抛错打断死循环，如 `config.changed` 联动 `config.set`）；emitAsync 单监听器超 10s 记告警（不中断）；订阅时维护按优先级有序的监听表，emit 零排序开销。
 
@@ -531,7 +566,7 @@ interface ToolDef {
 
 ### 4.4 上下文管理（v2：压缩优先于截断）
 
-- 会话历史按预算（默认 30000 tokens，config `context.maxTokens`）估算（中文 ≈1 token/字，英文 4 字符/token）。
+- 会话历史按预算（默认 60000 tokens，config `context.maxTokens`）估算（中文 ≈1 token/字，英文 4 字符/token）。
 - **v2 三级降级**（对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜）：
   1. 预算内 → 不动；
   2. 超预算 → **LLM 摘要压缩**（`core/chat/compact.ts`）：最早的完整对话轮被总结成
@@ -605,44 +640,226 @@ interface ToolDef {
 
 ## 6. 数据模型（SQLite，better-sqlite3）
 
+> 以 `server/db.ts` 的 `CREATE TABLE` 为准：**当前实际建表 8 张**（另有 `ALTER TABLE` 增量迁移列）。
+> 缓存**不落库**：三层缓存持久化在 `data/cache.json`（`kernel/cache.ts`，路径来自 `kernel/config.ts`
+> 的 `paths.cacheFile`），由 `kernel.stop()` 强制落盘、启动时恢复未过期条目。
+
 ```sql
-sessions(id TEXT PK, title TEXT, model TEXT, created_at INT, updated_at INT)
-messages(id TEXT PK, session_id TEXT, role TEXT,          -- user/assistant/tool/system
-         content TEXT, tool_calls TEXT, tool_call_id TEXT,
-         tokens_in INT, tokens_out INT, cost REAL, trace_id TEXT, created_at INT)
-plugin_state(plugin_id TEXT PK, enabled INT, version TEXT, loaded_at INT)
-cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
-              created_at INT, updated_at INT)
+-- 会话（provider = 模型所属供应商 id，切模型时持久化；mode/plan_pending/archived/pinned/role
+-- 由 ALTER TABLE 迁移补齐）
+CREATE TABLE sessions (
+  id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新会话',
+  model TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '',
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+-- 迁移列：mode TEXT DEFAULT 'normal' / plan_pending INTEGER DEFAULT 0
+--         archived INTEGER DEFAULT 0 / pinned INTEGER DEFAULT 0 / role TEXT DEFAULT ''
+
+-- 消息（reasoning 为迁移列；行序按 created_at, rowid 保证前缀字节稳定）
+CREATE TABLE messages (
+  id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
+  role TEXT NOT NULL, content TEXT, tool_calls TEXT, tool_call_id TEXT,
+  tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, cost REAL DEFAULT 0,
+  trace_id TEXT, created_at INTEGER NOT NULL
+);
+-- 迁移列：reasoning TEXT
+CREATE INDEX idx_messages_session ON messages(session_id, created_at);
+
+-- 供应商（protocol 为迁移列，旧库默认 'openai'；api_key 带主密钥时加密落库）
+CREATE TABLE providers (
+  id TEXT PRIMARY KEY, label TEXT NOT NULL, base_url TEXT NOT NULL,
+  api_key TEXT NOT NULL, model TEXT NOT NULL,
+  price_in REAL, price_out REAL, enabled INTEGER DEFAULT 1,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+-- 迁移列：protocol TEXT NOT NULL DEFAULT 'openai'
+
+-- 模型目录（复合主键；能力位与价格随 provider 拉取/手工维护）
+CREATE TABLE models (
+  provider_id TEXT NOT NULL, model_id TEXT NOT NULL,
+  context_window INTEGER, max_output INTEGER,
+  vision INTEGER NOT NULL DEFAULT 0, tools INTEGER NOT NULL DEFAULT 0,
+  reasoning INTEGER NOT NULL DEFAULT 0,
+  price_in REAL, price_out REAL, enabled INTEGER NOT NULL DEFAULT 1,
+  source TEXT NOT NULL DEFAULT 'manual', updated_at INTEGER NOT NULL,
+  PRIMARY KEY (provider_id, model_id)
+);
+
+-- 人设（L1 用户人设，设置页可编辑）
+CREATE TABLE personas (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, content TEXT NOT NULL,
+  enabled INTEGER DEFAULT 1, sort_order INTEGER DEFAULT 0,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+
+-- 工作区（沙箱根白名单）
+CREATE TABLE workspaces (
+  id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+
+-- 断点（每会话仅最新一条，upsert；任务正常完成时清除）
+CREATE TABLE agent_checkpoints (
+  session_id TEXT PRIMARY KEY, turn INTEGER NOT NULL,
+  history TEXT NOT NULL, created_at INTEGER NOT NULL
+);
+
+-- 插件状态（建表但**全仓无读写**——预留；插件启停状态目前由 PluginLoader 内存 +
+-- manifest 的 enabled 字段决定）
+CREATE TABLE plugin_state (
+  plugin_id TEXT PRIMARY KEY, enabled INTEGER DEFAULT 1, version TEXT, loaded_at INTEGER
+);
 ```
+
+**与早期文档的差异（已按代码修正）**：不存在 `cache_entries` 表——缓存落 `data/cache.json`；
+`sessions` 含 `provider` 列；`plugin_state` 建表但为预留（无读写路径）。
 
 ---
 
-## 7. HTTP API（v1 最小闭环）
+## 7. HTTP API（server/routes/ 按资源拆分 + 插件动态端点）
+
+> 扫描 `server/routes/*.ts` 的 `app.get/post/patch/put/delete('/api/...')`：**注册 70 条**
+> （69 条字符串路径 + 1 条正则路径 `/api/plugins/:id/ui/*`）；`server/index.ts` 另加
+> `/api/security`，合计 **71 条静态端点**。此外有插件经 `api` 能力挂载的动态端点（按
+> `/api/plugins/<pluginId>/<mount>/...` 约定分发）。以下按资源分组逐条列出。
+
+### 7.1 健康与安全
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/api/health` | 健康检查：`{ok, version, pid}`（bin 启动器校验版本/孤儿进程判定用） |
-| GET | `/api/models` | 可用模型列表（由 .env provider 配置生成） |
-| GET/POST | `/api/sessions` | 会话列表 / 新建 |
-| GET | `/api/sessions/:id/messages` | 会话消息历史 |
-| POST | `/api/sessions/:id/chat` | SSE 流式对话（同会话并发请求 409 互斥）；`body.resume=true` 时从断点历史继续（断点续跑） |
+| GET | `/api/security` | 安全姿态只读端点：绑定地址、变更类端点是否需 token、审批凭据是否强制、主密钥状态、解密失败凭据、策略放行面（不含任何密钥材料） |
+
+### 7.2 Providers / Models（`routes/providers.ts`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/providers` | 供应商列表（api_key 掩码 `apiKeyMasked`/`hasKey` + 各自模型清单 + failover 健康状态） |
+| POST | `/api/providers` | 新建供应商（label/baseUrl/apiKey/model 必填，protocol 白名单校验） |
+| PATCH | `/api/providers/:id` | 修改供应商（含启用开关、价格覆盖） |
+| DELETE | `/api/providers/:id` | 删除供应商（连带删除其 models 行） |
+| POST | `/api/providers/test` | 连接测试（max_tokens=1 探活；防 SSRF，拒绝私网/环回目标） |
+| POST | `/api/providers/models` | 从供应商拉取模型清单（目录探测 + 能力位提取，可选 persist 落库） |
+| GET | `/api/providers/:id/models` | 某供应商已入库的模型列表 |
+| PATCH | `/api/providers/:id/models` | 修改单模型条目（能力位/价格/启停，`?model=` 或 body.modelId 定位） |
+| GET | `/api/models` | 全部可用模型（key = `provider@model`，前端切换用） |
+
+### 7.3 Personas（`routes/personas.ts`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/personas/preview` | 预览组装后的完整 system prompt（L0+L1+L2） |
+| GET | `/api/personas` | 人设列表 |
+| POST | `/api/personas` | 新建人设 |
+| PATCH | `/api/personas/:id` | 修改人设（名称/内容/启停/排序） |
+| DELETE | `/api/personas/:id` | 删除人设（热刷新提示词） |
+
+### 7.4 Sessions / Chat（`routes/sessions.ts` + `routes/chat.ts`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/sessions` | 会话列表（置顶优先、按更新时间倒序） |
+| POST | `/api/sessions` | 新建会话（可带 model/provider） |
+| GET | `/api/sessions/:id/messages` | 会话消息历史（隐藏 harness 注入消息） |
+| PATCH | `/api/sessions/:id` | 改标题/模型/供应商/模式/角色/归档/置顶 |
+| DELETE | `/api/sessions/:id` | 删除会话（连带消息与断点） |
+| POST | `/api/sessions/batch-delete` | 批量删除（≤500 条） |
+| GET | `/api/sessions/:id/checkpoint` | 断点状态查询 `{exists, turn, historyMessages, createdAt}`（前端「继续任务」入口依据） |
+| POST | `/api/sessions/:id/chat` | SSE 流式对话（同会话并发 409 互斥）；`body.resume=true` 从断点历史继续 |
+
+### 7.5 Workspaces / Files / Git（`routes/workspaces.ts` 等）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/workspaces` | 工作区列表（标注 current 与危险根） |
+| POST | `/api/workspaces` | 登记工作区路径（拒绝盘符根/家目录等危险根） |
+| DELETE | `/api/workspaces/:id` | 移除登记 |
+| POST | `/api/workspaces/switch` | 切换沙箱根（仅接受已登记路径，sandboxRoot 热生效） |
+| GET | `/api/files/tree?path=` | 文件树（单层懒加载；忽略 node_modules/.git 等噪音） |
 | GET | `/api/files?path=` | 沙箱内目录浏览 |
-| GET | `/api/files/read?path=` | 读文件（自动编码识别） |
-| POST | `/api/files/write` | 写文件（沙箱校验） |
-| GET | `/api/files/tree?path=` | 文件树（单层懒加载，前端展开；忽略 node_modules/.git 等噪音） |
-| GET/POST/DELETE | `/api/workspaces` | 工作区列表 / 添加 / 移除（DB 持久化） |
-| POST | `/api/workspaces/switch` | 切换当前工作区（sandboxRoot 热生效） |
-| GET | `/api/skills` | 技能列表（已安装 = 内置 + 用户；市场可安装） |
+| GET | `/api/files/read?path=` | 读文件（自动编码识别；与 Agent 工具同一读边界） |
+| POST | `/api/files/write` | 写文件（沙箱校验 + 内核写保护） |
+| GET | `/api/files/search?q=` | 沙箱内文件名搜索 |
+| POST | `/api/files/open` | 在资源管理器中打开沙箱内目标 |
+| GET | `/api/git/status` | 仓库状态（分支/ahead/staged/changes；非仓库返回 repo:false） |
+| POST | `/api/git/commit` | 提交（本地可回退操作） |
+| POST | `/api/git/push` | 推送（`body.confirm=true` 显式确认才执行——改变远端共享状态） |
+
+### 7.6 Config / Meta（`routes/config.ts`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/config` | 运行时配置读取（context/cache/agent 各键 + 路由目标候选 + 任务类型清单） |
+| PATCH | `/api/config` | 修改并**持久化写回 config.json**（maxTokens 钳 2000~200000、l1Threshold 钳 0.5~1 等） |
+| GET | `/api/meta/paths` | 元信息：sandboxRoot / dbFile / tracesDir / configFile 路径 |
+| POST | `/api/meta/open` | 在资源管理器打开上述目录/文件（kind 白名单） |
+
+### 7.7 Plugins / Capabilities / Nav（`routes/plugins.ts`）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/capabilities` | 能力注册表（工具名/风险/成本/审批/限制/输出说明） |
+| GET | `/api/nav` | 插件前端页面贡献清单（已启动且注册 api 能力者；含 url/moduleUrl/statusUrl） |
+| GET | `/api/plugins` | 插件列表与状态（含 circuitBreaker 计数） |
+| POST | `/api/plugins/:id/actions` | `enable/disable/reload`（不重启内核） |
+| POST | `/api/plugins/:id/open` | 在资源管理器打开插件目录 |
+| GET | `/api/plugins/:id/config` | 读插件配置段 + manifest 声明的 config schema |
+| GET | `/api/plugins/:id/ui/*`（正则路由） | 插件前端模块静态托管（仅 ui/ 子目录下 js/css/map/json，防穿越，no-store） |
+
+### 7.8 Trace / Stats / Events（`routes/trace.ts` 等）
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/trace` | 查询轨迹步骤（trace_id/type/name/parent_id/limit 过滤；ring 未命中回退 JSONL 归档） |
+| GET | `/api/trace/stats` | 进程级 Trace/Cache 计数快照 + l1Enabled |
+| GET | `/api/stats` | 统计面板：全局概览 + 上下文用量 + 三层缓存命中率 |
+| GET | `/api/events` | 全局事件 SSE（同时是页面存活信号——连接断开即视为前端关闭） |
+
+### 7.9 Approvals / Commands / Rules / Skills / Evolve
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/api/approvals` | 挂起审批列表（可按 sessionId 过滤，含过期时间） |
+| POST | `/api/approvals/:id` | 批准/拒绝（`body.approved`；一次性凭据校验） |
+| GET | `/api/commands/list` | 斜杠命令清单（内置 + 插件 command 能力合并） |
+| POST | `/api/commands` | 执行斜杠命令（不消耗 LLM） |
+| GET | `/api/rules` | 规则视图（全局/项目文件 + 策略） |
+| PUT | `/api/rules/global/:name` | 写全局规则文件（文件名白名单，须 .md） |
+| PUT | `/api/rules/project` | 写项目规则（默认 AGENTS.md，相对路径） |
+| PUT | `/api/rules/policy` | 写审批策略规则（scope=global/project） |
+| GET | `/api/skills` | 技能列表（已安装 = 内置 + 技能包 + 用户；市场可安装） |
+| GET | `/api/skills/lock` | skills.lock.json 清单（含已安装标记） |
+| POST | `/api/skills/sync` | 按 lock 文件同步技能（可选 names 过滤 / force） |
+| GET | `/api/skills/usage` | 技能使用统计 |
 | POST | `/api/skills/install` | 从市场安装技能（复制到 data/skills + 热重载，失败回滚） |
 | POST | `/api/skills/:name/uninstall` | 卸载用户技能（热重载） |
 | GET | `/api/skills/:source/:name/read` | 读取技能全文（SKILL.md） |
-| GET | `/api/plugins` | 插件列表与状态 |
-| POST | `/api/plugins/:id/actions` | `enable/disable/reload` |
-| GET | `/api/trace?session_id=` | 查询轨迹（环形缓冲/落盘） |
-| GET | `/api/trace/stats` | 进程级 Trace/Cache 计数 |
-| GET | `/api/stats` | 统计面板：全局概览 + 上下文用量 + 三层缓存命中率 |
-| GET | `/api/events` | 全局事件 SSE（前端实时面板；**同时是页面存活信号**——连接断开即视为前端关闭） |
-| GET | `/api/sessions/:id/checkpoint` | 断点状态查询（{exists, turn, historyMessages}——前端可据此显示「继续任务」入口） |
+| GET | `/api/evolve/proposals` | 技能提案列表（自进化） |
+| POST | `/api/evolve/:id/accept` | 采纳提案 |
+| POST | `/api/evolve/:id/reject` | 驳回提案 |
+| POST | `/api/evolve/:id/delete` | 删除提案 |
+
+### 7.10 插件动态端点（`api` 能力 → `/api/plugins/<pluginId>/<mount>/...`）
+
+server 以 `app.use('/api/plugins/:pluginId', …)` 按当前插件实例动态分发（热重载后新路由立即生效；
+插件不存在或未提供 api 能力 → 404）。内置挂载点（`ctx.register({kind:'api'})`）：
+
+| 插件 | mount | 端点 | 说明 |
+| --- | --- | --- | --- |
+| todo（待办看板） | `board` | GET `/panel` 或 `/` | 面板 HTML 片段（nav 内联渲染） |
+| | | GET `/page` | 独立窗口完整 HTML（window.open） |
+| | | GET `/cards` | 卡片列表 |
+| | | POST `/cards` | 新建卡片（title 必填，上限保护） |
+| | | PATCH `/cards/:id` | 改卡片（status/title/desc/priority/order） |
+| | | DELETE `/cards/:id` | 删除卡片 |
+| | | PATCH `/cards/reorder` | 拖拽后批量重排 |
+| | | POST `/clear-done` | 清除已完成 |
+| goal-plan | `plan` | GET `/plan?sessionId=` | 查询会话计划（仅 GET，刷新后计划卡可恢复） |
+| self-extend | `panel` | GET `/panel` | 积木哲学说明面板（HTML 片段） |
+| workbench（用户插件） | `wb` | GET `/bridge` | 桥接状态 |
+| | | GET `/status` | 页头状态（nav.status 契约：text/connected/detail） |
+| | | GET `/app` | 工作台完整 HTML（iframe 嵌入） |
+| | | GET `/panel` | 插件迷你面板（今日待办概览） |
+| | | GET `/state` | 旧版兼容端点（从桥数据派生） |
 
 **页面感知自动停止**：前端与后端的唯一常驻连接是 `/api/events` SSE。`server/client-tracker.ts` 登记/注销这些连接；所有连接断开（用户彻底关闭页面）超过 `AUTO_STOP_IDLE_MS`（默认 30 秒，设 0 关闭，可经 `.env` 热更新）后，后端优雅退出（`server.close()` + `kernel.stop()` 缓存落盘 + `process.exit(0)`）。刷新页面/网络抖动由 EventSource 自动重连豁免（宽限期）；多标签页任一存活即不停止；纯 API 调用（从未打开页面）永不触发。不用 HTTP 轮询做信号——浏览器对后台标签页的 setInterval 节流会使轮询失真，而 SSE 连接不受 JS 节流影响。
 
@@ -653,7 +870,19 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 ## 8. 前端（Web UI 插件，v2.2 会话状态感知）
 
 - Vite + React + TypeScript，ChatGPT 式布局：左侧会话列表 + 插件面板 Tab，中部对话区，右侧可折叠 Trace 流水面板。
-- 组件：`ChatView`（流式渲染、工具调用卡片、中断按钮）、`SessionList`、`ModelPicker`、`PluginPanel`（插件启停/重载/状态）、`TracePanel`（实时流水+成本）、`FileExplorer`（沙箱文件浏览，v1 轻量版）。
+- 组件（`ui/src/components/` 实际文件）：
+  - **shell 直接挂载**：`App.tsx` 静态引入 `Sidebar`（会话列表 + 顶层 Tab 导航）、`ChatView`（流式渲染、
+    工具调用卡片、中断按钮）、`TracePanel`（实时流水 + span 树 + 成本）、`Menu`（下拉菜单）、
+    `PluginTabView`（插件标签页通用容器）；懒加载四个 Tab：`FilesView`、`PluginsView`、
+    `StatsView`、`SettingsView`。
+  - **视图内组合**：`Markdown`（marked + DOMPurify + highlight.js）、`BrandLogo` / `HeroSticker`
+    （品牌意象）、`Confirm`（应用内确认弹层，替代原生 confirm）、`Icon`（自绘图标集）、
+    `SkillsView`（由 `SettingsView` 内联挂载）、`PluginModuleView`（`nav.mode='module'` 的动态模块宿主，
+    由 `PluginTabView` 使用）。
+  - **零引用死组件（勿当活跃实现）**：`FileTree`、`PluginPanel`、`SkillsPanel`、`StatsPanel`、
+    `PersonaPanel`、`SessionList` 六个文件仍在目录里，但**无任何 import 引用**——功能已被
+    `FilesView` / `PluginsView`（内含同名局部 `PluginPanel`）/ `SkillsView` / `StatsView` /
+    `SettingsView` / `Sidebar` 取代，属待清理残留。
 - 插件面板即"现场管理启停"的入口：列表显示所有插件、状态、版本，一键 enable/disable/reload。
 
 **v2.2 会话状态感知（agent harness 前端特征）**——调查结论：agent 前端的第一性原理是
@@ -672,9 +901,17 @@ cache_entries(key TEXT PK, layer TEXT, value TEXT, hits INT,
 | 渲染性能 | 消息行 `content-visibility: auto`——长会话屏外消息跳过渲染（浏览器原生，零 JS 开销） | 虚拟化替代 |
 
 - SSE 解析支持全部事件（含 v2.2 新增 handoff / budget_hit / tool_result.stored）。
-- E2E 实测（Playwright + 真实 LLM）：中断→继续任务→三步任务无缝完成；真实 run_subagent
-  在轨迹面板呈现 3 层子任务下钻；handoff 移交 planner 后横幅出现、交回主代理即消失；
-  全程零控制台错误。
+- **自动化测试现状（如实记录）**：`ui/e2e/` 目前**只有 1 个 Playwright spec**——
+  `bubble-menu.spec.ts`（9 条用例，配置见 `ui/playwright.config.ts`，`npm run e2e`；
+  由 `.github/workflows/e2e.yml` 每次推送自动跑），覆盖**气泡长按菜单
+  （真长按 / 右键 / Shift+F10 三种触发）、引用回复上送、表情面板**，chat/providers/models
+  全部 route-mock（零 token、不落库、不调真实 LLM）。
+  上表的**中断续跑、角色接管横幅、成本熔断、span 树子代理下钻、审批超时、设置页 CRUD 等
+  没有自动化断言**——它们靠 `ui/diagnose-*.mjs`（19 个手工诊断脚本，如
+  `diagnose-stop.mjs` / `diagnose-live.mjs` / `diagnose-plan.mjs` / `diagnose-regression.mjs`）
+  人工跑一遍看输出验收，**不是 E2E 断言，也不进 CI**（`npm run diag*` 手动触发）。
+  其中部分脚本会真实调用廉价 LLM（`diagnose-live.mjs` / `diagnose-stop-server.mjs` /
+  `diagnose-plan.mjs` 的 B 段），跑完自动删除临时会话。
 
 ---
 
@@ -685,9 +922,11 @@ web-agent/
 ├─ package.json / tsconfig.json / .env.example
 ├─ README.md
 ├─ docs/ARCHITECTURE.md          ← 本文档
-├─ kernel/                        ← 内核 6 大件（薄）
+├─ kernel/                        ← 内核聚合 6 个状态件（薄）
 │  ├─ index.ts  types.ts  bus.ts  config.ts
-│  ├─ scope.ts（可逆效应引擎）  plugin-loader.ts  trace.ts  cache.ts
+│  ├─ plugin-loader.ts  trace.ts  cache.ts  budget.ts
+│  ├─ scope.ts（可逆效应引擎，逐插件实例）
+│  └─ loop.ts  service.ts（契约件：只放形状）
 ├─ core/                          ← 核心插件（同样走插件机制）
 │  ├─ chat/                       ← Agent 执行器 + LLM provider
 │  └─ tools-fs/                   ← 文件工具插件
@@ -705,7 +944,7 @@ web-agent/
 | 阶段 | 内容 | 出口标准 |
 | --- | --- | --- |
 | 0 | 项目初始化（package/tsconfig/git/.env 模板） | `npm run dev` 空跑通 |
-| 1 | 内核：bus → config → trace → cache → plugin-loader | 单测/脚本验证 5 大件 |
+| 1 | 内核：bus → config → trace → cache → plugin-loader | 单测/脚本验证该阶段的 5 个内核件 |
 | 2 | core/chat（Agent 执行器 + 流式 LLM）+ core/tools-fs | 命令行脚本完成一次带工具对话 |
 | 3 | server API + SSE | curl 验证全部接口 |
 | 4 | 前端 UI + 插件面板 + Trace 面板 | 浏览器全流程点测 |

@@ -1,6 +1,6 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
-import { useEffect, useState } from 'react';
-import { configApi, metaApi, providersApi, rulesApi, statsApi } from '../api';
+import { useCallback, useEffect, useState } from 'react';
+import { configApi, getMutationToken, metaApi, providersApi, rulesApi, securityApi, setMutationToken, statsApi, type SecurityPosture } from '../api';
 import type { RulesView, RuntimeConfig } from '../api';
 import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Brand, Theme } from '../App';
@@ -718,6 +718,138 @@ function GeneralSection({ theme, onThemeChange, brand, onBrandChange }: { theme:
   );
 }
 
+/**
+ * 安全姿态（A6/A7 的前端侧）：把「哪些门开着、主密钥是否可用、审批门是否被策略整体放行」
+ * 如实摆在界面上——这些状态此前只存在于服务端日志与 401 的报错里，用户看不见。
+ *
+ * 变更凭据为什么由人录入、不让服务端下发：本服务只监听 127.0.0.1，浏览器相对其它本机
+ * 进程没有任何额外特权，页面能读到的通道本机进程都读得到。所以 token 只能由**人**从
+ * 服务端的 env 抄进来（存在本浏览器 localStorage）；服务端下发等于对攻击者公开。
+ */
+function SecuritySection() {
+  const [posture, setPosture] = useState<SecurityPosture | null>(null);
+  const [tokenDraft, setTokenDraft] = useState(() => getMutationToken());
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try { setPosture(await securityApi.get()); setErr(null); }
+    catch (e) { setErr(e instanceof Error ? e.message : String(e)); }
+  }, []);
+  useEffect(() => { void load(); }, [load]);
+
+  const saveToken = () => {
+    setMutationToken(tokenDraft);
+    toast.success(tokenDraft.trim() ? '变更凭据已存入本浏览器，之后所有修改类操作都会带上它' : '已清除本机变更凭据');
+    setTokenDraft(getMutationToken());
+    void load();
+  };
+
+  const blanket = posture?.policy.blanketAllow ?? [];
+
+  return (
+    <div className="set-sec">
+      <span className="ss-title">安全</span>
+      {err && <div className="page-sub">安全状态没读到：{err}</div>}
+      {!posture && !err && <div className="page-sub">读取安全状态…</div>}
+
+      {posture && (
+        <>
+          <div className="set-row">
+            <div className="set-row-l">
+              <span className="set-row-label">监听地址</span>
+              <span className="set-row-desc">只服务本机；局域网与外网不可达（Host/Origin 另挡 DNS rebinding 与跨源页）</span>
+            </div>
+            <span className="sc-val" style={{ fontSize: 13 }}>{posture.bind}</span>
+          </div>
+
+          <div className="set-row">
+            <div className="set-row-l">
+              <span className="set-row-label">变更类操作显式授权</span>
+              <span className="set-row-desc">
+                服务端 {posture.mutationAuthRequired ? '已要求' : '未要求'} <code>{posture.mutationTokenHeader}</code> 头
+                （挡无意图的本机进程一次调用就批准危险命令 / 切沙箱根 / 注入 allow 策略；
+                不是进程隔离边界——同用户身份的代码本就能改 data/ 下的文件）
+              </span>
+            </div>
+            <span className={`sc-val ${posture.mutationAuthRequired ? 'teal' : 'orange'}`} style={{ fontSize: 13 }}>
+              {posture.mutationAuthRequired ? '已启用' : '未启用'}
+            </span>
+          </div>
+
+          {posture.mutationAuthRequired && (
+            <div className="set-row">
+              <div className="set-row-l">
+                <span className="set-row-label">录入变更凭据</span>
+                <span className="set-row-desc">
+                  填服务端 <code>MAHARNESS_API_TOKEN</code> 的值（只存这台浏览器，不从服务端取——
+                  服务端下发等于对本机所有进程公开）。留空并保存 = 本机不再自动带凭据。
+                </span>
+              </div>
+              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+                <input
+                  className="set-input" style={{ width: 200 }} type="password" autoComplete="off"
+                  aria-label="变更凭据" placeholder="与服务端 env 一致"
+                  value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)}
+                />
+                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={saveToken}>保存</button>
+              </div>
+            </div>
+          )}
+
+          <div className="set-row">
+            <div className="set-row-l">
+              <span className="set-row-label">审批一次性凭据</span>
+              <span className="set-row-desc">回答审批必须回带该次挂起的凭据（单次有效，重放被拒）。凭据随审批卡一起下发，本页已自动回带</span>
+            </div>
+            <span className={`sc-val ${posture.approvalTokenRequired ? 'teal' : 'orange'}`} style={{ fontSize: 13 }}>
+              {posture.approvalTokenRequired ? '强制' : '已下发但未强制'}
+            </span>
+          </div>
+
+          <div className="set-row">
+            <div className="set-row-l">
+              <span className="set-row-label">主密钥</span>
+              <span className="set-row-desc">
+                {posture.masterKey.message || posture.masterKey.state}
+                {posture.masterKey.backupPath ? `（原文件已备份为 ${posture.masterKey.backupPath}）` : ''}
+              </span>
+            </div>
+            <span className={`sc-val ${posture.masterKey.available ? 'teal' : 'red'}`} style={{ fontSize: 13 }}>
+              {posture.masterKey.available ? '可用' : '异常'}
+            </span>
+          </div>
+
+          {posture.credentials.broken.length > 0 && (
+            <div className="set-row">
+              <div className="set-row-l">
+                <span className="set-row-label">密钥不可解的供应商</span>
+                <span className="set-row-desc">
+                  {posture.credentials.broken.map((b) => `${b.label || b.id}（${b.reason === 'no-master-key' ? '没有主密钥' : '密文损坏或密钥已换'}）`).join('、')}
+                  —— 请在「模型与 Provider」里重新录入 Key；这不是你按错了什么
+                </span>
+              </div>
+              <span className="sc-val red" style={{ fontSize: 13 }}>{posture.credentials.broken.length} 个</span>
+            </div>
+          )}
+
+          {blanket.length > 0 && (
+            <div className="set-row">
+              <div className="set-row-l">
+                <span className="set-row-label">审批门已被整体放行</span>
+                <span className="set-row-desc">
+                  策略里有对全部工具放行的 allow 规则（{blanket.map((b) => `${b.tool} ← ${b.file}`).join('、')}）。
+                  这意味着高危调用不再逐个询问你——如果不是你本意，请到「用户规则」删掉它。
+                </span>
+              </div>
+              <span className="sc-val red" style={{ fontSize: 13 }}>注意</span>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
@@ -773,6 +905,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
                 <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('config')}>打开</button>
               </div>
             </div>
+            <SecuritySection />
           </>
         )}
       </div>

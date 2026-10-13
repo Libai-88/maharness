@@ -2,6 +2,8 @@
  * server/routes/events.ts —— 全局事件流（前端实时面板，SSE）
  */
 import type { Express } from 'express';
+import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
+import { approvalTokens } from './approvals';
 import { getChatService, type RouteDeps } from './shared';
 
 // ---- M2 /api/events 事件类型白名单 ----
@@ -50,7 +52,7 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     // 新连接必须立刻知道有哪些卡在等它点头。
     try {
       for (const a of getChatService(kernel)?.listApprovals() ?? []) {
-        writeEvent('approval.requested', { approvalId: a.id, name: a.name, summary: a.summary, sessionId: a.sessionId, createdAt: a.createdAt, expiresAt: a.expiresAt });
+        writeEvent('approval.requested', { approvalId: a.id, name: a.name, summary: a.summary, sessionId: a.sessionId, createdAt: a.createdAt, expiresAt: a.expiresAt, approvalToken: approvalTokens.issue(a.id, a.sessionId, a.expiresAt) });
       }
     } catch { /* 服务未就绪时静默：事件流本身仍可用 */ }
     // SSE 心跳：长连接保活
@@ -58,6 +60,29 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     const off = kernel.bus.on('*', (e) => {
       // M2 事件类型白名单：只转发前端实际消费的事件（见 SSE_EVENT_TYPES 注释）
       if (!SSE_EVENT_TYPES.has(e.type)) return;
+      // A6-c：子代理/并行的审批经全局总线到达（父执行器阻塞在子任务 handler 内，
+      // 其 approval_required 无法从会话 SSE 流出）——转发时铸发一次性凭据，
+      // 与本文件连接回放、chat.ts 会话内审批三处口径一致，前端只需回带同一个字段。
+      // 过期时刻取审批板里的**真实** expiresAt（总线事件本身不带），查不到才退回
+      // 「现在 + 超时常量」——凭据寿命不该长于它所标识的那次挂起。
+      if (e.type === 'approval.requested') {
+        const d = (e.data ?? {}) as { approvalId?: string; sessionId?: string };
+        if (d.approvalId) {
+          const live = getChatService(kernel)?.listApprovals().find((a) => a.id === d.approvalId);
+          writeEvent(e.type, {
+            ...d,
+            sessionId: d.sessionId ?? live?.sessionId,
+            createdAt: (d as { createdAt?: number }).createdAt ?? live?.createdAt,
+            expiresAt: live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
+            approvalToken: approvalTokens.issue(
+              d.approvalId,
+              d.sessionId ?? live?.sessionId,
+              live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
+            ),
+          }, e.traceId);
+          return;
+        }
+      }
       writeEvent(e.type, e.data, e.traceId);
     });
     req.on('close', () => { off(); clearInterval(heartbeat); tracker?.onDisconnect(res); });

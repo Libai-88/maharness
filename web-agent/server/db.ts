@@ -1,6 +1,9 @@
 /**
  * server/db.ts —— SQLite 持久化（better-sqlite3，同步 API，零配置）
- * 表：sessions / messages / plugin_state / cache_entries（v1 用内存缓存，表预留）
+ * 表（与 CREATE TABLE 一致）：sessions / messages / providers / models / personas
+ *   / workspaces / agent_checkpoints / plugin_state
+ * 注：plugin_state 是预留位（建表但全仓无读写——插件状态现由内核注册表与 plugin.json 承载）；
+ *     缓存**不落库**，落 data/cache.json（见 kernel/cache.ts 的 save/load）。
  */
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
