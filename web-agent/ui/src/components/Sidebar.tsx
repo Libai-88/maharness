@@ -5,7 +5,7 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import type { Session } from '../types';
 import { hueFrom } from '../types';
-import { AGENT_NAME, chatTime, displayTitle, previewOf } from '../voice';
+import { AGENT_NAME, APP_VERSION, chatTime, displayTitle, previewOf } from '../voice';
 import Confirm, { type ConfirmRequest } from './Confirm';
 import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
 
@@ -271,7 +271,9 @@ export default memo(function Sidebar({
             <div className="sb-foot-left">
               <span className="sb-foot-chip" title="正在运行的插件数">{pluginRunning} 个插件在跑</span>
             </div>
-            <span className="sb-foot-chip ver">v{version ?? '0.1.0'}</span>
+            {/* E10：去掉第 4 处版本字面量兜底——不传时统一用 voice.APP_VERSION（构建期
+                由 package.json 注入），全站只有一处能"写错版本号"。 */}
+            <span className="sb-foot-chip ver">v{version ?? APP_VERSION}</span>
           </div>
           <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
             <IconSettings size={14} />

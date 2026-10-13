@@ -10,9 +10,11 @@ import type { ToolStep } from './types';
 export const AGENT_NAME = '小马';
 export const AGENT_ID = 'maharness';
 
-/** 界面显示的版本号：唯一出处（此前 side-bar 里硬编码的 v0.1.2 与 package.json 的
- *  0.1.0 已经不一致了——版本号只该有一个地方能写错）。发版时与 ui/package.json 同改。 */
-export const APP_VERSION = '0.1.0';
+/** 界面显示的版本号：值由构建期从 ui/package.json 注入（见 vite.config.ts 的 define 与
+ *  src/global.d.ts）。此前这里是硬编码字面量、Sidebar 里还有第三处兜底字面量，而
+ *  ui/package.json 的 version 反倒没人读——改它界面不动，等于「四处里只有两处生效」。
+ *  现在只有一处能写错：package.json。 */
+export const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : '0.0.0';
 
 /** 系统条（居中灰字）文案 —— 微信式"系统提示"的口气 */
 export const sys = {

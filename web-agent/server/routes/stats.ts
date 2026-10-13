@@ -65,6 +65,10 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
       taskProfile: kernel.budget.taskProfile(),
       cache: {
         l1Enabled: kernel.cache.l1Enabled,
+        // E1：把真实生效阈值暴露给前端——此前 UI 硬编码 0.85（而 0.85 恰是缓存体系
+        // 设计文档实测否决、证明「中文同义改写永远无法命中」的值），展示与生效值不符。
+        l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.58),
+        l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
         l1: rate(cache.l1Hits, cache.l1Misses),
         l2: rate(cache.l2Hits, cache.l2Misses),
         // L3 双口径：估算（相邻调用公共前缀 token，无 provider 反馈时的降级度量）

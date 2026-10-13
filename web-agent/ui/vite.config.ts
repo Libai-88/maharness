@@ -1,8 +1,15 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
+// E10：版本号单一来源——构建期把 ui/package.json 的 version 注入代码，
+// 此前 voice.ts 与 Sidebar 各有一份字面量（而 ui/package.json 的 version 无人读取，
+// 改它不影响界面显示）。JSON import 走 resolveJsonModule，零新依赖。
+import pkg from './package.json';
 
 export default defineConfig({
   plugins: [react()],
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   server: {
     port: 5173,
     proxy: { '/api': 'http://localhost:3000' },

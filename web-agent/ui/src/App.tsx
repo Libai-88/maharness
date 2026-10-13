@@ -51,6 +51,10 @@ const StatsView = lazy(() => import('./components/StatsView'));
 const SettingsView = lazy(() => import('./components/SettingsView'));
 import PluginTabView from './components/PluginTabView';
 
+/** 轨迹面板保留的步骤上限（F4：此前硬编码在 slice(-199) 里，且淘汰策略会先砍掉父步骤，
+ *  导致子代理/并行整棵子树变孤儿。现在按「先淘汰叶子」的策略使用这个显式常量。） */
+const TRACE_MAX = 400;
+
 function preloadSecondaryViews() {
   void import('./components/FilesView');
   void import('./components/PluginsView');
@@ -217,7 +221,23 @@ export default function App() {
         // upsert：同一 step 先来 running 帧、后来 settle 帧，原地覆盖而不是堆两条
         setTraceSteps((prev) => {
           const i = prev.findIndex((s) => s.id === step.id);
-          if (i === -1) return [...prev.slice(-199), step];
+          if (i === -1) {
+            const next = [...prev, step];
+            if (next.length <= TRACE_MAX) return next;
+            // F4 修复：旧实现 slice(-199) 直接砍最旧的——而最旧的往往正是 run_subagent /
+            // run_parallel 的父步骤，父一没、整棵子树全成孤儿（面板只剩"孤儿步骤"兜底展示）。
+            // 现在优先淘汰【不被任何步骤当作 parentId 引用】的叶子步骤（同样从最旧端开始），
+            // 父步骤保命；全是叶子仍超额时才轮到父（此时孤儿兜底接手）。
+            const parents = new Set<string>();
+            for (const s of next) if (s.parentId) parents.add(s.parentId);
+            let drop = next.length - TRACE_MAX;
+            const keep: TraceStep[] = [];
+            for (const s of next) {
+              if (drop > 0 && !parents.has(s.id)) { drop--; continue; }
+              keep.push(s);
+            }
+            return drop > 0 ? keep.slice(drop) : keep; // 极端深树：叶子不够砍时再砍最旧的（含父）
+          }
           const next = prev.slice();
           next[i] = step;
           return next;

@@ -130,7 +130,9 @@ export interface KernelLike {
     /** 生命周期管理（dynamic capability loading）：按需激活/停用插件 */
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
-    list(): { manifest: PluginManifest; state: string; error?: string }[];
+    /** 清单投影。watched=false 表示该插件不在目录监听范围内（core/ 内置插件），
+     *  源码改动需 reload/重启才生效——UI 据此如实标注，不给所有插件一律打「热重载」。 */
+    list(): { manifest: PluginManifest; state: string; error?: string; watched?: boolean }[];
     /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
     resolveService(key: string, consumer?: string): unknown | undefined;    /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
     resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined;

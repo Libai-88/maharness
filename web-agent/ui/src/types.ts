@@ -126,6 +126,9 @@ export interface PluginInfo {
   error?: string;
   fixSuggestion?: string;
   essential?: boolean;
+  /** F5：true = 位于用户插件目录，受目录监听（保存即热重载）；
+   *  false = core/ 内置插件，源码改动需手动重载或重启。 */
+  watched?: boolean;
   circuitBreaker?: { failures: number; openedAt: number };
 }
 
@@ -265,6 +268,10 @@ export interface StatsInfo {
   taskProfile: { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
   cache: {
     l1Enabled: boolean;
+    /** 后端真实生效的 L1 命中阈值（E1：UI 不再硬编码，展示与生效值同源） */
+    l1Threshold?: number;
+    /** 后端真实生效的 L2 TTL（分钟，同上） */
+    l2TtlMin?: number;
     l1: { hits: number; misses: number; rate: number };
     l2: { hits: number; misses: number; rate: number };
     /** L3 双口径：hits/tokens 为本地估算（相邻调用公共前缀）；real* 为 provider usage 确认的真实命中 */

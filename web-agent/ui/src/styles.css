@@ -2301,20 +2301,20 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 
 .hero-chart { display: flex; flex-direction: column; gap: 6px; }
 .hc-bars { display: flex; align-items: flex-end; gap: 6px; height: 64px; }
-.hc-bar {
-  flex: 1;
+/* F2：旧的 .hc-bar + nth-child(1..7) 固定高度是一组**写死的假数据**（36/44/28/52/48/60/64），
+   配 Mon/Wed/Sun 三个标签（7 柱 3 标不对位），不反映任何真实指标。
+   现在柱子高度由 StatsView 按真实命中率给（inline style），CSS 只负责形态。 */
+.hc-bars-real { gap: 14px; }
+.hc-bar-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; gap: 3px; }
+.hc-bar-real {
+  width: 100%;
   border-radius: 2px;
-  background: var(--teal);
-  min-height: 4px;
+  min-height: 3px;
+  transition: height var(--motion-slower, .6s) var(--ease-out, cubic-bezier(.22,1,.36,1));
 }
-.hc-bar:nth-child(1) { height: 36px; }
-.hc-bar:nth-child(2) { height: 44px; }
-.hc-bar:nth-child(3) { height: 28px; }
-.hc-bar:nth-child(4) { height: 52px; }
-.hc-bar:nth-child(5) { height: 48px; }
-.hc-bar:nth-child(6) { height: 60px; }
-.hc-bar:nth-child(7) { height: 64px; }
-.hc-labels { display: flex; justify-content: space-between; font-size: 10px; font-family: var(--font-mono); color: var(--text-4); }
+.hc-bar-real.hc-bar-na { background: repeating-linear-gradient(45deg, var(--border), var(--border) 3px, transparent 3px, transparent 6px); }
+.hc-bar-val { font-size: 10px; font-family: var(--font-mono); color: var(--text-3); }
+.hc-labels { display: flex; justify-content: space-around; font-size: 10px; font-family: var(--font-mono); color: var(--text-4); }
 
 .saved-card {
   width: 380px;
@@ -2371,10 +2371,13 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .cc-desc { font-size: 12px; font-family: var(--font-mono); color: var(--text-2); }
 .cc-meta { font-size: 11px; color: var(--text-3); flex: 1; }
 .cc-bar { height: 8px; border-radius: 4px; background: var(--bg-input); overflow: hidden; }
-.cc-bar-fill { height: 100%; border-radius: 4px; }
-.cache-card.c1 .cc-bar-fill { background: var(--purple); width: 58%; }
-.cache-card.c2 .cc-bar-fill { background: var(--teal); width: 32%; }
-.cache-card.c3 .cc-bar-fill { background: var(--accent); width: 13%; }
+/* F2：fill 宽度此前在 CSS 里写死（58%/32%/13%）——纯装饰假进度条。
+   现在宽度由 StatsView 按各层真实命中率给（inline style），CSS 只管颜色与过渡。 */
+.cc-bar-fill { height: 100%; border-radius: 4px; transition: width var(--motion-slower, .6s) var(--ease-out, cubic-bezier(.22,1,.36,1)); }
+.cache-card.c1 .cc-bar-fill { background: var(--purple); }
+.cache-card.c2 .cc-bar-fill { background: var(--teal); }
+.cache-card.c3 .cc-bar-fill { background: var(--accent); }
+.cache-card.c3 .cc-bar-fill.cc-bar-na { background: repeating-linear-gradient(45deg, var(--border), var(--border) 3px, transparent 3px, transparent 6px); }
 .cc-example { font-size: 11px; font-family: var(--font-mono); color: var(--text-4); }
 
 /* 全局统计条 */

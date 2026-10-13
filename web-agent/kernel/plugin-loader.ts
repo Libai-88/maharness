@@ -1294,12 +1294,16 @@ export class PluginLoader {
   // ---------- 对外管理 API ----------
 
   /** 插件清单投影（不暴露 scope/plugin/chain 等内部结构——内核实现细节不是公共 API） */
-  list(): { manifest: PluginManifest; state: string; error?: string; circuitBreaker?: { failures: number; openedAt: number } }[] {
+  list(): { manifest: PluginManifest; state: string; error?: string; circuitBreaker?: { failures: number; openedAt: number }; watched: boolean }[] {
     return [...this.registry.values()].map((i) => ({
       manifest: i.manifest,
       state: i.state,
       error: i.error,
       circuitBreaker: i.circuitBreaker.failures > 0 ? i.circuitBreaker : undefined,
+      // F5：只有用户插件目录受 watch() 递归监听（保存即热重载）；core/ 下的内置插件
+      // 改动不会自动生效（需 reload/重启）。把这个事实投影出去，UI 才能如实标注，
+      // 而不是给所有运行中插件一律打「热重载」标签。
+      watched: i.dir.startsWith(this.userDir),
     }));
   }
 

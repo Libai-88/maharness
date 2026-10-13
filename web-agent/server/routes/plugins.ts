@@ -118,6 +118,8 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
       fixSuggestion: p.error ? suggestFix(p.error) : undefined,
       essential: p.manifest.essential,
       circuitBreaker: p.circuitBreaker,
+      // F5：是否受目录监听（true = 保存即热重载；false = core/ 内置插件，改动需重载/重启）
+      watched: p.watched === true,
     })));
   });
 

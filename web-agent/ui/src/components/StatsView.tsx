@@ -3,10 +3,12 @@ import { useEffect, useState } from 'react';
 import { animate, motion, useMotionValue, useTransform } from 'motion/react';
 import { statsApi } from '../api';
 import { fadeUp, staggerContainer } from '../motion';
+import { money } from '../voice';
 import type { StatsInfo } from '../types';
 
 const fmt = (n: number) => (n >= 10000 ? `${(n / 1000).toFixed(1)}k` : String(n));
-const cost = (n: number) => `¥${n.toFixed(2)}`;
+// F2：成本统一走 voice.money（全站单一口径 $）——定价按 USD/1M 计，此前本文件用 ¥ 是错的。
+const cost = (n: number) => money(n);
 
 /** 百分比格式化：后端 rate 已是 0-100 数值（42.5 = 42.5%），不再乘 100 */
 function pct(n: number) { return `${n.toFixed(1)}%`; }
@@ -58,7 +60,7 @@ export default function StatsView() {
           <span className="ph-cn">缓存与成本</span>
         </div>
         <span className="ph-title">看得见的成本，看得见的缓存</span>
-        <span className="ph-sub">三层缓存命中即可见 · 本周节省 {cost(cache.savedCost ?? 0)}</span>
+        <span className="ph-sub">三层缓存命中即可见 · 累计节省 {cost(cache.savedCost ?? 0)}</span>
       </motion.div>
 
       <motion.div variants={fadeUp} className="stats-row">
@@ -73,19 +75,39 @@ export default function StatsView() {
               ? `provider 确认命中 ${fmt(cache.l3.realTokens)} tok · 折合 ${cost(cache.savedCost ?? 0)}`
               : `节省调用 ${overall?.served ?? 0} 次 · 折合 ${cost(cache.savedCost ?? 0)}`}
           </div>
-          <div className="hero-chart">
-            <div className="hc-bars">
-              {[36, 44, 28, 52, 48, 60, 64].map((h, i) => (
-                <div key={i} className="hc-bar" style={{ height: h }} />
+          {/* F2 修复：此前这里是硬编码的 [36,44,28,52,48,60,64] 假柱状图配 Mon/Wed/Sun
+              三个标签（7 柱 3 标不对位、且不反映任何真实数据）——与「诚实呈现：真实状态、
+              真实数据」的信条直接冲突。改为**三层缓存命中率的真实对比**：数据全部来自
+              /api/stats。L3 无 provider 真实反馈时不画估算百分比（估算口径没有可靠分母，
+              画出来就是假数据），显示 L1/L2 两层的真实命中率。 */}
+          <div className="hero-chart" role="img" aria-label={`命中率：L1 ${pct(l1.rate ?? 0)}，L2 ${pct(l2.rate ?? 0)}${cache.l3.realHits > 0 ? `，L3 ${pct(cache.l3.realRate)}` : ''}`}>
+            <div className="hc-bars hc-bars-real">
+              {[
+                { k: 'L1', v: l1.rate ?? 0, color: 'var(--purple)' },
+                { k: 'L2', v: l2.rate ?? 0, color: 'var(--teal)' },
+                ...(cache.l3.realHits > 0 ? [{ k: 'L3', v: cache.l3.realRate, color: 'var(--accent)' }] : []),
+              ].map((b) => (
+                <div key={b.k} className="hc-bar-wrap">
+                  <div className="hc-bar-real" style={{ height: `${Math.max(2, Math.min(100, b.v))}%`, background: b.color }} />
+                  <span className="hc-bar-val">{pct(b.v)}</span>
+                </div>
               ))}
+              {cache.l3.realHits === 0 && (
+                <div className="hc-bar-wrap">
+                  <div className="hc-bar-real hc-bar-na" />
+                  <span className="hc-bar-val">L3 —</span>
+                </div>
+              )}
             </div>
-            <div className="hc-labels"><span>Mon</span><span>Wed</span><span>Sun</span></div>
+            <div className="hc-labels"><span>L1 语义</span><span>L2 工具</span><span>L3 前缀</span></div>
           </div>
         </div>
         <div className="saved-card">
-          <span className="sc-label">本周节省调用</span>
+          {/* C3 修复：served 是 L1+L2+L3 的**历史累计**计数，此前文案写「本周节省调用」
+              等于给同一个数字挂了两个时间窗（别处称"历史累计"）。改为如实标注。 */}
+          <span className="sc-label">累计节省调用</span>
           <span className="sc-value"><AnimatedNumber value={overall?.served ?? 0} format={fmt} /></span>
-          <span className="sc-sub">次 · LLM call skipped</span>
+          <span className="sc-sub">次 · LLM call skipped（历史累计）</span>
           <div className="sc-divider" />
           <div className="sc-row">
             <div className="sc-row-left"><span className="sc-dot" style={{ background: 'var(--purple)' }} /><span className="sc-lbl">L1 语义缓存</span></div>
@@ -110,8 +132,11 @@ export default function StatsView() {
           </div>
           <span className="cc-desc">字符 bigram · Dice 相似度</span>
           <span className="cc-meta">命中 {l1.hits} · 完全跳过 LLM{cache.l1Enabled ? '' : ' · 已关闭'}</span>
-          <div className="cc-bar"><div className="cc-bar-fill" /></div>
-          <span className="cc-example">阈值 ≥ 0.85 触发命中 · 免 embedding API</span>
+          {/* F2：cc-bar-fill 此前无宽度绑定（静态假进度条）——按真实命中率给宽度 */}
+          <div className="cc-bar"><div className="cc-bar-fill" style={{ width: `${Math.max(0, Math.min(100, l1.rate ?? 0))}%` }} /></div>
+          {/* E1：阈值来自后端真实生效值（此前硬编码 0.85，而 0.85 恰是缓存体系设计文档
+              实测否决的值；生效值一直是 0.58）。缺字段时退回 0.58，不再退回 0.85。 */}
+          <span className="cc-example">阈值 ≥ {(cache.l1Threshold ?? 0.58).toFixed(2)} 触发命中 · 免 embedding API</span>
         </div>
         <div className="cache-card c2">
           <div className="cc-head">
@@ -119,8 +144,8 @@ export default function StatsView() {
             <span className="cc-rate"><AnimatedNumber value={l2.rate ?? 0} format={pct} /></span>
           </div>
           <span className="cc-desc">hash(工具+参数) + mtime/size</span>
-          <span className="cc-meta">命中 {l2.hits} · TTL 30 min · 重复调用不重算</span>
-          <div className="cc-bar"><div className="cc-bar-fill" /></div>
+          <span className="cc-meta">命中 {l2.hits} · TTL {cache.l2TtlMin ?? 30} min · 重复调用不重算</span>
+          <div className="cc-bar"><div className="cc-bar-fill" style={{ width: `${Math.max(0, Math.min(100, l2.rate ?? 0))}%` }} /></div>
           <span className="cc-example">适用 read_file / list_dir / glob</span>
         </div>
         <div className="cache-card c3">
@@ -133,7 +158,8 @@ export default function StatsView() {
             真实命中 {fmt(cache.l3.realTokens ?? 0)} tok
             {cache.l3.realHits > 0 ? ` · 命中率 ${pct(cache.l3.realRate)}` : ' · 估算 ' + fmt(l3.tokens ?? 0) + ' tok'}
           </span>
-          <div className="cc-bar"><div className="cc-bar-fill" /></div>
+          {/* L3 条：有 provider 真实命中时按真实命中率给宽度；无真实反馈时不编造百分比 */}
+          <div className="cc-bar"><div className={`cc-bar-fill${cache.l3.realHits > 0 ? '' : ' cc-bar-na'}`} style={{ width: cache.l3.realHits > 0 ? `${Math.max(0, Math.min(100, cache.l3.realRate))}%` : '0%' }} /></div>
           <span className="cc-example">多轮对话输入成本按 provider 折扣计费</span>
         </div>
       </motion.div>

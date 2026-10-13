@@ -124,7 +124,10 @@ export default function PluginsView({ plugins, onAction }: Props) {
             <span className="plugin-name">{p.name}</span>
             <span className="plugin-ver">v{p.version}</span>
             {p.essential && <span className="plugin-tag" style={{ background: 'var(--purple-soft)', color: 'var(--purple)' }}>核心</span>}
-            {isRun && <span className="plugin-tag hot">热重载</span>}
+            {/* F5：只有用户插件目录受监听（保存即热重载）；core/ 内置插件改动需重载/重启，
+                此前对所有运行中插件一律打「热重载」标签是误导。 */}
+            {isRun && p.watched !== false && <span className="plugin-tag hot">热重载</span>}
+            {isRun && p.watched === false && <span className="plugin-tag" title="core/ 内置插件：源码改动需点「重载」或重启生效">内置</span>}
             {p.error && <span className="plugin-tag" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>错误</span>}
             {p.circuitBreaker && p.circuitBreaker.failures > 0 && (
               <span className="plugin-tag" style={{ background: 'var(--orange-soft)', color: 'var(--orange)' }}>
@@ -224,7 +227,9 @@ export default function PluginsView({ plugins, onAction }: Props) {
                 <span className="pd-ver">v{selected.version}</span>
                 <div className="pd-status">
                   <span className="ps-dot" style={{ background: 'currentColor' }} />
-                  {(selected.state === 'started' || selected.state === 'loaded') ? '运行中 · 热重载已启用' : selected.state === 'error' ? '出错' : '已停止'}
+                  {(selected.state === 'started' || selected.state === 'loaded')
+                    ? (selected.watched === false ? '运行中 · 内置插件（改动需重载/重启）' : '运行中 · 热重载已启用')
+                    : selected.state === 'error' ? '出错' : '已停止'}
                 </div>
                 <div className="pd-actions">
                   <button className="pd-btn ghost" onClick={() => void act(selected.id, 'reload')} disabled={!!busy[selected.id]}>
@@ -285,7 +290,7 @@ export default function PluginsView({ plugins, onAction }: Props) {
             <div className="empty-state">← 选择插件查看详情</div>
           )}
           <div className="pd-manifest">
-            <span className="pm-title">现场写插件（保存即生效）</span>
+            <span className="pm-title">现场写插件（plugins/ 下保存即生效）</span>
             <pre className="code-body" style={{ background: 'var(--bg-input)', borderRadius: 8, border: '1px solid var(--border)', overflowX: 'auto' }}>{`plugins/clock/plugin.json
 { "id": "clock", "name": "时钟工具",
   "version": "0.1.0", "entry": "index.ts", "enabled": true }
@@ -294,6 +299,11 @@ export default function PluginsView({ plugins, onAction }: Props) {
 export default { id: 'clock', async onLoad(ctx) {
   ctx.register({ kind: 'tool', tool: {
     name: 'get_current_time', ... } }); } };`}</pre>
+            {/* F5：如实说明 core/ 内置插件不在监听范围内——此前页面通篇"保存即生效"，
+                但 watch() 只监听用户插件目录，改 core/ 下的文件不动。 */}
+            <div className="provider-hint" style={{ marginTop: 8 }}>
+              上表「内置」标签的插件位于 core/，不在目录监听范围内：改动需点上方「重载」或重启服务生效。
+            </div>
           </div>
         </div>
       </aside>

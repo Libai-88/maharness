@@ -8,6 +8,7 @@ import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
 import Confirm, { type ConfirmRequest } from './Confirm';
 import SkillsView from './SkillsView';
+import PersonaPanel from './PersonaPanel';
 
 interface Props {
   providers: ProviderInfo[];
@@ -18,7 +19,7 @@ interface Props {
   onBrandChange: (b: Brand) => void;
 }
 
-type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'rules' | 'skills' | 'advanced';
+type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'personas' | 'rules' | 'skills' | 'advanced';
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
 
@@ -287,7 +288,9 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
               <div className="pv-field"><span className="pf-label">模型</span><span className="pf-value">{p.model}</span></div>
               <div className="pv-field" style={{ flex: '0 0 170px' }}>
                 <span className="pf-label">价格 / 1M tokens</span>
-                <span className="pf-value">¥{p.priceIn ?? '?'} in · ¥{p.priceOut ?? '?'} out</span>
+                {/* F2：币种统一 $（定价按 USD/1M，见 voice.money 的注释）——本文件 230 行的
+                    模型卡片 tooltip 早已用 $，这里曾是 ¥，同一界面两套货币符号。 */}
+                <span className="pf-value">${p.priceIn ?? '?'} in · ${p.priceOut ?? '?'} out</span>
               </div>
               <div className="pv-field" style={{ flex: '0 0 200px' }}>
                 <span className="pf-label">协议 / 能力</span>
@@ -342,10 +345,14 @@ function ContextSection() {
     }
   };
 
-  const maxTokens = stats?.context.maxTokens ?? cfg?.context.maxTokens ?? 30000;
+  // E3：后端各消费点的默认值统一是 60000（agent.ts / chat.ts / config.ts / stats.ts），
+  // 此前这里的 30000 兜底与代码与 README 旧文案互相矛盾，三处对齐到 60000。
+  const maxTokens = stats?.context.maxTokens ?? cfg?.context.maxTokens ?? 60000;
   const truncations = stats?.overview.truncations ?? 0;
-  const l1Threshold = cfg?.cache.l1Threshold ?? 0.85;
-  const l2TtlMin = cfg?.cache.l2TtlMin ?? 30;
+  // E1：兜底优先用后端真实生效阈值（statsApi 已带出），其次 0.58（代码默认）——
+  // 此前兜底 0.85 恰是缓存体系设计文档实测否决的值（中文同义改写 0.85 永不命中）。
+  const l1Threshold = stats?.cache.l1Threshold ?? cfg?.cache.l1Threshold ?? 0.58;
+  const l2TtlMin = cfg?.cache.l2TtlMin ?? stats?.cache.l2TtlMin ?? 30;
   const l3Enabled = cfg?.cache.l3Enabled ?? true;
 
   return (
@@ -391,11 +398,11 @@ function ContextSection() {
         <div className="set-row">
           <div className="set-row-l">
             <span className="set-row-label"><span className="tag t1">L1</span>语义缓存阈值</span>
-            <span className="set-row-desc">bigram Dice 相似度 ≥ 阈值即命中，免 LLM 调用</span>
+            <span className="set-row-desc">bigram Dice 相似度 ≥ 阈值即命中，免 LLM 调用（0.58 为实测标定值：再高中文同义改写难命中，再低易误命中）</span>
           </div>
           <div className="set-slider">
             <input
-              type="range" min={0.5} max={1} step={0.05}
+              type="range" min={0.5} max={1} step={0.01}
               value={l1Threshold}
               onChange={(e) => void patch({ cache: { l1Threshold: Number(e.target.value) } }, `L1 阈值 → ${Number(e.target.value).toFixed(2)}`)}
             />
@@ -718,6 +725,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
     { key: 'providers', label: '模型与 Provider' },
     { key: 'context', label: '上下文管理' },
     { key: 'routing', label: '模型路由' },
+    { key: 'personas', label: '人设与提示词' },
     { key: 'rules', label: '用户规则' },
     { key: 'skills', label: '技能系统' },
     { key: 'advanced', label: '高级' },
@@ -739,6 +747,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
         {tab === 'context' && <ContextSection />}
         {tab === 'routing' && <RoutingSection />}
+        {tab === 'personas' && <PersonaPanel />}
         {tab === 'rules' && <RulesSection />}
         {tab === 'skills' && <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><SkillsView /></div>}
         {tab === 'advanced' && (

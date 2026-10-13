@@ -136,11 +136,16 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
   // 无 provider 反馈（不支持缓存/无命中字段）时回退 trace.cacheHits 口径。
   const cache = stats?.cache ?? {};
   const realTotal = (cache.l3RealTokens ?? 0) + (cache.l3RealMissTokens ?? 0);
+  // C3 修复：回退口径此前把 toolCalls 混进分母（cacheHits / (llmCalls + toolCalls)），
+  // 工具调用越多命中率被压得越低——那是**系统性低估**且语义不成立（缓存命中数与
+  // 工具调用数不是同类事件）。回退口径改为「缓存命中步骤 / (LLM 调用 + 缓存命中)」，
+  // 即"本可发生的模型调用里有多少被缓存挡掉"，并在 UI 上标明这是估算口径。
   const cacheRate = realTotal > 0
     ? Math.round(((cache.l3RealTokens ?? 0) / realTotal) * 100)
     : stats?.trace?.cacheHits
-      ? Math.min(100, Math.round((stats.trace.cacheHits / Math.max(1, stats.trace.llmCalls + stats.trace.toolCalls)) * 100))
+      ? Math.min(100, Math.round((stats.trace.cacheHits / Math.max(1, stats.trace.llmCalls + stats.trace.cacheHits)) * 100))
       : 0;
+  const cacheRateIsReal = realTotal > 0;
 
   // 深度优先渲染（倒序：最新在前），子步骤折叠时只显示一行
   const renderTree = (): React.ReactNode[] => {
@@ -192,12 +197,12 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
         <div className="trail-stats">
           <div className="ts-grid">
             <div className="ts-card">
-              <span className="ts-label">缓存命中率</span>
+              <span className="ts-label">缓存命中率{cacheRateIsReal ? '' : '（估算）'}</span>
               <span className="ts-value teal">{cacheRate}%</span>
               <span className="ts-hint">
-                {realTotal > 0
+                {cacheRateIsReal
                   ? `L3 真实命中 ${(cache.l3RealTokens ?? 0).toLocaleString()} tok · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`
-                  : `L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`}
+                  : `无 provider 命中反馈，按「缓存命中 / (LLM 调用 + 命中)」估算 · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`}
               </span>
             </div>
             <div className="ts-card">
