@@ -16,7 +16,7 @@
 | 等级 | 条目数 | 说明 |
 |---|---|---|
 | **P0** | **5** | 破坏已文档化的安全承诺（A1/A2），或破坏核心机制正确性（B1/C1） |
-| **P1** | **14** | 可绕过防护/功能必然失败/用户可感知的行为错误 |
+| **P1** | **16** | 可绕过防护/功能必然失败/用户可感知的行为错误 |
 | **P2** | **24** | 静默失效、口径漂移、资源缓增、文档失真 |
 | **P3/记录** | **4** | 机制真但影响可忽略，建议只记录 |
 | 已证伪 | 5 | 见 §3「误报澄清」——列为独立章节，防止未来重复排查 |
@@ -77,6 +77,9 @@ Batch 1 与 Batch 2 写范围不重叠，建议**同时启动**（P0 安全项�
 | B12 | P1 | 功能 | 配置热更新不落盘：`/api/config` 的改动重启即丢 | `kernel/config.ts:41-51`、`server/routes/config.ts:46-75` | **已复现** | 1 |
 | B13 | P1 | 正确性 | 快照副本与活目录是两个模块实例 → 模块级单例状态分裂（写一份读另一份） | `core/chat/result-store.ts:77`、`core/chat/provider-health.ts:51` | **已复现**（selftest + stash 对照） | 1 |
 | B14 | P1 | 工程 | 测试 glob 把运行时快照当源码测；脏快照无回收 → 用例数与结果随磁盘残留漂移 | `package.json` test 脚本、`kernel/plugin-loader.ts:register`、`plugin-snapshot.ts:SKIP_DIR` | **已复现** | 1 |
+| B15 | P1 | 功能 | `withTimeout` 竞速定时器从不 `clearTimeout` → 每次插件生命周期留一个 30s ref'd 定时器，进程跑完也不退出 | `kernel/plugin-loader.ts:57-65` | **已复现**（`getActiveResourcesInfo` 见 32 个 Timeout） | 1 |
+| B16 | P1 | 功能 | `startServer` 导出的 `closeEnvWatcher` 从未被 selftest 调用 → `.env` 目录 `fs.watch` 句柄一直 ref 事件循环 | `scripts/selftest.ts:674-679`、`server/index.ts:166` | **已复现** | 1 |
+| B17 | P1 | 正确性 | 插件侧 `ctx.cache`/`ctx.trace` 直接拿内核内置实例，**绕过服务仲裁**——接管后 `kernel.*` 换了、插件自己用的还是旧实现 | `kernel/plugin-loader.ts` buildContext（原 `trace/cache: this.ctxBase.*`） | **已复现**（已修 + 回归） | 2 |
 | C1 | **P0** | 可观测 | `service_call` 噪声占归档 96~99.5%，挤掉真实步骤 | `kernel/plugin-loader.ts:813-828`、`kernel/index.ts:107-116` | **已复现** | 1 |
 | C2 | P2 | 可观测 | 归档回退是整文件同步读；归档无轮转/清理；`flushTimer` 未 unref | `kernel/trace.ts:55-56,96-101,147-157` | 代码确认 | 1 |
 | C3 | P2 | 可观测 | 统计口径不自洽（overall 只用 L1；"本周节省"实为累计；轨迹面板分母混入工具调用） | `server/routes/stats.ts:17,76-92`、`ui/src/components/TracePanel.tsx:141-142` | 代码确认 | 4 |
@@ -376,7 +379,28 @@ Batch 1 与 Batch 2 写范围不重叠，建议**同时启动**（P0 安全项�
 - **验收**：修复后源码树 spec 29 个 / 用例 **304 个**，连续运行计数稳定；`core/**/*@*/**/*.spec.ts` 命中数 = 0。
 - **工作量**：0.5 天（已完成）。**风险**：`tests` 不入快照意味着任何"运行时 import 自己 tests 目录"的插件会失效——全仓 grep 无此用法。
 
-### C. 可观测性
+### B-补. 执行中新确认的条目（B15–B17）与 A2 的加重事实
+
+> 这四条都是**动手时才暴露**的：静态审查看不到「进程为什么不退出」，也看不到「双基座错位会同时打掉内核写保护」。列出以修正原清单的严重度判断。
+
+**A2 的加重事实（原判 P0 偏低）**：`isProtectedWritePath` 同样只按 `sandboxRoot` 算相对路径。当前部署（沙箱根 `D:\DEEPSEEK`、项目根 `…\maharness\web-agent`）下，`write_file('maharness/web-agent/kernel/index.ts')` 的规范相对路径是 `maharness/web-agent/kernel/index.ts` —— **不命中 `kernel/` 前缀，内核写保护实际可绕过**。也就是说 README 的「内核写保护（自我接管防护）」与「`.env`/`data/` 不进上下文」两条承诺在同一处错位上同时失效。修复必须**双基座**（沙箱根 ∪ 项目根），只做敏感名单不够。
+- 已实施：`kernel/sandbox.ts` 新增 `SandboxBases` / `relUnder` / `sensitiveTarget` / `isApprovalRequiredWritePath`，`isProtectedWritePath`、`isDeniedReadPath` 加可选 `projectRoot` 参数（向后兼容）；`core/tools-fs` 与 `server/routes/files.ts` 全部改为双基座；写侧敏感目标（`.env`、`data/**`）走**强制审批**（不受 `tools.writeRequiresApproval` 影响），HTTP 写接口因无审批语义直接 403。
+- 回归：`kernel/tests/sandbox.spec.ts`（9 例），其中一例**显式断言旧行为**（单基座判 false）以钉住这个洞的成因。
+
+**B15 [P1] `withTimeout` 不 `clearTimeout` → 进程跑完不退出**（已修）
+- 机制：`Promise.race` 的定时器随胜者作废但从不清除，于是**每次** onLoad/onStart 都留一个 30s ref'd 定时器（16 插件 × 2 = 32 个）。`selftest` 打印完全文汇总后仍不退出即由此而来——表现为「验收门卡死」。
+- 定位过程值得记录：`process._getActiveHandles()` 报 `handles=0`，一度误判为句柄泄漏；真相是 **Node 12+ 的 timers 不再是 libuv 句柄，不出现在该列表里**，必须用 `process.getActiveResourcesInfo()`（实测 32×`"Timeout"`）。
+- 修复：胜者产生即 `clearTimeout` + `unref()` 双保险。
+
+**B16 [P1] selftest 从不调用 `closeEnvWatcher`**（已修）
+- `startServer` 早已导出该清理函数并在注释里点名「嵌入场景多次 start/stop 需要显式清理」，但 `selftest` 的 finally 只关了 server/store/kernel。修复：finally 补 `started?.closeEnvWatcher?.()`，并在 server 侧对 `.env` 目录 watcher 加 `unref()` 作纵深防御（漏关也不钉住循环）。
+- 效果：`npm run selftest` 从「不退出」变为 **26 秒退出、exit 0**。
+
+**B17 [P1] `ctx.cache` / `ctx.trace` 绕过服务仲裁**（已修）
+- 与 A2 同类的"半截接管"问题：`buildContext` 直接把内核内置实例交给插件，而 `kernel.cache` 走解析层。插件 `ctx.provide('service:cache', impl, 10)` 接管后，同一子系统在进程内有两种身份。
+- 修复：`buildContext` 的 `trace`/`cache` 改为**解析视图 getter**（复用不埋点的 `resolveView`，避免热路径重新引入 C1 噪声）。
+- 回归：`kernel/tests/services.spec.ts` 新增「探针服务在调用时读 `ctx.cache.mark`」两例（接管生效 / 停用回退）。
+
 
 
 #### C1 [P0] `service_call` 噪声占归档 96~99.5%，挤掉真实步骤
@@ -642,11 +666,56 @@ Get-ChildItem *.jsonl | Sort-Object Name | Select-Object -Last 6 | ForEach-Objec
 
 | 批次 | 状态 | 条目 | 验收证据 |
 |---|---|---|---|
-| **Batch 1** | ✅ 完成 | C1 · C4 · B1 · B7 · B11 · B12 · **B13 · B14**（执行中新发现并一并修复） | `typecheck` 0 error；`npm test` **304 通过 / 0 失败**（源码树 29 个 spec，计数已稳定）；`npm run selftest` **91 通过 / 0 失败**（修复前 90/1） |
-| Batch 2 | ⏳ 待做 | A1 · A2 · A3 · A4 · A5 · A6 · A7 · A8 · A9 · A10 · B10 | — |
-| Batch 3 | ⏳ 待做 | B2 · B3 · B4 · B5 · B6 · B8 · B9 · D1 · D2 | — |
-| Batch 4 | ⏳ 待做 | E1~E10 · F1~F5 · C2 · C3 | — |
-| Batch 5 | ⏳ 待做 | E2（README 安全模型）+ 已知边界单一入口 | — |
+| **Batch 1** | ✅ 完成 | C1 · C4 · B1 · B7 · B11 · B12 · **B13 · B14 · B15 · B16**（执行中新发现并一并修复） | 提交 `3179f27` + `a6abbb8` |
+| **Batch 2** | ✅ 完成 | A1 · A2 · A3 · A4 · A5 · A6 · A7 · A8 · A9 · A10 · B10 · **B17 · B18** | 提交 `abd4523` |
+| **Batch 3** | ✅ 完成 | B2 · B3 · B4 · B5 · B6 · B8 · B9 · C2 · D1 · D2 | 提交 `abd4523` |
+| **Batch 4** | ✅ 完成 | E1 · E3 · C3 · E4–E9 · F1 · F2 · F4 · F5 · E10 · A6 前端接线 | 提交 `98de899` + `086a4cc` |
+| **Batch 5** | ✅ 完成 | E2（README 安全模型按真实能力重写 + 已知边界单一入口） | 提交 `011ac22` |
+| **F3 收尾** | ✅ 完成 | useApprovals hook 抽取 + 14 处冗余依赖清理 | 提交 `6e18ef3` |
+| R1–R4 | ➖ 按原定级「只记录不修」 | R1 会话键不删（200–400 B/会话、重启清零）；R2 已证伪；R3 已证伪（真问题在 B3，已修）；R4 整文件同步读（已随 C2 改为尾部按块回读，故**实际已受益**） | 见 §7 |
+
+**§1 的全部条目均已处置**（P0 5 + P1 16 + P2 24 + P3 4，其中 1 条已证伪不计入）；
+执行中另**新发现并修复 B17、B18 两条**。
+
+**最终验收（提交 `6e18ef3` 时实测）**：
+
+| 门禁 | 结果 |
+|---|---|
+| `npm run typecheck` | **0 error** |
+| `npm run ui:typecheck` | **0 error** |
+| `npm test` | **673 通过 / 0 失败**（37 个 spec 文件） |
+| `npm run selftest` | **91 通过 / 0 失败**，27 秒正常退出 |
+| `npm run eval` | **4 通过 / 0 失败** |
+| `npm run ui:build` | 通过（Vite 生产构建，421 modules） |
+| C1 端到端指标 | 真实 server + 模拟 UI 统计轮询 30 轮 → 归档仅 **1** 条 `service_call`（`external → chat` 依赖边）；再轮询 30 轮**增量 0**。修复前：每轮 3~5 条、占比 96~99.5% |
+| 提交数 | 7（基线 `1540590` 之后） |
+
+### Batch 2–3 执行中新确认的条目
+
+**B17 [P1] `ctx.cache` / `ctx.trace` 绕过服务仲裁**（已修）
+`buildContext` 直接把内核内置实例交给插件，而 `kernel.cache` 走解析层——插件接管后同一子系统在进程内有**两种身份**，「137 处调用点零改动即可被接管」只对 `kernel.*` 那一半成立。修复：`trace`/`cache` 改为解析视图 getter，并复用**不埋点**的 `resolveView`（否则会经新入口把 C1 噪声再引进来）。回归：`services.spec.ts` 新增「探针服务在调用时读 `ctx.cache.mark`」两例（接管生效 / 停用回退）。
+
+**B18 [P1] Windows 上 `npx` 类 stdio MCP server 根本起不来**（已修）
+A4 执行过程中顺带发现并**当场实测坐实**：`spawnSync('npx')` → ENOENT（PATH 上只有 `.cmd` 垫片）、`spawnSync('npx.cmd')` → EINVAL（Node 因 CVE-2024-27980 禁止无 shell 启动 `.bat/.cmd`）。后果是 `config.example.json` 推荐的 `npx -y @modelcontextprotocol/server-filesystem` 在 Windows 上必然失败，而报错只是笼统一句"进程启动失败"。修复：win32 上非 `.exe` 命令一律经 cmd.exe 解析，命令行由我们自行组装（含空格/分隔符的参数整体加引号），错误信息回显实际命令行。回归：`core/mcp/tests/security.spec.ts` 的 4 例 `buildSpawnPlan`。
+
+**A2 的加重事实（成因比原判更严重，但定级 P0 已够）**
+`isProtectedWritePath` 与 `isDeniedReadPath` 都只按 `sandboxRoot` 算相对路径。当前部署（沙箱根 `D:\DEEPSEEK`、项目根 `…\maharness\web-agent`）下，`write_file('maharness/web-agent/kernel/index.ts')` 的规范相对路径**不命中 `kernel/` 前缀**——即"内核写保护（自我接管防护）"本身就能被长路径绕过，不只是 `.env`/`data/`。所以修复必须**双基座**（沙箱根 ∪ 项目根），只补敏感名单不够。`kernel/tests/sandbox.spec.ts` 里有一例**显式断言旧的单基座行为**（判 false）以钉住成因，防止将来"顺手简化"回退。
+
+### Batch 2–3 改动清单（要点）
+
+| 域 | 改动 | 关联 |
+|---|---|---|
+| PowerShell 判定 | 白名单 cmdlet 的**参数位不再当数据**：脚本块只允许 `$_` 属性 + 比较/逻辑运算符安全子集；出现类型字面量 / `::` / `$()` / 赋值 / 调用运算符即需审批。黑名单改为在**去引号扫描串**上逐段匹配；拆段改为引号与脚本块感知；补齐 New-Object/Add-Type/Start-Process/Invoke-Command 等"参数位即代码"动词 | A1 · A10 |
+| 沙箱 | 双基座判定 + `sensitiveTarget`/`isApprovalRequiredWritePath`（写侧敏感门）+ `resetCoreEditGuard` + 沙箱根缺失报错归因修正；tools-fs 与 HTTP 文件接口同步；`policyApproved` 进 ToolContext 并在 powershell/tools-fs handler 做纵深防御 | A2 · A8 · B10 |
+| SSRF | `isPrivateAddress` 逐组解析并还原 IPv4-mapped/6to4/NAT64 内嵌 v4，补齐保留段，IPv6 fail-closed；`web_fetch` 体积上限改流式；providers 两处 `fetch` 改逐跳复检 + 跨源剥凭据头；四处豁免统一 | A3 · A5 |
+| MCP | env 白名单透传（`inheritEnv` 逃生口）；工具默认需审批；win32 `taskkill /T` 回收孙进程；协议版本单一常量；HTTP 传输 URL 校验；`buildSpawnPlan` 解决 npx | A4 · B18 |
+| HTTP/密钥 | 变更类端点可选 token 门（`MAHARNESS_API_TOKEN`）；工作区根拒盘符根/家目录且 `/switch` 复检历史危险行；审批一次性凭据；通配 allow 需显式确认；`icacls` 收 ACL、`keyBroken` 暴露、已有密文拒绝静默重建密钥 | A6 · A7 |
+| 技能供应链 | 先落临时目录校验完整清单再原子替换；`force` 不再跳过校验 | A9 |
+| 配额 | 「全部前置校验通过后才扣」+ `refund` 句柄；`run_parallel` 改为一次委派扣 1 次（此前 4 任务必然失败并白烧 3 次）；空会话键回收 | B2 · D1 |
+| 事务/签名 | reload 回滚分支补提交检查；`watchConfig` 签名改稳定序列化 + 通配键展开 + 走 override 链；`keepActive` 以磁盘新 manifest 为准 | B3 · B4 · B8 |
+| 缓存/校验 | L1 向量分支补动作方向校验；embedding 失败降级而非掀翻对话；维度不一致告警；`validate.ts` 未知 type 改 fail-closed 并支持 type 数组 | B5 · B6 · B9 |
+| 可观测/资源 | 归档尾部按块回读（不再整文件同步读）+ `trace.retainDays` 轮转与热更新；成本按**实际调用模型**计价（接上无人使用的 `pricesFor`）、mini/haiku 独立价、价格来源不明告警 | C2 · D2 |
+| 测试 | 新增 `approval-bypass`/`sandbox`/`budget`/`shared`/`security`(MCP+B18)/`ssrf`(search+server 交叉比对)/`auth` 等 spec；扩展 `trace`(C2)/`services`(B17)/`config`/`bus`/`compact` | 全部 |
 
 ### Batch 1 改动清单
 
