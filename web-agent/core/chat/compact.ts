@@ -68,7 +68,13 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
   // （旧摘要中的事实不丢），不再"永久关闭压缩路径"（旧实现：新摘要直接顶掉旧摘要、
   // 丢掉旧事实；且摘要一旦存在就只能截断，长会话越截越碎）。
   const summaryIdx = history.findIndex((m) => m.role === 'system' && String(m.content ?? '').startsWith(SUMMARY_MARK));
-  const compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : 0;
+  // 头部 system 消息（L0 系统提示词）不参与压缩，且必须原样保留：
+  // 循环内压缩（agent.ts 每轮 compactFn）传入的 history 首元素就是 AgentRunner 组装的
+  // system prompt —— 旧实现 compressibleFrom=0 会把它送进摘要器、并因 prefix 为空而
+  // 直接丢弃，导致本轮剩余轮次的请求不再带任何系统级纪律（且 L3 前缀从此断裂）。
+  const headIsSystem = history[0]?.role === 'system'
+    && !String(history[0].content ?? '').startsWith(SUMMARY_MARK);
+  const compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : (headIsSystem ? 1 : 0);
 
   // 切点：从前往后找「压缩段结束」位置——使保留段（切点之后）估算 ≤ 预算 × KEEP_RATIO
   const keepBudget = Math.max(maxTokens * KEEP_RATIO, 512);
@@ -90,8 +96,11 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
     const summaryInput = summaryIdx >= 0 ? [history[summaryIdx], ...compressible] : compressible;
     const summary = await summarizeSegment(summaryInput, opts);
     if (summary) {
-      // 摘要之前若还有消息（非常规：如未剥离的头部 system），原样保留
-      const prefix = summaryIdx > 0 ? history.slice(0, summaryIdx) : [];
+      // 摘要锚点/头部 system 之前的内容原样保留（不能丢 L0 系统提示词）。
+      // 注意：prefixEnd 不能写成「summaryIdx > 0 ? summaryIdx : 0」——无锚点时那样会让
+      // 头部 system 落在 prefix 之外被压掉，必须取 compressibleFrom 作为下界。
+      const prefixEnd = summaryIdx >= 0 ? summaryIdx : compressibleFrom;
+      const prefix = history.slice(0, prefixEnd);
       const messages: LLMMessage[] = [
         ...prefix,
         { role: 'system', content: summary },

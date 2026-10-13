@@ -48,7 +48,12 @@ export interface ProviderHealth {
   lastErrorAt: number;
 }
 
-const health = new Map<string, ProviderHealth>();
+import { sharedSingleton } from '../../kernel/shared';
+
+/** providerId → 健康状态。经 sharedSingleton 取（缺陷 B13）：
+ *  agent 在快照副本里记账、`server/routes/providers.ts` import 的是活目录——
+ *  两份 Map 会让「密钥失效」红标与恢复广播永远看不见真实故障。 */
+const health = sharedSingleton('chat.providerHealth', () => new Map<string, ProviderHealth>());
 
 /** 判断错误是否为认证/权限类（401/403）——重试与 failover 都救不了，需要人工换 key。
  *  优先看 LLMHttpError.status（provider.ts 抛出时携带），文本正则仅作兜底：

@@ -47,31 +47,31 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
     try {
       const { context, cache, agent } = req.body ?? {};
       if (context?.maxTokens !== undefined) {
-        kernel.config.set('context.maxTokens', Math.max(2000, Math.min(200_000, Number(context.maxTokens))));
+        kernel.config.setPersistent('context.maxTokens', Math.max(2000, Math.min(200_000, Number(context.maxTokens))));
       }
-      if (context?.truncateInject !== undefined) kernel.config.set('context.truncateInject', Boolean(context.truncateInject));
-      if (context?.compact !== undefined) kernel.config.set('context.compact', Boolean(context.compact));
+      if (context?.truncateInject !== undefined) kernel.config.setPersistent('context.truncateInject', Boolean(context.truncateInject));
+      if (context?.compact !== undefined) kernel.config.setPersistent('context.compact', Boolean(context.compact));
       // M11 契约清理：cache 参数热更已由 kernel 侧 config.watch 统一接管
       //（config.set 广播 config.changed → kernel 订阅刷新 cache 实例），
       // server 不再手动补写 kernel.cache——避免「config 与 cache 状态双写漂移」。
       if (cache?.l1Threshold !== undefined) {
-        kernel.config.set('cache.l1Threshold', Math.min(1, Math.max(0.5, Number(cache.l1Threshold))));
+        kernel.config.setPersistent('cache.l1Threshold', Math.min(1, Math.max(0.5, Number(cache.l1Threshold))));
       }
       if (cache?.l2TtlMin !== undefined) {
-        kernel.config.set('cache.l2TtlMin', Math.max(1, Math.min(1440, Number(cache.l2TtlMin))));
+        kernel.config.setPersistent('cache.l2TtlMin', Math.max(1, Math.min(1440, Number(cache.l2TtlMin))));
       }
-      if (cache?.l3Enabled !== undefined) kernel.config.set('cache.l3Enabled', Boolean(cache.l3Enabled));
+      if (cache?.l3Enabled !== undefined) kernel.config.setPersistent('cache.l3Enabled', Boolean(cache.l3Enabled));
       if (cache?.warmup !== undefined && ['off', 'light', 'auto'].includes(String(cache.warmup))) {
-        kernel.config.set('cache.warmup', String(cache.warmup));
+        kernel.config.setPersistent('cache.warmup', String(cache.warmup));
       }
       if (agent?.reasoningBudget !== undefined) {
-        kernel.config.set('agent.reasoningBudget', Math.max(100, Math.min(16000, Number(agent.reasoningBudget))));
+        kernel.config.setPersistent('agent.reasoningBudget', Math.max(100, Math.min(16000, Number(agent.reasoningBudget))));
       }
       if (agent?.reasoningTotalBudget !== undefined) {
-        kernel.config.set('agent.reasoningTotalBudget', Math.max(200, Math.min(64000, Number(agent.reasoningTotalBudget))));
+        kernel.config.setPersistent('agent.reasoningTotalBudget', Math.max(200, Math.min(64000, Number(agent.reasoningTotalBudget))));
       }
       if (agent?.thinkInEnglish !== undefined) {
-        kernel.config.set('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
+        kernel.config.setPersistent('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
       }
       // 任务类型 → provider@model 路由表（值为空表示删除该类目路由）
       if (agent?.modelRouting !== undefined) {
@@ -86,17 +86,17 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
           if (!/^[\w.\-]+(@[\w.\-:/]+)?$/.test(value)) throw new Error(`路由目标格式非法: ${value}（应为 providerId 或 providerId@model）`);
           clean[key] = value;
         }
-        kernel.config.set('agent.modelRouting', clean);
+        kernel.config.setPersistent('agent.modelRouting', clean);
       }
       // 轮数上限（按模式可调）：超限后断点保留，可继续推进
       if (agent?.maxTurns !== undefined) {
-        kernel.config.set('agent.maxTurns', Math.max(1, Math.min(200, Number(agent.maxTurns))));
+        kernel.config.setPersistent('agent.maxTurns', Math.max(1, Math.min(200, Number(agent.maxTurns))));
       }
       if (agent?.maxTurnsPlan !== undefined) {
-        kernel.config.set('agent.maxTurnsPlan', Math.max(1, Math.min(400, Number(agent.maxTurnsPlan))));
+        kernel.config.setPersistent('agent.maxTurnsPlan', Math.max(1, Math.min(400, Number(agent.maxTurnsPlan))));
       }
       if (agent?.maxTurnsGoal !== undefined) {
-        kernel.config.set('agent.maxTurnsGoal', Math.max(1, Math.min(400, Number(agent.maxTurnsGoal))));
+        kernel.config.setPersistent('agent.maxTurnsGoal', Math.max(1, Math.min(400, Number(agent.maxTurnsGoal))));
       }
       res.json({ ok: true });
     } catch (err) {

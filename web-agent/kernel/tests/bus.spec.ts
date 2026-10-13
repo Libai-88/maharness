@@ -198,3 +198,73 @@ describe('EventBus onPhase（声明式三阶段钩子）', () => {
     assert.deepEqual(out, ['hook', 'listener', 'final:1']);
   });
 });
+
+/**
+ * B7/B11 回归：五语义的错误策略必须是「明确的一种」，而不是「有的隔离有的裸抛」。
+ * 隔离的正确理由：waterfall 是 agent.* 六钩子的通道（emitHook），某插件钩子抛错
+ * 只应让该层中间件不生效；旧实现异常穿出 run() → 整轮对话失败。
+ */
+describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）', () => {
+  test('waterfall：监听器抛错被隔离，链继续落到底层 final', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const bus = new EventBus();
+    const out: string[] = [];
+    bus.on('wf', () => { throw new Error('插件钩子炸了'); });
+    bus.on('wf', () => { out.push('second'); });
+    const r = await bus.waterfall('wf', { v: 1 }, (d: unknown) => { out.push('final'); return d; });
+    assert.deepEqual(out, ['second', 'final'], '抛错不应吞掉后续监听器，也不应吞掉 final');
+    assert.deepEqual(r, { v: 1 });
+  });
+
+  test('waterfall：抛错前已调用 next → 下游链结果照常返回（链不断在半路）', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const bus = new EventBus();
+    bus.on('wf', async (e) => {
+      const next = (e as unknown as { next: (v?: unknown) => Promise<unknown> }).next;
+      await next('MOD');           // 先推进下游
+      throw new Error('推进后才炸');
+    });
+    const r = await bus.waterfall<string>('wf', 'seed', (d: unknown) => `final:${d}`);
+    assert.equal(r, 'final:MOD', '下游已执行完毕，其结果必须返回给调用方');
+  });
+
+  test('serial：抛错监听器被跳过，后面的提供者结果照常返回', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const bus = new EventBus();
+    bus.on('se', () => { throw new Error('boom'); });
+    bus.on('se', () => 'ANSWER');
+    assert.equal(await bus.serial(EventBus.event('se')), 'ANSWER');
+  });
+
+  test('bail：抛错监听器被跳过，后面的同步结果照常短路', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const bus = new EventBus();
+    bus.on('ba', () => { throw new Error('boom'); });
+    bus.on('ba', () => 'HIT');
+    assert.equal(bus.bail(EventBus.event('ba')), 'HIT');
+  });
+
+  test('bail：async 监听器返回的未决 Promise 不算短路结果（跳过并继续派发）', async (t) => {
+    t.mock.method(console, 'warn', () => {});
+    const bus = new EventBus();
+    const seen: string[] = [];
+    bus.on('ba2', async () => { seen.push('async'); return 'ASYNC_RESULT'; });
+    bus.on('ba2', () => { seen.push('sync'); return 'SYNC_RESULT'; });
+    const r = bus.bail<string>(EventBus.event('ba2'));
+    assert.equal(r, 'SYNC_RESULT', '旧实现会返回未 await 的 Promise 并截断后续监听器');
+    assert.equal(typeof r, 'string');
+    assert.deepEqual(seen, ['async', 'sync'], 'async 监听器仍被执行，只是不参与同步短路');
+  });
+
+  test('深度保护错误不被隔离吞掉（waterfall 仍上抛）', async (t) => {
+    t.mock.method(console, 'error', () => {});
+    const bus = new EventBus();
+    // 自递归派发：每层 waterfall 都 enter 一次，超过 MAX_DEPTH 抛带标记的错误
+    bus.on('rec', () => bus.waterfall('rec', 1, (d: unknown) => d));
+    await assert.rejects(
+      () => bus.waterfall('rec', 1, (d: unknown) => d),
+      /递归深度/,
+      '事件风暴必须让调用方感知（静默隔离会让栈与内存被无限消耗）',
+    );
+  });
+});

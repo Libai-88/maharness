@@ -30,6 +30,20 @@ function isDepthError(err: unknown): boolean {
   return !!err && typeof err === 'object' && (err as Record<PropertyKey, unknown>)[DEPTH_ERROR] === true;
 }
 
+/** 是否为 thenable（async 监听器的返回值）——bail 需要据此拒绝「未决 Promise 当短路结果」 */
+function isThenable(v: unknown): v is Promise<unknown> {
+  return !!v && (typeof v === 'object' || typeof v === 'function')
+    && typeof (v as { then?: unknown }).then === 'function';
+}
+
+/** bail 遇 async 监听器的告警去重（每种事件名只提醒一次，避免高频派发刷屏） */
+const bailAsyncWarned = new Set<string>();
+function warnOnceBailAsync(type: string): void {
+  if (bailAsyncWarned.has(type)) return;
+  bailAsyncWarned.add(type);
+  console.warn(`[bus] bail("${type}") 的监听器返回 Promise（async 监听器无法参与同步短路）：已跳过该监听器继续派发。需要异步短路请改用 serial。`);
+}
+
 export class EventBus {
   /** 按 priority 降序维护的监听表（插入排序：订阅时定位，emit 时零排序开销）。
    *  同 priority 按 seq 升序（先订阅先执行）。 */
@@ -101,12 +115,21 @@ export class EventBus {
   }
 
   /** 异步串行 + 短路：顺序 await，首个返回非 null/undefined/false 立即短路返回。
-   *  用于「从多个提供者中取一个结果」的链式场景。 */
+   *  用于「从多个提供者中取一个结果」的链式场景。
+   *  错误策略：单个监听器抛错【隔离并继续下一个】（与 emit 一致）——派发语义是
+   *  「取一个结果」，某提供者故障不该让整链失败；深度保护错误除外（必须上抛）。 */
   async serial<T = unknown>(e: Event<T>): Promise<T | boolean | null | undefined> {
     this.enter(e.type);
     try {
       for (const listener of this.listenersOf(e.type)) {
-        const r = await listener(e);
+        let r: unknown;
+        try {
+          r = await listener(e);
+        } catch (err) {
+          this.rethrowIfDepth(err);
+          console.error(`[bus] serial("${e.type}") 监听器抛错（已隔离，继续下一个）:`, err);
+          continue;
+        }
         if (r !== null && r !== undefined && r !== false) return r as T;
       }
       return undefined;
@@ -115,14 +138,29 @@ export class EventBus {
     }
   }
 
-  /** 同步短路：同步版本的首个非空返回。 */
+  /** 同步短路：同步版本的首个非空返回。
+   *  错误策略同 serial（监听器抛错隔离并继续）。
+   *  **async 监听器不参与短路**：其返回值是未决 Promise，按真值判定会「立即短路并
+   *  静默截断后续监听器」，而调用方拿到的是没 await 的 Promise（B11）。现改为
+   *  跳过并告警一次——同步短路需要监听器同步返回结果（需要异步短路请用 serial）。 */
   bail<T = unknown>(e: Event<T>): T | boolean | null | undefined {
     this.enter(e.type);
     try {
       for (const listener of this.listenersOf(e.type)) {
         // listener 返回类型为 void | Promise<void>，但它可能是同步回调（返回同态真值）；
         // 这里用 any 断开 TS 对 void/Promise 的约束（运行时按真值判定短路）
-        const r = (listener as (ev: Event) => any)(e);
+        let r: unknown;
+        try {
+          r = (listener as (ev: Event) => unknown)(e);
+        } catch (err) {
+          this.rethrowIfDepth(err);
+          console.error(`[bus] bail("${e.type}") 监听器抛错（已隔离，继续下一个）:`, err);
+          continue;
+        }
+        if (isThenable(r)) {
+          warnOnceBailAsync(e.type);
+          continue;
+        }
         if (r !== null && r !== undefined && r !== false) return r as T;
       }
       return undefined;
@@ -131,7 +169,9 @@ export class EventBus {
     }
   }
 
-  /** 并发执行：Promise.allSettled，错误聚合成 AggregateError（不中途放弃其它监听器）。 */
+  /** 并发执行：Promise.allSettled，错误聚合成 AggregateError（不中途放弃其它监听器）。
+   *  错误策略与 serial/bail/waterfall 不同且有意为之：并发派发的语义是「等所有监听器
+   *  跑完并知道谁失败了」，因此不静默隔离，而是聚合成 AggregateError 交调用方处置。 */
   async parallel(e: Event): Promise<void> {
     this.enter(e.type);
     try {
@@ -152,6 +192,10 @@ export class EventBus {
    *  - 监听器返回非 undefined → 视为短路接管（result），链停；
    *  - 未返回 → 链自动继续（携带监听器对 data 的改写），落到底层 final。
    *  语义：先注册的监听器在最外层（priority 降序 + seq 升序）。
+   *  错误策略：监听器抛错【隔离并继续链】——本派发是 agent.* 六钩子的通道
+   *  （agent.before_llm / before_tool / after_tool 等），某个插件钩子故障只应让
+   *  「这一层中间件不生效」，而不应掀翻整轮对话（B7：旧实现异常会穿出 run()）。
+   *  深度保护错误除外（必须上抛，见 DEPTH_ERROR）。
    */
   async waterfall<T = unknown>(
     type: string,
@@ -176,7 +220,15 @@ export class EventBus {
           return downstream;
         };
         const e = { type, data: carry, ts: Date.now(), next: proceed } as Event & { next: typeof proceed };
-        const r = await listener(e);
+        let r: unknown;
+        try {
+          r = await listener(e);
+        } catch (err) {
+          this.rethrowIfDepth(err);
+          console.error(`[bus] waterfall("${type}") 监听器抛错（已隔离，链继续）:`, err);
+          // 抛错前若已调过 next，下游链已在飞行中——等它的结果，不能让链断在半路
+          return called ? (downstream as Promise<T>) : next(carry);
+        }
         if (r !== undefined) return r as T;
         return called ? (downstream as Promise<T>) : next(carry);
       };
@@ -249,9 +301,14 @@ export class EventBus {
     }) as Promise<void>;
   }
 
+  /** 监听器错误隔离时的例外出口：深度保护错误必须继续上抛——
+   *  它代表「事件风暴」而非某个插件的故障，静默隔离会让递归链无限消耗栈与内存。 */
+  private rethrowIfDepth(err: unknown): void {
+    if (isDepthError(err)) throw err;
+  }
+
   /** 进入一次分发：递归深度超限抛错（打断递归链，如 config.set ↔ config.changed 死循环）。
-   *  错误附带 DEPTH_ERROR 标记——emit 识别后向上传播给调用方（不被监听器隔离吞掉）。 */
-  private enter(type: string): void {
+   *  错误附带 DEPTH_ERROR 标记——emit 识别后向上传播给调用方（不被监听器隔离吞掉）。 */  private enter(type: string): void {
     if (++this.depth > this.MAX_DEPTH) {
       this.depth--;
       const err = new Error(`[bus] 事件递归深度超过 ${this.MAX_DEPTH}："${type}"（疑似监听器联动死循环，如 config.set ↔ config.changed；请检查事件监听器是否无条件 re-emit）`) as Error & Record<PropertyKey, unknown>;

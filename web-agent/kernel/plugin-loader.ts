@@ -187,6 +187,10 @@ export class PluginLoader {
   /** 依赖事实版本（v3 智能重载）：服务绑定/能力集/配置任何变化均递增——
    *  插件 depSignature 基于它，reloadChanged 据此只重载真正依赖变化的插件 */
   private factVersion = 0;
+  /** 上次执行签名比对时的依赖事实版本：reloadChanged 的快速路径据此判断
+   *  「自上次比对以来是否有任何可能改变签名的事实变化」，避免每次配置写入/轮询
+   *  都对全部 started 插件重算 depHooks 分量。 */
+  private lastFactVersion = -1;
   /** 能力集版本（v3）：按 kind 递增——onCapabilities(kind) 的签名只随该 kind 变化，
    *  避免其余能力变化触发全局重载 */
   private capVersions = new Map<Capability['kind'], number>();
@@ -221,6 +225,9 @@ export class PluginLoader {
     // 与 watchConfig 的「插件自处理」互补：这里保证「声明了配置依赖的插件」在配置
     // 变化后自动 reload（重跑 onLoad 拿到新值），无需任何插件或调用方显式触发。
     this.offConfigWatch = ctxBase.config.watch('*', () => {
+      // 任意配置键变化都算「依赖事实变化」：否则 reloadChanged 的快速路径会漏掉
+      // 那些没有插件显式 watchConfig、但确实影响了签名分量（cfg:key@value）的变更。
+      this.bumpFact();
       if (this.configReloadTimer) clearTimeout(this.configReloadTimer);
       this.configReloadTimer = setTimeout(() => {
         this.configReloadTimer = undefined;
@@ -328,6 +335,10 @@ export class PluginLoader {
       }
       id = manifest.id;
       const snap = this.snapshotOf(dir);
+      // 回收该插件的历史快照，只留当前内容对应的那一份（缺陷 B14）：
+      // 旧实现只在 reload 提交/回滚与卸载时剪枝，进程被中断/回滚失败/换分支留下的
+      // 「内容已过期但目录还在」的脏副本会长期驻盘，并被工具链（测试 glob、人工阅读）误当源码。
+      pruneSnapshots(dir, [snap.dir]);
       inst = { manifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), circuitBreaker: { failures: 0, openedAt: 0 } };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
@@ -813,9 +824,18 @@ export class PluginLoader {
   traceServiceGet(key: string, consumer: string, trace?: TraceLike): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
     const binding = this.providers.get(key);
     if (!binding) return undefined;
+    // 只在【确有插件接管】时埋点——内核内置子系统以 providerId='kernel'、priority 0
+    // 进入同一仲裁，对它埋点等于给每次 `kernel.cache/trace/budget` 属性访问都写一条
+    // service_call 步骤（UI 的 /api/trace/stats 每 2s、/api/stats 每 5s 轮询也会写）。
+    // 实测那样会让 service_call 占归档 96%~99.5%，把 ring（1000 条）里的真实对话
+    // 步骤挤掉，反而毁掉可观测性本身。这里是 ARCHITECTURE §1.5.2b 的兑现：
+    // 「Trace 解析只在确有插件绑定时才写 service_call 步骤（无接管 = 零额外开销）」。
+    // 调试口径可用配置 trace.serviceCall：takeover（默认）/ always / off。
+    const mode = this.ctxBase.config.get<string>('trace.serviceCall', 'takeover');
+    const traced = mode === 'always' || (mode !== 'off' && binding.pluginId !== KERNEL_PROVIDER_ID);
     // 服务调用入 Trace：可写盘、可前端口径的 span（复用现有三态输出）。
     // 注意：本处无 traceId 上下文（非执行路径），用空串，step 仍会上环形缓冲与 SSE。
-    if (trace?.startStep) {
+    if (traced && trace?.startStep) {
       const step = trace.startStep({
         traceId: '',
         turn: 0,
@@ -1088,7 +1108,8 @@ export class PluginLoader {
    * 遍历全部插件，重算各自依赖签名（服务注入 seq / 能力集 per-kind 版本 / 配置快照），
    * **仅对签名变化的插件执行 reload**；签名不变者保留原实例——服务绑定不断、
    * 依赖方不反复收到停用/激活通知、零级联抖动。
-   * 签名比对以 factVersion 为前提：factVersion 未变 → 直接跳过（快速路径）。
+   * 签名比对以 factVersion 为前提：factVersion 未变 → reloadChanged 直接跳过（快速路径，
+   * 见其实现）；本方法只负责「重算一个实例的签名」，不做版本判断（可被观测/测试单独调用）。
    */
   private recomputeSignature(inst: PluginInstance): string {
     // 收集 depHooks 当前分量；除依赖分量外，requires 插件的版本也算入（依赖升级 = 重载）
@@ -1104,7 +1125,14 @@ export class PluginLoader {
 
   /** v3：仅重载签名变化的插件（返回实际重载的 id 列表）。 */
   async reloadChanged(): Promise<string[]> {
+    // 快速路径（兑现下方注释的承诺）：依赖事实版本未变 → 没有任何可能改变签名的
+    // 事实发生变化，无需对全部 started 插件重算签名。前提是所有事实变化路径都调用
+    // bumpFact——服务绑定（declare/publish/withdraw）、能力集（notifyCapSet）、
+    // env（bumpEnv）、任意配置键（构造器里的 config.watch('*')）。
+    if (this.factVersion === this.lastFactVersion) return [];
+    this.lastFactVersion = this.factVersion;
     const changed: string[] = [];
+    let failed = false;
     for (const inst of [...this.registry.values()]) {
       // 跳过未进入运行态的（registered/enabled=false/lazy 未启动者无运行依赖）
       if (inst.state !== 'started') continue;
@@ -1128,9 +1156,13 @@ export class PluginLoader {
         if (cur) cur.depSignature = signature;
         changed.push(inst.manifest.id);
       } catch (err) {
+        failed = true;
         console.warn(`[plugin] 依赖驱动重载失败 ${inst.manifest.id}:`, err instanceof Error ? err.message : String(err));
       }
     }
+    // 有失败（含事务回滚）：作废快速路径，让下次调用重新比对——失败插件的签名未被
+    // 更新，必须保留重试机会（否则它会被"版本没变"永久跳过）。
+    if (failed) this.lastFactVersion = -1;
     return changed;
   }
 

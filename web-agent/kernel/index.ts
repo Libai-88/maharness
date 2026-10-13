@@ -21,6 +21,7 @@ export { Cache } from './cache';
 export { Budget, classifyTask } from './budget';
 export { EffectScope } from './scope';
 export { Service } from './service';
+export { sharedSingleton, peekShared } from './shared';
 export { PluginLoader, KERNEL_PROVIDER_ID } from './plugin-loader';
 export { SERVICE_KEYS, resolveRunnerFactory, makeRunner } from './loop';
 export type { AgentEvent, AgentHookCtx, AgentLoop, RunOptions, RunnerFactory } from './loop';

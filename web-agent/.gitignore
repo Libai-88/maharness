@@ -2,6 +2,8 @@ node_modules/
 dist/
 .env
 data/
+# 用户本地运行时配置（由设置页自动写回；示例见 config.example.json）
+config.json
 ui/dist/
 ui/node_modules/
 *.log

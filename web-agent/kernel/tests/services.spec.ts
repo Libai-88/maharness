@@ -123,8 +123,7 @@ describe('内核子系统可接管（cache / trace / budget 不再是不可替�
 });
 
 describe('服务绑定仲裁（可接管语义）', () => {
-  test('priority 大者生效，低优先级候选并存但不生效', async (t) => {
-    const f = setup({
+  test('priority 大者生效，低优先级候选并存但不生效', async (t) => {    const f = setup({
       base: `ctx.provide('svc', 'base', 0);`,
       plugin: `ctx.provide('svc', 'plugin', 10);`,
     });
@@ -258,5 +257,58 @@ describe('服务绑定仲裁（可接管语义）', () => {
     await f.kernel.plugins.disable('high');
     assert.deepEqual(events, ['provided:base'], '接管者停用：回退到 base（provided 而非 withdrawn）');
     assert.equal(f.kernel.plugins.resolveService('svc'), 'base');
+  });
+});
+
+/**
+ * C1 回归：service_call 埋点口径——「无接管 = 零额外开销」（兑现 ARCHITECTURE §1.5.2b）。
+ * 旧实现每次服务解析都无条件写一条步骤，于是 kernel.cache/trace/budget 的每次属性访问
+ * （含 UI 每 2s/5s 的统计轮询）都产生簿记噪声：实测占归档 96%~99.5%，
+ * 把 ring（1000）里的真实对话步骤挤掉——可观测性反被观测实现破坏。
+ */
+describe('service_call 埋点口径（C1）', () => {
+  const countServiceCalls = (f: Fixture) =>
+    f.kernel.trace.query(undefined, { type: 'service_call', limit: 500 }).length;
+
+  test('默认口径：内核内置子系统被解析时不产生任何步骤', async (t) => {
+    const f = setup({});
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+
+    for (let i = 0; i < 50; i++) {
+      void f.kernel.cache;
+      void f.kernel.trace;
+      void f.kernel.budget;
+    }
+    assert.equal(countServiceCalls(f), 0, '无接管时热路径应零埋点（旧实现此处会产生 150 条噪声）');
+  });
+
+  test('确有插件接管时才埋点，且能看出接管者是谁', async (t) => {
+    const stub = `ctx.provide('service:cache', { l1Get: async () => undefined, mark: 'plugin-cache' }, 10);`;
+    const f = setup({ overrideCache: stub });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+
+    void f.kernel.cache;
+    const steps = f.kernel.trace.query(undefined, { type: 'service_call', limit: 50 });
+    assert.equal(steps.length, 1, '接管场景保留服务调用可观测性');
+    assert.equal(steps[0].name, 'service:cache');
+    assert.match(String(steps[0].outputSummary), /overrideCache/, 'summary 指明消费方 → 提供方');
+  });
+
+  test('trace.serviceCall 可切口径：always 连内置也记，off 一律不记', async (t) => {
+    const f = setup({});
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+
+    f.kernel.config.set('trace.serviceCall', 'always');
+    void f.kernel.cache;
+    assert.ok(countServiceCalls(f) >= 1, 'always：内置提供者也埋点（调试用）');
+
+    f.kernel.config.set('trace.serviceCall', 'off');
+    const before = countServiceCalls(f);
+    void f.kernel.cache;
+    void f.kernel.trace;
+    assert.equal(countServiceCalls(f), before, 'off：不埋点');
   });
 });

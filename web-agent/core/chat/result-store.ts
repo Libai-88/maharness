@@ -13,6 +13,7 @@
  * v2 截断后 LLM 用 recall_tool_result 直接重读已观察的原文（纯读）。
  */
 import type { ToolContext } from '../../kernel/types';
+import { sharedSingleton } from '../../kernel/shared';
 
 interface ResultEntry {
   content: string;
@@ -73,8 +74,11 @@ export class ResultStore {
   }
 }
 
-/** chat 插件内单例：执行器回填与 recall_tool_result 工具共享同一存储 */
-export const resultStore = new ResultStore();
+/** chat 插件内单例：执行器回填与 recall_tool_result 工具共享同一存储。
+ *  必须经 sharedSingleton 取（缺陷 B13）：插件从内容快照目录 `<name>@<hash>/` 加载，
+ *  而 server/scripts 可能 import 活目录 `core/chat/…` —— 两份模块实例若各持一个
+ *  `new ResultStore()`，就会出现「执行器写快照副本、重读工具读活副本」的必然 miss。 */
+export const resultStore = sharedSingleton('chat.resultStore', () => new ResultStore());
 
 /** 会话隔离键：优先会话 ID；无会话（子代理/独立循环）用 traceId 天然隔离 */
 export function sessionKeyOf(ctx: Pick<ToolContext, 'sessionId' | 'traceId'>): string {

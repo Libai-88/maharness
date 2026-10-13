@@ -1,0 +1,59 @@
+{
+  "_comment": "maharness 运行时配置示例。复制为 config.json（项目根，与 package.json 同级）后按需修改；界面「设置」里的改动会自动写回 config.json。所有键都可省略——省略即用代码内默认值。",
+
+  "context": {
+    "maxTokens": 60000,
+    "compact": true,
+    "truncateInject": true
+  },
+
+  "cache": {
+    "l1Threshold": 0.58,
+    "l2TtlMin": 30,
+    "l3Enabled": true,
+    "warmup": "auto"
+  },
+
+  "agent": {
+    "maxTurns": 12,
+    "maxTurnsPlan": 24,
+    "maxTurnsGoal": 48,
+    "toolTimeoutMs": 30000,
+    "reasoningBudget": 800,
+    "reasoningTotalBudget": 3000,
+    "thinkInEnglish": true,
+    "modelRouting": {
+      "默认": "deepseek",
+      "代码": "deepseek@deepseek-reasoner"
+    }
+  },
+
+  "budget": {
+    "maxSessionCost": 0,
+    "subagentMaxTotal": 8
+  },
+
+  "tools": {
+    "writeRequiresApproval": false
+  },
+
+  "skills": {
+    "indexMaxTokens": 900,
+    "descMaxChars": 160
+  },
+
+  "trace": {
+    "_comment": "serviceCall=takeover（默认，仅插件接管内核子系统时才记服务调用步骤）/ always（调试用，每次服务解析都记）/ off（完全不记）",
+    "serviceCall": "takeover"
+  },
+
+  "mcp": {
+    "servers": {
+      "filesystem": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]
+      }
+    }
+  }
+}

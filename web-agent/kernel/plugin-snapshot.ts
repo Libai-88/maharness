@@ -14,7 +14,11 @@ import { createHash } from 'node:crypto';
 import { basename, dirname, join, relative } from 'node:path';
 
 const SOURCE_EXT = /\.(ts|tsx|mts|cts|js|mjs|cjs|jsx)$/;
-const SKIP_DIR = new Set(['node_modules', '.git', 'data', 'dist', 'coverage']);
+/** 不进快照、也不进内容哈希的目录名。
+ *  `tests` 在列（缺陷 B14）：插件的 spec 只在源码树被执行，运行时快照带着它们只有坏处——
+ *  快照副本会被测试 glob 收成"源码测试"，而副本内容取决于上次加载时刻，
+ *  于是同一份 spec 可能拿旧实现跑，结果随磁盘残留漂移。 */
+const SKIP_DIR = new Set(['node_modules', '.git', 'data', 'dist', 'coverage', 'tests']);
 /** 快照目录名：<name>@<10 位十六进制>。扫描与监听据此识别并跳过，避免把快照当作插件重复加载 */
 export const SNAPSHOT_SUFFIX = /@[0-9a-f]{10}$/;
 /** 快照体积上限：超过则不落快照，退回入口级热重载并告警（不静默） */
