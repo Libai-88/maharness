@@ -1,8 +1,9 @@
 // ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
 import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { approvalsApi, commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import { useApprovals } from './hooks/useApprovals';
 import type { ErrorKind } from './api';
-import type { ApprovalItem, BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginInfo, PluginNavItem, ProviderInfo, Session, TodoCard, TraceStep } from './types';
+import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginInfo, PluginNavItem, ProviderInfo, Session, TodoCard, TraceStep } from './types';
 import { toolActivityLabel } from './types';
 // 演出重建：DB 行 → 界面消息（刷新前后同一形态）；文案中心：所有系统话术统一出口
 import { collectMembers, replayMessages } from './replay';
@@ -113,7 +114,6 @@ export default function App() {
   const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
   const [traceOpen, setTraceOpen] = useState(true);
-  const [approvals, setApprovals] = useState<ApprovalItem[]>([]);
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
@@ -140,18 +140,18 @@ export default function App() {
   // 消息镜像 ref：retry 时刻同步读取（state 提交前也能拿到当前值）
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
-  // 审批列表镜像：respondApproval 里同步读凭据（不进 useCallback 依赖，
-  // 否则每次挂起/回答都会重建回调，破坏 ChatView 的 memo —— 与 messagesRef 同一手法）
-  const approvalsRef = useRef(approvals);
-  approvalsRef.current = approvals;
   // 会话镜像 ref：全局事件回调里判断"这条是不是当前会话的"（避免闭包捕获旧 activeId）
   const activeIdRef = useRef<string | null>(activeId);
   activeIdRef.current = activeId;
   // 本会话经历过的 traceId：轨迹面板据此只显示"这场对话"的步骤（旧版把别的会话的
   // trace.step 也混进来，你在 A 会话里看到 B 会话正在干什么）
   const traceIdsRef = useRef(new Set<string>());
-  // 已提示过"审批超时作废"的审批 id（避免每秒重复插系统消息）
-  const expiredNotifiedRef = useRef(new Set<string>());
+  // 审批状态机（挂起集合的三个来源 + 超时撤卡 + 回答）：见 hooks/useApprovals.ts
+  const pushSystemMessage = useCallback((id: string, text: string) => {
+    setMessages((m) => [...m, { id, role: 'system', content: text, ts: Date.now() }]);
+  }, []);
+  const { approvals, onApprovalRequired: onApprovalFromStream, onGlobalApproval: onApprovalFromBus, respond: respondApproval } =
+    useApprovals({ activeId, pushSystemMessage });
 
   // ---- 流式文本 rAF 合帧缓冲 ----
   // SSE 每 chunk 一次 setState 会让 App 整树以 chunk 频率全量重渲染（长会话下明显卡顿）。
@@ -277,25 +277,8 @@ export default function App() {
       }
       else if (e.type === 'approval.requested') {
         // 子代理/并行任务的审批经全局事件广播（主执行器阻塞在子任务 handler 内，
-        // 审批事件无法从其 SSE 流到达）；按 id 去重合并进统一审批列表。
-        // sessionId/expiresAt 一并收下：刷新后卡片能回原位，也能显示"还剩几分钟"。
-        const d = e.data as { approvalId: string; name: string; summary: string; sessionId?: string; createdAt?: number; expiresAt?: number; approvalToken?: string };
-        if (d?.approvalId) {
-          setApprovals((prev) => {
-            const hit = prev.findIndex((a) => a.id === d.approvalId);
-            if (hit >= 0) {
-              // 已存在（例如先经会话 SSE 收到、后经全局事件重复播报）：只补缺失的凭据与时限
-              if (prev[hit].approvalToken === d.approvalToken && prev[hit].expiresAt === d.expiresAt) return prev;
-              const next = prev.slice();
-              next[hit] = { ...prev[hit], approvalToken: d.approvalToken ?? prev[hit].approvalToken, expiresAt: d.expiresAt ?? prev[hit].expiresAt };
-              return next;
-            }
-            return [...prev, {
-              id: d.approvalId, name: d.name, summary: d.summary, sessionId: d.sessionId,
-              createdAt: d.createdAt ?? Date.now(), expiresAt: d.expiresAt, approvalToken: d.approvalToken,
-            }];
-          });
-        }
+        // 审批事件无法从其 SSE 流到达）。合并逻辑（去重 + 补凭据）在 useApprovals 内。
+        onApprovalFromBus(e.data as { approvalId: string; name: string; summary: string; sessionId?: string; createdAt?: number; expiresAt?: number; approvalToken?: string });
       }
       else if (e.type === 'provider.error') {
         // Provider 健康回报（agent failover 链真实调用失败）：刷新健康标记 + 即时提示，
@@ -330,51 +313,7 @@ export default function App() {
     return () => clearInterval(t);
   }, [traceOpen, activeTab]);
 
-  // ---- 审批：刷新后原位复原 + 到点自动撤卡 ----
-  // 服务端共享 ApprovalBoard 才是权威：首屏与切会话都拉一次挂起清单，按 id 与本地合并
-  // （本地没有的补上，服务端已不认的——已批/已撤/超时——本地也清掉）。
-  // 旧版没有这个端点：刷新一次审批卡就消失，而服务端还在等，10 分钟后回填"用户拒绝了该操作"
-  // ——用户看到的是"agent 卡了很久，然后说我拒绝了它"。
-  const seedApprovals = useCallback(async () => {
-    try {
-      const r = await approvalsApi.list();
-      const alive = new Set(r.pending.map((p) => p.id));
-      setApprovals((prev) => {
-        const merged = new Map(prev.filter((a) => alive.has(a.id)).map((a) => [a.id, a]));
-        for (const p of r.pending) {
-          const known = merged.get(p.id);
-          merged.set(p.id, {
-            id: p.id, name: p.name, summary: p.summary, sessionId: p.sessionId,
-            createdAt: p.createdAt, expiresAt: p.expiresAt,
-            // 清单是刷新/重连后的兜底通道：本地没有凭据时用它补上
-            approvalToken: known?.approvalToken ?? p.approvalToken,
-          });
-        }
-        return [...merged.values()];
-      });
-    } catch { /* 对话服务未就绪时忽略 */ }
-  }, []);
-  useEffect(() => { void seedApprovals(); }, [seedApprovals, activeId]);
-
-  // 超时撤卡：服务端 10 分钟后自动拒绝，本地到点把卡撤掉并留一句人话
-  // （不让用户对着一个已经作废的卡片继续点，然后纳闷为什么没反应）
-  useEffect(() => {
-    if (!approvals.length) return;
-    const t = setInterval(() => {
-      const now = Date.now();
-      const expired = approvals.filter((a) => a.expiresAt && a.expiresAt <= now);
-      if (!expired.length) return;
-      setApprovals((prev) => prev.filter((a) => !(a.expiresAt && a.expiresAt <= now)));
-      for (const a of expired) {
-        if (expiredNotifiedRef.current.has(a.id)) continue;
-        expiredNotifiedRef.current.add(a.id);
-        if (!a.sessionId || a.sessionId === activeIdRef.current) {
-          setMessages((m) => [...m, { id: `ap-exp-${a.id}`, role: 'system', content: sys.approvalExpired(a.name), ts: Date.now() }]);
-        }
-      }
-    }, 1000);
-    return () => clearInterval(t);
-  }, [approvals]);
+  // ---- 审批：状态机已抽到 hooks/useApprovals.ts（三个挂起来源 + 超时撤卡 + 回答）----
 
   // 次要视图 chunk 预取：首屏渲染完成后 idle 时拉取，首次切 Tab 无加载等待
   useEffect(() => {
@@ -453,7 +392,7 @@ export default function App() {
     } catch (err) {
       toast.error(`这段聊天没能打开：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   const createSession = useCallback(async () => {
     try {
@@ -470,7 +409,7 @@ export default function App() {
     } catch (err) {
       toast.error(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [sel, toast]);
+  }, [sel]);
 
   const deleteSession = useCallback(async (id: string) => {
     try {
@@ -488,7 +427,7 @@ export default function App() {
       }
       return next;
     });
-  }, [activeId, selectSession, toast]);
+  }, [activeId, selectSession]);
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     try {
@@ -498,7 +437,7 @@ export default function App() {
     } catch (err) {
       toast.error(`归档操作失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   const pinSession = useCallback(async (id: string, pinned: boolean) => {
     try {
@@ -508,7 +447,7 @@ export default function App() {
     } catch (err) {
       toast.error(`置顶操作失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   /** 批量删除（后端事务原子批量接口） */
   const batchDelete = useCallback(async (ids: string[]) => {
@@ -525,7 +464,7 @@ export default function App() {
     } catch (err) {
       toast.error(`批量删除失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [activeId, sessions, selectSession, toast]);
+  }, [activeId, sessions, selectSession]);
 
   /** 批量归档（未归档的标记归档） */
   const batchArchive = useCallback(async (ids: string[]) => {
@@ -537,7 +476,7 @@ export default function App() {
     } catch (err) {
       toast.error(`批量归档失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   const renameSession = useCallback(async (id: string, title: string) => {
     const t = title.trim();
@@ -549,7 +488,7 @@ export default function App() {
     } catch (err) {
       toast.error(`重命名失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   const setSessionMode = useCallback(async (mode: string) => {
     if (!activeId) return;
@@ -561,7 +500,7 @@ export default function App() {
     } catch (err) {
       toast.error(`切换模式失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [activeId, toast]);
+  }, [activeId]);
 
   const selectModel = useCallback(async (id: string) => {
     // 兼容两种 key：新格式 `provider@model`；旧格式纯 provider id（浏览器缓存旧 UI 时）
@@ -578,7 +517,7 @@ export default function App() {
       }
       catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
     }
-  }, [models, activeId, toast]);
+  }, [models, activeId]);
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
@@ -590,7 +529,7 @@ export default function App() {
       const label = action === 'enable' ? '启用' : action === 'disable' ? '停用' : action === 'uninstall' ? '卸载' : '重载';
       toast.error(`插件${label}失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   const refreshProviders = useCallback(async () => {
     try {
@@ -599,7 +538,7 @@ export default function App() {
     } catch (err) {
       toast.error(`刷新 Provider 失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [toast]);
+  }, []);
 
   /** 流式回复处理器（send 与断点续跑共用；文本增量经 rAF 合帧批量提交）
    *  实时路径刻意产出与 replayMessages() 完全相同的形状：开始办事的那几轮文本挪进
@@ -641,17 +580,7 @@ export default function App() {
         } : t),
       } : m));
     },
-    onApprovalRequired: (id: string, name: string, summary: string, approvalToken?: string) => setApprovals((prev) => {
-      const hit = prev.findIndex((a) => a.id === id);
-      // 已存在则只补凭据（SSE 先到、清单后到的竞态里，后到的一定向导正确的凭据）
-      if (hit >= 0) {
-        if (!approvalToken || prev[hit].approvalToken === approvalToken) return prev;
-        const next = prev.slice();
-        next[hit] = { ...prev[hit], approvalToken };
-        return next;
-      }
-      return [...prev, { id, name, summary, approvalToken }];
-    }),
+    onApprovalRequired: onApprovalFromStream,
     onHandoff: (role: string, objective: string) => {
       // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
       flushStreamBuffer();
@@ -710,7 +639,7 @@ export default function App() {
       setCheckpoint(null);
       setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
     },
-  }), [activeId, queueStreamText, flushStreamBuffer, toast]);
+  }), [activeId, queueStreamText, flushStreamBuffer]);
 
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
@@ -798,18 +727,6 @@ export default function App() {
     if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
   }, [activeId]);
 
-  const respondApproval = useCallback(async (id: string, approved: boolean) => {
-    // 一次性凭据（A6-c）：随本次挂起下发，回答时回带；用过即作废，重放 403。
-    const token = approvalsRef.current.find((a) => a.id === id)?.approvalToken;
-    try {
-      await approvalsApi.respond(id, approved, token);
-      toast.success(approved ? '已批准执行' : '已拒绝');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : '审批已过期或无效');
-    }
-    setApprovals((prev) => prev.filter((a) => a.id !== id));
-  }, [toast]);
-
   // 稳定引用回调：配合 memo 化的 Sidebar/TracePanel，流式渲染期间跳过无关子树 reconcile
   const handleRoleReset = useCallback(async () => {
     if (!activeId) return;
@@ -820,7 +737,7 @@ export default function App() {
     } catch (err) {
       toast.error(`移交失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [activeId, toast]);
+  }, [activeId]);
 
   const refreshTraceStats = useCallback(() => {
     void traceApi.stats().then(setTraceStats).catch(() => undefined);
