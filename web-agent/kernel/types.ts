@@ -119,8 +119,9 @@ export interface KernelLike {
   budget: {
     subagentQuota(): { allowed: boolean; remaining: number; reason?: string };
     consumeSubagent(): void;
-    /** 原子配额消耗（check-and-consume 一步完成，消除 TOCTOU）：per-session 池 + 进程级总上限 */
-    consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number };
+    /** 原子配额消耗（check-and-consume 一步完成，消 TOCTOU）：per-session 池 + 进程级总上限。
+     *  refund 用于撤销本次记账（B2：委派前置校验失败时不能白扣额度）。 */
+    consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number; refund?: () => void };
     recordTask(record: { type: string; turns: number; cost: number; failed: boolean; ts: number }): void;
     taskProfile(): { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
   };
@@ -443,6 +444,10 @@ export interface ToolContext {
   trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
   approved?: boolean;       // 已通过用户审批（审批后重试时置 true）
   approvalId?: string;      // 本次审批 ID
+  /** 用户策略规则（rules 插件 allow）显式放行本次调用：等价于"已获授权但没有审批卡"。
+   *  高危工具的 handler 侧纵深防御（A8）据此区分「策略放行」与「绕过审批门」——
+   *  前者照常执行并留痕，后者一律拒绝。 */
+  policyApproved?: boolean;
   /** 本次 run 实际使用的模型与 provider id（能力路由据此判断"要不要借道多模态模型"） */
   model?: string;
   providerId?: string;

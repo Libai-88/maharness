@@ -157,6 +157,13 @@ export class Config {
     return (this.get<Record<string, unknown>>(pluginId) ?? {});
   }
 
+  /** 生效配置的浅引用（defaults ← config.json ← 运行时 set）。
+   *  仅供内核内部需要「看到配置全貌」的场合使用（如依赖签名对通配键取值）；
+   *  插件侧仍只应经 get/section 读配置——不对外承诺可写。 */
+  snapshot(): Record<string, unknown> {
+    return this.store;
+  }
+
   /**
    * 声明式配置对账：订阅某配置键的变化（精确键 + 通配符，如 'agent.*'）。
    * 返回退订函数。与 config.changed 事件的区别：按「变了哪个键」分派（最小干预），

@@ -62,8 +62,9 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
     try {
       const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
       const file = resolveInSandbox(sandbox, String(req.query.path ?? ''));
-      // C-S4/H10：与 Agent 工具同一读边界（.env / data/ 等敏感位置读拒）
-      if (isDeniedReadPath(file, sandbox)) {
+      // C-S4/H10 + A2：与 Agent 工具同一读边界，且按「沙箱根 ∪ 项目根」双基座判定
+      //（只按沙箱根算相对路径时，`<项目根>/data/agent.db` 这类路径不被拦截）
+      if (isDeniedReadPath(file, sandbox, kernel.rootDir)) {
         return res.status(403).json({ error: '拒绝读取受保护路径（.env / data/ 等敏感位置）' });
       }
       if (!existsSync(file)) return res.status(404).json({ error: '文件不存在' });

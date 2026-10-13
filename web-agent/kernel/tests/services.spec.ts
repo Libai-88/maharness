@@ -319,3 +319,43 @@ describe('service_call 埋点口径（C1）', () => {
     assert.equal(countServiceCalls(f), before, 'off：不埋点');
   });
 });
+
+/**
+ * R3 回归：接管必须同时改到「插件自己的 ctx.cache / ctx.trace」。
+ * 旧实现把内核内置实例直接交给插件，于是接管发生后出现两种身份——
+ * `kernel.cache` 已是插件实现、插件内部的 `ctx.cache` 还是内核那份，
+ * 「137 处调用点零改动即可被接管」只对 kernel.* 那一半成立。
+ */
+describe('接管对插件侧 ctx.* 同样生效（R3）', () => {
+  test('插件以 priority>0 接管 service:cache 后，其 ctx.cache 也解析到新实现', async (t) => {
+    const stub = [
+      `ctx.provide('service:cache', { mark: 'plugin-cache', l1Get: async () => undefined }, 10);`,
+      // 探针服务：调用时读 ctx.cache —— 走的必须是解析视图
+      `ctx.provide('service:probe', { seeCache: () => (ctx.cache && ctx.cache.mark) ?? 'none',`,
+      `  seeTrace: () => (ctx.trace && ctx.trace.mark) ?? 'none' }, 0);`,
+      // 顺带接管 trace，验证两个视图都走仲裁
+      `ctx.provide('service:trace', { mark: 'plugin-trace', startStep: () => ({ id: 'x', finish: () => {}, fail: () => {}, cancel: () => {} }) }, 10);`,
+    ].join('\n');
+    const f = setup({ r3Probe: stub });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+
+    const probe = f.kernel.plugins.resolveService('service:probe') as { seeCache: () => string; seeTrace: () => string };
+    assert.equal(probe.seeCache(), 'plugin-cache', 'ctx.cache 必须随接管一起换');
+    assert.equal(probe.seeTrace(), 'plugin-trace', 'ctx.trace 必须随接管一起换');
+    assert.equal((f.kernel.cache as unknown as { mark?: string }).mark, 'plugin-cache', 'kernel.cache 与 ctx.cache 同一实例');
+  });
+
+  test('接管者停用后 ctx.cache 自动回退内核内置实现', async (t) => {
+    const stub = `ctx.provide('service:cache', { mark: 'plugin-cache' }, 10);
+      ctx.provide('service:probe2', { see: () => (ctx.cache && ctx.cache.mark) ?? 'builtin' }, 0);`;
+    const f = setup({ r3Rollback: stub });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const probe = f.kernel.plugins.resolveService('service:probe2') as { see: () => string };
+    assert.equal(probe.see(), 'plugin-cache');
+    await f.kernel.plugins.disable('r3Rollback');
+    assert.equal((f.kernel.cache as unknown as { l1Get?: unknown }).l1Get !== undefined, true,
+      '回退后仍是可用的内核内置 Cache');
+  });
+});

@@ -10,7 +10,7 @@ import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync, op
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
-import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart } from '../../kernel/sandbox';
+import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
 import { walkFiles, matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol } from '../../kernel/fssearch';
 import type { EditOp } from '../../kernel/fssearch';
@@ -133,6 +133,34 @@ export default {
   version: '0.2.0',
   onLoad(ctx) {
     const writeNeedsApproval = () => ctx.config.get<boolean>('tools.writeRequiresApproval', false);
+    // A2：判定基座 = 沙箱根 ∪ 项目根。二者可以不同（SANDBOX_ROOT 指到别处时，
+    // 只按沙箱根算相对路径会让 .env / data/ 的保护整体失效，连 kernel/ 写保护也能绕过）。
+    const bases = (sandboxRoot: string) => ({ sandboxRoot, projectRoot: ctx.paths.root });
+    /** 写/改类工具的审批判定：敏感目标（.env、data 目录）一律要用户批准，
+     *  不受 `tools.writeRequiresApproval` 开关影响——那个开关管的是普通工作区文件。 */
+    const writeGate = (args: unknown, tctx: ToolContext): { needsApproval: boolean; reason: string } => {
+      let file: string;
+      try {
+        file = resolveInSandbox(tctx.sandboxRoot, String((args as { path?: string })?.path ?? ''));
+      } catch {
+        return { needsApproval: true, reason: '路径无法解析（越界或非法），按高危处理' };
+      }
+      if (isApprovalRequiredWritePath(file, bases(tctx.sandboxRoot))) {
+        return { needsApproval: true, reason: '写入密钥/内部数据位置（.env 或 data/）' };
+      }
+      return { needsApproval: writeNeedsApproval(), reason: '写入工作区文件' };
+    };
+    /** handler 侧纵深防御（与 powershell/delete_file 同一口径）：执行器审批门是主防线，
+     *  这里兜住「绕过门直接调 handler」的情形；policyApproved 是用户策略规则的合法授权。 */
+    const sensitiveBypass = (file: string, tctx: ToolContext): { ok: false; needsApproval: boolean; approvalSummary: string } | null => {
+      if (!isApprovalRequiredWritePath(file, bases(tctx.sandboxRoot))) return null;
+      if (tctx.approved || tctx.policyApproved) return null;
+      return {
+        ok: false,
+        needsApproval: true,
+        approvalSummary: `写入密钥/内部数据位置需用户批准\n路径：${relative(tctx.sandboxRoot, file)}`,
+      };
+    };
 
     ctx.register({
       kind: 'persona',
@@ -211,7 +239,7 @@ export default {
         },
         async handler(args: { path?: string; offset?: number; limit?: number; lineNumbers?: boolean }, tctx: ToolContext): Promise<{ ok: boolean; data?: ReadResult; error?: string }> {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if (isDeniedReadPath(file, tctx.sandboxRoot)) {
+          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝读取: ${relative(tctx.sandboxRoot, file)}（密钥与环境配置 .env、内部数据 data/ 不可读）` };
           }
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}` };
@@ -345,8 +373,8 @@ export default {
         risk: 'medium',
         costHint: 'low',
         approval: true,
-        limits: '整文件覆写；内核保护区（kernel/、core/chat/）与 .env/data 拒写',
-        description: '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。沙箱内写默认免审批（可经 tools.writeRequiresApproval 恢复审批）。',
+        limits: '整文件覆写；kernel/、core/chat/ 硬拒，.env 与 data/ 需用户批准',
+        description: '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。普通工作区文件写默认免审批（可经 tools.writeRequiresApproval 恢复审批）；但 .env 与 data/ 下的任何写入都必须用户批准，不受该开关影响。',
         parameters: {
           type: 'object',
           properties: {
@@ -355,13 +383,15 @@ export default {
           },
           required: ['path', 'content'],
         },
-        assessApproval: () => ({ needsApproval: writeNeedsApproval(), reason: '写入工作区文件' }),
+        assessApproval: writeGate,
         async handler(args: { path?: string; content?: string }, tctx: ToolContext) {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if (isProtectedWritePath(file, tctx.sandboxRoot)) {
+          if (isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
           }
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
+          const gate = sensitiveBypass(file, tctx);
+          if (gate) return gate;
           mkdirSync(resolve(file, '..'), { recursive: true });
           atomicWrite(file, args.content);
           invalidateFileCaches(tctx);
@@ -400,13 +430,15 @@ export default {
           },
           required: ['path', 'edits'],
         },
-        assessApproval: () => ({ needsApproval: writeNeedsApproval(), reason: '编辑工作区文件' }),
+        assessApproval: writeGate,
         async handler(args: { path?: string; edits?: EditOp[] }, tctx: ToolContext) {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if (isProtectedWritePath(file, tctx.sandboxRoot)) {
+          if (isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝编辑内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}` };
           }
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}——新建请用 write_file` };
+          const gate = sensitiveBypass(file, tctx);
+          if (gate) return gate;
           const st = statSync(file);
           if (!st.isFile()) return { ok: false, error: '目标不是文件' };
           if (st.size > MAX_EDIT_BYTES) return { ok: false, error: `文件过大（${st.size} 字节 > ${MAX_EDIT_BYTES}），edit_file 不支持` };
@@ -457,10 +489,12 @@ export default {
           if (!existsSync(target)) return { ok: false, error: `目标不存在: ${relative(tctx.sandboxRoot, target) || '.'}` };
           const rel = relative(tctx.sandboxRoot, target) || '.';
           if (rel === '.') return { ok: false, error: '不能删除沙箱根目录' };
-          if (isProtectedWritePath(target, tctx.sandboxRoot)) {
+          if (isProtectedWritePath(target, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
           }
-          if (!tctx.approved) {
+          // A8：删除的 handler 侧二次校验保留，但必须承认用户策略规则的放行
+          //（policyApproved 此前未透传，规则 allow 会被这里误拦）
+          if (!tctx.approved && !tctx.policyApproved) {
             return { ok: false, needsApproval: true, approvalSummary: `删除文件/目录\n路径：${rel}` };
           }
           const st = statSync(target);
@@ -475,6 +509,6 @@ export default {
       },
     });
 
-    ctx.logger.info('工具就绪: list_dir / read_file / glob / grep / write_file / edit_file / delete_file（沙箱内，写类默认免审批）');
+    ctx.logger.info('工具就绪: list_dir / read_file / glob / grep / write_file / edit_file / delete_file（沙箱内；普通写默认免审批，.env 与 data/ 写入需批准，kernel/ 与 core/chat/ 硬拒）');
   },
 } satisfies Plugin;

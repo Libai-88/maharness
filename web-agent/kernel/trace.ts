@@ -3,7 +3,7 @@
  * append-only 结构：TraceSession(traceId) → Turn → Step。
  * 三态输出：① SSE 实时推送（trace.step 事件）② JSONL 审计落盘（异步批量）③ 内存环形缓冲。
  */
-import { appendFileSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, openSync, mkdirSync, readdirSync, readSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventBus } from './bus';
 import type { StepHandle, TraceStats, TraceStep, TraceStepInit } from './types';
@@ -13,6 +13,44 @@ const RING_CAPACITY = 1000;
 const FLUSH_BATCH = 100;
 /** 定时落盘：队列非空时最迟该间隔落一次盘 */
 const FLUSH_INTERVAL_MS = 2_000;
+/** 归档保留天数默认值（`trace.retainDays` 可覆盖；0 = 不清理） */
+const RETAIN_DAYS_DEFAULT = 14;
+
+/** 读文件末尾至多 maxLines 行（缺陷 C2）。
+ *
+ * 旧实现 `readFileSync(整个文件).split('\n').slice(-maxLines)`：20k 只是**解析**上限，
+ * I/O 却是全文件同步读——归档按天只追加、无轮转，文件会随运行时间单调变大，
+ * 于是 ring 未命中时的回退查询代价线性上升（实测单文件已 0.9MB，且当时 96%+ 是噪声）。
+ * 这里从文件尾按块回读，只在凑够行数后解码那一段（主线程代价与文件大小解耦）。 */
+function readTailLines(path: string, maxLines: number): string[] {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const size = fstatSync(fd).size;
+    if (size === 0) return [];
+    const CHUNK = 64 * 1024;
+    let pos = size;
+    const buf = Buffer.alloc(Math.min(CHUNK, size));
+    let collected = Buffer.alloc(0);
+    let newlines = 0;
+    while (pos > 0 && newlines <= maxLines) {
+      const take = Math.min(CHUNK, pos);
+      pos -= take;
+      readSync(fd, buf, 0, take, pos);
+      const slice = buf.subarray(0, take);
+      collected = Buffer.concat([slice, collected]);
+      for (let i = 0; i < slice.length; i++) if (slice[i] === 0x0a) newlines++;
+    }
+    const lines = collected.toString('utf-8').split('\n');
+    // 未读到文件头时，首行是被截断的半行 → 丢弃（宁可少一行，不返回坏 JSON）
+    if (pos > 0) lines.shift();
+    return lines.filter((l) => l.trim()).slice(-maxLines);
+  } catch {
+    return [];
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* 忽略 */ } }
+  }
+}
 
 export class Trace {
   private ring: TraceStep[] = [];
@@ -38,10 +76,16 @@ export class Trace {
   /** 进程退出前兜底 flush（同步 appendFileSync 在 exit 钩子内可执行） */
   private readonly exitFlush = () => this.flush();
 
-  constructor(private bus: EventBus, tracesDir: string) {
+  constructor(private bus: EventBus, tracesDir: string, retainDays?: number) {
     this.tracesDir = tracesDir;
+    if (typeof retainDays === 'number') this.retainDaysCfg = retainDays;
     try { mkdirSync(tracesDir, { recursive: true }); } catch { /* 忽略 */ }
     process.on('exit', this.exitFlush);
+  }
+
+  /** 归档保留天数（配置热更新入口；0 = 永不清理） */
+  setRetainDays(days: number): void {
+    this.retainDaysCfg = days;
   }
 
   /** 开始一个 Step，返回收尾句柄 */
@@ -130,7 +174,42 @@ export class Trace {
         console.warn('[trace] JSONL 落盘失败（后续失败仅计数，见 stats().writeFailures）:', err instanceof Error ? err.message : String(err));
       }
     }
+    // 跨天才尝试清理（每天至多一次 readdir/rmSync，不在热路径上）
+    if (today !== this.lastPruneDay) {
+      this.lastPruneDay = today;
+      this.pruneOld();
+    }
   }
+
+  /** 归档保留期清理（缺陷 C2：此前按天只追加、无任何轮转/上限，磁盘单调增长）。
+   *  `trace.retainDays` 可配（默认 14，0 = 永不清理），由 Kernel 注入并随配置热更新。
+   *  文件名即日期（YYYY-MM-DD.jsonl），按日期字典序判定，不看 mtime——
+   *  避免复制/迁移的文件被误删。 */
+  pruneOld(): void {
+    const retainDays = this.retainDaysCfg;
+    if (!(retainDays > 0)) return;
+    let files: string[];
+    try {
+      files = readdirSync(this.tracesDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
+    } catch { return; }
+    // 不按「文件数 ≤ 保留天数」提前返回：文件少不代表都新（只有两个百年前的归档时
+    // 同样必须清理）。判定只看日期，代价是一次 readdir，且每天至多跑一次。
+    const cutoff = new Date(Date.now() - retainDays * 86_400_000).toISOString().slice(0, 10);
+    for (const f of files) {
+      const day = f.slice(0, 10);
+      if (day >= cutoff) continue;
+      try {
+        rmSync(join(this.tracesDir, f), { force: true });
+      } catch (err) {
+        console.warn(`[trace] 归档清理失败（${f}）:`, err instanceof Error ? err.message : String(err));
+      }
+    }
+  }
+
+  /** 归档保留天数（`trace.retainDays`，由 Kernel 注入并随配置热更新；0 = 永不清理） */
+  private retainDaysCfg = RETAIN_DAYS_DEFAULT;
+  /** 上次清理所在日期（跨天才扫一次目录，不在热路径上） */
+  private lastPruneDay = '';
 
   /** 查询轨迹：按 traceId / 步骤类型 / 名称 / 父步骤 过滤环形缓冲（最近 1000 条；可观察性的检索面）
    *  parentId：span 树下钻——查某步骤的全部子步骤（如 run_subagent 工具步骤下的子代理内部步骤） */
@@ -156,9 +235,8 @@ export class Trace {
     const out: TraceStep[] = [];
     for (const file of files) {
       try {
-        const lines = readFileSync(join(this.tracesDir, file), 'utf-8').split('\n');
-        for (const line of lines.slice(-maxLines)) {
-          if (!line.trim()) continue;
+        const lines = readTailLines(join(this.tracesDir, file), maxLines);
+        for (const line of lines) {
           let step: TraceStep;
           try {
             step = JSON.parse(line) as TraceStep;

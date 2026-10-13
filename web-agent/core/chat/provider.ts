@@ -72,6 +72,15 @@ const PRICE_TABLE: Record<string, { in: number; out: number }> = {
   'qwen-plus': { in: 0.4, out: 1.2 },
 };
 
+/** 价格来源不明时同一 provider/model 只告警一次（D2：不静默用编造价做成本核算）。 */
+const priceGuessWarned = new Set<string>();
+function warnOncePriceGuess(who: string, prices: { in: number; out: number }): void {
+  if (priceGuessWarned.has(who)) return;
+  priceGuessWarned.add(who);
+  console.warn(`[provider] ${who} 未登记价格，成本统计按估算 ${prices.in}/${prices.out} USD/百万 token 计——`
+    + `如需准确成本，请在设置里为该模型填价，或设 <NAME>_PRICE_IN/_PRICE_OUT。`);
+}
+
 /** 扫描 .env / 环境变量，自动发现 OpenAI 兼容 Provider */
 export function discoverProviders(): ProviderConfig[] {
   const map = new Map<string, ProviderConfig>();
@@ -91,9 +100,13 @@ export function discoverProviders(): ProviderConfig[] {
   return [...map.values()].filter((c) => c.baseUrl && c.apiKey && c.model);
 }
 
-/** 估算成本（USD） */
-export function estimateCost(provider: ProviderDef, input: number, output: number): number {
-  const p = (provider as ProviderDef & { prices?: { in: number; out: number } }).prices;
+/** 估算成本（USD）。
+ *  D2 修复：必须按**实际调用的模型**取价。旧实现只用 provider.prices（= provider 默认
+ *  模型单价），而 `agent.modelRouting` 会把任务路由到别的模型、failover 也会换模型——
+ *  于是"默认 gpt-4o、实调 gpt-4o-mini"这类情况下统计面板与熔断预算都在按错的价格算。
+ *  model 省略时退回 provider 级价格（保持旧行为）。 */
+export function estimateCost(provider: ProviderDef, input: number, output: number, model?: string): number {
+  const p = pricesFor(provider, model);
   if (!p) return 0;
   return (input / 1_000_000) * p.in + (output / 1_000_000) * p.out;
 }
@@ -138,10 +151,19 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
   const capFor = (model: string): ModelCapability | undefined => cfg.models?.find(m => m.modelId === model);
   const cap = capFor(cfg.model);
   const tablePrice = PRICE_TABLE[cfg.model];
+  // D2：价格来源可追溯——用户显式设定 > 模型登记价 > 内置价表 > 目录推断/兜底。
+  // 落到最后一档时价格是**编出来的**（未知模型套 0.3/1.2），统计面板与成本熔断都吃它。
+  // 不静默：告警一次并说明如何设真价（清单 D2 的"诚实"要求；数值本身保持原行为，
+  // 避免把"本地网关代理付费上游"这类场景误归零——那同样是错的口径）。
+  const priceGuessed = cfg.inputPrice === undefined && cfg.outputPrice === undefined
+    && cap?.priceIn === undefined && tablePrice === undefined;
   const resolvedPrices = {
     in: cfg.inputPrice ?? cap?.priceIn ?? tablePrice?.in ?? 0.3,
     out: cfg.outputPrice ?? cap?.priceOut ?? tablePrice?.out ?? 1.2,
   };
+  if (priceGuessed) {
+    warnOncePriceGuess(`${cfg.id}/${cfg.model}`, resolvedPrices);
+  }
   const baseUrl = cfg.baseUrl.replace(/\/+$/, '');
   return {
     id: cfg.id,

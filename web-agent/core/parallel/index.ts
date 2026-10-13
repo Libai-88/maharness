@@ -106,19 +106,26 @@ export default {
             if (t.objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
           }
 
-          // 认知资源管理：每个并行子任务消耗 1 次子代理配额（并行 = 多份认知资源同时运行）
-          // M4 原子配额：consumeSubagentQuota 逐个消耗（检查+消耗原子完成，并发不超发）；
-          // 不足即在申请时拒绝——不会出现"先检查后消耗"窗口内被并发抢空的超发
-          for (let i = 0; i < tasks.length; i++) {
-            const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
-            if (!quota.allowed) {
-              return { ok: false, error: `子代理配额不足：第 ${i + 1}/${tasks.length} 个并行子任务申请配额被拒（剩余 ${quota.remaining}，10 分钟窗口内限额）。请减少并行数量或稍后再试。` };
-            }
-          }
-
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法并行委派' };
+
+          // 前置校验：循环服务必须可用（B2——不可用就白扣配额；子任务里仍逐个经
+          // makeRunner 取用，保持「替换循环即全局一致」的语义）
+          if (!makeRunner(ctx.kernel, ctx.bus)) {
+            return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法并行委派' };
+          }
+
+          // 认知资源管理（B2 修复）：一次 run_parallel = **一次委派**，只扣 1 次配额。
+          // 旧实现按子任务逐个扣，而会话窗口上限是 3、MAX_PARALLEL 是 4 ——
+          // 于是任何 4 任务的并行调用**必然**在第 4 次申请时被拒，同时白烧掉前面
+          // 3 次配额（正好占满整个会话窗口）：功能必然失败 + 额度被清零。
+          // 成本仍然受控：下方 splitBudget 把剩余预算按任务数均分给各子循环，
+          // 每个子循环另有 maxTurns 上限，配额只管"召唤次数"不管"召唤体量"。
+          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+          if (!quota.allowed) {
+            return { ok: false, error: `子代理配额不足（10 分钟窗口内限额，剩余 ${quota.remaining}）。请减少委派频率或稍后再试。` };
+          }
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const toolsFor = (t: { tools?: string }): ToolDef[] => t.tools === 'all'

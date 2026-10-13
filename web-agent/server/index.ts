@@ -7,13 +7,17 @@
  */
 import dotenv from 'dotenv';
 import { existsSync, readFileSync, watch } from 'node:fs';
+import { timingSafeEqual } from 'node:crypto';
 import { join, dirname, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import express from 'express';
 import { Kernel } from '../kernel';
-import { Store, DEFAULT_PERSONA } from './db';
-import { loadOrCreateSecretKey } from './secrets';
+import { Store, DEFAULT_PERSONA, hasEncryptedProviderKeys } from './db';
+import { resolveSecretKey } from './secrets';
 import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './routes';
+import { isSafeWorkspaceRoot } from './routes/workspaces';
+import { policyPosture } from './routes/rules';
+import { approvalTokenRequired } from './routes/approvals';
 import { discoverProviders } from '../core/chat/provider';
 import { ClientTracker } from './client-tracker';
 
@@ -30,6 +34,64 @@ let activeRuns = 0;
 export function beginRun(): void { activeRuns++; }
 export function endRun(): void { activeRuns = Math.max(0, activeRuns - 1); }
 export function activeRunCount(): number { return activeRuns; }
+
+// ---- A6-b 变更类端点的可选 token 门 ----
+/** 校验头名（前端接线时用同一个常量，避免拼写漂移） */
+export const MUTATION_TOKEN_HEADER = 'x-maharness-token';
+/** 需要显式授权的变更类方法（GET/HEAD 只读端点不受影响） */
+const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+/**
+ * 当前生效的 API token。
+ * **每次请求都读** process.env（不是启动快照）：与本项目「.env 改动即生效」的心智模型一致，
+ * 也让运维可以经 .env 热更新开关这道门。空/未设 = 关闭。
+ */
+export function requiredApiToken(): string {
+  return String(process.env.MAHARNESS_API_TOKEN ?? '').trim();
+}
+
+/** 常量时间比较（长度不等直接 false，避免逐字节早退把 token 长度/前缀做成侧信道） */
+function tokenMatches(provided: string, expected: string): boolean {
+  if (!provided || !expected) return false;
+  const a = Buffer.from(provided, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+/**
+ * 中间件：变更类请求（POST/PATCH/PUT/DELETE，/api 前缀内）必须携带匹配头。
+ *
+ * 威胁模型边界（必须讲清，否则这道门会被误解成「鉴权」）：
+ *  · 本服务只绑 127.0.0.1，挡的是局域网/外网；Host+Origin 挡的是浏览器跨源页面。
+ *    剩下的敞口是**本机任意进程**——它可以直接读写工作区文件、直接改 data/rules.json，
+ *    所以「有了 token 就安全」是假的：同用户身份的进程本就能读到这个 env 与数据目录。
+ *  · token 的真实意义是把「改变 agent 行为与审批语义」这件事变成需要显式授权：
+ *    无意图的本机进程（其它工具、脚本、被注入的插件、端口扫描）不再能一次 HTTP
+ *    调用就批准危险命令、把沙箱根切到盘符根、或注入 {tool:"*",effect:"allow"}。
+ *    这是**抬高门槛**，不是隔离边界——真正的隔离边界是 OS 用户/文件权限。
+ *  · 未设置 MAHARNESS_API_TOKEN 时完全放行，保持既有本机免鉴权用法（不破坏现有使用方式）。
+ *  · 注册位置：Host/Origin 校验之后、业务路由与插件 API 之前（含 /api/plugins/*）。
+ *  · 前端接线（设置后由页面自动带上该头）需要改 ui/（api.ts 单点 + 页面注入 token），
+ *    属另一条改造；本门默认关闭即不影响现有前端。
+ */
+export function createApiTokenGuard(): express.RequestHandler {
+  return (req, res, next) => {
+    const expected = requiredApiToken();
+    if (!expected) return next(); // 未启用：与历史行为完全一致
+    const method = String(req.method ?? '').toUpperCase();
+    if (!MUTATING_METHODS.has(method)) return next();
+    const raw = req.headers[MUTATION_TOKEN_HEADER] ?? req.headers.authorization;
+    const one = Array.isArray(raw) ? raw[0] : raw;
+    const bearer = typeof one === 'string' ? /^Bearer\s+(.+)$/i.exec(one.trim()) : null;
+    const provided = bearer ? bearer[1].trim() : (typeof one === 'string' ? one.trim() : '');
+    if (tokenMatches(provided, expected)) return next();
+    // 不回显期望值、不区分「没带」与「带错」的细节（只说需要哪个头），避免给探测者提示
+    return res.status(401).json({
+      error: `未授权：服务端已启用 MAHARNESS_API_TOKEN，变更类请求必须携带 ${MUTATION_TOKEN_HEADER} 头`,
+    });
+  };
+}
 
 /** DB 为空时从 .env 首次导入 Provider、写入默认人设；之后以 DB 为唯一来源 */
 function seedDefaults(store: Store): void {
@@ -59,12 +121,41 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
   await kernel.start();
 
-  // 凭据加密：data/secret.key 主密钥（首启生成）；api_key 加密落库，读取时解密
-  const store = new Store(kernel.paths.dbFile, { secretKey: loadOrCreateSecretKey(kernel.paths.data) });
+  // 凭据加密：data/secret.key 主密钥；api_key 加密落库，读取时解密。
+  // A7-3：主密钥缺失/异常时不再静默重建——先问「库里是否已有 v1: 密文」（只在异常分支才查，
+  // 正常路径零额外开销），有密文则按 resolveSecretKey 的策略处理（缺失→生成并显式告警；
+  // 异常→保留原文件、本次不带密钥），把旧密文作废这件事从「静默」变成「必须有人说话」。
+  const keyInfo = resolveSecretKey(kernel.paths.data, {
+    hasExistingCiphertext: () => hasEncryptedProviderKeys(kernel.paths.dbFile),
+  });
+  if (keyInfo.state !== 'ok') {
+    // created（首启）用 log；其余状态都是「用户必须知道」的故障，用 error 级
+    const line = `[secret] ${keyInfo.path}：${keyInfo.message}`;
+    if (keyInfo.state === 'created') console.log(line);
+    else console.error(`[secret] 主密钥异常（${keyInfo.state}）—— ${line}`);
+  }
+  const store = new Store(kernel.paths.dbFile, { secretKey: keyInfo.key, masterKey: keyInfo });
   seedDefaults(store);
+  // A7-2：把「密钥不可解」的既成事实打出来（Store 读一遍即完成记账），
+  // 否则用户只在真实请求 401 时才发现，归因会指向供应商而不是本机密钥文件。
+  {
+    const ks = store.keyStatus();
+    if (!ks.hasMasterKey && ks.hasCiphertext) {
+      console.error(`[secret] 本次运行没有可用主密钥：${ks.broken.length} 个供应商的密钥无法解密，`
+        + '请在设置页重新录入，或恢复 data/secret.key 后重启（详见 /api/security）');
+    } else if (ks.broken.length) {
+      console.error(`[secret] ${ks.broken.length} 个供应商的 api_key 不可解：`
+        + ks.broken.map((b) => `${b.id}(${b.reason})`).join(', ') + ' —— 请在设置页重新录入');
+    }
+  }
   // 种子工作区：当前沙箱根目录始终可选（沙箱可切换，切换后工具边界随之热更新）
+  // A6-2：危险根（盘符根/家目录及其祖先/系统目录）不作为工作区登记——连种子也不放过，
+  // 否则 .env 里写错 SANDBOX_ROOT=C:\ 会绕过 HTTP 校验直接把保护名单基座打掉。
   const sandbox = kernel.config.get<string>('sandboxRoot', rootDir);
-  if (!store.listWorkspaces().some((w) => w.path === sandbox)) store.addWorkspace(sandbox);
+  if (!store.listWorkspaces().some((w) => w.path === sandbox)) {
+    if (isSafeWorkspaceRoot(sandbox)) store.addWorkspace(sandbox);
+    else console.warn(`[seed] 已跳过危险的 SANDBOX_ROOT 工作区登记：${sandbox}（文件系统根/家目录/系统目录不可作为工作区）`);
+  }
   refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
   refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
   const app = express();
@@ -95,6 +186,38 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
       return res.status(403).json({ error: 'Forbidden: Origin 不在白名单' });
     }
     next();
+  });
+
+  // ---- A6-b 变更类端点的可选 token 门（紧跟 Host/Origin 之后、业务路由之前）----
+  // 覆盖 /api/*（含下方插件 API 挂载点 /api/plugins/*），GET/HEAD 只读不受影响。
+  // 未设 MAHARNESS_API_TOKEN 时逐请求透传 = 现有本机免鉴权行为不变。
+  // 威胁模型与边界见 createApiTokenGuard 注释：这是「显式授权」门槛，不是进程隔离边界。
+  app.use('/api', createApiTokenGuard());
+
+  // ---- A6/A7 安全姿态只读端点：把「当前哪些门是开着的、密钥是否可用」说清楚 ----
+  // 只读、无副作用、不含任何密钥材料（token / api_key / secret.key 一律不外泄）。
+  // 前端接线（横幅）从这里取真实故障口径，而不是靠 401 反推。
+  app.get('/api/security', (_req, res) => {
+    const tokenRequired = requiredApiToken().length > 0;
+    const broken = store.keyStatus();
+    res.json({
+      bind: '127.0.0.1',
+      // 变更类端点是否需要 x-maharness-token
+      mutationAuthRequired: tokenRequired,
+      mutationTokenHeader: MUTATION_TOKEN_HEADER,
+      // 审批一次性凭据是否强制（见 routes/approvals.ts 的 A6-1 说明）
+      approvalTokenRequired: approvalTokenRequired(),
+      masterKey: {
+        state: keyInfo.state,
+        available: !!keyInfo.key,
+        path: keyInfo.path,
+        message: keyInfo.message,
+        backupPath: keyInfo.backupPath ?? null,
+      },
+      credentials: broken,
+      // A6-3：当前策略是否已把全部工具的审批门整体放行（rules 服务不可用时 available:false）
+      policy: policyPosture(kernel),
+    });
   });
 
   const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）

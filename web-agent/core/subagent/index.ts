@@ -141,13 +141,6 @@ export default {
           // maxTurns：默认 6；学术技能的子代理（检索席位/评审席位）常需更多轮，钳制 1-12 防失控
           const maxTurns = Math.max(1, Math.min(12, Math.floor(Number(args.maxTurns) || 6)));
 
-          // 认知资源管理（harness 强制，不是 LLM 自觉）：
-          // M4 原子配额：consumeSubagentQuota 检查+消耗一步完成（并发调用不会超发）
-          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
-          if (!quota.allowed) {
-            return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：简单任务请直接执行；确需委派请稍后再试。` };
-          }
-
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const provider = chatSvc?.providers?.[0];
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派子代理' };
@@ -161,6 +154,15 @@ export default {
           // 插件替换循环后子代理同步改变（避免「顶层换了、子代理跑旧循环」的割裂）
           const runner = makeRunner(ctx.kernel, ctx.bus);
           if (!runner) return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法委派子代理' };
+
+          // 认知资源管理（harness 强制，不是 LLM 自觉）：M4 原子配额，检查+消耗一步完成。
+          // B2 修复：配额必须在**所有前置校验通过之后**才扣——旧顺序是先扣再校验
+          // provider / runner，于是"没配 key"或"对话引擎被停用"这类根本不可能执行的
+          // 调用也白白吃掉会话窗口额度（无退还路径），用户随后真要委派时被拒。
+          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+          if (!quota.allowed) {
+            return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：简单任务请直接执行；确需委派请稍后再试。` };
+          }
           const traceId = `sub-${randomUUID().slice(0, 8)}`;
           let answer = '';
           let usage = { input: 0, output: 0 };
@@ -261,10 +263,6 @@ export default {
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
 
-          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
-          if (!quota.allowed) {
-            return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：请控制审查频率。` };
-          }
           const provider = chatSvc?.providers?.[0];
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
 
@@ -273,6 +271,12 @@ export default {
           // 审查循环同样经服务解析取得：审查者与执行者跑同一个循环实现（可被插件统一替换）
           const runner = makeRunner(ctx.kernel, ctx.bus);
           if (!runner) return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法委派审查' };
+
+          // B2：配额在全部前置校验之后才扣（理由同 run_subagent）
+          const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
+          if (!quota.allowed) {
+            return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：请控制审查频率。` };
+          }
           const traceId = `rev-${randomUUID().slice(0, 8)}`;
           const criteria = args.criteria ? String(args.criteria).trim() : '正确性与需求符合度';
           const objective = `审查以下产出。审查标准：${criteria}。\n\n【待审查产出/说明】\n${target}`;

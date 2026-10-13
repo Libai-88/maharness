@@ -2,7 +2,7 @@
  * server/routes/providers.ts —— Provider 管理（网页端；DB 为唯一来源）
  */
 import type { Express } from 'express';
-import { assertPublicHttpUrl, getChatService, maskKey, refreshChatProviders, type RouteDeps } from './shared';
+import { assertProviderBaseUrl, fetchWithPublicRedirects, getChatService, maskKey, refreshChatProviders, type RouteDeps } from './shared';
 import { extractFromProviderMeta, resolveCapabilities } from '../../kernel/modelCatalog';
 import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError } from '../../core/chat/provider-health';
 
@@ -38,10 +38,12 @@ function buildPing(base: string, protocol: string, key: string, model: string): 
   }];
 }
 
-/** 按协议拉取模型列表（三家端点/鉴权头各异）；HTTP 非 2xx 抛错且不回显远端 body */
+/** 按协议拉取模型列表（三家协议端点/鉴权头各异）；HTTP 非 2xx 抛错且不回显远端 body */
 async function fetchProviderModels(base: string, protocol: ProviderProtocol, key: string): Promise<PulledModel[]> {
+  // A5：走 fetchWithPublicRedirects（redirect:'manual' + 逐跳 SSRF 校验），不再让 undici 自行
+  // 跟随 30x——/models 会把响应体解析后回吐，重定向不校验就是可读型 SSRF。
   const doFetch = async (url: string, headers: Record<string, string>): Promise<unknown> => {
-    const r = await fetch(url, { headers, signal: AbortSignal.timeout(15000) });
+    const r = await fetchWithPublicRedirects(url, { headers, signal: AbortSignal.timeout(15000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 401 || r.status === 403 ? '（Key 无效或无权限）' : ''}`);
     return await r.json().catch(() => null);
   };
@@ -102,13 +104,12 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       return res.status(400).json({ error: '名称 / 地址 / Key / 模型 均为必填' });
     }
     // H5 SSRF：保存路径与 /test 同规则校验（真实对话会按此地址服务端 fetch）。
-    // AGENT_ALLOW_PRIVATE_URLS=1 显式放行本地/内网地址（本机 Ollama 等本地模型场景）。
-    if (process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
-      try {
-        await assertPublicHttpUrl(String(baseUrl).trim());
-      } catch (err) {
-        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-      }
+    // AGENT_ALLOW_PRIVATE_URLS=1 显式放行本地/内网地址（本机 Ollama 等本地模型场景）——
+    // 是否豁免统一由 assertProviderBaseUrl 判断（A5：四处入口不再各写一遍 env 比较）。
+    try {
+      await assertProviderBaseUrl(String(baseUrl).trim());
+    } catch (err) {
+      return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
     const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'provider'}-${Math.random().toString(36).slice(2, 6)}`;
     store.upsertProvider({
@@ -126,10 +127,10 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     if (!existing) return res.status(404).json({ error: '供应商不存在' });
     const { label, baseUrl, apiKey, model, priceIn, priceOut, enabled } = req.body ?? {};
     const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : existing.protocol;
-    // H5 SSRF：仅当地址被修改时校验（沿用已保存地址无需重复检查）
-    if (baseUrl?.trim() && baseUrl.trim() !== existing.baseUrl && process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
+    // H5 SSRF：仅当地址被修改时校验（沿用已保存地址无需重复检查）；豁免判定同 assertProviderBaseUrl
+    if (baseUrl?.trim() && baseUrl.trim() !== existing.baseUrl) {
       try {
-        await assertPublicHttpUrl(String(baseUrl).trim());
+        await assertProviderBaseUrl(String(baseUrl).trim());
       } catch (err) {
         return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       }
@@ -173,10 +174,12 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       return res.status(400).json({ error: 'Key 为必填' });
     }
     const base = String(baseUrl).trim().replace(/\/+$/, '');
-    // H5 SSRF 防护：协议白名单 + DNS 解析后拒绝私网/环回/链路本地段
+    // H5 SSRF 防护：协议白名单 + 逐跳校验（redirect:'manual'，见 fetchWithPublicRedirects）
     //（provider test 是「用户可控 URL + 服务端发请求」的经典 SSRF 入口）
+    // 豁免语义与保存/PATCH/models 一致：AGENT_ALLOW_PRIVATE_URLS=1 时可对本机 Ollama「验证密钥」
+    //（此前这一处无条件校验，导致按注释设了变量仍然连不上本地地址）
     try {
-      await assertPublicHttpUrl(base);
+      await assertProviderBaseUrl(base);
     } catch (err) {
       return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
@@ -186,7 +189,8 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     // （成功清除 authFailed 红标/会话横幅；失败标记失效），不等下一条真实消息
     const pid = providerId ? String(providerId) : undefined;
     try {
-      const r = await fetch(...buildPing(base, protocol, String(useKey ?? ''), String(model)));
+      const [pingUrl, pingInit] = buildPing(base, protocol, String(useKey ?? ''), String(model));
+      const r = await fetchWithPublicRedirects(pingUrl, pingInit);
       const latencyMs = Date.now() - started;
       if (!r.ok) {
         // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
@@ -224,12 +228,12 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       return res.status(400).json({ ok: false, error: '地址 / Key 均为必填（编辑已保存供应商时 Key 可留空）' });
     }
     const base = String(baseUrl).trim().replace(/\/+$/, '');
-    if (process.env.AGENT_ALLOW_PRIVATE_URLS !== '1') {
-      try {
-        await assertPublicHttpUrl(base);
-      } catch (err) {
-        return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-      }
+    // 豁免判定统一走 assertProviderBaseUrl；真正的逐跳防护在 fetchProviderModels 内部
+    // （redirect:'manual' + 每一跳复检），这里先拦一次只为尽早给出可读错误。
+    try {
+      await assertProviderBaseUrl(base);
+    } catch (err) {
+      return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
     }
     try {
       const raw = await fetchProviderModels(base, protocol as ProviderProtocol, String(useKey ?? ''));

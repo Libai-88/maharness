@@ -64,7 +64,7 @@ export class Kernel {
       }
       : base;
     this.config = new Config(this.bus, defaults, this.paths.configFile);
-    this.builtinTrace = new Trace(this.bus, this.paths.traces);
+    this.builtinTrace = new Trace(this.bus, this.paths.traces, this.config.get<number>('trace.retainDays', 14));
     this.builtinCache = new Cache(undefined, {
       l1TextThreshold: this.config.get<number>('cache.l1Threshold', 0.58),
       l2TtlMs: this.config.get<number>('cache.l2TtlMin', 30) * 60_000,
@@ -75,6 +75,12 @@ export class Kernel {
         this.builtinCache.setConfig({ l1TextThreshold: value });
       } else if (key === 'cache.l2TtlMin' && typeof value === 'number') {
         this.builtinCache.setConfig({ l2TtlMs: value * 60_000 });
+      }
+    });
+    // 归档保留期热更新（C2）：trace.retainDays 改动即时生效，不必重启
+    this.config.watch('trace.*', (key, value) => {
+      if (key === 'trace.retainDays' && typeof value === 'number') {
+        this.builtinTrace.setRetainDays(value);
       }
     });
     this.builtinBudget = new Budget(

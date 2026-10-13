@@ -21,10 +21,17 @@ interface CatalogRule extends Partial<ModelCapabilities> {
   re: RegExp;
 }
 
-/** 顺序敏感：先具体后宽泛，命中即止 */
+/** 顺序敏感：先具体后宽泛，命中即止。
+ *  D2 修复：mini/haiku 这类"小杯"模型此前与旗舰同价（`/^gpt-4o(-mini)?/` 一条规则覆盖两者，
+ *  2.5/10 对 mini 实际约 0.15/0.6 → 虚高 ~16 倍；`/^claude-…-4/` 把 haiku 也按 3/15 计）。
+ *  成本统计与 `budget.maxSessionCost` 熔断都吃这个价，虚高会让用户"没花那么多却以为花超了"。
+ *  现在小杯单独成条，且必须排在大杯之前（顺序敏感）。 */
 const CATALOG: CatalogRule[] = [
   // ---- OpenAI ----
-  { re: /^gpt-4o(-mini)?/, contextWindow: 128_000, maxOutput: 16_000, vision: true, tools: true, priceIn: 2.5, priceOut: 10 },
+  { re: /^gpt-4o-mini/, contextWindow: 128_000, maxOutput: 16_000, vision: true, tools: true, priceIn: 0.15, priceOut: 0.6 },
+  { re: /^gpt-4o(-.+)?/, contextWindow: 128_000, maxOutput: 16_000, vision: true, tools: true, priceIn: 2.5, priceOut: 10 },
+  { re: /^gpt-4\.1-nano/, contextWindow: 1_000_000, maxOutput: 32_000, vision: true, tools: true, priceIn: 0.1, priceOut: 0.4 },
+  { re: /^gpt-4\.1-mini/, contextWindow: 1_000_000, maxOutput: 32_000, vision: true, tools: true, priceIn: 0.4, priceOut: 1.6 },
   { re: /^gpt-4\.1/, contextWindow: 1_000_000, maxOutput: 32_000, vision: true, tools: true, priceIn: 2, priceOut: 8 },
   { re: /^gpt-4-turbo|^gpt-4-vision/, contextWindow: 128_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 10, priceOut: 30 },
   { re: /^gpt-5|^chatgpt-4o-latest/, contextWindow: 200_000, maxOutput: 64_000, vision: true, tools: true, reasoning: true, priceIn: 1.25, priceOut: 10 },
@@ -32,7 +39,9 @@ const CATALOG: CatalogRule[] = [
   { re: /^gpt-3\.5|^gpt-4$|^gpt-4-0/, contextWindow: 16_385, maxOutput: 4_096, vision: false, tools: true, priceIn: 3, priceOut: 6 },
 
   // ---- Anthropic ----
-  { re: /^claude-(opus|sonnet|haiku)-4|^claude-4/, contextWindow: 200_000, maxOutput: 32_000, vision: true, tools: true, reasoning: true, priceIn: 3, priceOut: 15 },
+  // haiku 必须排在 claude-*-4 大杯之前（否则被宽泛规则吞掉）
+  { re: /^claude-.*haiku/, contextWindow: 200_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 1, priceOut: 5 },
+  { re: /^claude-(opus|sonnet)-4|^claude-4/, contextWindow: 200_000, maxOutput: 32_000, vision: true, tools: true, reasoning: true, priceIn: 3, priceOut: 15 },
   { re: /^claude-3-5-|^claude-3-7-/, contextWindow: 200_000, maxOutput: 8_192, vision: true, tools: true, priceIn: 3, priceOut: 15 },
   { re: /^claude-3-/, contextWindow: 200_000, maxOutput: 4_096, vision: true, tools: true, priceIn: 3, priceOut: 15 },
 
@@ -64,6 +73,13 @@ const FALLBACK: ModelCapabilities = {
 
 /** 本地/自托管服务的价格一律记 0 */
 const LOCAL_PRICE = /^(ollama|lmstudio|local|vllm|sglang)$/i;
+
+/** 该模型 id 是否命中目录规则（D2：调用方据此区分「目录里真有这条价」与
+ *  「套了编造的兜底价」——后者必须让成本口径可见，不能静默当真价用）。 */
+export function isKnownModel(modelId: string): boolean {
+  const id = String(modelId ?? '').toLowerCase();
+  return CATALOG.some((r) => r.re.test(id));
+}
 
 export function inferCapabilities(modelId: string, providerId?: string): ModelCapabilities {
   const id = String(modelId ?? '').toLowerCase();

@@ -34,7 +34,7 @@ import { EffectScope } from './scope';
 import { dirDigest, fileDigest, materialize, pruneSnapshots, SNAPSHOT_SUFFIX, type Snapshot } from './plugin-snapshot';
 import { validateAgainstSchema } from './validate';
 import type {
-  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginManifest, PluginStorage, TraceLike,
+  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginManifest, PluginStorage, TraceLike, CacheLike,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
@@ -520,8 +520,12 @@ export class PluginLoader {
       storage: this.makeStorage(inst),
       outbound: this.makeOutbound(inst),
       config,
-      trace: this.ctxBase.trace,
-      cache: this.ctxBase.cache,
+      // ctx.trace / ctx.cache 走与 kernel.* **同一条解析链**（缺陷 R3）：
+      // 旧写法直接把内核内置实例交给插件，于是插件以 priority>0 接管 service:cache 之后
+      // 「kernel.cache 已是插件实现、插件自己的 ctx.cache 仍旧」——同一子系统在进程内
+      // 存在两种身份，接管语义只在文档承诺的那一半成立。
+      get trace() { return loader.resolveView<TraceLike>('service:trace', loader.ctxBase.trace); },
+      get cache() { return loader.resolveView<CacheLike>('service:cache', loader.ctxBase.cache); },
       register: (cap: Capability) => {
         // 可逆效应：登记能力并留下逆元（卸载时自动回收，无需作者手工 unregister）
         inst.caps.push(cap);
@@ -607,8 +611,13 @@ export class PluginLoader {
           return off;
         },
         watchConfig: (key: string, cb: (value: unknown) => void) => {
-          // v3 智能重载：登记配置依赖（读当前值，配置变化即 bumpFact）
-          inst.depHooks.push(() => `cfg:${key}@${String(loader.ctxBase.config.get(key))}`);
+          // v3 智能重载：登记配置依赖（读当前值，配置变化即 bumpFact）。
+          // B4 修复：签名分量此前是 `String(全局 config.get(key))`，有三处静默失效——
+          //  ① 对象/数组值恒为 "[object Object]"，改它下面的字段永不触发重载；
+          //  ② 通配键（如 'rules.*'）走点路径查找会命中字面 "*" → 恒 undefined → 声明形同无效；
+          //  ③ 读的是全局 config，而插件实际读的是 configWith override 链后的值（两套口径）。
+          // 现在统一按「该插件眼中的有效值 + 稳定序列化」取分量，通配键按子树整体参与签名。
+          inst.depHooks.push(() => `cfg:${key}@${loader.configSignature(inst, key)}`);
           // 声明式配置对账：按「变了哪个键」分派（最小干预），并递增依赖事实版本
           const off = loader.ctxBase.config.watch(key, (_k, v) => {
             loader.bumpFact();
@@ -676,6 +685,57 @@ export class PluginLoader {
       if (value !== undefined && value !== null) return value as T;
     }
     return this.ctxBase.config.get(key, def);
+  }
+
+  /** 稳定序列化：对象键排序后输出，数组保序。避免"内容相同、键序不同"造成签名抖动
+   *  （那会让 reloadChanged 每次都判为"依赖变了"，零抖动的承诺失效）。 */
+  private stableStringify(value: unknown): string {
+    if (value === undefined) return '∅';
+    if (value === null) return 'null';
+    if (Array.isArray(value)) return `[${value.map((v) => this.stableStringify(v)).join(',')}]`;
+    if (typeof value === 'object') {
+      const o = value as Record<string, unknown>;
+      return `{${Object.keys(o).sort().map((k) => `${k}:${this.stableStringify(o[k])}`).join(',')}}`;
+    }
+    return String(value);
+  }
+
+  /** 把嵌套配置展平成「点路径 → 叶值」，用于通配键取值 */
+  private flattenConfig(node: unknown, prefix = '', out: Record<string, unknown> = {}): Record<string, unknown> {
+    if (!node || typeof node !== 'object' || Array.isArray(node)) {
+      if (prefix) out[prefix] = node;
+      return out;
+    }
+    for (const [k, v] of Object.entries(node as Record<string, unknown>)) {
+      const path = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === 'object' && !Array.isArray(v)) this.flattenConfig(v, path, out);
+      else out[path] = v;
+    }
+    return out;
+  }
+
+  /** 配置依赖签名分量（缺陷 B4）：旧实现是 `String(全局 config.get(key))`——
+   *  ① 对象值恒为 "[object Object]"，改它下面的字段永不触发重载；
+   *  ② 通配键（`rules.*`）按字面键查 → 恒 undefined → 声明等于没写；
+   *  ③ 读全局值而插件实际读的是 configWith override 链后的值，两套口径。
+   *  现在：精确键走 override 链取值并稳定序列化；通配键按该前缀下的整棵子树取叶集合。 */
+  private configSignature(inst: PluginInstance, key: string): string {
+    if (key === '*' || key.endsWith('.*')) {
+      const prefix = key === '*' ? '' : key.slice(0, -2);
+      const pick = (flat: Record<string, unknown>) => {
+        const hits: Record<string, unknown> = {};
+        for (const [p, v] of Object.entries(flat)) {
+          if (!prefix || p === prefix || p.startsWith(prefix + '.')) hits[p] = v;
+        }
+        return hits;
+      };
+      const global = pick(this.flattenConfig((this.ctxBase.config as unknown as { snapshot?: () => Record<string, unknown> }).snapshot?.() ?? {}));
+      // override 链里也可能有同前缀的覆盖，一并计入
+      const layers: Record<string, unknown>[] = [];
+      for (const layer of inst.configOverrides) layers.push(pick(this.flattenConfig(layer)));
+      return this.stableStringify(Object.assign({}, global, ...layers));
+    }
+    return this.stableStringify(this.getContextConfig(inst, key));
   }
 
   // ---------- 服务共效应注册表（反应性依赖 + 优先级接管） ----------
@@ -821,6 +881,14 @@ export class PluginLoader {
     return this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace)?.value;
   }
 
+  /** 解析视图（不埋点）：取当前生效的绑定，缺失时回退内置实现。
+   *  给 ctx.trace / ctx.cache 这类「每次属性访问都会走一遍」的场合用——
+   *  埋点交给 resolveService（显式解析点），避免热路径把簿记写进 Trace（C1 的同一教训）。 */
+  private resolveView<T>(key: string, fallback: T): T {
+    const binding = this.providers.get(key);
+    return (binding ? (binding.value as T) : fallback);
+  }
+
   /** 服务解析的可观测形式：保留提供者身份，供调试/管理面使用。 */
   resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined {
     const binding = this.traceServiceGet(key, consumer ?? 'external', this.ctxBase.trace);
@@ -903,6 +971,21 @@ export class PluginLoader {
     // 事实变了，依赖边表随之失效：下一次解析重新留痕（接管/回退这类变化必须再次可见）
     this.tracedEdges.clear();
     return ++this.factVersion;
+  }
+
+  /** reload 后是否应保持启动（缺陷 B8）：**以磁盘上的新 manifest 为准**。
+   *  旧实现用内存里的旧 manifest 算 keepActive，于是把 `enabled:false → true`
+   *   （或 `lazy:true → false`）翻回来时，会以 start=false 重载 → 新实例停在
+   *   `loaded`，既不启动也不会被 loadAll 再拉起（loadAll 只在开机跑一次），
+   *   必须再改一次文件或手动 enable 才生效——"改一次不生效、改两次才灵"。
+   *  读不到/解析失败时退回旧 manifest（不因读盘抖动而改变启动决定）。 */
+  private keepActiveFor(inst: PluginInstance): boolean {
+    let manifest = inst.manifest;
+    try {
+      const parsed = JSON.parse(readFileSync(join(inst.dir, 'plugin.json'), 'utf-8')) as PluginManifest;
+      if (parsed && parsed.id === manifest.id) manifest = parsed;
+    } catch { /* 用内存中的 manifest 兜底 */ }
+    return !(manifest.enabled === false || manifest.lazy);
   }
 
   // ---------- 生命周期（chain 串行队列：真排队，替代 check-then-act 惯性） ----------
@@ -1099,6 +1182,17 @@ export class PluginLoader {
         }
         this.registry.set(registryId, rollback);
         pruneSnapshots(dir, [oldLoadDir]); // 失败版本的快照一并回收
+        // B3 修复：回滚分支此前没有提交检查（提交分支有），于是「回滚实例自己也没起来」
+        // 会被当作回滚成功——最典型的组合是熔断态：startInternal 的熔断分支置
+        // state='error' 后**裸 return 不抛**，于是 error 态实例进了注册表、发出
+        // plugin.reloaded{rollback:true}、reload() 正常 resolve、HTTP 返回 ok:true。
+        // 而"事务性热重载：失败必回滚或报错"正是 self-extend 的安全前提。
+        if (rollback.state === 'error') {
+          const rbErr = rollback.error ?? '回滚后的旧版本仍未能启动';
+          console.error(`[plugin] ${registryId} 新版本失败且旧版本也未能恢复: ${msg} / ${rbErr}`);
+          this.bus.emit(EventBus.event('plugin.error', { id: registryId, error: `${msg}；回滚未恢复: ${rbErr}`, rollback: true }));
+          throw new Error(`热重载失败且回滚未恢复: ${rbErr}`);
+        }
         console.warn(`[plugin] ${registryId} 新版本加载失败，已回滚到旧版本: ${msg}`);
         this.bus.emit(EventBus.event('plugin.error', { id: registryId, error: msg, rollback: true }));
         this.bus.emit(EventBus.event('plugin.reloaded', { id: registryId, rollback: true }));
@@ -1169,7 +1263,7 @@ export class PluginLoader {
       // 否则入口 hash 不变 → import 命中 ESM 缓存 → onLoad/onStart 读到的还是旧值
       inst.forceFresh = true;
       try {
-        const keepActive = !(inst.manifest.enabled === false || inst.manifest.lazy);
+        const keepActive = this.keepActiveFor(inst);
         await this.reload(inst.manifest.id, keepActive);
         // 提交成功才更新签名——reload 会以新实例替换 registry（新实例继承旧签名），
         // 必须对 registry 中的当前实例写新值；失败回滚时保持旧值，后续同类依赖
@@ -1401,7 +1495,7 @@ export class PluginLoader {
           if (prev === mtime) return; // 目录未变化：跳过（编辑器保存常触发无实效的目录事件）
         }
         // 生命周期：lazy/停用声明的插件文件变化时重载但保持未激活
-        const keepActive = !(target.manifest.enabled === false || target.manifest.lazy);
+        const keepActive = this.keepActiveFor(target);
         await this.reload(target.manifest.id, keepActive);
         return;
       }

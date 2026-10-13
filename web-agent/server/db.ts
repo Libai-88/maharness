@@ -4,8 +4,10 @@
  */
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
+import { existsSync, readFileSync } from 'node:fs';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
-import { decryptSecret, encryptSecret, isEncrypted } from './secrets';
+import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secrets';
+import type { SecretKeyInfo } from './secrets';
 
 /**
  * 不该出现在用户眼里的消息前缀——**单一出处**。
@@ -42,6 +44,26 @@ export interface ProviderRow {
   enabled: number;
   createdAt: number;
   updatedAt: number;
+  /**
+   * A7-2：该行存的是 `v1:` 密文，但本次运行解不开（主密钥丢失/更换，或密文损坏）。
+   * **不落库**——由 Store 在读取时现算现填，因此重启后仍会如实复现。
+   * 存在意义：此前解密失败静默返回空串，UI 只能显示「未配置 key」或沿用旧值，
+   * 用户看到的是「莫名其妙 401」而不是「密钥不可解」这个真实故障。
+   * 前端接线（设置页横幅）由 ui/ 侧另行完成；`GET /api/security` 已经聚合暴露（index.ts）。
+   */
+  keyBroken?: boolean;
+  /** 不可解原因：decrypt-failed（密钥不符/密文损坏）| no-master-key（本次无主密钥） */
+  keyBrokenReason?: string;
+}
+
+/** 主密钥状态快照（供 /api/security 与启动日志共用同一口径） */
+export interface StoreKeyStatus {
+  /** 本次运行是否持有可用主密钥 */
+  hasMasterKey: boolean;
+  /** 库里存在 v1: 密文（无论能否解密） */
+  hasCiphertext: boolean;
+  /** 密钥不可解的 provider 明细 */
+  broken: { id: string; label: string; reason: string }[];
 }
 
 /** 模型能力行（一个 Provider 可挂多个模型，路由按能力谓词选路） */
@@ -87,9 +109,21 @@ export class Store {
   private db: Database.Database;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
+  /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
+  private readonly masterKey?: SecretKeyInfo;
+  /**
+   * A7-2：本次运行中「解不开密」的 provider（id → 原因），读取时实时维护。
+   * 只在内存——密钥换了就是换了，重启后按新一遍读取如实复现，比落库一个状态列更不易失真。
+   */
+  private readonly brokenKeys = new Map<string, string>();
+  /** 已告警过的 provider（避免状态接口/列表轮询把解密失败刷成日志洪水） */
+  private readonly warnedKeys = new Set<string>();
+  /** 库里是否见过 v1: 密文（迁移循环/解密路径顺带记录，供状态接口） */
+  private seenCiphertext = false;
 
-  constructor(dbFile: string, opts: { secretKey?: Buffer } = {}) {
+  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo } = {}) {
     this.secretKey = opts.secretKey;
+    this.masterKey = opts.masterKey;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(`
@@ -174,6 +208,7 @@ export class Store {
       const plainRows = this.db.prepare('SELECT id, api_key AS apiKey FROM providers').all() as { id: string; apiKey: string }[];
       const upd = this.db.prepare('UPDATE providers SET api_key = ? WHERE id = ?');
       for (const row of plainRows) {
+        if (isEncrypted(row.apiKey)) this.seenCiphertext = true; // A7：库里确有密文
         if (!row.apiKey || isEncrypted(row.apiKey)) continue;
         upd.run(this.encryptKey(row.apiKey), row.id);
       }
@@ -188,16 +223,37 @@ export class Store {
     try { this.db.close(); } catch { /* 已关闭 */ }
   }
 
-  // ---------- providers（网页端管理，DB 为唯一来源；api_key 加密落库） ----------
-
-  /** 解密存储密钥（唯一出口）；无主密钥时原样透传（明文兜底） */
-  private decryptKey(blob: string): string {
-    if (!this.secretKey || !blob) return blob;
+  /**
+   * 解密存储密钥（唯一出口）；无主密钥时原样透传（明文兜底）。
+   * A7-2：解不开**不再静默**——按 provider 记录 keyBroken 原因（内存态，供
+   * listProviders/getProvider 的返回行与 keyStatus()），启动时那次 console.warn 之外，
+   * 调用方与 /api/security 都能拿到「是哪个 provider、为什么不可解」的结构化事实。
+   * 返回值的口径维持原样（失败仍返回空串/透传），避免一次改动同时改掉鉴权头内容；
+   * 「不可解」这个故障由 keyBroken 字段承载，前端据此出真实横幅。
+   */
+  private decryptKey(blob: string, providerId?: string): string {
+    if (isEncrypted(blob)) this.seenCiphertext = true;
+    if (!this.secretKey || !blob) {
+      // 库里是密文而本次运行没有主密钥（secret.key 丢失/异常被保留）：返回值口径
+      // 保持历史行为（密文原样透传，见 server/tests/db.spec.ts 对无密钥 Store 的断言），
+      // 但**必须记账**：否则调用方只看 apiKey 时又回到「看起来已配置」的假象。
+      if (isEncrypted(blob) && providerId) this.brokenKeys.set(providerId, 'no-master-key');
+      return blob;
+    }
     try {
-      return decryptSecret(blob, this.secretKey);
+      const plain = decryptSecret(blob, this.secretKey);
+      if (providerId) this.brokenKeys.delete(providerId); // 修好了就摘掉故障标记，不留残余
+      return plain;
     } catch (err) {
-      console.warn('[store] api_key 解密失败（密钥变更或密文损坏），该 Provider 将不可用:',
-        err instanceof Error ? err.message : String(err));
+      if (providerId) {
+        // 同一行同一原因只报一次：状态接口/列表轮询不该把日志刷满
+        if (!this.warnedKeys.has(providerId)) {
+          this.warnedKeys.add(providerId);
+          console.warn(`[store] provider ${providerId} 的 api_key 解密失败（密钥变更或密文损坏），该供应商不可用:`,
+            err instanceof Error ? err.message : String(err));
+        }
+        this.brokenKeys.set(providerId, 'decrypt-failed');
+      }
       return '';
     }
   }
@@ -208,18 +264,49 @@ export class Store {
     return encryptSecret(plain, this.secretKey);
   }
 
+  /** 给读取到的行补 keyBroken 字段（唯一装配点，避免各处漏填） */
+  private withKeyState(r: ProviderRow): ProviderRow {
+    const reason = this.brokenKeys.get(r.id);
+    if (!reason) return r;
+    return { ...r, keyBroken: true, keyBrokenReason: reason };
+  }
+
+  /** 某 provider 的 api_key 当前是否不可解（路由层/状态接口用） */
+  isKeyBroken(id: string): boolean {
+    return this.brokenKeys.has(id);
+  }
+
+  /**
+   * A7-2 状态快照：主密钥是否可用 + 哪些 provider 的密钥不可解。
+   * `GET /api/security` 直接返回它；调用一次 listProviders 以刷新记账。
+   * hasMasterKey 口径优先取 resolveSecretKey() 的结果（无密钥 = 本次没拿到密钥），
+   * 未传 masterKey 时退化为「传入了 Buffer」。
+   */
+  keyStatus(): StoreKeyStatus {
+    const rows = this.listProviders();
+    return {
+      hasMasterKey: this.masterKey ? !!this.masterKey.key : !!this.secretKey,
+      hasCiphertext: this.seenCiphertext || rows.some((r) => r.keyBroken),
+      broken: rows
+        .filter((r) => r.keyBroken)
+        .map((r) => ({ id: r.id, label: r.label, reason: r.keyBrokenReason ?? 'decrypt-failed' })),
+    };
+  }
+
+  // ---------- providers（网页端管理，DB 为唯一来源；api_key 加密落库） ----------
+
   listProviders(): ProviderRow[] {
     const rows = this.db
       .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
       .all() as ProviderRow[];
-    return rows.map((r) => ({ ...r, apiKey: this.decryptKey(r.apiKey) }));
+    return rows.map((r) => this.withKeyState({ ...r, apiKey: this.decryptKey(r.apiKey, r.id) }));
   }
 
   getProvider(id: string): ProviderRow | undefined {
     const r = this.db
       .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
       .get(id) as ProviderRow | undefined;
-    return r ? { ...r, apiKey: this.decryptKey(r.apiKey) } : undefined;
+    return r ? this.withKeyState({ ...r, apiKey: this.decryptKey(r.apiKey, r.id) }) : undefined;
   }
 
   upsertProvider(p: {
@@ -227,7 +314,14 @@ export class Store {
     protocol?: string; priceIn?: number; priceOut?: number; enabled?: number;
   }): void {
     const now = Date.now();
-    const storedKey = this.encryptKey(p.apiKey);
+    // A7-2 连带防护：api_key 不可解时 getProvider 返回空串，PATCH 会把它当成「新值」写回，
+    // 于是库里那段仍可恢复的密文被空串覆盖（真·二次数据丢失）。语义改为
+    // 「空 = 不改动」：留空时原样保留已存的密文/明文，绝不用空串覆盖。
+    let storedKey = this.encryptKey(p.apiKey);
+    if (!p.apiKey) {
+      const raw = (this.db.prepare('SELECT api_key AS k FROM providers WHERE id = ?').get(p.id) as { k?: string } | undefined)?.k;
+      if (raw) storedKey = raw;
+    }
     const existing = this.getProvider(p.id);
     const protocol = p.protocol ?? existing?.protocol ?? 'openai';
     if (existing) {
@@ -244,6 +338,9 @@ export class Store {
   deleteProvider(id: string): void {
     this.db.prepare('DELETE FROM providers WHERE id = ?').run(id);
     this.db.prepare('DELETE FROM models WHERE provider_id = ?').run(id);
+    // 故障记账随行 removal 一并清掉，否则状态接口会报一个不存在的 provider
+    this.brokenKeys.delete(id);
+    this.warnedKeys.delete(id);
   }
 
   setProviderEnabled(id: string, enabled: number): void {
@@ -615,3 +712,41 @@ export class Store {
     };
   }
 }
+
+/**
+ * A7-3 判定支撑：库里是否已存在 `v1:` 密文（在 Store 打开**之前**问一次）。
+ * 用途：主密钥文件缺失/异常时，决定是否允许自动重新生成——有密文就不许静默换密钥。
+ * 策略（宁可误保守，不可误覆盖）：
+ *  1) 首选只读打开 + SQL 精确判定；
+ *  2) 只读打开失败（WAL 需要写 -shm、文件被占用、库刚被别的连接建起等）→
+ *     退化为原始字节扫描 `v1:` 前缀：假阳性只会多一次「拒绝重建 + 指引」的告警，
+ *     方向是安全的；假阴性才会静默作废密文，所以要尽量避免。
+ * 任何异常都不抛出：判定失败按「无密文」处理会让行为回到历史默认（生成新密钥），
+ * 因此这里保守返回 true（视为有密文）更合适——只有明确查到 0 行才返回 false。
+ */
+export function hasEncryptedProviderKeys(dbFile: string): boolean {
+  if (!existsSync(dbFile)) return false;
+  try {
+    const db = new Database(dbFile, { readonly: true, fileMustExist: true });
+    try {
+      const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='providers'`).all();
+      if (!tables.length) return false; // 老库/空库：没有 providers 表
+      const hit = db.prepare(`SELECT 1 AS x FROM providers WHERE api_key LIKE '${SECRET_PREFIX}%' LIMIT 1`)
+        .get() as { x?: number } | undefined;
+      return !!hit?.x;
+    } finally {
+      try { db.close(); } catch { /* 忽略 */ }
+    }
+  } catch (err) {
+    console.warn('[store] 只读探测 api_key 密文失败，改用字节扫描兜底:', err instanceof Error ? err.message : String(err));
+    try {
+      const raw = readFileSync(dbFile, 'latin1');
+      return raw.includes(SECRET_LIKE_PREFIX);
+    } catch {
+      return true; // 读都读不动：按「可能有密文」处理，宁可拒绝重建密钥
+    }
+  }
+}
+
+/** 密文前缀字面量（与 secrets.ts SECRET_PREFIX 一致；SQL LIKE 里用不到通配转义） */
+const SECRET_LIKE_PREFIX = 'v1:';

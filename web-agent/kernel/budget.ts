@@ -65,21 +65,43 @@ export class Budget {
    * 旧 API「先 subagentQuota() 检查、后 consumeSubagent() 记账」在两次调用之间
    * 可能有并发调用穿插，导致窗口内超额。本方法检查通过即记账，同一调用内完成。
    *  双层配额：per-session（默认 3 次/10 分钟）+ 进程级总上限（默认 8，构造可配）。
+   *
+   * `refund`（缺陷 B2）：本次记账的**撤销句柄**。委派工具在扣完配额之后才发现
+   * provider/runner 不可用、或子任务根本没跑起来时，配额必须能还回去——旧实现记账即最终
+   * （全类无 release），于是"失败也扣额度"，用户窗口内可用的委派被白白吃掉。
    */
-  consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number } {
+  consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number; refund?: () => void } {
     const now = Date.now();
     this.totalCalls = this.totalCalls.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS);
     const sess = this.sessionCalls.get(sessionId)?.filter((c) => now - c.ts < SUBAGENT_WINDOW_MS) ?? [];
+    // D1：窗口内已无记录就删键，而不是留一个空数组占位——否则 sessionCalls 的键数
+    // 随会话数单调增长（旧实现从不 delete）。
+    if (sess.length === 0) this.sessionCalls.delete(sessionId);
     const sessRemaining = SUBAGENT_MAX_CALLS_PER_SESSION - sess.length;
     const totalRemaining = this.maxTotalCalls - this.totalCalls.length;
     if (sessRemaining <= 0 || totalRemaining <= 0) {
       return { allowed: false, remaining: 0 };
     }
     // 检查通过，立即记账（原子完成）
-    sess.push({ ts: now });
+    const sessRec = { ts: now };
+    const totalRec = { ts: now };
+    sess.push(sessRec);
     this.sessionCalls.set(sessionId, sess);
-    this.totalCalls.push({ ts: now });
-    return { allowed: true, remaining: Math.min(sessRemaining, totalRemaining) - 1 };
+    this.totalCalls.push(totalRec);
+    let done = false;
+    const refund = (): void => {
+      if (done) return;
+      done = true;
+      const cur = this.sessionCalls.get(sessionId);
+      if (cur) {
+        const i = cur.indexOf(sessRec);
+        if (i >= 0) cur.splice(i, 1);
+        if (cur.length === 0) this.sessionCalls.delete(sessionId);
+      }
+      const j = this.totalCalls.indexOf(totalRec);
+      if (j >= 0) this.totalCalls.splice(j, 1);
+    };
+    return { allowed: true, remaining: Math.min(sessRemaining, totalRemaining) - 1, refund };
   }
 
   /** 重工具配额检查（旧 API，保留兼容；仅反映进程级池，新调用方请用 consumeSubagentQuota） */

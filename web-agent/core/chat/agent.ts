@@ -8,7 +8,7 @@ import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
 import { classifyTask, reasoningBudgetFor } from '../../kernel/budget';
 import { validateAgainstSchema } from '../../kernel/validate';
 import { resultStore, sessionKeyOf } from './result-store';
-import { estimateCost } from './provider';
+import { estimateCost, pricesFor } from './provider';
 import { noteProviderFailure, noteProviderSuccess, isAbortError, TaskStoppedError } from './provider-health';
 import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
@@ -456,6 +456,9 @@ export class AgentRunner {
       // LLM 作为用户只需要知道"系统换了备用路径"，不需要面对 error 500 胡乱思考。
       const providerChain = [provider, ...(opts.fallbackProviders ?? [])];
       let activeProvider: ProviderDef = provider;
+      // D2：本轮**实际调用**的模型（failover 会经 resolveFallbackModel 换模型名，路由也可能
+      // 已把 model 指到别处）——计价与节省成本核算都以它为准，而不是 provider 默认模型。
+      let activeModel = model;
       const step = this.kernel.trace.startStep({
         traceId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
         parentId: opts.parentStepId,
@@ -509,6 +512,7 @@ export class AgentRunner {
           // 原样打过去必然 403/400「无权访问该模型」，整条链耗尽报错。备用链路上
           // 用该 provider 实际可用的模型（models 列表命中 → defaultModel 兜底）。
           const chainModel = pi === 0 ? model : resolveFallbackModel(activeProvider, model);
+          activeModel = chainModel;
           let ok = false;
           for (let attempts = 0; attempts < 2 && !ok; attempts++) {
             if (attempts > 0) {
@@ -593,14 +597,14 @@ export class AgentRunner {
       const tOut = usage?.output ?? 0;
       totalIn += tIn;
       totalOut += tOut;
-      const cost = estimateCost(activeProvider, tIn, tOut);
+      const cost = estimateCost(activeProvider, tIn, tOut, activeModel);
       totalCost += cost;
       // L3 真实命中核算：provider usage 确认的缓存命中 token——前缀缓存命中省的是
       // prefill 输入的钱（DeepSeek 50~120 倍价差 / OpenAI 最高省 90% / Anthropic 1/10 价），
       // 真实命中率 = cachedInput/(cachedInput+missInput)，本地估算不可替代。
       if (usage?.cachedInput != null && usage.cachedInput > 0) {
         this.kernel.cache.recordProviderCacheHit(usage.cachedInput, usage.missInput ?? 0);
-        const saved = (usage.cachedInput / 1_000_000) * (activeProvider.prices?.in ?? 0);
+        const saved = (usage.cachedInput / 1_000_000) * (pricesFor(activeProvider, activeModel).in ?? 0);
         this.kernel.cache.recordSavedCost(saved);
       }
       // 思考预算统计：记录本轮 reasoning 长度并累计（下一轮 LLM 调用前消费）
@@ -763,7 +767,9 @@ export class AgentRunner {
           else signal?.addEventListener('abort', onClientAbort, { once: true });
           try {
             result = await withToolTimeout(
-              tool.handler(toolArgs, { ...tctx, signal: ac.signal }),
+              // policyApproved 透传给 handler（A8）：高危工具在 handler 侧做纵深防御时，
+              // 必须能区分「用户策略规则放行」与「绕过审批门」——前者是合法授权。
+              tool.handler(toolArgs, { ...tctx, policyApproved: toolCtx.policyApproved === true, signal: ac.signal }),
               tool.timeoutMs ?? toolTimeout,
               () => ac.abort(),
             );

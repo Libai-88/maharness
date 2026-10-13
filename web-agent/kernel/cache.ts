@@ -185,6 +185,9 @@ export class Cache {
   private maxL1 = 500;
   private maxL2 = 2000;
   private saveTimer: NodeJS.Timeout | null = null;
+  /** 同一类告警只说一次（B9：向量召回失败 / 维度不一致都属于"配置问题"，
+   *  刷屏没有价值，但完全静默又会让人以为缓存在正常工作） */
+  private readonly warned = new Set<string>();
   private counter: CacheStats = {
     l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
     l3Hits: 0, l3Tokens: 0,
@@ -198,6 +201,13 @@ export class Cache {
     if (cfg.maxL1 !== undefined) this.maxL1 = cfg.maxL1;
     if (cfg.maxL2 !== undefined) this.maxL2 = cfg.maxL2;
     if (persistFile) this.load();
+  }
+
+  /** 同类告警只打印一次 */
+  private warnOnce(kind: string, msg: string): void {
+    if (this.warned.has(kind)) return;
+    this.warned.add(kind);
+    console.warn(msg);
   }
 
   /** 运行时更新缓存参数（配置热更新入口） */
@@ -380,27 +390,56 @@ export class Cache {
       this.counter.l1Misses++;
       return { hit: false };
     }
+    // 动作方向集合：语义匹配与向量匹配都必须过这一关（B5）
+    const qActions = actionGroups(norm);
     if (this.embeddingFn) {
-      const vec = await this.embeddingFn(norm);
-      let best: { key: string; score: number; scope?: string } | null = null;
-      for (const [key, entry] of this.l1) {
-        if (entry.promptKey !== promptKey) continue;
-        if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
-        if (entry.expiresAt < Date.now()) {
-          this.l1.delete(key);
-          continue;
+      // B9 修复①：向量召回失败（未配 key / 401 / 超时）**不得掀翻本轮对话**。
+      // 旧实现既不 try/catch，调用点（agent.ts 的 L1 查询）也不在 try 内，
+      // 一个 embedding HTTP 异常会穿出 run()。现在降级为文本相似度路径。
+      let vec: number[] | null = null;
+      try {
+        vec = await this.embeddingFn(norm);
+      } catch (err) {
+        this.warnOnce('embedding-failed', `[cache] L1 向量召回失败，本轮降级为文本相似度：${err instanceof Error ? err.message : String(err)}`);
+      }
+      if (vec && vec.length) {
+        let best: { key: string; score: number; scope?: string } | null = null;
+        for (const [key, entry] of this.l1) {
+          if (entry.promptKey !== promptKey) continue;
+          if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
+          if (entry.expiresAt < Date.now()) {
+            this.l1.delete(key);
+            continue;
+          }
+          const ev = entry.vector ?? [];
+          if (!ev.length) continue;
+          if (ev.length !== vec.length) {
+            // B9 修复②：换了 embedding 模型后维度不一致，cosine 会算出 NaN →
+            // `NaN >= 阈值` 恒 false，于是**静默永不命中**且毫无告警。显式跳过并告警一次。
+            this.warnOnce('embedding-dim', `[cache] L1 向量维度不一致（查询 ${vec.length} vs 存量 ${ev.length}）：疑似换了 embedding 模型，旧向量已失效，请 clear 语义缓存`);
+            continue;
+          }
+          const score = cosine(vec, ev);
+          if (score > (best?.score ?? 0)) best = { key, score, scope: entry.scope };
         }
-        const score = cosine(vec, entry.vector ?? []);
-        if (score > (best?.score ?? 0)) best = { key, score, scope: entry.scope };
+        if (best && best.score >= L1_THRESHOLD) {
+          const entry = this.l1.get(best.key)!;
+          // B5 修复：向量路径此前**不做动作方向校验**（只有 Dice 路径做），于是
+          // "读文件 A" 与 "写文件 A" 这类语义相反的问答可能互串答案——而 L1 命中会
+          // 直接结束本轮、跳过 LLM 与工具调用，即"要写的东西没写"。方向校验补上。
+          const a1 = new Set(entry.actions);
+          const sameAction = a1.size === qActions.size && [...qActions].every((x) => a1.has(x));
+          if (!sameAction) {
+            this.counter.l1Misses++;
+            return { hit: false };
+          }
+          entry.hits++;
+          this.counter.l1Hits++;
+          return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
+        }
+        this.counter.l1Misses++;
+        return { hit: false };
       }
-      if (best && best.score >= L1_THRESHOLD) {
-        const entry = this.l1.get(best.key)!;
-        entry.hits++;
-        this.counter.l1Hits++;
-        return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
-      }
-      this.counter.l1Misses++;
-      return { hit: false };
     }
     // 自研文本相似度：内容词 bigram Dice（轻量语义归一化——忽略表面措辞，保留内容词）
     // 精确匹配优先：归一化后全等（同句重复提问）直接命中，不走相似度
@@ -420,7 +459,6 @@ export class Cache {
       }
     }
     const qBigrams = bigramSet(contentWords(norm));
-    const qActions = actionGroups(norm);
     let best: { key: string; score: number; scope?: string } | null = null;
     for (const [key, entry] of this.l1) {
       if (entry.promptKey !== promptKey) continue;
