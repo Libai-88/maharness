@@ -49,6 +49,12 @@ OS 管理员、已控制当前 OS 用户的攻击者和物理控制设备者不�
 
 安全回归映射由 `web-agent/scripts/check-threat-model.mjs` 校验：威胁模型中的代码/测试路径必须存在，`test:security` 中的每个测试文件必须在模型中出现。CI 执行 `npm run check:threat-model`；入口维护角色为安全维护者，代码路径或安全测试集合变更时同步复核本文件。
 
+## 复核节奏与集成级验证
+
+- 版本化：安全边界、部署模式、插件执行器、凭据策略或新增暴露入口变更时递增本模型版本，并同步更新入口表、剩余风险表和测试映射。
+- 例行复核：每次发布前核对入口表与剩余风险表；每季度对全部入口做一次控制有效性抽查（跑完整 `npm run test:security`、`npm run check:threat-model` 与主 CI）。
+- 集成级验证：控制措施不只在单元层验证——`server/tests/auth.spec.ts` 覆盖真实 HTTP 请求的凭据决策、来源校验、SSE 配额与审计落库；`server/tests/provider-diagnostics.spec.ts` 覆盖真实聊天链路的审批批准/拒绝与工具执行；`server/tests/ssrf.spec.ts` 与 `core/search/tests/ssrf.spec.ts` 使用真实本地 HTTP connector 验证连接目标固定；UI E2E 覆盖浏览器侧审批批准/拒绝交互。上述全部纳入 GitHub Actions 主 CI 干净 checkout 执行。
+
 ## 已确认的剩余风险
 
 | 风险 | 当前影响 | 发布要求 |
