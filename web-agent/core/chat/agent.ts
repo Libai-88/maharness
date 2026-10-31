@@ -142,6 +142,8 @@ export function annotateToolDef(t: ToolDef): ToolDef {
 
 /** 审批判定（执行器侧，不进 handler）：
  *  - 工具声明 assessApproval → 按本次参数决定（只读命令免审批、写入命令仍拦）
+ *  - risk==='high' → 无条件拦（风险等级是声明式安全边界，不是 UI 标签；
+ *    插件工具漏写 approval 时不因「作者疏忽」跳过审批门）
  *  - 否则 approval===true → 无条件拦
  *  - 判定函数抛异常 → 按需要审批处理（fail-closed）
  *  导出供单测。 */
@@ -155,6 +157,7 @@ export function assessToolApproval(tool: ToolDef, args: unknown, tctx: ToolConte
       return { needsApproval: true, reason: `审批判定异常（按需审批处理）: ${err instanceof Error ? err.message : String(err)}` };
     }
   }
+  if (tool.risk === 'high') return { needsApproval: true, reason: `工具 ${tool.name} 风险等级 high，需要用户审批` };
   return tool.approval
     ? { needsApproval: true, reason: `工具 ${tool.name} 声明需要用户审批` }
     : { needsApproval: false, reason: '' };

@@ -116,6 +116,47 @@ describe('ApprovalBoard 共享注册表', () => {
 // ---------- AgentRunner 审批可达性 ----------
 
 describe('AgentRunner 审批（共享 board）', () => {
+  test('risk=high 但漏写 approval 的工具仍被审批门拦截', async () => {
+    let handledWithApproval: boolean | null = null;
+    const tool: ToolDef = {
+      name: 'high_risk_no_approval',
+      description: '高风险但漏写 approval 的工具',
+      parameters: { type: 'object', properties: {} },
+      risk: 'high',
+      async handler(_args, tctx) {
+        handledWithApproval = tctx.approved ?? false;
+        return { ok: true, data: { ok: true } };
+      },
+    };
+    const calls = { n: 0 };
+    const provider = scriptedProvider([
+      async function* (): AsyncIterable<LLMChunk> {
+        yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'high_risk_no_approval', arguments: '{}' } } };
+      },
+      doneStream,
+    ], calls);
+
+    const kernel = kernelStub(process.cwd(), 5000);
+    const child = new AgentRunner(kernel, bus, new ApprovalBoard(60));
+
+    const events: string[] = [];
+    const keepAlive = setInterval(() => {}, 1000);
+    try {
+      for await (const ev of child.run({
+        provider, model: 'm',
+        messages: [{ role: 'user', content: '帮我做件事' }],
+        tools: [tool], traceId: 't-risk', sessionId: 's-risk', maxTurns: 3,
+      })) {
+        events.push(ev.type);
+      }
+    } finally {
+      clearInterval(keepAlive);
+    }
+
+    assert.ok(events.includes('approval_required'), '高风险工具应触发 approval_required');
+    assert.equal(handledWithApproval, null, '未批准前 handler 不应执行');
+  });
+
   test('未批准前 handler 被执行器拦截；审批超时自动拒绝后任务继续', async () => {
     let handledWithApproval: boolean | null = null;
     const tool: ToolDef = {
