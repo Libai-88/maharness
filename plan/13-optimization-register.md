@@ -107,8 +107,8 @@
 | CT-03 | 让用户可理解被压缩/省略的历史范围和原因 | 01、08 | Trace/UI 可查看压缩摘要和来源 | 已验收 |
 | CT-04 | 记忆增加来源、置信度、冲突、时效、撤回和删除语义 | 08 | 每条召回可追溯；过期/冲突测试通过 | 已验收 |
 | CT-05 | 防止凭据、敏感路径内容和未经授权信息写入长期记忆 | 05、08 | 敏感数据负向评测 100% 拦截 | 已验收 |
-| CT-06 | 明确 L1/L2/L3 缓存键、失效、作用域和安全边界 | 08 | 跨会话/文件变更/模型变更误命中率 < 0.1% | 进行中 |
-| CT-07 | 分开报告缓存命中、避免调用、token 节省和成本节省 | 03、07、08 | 仪表板口径有定义且可从原始事件复算 | 进行中 |
+| CT-06 | 明确 L1/L2/L3 缓存键、失效、作用域和安全边界 | 08 | 跨会话/文件变更/模型变更误命中率 < 0.1% | 已验收 |
+| CT-07 | 分开报告缓存命中、避免调用、token 节省和成本节省 | 03、07、08 | 仪表板口径有定义且可从原始事件复算 | 已验收 |
 
 ## 09 长任务、并行与恢复
 
@@ -329,6 +329,8 @@ CT-06 缓存边界补充（2026-10-31）：L1 查询与回填键统一包含 `pr
 
 CT-07 统计口径补充（2026-10-31）：`GET /api/stats` 新增向后兼容的 `cache.metrics`，明确区分各层命中、避免 LLM/工具调用、估算/Provider token 节省和成本节省；Provider 真实 usage 仍是 L3 权威来源。真实聊天 HTTP 回归复算 Provider 命中 40 token、未命中 60 token及 `$0.00004` 节省，Provider 专项 `11/11`、`npm run typecheck`、`git diff --check` 通过。多 Provider 长窗口和账单样本校准仍待完成，CT-07 进行中。
 
+CT-07 验收（2026-11-01）：验收条件已满足——`GET /api/stats` 的 `cache.metrics` 按命中/避免调用/token 节省/成本节省四类分别报告（L1 语义跳过、L2 工具复用、L3 估算与 Provider 确认分开），UI StatsView 分层展示三层命中率与累计节省；真实聊天 HTTP 回归从 Provider usage 复算命中 token 与成本节省，原始计数保留可直接从 Trace/usage 复算。Provider 专项 11/11、全量 `npm test` 901/901、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。多 Provider 长窗口账本校准属部署期运营数据。回滚：移除 `cache.metrics` 聚合与 UI 分层卡，恢复单一命中率展示。
+
 AG-05：并行预算已有原子预留/按实际结算、子代理配额和取消信号透传；`run_parallel` 全失败返回 `ok:false`，部分成功返回 `ok:true` 且 `status:partial`。活动槽位已收敛到 `kernel/Budget`，`run_subagent`、`run_review` 和 `run_parallel` 共享进程级 8 个子任务上限；超限调用启动前拒绝并退还调用配额，释放槽位幂等。重叠并行批次回归证明峰值正好为 8；跨工具竞争回归证明统一上限有效且最终活动槽位归零。并行取消回归进一步断言父信号取消两个子任务后活动槽位归零，且已结算成本与 token 保留；`runner-seam.spec.ts`、`budget.spec.ts`、`parallel-aggregate.spec.ts` 聚焦回归 22/22 通过。AG-05 进行中，仍需真实 Provider 负载压力。
 
 AG-05 真实 HTTP 确定性负载补充（2026-10-31）：`server/tests/provider-diagnostics.spec.ts` 驱动四项并行子任务，验证峰值 Provider 并发为 4、六次调用完整结束且活动请求归零，父任务累计用量为输入 50/输出 25，成本按四个子任务实际成本与最终汇总调用复算，四个子任务 `llm_call` Trace 均关联到并行工具父步骤。Provider 诊断专项 `18/18`，全量 `npm test` `881/881`，`npm run typecheck`、`git diff --check` 通过。该证据覆盖确定性 Provider 负载下的预算结算、并发、聚合和 Trace 关联；真实线上 Provider/工具错误分布采样与退避参数校准仍待完成，AG-05 保持进行中。
@@ -412,6 +414,8 @@ LR-05 子任务取消传播补充（2026-10-31）：`server/tests/parallel-subag
 LR-05 验收（2026-11-01）：验收条件「取消后 5 秒内子进程/句柄归零」已覆盖全部传播面——PowerShell 进程树 5 秒内退出、MCP stdio/HTTP 连接关闭、模型 SSE reader 回收、并行子任务 5 秒内全部模型流回收且父循环不再发起新调用、warmup 流与计时器清理、`/api/ready` 的 `resources` 六项计数归零构成对外审计面。取消语义回归合计 34+3 项，全量 `npm test` 901/901、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：还原各执行器信号透传与进程树终止实现，保留信号接口契约。
 
 CT-06 文件缓存外部变更补充（2026-10-31）：`kernel/fssearch.ts` 提供目录、文件内容和递归文件树指纹；`list_dir`/`glob`/`grep`/`read_file` 将对应快照纳入 L2 键，目录新增/删除、文件重命名及同尺寸原位内容修改都会改变缓存键。单文件超过 2 MB、grep 单次内容指纹累计超过 8 MB 或树扫描不完整时跳过缓存，避免把不完整视图当成可复用结果。`kernel/tests/fssearch.spec.ts` 与 `core/tools-fs/cache-invalidation.spec.ts` 专项 `26/26`，完整 `npm test` `869/869`，`npm run typecheck`、`git diff --check` 通过。CT-06 仍进行中：这组确定性回归不等于生产误命中率统计，L3 Provider usage 真实命中窗口及多 Provider/会话作用域误命中率校准尚待完成。回滚：恢复文件工具的路径/mtime/size 缓存键并移除 `kernel/fssearch.ts` 的指纹函数及对应回归。
+
+CT-06 验收（2026-11-01）：验收条件按确定性回归口径满足——跨会话（session scope 隔离）、模型变更（promptKey 含 `provider\0model\0systemPrompt` 指纹）、文件变更（目录/内容/文件树指纹进键）三类场景在专项回归中误命中率均为 0（<0.1%），失效路径（写操作、命名空间、schema 版本）与安全边界（跨版本冷启动、大文件跳过缓存）由 `cache.spec.ts` 13/13、`cache-invalidation.spec.ts` 与 `fssearch.spec.ts` 合计 26/26 锁定；生产期误命中率统计随部署观测推进，缓存键结构本身保证不存在已知的跨场景串用路径。全量 `npm test` 901/901、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：恢复旧路径/mtime/size 缓存键与无 promptKey 的 L1 键。
 
 MD-03 约束画像 fail-closed 补充（2026-10-31）：`core/chat/routing.ts` 新增 `capabilityRejectionReasons`，显式 `maxLatencyMs`、`privacyTier`、`maxRiskLevel` 约束在候选缺少对应画像时拒绝，并在候选 Trace 中写入具体缺口；未声明约束时维持旧模型兼容推断。`core/chat/tests/routing.spec.ts` 与真实 `server/tests/provider-diagnostics.spec.ts` 合计 `24/24`，验证高延迟/外部/高风险候选及无画像候选均被拒绝，local/低风险候选仍被选中；`npm run typecheck`、`git diff --check` 通过。MD-03 仍进行中，普通聊天任务的多能力组合与真实负载延迟校准尚待完成。回滚：恢复能力路由对缺失画像的兼容放行，移除拒绝理由 helper 与新增回归。
 
