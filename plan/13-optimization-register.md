@@ -36,7 +36,7 @@
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
 | OB-01 | 统一 run/step/tool/provider/plugin 的因果 ID 和重试序号 | 03 | 父子链完整率 100%，事件 schema 测试通过 | 已验收 |
-| OB-02 | 补齐耗时、token、成本、缓存、审批、错误和结果摘要 | 03、07、08 | Trace 字段与实际模型调用/工具结果交叉核对 | 进行中 |
+| OB-02 | 补齐耗时、token、成本、缓存、审批、错误和结果摘要 | 03、07、08 | Trace 字段与实际模型调用/工具结果交叉核对 | 已验收 |
 | OB-03 | 提供按会话、run、时间、插件、错误筛选的分页查询 | 03 | 10 万事件查询 P95 < 500ms；不整文件同步读取 | 已验收 |
 | OB-04 | 增加可审计的事件详情与参数脱敏 | 03、05 | 密钥/凭据不落入 trace；授权审计信息可定位 | 已验收 |
 | OB-05 | 增加安全重放和步骤级差异比较 | 03、04 | 桩模式复现 golden；真实副作用默认不执行 | 已验收 |
@@ -395,7 +395,9 @@ CT-06 文件缓存外部变更补充（2026-10-31）：`kernel/fssearch.ts` 提�
 
 MD-03 约束画像 fail-closed 补充（2026-10-31）：`core/chat/routing.ts` 新增 `capabilityRejectionReasons`，显式 `maxLatencyMs`、`privacyTier`、`maxRiskLevel` 约束在候选缺少对应画像时拒绝，并在候选 Trace 中写入具体缺口；未声明约束时维持旧模型兼容推断。`core/chat/tests/routing.spec.ts` 与真实 `server/tests/provider-diagnostics.spec.ts` 合计 `24/24`，验证高延迟/外部/高风险候选及无画像候选均被拒绝，local/低风险候选仍被选中；`npm run typecheck`、`git diff --check` 通过。MD-03 仍进行中，普通聊天任务的多能力组合与真实负载延迟校准尚待完成。回滚：恢复能力路由对缺失画像的兼容放行，移除拒绝理由 helper 与新增回归。
 
-OB-02 交叉验收证据补充（2026-10-31）：Trace 已完整记录模型耗时、输入/输出/缓存 token、按实际模型价格计算的成本、L2/L3 缓存层、审批等待与批准/拒绝终态、错误分类/稳定码/重试决定及工具结果摘要。`server/tests/provider-diagnostics.spec.ts` 真实 HTTP 回归覆盖瞬时错误重试、参数错误停止、审批批准/拒绝、工具结果和同一未变文件二次读取的 L2 命中；Provider 诊断专项 `16/16`，全量 `npm test` `879/879`，`npm run typecheck`、`git diff --check` 通过。交叉验收证据已齐，登记状态保持进行中，待形成并关联 OB-02 实现提交后关闭。回滚：恢复 `server/tests/provider-diagnostics.spec.ts` 的单次文件读取与原有断言，并移除本轮 Trace 交叉回归；保留已存在的 Trace 字段兼容读取。
+OB-02 交叉验收证据补充（2026-10-31）：Trace 已完整记录模型耗时、输入/输出/缓存 token、按实际模型价格计算的成本、L2/L3 缓存层、审批等待与批准/拒绝终态、错误分类/稳定码/重试决定及工具结果摘要。`server/tests/provider-diagnostics.spec.ts` 真实 HTTP 回归覆盖瞬时错误重试、参数错误停止、审批批准/拒绝、工具结果和同一未变文件二次读取的 L2 命中；Provider 诊断专项 `16/16`，全量 `npm test` `879/879`，`npm run typecheck`、`git diff --check` 通过。回滚：恢复 `server/tests/provider-diagnostics.spec.ts` 的单次文件读取与原有断言，并移除本轮 Trace 交叉回归；保留已存在的 Trace 字段兼容读取。
+
+OB-02 验收（2026-11-01）：交叉验收证据与实现提交（`0c40c86`）关联后关闭。Trace 字段与实际模型调用/工具结果的全路径交叉核对齐备：`llm_call` 核对实际 Provider/model、耗时、输入/输出/缓存 token 与按实际价格复算的成本；`tool_call` 核对两次读取的终态、结果摘要、耗时与二次读取的唯一 `cache_hit`（L2）；`retry-policy` 核对错误分类、稳定码与重试/停止决定；审批批准/拒绝/过期凭据路径核对凭据下发、执行/阻断与同一 Trace 关联；参数错误与预算耗尽路径核对错误终态字段。Provider 诊断专项 `21/21`，全量 `npm test` `900/900`、`npm run eval:ci` `27/27`、`npm run typecheck` 通过。OB-02 已验收。
 
 UX-02 验收（2026-10-31）：`ui/e2e/main-flows.spec.ts` 新增「全流程状态链」场景，以 SSE/REST mock 锁定目标条、审批卡、结果终态、阻塞终态与恢复入口的完整链路：plan mock 内容渲染到目标条，`approval_required` 帧唤起审批卡且 `POST /api/approvals` 携带一次性凭据，`done` 帧落为结果终态，`error` 帧落为阻塞终态并在 `.wx-failure` title 保留原始错误，`sess-banner.resume` 发出带会话凭据的恢复请求。`ui/e2e/sse-reconnect.spec.ts` 的审计统计改为按页面加载时间戳过滤 `occurredAt`，消除共享 e2e 数据目录中历史事件挤占 `limit=500` 窗口导致的偶发失败。验证：主流程专项 `5/5`、UI E2E 全量 `29/29`、`npm run ui:typecheck`、`npm run typecheck`、`git diff --check` 通过。回滚：删除 `ui/e2e/main-flows.spec.ts` 中的 UX-02 场景，并恢复 `sse-reconnect.spec.ts` 的无条件审计计数。
 

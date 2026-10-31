@@ -25,7 +25,7 @@ Trace 是可查询、可关联、可重放的调试器，不只是日志列表�
 - 验证：`web-agent/ui` 目录 `npm run e2e` 14/14、`npm run typecheck` 和 `npm run build` 通过。
 - 已补齐：Trace 步骤 ID 使用进程前缀与单调序号，步骤统一携带兼容性的 `attempt`（首次为 0，重试/failover 递增），旧 JSONL 缺省字段按 0 读取；Trace 与 Provider 重试专项回归 16/16。
 
-- 已补齐真实调用交叉证据：HTTP 聊天 run 的 `llm_call` Trace 可核对实际 Provider/model、耗时、输入/输出 token、Provider 回报的缓存命中 token及按实际模型价格计算的成本；同一 run 的 `retry-policy` Trace 保留错误分类和重试决定，参数错误路径保留停止重试与稳定错误码；另一个 HTTP run 真实执行 `read_file` 两次，`tool_call` Trace 保留两次工具终态、结果摘要与耗时，第二次读取产生唯一 `cache_hit` 且 `cacheLayer=L2`；审批批准、拒绝与过期凭据路径验证凭据下发、工具执行/阻断及同一 Trace 关联。OB-02 交叉验收证据已齐，Provider 诊断专项 `16/16`、全量 `npm test` `879/879`、类型检查与 diff 检查通过；登记状态待关联实现提交后关闭。
+- 已补齐真实调用交叉证据：HTTP 聊天 run 的 `llm_call` Trace 可核对实际 Provider/model、耗时、输入/输出 token、Provider 回报的缓存命中 token及按实际模型价格计算的成本；同一 run 的 `retry-policy` Trace 保留错误分类和重试决定，参数错误路径保留停止重试与稳定错误码；另一个 HTTP run 真实执行 `read_file` 两次，`tool_call` Trace 保留两次工具终态、结果摘要与耗时，第二次读取产生唯一 `cache_hit` 且 `cacheLayer=L2`；审批批准、拒绝与过期凭据路径验证凭据下发、工具执行/阻断及同一 Trace 关联。OB-02 交叉验收证据已齐，Provider 诊断专项 `21/21`、全量 `npm test` `900/900`、类型检查与 diff 检查通过。
 
 - 审批过期路径已收口：`server/routes/approvals.ts` 只有一次性凭据验证结果为 `ok` 才允许进入执行器，过期凭据在宽松模式下也被拒绝；`server/tests/auth.spec.ts` 认证专项 28/28 验证凭据过期、错误和重放语义。
 
@@ -40,8 +40,9 @@ Trace 是可查询、可关联、可重放的调试器，不只是日志列表�
 - 已补齐 Trace 入口兜底：`kernel/trace.ts` 对插件/扩展误传的空 `traceId` 自动生成 `unscoped` 可查询 run，避免任何落盘事件绕过 schema；Trace 回归验证该事件可查询且严格完整图校验通过。
 - 已补齐 Trace 可选字段 schema：`validateTraceSteps` 现在校验会话/插件与摘要字符串、结束时间和耗时、token/成本非负范围、缓存层、错误分类、重试字段等运行时类型；非法字段回归已覆盖。
 - 已补齐旧归档兼容：JSONL 尾部读取和索引随机读取统一把历史缺失的 `attempt` 补为 `0`，旧事件经过当前 schema 校验仍可被查询和导出。
-- 仍待完成：跨 run/provider/plugin 的生产事件全量 schema 校验、安全重放、长 run 大事件量 UI 性能、错误定位与服务端集成验收。
+- 仍待完成：跨 run/provider/plugin 的生产事件全量 schema 校验、长 run 大事件量 UI 性能、错误定位与服务端集成验收。
 - Trace UI 时间线已收口：有子步骤的根步骤可折叠/展开（折叠隐藏整棵子树）；类型筛选切换为平铺视图，被筛掉的父步骤不再吞掉子树；孤儿兜底在平铺模式下不重复渲染。E2E 覆盖 span 树父子展开、错误定位、类型筛选平铺计数与 200 步大事件量双向滚动。验证：轨迹专项 4/4、UI E2E 24/24、全量 `npm test` 898/898、双端 typecheck 与 `git diff --check` 通过。
+- OB-02 验收（2026-11-01）：实现提交 `0c40c86` 关联完成。验证：Provider 诊断专项 21/21、全量 `npm test` 900/900、`npm run eval:ci` 27/27、`npm run typecheck` 通过。回滚方式见登记册。
 
 ## 范围
 
