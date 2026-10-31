@@ -116,7 +116,7 @@
 
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
-| LR-01 | 建立版本化持久化任务状态机与 checkpoint | 09、10 | 进程强杀后从最近有效点恢复 | 进行中 |
+| LR-01 | 建立版本化持久化任务状态机与 checkpoint | 09、10 | 进程强杀后从最近有效点恢复 | 已验收 |
 | LR-02 | 对长任务支持暂停、取消、继续、交接和过期清理 | 01、09 | 每个转移有状态测试和 UI E2E | 待执行 |
 | LR-03 | 以幂等键和副作用记录保证重复恢复不重复执行 | 02、09 | 重放文件/HTTP/子进程任务无重复副作用 | 已验收 |
 | LR-04 | 建立子任务并发上限、预算预留、局部结果与失败聚合 | 02、09 | 并发压力测试满足预算和资源上限 | 进行中 |
@@ -338,6 +338,8 @@ LR-04 压力回归补充（2026-10-31）：`kernel/tests/budget.spec.ts` 新增 
 LR-01 checkpoint 版本补充（2026-10-31）：断点 payload 显式写入 `schemaVersion: 1`，读取返回版本；旧版直接消息数组保留兼容标记 `0`，缺省版本对象按 v1 读取，未知版本 fail-closed 并清理断点。`server/tests/db.spec.ts` 专项 `16/16`、`npm run typecheck`、`npm run ui:typecheck`、`git diff --check` 通过。进程强杀后的真实恢复演练仍待完成。
 
 LR-01 进程强杀恢复补充（2026-10-31）：新增 `server/tests/process-recovery.spec.ts` 及 `server/tests/fixtures/process-recovery-child.ts`。真实服务子进程在临时 `AGENT_DATA_DIR` 写入 checkpoint、任务契约、run id、工具验收结果和已完成副作用账本后被强制终止；第二个真实服务子进程使用同一数据目录启动，先确认已完成账本保持 `done`，再通过真实 `/api/sessions/:id/chat`（`resume:true`）完成 SSE 恢复，确认 checkpoint 清除且副作用未重复认领。专项 `1/1`、`npm run typecheck`、`git diff --check` 通过。LR-01 的服务级强杀恢复验收已覆盖；登记项仍保持进行中，剩余网络断开、Provider 故障和并行任务等更广泛故障演练证据。
+
+LR-01 验收（2026-11-01）：验收条件「进程强杀后从最近有效点恢复」已由真实子进程强杀演练满足——`process-recovery.spec.ts` 强杀服务子进程后以同一数据目录重启，checkpoint 版本化（schemaVersion 1/旧格式兼容/未知版本 fail-closed）、副作用账本不重复认领、`resume:true` SSE 恢复且断点清除，任务契约与验收结果跨进程保留。登记条件全满足；网络断开/Provider 故障/并行任务演练属故障注入面扩展，由 AG-04（故障分布）与 LR-04（并行恢复）承接。全量 `npm test` 901/901、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：恢复旧版无 schemaVersion checkpoint 格式并移除强杀演练。
 
 AG-06：任务只有通过结构化验收条件才发出 `task_verified`；事件为每项检查提供结果与 Trace step ID。服务端将验收状态、检查及证据持久化到 assistant 消息，消息气泡在答复旁展示逐项结果和 Trace 引用。`server/tests/db.spec.ts` 覆盖 Store 重开后的证据恢复；`ui/e2e/bubble-menu.spec.ts` 覆盖完成答复、全部检查和 Trace 引用的同消息展示。专用 Playwright 用例及全量 `npm run e2e` 12/12 通过，`npm run ui:typecheck` 通过；AG-06 已验收。
 
