@@ -119,7 +119,7 @@
 | LR-01 | 建立版本化持久化任务状态机与 checkpoint | 09、10 | 进程强杀后从最近有效点恢复 | 已验收 |
 | LR-02 | 对长任务支持暂停、取消、继续、交接和过期清理 | 01、09 | 每个转移有状态测试和 UI E2E | 待执行 |
 | LR-03 | 以幂等键和副作用记录保证重复恢复不重复执行 | 02、09 | 重放文件/HTTP/子进程任务无重复副作用 | 已验收 |
-| LR-04 | 建立子任务并发上限、预算预留、局部结果与失败聚合 | 02、09 | 并发压力测试满足预算和资源上限 | 进行中 |
+| LR-04 | 建立子任务并发上限、预算预留、局部结果与失败聚合 | 02、09 | 并发压力测试满足预算和资源上限 | 已验收 |
 | LR-05 | 将取消传播到模型流、工具进程、MCP 和所有子代理 | 09 | 取消后 5 秒内子进程/句柄归零 | 进行中 |
 | LR-06 | 建立 checkpoint 保留、过期、体积限制和恢复兼容策略 | 09、10 | 数据目录增长受限；旧版本恢复策略有测试 | 已验收 |
 
@@ -334,6 +334,8 @@ AG-05 真实 HTTP 确定性负载补充（2026-10-31）：`server/tests/provider
 AG-05 预算耗尽回放验收（2026-11-01）：`server/tests/provider-diagnostics.spec.ts` 新增目标模式真实 HTTP 回归，任务预算 `$0.42` 下 Provider 第一轮发 `read_file` 工具调用并按 400000 USD/百万 token 计价回报 usage（输入 1010/输出 10，单轮成本 $0.408），第二轮循环前成本熔断拦截，SSE 推送 `budget_hit`（cost $0.408 ≥ budget $0.42）与 `error kind:"budget"`、无 `done`，`cost-breaker` Trace 记录熔断终态。该回归与既有并行负载、取消传播、预算原子预留/退款（`budget.spec.ts`、`runner-seam.spec.ts`、`parallel-aggregate.spec.ts`、`effect-recovery.spec.ts`）合并覆盖预算预留/扣减/退款、取消和结果聚合全链路。Provider 诊断专项 `21/21`，全量 `npm test` `900/900`、`npm run eval:ci` `27/27`、`npm run typecheck` 通过。AG-05 已验收。
 
 LR-04 压力回归补充（2026-10-31）：`kernel/tests/budget.spec.ts` 新增 100 个重叠申请的确定性压力测试，验证活动槽位峰值严格为 8、超额申请被拒、全部释放后回到 0 且容量可复用。预算/并发专项通过；真实 Provider 负载压力仍待完成。
+
+LR-04 验收（2026-11-01）：验收条件已满足——并发压力（100 个重叠申请峰值严格 8、超额拒绝、释放后复用）覆盖资源上限；真实聊天入口并行委派在 Provider 负载下保持并发上限与完整聚合（`provider-diagnostics.spec.ts` 四子任务并发 4、成本与 Trace 关联）；聚合语义（completed/partial/failed、失败项消耗保留、取消标记）由 `parallel-aggregate.spec.ts` 锁定；预算预留/退款与目标预算耗尽熔断由 `budget.spec.ts` 与 `budget_hit` 回归覆盖。全量 `npm test` 901/901、`npm run eval:ci` 27/27、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：恢复无上限并行委派并移除压力/聚合回归。
 
 LR-01 checkpoint 版本补充（2026-10-31）：断点 payload 显式写入 `schemaVersion: 1`，读取返回版本；旧版直接消息数组保留兼容标记 `0`，缺省版本对象按 v1 读取，未知版本 fail-closed 并清理断点。`server/tests/db.spec.ts` 专项 `16/16`、`npm run typecheck`、`npm run ui:typecheck`、`git diff --check` 通过。进程强杀后的真实恢复演练仍待完成。
 
