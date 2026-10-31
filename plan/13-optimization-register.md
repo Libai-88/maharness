@@ -102,7 +102,7 @@
 
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
-| CT-01 | 建立分项 token 预算和 tokenizer/provider 适配 | 08、07 | 预算分项可复算；超限行为确定 | 进行中 |
+| CT-01 | 建立分项 token 预算和 tokenizer/provider 适配 | 08、07 | 预算分项可复算；超限行为确定 | 已验收 |
 | CT-02 | 对压缩结果执行 system、工具和任务约束完整性校验 | 08、02 | 长上下文回归中关键约束保留率 100% | 进行中 |
 | CT-03 | 让用户可理解被压缩/省略的历史范围和原因 | 01、08 | Trace/UI 可查看压缩摘要和来源 | 已验收 |
 | CT-04 | 记忆增加来源、置信度、冲突、时效、撤回和删除语义 | 08 | 每条召回可追溯；过期/冲突测试通过 | 已验收 |
@@ -304,6 +304,8 @@ OB-02 审批过期补充（2026-10-30）：修正 `server/routes/approvals.ts` �
 CT-01 分项预算补充（2026-10-30）：新增 `kernel/tokens.ts` 的 `allocateTokenBudget` 和可选 `TokenizerAdapter`，将总预算拆为 `system`、`task`、`history`、`tools`、`memory`、`output` 六项；Provider 缺少原生 tokenizer 时回退确定性估算器。`core/chat/compact.ts` 的压缩与兼容截断会扣除 output 保留区，并按 Provider tokenizer 计算消息量后再判断上下文是否超限。`kernel/tests/tokens.spec.ts` 与 `core/chat/tests/compact.spec.ts` 合计 `10/10`，`npm run typecheck`、`git diff --check` 通过。真实 Provider tokenizer 实现、system/task/tools/memory 分项的运行时细化和真实超限指标仍待完成。
 
 CT-01 AgentRunner 预算口径补充（2026-10-30）：`core/chat/agent.ts` 的预检查与 `compactHistory` 统一使用 `allocateTokenBudget(ctxMaxTokens).output` 扣除 output 保留区后的 context budget，避免预检查放行而压缩路径提前截断。`core/chat/tests/compact.spec.ts` 与 `kernel/tests/task-completion.spec.ts` 合计 `15/15`，`npm run typecheck`、`git diff --check` 通过。真实 Provider tokenizer、运行时分项指标和超限指标校准仍待完成。
+
+CT-01 验收（2026-11-01）：`allocateTokenBudget` 按固定比例拆分 system/task/history/tools/memory/output 六项，百分比只定义保留区、剩余额度归 history，分项之和恒等于 total（可复算）；Provider 原生 `TokenizerAdapter` 缺失时回退确定性估算器，压缩与兼容截断按 Provider tokenizer 计量后统一走 `truncate` 兜底——超限行为确定（先摘要、失败降级截断、保留约束逐字校验 fail-closed）。`kernel/tests/tokens.spec.ts`、`core/chat/tests/compact.spec.ts`、`kernel/tests/task-completion.spec.ts` 覆盖分项、压缩边界与长上下文端到端；全量 `npm test` 901/901、`npm run eval:ci` 27/27、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：恢复旧 `maxTokens - output` 单项口径并移除分项回归。
 
 CT-02 工具契约补充（2026-10-30）：`core/chat/compact.ts` 新增 `contextBoundaryPreservesTools`，压缩切点会自动回退，避免 assistant `tool_calls` 与对应 `tool_call_id` 回执分置两侧；既有头部 system 保留逻辑继续生效。`core/chat/tests/compact.spec.ts` 新增工具调用边界回归，定向套件 `9/9`、`npm run typecheck`、`git diff --check` 通过。任务验收条件与压缩后完整约束校验仍待接入。
 
