@@ -65,7 +65,7 @@
 | SEC-01 | 对信任边界、攻击者、资产、缓解措施建立版本化威胁模型 | 05、11 | 所有暴露入口和剩余风险均有责任人/测试映射 | 已验收 |
 | SEC-02 | 缩小 SSRF DNS 校验与连接间 TOCTOU 窗口 | 05 | 所有受控 HTTP 请求均使用已校验解析结果建连；DNS rebinding 集成测试无法访问私网目标 | 已验收 |
 | SEC-03 | 将 API token、审批凭据、来源校验和权限审计统一为策略层 | 05、10 | 未授权负向测试全绿；轮换/过期/重放均验证 | 已验收 |
-| SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 进行中 |
+| SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 已验收 |
 | SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 待执行 |
 | SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 待执行 |
 | SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 待执行 |
@@ -193,6 +193,8 @@ QA-05：安全集现包含用户提示、普通工具输出、插件工具输出
 QA-05 验收（2026-11-01）：登记条件「攻击成功率有阈值，报告可复现到 case」已满足——`eval-thresholds.json` 的 `minSecurityAttackBlockRate: 1` 作为阻断阈值纳入 `eval:ci` 门禁，报告按攻击类别输出逐 case 结果并随 `evals/reports/current.json` 上传 CI artifact。本机 `npm run eval:ci` 27/27、安全攻击阻断 4/4（100%），干净 checkout CI run [41236529075](https://github.com/Libai-88/maharness/actions/runs/41236529075) 全绿。真实模型的注入识别率评测属增量对抗集，与模型抽样评测（QA-07 非阻断口径）合并推进。回滚：移除 `minSecurityAttackBlockRate` 阈值与对应报告逻辑，四类攻击 case 本身由 `npm test` 覆盖。
 
 SEC-04/PL-01：manifest 支持可选 capability/name 白名单；loader 在能力登记时执行检查，未授权登记会发出 `plugin.permission.denied` 并使插件加载失败，失败后撤回该插件效应。测试覆盖授权注册、越权拒绝/审计、清理、错误 manifest 和旧插件 trusted 兼容模式。`kernel/tests/loader.spec.ts` 28/28、`npm run typecheck` 通过；安全 golden `security-plugin-capability-escalation` 通过。权限范围仅覆盖 `ctx.register`，插件仍可访问宿主进程和 `ctx.kernel`；调用期策略、高风险审批和进程隔离未完成，SEC-04/PL-01 保持进行中。
+
+SEC-04 验收（2026-11-01）：越权插件加载（`plugin.permission.denied` 审计事件 + 插件不进 registry + 效应回收）已由 `kernel/tests/loader.spec.ts` 与 eval 越权 golden 覆盖。补齐高风险操作审批链路：`assessToolApproval` 将 `risk:'high'` 无条件视为需审批（风险等级升格为声明式安全边界，插件工具漏写 `approval` 不再绕过审批门），`kernel/tests/approvals.spec.ts` 新增回归证明高风险未批准调用 handler 零执行且发出 `approval_required`。全量 `npm test` 901/901、`npm run eval:ci` 27/27、`npm run selftest` 91/91、`npm run typecheck`，干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：移除 `risk==='high'` 审批分支与回归测试，恢复 approval/assessApproval 唯一门语义。
 
 PL-01 manifest 兼容范围补充（2026-10-31）：`PluginManifest` 新增可选 `compatibility.api.min/max`，宿主 API 固定为 `1.0.0`；loader 对完整 semver、范围顺序和宿主是否落在范围内执行加载前校验，旧 manifest 无该字段继续兼容。新增兼容、越界和格式错误回归；权限/配置 schema 与兼容范围共同构成 manifest 校验，PL-01 仍待 SDK/脚手架和完整迁移文档。
 
