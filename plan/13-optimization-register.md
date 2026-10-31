@@ -103,7 +103,7 @@
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
 | CT-01 | 建立分项 token 预算和 tokenizer/provider 适配 | 08、07 | 预算分项可复算；超限行为确定 | 已验收 |
-| CT-02 | 对压缩结果执行 system、工具和任务约束完整性校验 | 08、02 | 长上下文回归中关键约束保留率 100% | 进行中 |
+| CT-02 | 对压缩结果执行 system、工具和任务约束完整性校验 | 08、02 | 长上下文回归中关键约束保留率 100% | 已验收 |
 | CT-03 | 让用户可理解被压缩/省略的历史范围和原因 | 01、08 | Trace/UI 可查看压缩摘要和来源 | 已验收 |
 | CT-04 | 记忆增加来源、置信度、冲突、时效、撤回和删除语义 | 08 | 每条召回可追溯；过期/冲突测试通过 | 已验收 |
 | CT-05 | 防止凭据、敏感路径内容和未经授权信息写入长期记忆 | 05、08 | 敏感数据负向评测 100% 拦截 | 已验收 |
@@ -312,6 +312,8 @@ CT-02 工具契约补充（2026-10-30）：`core/chat/compact.ts` 新增 `contex
 CT-02 约束完整性补充（2026-10-30）：`core/chat/compact.ts` 新增 `contextIntegrityPreservesConstraints`，对 `【任务约束】`、`【验收条件】`、`【核心记忆块】`、`【长期记忆】` 和 `【失败教训】` 消息执行逐字保留校验；压缩切点跳过受保护消息，压缩结果校验失败时降级截断。`core/chat/tests/compact.spec.ts` 新增任务/验收/记忆约束保留与 fail-closed 回归；全量测试 `802/802`、`npm run typecheck`、`git diff --check` 通过。长上下文中真实任务契约与记忆注入的端到端覆盖仍待补齐。
 
 CT-02 长上下文端到端补充（2026-10-31）：`kernel/tests/task-completion.spec.ts` 新增长任务 AgentRunner 回归，真实触发 `compactHistory` 摘要调用后再发送任务请求，断言 `【任务约束】`、`【验收条件】` 和 `【长期记忆】` 逐字保留，并继续通过 `task_verified`/`assistant_done`。上下文与任务完成专项 `19/19`、`npm run typecheck`、`git diff --check` 通过；压缩后的真实 Provider 超限率和更多工具回执组合仍待校准，CT-02 进行中。
+
+CT-02 验收（2026-11-01）：验收条件「长上下文回归中关键约束保留率 100%」已满足——压缩切点工具回执配对校验（`contextBoundaryPreservesTools`）、受保护消息逐字保留校验（任务约束/验收条件/核心记忆/长期记忆/失败教训，`contextIntegrityPreservesConstraints`）与长上下文端到端 AgentRunner 回归（真实摘要压缩后逐字断言并保持 `task_verified`）三层覆盖；校验失败 fail-closed 降级截断。定向回归 `19/19`、全量 `npm test` 901/901、`npm run eval:ci` 27/27、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：移除两个校验函数与长上下文回归，恢复压缩后不校验直接提交。
 
 OB-03 归档维度补充（2026-10-30）：Trace 步骤契约新增可选 `sessionId`、`pluginId`；JSONL `.idx` 同步记录两个维度，归档查询与 `/api/trace` 支持会话、插件、时间、状态和错误分类过滤，并继续使用 limit/before cursor 分页。聊天路由和 Provider LLM 步骤写入 session 维度，插件 service_call 写入 plugin 维度；无 ring 命中时带任一定位维度可回退归档。Trace 专项 `8/8`、归档压力 `5/5`，全量测试 `803/803`，`npm run typecheck`、`git diff --check` 通过；完整分页压力覆盖仍待补齐。
 
