@@ -15,7 +15,7 @@ import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, request as httpRequest } from 'node:http';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname, join, parse } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { tmpdir, homedir } from 'node:os';
 
@@ -411,6 +411,12 @@ describe('A6-b 变更类端点的可选 token 门', () => {
 
   test('全局事件流与聊天流共用进程级 SSE 配额，并在断开后释放', async () => {
     const streams: { response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }[] = [];
+    // 聊天入口在 Provider 检查之后才到达 SSE 配额门；注册一条假 Provider（不会
+    // 被真实调用——配额测试的 run 拿不到 429 就不会真正请求模型）保证链路能到门。
+    started!.store.upsertProvider({
+      id: 'auth-spec-quota-provider', label: 'Auth Spec Quota', baseUrl: 'http://127.0.0.1:9/unreachable',
+      apiKey: 'spec-quota', model: 'quota-model', protocol: 'openai',
+    });
     try {
       for (let i = 0; i < 8; i++) {
         const response = await fetch(`${base}/api/events`);
@@ -427,6 +433,7 @@ describe('A6-b 变更类端点的可选 token 门', () => {
       assert.equal(rejected.headers.get('retry-after'), '15');
     } finally {
       await Promise.all(streams.map(({ reader }) => reader.cancel().catch(() => undefined)));
+      started!.store.deleteProvider('auth-spec-quota-provider');
     }
     const sessionResponse = await post('/api/sessions', { title: 'SSE quota release' });
     assert.equal(sessionResponse.status, 200);
@@ -461,8 +468,9 @@ describe('A6-b 变更类端点的可选 token 门', () => {
 
 describe('A6-a 危险工作区根', () => {
   test('POST /api/workspaces 拒绝 C:\\（盘符根），中文理由', async () => {
-    const r = await post('/api/workspaces', { path: 'C:\\' });
-    assert.equal(r.status, 400, '盘符根必须被拒绝');
+    // 平台无关的文件系统根：任何平台上 parse(abs).root 都指向真根（Windows 上是盘符根）。
+    const r = await post('/api/workspaces', { path: parse(tmp).root });
+    assert.equal(r.status, 400, '文件系统根必须被拒绝');
     const b = await jsonOf<{ rule?: string; error?: string }>(r);
     assert.equal(b.rule, 'fs-root');
     assert.match(String(b.error), /拒绝/);
@@ -485,7 +493,7 @@ describe('A6-a 危险工作区根', () => {
   });
 
   test('/switch 对已入库的危险行复检拒绝（兜住修复前登记的路径）', async () => {
-    const legacy = 'D:\\';
+    const legacy = parse(tmp).root;
     const row = started!.store.addWorkspace(legacy); // 直接写库，模拟修复前已登记
     const r = await post('/api/workspaces/switch', { path: legacy });
     assert.equal(r.status, 400);
