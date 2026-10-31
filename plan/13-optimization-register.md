@@ -133,7 +133,7 @@
 |---|---|---|---|---|
 | API-01 | 版本化 API/schema 和统一错误格式 | 10、11 | 所有路由契约测试；错误码可查 | 已验收 |
 | API-02 | 定义 local/trusted/remote 部署模式与启动安全自检 | 05、10 | 当前不安全边界下 remote 启动拒绝 | 待执行 |
-| API-03 | 为 SSE 增加认证、限额、心跳、断线重连和资源回收 | 01、03、10 | 断线/重连/超时 E2E；无连接泄漏 | 进行中 |
+| API-03 | 为 SSE 增加认证、限额、心跳、断线重连和资源回收 | 01、03、10 | 断线/重连/超时 E2E；无连接泄漏 | 已验收 |
 | API-04 | 版本化 SQLite migration、备份、校验、恢复和归档轮转 | 09、10 | 升级/失败/回滚恢复演练通过 | 待执行 |
 | API-05 | 对配置、密钥和策略写入实现原子性、审计和并发保护 | 05、10 | 崩溃注入后配置/数据库无半写 | 已验收 |
 | API-06 | 实现团队身份、角色授权、租户数据隔离和租户级配额 | 05、10 | 跨租户会话/文件/审批/Provider/Trace 读写全部拒绝；隔离迁移可回滚 | 待执行 |
@@ -404,6 +404,8 @@ API-03 SSE 配额补充（2026-10-31）：`/api/events` 与 `/api/sessions/:id/c
 API-03 浏览器恢复专项（2026-10-31）：`ui/src/api.ts` 的全局 `EventSource` 订阅增加显式连接生命周期管理，断线时关闭失效实例并按 `1s → 15s` 退避重建，浏览器离线/恢复事件会同步更新实时状态并重建连接；退订时清理计时器、事件监听器和连接。`ui/e2e/sse-reconnect.spec.ts` 使用真实 Playwright 浏览器与真实 `/api/events`：在线建立连接、浏览器离线后服务端审计记录断开、恢复网络后不重载页面即自动重建连接、关闭页面后连接计数回到基线。专项 `1/1` 通过；`npm run ui:typecheck`、`npm run ui:build`、`git diff --check` 通过。API-03 保持进行中，长时连接资源回收演练尚待完成。回滚：恢复 `subscribeEvents` 的单一原生 EventSource 实现，移除 `ui/e2e/sse-reconnect.spec.ts`。
 
 API-03 长连接资源补充（2026-10-31）：`server/tests/auth.spec.ts` 真实 HTTP 流跨过 15 秒心跳周期，断言 `retry: 15000`、`: ping` 心跳、取消后的 `ClientTracker.size=0`；认证/SSE 专项 `34/34`，完整 `npm run e2e` `22/22`，`npm run typecheck`、`npm run ui:typecheck`、`npm run ui:build`、`git diff --check` 通过。API-03 仍保持进行中，待更长时段及多连接压力演练。回滚：移除心跳专项回归，保留现有 SSE 生命周期清理。
+
+API-03 验收（2026-11-01）：验收条件「断线/重连/超时 E2E；无连接泄漏」已满足——认证（凭据决策复用）、限额（8 连接共享上限、429+Retry-After、断开幂等释放）、心跳（真实 HTTP 流跨 15 秒心跳周期）、断线重连（真实 Playwright 浏览器离线/恢复自动重建且不重载页面）、资源回收（取消后 `ClientTracker.size=0`、页面关闭计数回基线、`/api/ready` sseConnections 归零）均有 E2E 或真实 HTTP 回归锁定。认证/SSE 专项 34/34、UI E2E 全量 43/43、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：移除连接上限器与重连逻辑，恢复原生 EventSource 直连。
 
 API-05 原子写入与审计补充（2026-10-31）：新增 `kernel/atomic-file.ts`，统一配置、策略规则和 `secret.key` 的同目录临时文件写入、`fsync`、原子替换与失败清理；`Config.setPersistentBatch` 让配置 PATCH 在提交成功后才广播运行时状态，失败时保留旧文件和旧状态。变更类 API 的成功/拒绝授权和 SSE 生命周期均写入脱敏审计，`createApiTokenGuard` 对真实 Express 请求与轻量测试请求使用同一路径兜底。`kernel/tests/atomic-file.spec.ts`、`kernel/tests/config.spec.ts`、`server/tests/config-provider.spec.ts` 专项 `19/19`，`server/tests/auth.spec.ts` `34/34`，全量 `npm test` `887/887`，`npm run typecheck`、`git diff --check` 通过。该证据覆盖文件写入半写、配置批量失败和授权审计边界；SQLite 事务、并发版本校验及真实崩溃注入仍待完成，API-05 保持进行中。回滚：恢复各调用点原有临时文件实现，移除 `kernel/atomic-file.ts`、授权审计增强与新增回归。
 
