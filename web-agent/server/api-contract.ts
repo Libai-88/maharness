@@ -74,7 +74,7 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/personas', response: 'object', description: '创建人设' },
   { method: 'PATCH', path: '/api/personas/:id', response: 'object', description: '更新人设' },
   { method: 'DELETE', path: '/api/personas/:id', response: 'object', description: '删除人设' },
-  { method: 'GET', path: '/api/skills', response: 'array', description: '技能列表' },
+  { method: 'GET', path: '/api/skills', response: 'object', description: '技能列表（installed + market）' },
   { method: 'GET', path: '/api/skills/lock', response: 'object', description: '技能锁定状态' },
   { method: 'GET', path: '/api/skills/usage', response: 'object', description: '技能使用统计' },
   { method: 'POST', path: '/api/skills/sync', response: 'object', description: '同步技能' },

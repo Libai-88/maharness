@@ -602,9 +602,13 @@ export default {
     const hasEntries = Array.isArray(tree.entries) && tree.entries.some((e) => e.name === 'core' || e.name === 'server');
     check('[files/tree] 沙箱根文件树', hasEntries, `(${tree.entries?.length ?? 0} 项)`);
 
-    const skills = await fetch(`${base}/api/skills`).then((r) => r.json()) as {
+    const skillsRes = await fetch(`${base}/api/skills`);
+    const skills = await skillsRes.json() as {
       installed: { name: string; source: string }[]; market: { name: string; description: string }[];
     };
+    if (!skillsRes.ok || !Array.isArray(skills?.installed)) {
+      throw new Error(`GET /api/skills → ${skillsRes.status}: ${JSON.stringify(skills).slice(0, 300)}`);
+    }
     const hasInstalled = Array.isArray(skills.installed) && skills.installed.length >= 4;
     check('[skills API] 已安装/市场', hasInstalled, `installed=${skills.installed.length} market=${skills.market.length}`);
 
