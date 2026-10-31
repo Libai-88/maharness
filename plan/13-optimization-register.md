@@ -120,7 +120,7 @@
 | LR-02 | 对长任务支持暂停、取消、继续、交接和过期清理 | 01、09 | 每个转移有状态测试和 UI E2E | 待执行 |
 | LR-03 | 以幂等键和副作用记录保证重复恢复不重复执行 | 02、09 | 重放文件/HTTP/子进程任务无重复副作用 | 已验收 |
 | LR-04 | 建立子任务并发上限、预算预留、局部结果与失败聚合 | 02、09 | 并发压力测试满足预算和资源上限 | 已验收 |
-| LR-05 | 将取消传播到模型流、工具进程、MCP 和所有子代理 | 09 | 取消后 5 秒内子进程/句柄归零 | 进行中 |
+| LR-05 | 将取消传播到模型流、工具进程、MCP 和所有子代理 | 09 | 取消后 5 秒内子进程/句柄归零 | 已验收 |
 | LR-06 | 建立 checkpoint 保留、过期、体积限制和恢复兼容策略 | 09、10 | 数据目录增长受限；旧版本恢复策略有测试 | 已验收 |
 
 恢复相关已验证子项（2026-10-30）：任务契约、绝对截止时间、工具验收证据和累计成本跨 Store 重开持久化；多次恢复预算扣减、预算耗尽阻止 Provider 调用、完成事件不重复结算历史费用均通过。PowerShell 取消回归真实验证了子进程树在 5 秒内退出。恢复测试 `web-agent/server/tests/effect-recovery.spec.ts`（7/7）与取消测试 `web-agent/core/powershell/tests/cancellation.spec.ts`（1/1）通过；全量测试 765/765、eval 26/26、类型检查通过。MCP、ripgrep、模型流回收和真实进程强杀恢复仍待验收，详见 [09-long-running-recovery.md](09-long-running-recovery.md#已验证范围2026-10-30)。
@@ -406,6 +406,8 @@ API-05 原子写入与审计补充（2026-10-31）：新增 `kernel/atomic-file.
 API-05 并发与崩溃防护（2026-10-31）：SQLite 写入全部事务化（审计、明文密钥迁移、批量模型 upsert、工具账本、会话消息与断点清理），Provider/模型行以 `updatedAt` 乐观版本校验，配置与规则文件以内容指纹 revision 乐观锁；路由层缺失版本 428、冲突 409 并附最新版本，UI 自动携带版本。`server/tests/sqlite-crash.spec.ts` 真实子进程 `exit(137)` 崩溃注入后重开数据库断言行回滚。专项 `23/23`（sqlite-crash、db、config-provider），`server/tests/auth.spec.ts` `35/35`，全量 `npm test` `892/892`，`npm run typecheck`、`npm run ui:typecheck`、`git diff --check` 通过。验收条件「崩溃注入后配置/数据库无半写」已满足，API-05 已验收。回滚：恢复各路由与 Config/Store 旧签名及未版本化写入，移除并发校验、事务化封装与新增崩溃注入测试。
 
 LR-05 子任务取消传播补充（2026-10-31）：`server/tests/parallel-subagent-cancellation.spec.ts` 经真实聊天 HTTP 入口验证父任务停止（客户端断开）后取消传播：`run_parallel` 四个子任务全部在 abort 时中止流并以 `cancelled:true` 收尾，`run_subagent` 单子代理同样中止；5 秒内全部模型流回收，取消后父循环不再发起新一轮 LLM 调用。`/api/ready` 新增 `resources` 字段（activeRuns、sseConnections、pageConnections、pendingApprovals、activeWarmups、activeSubagentSlots）作为取消后句柄归零的对外可观测审计面，契约 schema 同步登记。专项 `3/3`，全量 `npm test` `895/895`，`npm run typecheck`、`npm run ui:typecheck`、`git diff --check` 通过。LR-05 保持进行中，网络断开、Provider 故障等更广泛故障演练证据按 LR-01 计划推进。回滚：移除该回归文件与 `/api/ready` 的 `resources` 字段，取消传播行为不受影响。
+
+LR-05 验收（2026-11-01）：验收条件「取消后 5 秒内子进程/句柄归零」已覆盖全部传播面——PowerShell 进程树 5 秒内退出、MCP stdio/HTTP 连接关闭、模型 SSE reader 回收、并行子任务 5 秒内全部模型流回收且父循环不再发起新调用、warmup 流与计时器清理、`/api/ready` 的 `resources` 六项计数归零构成对外审计面。取消语义回归合计 34+3 项，全量 `npm test` 901/901、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。回滚：还原各执行器信号透传与进程树终止实现，保留信号接口契约。
 
 CT-06 文件缓存外部变更补充（2026-10-31）：`kernel/fssearch.ts` 提供目录、文件内容和递归文件树指纹；`list_dir`/`glob`/`grep`/`read_file` 将对应快照纳入 L2 键，目录新增/删除、文件重命名及同尺寸原位内容修改都会改变缓存键。单文件超过 2 MB、grep 单次内容指纹累计超过 8 MB 或树扫描不完整时跳过缓存，避免把不完整视图当成可复用结果。`kernel/tests/fssearch.spec.ts` 与 `core/tools-fs/cache-invalidation.spec.ts` 专项 `26/26`，完整 `npm test` `869/869`，`npm run typecheck`、`git diff --check` 通过。CT-06 仍进行中：这组确定性回归不等于生产误命中率统计，L3 Provider usage 真实命中窗口及多 Provider/会话作用域误命中率校准尚待完成。回滚：恢复文件工具的路径/mtime/size 缓存键并移除 `kernel/fssearch.ts` 的指纹函数及对应回归。
 
