@@ -91,7 +91,7 @@
 |---|---|---|---|---|
 | MD-01 | 统一 Provider/model/capability/pricing 的稳定 ID 与 schema | 07 | schema contract tests；模型别名不改变计价 ID | 已验收 |
 | MD-02 | 统一流式、工具调用、结构化输出、视觉和取消能力声明 | 07 | 各 Provider 适配器契约测试通过 | 已验收 |
-| MD-03 | 建立可解释的按能力、成本、延迟、隐私和风险路由 | 07 | 每次选择带候选、评分与拒绝理由 Trace | 进行中 |
+| MD-03 | 建立可解释的按能力、成本、延迟、隐私和风险路由 | 07 | 每次选择带候选、评分与拒绝理由 Trace | 已验收 |
 | MD-04 | 规范超时、重试、熔断、健康状态和 failover | 07、09 | 故障注入下无无限重试、无重复副作用 | 已验收 |
 | MD-05 | 将真实调用模型、价格版本、缓存折扣和成本统一结算 | 03、07、08 | 请求级成本可复算；与账单样本误差 < 1% | 待执行 |
 | MD-06 | 提供 Provider 能力探测和配置诊断 | 07、10 | 配置错误有可操作诊断，密钥不回显 | 已验收 |
@@ -404,6 +404,8 @@ LR-05 子任务取消传播补充（2026-10-31）：`server/tests/parallel-subag
 CT-06 文件缓存外部变更补充（2026-10-31）：`kernel/fssearch.ts` 提供目录、文件内容和递归文件树指纹；`list_dir`/`glob`/`grep`/`read_file` 将对应快照纳入 L2 键，目录新增/删除、文件重命名及同尺寸原位内容修改都会改变缓存键。单文件超过 2 MB、grep 单次内容指纹累计超过 8 MB 或树扫描不完整时跳过缓存，避免把不完整视图当成可复用结果。`kernel/tests/fssearch.spec.ts` 与 `core/tools-fs/cache-invalidation.spec.ts` 专项 `26/26`，完整 `npm test` `869/869`，`npm run typecheck`、`git diff --check` 通过。CT-06 仍进行中：这组确定性回归不等于生产误命中率统计，L3 Provider usage 真实命中窗口及多 Provider/会话作用域误命中率校准尚待完成。回滚：恢复文件工具的路径/mtime/size 缓存键并移除 `kernel/fssearch.ts` 的指纹函数及对应回归。
 
 MD-03 约束画像 fail-closed 补充（2026-10-31）：`core/chat/routing.ts` 新增 `capabilityRejectionReasons`，显式 `maxLatencyMs`、`privacyTier`、`maxRiskLevel` 约束在候选缺少对应画像时拒绝，并在候选 Trace 中写入具体缺口；未声明约束时维持旧模型兼容推断。`core/chat/tests/routing.spec.ts` 与真实 `server/tests/provider-diagnostics.spec.ts` 合计 `24/24`，验证高延迟/外部/高风险候选及无画像候选均被拒绝，local/低风险候选仍被选中；`npm run typecheck`、`git diff --check` 通过。MD-03 仍进行中，普通聊天任务的多能力组合与真实负载延迟校准尚待完成。回滚：恢复能力路由对缺失画像的兼容放行，移除拒绝理由 helper 与新增回归。
+
+MD-03 验收（2026-11-01）：登记条件「每次选择带候选、评分与拒绝理由 Trace」已满足——任务路由 `model-route` Trace（真实 HTTP 聊天，含候选/评分/选中/理由）、能力路由 `vision-route` Trace（真实图片借道分析，含回切原模型记录）与约束拒绝（高延迟/外部/高风险/无画像候选的逐项缺口写入 Trace）构成完整可解释链路；任务类型路由与能力路由均记录决策依据。全量回归 `npm test` 900/900、`npm run eval:ci` 27/27、干净 checkout CI run [41238499641](https://github.com/Libai-88/maharness/actions/runs/41238499641) success。真实负载延迟校准属部署期调参，随生产数据推进。回滚：还原约束路由 fail-closed 与 Trace 写入点，恢复候选信息仅日志输出。
 
 OB-02 交叉验收证据补充（2026-10-31）：Trace 已完整记录模型耗时、输入/输出/缓存 token、按实际模型价格计算的成本、L2/L3 缓存层、审批等待与批准/拒绝终态、错误分类/稳定码/重试决定及工具结果摘要。`server/tests/provider-diagnostics.spec.ts` 真实 HTTP 回归覆盖瞬时错误重试、参数错误停止、审批批准/拒绝、工具结果和同一未变文件二次读取的 L2 命中；Provider 诊断专项 `16/16`，全量 `npm test` `879/879`，`npm run typecheck`、`git diff --check` 通过。回滚：恢复 `server/tests/provider-diagnostics.spec.ts` 的单次文件读取与原有断言，并移除本轮 Trace 交叉回归；保留已存在的 Trace 字段兼容读取。
 
