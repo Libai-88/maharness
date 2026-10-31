@@ -198,10 +198,6 @@ export class Store {
    */
   private migrate(dbFile: string): void {
     const current = Number(this.db.pragma('user_version', { simple: true }));
-    const hasUserTables = (() => {
-      const rows = this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).all() as { name: string }[];
-      return rows.length > 0;
-    })();
     if (current > Store.DB_SCHEMA_VERSION) {
       throw new Error(`数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`);
     }

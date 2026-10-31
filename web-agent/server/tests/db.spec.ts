@@ -48,7 +48,7 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       const reopened = new Store(legacyPath);
       try {
         assert.equal(reopened.schemaVersion, Store.DB_SCHEMA_VERSION, '历史库自动推进到当前版本');
-        assert.equal(reopened.listSessions(10)[0]?.id, session.id, '数据保留');
+        assert.equal(reopened.listSessions()[0]?.id, session.id, '数据保留');
       } finally { reopened.close(); }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
@@ -86,7 +86,7 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       Store.autoMaintain(dbPath);
       const reopened = new Store(dbPath);
       try {
-        assert.equal(reopened.listSessions(10)[0]?.id, session.id, '数据从备份恢复');
+        assert.equal(reopened.listSessions()[0]?.id, session.id, '数据从备份恢复');
       } finally { reopened.close(); }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
