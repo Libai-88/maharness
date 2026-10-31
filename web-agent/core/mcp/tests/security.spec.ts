@@ -11,6 +11,8 @@
  */
 import { describe, it, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createServer } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import {
   buildSpawnEnv,
   buildSpawnPlan,
@@ -20,8 +22,21 @@ import {
   isPrivateHostAddress,
   wrapMcpTool,
   MCP_PROTOCOL_VERSION,
+  StdioConnection,
+  HttpConnection,
   type ServerCfg,
 } from '../index';
+
+const MCP_FIXTURE = [
+  "let cancelled=false;",
+  "const readline=require('node:readline');",
+  "const rl=readline.createInterface({input:process.stdin});",
+  "rl.on('line',line=>{ const m=JSON.parse(line);",
+  "if(m.method==='initialize') process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2026-07-28'}})+'\\n');",
+  "else if(m.method==='tools/call' && m.params.name==='fast') process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:cancelled?'cancel-seen':'cancel-missing'}]}})+'\\n');",
+  "else if(m.method==='$/cancelRequest') cancelled=true;",
+  "});",
+].join('');
 
 /** 模拟宿主进程环境：含密钥/代理/内核配置 + Windows 运行必需项（故意混排大小写，如 Path/PATHEXT） */
 const FAKE_PARENT_ENV: Record<string, string> = {
@@ -234,6 +249,50 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
 
   it('协议版本单一常量：stdio 与 http 共用 2026-07-28', () => {
     assert.equal(MCP_PROTOCOL_VERSION, '2026-07-28');
+  });
+});
+
+describe('LR-05 MCP 取消传播与 pending 回收', () => {
+  it('取消发送 $/cancelRequest，释放 pending，连接可继续调用', async () => {
+    const conn = new StdioConnection('fixture', {
+      type: 'stdio', command: process.execPath, args: ['-e', MCP_FIXTURE],
+    });
+    await conn.initialize();
+    const controller = new AbortController();
+    const cancelled = conn.toolsCall('slow', {}, controller.signal);
+    controller.abort();
+    await assert.rejects(cancelled, /请求已取消/);
+    const result = await conn.toolsCall('fast', {});
+    assert.equal(result.content?.[0]?.text, 'cancel-seen', '后续调用应观察到服务端已收到取消通知');
+    conn.close();
+  });
+
+  it('HTTP MCP 调用取消后关闭底层请求连接', async () => {
+    let closed = false;
+    const server = createServer((_req, res) => {
+      res.on('close', () => { closed = true; });
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.write('{"jsonrpc":"2.0","id":3,"result":{"content":[');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const port = (server.address() as AddressInfo).port;
+    const conn = new HttpConnection('fixture-http', {
+      type: 'http', url: `http://127.0.0.1:${port}/mcp`, allowPrivate: true,
+    });
+    const controller = new AbortController();
+    try {
+      const pending = conn.toolsCall('slow', {}, controller.signal);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      controller.abort();
+      await assert.rejects(pending, /abort|取消|停止/i);
+      const deadline = Date.now() + 2_000;
+      while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(closed, true, '取消后服务端应观察到 HTTP 请求关闭');
+    } finally {
+      controller.abort();
+      server.closeAllConnections();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
   });
 });
 

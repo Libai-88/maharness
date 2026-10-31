@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { routeForCapability, capabilitySatisfied, routeForTask } from '../routing';
+import { routeForCapability, capabilitySatisfied, capabilityRejectionReasons, routeForTask } from '../routing';
 import type { ModelCapability, ProviderDef } from '../../../kernel/types';
 
 const cap = (modelId: string, over: Partial<ModelCapability> = {}): ModelCapability => ({
@@ -42,6 +42,11 @@ describe('能力路由 routeForCapability', () => {
     assert.equal(r?.provider.id, 'qwen');
     assert.equal(r?.model, 'qwen2.5-vl-7b');
     assert.equal(r?.same, false);
+    assert.equal(r?.candidates.filter((candidate) => candidate.accepted).length, 1);
+    assert.equal(r?.candidates.find((candidate) => candidate.accepted)?.model, 'qwen2.5-vl-7b');
+    assert.ok(r?.candidates.find((candidate) => candidate.model === 'qwen-vl-max')?.reasons.includes('评分低于已选候选'));
+    assert.ok(r?.candidates.find((candidate) => candidate.model === 'deepseek-chat')?.reasons.includes('当前模型无需切换'));
+    assert.ok(r?.candidates.find((candidate) => candidate.model === 'deepseek-reasoner')?.reasons.includes('不满足至少一项能力要求'));
   });
 
   it('无任何视觉模型时返回 undefined（调用方给配置指引）', () => {
@@ -63,6 +68,27 @@ describe('能力路由 routeForCapability', () => {
     const r = routeForCapability({ minContext: 200_000 }, [deepseek, provider('claude', 'claude-sonnet-4-5', [cap('claude-sonnet-4-5', { contextWindow: 200_000 })])],
       { providerId: 'deepseek', model: 'deepseek-chat' });
     assert.equal(r?.model, 'claude-sonnet-4-5');
+  });
+
+  it('按延迟、隐私和风险约束筛选并保留可解释评分', () => {
+    const local = provider('local', 'local-fast', [cap('local-fast', { latencyMs: 80, privacyTier: 'local', riskLevel: 'low', vision: true })]);
+    const external = provider('external', 'external-slow', [cap('external-slow', { latencyMs: 900, privacyTier: 'external', riskLevel: 'high', vision: true })]);
+    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'medium' }, [external, local], { providerId: 'deepseek', model: 'deepseek-chat' });
+    assert.equal(r?.provider.id, 'local');
+    assert.match(r?.candidates.find((c) => c.accepted)?.reasons.join(' ') ?? '', /延迟≈80ms/);
+    assert.ok(r?.candidates.find((c) => c.model === 'external-slow')?.reasons.includes('不满足至少一项能力要求'));
+  });
+
+  it('显式延迟、隐私和风险约束缺少画像时 fail-closed 并说明缺口', () => {
+    const unprofiled = provider('unprofiled', 'vision-model', [cap('vision-model', { vision: true })]);
+    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'low' }, [unprofiled], { providerId: 'text', model: 'text-model' });
+    assert.equal(r, undefined, '没有画像证据时不能声称满足显式约束');
+    assert.deepEqual(capabilityRejectionReasons({ maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'low' }, cap('vision-model')), [
+      '不满足至少一项能力要求',
+      '未登记延迟画像，无法确认满足延迟上限',
+      '未登记隐私画像，无法确认符合隐私要求',
+      '未登记风险画像，无法确认符合风险上限',
+    ]);
   });
 });
 

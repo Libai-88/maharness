@@ -18,7 +18,7 @@
  * 与工作区切换同级的一次性代价，换来的是长会话不丢事实。
  */
 import type { LLMMessage, ProviderDef, TraceLike } from '../../kernel/types';
-import { estimateTokens } from '../../kernel/tokens';
+import { allocateTokenBudget, countMessageTokens, estimateTokens } from '../../kernel/tokens';
 
 /** 压缩摘要的前缀标记：检测到它即认为历史已压缩（跳过，不重复总结） */
 export const SUMMARY_MARK = '【历史摘要】';
@@ -45,6 +45,47 @@ export interface CompactResult {
   estimatedTokens: number;
 }
 
+/** 切分上下文时不得把 assistant tool_call 与 tool 回执拆到两侧。 */
+export function contextBoundaryPreservesTools(history: LLMMessage[], cut: number): boolean {
+  const beforeAssistantCalls = new Set<string>();
+  const afterAssistantCalls = new Set<string>();
+  const beforeToolResults = new Set<string>();
+  const afterToolResults = new Set<string>();
+  for (let i = 0; i < history.length; i++) {
+    const message = history[i]!;
+    const calls = Array.isArray(message.tool_calls) ? message.tool_calls : [];
+    for (const call of calls) {
+      const id = (call as { id?: unknown }).id;
+      if (typeof id === 'string') (i < cut ? beforeAssistantCalls : afterAssistantCalls).add(id);
+    }
+    if (message.role === 'tool' && message.tool_call_id) {
+      if (i < cut) beforeToolResults.add(message.tool_call_id);
+      else afterToolResults.add(message.tool_call_id);
+    }
+  }
+  return ![...beforeAssistantCalls].some((id) => afterToolResults.has(id))
+    && ![...afterAssistantCalls].some((id) => beforeToolResults.has(id));
+}
+
+const PROTECTED_CONTEXT_PREFIXES = [
+  '【任务约束】', '【验收条件】', '【核心记忆块】', '【长期记忆】', '【失败教训】',
+];
+
+/** 任务、验收和记忆约束属于上下文契约，压缩后必须逐字保留。 */
+export function contextIntegrityPreservesConstraints(before: LLMMessage[], after: LLMMessage[]): boolean {
+  const protectedMessages = before.filter((message) => {
+    const content = String(message.content ?? '');
+    return PROTECTED_CONTEXT_PREFIXES.some((prefix) => content.startsWith(prefix));
+  });
+  return protectedMessages.every((message) => after.some((candidate) =>
+    candidate.role === message.role && candidate.content === message.content));
+}
+
+function isProtectedContextMessage(message: LLMMessage): boolean {
+  const content = String(message.content ?? '');
+  return PROTECTED_CONTEXT_PREFIXES.some((prefix) => content.startsWith(prefix));
+}
+
 /** 摘要提示词：只保留任务相关事实，丢弃寒暄与过程（输出必须以标记开头，否则视为失败降级） */
 const SUMMARIZE_PROMPT = [
   `你是会话历史摘要器。把以下早期对话压缩为一段「${SUMMARY_MARK}」：`,
@@ -58,8 +99,11 @@ const SUMMARIZE_PROMPT = [
  * 返回处理后的消息序列；mode 标识走了哪条路径（可观测：Trace 记录）。
  */
 export async function compactHistory(history: LLMMessage[], maxTokens: number, opts: CompactOptions = {}): Promise<CompactResult> {
-  const total = history.reduce((s, m) => s + estimateTokens(m.content ?? ''), 0);
-  if (total <= maxTokens || history.length <= 1) {
+  const budget = allocateTokenBudget(maxTokens);
+  const contextBudget = Math.max(0, maxTokens - budget.output);
+  const count = (messages: LLMMessage[]) => countMessageTokens(messages, opts.provider?.tokenizer);
+  const total = count(history);
+  if (total <= contextBudget || history.length <= 1) {
     return { messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total };
   }
 
@@ -74,21 +118,24 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
   // 直接丢弃，导致本轮剩余轮次的请求不再带任何系统级纪律（且 L3 前缀从此断裂）。
   const headIsSystem = history[0]?.role === 'system'
     && !String(history[0].content ?? '').startsWith(SUMMARY_MARK);
-  const compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : (headIsSystem ? 1 : 0);
+  let compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : (headIsSystem ? 1 : 0);
+  while (compressibleFrom < history.length && isProtectedContextMessage(history[compressibleFrom]!)) compressibleFrom++;
 
   // 切点：从前往后找「压缩段结束」位置——使保留段（切点之后）估算 ≤ 预算 × KEEP_RATIO
-  const keepBudget = Math.max(maxTokens * KEEP_RATIO, 512);
+  const keepBudget = Math.max(contextBudget * KEEP_RATIO, 512);
   let cut = history.length;
   let acc = 0;
   for (let i = history.length - 1; i >= compressibleFrom; i--) {
-    acc += estimateTokens(history[i].content ?? '');
+    acc += count([history[i]!]);
     if (acc > keepBudget) { cut = i + 1; break; }
   }
+  while (cut > compressibleFrom && !contextBoundaryPreservesTools(history, cut)) cut--;
+  while (cut > compressibleFrom && history.slice(compressibleFrom, cut).some(isProtectedContextMessage)) cut--;
   const compressible = history.slice(compressibleFrom, cut);
   const kept = history.slice(cut);
   if (compressible.length === 0) {
     // 无可压缩段（全是最近轮）→ 截断兜底（切掉最早的一部分，保留最新）
-    return truncate(history, maxTokens, total);
+    return truncate(history, contextBudget, total, opts.provider?.tokenizer);
   }
 
   // ---- compact：LLM 总结压缩段（二次摘要：旧摘要 + 新段 → 合并成一条新摘要） ----
@@ -106,23 +153,27 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
         { role: 'system', content: summary },
         ...kept,
       ];
-      const compactedTokens = compressible.reduce((s, m) => s + estimateTokens(m.content ?? ''), 0);
+      if (!contextIntegrityPreservesConstraints(history, messages)) {
+        return truncate(history, contextBudget, total, opts.provider?.tokenizer);
+      }
+      const compactedTokens = count(compressible);
       const summaryTokens = estimateTokens(summary);
       opts.trace?.startStep({ traceId: opts.traceId ?? '', turn: opts.turn ?? 0, type: 'system', name: '上下文压缩' })
         .finish({
-          outputSummary: `LLM 摘要压缩 ${compressible.length} 条早期消息（${compactedTokens} → ${summaryTokens} tokens，省 ${compactedTokens - summaryTokens}）`,
+          inputSummary: `history[${compressibleFrom}..${cut - 1}] · ${compressible.length} 条早期消息`,
+          outputSummary: `来源 history[${compressibleFrom}..${cut - 1}]；LLM 摘要压缩 ${compressible.length} 条早期消息（${compactedTokens} → ${summaryTokens} tokens，省 ${compactedTokens - summaryTokens}）`,
           tokensIn: compactedTokens, tokensOut: summaryTokens,
         });
       return {
         messages, mode: 'compact',
         droppedMessages: 0, compactedMessages: compressible.length,
-        estimatedTokens: summaryTokens + kept.reduce((s, m) => s + estimateTokens(m.content ?? ''), 0),
+        estimatedTokens: summaryTokens + count(kept),
       };
     }
     // 摘要失败（调用异常/输出不符）→ 降级截断
   }
 
-  return truncate(history, maxTokens, total);
+  return truncate(history, contextBudget, total, opts.provider?.tokenizer);
 }
 
 /** 调 LLM 压缩一段历史为摘要；失败或输出不符标记时返回 null（调用方降级） */
@@ -155,19 +206,21 @@ async function summarizeSegment(segment: LLMMessage[], opts: CompactOptions): Pr
 }
 
 /** 截断兜底：保留 system 与最新消息，丢弃较早并注入说明（LLM 对截断有感知） */
-function truncate(history: LLMMessage[], maxTokens: number, total: number): CompactResult {
+function truncate(history: LLMMessage[], maxTokens: number, total: number, tokenizer?: ProviderDef['tokenizer']): CompactResult {
   if (history.length <= 1) {
     return { messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total };
   }
-  const head = history[0].role === 'system' ? [history[0]] : [];
+  let protectedHeadCount = history[0].role === 'system' ? 1 : 0;
+  while (protectedHeadCount < history.length && isProtectedContextMessage(history[protectedHeadCount]!)) protectedHeadCount++;
+  const head = history.slice(0, protectedHeadCount);
   const rest = history.slice(head.length);
-  const headTokens = head.reduce((s, m) => s + estimateTokens(m.content ?? ''), 0);
+  const headTokens = countMessageTokens(head, tokenizer);
   let budget = Math.max(maxTokens - headTokens, 256);
 
   const kept: LLMMessage[] = [];
   let acc = 0;
   for (let i = rest.length - 1; i >= 0; i--) {
-    const t = estimateTokens(rest[i].content ?? '');
+    const t = countMessageTokens([rest[i]!], tokenizer);
     if (kept.length > 0 && acc + t > budget) break;
     kept.unshift(rest[i]);
     acc += t;
@@ -185,6 +238,7 @@ function truncate(history: LLMMessage[], maxTokens: number, total: number): Comp
 
 /** 保留原截断函数导出（兼容 server/context.ts 的既有使用方） */
 export function truncateHistory(history: LLMMessage[], maxTokens: number): { messages: LLMMessage[]; truncated: boolean; droppedMessages: number; estimatedTokens: number } {
-  const r = truncate(history, maxTokens, history.reduce((s, m) => s + estimateTokens(m.content ?? ''), 0));
+  const contextBudget = Math.max(0, maxTokens - allocateTokenBudget(maxTokens).output);
+  const r = truncate(history, contextBudget, countMessageTokens(history));
   return { messages: r.messages, truncated: r.mode === 'truncate', droppedMessages: r.droppedMessages, estimatedTokens: r.estimatedTokens };
 }

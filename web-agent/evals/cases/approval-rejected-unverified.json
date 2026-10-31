@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "approval-rejected-unverified",
+  "description": "审批拒绝时受保护动作没有成功证据",
+  "messages": [{ "role": "user", "content": "Run the protected action" }],
+  "approval": { "toolName": "eval_approval_action", "decision": "reject" },
+  "task": {
+    "objective": "The protected action must execute",
+    "acceptance": [{ "type": "tool_succeeded", "name": "eval_approval_action" }]
+  },
+  "requests": [
+    { "chunks": [
+      { "type": "tool_call", "toolCall": { "id": "approval-reject-call", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+      { "type": "usage", "input": 25, "output": 6 },
+      { "type": "done" }
+    ] },
+    { "chunks": [
+      { "type": "delta", "text": "The action was not run." },
+      { "type": "usage", "input": 32, "output": 5 },
+      { "type": "done" }
+    ] }
+  ],
+  "expect": { "llmCalls": 2, "noErrors": false, "taskOutcome": "failed", "approvalOutcome": "rejected", "approvalHandlerCalls": 0 }
+}

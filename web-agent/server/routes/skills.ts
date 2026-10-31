@@ -10,7 +10,11 @@ import { parseFrontMatter, fmString } from '../../kernel/frontmatter';
 import type { SkillSource } from '../../core/skills/index';
 
 interface SkillsService {
-  list: () => { name: string; description: string; source: string; shadowed?: string[]; bodyChars?: number }[];
+  list: () => {
+    name: string; description: string; source: string; shadowed?: string[]; bodyChars?: number;
+    license?: string; allowedTools?: string[]; metadata?: Record<string, string>;
+    triggers?: string[]; appliesWhen?: string[]; rejectWhen?: string[]; input?: string; output?: string; contractWarnings?: string[];
+  }[];
   get: (n: string) => { ok: boolean; content?: string; error?: string };
   readBySource?: (source: SkillSource, name: string) => string | null;
   usage?: () => Record<string, { indexShown: number; reads: number; bodyTokens: number; lastReadAt?: number }>;

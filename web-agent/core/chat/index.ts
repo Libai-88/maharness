@@ -10,7 +10,7 @@
  */
 import type { PersonaDef, Plugin } from '../../kernel/types';
 import { SERVICE_KEYS } from '../../kernel/types';
-import { AgentRunner, defaultRunnerFactory, textualizeHistory, annotateToolDef } from './agent';
+import { AgentRunner, defaultRunnerFactory, textualizeHistory, annotateToolDef, redactTraceValue } from './agent';
 import { compactHistory } from './compact';
 import { routeForTask } from './routing';
 import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from './policy';
@@ -154,7 +154,8 @@ export default {
       },
       getSystemPrompt: () => service.systemPrompt,
       /** 挂起审批清单（可按会话过滤）：前端首屏/刷新后据此恢复审批卡 */
-      listApprovals: (sessionId?: string): PendingApproval[] => globalApprovalBoard.listPending(sessionId),
+      listApprovals: (sessionId?: string): PendingApproval[] =>
+        globalApprovalBoard.listPending(sessionId).map((a) => ({ ...a, args: redactTraceValue(a.args) })),
       // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
       textualizeHistory,
       compactHistory,

@@ -1,6 +1,18 @@
 ---
 name: skill-authoring
 description: 如何编写一个 maharness skill。需要给 Agent 增加可复用的能力指南/知识包时使用（含格式规范、质量要求、使用场景）。
+triggers:
+  - 编写技能
+  - 新增知识包
+  - 固化可复用流程
+applies-when:
+  - 需要新增或修改 SKILL.md
+  - 需要为 Agent 沉淀方法论
+reject-when:
+  - 任务只需要修改可执行代码
+  - 已有技能完全覆盖当前需求
+input: 技能名称、适用任务、流程规范和质量要求
+output: 带 frontmatter 的 SKILL.md、正例和拒绝条件
 ---
 
 # Skill 编写指南
@@ -15,6 +27,9 @@ skill 是给 Agent 的可复用能力指南：一个目录 + 一份 `SKILL.md`�
 - 自我改造前先看 `agent-self-design`，写插件前先看 `plugin-authoring`。
 
 ## 格式规范
+
+技能 frontmatter 应声明 `triggers`、`applies-when`、`reject-when`、`input` 和 `output`；索引会校验这五项并对缺失字段返回 `contractWarnings`，旧技能仍可被发现。
+
 ```
 skill-name/
 └── SKILL.md

@@ -1,0 +1,7 @@
+{
+  "name": "provider-parameter-stop",
+  "description": "故障回放：Provider 400 参数错误不重试",
+  "messages": [{ "role": "user", "content": "请回答参数失败" }],
+  "requests": [{ "chunks": [{ "type": "throw", "status": 400, "message": "invalid request" }] }],
+  "expect": { "llmCalls": 1, "noErrors": false }
+}

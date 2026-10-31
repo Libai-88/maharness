@@ -12,6 +12,9 @@
 import type {
   AgentRunSummary, KernelLike, LLMMessage, PluginBus, ProviderDef, ToolCall, ToolDef, ToolResult,
 } from './types';
+import type { TaskContract } from './task-verifier';
+export type { ClassifiedError, ErrorCategory } from './error-policy';
+export type { TaskContract, TaskCriterion, TaskVerificationResult } from './task-verifier';
 
 /**
  * 钩子管线运行上下文（agent.* 事件负载）
@@ -48,6 +51,7 @@ export type AgentEvent =
   | { type: 'tool_result'; id?: string; name: string; summary: string; ok: boolean; stored?: boolean }
   | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
   | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
+  | { type: 'task_verified' | 'task_partial' | 'task_failed'; objective: string; checks: { ok: boolean; reason?: string }[]; evidence?: { source: string; detail: string; traceStepId?: string }[] }
   | { type: 'budget_hit'; cost: number; budget: number }
   | { type: 'handoff'; role: string; objective: string }
   /** provider 重试（内层瞬态重试 / 外层切换备用）：重试前执行器已清空上次失败流的
@@ -55,10 +59,14 @@ export type AgentEvent =
    *  reason 让人话提示能对上现实：同线路重试 / 换线路 / 叙述化纠偏，三者观感不同。 */
   | { type: 'retry'; reason: 'attempt' | 'failover' | 'narration'; detail?: string }
   /** kind 让前端能区分"用户自己按了停止"与"真出错了"——aborted 不该画成红色报错 */
-  | { type: 'error'; error: string; kind?: 'aborted' | 'budget' | 'max-turns' | 'policy' | 'upstream' };
+  | { type: 'error'; error: string; kind?: 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'auth' | 'parameter' | 'business' | 'transient' };
 
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
+  /** 已完成轮次的工具验收证据，跨恢复保留且不从模型文本推断。 */
+  restoredToolResults?: { name: string; ok: boolean }[];
+  /** 本逻辑任务在已完成 checkpoint 轮次的累计费用；不计入本次 run 账单。 */
+  restoredCostUsd?: number;
   provider: ProviderDef;
   model: string;
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
@@ -82,13 +90,24 @@ export interface RunOptions {
   /** 本任务成本硬上限（美元）：累计成本 ≥ 该值时熔断——不再发起新 LLM 调用，保留已完成结果。
    *  harness 管理认知资源的硬边界（软边界是 server 侧的成本警告注入）。 */
   costBudget?: number;
+  /** 可选任务契约；提供后，最终答复必须通过 acceptance 才能进入 assistant_done。 */
+  task?: TaskContract;
+  /** 同一逻辑任务跨 checkpoint 恢复时保持不变，用于副作用执行账本。 */
+  executionId?: string;
+  /** 恢复后延续逻辑轮数，避免同一轮副作用键发生漂移。 */
+  turnOffset?: number;
+  /** 持久化副作用账本；pending 表示执行结果未知，必须拒绝自动重放。 */
+  effectJournal?: {
+    claim(key: string): { state: 'new' | 'done' | 'pending'; result?: ToolResult };
+    complete(key: string, result: ToolResult): void;
+  };
   /** 上下文压缩回调（M1 循环内预算检查）：每轮 before_llm 后估算 history，
    *  超 context.maxTokens 时调用，返回压缩后的消息序列（由 server 注入 compactHistory
    *  等实现）；缺失时维持现状（不在 run 内压缩，由 server 组装侧兜底）。 */
   compactFn?: (history: LLMMessage[]) => Promise<LLMMessage[]>;
   /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
    *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
-  onCheckpoint?: (turn: number, history: LLMMessage[]) => void;
+  onCheckpoint?: (turn: number, history: LLMMessage[], evidence?: { toolResults: { name: string; ok: boolean }[]; costUsd: number }) => void;
   /** 发送序列快照同步（L3 前缀缓存逼近 100% 的关键）：每次 LLM 调用前，把
    *  实际发送的消息序列中【尚未入库的增量】回调给 server 持久化。
    *  覆盖全部消息类型（含钩子注入的教训/记忆/英文提醒）——DB 成为发送序列的

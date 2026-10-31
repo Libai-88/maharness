@@ -215,6 +215,49 @@ describe('AgentRunner 审批（共享 board）', () => {
       clearInterval(keepAlive);
     }
   });
+
+  test('审批通过后，幂等工具的瞬时失败按工具契约重试', async () => {
+    let handlerCalls = 0;
+    let approvalId: string | null = null;
+    const tool: ToolDef = {
+      name: 'retry_after_approval', description: '需审批且幂等', parameters: { type: 'object', properties: {} },
+      approval: true, idempotent: true, retry: { maxAttempts: 2, backoffMs: 1 },
+      async handler(_args, tctx) {
+        assert.equal(tctx.approved, true);
+        handlerCalls++;
+        if (handlerCalls === 1) throw new Error('ETIMEDOUT');
+        return { ok: true, data: { accepted: true } };
+      },
+    };
+    const provider = scriptedProvider([
+      async function* (): AsyncIterable<LLMChunk> {
+        yield { type: 'tool_call', toolCall: { id: 'approval-retry', type: 'function', function: { name: 'retry_after_approval', arguments: '{}' } } };
+      },
+      doneStream,
+    ], { n: 0 });
+    const board = new ApprovalBoard(5000);
+    const runner = new AgentRunner(kernelStub(process.cwd(), 5000), bus, board);
+    const keepAlive = setInterval(() => {}, 1000);
+    try {
+      const events: string[] = [];
+      const running = (async () => {
+        for await (const ev of runner.run({ provider, model: 'm', messages: [{ role: 'user', content: '执行' }], tools: [tool], traceId: 'approval-retry', sessionId: 's3', maxTurns: 3 })) {
+          events.push(ev.type);
+          if (ev.type === 'approval_required') approvalId = ev.approvalId;
+        }
+      })();
+      const deadline = Date.now() + 2000;
+      while (!approvalId && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+      assert.ok(approvalId);
+      assert.equal(runner.approveApproval(approvalId!, true), true);
+      await running;
+      assert.equal(handlerCalls, 2);
+      assert.ok(events.includes('approval_required'));
+      assert.ok(events.includes('tool_result'));
+    } finally {
+      clearInterval(keepAlive);
+    }
+  });
 });
 
 // ---------- 工具超时取消（B4）：signal 传导 ----------

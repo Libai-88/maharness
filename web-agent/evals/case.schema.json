@@ -1,0 +1,125 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "maharness deterministic evaluation case",
+  "type": "object",
+  "required": ["name", "messages", "requests", "expect"],
+  "properties": {
+    "schemaVersion": { "type": "integer", "enum": [1] },
+    "name": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "sandbox": {
+      "type": "object",
+      "properties": { "files": { "type": "object" } }
+    },
+    "messages": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["role", "content"],
+        "properties": {
+          "role": { "type": "string", "enum": ["system", "user", "assistant", "tool"] },
+          "content": { "type": "string" }
+        }
+      }
+    },
+    "requests": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["chunks"],
+        "properties": {
+          "chunks": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": ["type"],
+              "properties": {
+                "type": { "type": "string", "enum": ["delta", "reasoning", "tool_call", "usage", "done", "throw"] }
+              }
+            }
+          }
+        }
+      }
+    },
+    "task": {
+      "type": "object",
+      "required": ["objective", "acceptance"],
+      "properties": {
+        "objective": { "type": "string", "minLength": 1 },
+        "acceptance": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": { "type": "string", "enum": ["output_contains", "output_matches", "tool_succeeded", "file_exists", "file_contains"] },
+              "value": { "type": "string" },
+              "pattern": { "type": "string" },
+              "flags": { "type": "string" },
+              "name": { "type": "string" },
+              "path": { "type": "string" }
+            }
+          }
+        },
+        "risk": { "type": "string", "enum": ["low", "medium", "high"] },
+        "deadlineAt": { "type": "integer", "minimum": 0 },
+        "costBudgetUsd": { "type": "number", "minimum": 0 },
+        "idempotencyKey": { "type": "string" }
+      }
+    },
+    "approval": {
+      "type": "object",
+      "required": ["toolName", "decision"],
+      "properties": {
+        "toolName": { "type": "string", "minLength": 1 },
+        "decision": { "type": "string", "enum": ["approve", "reject"] }
+      }
+    },
+    "recovery": {
+      "type": "object",
+      "required": ["toolName", "checkpointAfterTurn"],
+      "properties": {
+        "toolName": { "type": "string", "minLength": 1 },
+        "checkpointAfterTurn": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "securityAttack": {
+      "type": "object",
+      "required": ["category"],
+      "properties": {
+        "category": { "type": "string", "enum": ["user_prompt_injection", "tool_output_injection", "plugin_tool_output_injection", "plugin_capability_escalation"] },
+        "sourceTool": { "type": "string", "minLength": 1 },
+        "payload": { "type": "string", "minLength": 1 },
+        "protectedTool": { "type": "string", "minLength": 1 },
+        "allowedName": { "type": "string", "minLength": 1 },
+        "attemptedName": { "type": "string", "minLength": 1 }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "category": { "enum": ["tool_output_injection", "plugin_tool_output_injection"] } }, "required": ["category"] },
+          "then": { "required": ["sourceTool"] }
+        }
+        ,{
+          "if": { "properties": { "category": { "const": "plugin_capability_escalation" } }, "required": ["category"] },
+          "then": { "required": ["allowedName", "attemptedName"] }
+        }
+      ]
+    },
+    "expect": {
+      "type": "object",
+      "properties": {
+        "repeats": { "type": "integer", "minimum": 1 },
+        "toolSequence": { "type": "array", "items": { "type": "string" } },
+        "answerContains": { "type": "array", "items": { "type": "string" } },
+        "llmCalls": { "type": "integer", "minimum": 0 },
+        "cachedOn": { "type": "array", "items": { "type": "integer", "minimum": 1 } },
+        "noErrors": { "type": "boolean" },
+        "taskOutcome": { "type": "string", "enum": ["verified", "partial", "failed"] },
+        "approvalOutcome": { "type": "string", "enum": ["approved", "rejected"] },
+        "approvalHandlerCalls": { "type": "integer", "minimum": 0 },
+        "recoveryToolCalls": { "type": "integer", "minimum": 0 },
+        "securityOutcome": { "type": "string", "enum": ["blocked"] }
+      }
+    }
+  }
+}

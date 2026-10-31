@@ -163,12 +163,18 @@ export default {
           if (!quota.allowed) {
             return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：简单任务请直接执行；确需委派请稍后再试。` };
           }
+          const releaseSlot = ctx.kernel.budget.reserveSubagentSlots(1);
+          if (!releaseSlot) {
+            quota.refund?.();
+            return { ok: false, error: '子代理资源繁忙（进程活动子任务上限已满），本次未启动且配额已退还。' };
+          }
           const traceId = `sub-${randomUUID().slice(0, 8)}`;
           let answer = '';
           let usage = { input: 0, output: 0 };
           let cost = 0;
           let toolCalls = 0;
           let error: string | undefined;
+          let cancelled = false;
           // H3 中断/预算透传：主循环 abort 即刻传导给子循环；主循环剩余预算（执行器在
           // ToolContext 上局部扩展的 remainingBudget 字段，kernel 契约尚未声明）作为
           // 子代理成本硬上限——子代理开销受主任务预算约束，不会绕开熔断
@@ -202,12 +208,25 @@ export default {
                   data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                 });
               }
-              else if (ev.type === 'error') error = ev.error;
+              else if (ev.type === 'error') { error = ev.error; cancelled = ev.kind === 'aborted'; }
             }
           } catch (err) {
             error = err instanceof Error ? err.message : String(err);
+            cancelled = tctx.signal?.aborted === true;
+          } finally {
+            releaseSlot();
           }
-          if (error) return { ok: false, error: `子代理失败: ${error}` };
+          if (error) return {
+            ok: false,
+            error: `子代理失败: ${error}`,
+            cancelled,
+            toolCalls,
+            tokensIn: usage.input,
+            tokensOut: usage.output,
+            cost,
+            traceId,
+            subagentCost: { cost, tokensIn: usage.input, tokensOut: usage.output },
+          };
           return {
             ok: true,
             data: {
@@ -277,6 +296,11 @@ export default {
           if (!quota.allowed) {
             return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：请控制审查频率。` };
           }
+          const releaseSlot = ctx.kernel.budget.reserveSubagentSlots(1);
+          if (!releaseSlot) {
+            quota.refund?.();
+            return { ok: false, error: '审查资源繁忙（进程活动子任务上限已满），本次未启动且配额已退还。' };
+          }
           const traceId = `rev-${randomUUID().slice(0, 8)}`;
           const criteria = args.criteria ? String(args.criteria).trim() : '正确性与需求符合度';
           const objective = `审查以下产出。审查标准：${criteria}。\n\n【待审查产出/说明】\n${target}`;
@@ -307,6 +331,8 @@ export default {
             }
           } catch (err) {
             error = err instanceof Error ? err.message : String(err);
+          } finally {
+            releaseSlot();
           }
           if (error) return { ok: false, error: `审查失败: ${error}` };
           const review = parseReview(answer);

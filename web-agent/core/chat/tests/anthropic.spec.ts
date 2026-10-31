@@ -4,6 +4,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { buildBody, mapMessages, reduceEvent, createStreamState, usageChunks, imageSource } from '../anthropic';
 import { createProvider } from '../provider';
+import { LLMHttpError } from '../provider-health';
 import type { LLMChunk, LLMMessage } from '../../../kernel/types';
 import { capabilityFor } from '../provider';
 import { routeForCapability, capabilitySatisfied } from '../routing';
@@ -124,6 +125,7 @@ let server: Server | null = null;
 let lastRequest: { path: string; headers: Record<string, string | string[] | undefined>; body: Record<string, unknown> } | null = null;
 let sseFrames: string[] = ['data: {"type":"message_stop"}\n\n'];
 let httpStatus = 200;
+let retryAfterHeader: string | undefined;
 
 after(() => { server?.close(); server = null; });
 
@@ -141,7 +143,11 @@ async function startMock(): Promise<string> {
         headers: req.headers as Record<string, string | string[] | undefined>,
         body: raw ? JSON.parse(raw) as Record<string, unknown> : {},
       };
-      if (httpStatus !== 200) { res.writeHead(httpStatus, { 'Content-Type': 'application/json' }); res.end('{"type":"error"}'); return; }
+      if (httpStatus !== 200) {
+        res.writeHead(httpStatus, { 'Content-Type': 'application/json', ...(retryAfterHeader ? { 'Retry-After': retryAfterHeader } : {}) });
+        res.end('{"type":"error"}');
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
       for (const f of sseFrames) res.write(f);
       res.end();
@@ -226,6 +232,22 @@ describe('Anthropic 原生端点端到端', () => {
     httpStatus = 200;
   });
 
+  it('OpenAI 与 Anthropic 均透传 Retry-After 到统一重试策略', async () => {
+    const base = await startMock();
+    httpStatus = 429;
+    retryAfterHeader = '0.25';
+    for (const protocol of ['openai', 'anthropic'] as const) {
+      const p = createProvider({ id: `retry-after-${protocol}`, baseUrl: base, apiKey: 'k', model: 'm', protocol });
+      let thrown: unknown;
+      try { await collect(p, [user('x')], 'm'); } catch (error) { thrown = error; }
+      assert.ok(thrown instanceof LLMHttpError);
+      assert.equal((thrown as LLMHttpError).status, 429);
+      assert.equal((thrown as LLMHttpError).retryAfterMs, 250);
+    }
+    retryAfterHeader = undefined;
+    httpStatus = 200;
+  });
+
   it('流内 error 事件抛错；缺 message_stop 视为断流抛错', async () => {
     const base = await startMock();
     sseFrames = ['data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n', 'data: {"type":"message_stop"}\n\n'];
@@ -245,6 +267,54 @@ describe('Anthropic 原生端点端到端', () => {
     assert.equal(chunks.filter(c => c.type === 'delta').length, 1);
     assert.equal(lastRequest?.path, '/chat/completions');
     assert.equal(lastRequest?.headers.authorization, 'Bearer sk-x');
+  });
+
+  it('OpenAI 流取消后关闭底层 SSE 连接', async () => {
+    let closed = false;
+    const server = createServer((_req, res) => {
+      res.on('close', () => { closed = true; });
+      res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+      res.write('data: {"choices":[{"delta":{"content":"开始"}}]}\n\n');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+    const p = createProvider({ id: 'cancel-oai', baseUrl: base, apiKey: 'k', model: 'm', protocol: 'openai' });
+    const controller = new AbortController();
+    const iterator = p.chat([user('stop')], { model: 'm', signal: controller.signal })[Symbol.asyncIterator]();
+    try {
+      const first = await iterator.next();
+      assert.equal(first.value?.type, 'delta');
+      controller.abort();
+      await assert.rejects(() => iterator.next(), /abort|停止|取消/i);
+      const deadline = Date.now() + 2_000;
+      while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
+      assert.equal(closed, true, '取消后服务端应观察到 SSE 连接关闭');
+    } finally {
+      controller.abort();
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
+
+  it('OpenAI 与 Anthropic 请求都受 Provider 时限约束', async () => {
+    for (const protocol of ['openai', 'anthropic'] as const) {
+      let closed = false;
+      const server = createServer((_req, res) => {
+        res.on('close', () => { closed = true; });
+        res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+        res.flushHeaders();
+      });
+      await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+      const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+      const p = createProvider({ id: `timeout-${protocol}`, baseUrl: base, apiKey: 'k', model: 'm', protocol, requestTimeoutMs: 40 });
+      try {
+        await assert.rejects(() => collect(p, [user('timeout')], 'm'), /timeout|timed out/i);
+        const deadline = Date.now() + 2_000;
+        while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
+        assert.equal(closed, true, `${protocol} 超时后应关闭服务端流`);
+      } finally {
+        await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      }
+    }
   });
 });
 

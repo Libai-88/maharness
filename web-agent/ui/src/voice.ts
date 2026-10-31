@@ -144,7 +144,7 @@ export function tidySentence(s: string, max = 160): string {
   return one.length > max ? `${one.slice(0, max)}…` : one;
 }
 
-export type ErrorKind = 'aborted' | 'budget' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy';
+export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy' | 'auth' | 'parameter' | 'business' | 'transient';
 
 export interface HumanError {
   /** 摆在气泡里的人话 */
@@ -167,12 +167,17 @@ export function humanizeError(raw: string, kind?: ErrorKind): HumanError {
   if (kind === 'budget' || /成本预算已耗尽/.test(msg)) {
     return { text: '这次说到这儿就停了——预算用完了。已完成的部分都在，接着聊或新建一个都行。', hint: '可在「设置」里调整预算', severe: false };
   }
+  if (kind === 'deadline') return { text: '任务超过了设定时限，已停止后续执行。', hint: tidySentence(msg, 100), severe: false };
   if (kind === 'max-turns' || /轮数上限/.test(msg)) {
     return { text: '这个任务有点大，我先把做到哪儿的都留着了。再说一句「继续」，我接着往下推。', severe: false };
   }
   if (kind === 'policy' || /策略拦截/.test(msg)) {
     return { text: `这条路被规则挡住了：${tidySentence(msg, 80)}`, hint: '可在「设置 · 规则」里调整', severe: false };
   }
+  if (kind === 'auth') return { text: '这条线路的凭据或模型权限不可用。', hint: '请在设置中检查 Provider 密钥和模型权限', severe: true };
+  if (kind === 'parameter') return { text: '请求参数不符合当前模型或工具的要求。', hint: tidySentence(msg, 100), severe: false };
+  if (kind === 'business') return { text: '服务端拒绝了这次请求。', hint: tidySentence(msg, 100), severe: false };
+  if (kind === 'transient') return { text: '服务暂时没有响应好，可以稍后重试。', hint: '系统不会重复执行已完成的工具动作', severe: true };
   if (/密钥|401|403|invalid api key|unauthorized|no access to model/i.test(msg)) {
     return { text: '我这边的一条线路钥匙过期了，已经自动换了一条继续陪你聊。', hint: '有空去「设置」换一下密钥', severe: true };
   }

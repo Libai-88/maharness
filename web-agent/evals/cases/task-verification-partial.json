@@ -1,0 +1,20 @@
+{
+  "name": "task-verification-partial",
+  "description": "部分满足验收条件时返回部分完成状态",
+  "messages": [{ "role": "user", "content": "Complete both requested checks" }],
+  "task": {
+    "objective": "Include the ready marker and the published marker",
+    "acceptance": [
+      { "type": "output_contains", "value": "ready marker" },
+      { "type": "output_contains", "value": "published marker" }
+    ]
+  },
+  "requests": [{
+    "chunks": [
+      { "type": "delta", "text": "ready marker" },
+      { "type": "usage", "input": 20, "output": 4 },
+      { "type": "done" }
+    ]
+  }],
+  "expect": { "llmCalls": 1, "noErrors": false, "taskOutcome": "partial" }
+}

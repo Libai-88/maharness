@@ -8,7 +8,7 @@
  * 注入策略（关键）：正文永不注入；每轮只注入「技能索引」（name + 截断描述），
  *   且默认按当前任务相关性取 top-K（skills.enabled=routing），受 indexMaxTokens 预算约束；
  *   全文仍由 get_skill 懒加载，读取量记入 data/skill-usage.json 台账。
- * frontmatter 走 kernel/frontmatter 真解析（name/description/license/allowed-tools/metadata）。
+ * frontmatter 走 kernel/frontmatter 真解析（name/description/license/allowed-tools/metadata/契约字段）。
  */
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
@@ -45,6 +45,18 @@ export interface SkillInfo {
   license?: string;
   allowedTools?: string[];
   metadata?: Record<string, string>;
+  /** 触发技能候选的用户意图关键词或短语 */
+  triggers?: string[];
+  /** 适用条件，供路由与 UI 展示 */
+  appliesWhen?: string[];
+  /** 明确拒绝条件，避免将技能套用到不适合的任务 */
+  rejectWhen?: string[];
+  /** 技能输入契约（自然语言或 schema 摘要） */
+  input?: string;
+  /** 技能输出契约（自然语言或 schema 摘要） */
+  output?: string;
+  /** 契约 schema 校验告警；保留技能可发现性，不因旧技能缺字段而丢失 */
+  contractWarnings?: string[];
   /** 正文字符数（索引预算与台账用） */
   bodyChars?: number;
 }
@@ -56,14 +68,14 @@ interface SkillEntry extends SkillInfo {
 
 /** 技能包根扫描：支持 vendor/<pack>/<skill>/ 与 vendor/<pack>/skills/<skill>/ 两种上游布局；
  *  vendor/<pack>/SKILL.md（整包即一个技能）→ 以 pack 自身为技能目录、其父目录为资源根。 */
-function packRoots(): { packRoot: string; skillParent: string; selfAsSkill?: string }[] {
-  if (!existsSync(vendorDir)) return [];
+function packRoots(vendorRoot = vendorDir): { packRoot: string; skillParent: string; selfAsSkill?: string }[] {
+  if (!existsSync(vendorRoot)) return [];
   const out: { packRoot: string; skillParent: string; selfAsSkill?: string }[] = [];
   let entries;
-  try { entries = readdirSync(vendorDir, { withFileTypes: true }); } catch { return out; }
+  try { entries = readdirSync(vendorRoot, { withFileTypes: true }); } catch { return out; }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
-    const packRoot = join(vendorDir, e.name);
+    const packRoot = join(vendorRoot, e.name);
     if (existsSync(join(packRoot, 'SKILL.md'))) { out.push({ packRoot: dirname(packRoot), skillParent: packRoot, selfAsSkill: e.name }); continue; }
     const nested = join(packRoot, 'skills');
     out.push({ packRoot, skillParent: existsSync(nested) ? nested : packRoot });
@@ -79,6 +91,18 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
   const fm = parseFrontMatter(md);
   const meta = fmMap(fm.data, 'metadata');
   const allowed = fmList(fm.data, 'allowed-tools').length ? fmList(fm.data, 'allowed-tools') : fmList(fm.data, 'allowed_tools');
+  const triggers = fmList(fm.data, 'triggers');
+  const appliesWhen = fmList(fm.data, 'applies-when').length ? fmList(fm.data, 'applies-when') : fmList(fm.data, 'applies_when');
+  const rejectWhen = fmList(fm.data, 'reject-when').length ? fmList(fm.data, 'reject-when') : fmList(fm.data, 'reject_when');
+  const input = fmString(fm.data, 'input') || undefined;
+  const output = fmString(fm.data, 'output') || undefined;
+  const contractWarnings = [
+    [triggers.length > 0, '缺少 triggers（至少一个触发场景）'],
+    [appliesWhen.length > 0, '缺少 applies-when（至少一个适用条件）'],
+    [rejectWhen.length > 0, '缺少 reject-when（至少一个拒绝条件）'],
+    [!!input, '缺少 input（输入契约）'],
+    [!!output, '缺少 output（输出契约）'],
+  ].filter(([ok]) => !ok).map(([, message]) => message as string);
   return {
     name: fmString(fm.data, 'name') || name,
     description: fmString(fm.data, 'description') || '(无描述)',
@@ -86,6 +110,11 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
     license: fmString(fm.data, 'license') || undefined,
     allowedTools: allowed.length ? allowed : undefined,
     metadata: Object.keys(meta).length ? meta : undefined,
+    triggers: triggers.length ? triggers : undefined,
+    appliesWhen: appliesWhen.length ? appliesWhen : undefined,
+    rejectWhen: rejectWhen.length ? rejectWhen : undefined,
+    input, output,
+    contractWarnings: contractWarnings.length ? contractWarnings : undefined,
     bodyChars: fm.body.length,
   };
 }
@@ -96,6 +125,12 @@ function publicInfo(e: SkillEntry, shadows: SkillSource[]): SkillInfo {
   if (e.license) info.license = e.license;
   if (e.allowedTools?.length) info.allowedTools = e.allowedTools;
   if (e.metadata) info.metadata = e.metadata;
+  if (e.triggers) info.triggers = e.triggers;
+  if (e.appliesWhen) info.appliesWhen = e.appliesWhen;
+  if (e.rejectWhen) info.rejectWhen = e.rejectWhen;
+  if (e.input) info.input = e.input;
+  if (e.output) info.output = e.output;
+  if (e.contractWarnings) info.contractWarnings = e.contractWarnings;
   if (e.bodyChars) info.bodyChars = e.bodyChars;
   return info;
 }
@@ -109,6 +144,8 @@ export default {
     const topK = Math.max(1, ctx.config.get<number>('skills.topK', 8));
     const indexMaxTokens = Math.max(100, ctx.config.get<number>('skills.indexMaxTokens', 900));
     const descMaxChars = Math.max(40, ctx.config.get<number>('skills.descMaxChars', 160));
+    const configuredVendorDir = ctx.config.get<string>('skills.vendorDir', vendorDir);
+    const skillVendorDir = resolve(configuredVendorDir);
     const usageFile = join(ctx.paths.data, 'skill-usage.json');
 
     let scanCache: { at: number; entries: SkillEntry[]; index: Map<string, { entry: SkillEntry; shadows: SkillSource[] }> } | null = null;
@@ -119,7 +156,7 @@ export default {
       const parents: { dir: string; source: SkillSource; packRoot?: string; selfName?: string }[] = [];
       for (const rel of PROJECT_DIRS) parents.push({ dir: join(resolve(projectRoot), rel), source: 'project' });
       parents.push({ dir: userDir, source: 'user' });
-      for (const { packRoot, skillParent, selfAsSkill } of packRoots()) {
+      for (const { packRoot, skillParent, selfAsSkill } of packRoots(skillVendorDir)) {
         parents.push({ dir: skillParent, source: 'pack', packRoot, selfName: selfAsSkill });
       }
       parents.push({ dir: builtinDir, source: 'builtin' });
@@ -247,7 +284,7 @@ export default {
       service: {
         id: 'skills',
         instance: {
-          list, get, entryOf, packDir: vendorDir,
+          list, get, entryOf, packDir: skillVendorDir,
           /** 供 UI/管理端按来源+名称读原文（project/user/pack/builtin 由服务定位目录） */
           readBySource(source: SkillSource, name: string): string | null {
             const e = entryOf(name);

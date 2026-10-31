@@ -299,8 +299,12 @@ const PROBE_VER = 'v1';
 interface PsResult { code: number; stdout: string; stderr: string }
 
 /** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根） */
-function runPowershell(command: string, timeoutMs: number, cwd: string): Promise<PsResult> {
+export function runPowershell(command: string, timeoutMs: number, cwd: string, signal?: AbortSignal): Promise<PsResult> {
   return new Promise((resolve, reject) => {
+    if (signal?.aborted) {
+      reject(signal.reason instanceof Error ? signal.reason : new Error('命令已取消'));
+      return;
+    }
     // OutputEncoding 保证 stdout 按 UTF-8 输出（Windows 控制台默认 GBK）
     const full = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ErrorActionPreference='Continue'; ${command}`;
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', full], {
@@ -310,22 +314,44 @@ function runPowershell(command: string, timeoutMs: number, cwd: string): Promise
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let terminalError: Error | undefined;
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+    };
+    const killTree = () => {
+      if (process.platform === 'win32' && ps.pid) {
+        try {
+          const killer = spawn('taskkill', ['/PID', String(ps.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+          killer.on('error', () => { try { ps.kill(); } catch { /* 忽略 */ } });
+        } catch { try { ps.kill(); } catch { /* 忽略 */ } }
+      } else {
+        try { ps.kill('SIGKILL'); } catch { /* 忽略 */ }
+      }
+    };
+    const onAbort = () => {
+      if (settled || terminalError) return;
+      terminalError = signal?.reason instanceof Error ? signal.reason : new Error('命令已取消');
+      killTree();
+    };
     const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      // 杀整个进程树（Windows 下 kill() 不杀子进程）
-      try { spawn('taskkill', ['/PID', String(ps.pid), '/T', '/F'], { windowsHide: true }); } catch { /* 忽略 */ }
-      reject(new Error(`命令执行超时（${timeoutMs / 1000}s），已终止`));
+      terminalError = new Error(`命令执行超时（${timeoutMs / 1000}s），已终止`);
+      killTree();
     }, timeoutMs);
+    signal?.addEventListener('abort', onAbort, { once: true });
     ps.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
     ps.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
-    ps.on('error', (err) => { if (!settled) { settled = true; clearTimeout(timer); reject(err); } });
+    ps.on('error', (err) => {
+      terminalError ??= err;
+    });
     ps.on('close', (code) => {
       if (settled) return;
       settled = true;
-      clearTimeout(timer);
-      resolve({ code: code ?? -1, stdout, stderr });
+      cleanup();
+      if (terminalError) reject(terminalError);
+      else resolve({ code: code ?? -1, stdout, stderr });
     });
+    if (signal?.aborted) onAbort();
   });
 }
 
@@ -404,7 +430,7 @@ export default {
           }
 
           try {
-            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot);
+            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, tctx.signal);
             const combined = (r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '')).slice(0, MAX_OUTPUT);
             const truncated = combined.length >= MAX_OUTPUT;
             if (r.code === 0) {
@@ -443,10 +469,10 @@ export default {
           const wanted = (args.commands ?? []).map(c => String(c).trim()).filter(c => /^[A-Za-z0-9_.+-]{1,32}$/.test(c));
           const cmds = wanted.length ? wanted : PROBE_DEFAULTS;
           const withVersion = !!args.withVersion;
-          const key = tctx.cache.makeKey(['env_probe', PROBE_VER, cmds.join(','), withVersion ? 'v' : '']);
+          const key = tctx.cache.makeKey(['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : '']);
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '环境探测缓存命中' });
             return { ok: true, data: hit.value };
           }
@@ -455,7 +481,7 @@ export default {
             ? `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { $v = ''; try { $v = ((& $c --version) 2>&1 | Select-Object -First 1) } catch {}; "$($i.Name)|$($i.Source)|$v" } else { "$c||" } }; $out -join "\`n"`
             : `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { "$($i.Name)|$($i.Source)|" } else { "$c||" } }; $out -join "\`n"`;
           try {
-            const r = await runPowershell(script, (withVersion ? 45 : 20) * 1000, tctx.sandboxRoot);
+            const r = await runPowershell(script, (withVersion ? 45 : 20) * 1000, tctx.sandboxRoot, tctx.signal);
             const tools = r.stdout.split(/\r?\n/).filter(l => l.includes('|')).map(l => {
               const [name, path, version] = l.split('|');
               return { name: (name || '').trim(), found: !!(path || '').trim(), path: (path || '').trim() || undefined, version: (version || '').trim() || undefined };

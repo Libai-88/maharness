@@ -34,7 +34,7 @@
 import { spawn } from 'node:child_process';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
-import type { Plugin, ToolDef } from '../../kernel/types';
+import type { Plugin, ToolContext, ToolDef } from '../../kernel/types';
 
 /**
  * MCP 协议版本——**单一事实源**（stdio 的 initialize 与 HTTP 的 Mcp-Protocol-Version
@@ -273,7 +273,7 @@ interface McpCallResult {
 interface McpConnection {
   initialize(): Promise<void>;
   toolsList(): Promise<McpToolDef[]>;
-  toolsCall(name: string, args: Record<string, unknown>): Promise<McpCallResult>;
+  toolsCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult>;
   close(): void;
 }
 
@@ -290,6 +290,8 @@ interface PendingEntry {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timer?: NodeJS.Timeout;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 }
 
 // ============ stdio 启动计划（缺陷 B18：Windows 上 npx 是 .cmd 垫片） ============
@@ -324,7 +326,7 @@ export function buildSpawnPlan(
   return { file: [cmd, ...args].map(quoteCmdArg).join(' '), args: [], shell: true };
 }
 
-class StdioConnection implements McpConnection {
+export class StdioConnection implements McpConnection {
   private proc: ReturnType<typeof spawn> | null = null;
   private pending = new Map<number, PendingEntry>();
   private nextId = 1;
@@ -389,25 +391,42 @@ class StdioConnection implements McpConnection {
         const p = this.pending.get(msg.id)!;
         this.pending.delete(msg.id);
         if (p.timer) clearTimeout(p.timer);
+        if (p.signal && p.onAbort) p.signal.removeEventListener('abort', p.onAbort);
         if (msg.error) p.reject(new Error(msg.error.message ?? 'JSON-RPC 错误'));
         else p.resolve(msg.result);
       }
     } catch { /* 非 JSON 行忽略 */ }
   }
 
-  request(method: string, params: unknown): Promise<unknown> {
+  request(method: string, params: unknown, signal?: AbortSignal): Promise<unknown> {
     return new Promise((resolve, reject) => {
+      if (signal?.aborted) {
+        reject(new Error('MCP 请求已取消'));
+        return;
+      }
       const id = this.nextId++;
-      const entry: PendingEntry = { resolve, reject };
+      const entry: PendingEntry = { resolve, reject, signal };
       this.pending.set(id, entry);
-      this.write({ jsonrpc: '2.0', id, method, params });
+      const cleanup = () => {
+        if (entry.timer) clearTimeout(entry.timer);
+        if (entry.signal && entry.onAbort) entry.signal.removeEventListener('abort', entry.onAbort);
+      };
       const timer = setTimeout(() => {
         if (this.pending.delete(id)) {
+          cleanup();
           reject(new Error(`MCP 请求超时: ${method}`));
         }
       }, 30_000);
       timer.unref?.();
       entry.timer = timer;
+      entry.onAbort = () => {
+        if (!this.pending.delete(id)) return;
+        cleanup();
+        this.write({ jsonrpc: '2.0', method: '$/cancelRequest', params: { requestId: id } });
+        reject(new Error('MCP 请求已取消'));
+      };
+      signal?.addEventListener('abort', entry.onAbort, { once: true });
+      this.write({ jsonrpc: '2.0', id, method, params });
     });
   }
 
@@ -419,6 +438,7 @@ class StdioConnection implements McpConnection {
     if (this.closed) return;
     for (const p of this.pending.values()) {
       if (p.timer) clearTimeout(p.timer);
+      if (p.signal && p.onAbort) p.signal.removeEventListener('abort', p.onAbort);
       p.reject(err);
     }
     this.pending.clear();
@@ -429,8 +449,8 @@ class StdioConnection implements McpConnection {
     return r.tools ?? [];
   }
 
-  async toolsCall(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
-    const r = (await this.request('tools/call', { name, arguments: args })) as McpCallResult;
+  async toolsCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
+    const r = (await this.request('tools/call', { name, arguments: args }, signal)) as McpCallResult;
     return r ?? {};
   }
 
@@ -450,7 +470,7 @@ class StdioConnection implements McpConnection {
 
 // ============ http 传输（stateless POST，2026-07-28 规范形态） ============
 
-class HttpConnection implements McpConnection {
+export class HttpConnection implements McpConnection {
   private validatedUrl?: string;
 
   constructor(private name: string, private cfg: ServerCfg) {}
@@ -471,7 +491,7 @@ class HttpConnection implements McpConnection {
     return raw;
   }
 
-  private async post(body: Record<string, unknown>): Promise<unknown> {
+  private async post(body: Record<string, unknown>, signal?: AbortSignal): Promise<unknown> {
     const url = await this.safeUrl();
     const res = await fetch(url, {
       method: 'POST',
@@ -484,7 +504,7 @@ class HttpConnection implements McpConnection {
       body: JSON.stringify(body),
       // stateless 无会话可续，重定向一律不跟随：跟随机重定向会绕开上面的端点校验
       redirect: 'error',
-      signal: AbortSignal.timeout(30_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const text = await res.text();
@@ -511,8 +531,8 @@ class HttpConnection implements McpConnection {
     return r.result?.tools ?? [];
   }
 
-  async toolsCall(name: string, args: Record<string, unknown>): Promise<McpCallResult> {
-    const r = (await this.post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: args } })) as {
+  async toolsCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
+    const r = (await this.post({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name, arguments: args } }, signal)) as {
       result?: { content?: { type?: string; text?: string }[]; isError?: boolean };
       error?: { message?: string };
     };
@@ -557,9 +577,9 @@ export function wrapMcpTool(serverName: string, mt: McpToolDef, conn: McpConnect
     limits: gate.approval
       ? '外部 MCP 工具：每次调用都需用户审批'
       : '外部 MCP 工具：配置已显式关闭审批（approval:false），调用无需确认——仅对可信 server 使用',
-    handler: async (args: unknown) => {
+    handler: async (args: unknown, tctx: ToolContext) => {
       try {
-        const res = await conn.toolsCall(mt.name, (args ?? {}) as Record<string, unknown>);
+        const res = await conn.toolsCall(mt.name, (args ?? {}) as Record<string, unknown>, tctx.signal);
         const text = contentToText(res.content);
         if (res.isError) return { ok: false, error: text || `MCP 工具 ${mt.name} 执行失败` };
         return { ok: true, data: { text, server: serverName, tool: mt.name } };

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "name": "approval-approved-partial",
+  "description": "审批工具成功但另一项验收未满足时保留部分完成状态",
+  "messages": [{ "role": "user", "content": "Run the protected action and publish the result" }],
+  "approval": { "toolName": "eval_approval_action", "decision": "approve" },
+  "task": {
+    "objective": "Run the action and include both result markers",
+    "acceptance": [
+      { "type": "tool_succeeded", "name": "eval_approval_action" },
+      { "type": "output_contains", "value": "ready marker" },
+      { "type": "output_contains", "value": "published marker" }
+    ]
+  },
+  "requests": [
+    { "chunks": [
+      { "type": "tool_call", "toolCall": { "id": "approval-partial-call", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+      { "type": "usage", "input": 32, "output": 7 },
+      { "type": "done" }
+    ] },
+    { "chunks": [
+      { "type": "delta", "text": "The action ran and the ready marker is present." },
+      { "type": "usage", "input": 38, "output": 10 },
+      { "type": "done" }
+    ] }
+  ],
+  "expect": { "llmCalls": 2, "noErrors": false, "taskOutcome": "partial", "approvalOutcome": "approved", "approvalHandlerCalls": 1 }
+}

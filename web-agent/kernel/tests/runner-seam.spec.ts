@@ -25,7 +25,7 @@ import type { ToolDef, ToolContext } from '../types';
 const CHAT_PLUGIN_ID = 'chat';
 
 /** 替身循环的调用记录：经事件总线采集（不借助 globalThis——多用例共享进程会串扰） */
-interface StubCall { systemPrompt?: string; model?: string }
+interface StubCall { systemPrompt?: string; model?: string; objective?: string; hasSignal?: boolean }
 
 function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup: () => void } {
   const rootDir = mkdtempSync(join(tmpdir(), 'mh-runner-'));
@@ -43,9 +43,34 @@ function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup:
     id: 'runner-stub', name: 'runner-stub', version: '0.1.0', entry: 'index.ts',
   }));
   writeFileSync(join(pdir, 'index.ts'), `
+    let activeParallel = 0;
     const stubFactory = (kernel, bus) => ({
       async *run(opts) {
-        bus.emit({ type: 'stub.runner.called', ts: Date.now(), data: { systemPrompt: opts.systemPrompt, model: opts.model } });
+        const objective = opts.messages?.[0]?.content ?? '';
+        if (objective.startsWith('capacity-delay')) {
+          activeParallel++;
+          bus.emit({ type: 'stub.runner.capacity', ts: Date.now(), data: { active: activeParallel } });
+          try {
+            yield { type: 'delta', text: 'capacity' };
+            await new Promise((resolve) => setTimeout(resolve, 80));
+            yield { type: 'assistant_done', content: 'capacity', reasoning: '', usage: { input: 1, output: 1 }, cost: 0 };
+          } finally {
+            activeParallel--;
+            bus.emit({ type: 'stub.runner.capacity', ts: Date.now(), data: { active: activeParallel } });
+          }
+          return;
+        }
+        bus.emit({ type: 'stub.runner.called', ts: Date.now(), data: { systemPrompt: opts.systemPrompt, model: opts.model, objective, hasSignal: !!opts.signal } });
+        if (objective.startsWith('wait-for-abort')) {
+          yield { type: 'delta', text: 'partial' };
+          yield { type: 'assistant_done', content: 'partial', reasoning: '', usage: { input: 10, output: 2 }, cost: 0.05 };
+          await new Promise((resolve) => {
+            if (opts.signal?.aborted) resolve();
+            else opts.signal?.addEventListener('abort', resolve, { once: true });
+          });
+          yield { type: 'error', error: '已停止', kind: 'aborted' };
+          return;
+        }
         yield { type: 'delta', text: '替身回答' };
         yield { type: 'tool_result', id: 't1', name: 'fake', summary: 'ok', ok: true };
         yield { type: 'assistant_done', content: '替身回答', reasoning: '', usage: { input: 1, output: 2 }, cost: 0.5 };
@@ -193,6 +218,123 @@ describe('执行循环可替换（service:runner）', () => {
     const data = res.data as { completed: number; results: { answer?: string }[] };
     assert.equal(data.completed, 2);
     assert.equal(data.results[0].answer, '替身回答');
+  });
+
+  test('并行压力：四个独立子任务全部启动并聚合，不超过硬上限', async (t) => {
+    const f = setup();
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
+    chat.setProviders([{
+      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
+      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
+    }]);
+    const before = f.calls.length;
+    const res = await toolOf(f.kernel, 'run_parallel').handler(
+      { tasks: [{ objective: 'A' }, { objective: 'B' }, { objective: 'C' }, { objective: 'D' }] },
+      toolCtx(f.rootDir, f.kernel),
+    );
+    assert.equal(res.ok, true);
+    const data = res.data as { status: string; completed: number; failed: number; results: unknown[] };
+    assert.equal(data.status, 'completed');
+    assert.equal(data.completed, 4);
+    assert.equal(data.failed, 0);
+    assert.equal(data.results.length, 4);
+    assert.equal(f.calls.length - before, 4);
+  });
+
+  test('并行资源上限：重叠批次的活动子任务不超过 8，超限批次不启动', async (t) => {
+    const f = setup();
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
+    chat.setProviders([{
+      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
+      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
+    }]);
+    let active = 0;
+    let peak = 0;
+    f.kernel.bus.on('stub.runner.capacity', (event) => {
+      active = (event.data as { active: number }).active;
+      peak = Math.max(peak, active);
+    });
+    const tool = toolOf(f.kernel, 'run_parallel');
+    const batch = (name: string) => tool.handler({ tasks: Array.from({ length: 4 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) }, toolCtx(f.rootDir, f.kernel));
+    const p1 = batch('one');
+    const p2 = batch('two');
+    const p3 = batch('three');
+    const [r1, r2, r3] = await Promise.all([p1, p2, p3]);
+    assert.equal(r1.ok, true);
+    assert.equal(r2.ok, true);
+    assert.equal(r3.ok, false);
+    assert.match(String(r3.error), /资源繁忙/);
+    assert.equal(peak, 8);
+    assert.equal(active, 0);
+  });
+
+  test('跨工具共享资源上限：run_subagent 占用槽位后，run_parallel 按同一总量拒绝超额', async (t) => {
+    const f = setup();
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
+    chat.setProviders([{
+      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
+      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
+    }]);
+    let subagentStarted!: () => void;
+    const started = new Promise<void>((resolve) => { subagentStarted = resolve; });
+    const off = f.kernel.bus.on('stub.runner.capacity', (event) => {
+      if ((event.data as { active: number }).active === 1) { off(); subagentStarted(); }
+    });
+    const subagent = toolOf(f.kernel, 'run_subagent').handler({ objective: 'capacity-delay standalone' }, toolCtx(f.rootDir, f.kernel));
+    await started;
+    const parallel = toolOf(f.kernel, 'run_parallel');
+    const batch = (name: string) => parallel.handler(
+      { tasks: Array.from({ length: 4 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
+      toolCtx(f.rootDir, f.kernel),
+    );
+    const [accepted, rejected] = await Promise.all([batch('accepted'), batch('rejected')]);
+    assert.equal(accepted.ok, true);
+    assert.equal(rejected.ok, false);
+    assert.match(String(rejected.error), /资源繁忙/);
+    assert.equal(f.kernel.budget.activeSubagentCount(), 0);
+    const subagentResult = await subagent;
+    assert.equal(subagentResult.ok, true);
+  });
+
+  test('并行取消传播：父 signal 取消全部子任务，保留已结算成本', async (t) => {
+    const f = setup();
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
+    chat.setProviders([{
+      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
+      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
+    }]);
+
+    const controller = new AbortController();
+    const started = new Promise<void>((resolve) => {
+      const off = f.kernel.bus.on('stub.runner.called', () => {
+        if (f.calls.length === 2) { off(); resolve(); }
+      });
+    });
+    const handlerPromise = toolOf(f.kernel, 'run_parallel').handler(
+      { tasks: [{ objective: 'wait-for-abort A' }, { objective: 'wait-for-abort B' }] },
+      { ...toolCtx(f.rootDir, f.kernel), signal: controller.signal },
+    );
+    await started;
+    assert.ok(f.calls.every((c) => c.hasSignal), '父取消信号已透传到每个子 runner');
+    controller.abort();
+    const res = await handlerPromise;
+    assert.equal(res.ok, false, '全部子任务取消属于并行工具失败，不应伪装为成功');
+    const data = res.data as { status: string; cancelled: number; completed: number; results: { cancelled?: boolean }[]; subagentCost: { cost: number; tokensIn: number } };
+    assert.equal(data.status, 'failed');
+    assert.equal(data.cancelled, 2);
+    assert.equal(data.completed, 0);
+    assert.ok(data.results.every((r) => r.cancelled));
+    assert.equal(data.subagentCost.cost, 0.1);
+    assert.equal(data.subagentCost.tokensIn, 20);
+    assert.equal(f.kernel.budget.activeSubagentCount(), 0, '取消后所有并行活动槽位均已释放');
   });
 
   test('接管者停用 → 自动回退默认循环；重新启用 → 再次接管', async (t) => {

@@ -152,10 +152,13 @@ export default {
             imageId: { type: 'string', description: 'read_image 返回的 imageId（与 path 二选一）' },
             path: { type: 'string', description: '未登记时可直接给图片路径（相对沙箱根目录）' },
             question: { type: 'string', description: '要视觉模型回答的具体问题' },
+            maxLatencyMs: { type: 'number', description: '可接受的最大模型延迟（毫秒）' },
+            privacyTier: { type: 'string', enum: ['local', 'trusted', 'external'], description: '要求的隐私等级' },
+            maxRiskLevel: { type: 'string', enum: ['low', 'medium', 'high'], description: '允许的最高风险等级' },
           },
           required: ['question'],
         },
-        async handler(args: { imageId?: string; path?: string; question?: string }, tctx) {
+        async handler(args: { imageId?: string; path?: string; question?: string; maxLatencyMs?: number; privacyTier?: 'local' | 'trusted' | 'external'; maxRiskLevel?: 'low' | 'medium' | 'high' }, tctx) {
           if (!enabled) return { ok: false, error: '视觉能力已由配置关闭' };
           let ref = args.imageId ? findImage(String(args.imageId)) : undefined;
           if (!ref && args.path) {
@@ -183,8 +186,16 @@ export default {
           let decision: RouteDecision | undefined;
           void decision;
 
-          if (!capabilitySatisfied({ vision: true }, currentProvider, currentModel)) {
-            const pick = routeForCapability({ vision: true }, list, { providerId: currentProvider.id, model: currentModel });
+          const capabilityNeed = {
+            vision: true,
+            ...(Number.isFinite(args.maxLatencyMs) ? { maxLatencyMs: Math.max(0, Number(args.maxLatencyMs)) } : {}),
+            ...(args.privacyTier ? { privacyTier: args.privacyTier } : {}),
+            ...(args.maxRiskLevel ? { maxRiskLevel: args.maxRiskLevel } : {}),
+          } as const;
+
+          if (!capabilitySatisfied(capabilityNeed, currentProvider, currentModel)) {
+            const pick = routeForCapability(capabilityNeed, list, { providerId: currentProvider.id, model: currentModel });
+            decision = pick;
             if (!pick) {
               const known = list.map(p => `${p.id}@${p.defaultModel}`).join('、');
               return { ok: false, error: `当前模型 ${currentProvider.id}@${currentModel} 不支持视觉，且可用 provider 中没有任何带视觉能力的模型（已配置：${known}）。请在「设置 → 供应商」拉取模型列表（会自动识别视觉能力）或配置一个多模态模型。` };
@@ -203,7 +214,9 @@ export default {
             return { ok: false, error: `视觉模型 ${target.provider.id}@${target.model} 调用失败：${r.error}` };
           }
           step.finish({
-            outputSummary: routed ? `借道 ${target.provider.id}@${target.model} 分析，结果以文本回传 ${currentModel}` : `就地 ${target.model} 分析`,
+            outputSummary: routed
+              ? JSON.stringify({ reason: decision?.reason, target: `${target.provider.id}@${target.model}`, candidates: decision?.candidates })
+              : `就地 ${target.model} 分析`,
             tokensIn: r.tokensIn, tokensOut: r.tokensOut,
           });
           return {

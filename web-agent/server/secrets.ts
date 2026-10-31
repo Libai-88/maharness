@@ -30,11 +30,12 @@
  */
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
 import {
-  mkdirSync, readFileSync, writeFileSync, existsSync, chmodSync, copyFileSync,
+  mkdirSync, readFileSync, existsSync, chmodSync, copyFileSync,
 } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import * as os from 'node:os';
+import { atomicWriteFileSync } from '../kernel/atomic-file';
 
 export const SECRET_PREFIX = 'v1:';
 const KEY_FILE = 'secret.key';
@@ -115,7 +116,7 @@ function generateAndPersist(dataDir: string, path: string): { key?: Buffer; stat
   const key = randomBytes(32);
   try {
     mkdirSync(dataDir, { recursive: true });
-    writeFileSync(path, key.toString('hex'), { encoding: 'utf-8', flag: 'w' });
+    atomicWriteFileSync(path, key.toString('hex'));
     hardenSecretKeyPath(path);
     return { key, state: 'created', message: '已生成新的主密钥' };
   } catch (err) {

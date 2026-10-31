@@ -82,6 +82,40 @@ describe('Cache 持久化', () => {
       rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it('忽略未知持久化 schema，避免跨版本误命中', async () => {
+    const { writeFileSync, mkdtempSync, rmSync } = await import('node:fs');
+    const { join } = await import('node:path');
+    const { tmpdir } = await import('node:os');
+    const dir = mkdtempSync(join(tmpdir(), 'cache-schema-'));
+    const file = join(dir, 'cache.json');
+    try {
+      writeFileSync(file, JSON.stringify({ v: 1, l1: [{ k: 'pk|问题', answer: '旧答案', hits: 0, promptKey: 'pk', expiresAt: Date.now() + 60_000, bigrams: ['问题'] }] }));
+      const cache = new Cache(undefined, {}, file);
+      assert.equal((await cache.l1Get('问题内容足够长', 'pk')).hit, false);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('Cache 作用域与命名空间隔离', () => {
+  it('同一问题的不同 promptKey 和 session scope 不互相命中', async () => {
+    const cache = new Cache();
+    await cache.l1Set('请分析这个配置文件的内容', 'Provider A 的答案足够详细，可以直接使用。', 'provider-a', 'session-a');
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-b', 'session-a')).hit, false);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-a', 'session-b')).hit, false);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-a', 'session-a')).hit, true);
+  });
+
+  it('命名空间失效不误伤其他 L2 条目', () => {
+    const cache = new Cache();
+    cache.l2Set('read_file:key', 'file');
+    cache.l2Set('web_search:key', 'web');
+    cache.l2DeleteNamespace('read_file');
+    assert.equal(cache.l2Get('read_file:key').hit, false);
+    assert.equal(cache.l2Get('web_search:key').hit, true);
+  });
 });
 
 describe('文本工具函数', () => {

@@ -72,13 +72,16 @@ export class ReplayProvider implements ProviderDef {
   id = 'replay';
   label = 'REPLAY';
   defaultModel = 'replay';
+  prices?: { in: number; out: number };
   /** 已消耗的 LLM 调用次数（断言用：如 L1 缓存命中时第二次 run 应为 0 次新调用） */
   callCount = 0;
   /** 请求与录音不一致的累计次数（严格模式会抛错；宽松模式以此为可观测信号） */
   mismatches = 0;
   private cursor = 0;
 
-  constructor(private recording: Recording, private opts: { strict?: boolean } = {}) {}
+  constructor(private recording: Recording, private opts: { strict?: boolean; prices?: { in: number; out: number } } = {}) {
+    this.prices = opts.prices;
+  }
 
   private mismatchReason(messages: LLMMessage[], req: RecordedRequest): string | undefined {
     if (!req.messages) return undefined; // 旧格式录音无请求轮廓：跳过比对（无法对齐）
@@ -109,7 +112,18 @@ export class ReplayProvider implements ProviderDef {
       if (this.opts.strict) throw new Error(msg);
       console.warn(msg);
     }
-    for (const chunk of req.chunks) yield chunk;
+    for (const chunk of req.chunks) {
+      // Golden 专用故障帧：模拟 provider 在流开始前抛出可分类错误，验证重试/熔断策略。
+      if ((chunk as unknown as { type?: string }).type === 'throw') {
+        const fault = chunk as unknown as { message?: string; status?: number; name?: string };
+        const error = Object.assign(new Error(fault.message ?? 'replay fault'), {
+          ...(fault.status === undefined ? {} : { status: fault.status }),
+          ...(fault.name ? { name: fault.name } : {}),
+        });
+        throw error;
+      }
+      yield chunk;
+    }
   }
 }
 

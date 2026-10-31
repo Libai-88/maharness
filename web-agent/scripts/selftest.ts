@@ -1006,11 +1006,15 @@ export default {
     && r2.messages[r2.messages.length - 1].content === '问题三：最新问题';
   check('[compact] LLM 摘要压缩旧轮（保留最新）', compactOk,
     `(mode=${r2.mode} 压缩=${r2.compactedMessages} 摘要=${String(r2.messages[0].content ?? '').slice(0, 20)}…)`);
-  // 3) 已压缩防重复：历史已有【历史摘要】→ 不再 LLM 总结（不会每轮重复花钱）
+  // 3) 已压缩锚定：已有摘要与新增历史合并，避免丢失旧事实
   let mockCalls = 0;
   const mockCounter = {
     id: 'mock-c2', label: 'C2', defaultModel: 'm', prices: { in: 0, out: 0 },
-    async *chat() { mockCalls++; yield { type: 'delta' as const, text: 'x' }; yield { type: 'done' as const }; },
+    async *chat() {
+      mockCalls++;
+      yield { type: 'delta' as const, text: `${SUMMARY_MARK} 合并后的历史事实` };
+      yield { type: 'done' as const };
+    },
   };
   const already = [
     { role: 'system' as const, content: `${SUMMARY_MARK} 已压缩的早期对话` },
@@ -1019,7 +1023,8 @@ export default {
     { role: 'user' as const, content: '问题三：最新问题' },
   ];
   const r3 = await compactHistory(already, 900, { provider: mockCounter, model: 'm' });
-  check('[compact] 已摘要不重复压缩（防重复花钱）', mockCalls === 0 && r3.mode === 'truncate',
+  check('[compact] 已摘要锚定合并新增历史', mockCalls === 1 && r3.mode === 'compact'
+    && String(r3.messages[0]?.content ?? '').includes('合并后的历史事实'),
     `(LLM 调用=${mockCalls} mode=${r3.mode})`);
 }
 

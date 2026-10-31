@@ -27,6 +27,7 @@ const STEP_NAMES: Record<string, string> = {
   'narration-fix': '纠正"把调用写成了文字"',
   'cost-breaker': '成本熔断',
   '上下文截断': '上下文截断',
+  '上下文压缩': '上下文压缩',
   'policy-allow': '规则放行',
   approval: '等你点头',
 };
@@ -57,9 +58,9 @@ function exportJsonl(steps: TraceStep[]) {
 
 /** 单条步骤渲染（span 树：子步骤缩进 + 可折叠下钻，OpenAI/Anthropic agent 调试器风格）
  *  进行中的步骤显示跳动圆点 + 实时计时（旧版只推 settle 帧，长工具执行期间面板是静止的）。 */
-function StepRow({ s, depth, collapsed, onToggle, now }: { s: TraceStep; depth: number; collapsed: boolean; onToggle: () => void; now: number }) {
+function StepRow({ s, depth, collapsed, hasChildren, onToggle, now }: { s: TraceStep; depth: number; collapsed: boolean; hasChildren: boolean; onToggle: () => void; now: number }) {
   const b = TYPE_BADGE[s.type] ?? { label: s.type.toUpperCase(), cls: 'sys' };
-  const toggleable = depth > 0;
+  const toggleable = hasChildren;
   const running = s.status === 'running';
   return (
     <div
@@ -77,12 +78,12 @@ function StepRow({ s, depth, collapsed, onToggle, now }: { s: TraceStep; depth: 
         onKeyDown={toggleable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
       >
         <div className="tl-left">
-          {depth > 0 && (
+          {toggleable && (
             <span className={`tl-arrow ${collapsed ? '' : 'open'}`}><IconChevronDown size={9} /></span>
           )}
           <span className={`tl-badge ${b.cls}`}>{b.label}</span>
           <span className="tl-title" title={s.name}>{stepTitle(s)}</span>
-          {depth > 0 && s.traceId && <span className="tl-child-tag" title="子任务（span 树下钻：子代理/并行）">子任务</span>}
+          {s.traceId && depth > 0 && <span className="tl-child-tag" title="子任务（span 树下钻：子代理/并行）">子任务</span>}
         </div>
         <div className="tl-right">
           {running && <span className="tl-live" title="这一步正在做"><i /><i /><i /></span>}
@@ -95,6 +96,7 @@ function StepRow({ s, depth, collapsed, onToggle, now }: { s: TraceStep; depth: 
           {(s.tokensIn || s.tokensOut || s.cost) && (
             <div className="tl-body">↑{s.tokensIn ?? 0} ↓{s.tokensOut ?? 0}{s.cost ? ` · $${s.cost.toFixed(4)}` : ''}</div>
           )}
+          {s.inputSummary && <div className="tl-body" style={{ color: 'var(--text-3)' }}>来源：{s.inputSummary}</div>}
           {s.outputSummary && <div className="tl-body" style={{ color: 'var(--text-3)' }}>{s.outputSummary}</div>}
           {s.error && <div className="tl-body" style={{ color: 'var(--red)' }}>{s.error}</div>}
         </>
@@ -117,8 +119,10 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
   }, [runningCount]);
   // span 树组装：root = 无 parentId 的步骤；children 按 parentId 索引。
   // 跨 traceId 也成立——子代理步骤的 parentId 指向调用方工具步骤（OpenAI tracing 层级）
+  // 类型筛选时改用平铺视图：被筛掉的父步骤若仍作树根，其子树会整棵消失（审计场景不可接受）
   const tree = useMemo(() => {
     const filtered = typeFilter ? steps.filter((s) => s.type === typeFilter) : steps;
+    if (typeFilter) return { roots: filtered, byParent: new Map<string, TraceStep[]>() };
     const byParent = new Map<string, TraceStep[]>();
     for (const s of filtered) {
       if (!s.parentId) continue;
@@ -129,6 +133,10 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
     const roots = filtered.filter((s) => !s.parentId);
     return { roots, byParent };
   }, [steps, typeFilter]);
+  const visibleSteps = useMemo(
+    () => typeFilter ? steps.filter((s) => s.type === typeFilter) : steps,
+    [steps, typeFilter],
+  );
   const { roots, byParent } = tree;
   // 缓存命中率优先用「provider 真实命中率」（token 口径，唯一权威）：
   // L3 前缀缓存是 agent 成本主战场（DeepSeek 命中/未命中价差 50~120 倍），
@@ -159,6 +167,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
           s={s}
           depth={depth}
           collapsed={isCollapsed}
+          hasChildren={children.length > 0}
           now={now}
           onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
         />,
@@ -167,12 +176,13 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
         for (const c of [...children].reverse()) visit(c, depth + 1);
       }
     };
-    for (const s of [...roots].reverse()) visit(s, 0);
+    const rendered = new Set<string>();
+    for (const s of [...roots].reverse()) { rendered.add(s.id); visit(s, 0); }
     // 孤儿（父步骤已被环形缓冲淘汰）：仍展示（depth 1，可下钻自己）
-    const known = new Set(steps.map((x) => x.id));
-    for (const s of [...steps].reverse()) {
-      if (s.parentId && !known.has(s.parentId)) {
-        out.push(<StepRow key={`or-${s.id}`} s={s} depth={1} collapsed={!!collapsed[s.id]} now={now} onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))} />);
+    const known = new Set(visibleSteps.map((x) => x.id));
+    for (const s of [...visibleSteps].reverse()) {
+      if (!rendered.has(s.id) && s.parentId && !known.has(s.parentId)) {
+        out.push(<StepRow key={`or-${s.id}`} s={s} depth={1} collapsed={!!collapsed[s.id]} hasChildren={false} now={now} onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))} />);
       }
     }
     return out;
@@ -189,7 +199,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
         </div>
         <div className="th-right" style={{ display: 'flex', gap: 4 }}>
           <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}><IconRefresh size={13} /></button>
-          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(steps)} disabled={!steps.length}><IconDownload size={13} /></button>
+          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length}><IconDownload size={13} /></button>
         </div>
       </div>
 
@@ -223,6 +233,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
           </div>
           <select
             className="set-input" style={{ height: 28, fontSize: 11, width: '100%' }}
+            aria-label="步骤类型筛选"
             value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
           >
             <option value="">全部步骤</option>
@@ -237,7 +248,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
         )}
         {renderTree()}
         <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
-          <button className="tl-export" onClick={() => exportJsonl(steps)} disabled={!steps.length} title="导出当前步骤为 JSONL 审计文件">查看完整 JSONL 审计 →</button>
+          <button className="tl-export" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length} title="导出当前筛选结果为 JSONL 审计文件">导出 JSONL 审计 →</button>
         </div>
       </div>
     </>

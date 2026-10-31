@@ -12,13 +12,14 @@
 import { estimateTokens } from '../../kernel/tokens';
 import { inferCapabilities } from '../../kernel/modelCatalog';
 // 失败分类：带状态码的 HTTP 错误（provider-health 据此判定"密钥失效"，不再猜文本）
-import { LLMHttpError } from './provider-health';
+import { LLMHttpError, parseRetryAfterMs } from './provider-health';
 import {
   buildBody as buildAnthropicBody, createStreamState as createAnthropicState,
   reduceEvent as reduceAnthropicEvent, usageChunks,
 } from './anthropic';
 import type {
   ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
+  ProviderCapabilities,
 } from '../../kernel/types';
 
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
@@ -61,6 +62,26 @@ export interface ProviderConfig {
   models?: ModelCapability[];
   inputPrice?: number;
   outputPrice?: number;
+  requestTimeoutMs?: number;
+}
+
+const PROVIDER_REQUEST_TIMEOUT_MS = 120_000;
+
+function providerRequestSignal(signal: AbortSignal | undefined, timeoutMs: number): AbortSignal {
+  const timeout = AbortSignal.timeout(timeoutMs);
+  return signal ? AbortSignal.any([signal, timeout]) : timeout;
+}
+
+/** 协议级能力声明使用保守值；模型级能力仍由 capabilityFor 覆盖。 */
+export function adapterCapabilities(protocol: string = 'openai'): ProviderCapabilities {
+  switch (protocol) {
+    case 'anthropic':
+      return { streaming: true, toolCalls: true, structuredOutput: false, vision: true, cancellation: true };
+    case 'ollama':
+      return { streaming: true, toolCalls: true, structuredOutput: false, vision: false, cancellation: true };
+    default:
+      return { streaming: true, toolCalls: true, structuredOutput: false, vision: true, cancellation: true };
+  }
 }
 
 /** 常见模型价格表（USD / 百万 token；如有出入以 .env 覆盖为准） */
@@ -170,12 +191,13 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     label: cfg.id.toUpperCase(),
     defaultModel: cfg.model,
     protocol: cfg.protocol ?? 'openai',
+    capabilities: adapterCapabilities(cfg.protocol),
     models: cfg.models,
     prices: resolvedPrices,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
       const protocol = cfg.protocol ?? 'openai';
       if (protocol === 'anthropic') {
-        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, opts);
+        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, opts, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
         return;
       }
       if (process.env.TRACE_LLM_BODY === 'on') {
@@ -208,11 +230,11 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
           Authorization: `Bearer ${cfg.apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: opts.signal,
+        signal: providerRequestSignal(opts.signal, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
-        throw new LLMHttpError(res.status, `LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`);
+        throw new LLMHttpError(res.status, `LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`, parseRetryAfterMs(res.headers.get('retry-after')));
       }
       if (!res.body) throw new Error('LLM 响应无 body');
 
@@ -285,6 +307,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
           }
         }
       } finally {
+        await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
         reader.releaseLock();
       }
       // M7 断流半包：流正常结束但未收到 [DONE] 标记 → 视为错误抛出（半截响应不可信，
@@ -310,7 +333,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
  *  与 OpenAI 路径同契约：产出 delta/reasoning/tool_call/usage/done，异常一律抛出交给 failover。 */
 async function* anthropicStream(
   providerId: string, baseUrl: string, apiKey: string,
-  messages: LLMMessage[], opts: ChatOptions,
+  messages: LLMMessage[], opts: ChatOptions, timeoutMs: number,
 ): AsyncGenerator<LLMChunk> {
   const body = buildAnthropicBody(opts.model, messages, {
     maxTokens: opts.maxTokens, temperature: opts.temperature, tools: opts.tools,
@@ -328,11 +351,11 @@ async function* anthropicStream(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-    signal: opts.signal,
+    signal: providerRequestSignal(opts.signal, timeoutMs),
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new LLMHttpError(res.status, `LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`);
+    throw new LLMHttpError(res.status, `LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`, parseRetryAfterMs(res.headers.get('retry-after')));
   }
   if (!res.body) throw new Error('LLM 响应无 body');
 
@@ -360,6 +383,7 @@ async function* anthropicStream(
       }
     }
   } finally {
+    await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
     reader.releaseLock();
   }
   if (!st.finished) throw new Error(`LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);

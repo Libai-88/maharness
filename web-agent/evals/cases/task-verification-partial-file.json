@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "task-verification-partial-file",
+  "description": "答案满足一项验收而沙箱文件内容未满足另一项",
+  "sandbox": { "files": { "report.txt": "draft" } },
+  "messages": [{ "role": "user", "content": "Prepare and publish the report" }],
+  "task": {
+    "objective": "Confirm the response and published report",
+    "acceptance": [
+      { "type": "output_contains", "value": "ready marker" },
+      { "type": "file_contains", "path": "report.txt", "value": "published" }
+    ]
+  },
+  "requests": [{ "chunks": [
+    { "type": "delta", "text": "The ready marker is present." },
+    { "type": "usage", "input": 21, "output": 7 },
+    { "type": "done" }
+  ] }],
+  "expect": { "llmCalls": 1, "noErrors": false, "taskOutcome": "partial" }
+}

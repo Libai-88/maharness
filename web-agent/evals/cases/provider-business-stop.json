@@ -1,0 +1,7 @@
+{
+  "name": "provider-business-stop",
+  "description": "故障回放：Provider 业务拒绝不重试",
+  "messages": [{ "role": "user", "content": "请回答业务失败" }],
+  "requests": [{ "chunks": [{ "type": "throw", "message": "quota exceeded" }] }],
+  "expect": { "llmCalls": 1, "noErrors": false }
+}

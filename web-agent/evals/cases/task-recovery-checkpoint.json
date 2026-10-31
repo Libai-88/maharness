@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "task-recovery-checkpoint",
+  "description": "Store 重开后从 checkpoint 恢复任务验收证据，已完成工具不重跑",
+  "messages": [{ "role": "user", "content": "执行记录工具并在恢复后完成任务" }],
+  "requests": [
+    { "chunks": [{ "type": "tool_call", "toolCall": { "id": "record-before-restart", "type": "function", "function": { "name": "record_effect", "arguments": "{}" } } }, { "type": "done" }] },
+    { "chunks": [{ "type": "delta", "text": "恢复后已完成" }, { "type": "usage", "input": 12, "output": 4 }, { "type": "done" }] }
+  ],
+  "task": { "objective": "记录工具调用并完成", "acceptance": [{ "type": "tool_succeeded", "name": "record_effect" }] },
+  "recovery": { "toolName": "record_effect", "checkpointAfterTurn": 1 },
+  "expect": {
+    "toolSequence": ["record_effect"],
+    "answerContains": ["恢复后已完成"],
+    "llmCalls": 2,
+    "noErrors": true,
+    "taskOutcome": "verified",
+    "recoveryToolCalls": 1
+  }
+}

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "name": "approval-rejected-no-task",
+  "description": "无任务验收的受保护工具调用也会记录审批拒绝且不执行 handler",
+  "messages": [{ "role": "user", "content": "Attempt the protected action" }],
+  "approval": { "toolName": "eval_approval_action", "decision": "reject" },
+  "requests": [
+    { "chunks": [
+      { "type": "tool_call", "toolCall": { "id": "approval-reject-no-task", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+      { "type": "usage", "input": 24, "output": 6 },
+      { "type": "done" }
+    ] },
+    { "chunks": [
+      { "type": "delta", "text": "The protected action requires approval." },
+      { "type": "usage", "input": 30, "output": 7 },
+      { "type": "done" }
+    ] }
+  ],
+  "expect": { "llmCalls": 2, "noErrors": true, "approvalOutcome": "rejected", "approvalHandlerCalls": 0 }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "name": "approval-approved-verified",
+  "description": "审批批准后工具执行，并由任务验收确认成功",
+  "messages": [{ "role": "user", "content": "Run and verify the protected action" }],
+  "approval": { "toolName": "eval_approval_action", "decision": "approve" },
+  "task": {
+    "objective": "The protected action must execute",
+    "acceptance": [{ "type": "tool_succeeded", "name": "eval_approval_action" }]
+  },
+  "requests": [
+    { "chunks": [
+      { "type": "tool_call", "toolCall": { "id": "approval-verified-call", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+      { "type": "usage", "input": 28, "output": 7 },
+      { "type": "done" }
+    ] },
+    { "chunks": [
+      { "type": "delta", "text": "The approved action ran successfully." },
+      { "type": "usage", "input": 35, "output": 8 },
+      { "type": "done" }
+    ] }
+  ],
+  "expect": { "llmCalls": 2, "noErrors": true, "taskOutcome": "verified", "approvalOutcome": "approved", "approvalHandlerCalls": 1 }
+}

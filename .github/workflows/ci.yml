@@ -18,21 +18,42 @@ jobs:
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: web-agent/package-lock.json
+          cache-dependency-path: |
+            web-agent/package-lock.json
+            web-agent/ui/package-lock.json
       - name: 安装依赖（含生产依赖校验：tsx 已入 dependencies，--omit=dev 可启动）
         run: npm ci
+      - name: 安装 UI 与 Playwright 依赖
+        run: npm ci --prefix ui
       - name: 单元测试（kernel + server）
         run: npm test
+      - name: 安全回归（PowerShell、路径、SSRF、MCP、HTTP API）
+        run: npm run test:security
+      - name: 威胁模型与安全测试映射检查
+        run: npm run check:threat-model
       - name: 后端类型检查
         run: npm run typecheck
       - name: 前端类型检查
         run: npm run ui:typecheck
       - name: 产品级冒烟（selftest：隔离数据目录，不触发 LLM）
         run: npm run selftest
-      - name: golden 回归（ReplayProvider 确定性回放）
-        run: npm run eval
+      - name: golden 回归、baseline 阈值门禁与 JSON 报告（ReplayProvider 确定性回放）
+        id: eval
+        run: npm run eval -- --baseline evals/baseline.json --report evals/reports/current.json
+      - name: 上传确定性评测报告
+        if: always() && steps.eval.outcome != 'skipped'
+        uses: actions/upload-artifact@v4
+        with:
+          name: maharness-eval-report
+          path: web-agent/evals/reports/current.json
+          if-no-files-found: error
       - name: 构建（UI + 类型检查）
         run: npm run build
+      - name: 安装 Playwright Chromium
+        working-directory: web-agent/ui
+        run: npx playwright install --with-deps chromium
+      - name: Playwright UI 回归
+        run: npm run e2e
       - name: 生产依赖安装可启动性
         run: |
           npm ci --omit=dev

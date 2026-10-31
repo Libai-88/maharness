@@ -123,6 +123,10 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
     })));
   });
 
+  app.get('/api/plugins/diagnostics', (_req, res) => {
+    res.json(kernel.plugins.diagnostics());
+  });
+
   app.post('/api/plugins/:id/actions', async (req, res) => {
     const { action } = req.body ?? {};
     const id = req.params.id;

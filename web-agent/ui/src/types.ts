@@ -34,9 +34,18 @@ export interface Message {
   toolCallId?: string;
   /** 一次 run 的关联键（结算回填后才有） */
   traceId?: string;
+  taskVerification?: TaskVerificationInfo;
+}
+
+export interface TaskVerificationInfo {
+  status: 'verified' | 'partial' | 'failed';
+  objective: string;
+  checks: { ok: boolean; reason?: string }[];
+  evidence: { source: string; detail: string; traceStepId?: string }[];
 }
 
 export interface ModelInfo {
+  schemaVersion?: number;
   /** provider@model（新旧 UI 兼容） */
   id: string;
   /** 纯 provider id：旧版前端按此匹配，新前端也用它解析 */
@@ -46,7 +55,10 @@ export interface ModelInfo {
 }
 
 export interface ModelCapabilityInfo {
+  providerId?: string;
   modelId: string;
+  modelKey?: string;
+  pricingId?: string;
   contextWindow: number | null;
   maxOutput: number | null;
   vision: number;
@@ -56,6 +68,9 @@ export interface ModelCapabilityInfo {
   priceOut: number | null;
   enabled: number;
   source: string;
+  latencyMs?: number | null;
+  privacyTier?: 'local' | 'trusted' | 'external' | null;
+  riskLevel?: 'low' | 'medium' | 'high' | null;
 }
 
 export interface ProviderInfo {
@@ -76,9 +91,22 @@ export interface ProviderInfo {
   health?: { failures: number; authFailed: boolean; lastError: string; lastErrorAt: number };
 }
 
+export interface ProviderDiagnostic {
+  schemaVersion: number;
+  providerId: string;
+  protocol: string;
+  configured: { baseUrl: boolean; apiKey: boolean; defaultModel: boolean };
+  health: ProviderInfo['health'] | null;
+  models: ModelCapabilityInfo[];
+  issues: string[];
+}
+
 /** /api/providers/models 拉取结果（含推断能力，用于免手填） */
 export interface PulledModel {
   id: string;
+  providerId?: string;
+  modelKey?: string;
+  pricingId?: string;
   label?: string;
   contextWindow: number;
   maxOutput: number;
@@ -130,6 +158,13 @@ export interface PluginInfo {
    *  false = core/ 内置插件，源码改动需手动重载或重启。 */
   watched?: boolean;
   circuitBreaker?: { failures: number; openedAt: number };
+}
+
+export interface PluginDiagnostic {
+  id: string;
+  kind: 'conflict' | 'load' | 'dependency' | 'rollback';
+  message: string;
+  suggestion?: string;
 }
 
 /**
@@ -330,6 +365,7 @@ export interface ChatMessage {
   usage?: { input: number; output: number };
   cost?: number;
   cached?: boolean;         // L1 语义缓存命中（零 LLM 成本直接回答）
+  taskVerification?: TaskVerificationInfo;
   /** 微信式系统提示种类：join = 「邀请 XX 加入群聊」（子代理入群） */
   sysKind?: 'join';
   /** join 消息中被邀请入群的成员名 */
@@ -433,6 +469,7 @@ export interface ApprovalItem {
 /** 断点状态（checkpoint：任务中断后可继续） */
 export interface CheckpointInfo {
   exists: boolean;
+  schemaVersion: number | null;
   turn: number;
   historyMessages: number;
   createdAt: number;

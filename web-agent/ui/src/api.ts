@@ -1,5 +1,5 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PlanState, PluginInfo, PluginNavItem, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 // ---- 变更类端点的显式授权凭据（A6-b 的前端侧）----
 const TOKEN_KEY = 'maharness-api-token';
@@ -73,6 +73,12 @@ export interface ChatHandlers {
   onHandoff?(role: string, objective: string): void;
   /** 成本熔断（budget_hit）：harness 硬边界触发 */
   onBudgetHit?(cost: number, budget: number): void;
+  /** 任务契约验收结果：可选，旧调用方无需实现 */
+  onTaskVerified?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
+  onTaskPartial?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
+  onTaskFailed?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
+  /** 开放式目标缺少可验证标准：展示可解释推断并等待用户在对话中补充条件。 */
+  onTaskInference?(objective: string, inference: { confidence: number; basis: string; needsConfirmation: boolean; rationale: string }): void;
   /** provider 重试（retry）：当前流式作废重新开始——调用方应清空流式内容重新累积。
    *  reason 让"作废"不再无声：换线路 / 刚才没接上 / 重新用真方式调用。 */
   onRetry?(reason: 'attempt' | 'failover' | 'narration', detail?: string): void;
@@ -83,7 +89,7 @@ export interface ChatHandlers {
   onEnd(): void;
 }
 
-export type ErrorKind = 'aborted' | 'budget' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy';
+export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy' | 'auth' | 'parameter' | 'business' | 'transient';
 
 /** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
  *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
@@ -159,6 +165,12 @@ export async function streamChat(
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
+          case 'task_verified': h.onTaskVerified?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
+          case 'task_partial': h.onTaskPartial?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
+          case 'task_failed': h.onTaskFailed?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
+          case 'task_inference':
+            if (d.inference && typeof d.inference === 'object') h.onTaskInference?.(String(d.objective ?? ''), d.inference as { confidence: number; basis: string; needsConfirmation: boolean; rationale: string });
+            break;
           case 'retry':
             // provider 重试：透传给 handler（App 记录截断边界，展示层从该边界重新累积）
             h.onRetry?.((d.reason as 'attempt' | 'failover' | 'narration') ?? 'attempt', d.detail ? String(d.detail) : undefined);
@@ -195,15 +207,71 @@ function isAbortLike(err: unknown): boolean {
 
 /** 全局事件订阅（Trace 实时面板 / plan / todo / 审批 / provider 健康）。
  *  onState 把"这条常驻连接到底通不通"告诉调用方——断线时界面该有反应，
- *  而不是"实时"灯常亮、数据其实早就不动了。浏览器会自动重连，这里只报状态。 */
+ *  而不是"实时"灯常亮、数据其实早就不动了。断线后主动重建 EventSource，
+ *  避免浏览器在离线恢复后只保留一个已经失效的重连状态。 */
 export function subscribeEvents(onEvent: (e: BusEvent) => void, onState?: (s: 'open' | 'down') => void): () => void {
-  const es = new EventSource('/api/events');
-  es.addEventListener('open', () => onState?.('open'));
-  es.addEventListener('error', () => onState?.('down'));
-  es.addEventListener('event', (ev) => {
-    try { onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent); } catch { /* 忽略 */ }
-  });
-  return () => es.close();
+  let es: EventSource | undefined;
+  let retryTimer: ReturnType<typeof setTimeout> | undefined;
+  let stopped = false;
+  let retryMs = 1_000;
+
+  const clearRetry = (): void => {
+    if (retryTimer !== undefined) {
+      clearTimeout(retryTimer);
+      retryTimer = undefined;
+    }
+  };
+  const connect = (): void => {
+    if (stopped) return;
+    clearRetry();
+    const next = new EventSource('/api/events');
+    es = next;
+    next.addEventListener('open', () => {
+      if (stopped || es !== next) return;
+      retryMs = 1_000;
+      onState?.('open');
+    });
+    next.addEventListener('error', () => {
+      if (stopped || es !== next) return;
+      onState?.('down');
+      next.close();
+      es = undefined;
+      retryTimer = setTimeout(() => {
+        retryTimer = undefined;
+        connect();
+      }, retryMs);
+      retryMs = Math.min(retryMs * 2, 15_000);
+    });
+    next.addEventListener('event', (ev) => {
+      if (stopped || es !== next) return;
+      try { onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent); } catch { /* 忽略 */ }
+    });
+  };
+  const reconnectOnline = (): void => {
+    if (stopped) return;
+    es?.close();
+    es = undefined;
+    retryMs = 1_000;
+    connect();
+  };
+  const markOffline = (): void => {
+    if (!stopped) {
+      onState?.('down');
+      es?.close();
+      es = undefined;
+    }
+  };
+  window.addEventListener('online', reconnectOnline);
+  window.addEventListener('offline', markOffline);
+  connect();
+  return () => {
+    stopped = true;
+    clearRetry();
+    es?.close();
+    es = undefined;
+    window.removeEventListener('online', reconnectOnline);
+    window.removeEventListener('offline', markOffline);
+  };
 }
 
 // ---------- 会话 ----------
@@ -269,10 +337,12 @@ export const evolveApi = {
 };
 
 /** 用户规则：全局/项目提示规则文件 + 策略规则 */
-export interface RuleFileInfo { name: string; content: string }
+export interface RuleFileInfo { name: string; content: string; revision?: string }
 export interface RulesView {
   paths: { globalDir: string; globalPolicy: string; projectRoot: string };
   policy: { id: string; effect: string; tool: string; argPattern?: string; pathPattern?: string; reason?: string; enabled?: boolean }[];
+  policyRevisions: { global: string; project: string };
+  ruleFileRevisions: { global: Record<string, string>; project: Record<string, string> };
   policyFiles: string[];
   errors: string[];
   globalFiles: RuleFileInfo[];
@@ -282,12 +352,12 @@ export interface RulesView {
 
 export const rulesApi = {
   get: () => api<RulesView>('/api/rules'),
-  putGlobal: (name: string, content: string) =>
-    api<{ ok: boolean }>(`/api/rules/global/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content }) }),
-  putProject: (path: string, content: string) =>
-    api<{ ok: boolean }>('/api/rules/project', { method: 'PUT', body: JSON.stringify({ path, content }) }),
-  putPolicy: (scope: 'global' | 'project', rules: RulesView['policy']) =>
-    api<{ ok: boolean; error?: string }>('/api/rules/policy', { method: 'PUT', body: JSON.stringify({ scope, rules }) }),
+  putGlobal: (name: string, content: string, revision: string) =>
+    api<{ ok: boolean }>(`/api/rules/global/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify({ content, revision }) }),
+  putProject: (path: string, content: string, revision: string) =>
+    api<{ ok: boolean }>('/api/rules/project', { method: 'PUT', body: JSON.stringify({ path, content, revision }) }),
+  putPolicy: (scope: 'global' | 'project', rules: RulesView['policy'], revision: string) =>
+    api<{ ok: boolean; revision: string; error?: string }>('/api/rules/policy', { method: 'PUT', body: JSON.stringify({ scope, rules, revision }) }),
 };
 
 export const workspacesApi = {
@@ -332,17 +402,30 @@ export interface RoutingTarget {
 }
 
 export interface RuntimeConfig {
+  revision?: string;
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
   agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean; modelRouting: Record<string, string> };
+  provider: { circuitBreakerThreshold: number; circuitBreakerResetMs: number };
   routingTargets?: RoutingTarget[];
   taskTypes?: string[];
 }
 
+let latestConfigRevision: string | undefined;
+
 export const configApi = {
-  get: () => api<RuntimeConfig>('/api/config'),
-  patch: (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']>; agent?: Partial<RuntimeConfig['agent']> }) =>
-    api<{ ok: boolean }>('/api/config', { method: 'PATCH', body: JSON.stringify(patch) }),
+  get: async () => {
+    const result = await api<RuntimeConfig>('/api/config');
+    latestConfigRevision = result.revision;
+    return result;
+  },
+  patch: async (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']>; agent?: Partial<RuntimeConfig['agent']>; provider?: Partial<RuntimeConfig['provider']>; checkpoint?: { retentionDays?: number } }) => {
+    const result = await api<{ ok: boolean; revision?: string }>('/api/config', {
+      method: 'PATCH', body: JSON.stringify({ ...patch, ...(latestConfigRevision ? { revision: latestConfigRevision } : {}) }),
+    });
+    latestConfigRevision = result.revision ?? latestConfigRevision;
+    return result;
+  },
 };
 
 /** 元信息（数据/审计目录路径） */
@@ -387,10 +470,11 @@ export const modelsApi = {  list: () => api<ModelInfo[]>('/api/models'),
 
 export const providersApi = {
   list: () => api<ProviderInfo[]>('/api/providers'),
+  diagnose: (id: string) => api<ProviderDiagnostic>(`/api/providers/${encodeURIComponent(id)}/diagnose`),
   create: (form: ProviderForm) => api<ProviderInfo>('/api/providers', { method: 'POST', body: JSON.stringify(form) }),
-  update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean }) =>
+  update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean; expectedUpdatedAt?: number }) =>
     api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
-  remove: (id: string) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE' }),
+  remove: (id: string, expectedUpdatedAt: number) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt }) }),
   test: (body: { baseUrl: string; apiKey: string; model: string; protocol?: string; providerId?: string }) =>
     api<{ ok: boolean; latencyMs?: number; message?: string; error?: string; authFailed?: boolean }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
   /** 拉取供应商模型与能力（openai / anthropic / ollama 三协议）；编辑已保存供应商时 Key 可留空 */
@@ -411,6 +495,7 @@ export const personasApi = {
 
 export const pluginsApi = {
   list: () => api<PluginInfo[]>('/api/plugins'),
+  diagnostics: () => api<PluginDiagnostic[]>('/api/plugins/diagnostics'),
   action: (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') =>
     api<{ ok: boolean; state: string }>(`/api/plugins/${id}/actions`, { method: 'POST', body: JSON.stringify({ action }) }),
   open: (id: string) => api<{ ok: boolean; path: string }>(`/api/plugins/${id}/open`, { method: 'POST' }),

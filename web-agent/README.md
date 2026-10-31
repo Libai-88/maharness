@@ -109,7 +109,7 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
    "知道 id"抬到"必须先列举且凭据单次有效"；要彻底关闭请启用 `MAHARNESS_API_TOKEN`。
 4. `MAHARNESS_API_TOKEN` 一旦启用，页面需在设置→高级→安全 录入同一个值，
    否则修改类操作会全部 401（这是设计，不是故障）。
-5. DNS 重绑定之外的 TOCTOU 窗口仍在：SSRF 校验与真实连接各解析一次 DNS，未做 IP 钉扎。
+5. Provider 与网页抓取直连会把同一次 DNS 解析结果用于校验和 socket 连接，重定向逐跳重新校验并 pinning。`SEARCH_PROXY` 仅用于固定的 DuckDuckGo/Tavily 搜索服务请求；只接受无凭据的 HTTP(S) 代理 URL，配置变化会关闭旧连接池；代理端解析由用户配置的受信代理负责，不适用于不可信代理。
 6. 插件是**完全信任**的：`module` 模式的前端模块与宿主同源同 realm、没有沙箱，
    只应用于自己写或自己安装的插件；不可信来源请用 `iframe` 模式。
 7. `core/` 内置插件不在目录监听范围内（改动需重载或重启）；只有 `plugins/` 保存即生效。
@@ -191,7 +191,7 @@ Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外�
 | `<NAME>_PRICE_IN` / `_PRICE_OUT` | — | 覆盖价格（USD/百万 token，用于成本核算） |
 | `EMBEDDING_BASE_URL/API_KEY/MODEL` | 未设 | 三者齐备才激活 L1 向量召回；否则走自研 bigram Dice（始终可用） |
 | `TAVILY_API_KEY` | 未设 | 联网搜索用 Tavily；未配置自动降级 DuckDuckGo |
-| `SEARCH_PROXY` | 未设 | 搜索/抓取走 HTTP 代理（如 `http://127.0.0.1:7897`） |
+| `SEARCH_PROXY` | 未设 | DuckDuckGo/Tavily 搜索服务请求走无凭据 HTTP(S) 代理（如 `http://127.0.0.1:7897`）；拒绝其他协议、凭据、查询参数和片段；用户提供的网页抓取 URL 直连并固定到已校验 IP |
 | `SANDBOX_ROOT` | 启动目录 | 文件工具与文件 API 的沙箱根（防穿越 + realpath） |
 | `PORT` | `3000` | 服务端口（始终只绑 127.0.0.1） |
 | `DEV_ORIGIN_PORT` | `5173` | 额外放行的 Origin（Vite 开发服务器） |

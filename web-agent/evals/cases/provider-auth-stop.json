@@ -1,0 +1,7 @@
+{
+  "name": "provider-auth-stop",
+  "description": "故障回放：Provider 401 认证失败不重试",
+  "messages": [{ "role": "user", "content": "请回答认证失败" }],
+  "requests": [{ "chunks": [{ "type": "throw", "status": 401, "message": "unauthorized" }] }],
+  "expect": { "llmCalls": 1, "noErrors": false }
+}

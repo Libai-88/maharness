@@ -26,6 +26,7 @@
 import type { Express, Request } from 'express';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { getChatService, getRunner, type RouteDeps } from './shared';
+import { auditAuthorizationDenial, auditAuthorizationGrant, decideCredentialAuthorization } from '../security-policy';
 
 /** 一次性审批凭据的请求头名（也可以放 body 的 approvalToken 字段） */
 export const APPROVAL_TOKEN_HEADER = 'x-maharness-approval-token';
@@ -143,18 +144,35 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
     //   （server/routes/chat.ts:362、server/routes/events.ts:53，均不在本次改动范围内），
     //   并让 ui/src/api.ts 的 approvalsApi.respond 回带它。完成后把 MAHARNESS_APPROVAL_TOKEN=1
     //   设为默认即可彻底关闭「本机进程代批」。
-    if (provided) {
-      const verdict = approvalTokens.verify(id, provided);
-      if (verdict === 'invalid') {
+    const verdict = provided ? approvalTokens.verify(id, provided) : undefined;
+    const decision = decideCredentialAuthorization({
+      enabled: approvalTokenRequired(),
+      supplied: !!provided,
+      // 只有明确通过校验的凭据才有效；过期凭据必须和错值/重放一样拒绝。
+      valid: verdict === 'ok',
+    });
+    if (!decision.allowed) {
+      if (decision.reason === 'invalid') {
+        auditAuthorizationDenial(kernel, {
+          subject: 'anonymous', capability: 'approval:respond',
+          object: '/api/approvals/:id', reason: 'approval-token-invalid',
+        }, deps.store);
         return res.status(403).json({ error: '审批凭据无效或已使用（一次性凭据不可重放）' });
       }
-      // expired：不拦，交给下面的挂起判定（服务端本来就会 resolve(false) 并清条目）
-    } else if (approvalTokenRequired()) {
+      auditAuthorizationDenial(kernel, {
+        subject: 'anonymous', capability: 'approval:respond',
+        object: '/api/approvals/:id', reason: 'approval-token-required',
+      }, deps.store);
       return res.status(401).json({
         error: `未授权：回答审批必须携带一次性凭据（先 GET /api/approvals 取 approvalToken，`
           + `回带于 ${APPROVAL_TOKEN_HEADER} 头或 body.approvalToken）`,
       });
-    } else if (!warnedLooseMode) {
+    }
+    if (provided && verdict === 'ok') auditAuthorizationGrant(kernel, {
+      subject: 'approval-token', capability: 'approval:respond', object: '/api/approvals/:id',
+    }, deps.store);
+    // expired：交给挂起判定；已过期的审批会按既有语义被拒绝并清理。
+    if (!provided && !approvalTokenRequired() && !warnedLooseMode) {
       warnedLooseMode = true;
       // 只提示一次：默认宽松模式是给既有前端留的兼容位，别让它变成「以为已经关闭了」
       console.warn('[approvals] 未启用 MAHARNESS_API_TOKEN/MAHARNESS_APPROVAL_TOKEN：'

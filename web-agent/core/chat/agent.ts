@@ -4,18 +4,20 @@
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
 import { randomUUID, createHash } from 'node:crypto';
-import { sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
+import { allocateTokenBudget, sharedPrefixTokens, estimateTokens } from '../../kernel/tokens';
 import { classifyTask, reasoningBudgetFor } from '../../kernel/budget';
 import { validateAgainstSchema } from '../../kernel/validate';
 import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost, pricesFor } from './provider';
-import { noteProviderFailure, noteProviderSuccess, isAbortError, TaskStoppedError } from './provider-health';
+import { noteProviderFailure, noteProviderSuccess, isAbortError, TaskStoppedError, isProviderCircuitOpen } from './provider-health';
 import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
   AgentRunSummary, KernelLike, LLMChunk, LLMMessage, PluginBus, ProviderDef, RunnerFactory, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep,
 } from '../../kernel/types';
 // 循环契约来自内核（kernel/loop.ts）：内核承诺接口形状，本文件只实现行为。
 import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
+import { verifyTaskContract } from '../../kernel/task-verifier';
+import { classifyError, shouldRetry } from '../../kernel/error-policy';
 
 // 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
 export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
@@ -67,6 +69,19 @@ const CONTINUE_HINT = '【继续】请根据工具结果继续处理任务；如
 export function summarizeToolResult(text: string): string {
   const t = text.replace(/\s+/g, ' ').trim();
   return t.length > 400 ? t.slice(0, 400) + '…' : t;
+}
+
+/** Trace 参数只保留结构，不把凭据写入实时事件或 JSONL 归档。 */
+export function redactTraceValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactTraceValue);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = /(?:api[-_]?key|token|secret|password|authorization|cookie|credential)/i.test(key)
+      ? '[REDACTED]'
+      : redactTraceValue(child);
+  }
+  return out;
 }
 
 /** 叙述化工具调用检测：模型把工具调用写成正文文本（【工具调用 X】参数/结果 …）而非原生
@@ -167,6 +182,22 @@ async function withToolTimeout<T>(p: Promise<T>, ms: number, onTimeout?: () => v
   }
 }
 
+function abortableDelay(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.reject(new TaskStoppedError('已停止'));
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', onAbort);
+      reject(new TaskStoppedError('已停止'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
 export class AgentRunner {
   private pendingApprovals: ApprovalBoard;
 
@@ -222,7 +253,7 @@ export class AgentRunner {
     const thinkInEnglish = this.kernel.config.get<boolean>('agent.thinkInEnglish', true);
     const scratchpad: Record<string, unknown> = {};
     // run 收尾摘要累加器（自进化的事实源：哪个工具反复失败、用户强调过什么）
-    const runStats = { toolCalls: 0, toolFailures: 0, denied: 0, failedTools: {} as Record<string, number> };
+    const runStats = { toolCalls: 0, toolFailures: 0, denied: 0, failedTools: {} as Record<string, number>, toolResults: (opts.restoredToolResults ?? []).map((result) => ({ ...result })) };
     const noteToolCall = (name: string, ok: boolean, governed = false) => {
       runStats.toolCalls++;
       if (governed) { runStats.denied++; return; }
@@ -276,6 +307,9 @@ export class AgentRunner {
     }
 
     let totalIn = 0, totalOut = 0, totalCost = 0;
+    const restoredCost = opts.restoredCostUsd ?? 0;
+    const taskRemaining = opts.task?.costBudgetUsd === undefined ? undefined : Math.max(0, opts.task.costBudgetUsd - restoredCost);
+    const costBudget = taskRemaining === undefined ? opts.costBudget : Math.min(taskRemaining, opts.costBudget ?? taskRemaining);
     // H8 叙述化纠偏计数：每次 run 最多纠 2 次（防"叙述→纠偏→再叙述"循环烧钱；第 3 次放行为最终答案）
     let narrationFixes = 0;
     // L3 前缀缓存统计：记录上一轮实际发给 LLM 的 history 快照（钩子可能改写）
@@ -296,8 +330,19 @@ export class AgentRunner {
     let costWarnInjected = false;
     // 最后真实 user 消息（任务画像/熔断记录用；L1 缓存查询块会更新它）
     let q = '';
+    const taskContract = opts.task;
+    const deadlineAt = taskContract?.deadlineAt;
+    const deadlineExpired = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
 
     for (let turn = 0; turn < maxTurns; turn++) {
+      if (deadlineExpired()) {
+        const error = `任务已超过截止时间（${new Date(deadlineAt!).toISOString()}）`;
+        this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'task-deadline' }).fail(error);
+        this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn, cost: totalCost, failed: true, ts: Date.now() });
+        yield { type: 'task_failed', objective: taskContract!.objective, checks: [{ ok: false, reason: error }], evidence: [{ source: 'deadline', detail: error }] };
+        yield { type: 'error', error, kind: 'deadline' };
+        return;
+      }
       if (signal?.aborted) {
         yield { type: 'error', error: '已停止', kind: 'aborted' };
         return;
@@ -306,15 +351,15 @@ export class AgentRunner {
       // ---- 成本熔断（harness 硬边界，实时核算）：累计成本 ≥ 预算 → 不再发起新 LLM 调用 ----
       // 与 server 侧的成本警告（软边界，注入文本）分级配合：警告让 LLM 收敛，
       // 熔断由 harness 强制执行——预算不是建议，是边界。
-      if (opts.costBudget !== undefined && totalCost >= opts.costBudget) {
+      if (costBudget !== undefined && totalCost >= costBudget) {
         this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'cost-breaker', parentId: opts.parentStepId })
-          .fail(`成本预算已耗尽`, { outputSummary: `$${totalCost.toFixed(6)} ≥ $${opts.costBudget.toFixed(6)}，熔断停止` });
+          .fail(`成本预算已耗尽`, { outputSummary: `$${totalCost.toFixed(6)} ≥ $${costBudget.toFixed(6)}，熔断停止` });
         this.kernel.budget.recordTask({
           type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now(),
         });
         emitFinish('budget-hit', q, '', turn + 1);
-        yield { type: 'budget_hit', cost: totalCost, budget: opts.costBudget };
-        yield { type: 'error', error: `成本预算已耗尽（本任务累计 $${totalCost.toFixed(6)} ≥ 预算 $${opts.costBudget.toFixed(6)}），已停止。已完成的部分结果保留在会话中；如需继续请新建会话或提高预算。`, kind: 'budget' };
+        yield { type: 'budget_hit', cost: totalCost, budget: costBudget };
+        yield { type: 'error', error: `成本预算已耗尽（本次运行累计 $${totalCost.toFixed(6)} ≥ 剩余额度 $${costBudget.toFixed(6)}），已停止。已完成的部分结果保留在会话中；如需继续请新建会话或提高预算。`, kind: 'budget' };
         return;
       }
 
@@ -328,8 +373,9 @@ export class AgentRunner {
       // 增量同步游标（重写后的序列与 DB 镜像关系由 server 侧协调）。
       if (opts.compactFn) {
         const ctxMaxTokens = this.kernel.config.get<number>('context.maxTokens', 60_000);
+        const contextBudget = Math.max(0, ctxMaxTokens - allocateTokenBudget(ctxMaxTokens).output);
         const histTokens = estimateTokens(llmCtx.history.map((m) => m.content ?? '').join('\n'));
-        if (histTokens > ctxMaxTokens) {
+        if (histTokens > contextBudget) {
           try {
             const compacted = await opts.compactFn(llmCtx.history);
             if (compacted && compacted.length < llmCtx.history.length) {
@@ -342,11 +388,11 @@ export class AgentRunner {
 
       // ---- 成本预警（85% 阈值，限一次）：接近预算 → 注入收敛指令 ----
       // 与思考预算同级的"认知资源"管理：预算不是请 LLM 自觉，是 harness 告知边界
-      if (opts.costBudget !== undefined && !costWarnInjected && totalCost > opts.costBudget * 0.85) {
+      if (costBudget !== undefined && !costWarnInjected && totalCost > costBudget * 0.85) {
         costWarnInjected = true;
         llmCtx.history.push({
           role: 'system',
-          content: `【harness 成本预警】本任务已花费 $${totalCost.toFixed(5)}，接近预算上限 $${opts.costBudget.toFixed(5)}（85%）。请立即收敛：停止探索性工具调用，基于已有信息直接给出结论；超预算将被强制熔断。`,
+          content: `【harness 成本预警】本次运行已花费 $${totalCost.toFixed(5)}，接近剩余额度 $${costBudget.toFixed(5)}（85%）。请立即收敛：停止探索性工具调用，基于已有信息直接给出结论；超预算将被强制熔断。`,
         });
       }
 
@@ -423,8 +469,10 @@ export class AgentRunner {
       q = lastUser?.content ?? '';
       // 注入完成后、LLM 调用前：把发送序列增量同步入库（教训/记忆/提醒/上一轮工具消息）
       syncHistory();
-      if (turn === 0 && q.length >= 8) {
-        const promptKey = createHash('sha256').update(`${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
+      // 带任务契约的 run 必须经过真实执行与验收；缓存答案没有本次 run 的工具证据，
+      // 不能直接作为已完成结果返回。
+      if (turn === 0 && q.length >= 8 && !opts.task) {
+        const promptKey = createHash('sha256').update(`${provider}\0${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
         const cached = await this.kernel.cache.l1Get(q, promptKey, cacheScope);
         if (cached.hit && cached.answer) {
           // 命中学习：把当前措辞也回填（沿用来源条目的作用域，缓存簇同域扩展——同义改写可连续命中）
@@ -434,7 +482,7 @@ export class AgentRunner {
           // 按 provider 价格估算本次节省的成本（缓存命中 = 省掉的 LLM 调用费用）
           const saved = (tIn / 1_000_000) * (provider.prices?.in ?? 0) + (tOut / 1_000_000) * (provider.prices?.out ?? 0);
           this.kernel.cache.recordSavedCost(saved);
-          const step = this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'cache_hit', name: 'L1', cacheKey: cached.key ?? '' });
+          const step = this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'cache_hit', name: 'L1', cacheLayer: 'L1', cacheKey: cached.key ?? '' });
           step.finish({ outputSummary: `L1 语义缓存命中：${cached.answer.slice(0, 60)}…`, tokensIn: tIn, tokensOut: tOut });
           yield { type: 'delta', text: cached.answer };
            yield {
@@ -460,7 +508,7 @@ export class AgentRunner {
       // 已把 model 指到别处）——计价与节省成本核算都以它为准，而不是 provider 默认模型。
       let activeModel = model;
       const step = this.kernel.trace.startStep({
-        traceId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
+        traceId, sessionId: opts.sessionId, turn, type: 'llm_call', name: `${provider.id}/${model}`,
         parentId: opts.parentStepId,
       });
       let text = '';
@@ -513,6 +561,17 @@ export class AgentRunner {
           // 用该 provider 实际可用的模型（models 列表命中 → defaultModel 兜底）。
           const chainModel = pi === 0 ? model : resolveFallbackModel(activeProvider, model);
           activeModel = chainModel;
+          if (isProviderCircuitOpen(activeProvider.id)) {
+            lastErr = new Error(`Provider ${activeProvider.id} 熔断冷却中`);
+            this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'system', name: 'provider-circuit-open' })
+              .finish({ outputSummary: `${activeProvider.id} 连续瞬时失败，冷却中，跳过本次请求` });
+            if (pi < providerChain.length - 1) {
+              const nextProvider = providerChain[pi + 1];
+              yield { type: 'retry', reason: 'failover', detail: `${activeProvider.label || activeProvider.id} 暂时熔断，换 ${nextProvider.label || nextProvider.id}` };
+              continue;
+            }
+            throw lastErr;
+          }
           let ok = false;
           for (let attempts = 0; attempts < 2 && !ok; attempts++) {
             if (attempts > 0) {
@@ -543,7 +602,12 @@ export class AgentRunner {
               //   2) 备用 provider 被真实调用一次，用户已取消的任务继续烧 token 计费；
               //   3) 白等 1.2s 重试间隔，锁不释放，紧接着发消息撞 409。
               if (signal?.aborted || isAbortError(err)) throw err instanceof TaskStoppedError ? err : new TaskStoppedError('已停止');
-              if (attempts === 0) await new Promise((r) => setTimeout(r, 1200)); // 瞬态恢复缓冲
+              const classified = classifyError(err);
+              const retry = shouldRetry(err, attempts);
+              this.kernel.trace.startStep({ traceId, turn, attempt: attempts + 1, parentId: opts.parentStepId, type: 'system', name: 'retry-policy' })
+                .finish({ outputSummary: `${classified.code}: ${retry ? 'retry' : 'stop'}${retry ? ` after ${classified.retryDelayMs}ms` : ''}`, errorCategory: classified.category, errorCode: classified.code, retryable: retry, retryDelayMs: classified.retryDelayMs });
+              if (retry) await abortableDelay(classified.retryDelayMs, signal);
+              else break;
             }
           }
           if (ok) {
@@ -557,7 +621,10 @@ export class AgentRunner {
           // 健康回报：该 provider 重试耗尽——记录失败（401/403 归类为密钥失效）并广播，
           // 前端即时提示，不等整条 failover 链耗尽才被发现
           if (signal?.aborted || isAbortError(lastErr)) throw new TaskStoppedError('已停止');
-          const health = noteProviderFailure(activeProvider.id, lastErr);
+          const health = noteProviderFailure(activeProvider.id, lastErr, {
+            threshold: this.kernel.config.get<number>('provider.circuitBreakerThreshold', 3),
+            resetMs: this.kernel.config.get<number>('provider.circuitBreakerResetMs', 60_000),
+          });
           if (health) this.bus.emit({
             type: 'provider.error',
             data: { providerId: activeProvider.id, providerLabel: activeProvider.label, authFailed: health.authFailed, error: health.lastError },
@@ -574,7 +641,7 @@ export class AgentRunner {
             const nextProvider = providerChain[pi + 1];
             const nextModel = resolveFallbackModel(nextProvider, model);
             yield { type: 'retry', reason: 'failover', detail: `${activeProvider.label || activeProvider.id} 这条路走不通，换 ${nextProvider.label || nextProvider.id} 再说一遍` };
-            this.kernel.trace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'system', name: 'failover' })
+            this.kernel.trace.startStep({ traceId, turn, attempt: pi + 1, parentId: opts.parentStepId, type: 'system', name: 'failover' })
               .finish({ outputSummary: `${activeProvider.id} 连续失败，切换备用 ${nextProvider.id}（模型 → ${nextModel}）` });
           } else {
             throw lastErr; // 全部 provider 失败：抛给外层终止本轮
@@ -584,13 +651,16 @@ export class AgentRunner {
         // 取消（用户点「停止」/客户端断线）与真故障分道扬镳：
         // 「已停止」不是错误，不该在温馨的聊天窗口里画成一条红字报错。
         const aborted = signal?.aborted === true || err instanceof TaskStoppedError || isAbortError(err);
+        const classified = classifyError(err);
         const errMsg = aborted ? '已停止' : (err instanceof Error ? err.message : String(err));
         await this.emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg });
         if (aborted) step.cancel();
-        else step.fail(errMsg);
+        else step.fail(errMsg, { name: `${activeProvider.id}/${activeModel}`, errorCategory: classified.category, errorCode: classified.code, retryable: classified.retryable, retryDelayMs: classified.retryDelayMs });
         // 已发送序列仍同步入库（失败中断也不丢已观察的上下文；下 run 从这里继续能命中前缀）
         syncHistory();
-        yield { type: 'error', error: errMsg, kind: aborted ? 'aborted' : 'upstream' };
+        const errorKind = aborted ? 'aborted' : classified.category === 'auth' || classified.category === 'parameter'
+          || classified.category === 'business' || classified.category === 'transient' ? classified.category : 'upstream';
+        yield { type: 'error', error: errMsg, kind: errorKind };
         return;
       }
       const tIn = usage?.input ?? 0;
@@ -612,8 +682,12 @@ export class AgentRunner {
       totalReasoningTokens += lastTurnReasoningTokens;
       runReasoning += reasoning;
       step.finish({
+        // failover 可能已切换 Provider/model；Trace 必须反映最终实际调用线路，
+        // 否则成本、错误与结果无法和真实上游请求对账。
+        name: `${activeProvider.id}/${activeModel}`,
         outputSummary: text.slice(0, 200),
         tokensIn: tIn, tokensOut: tOut, tokensCached: usage?.cachedInput, cost,
+        ...(usage?.cachedInput != null ? { cacheLayer: 'L3' as const } : {}),
       });
 
       // ---- 文本清洗：剥离混在正文中的思考标签（流式分流器的最终兜底，
@@ -642,6 +716,14 @@ export class AgentRunner {
 
       // ---- 无工具调用：本轮结束 ----
       if (!collected.length) {
+        if (deadlineExpired()) {
+          const error = `任务已超过截止时间（${new Date(deadlineAt!).toISOString()}）`;
+          this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now() });
+          yield { type: 'task_failed', objective: opts.task!.objective, checks: [{ ok: false, reason: error }], evidence: [{ source: 'deadline', detail: error }] };
+          emitFinish('failed', q, text, turn + 1);
+          yield { type: 'error', error, kind: 'deadline' };
+          return;
+        }
         // H8 叙述化纠偏：弱模型会模仿历史文本化（textualizeHistory）的示范格式，把工具调用写成
         // 正文文本而非原生 tool_calls——文本不会被执行，任务假性完成。harness 检测到即注入一次
         // 纠偏提示重开一轮（限 2 次；retry 事件让前端清掉已流出的叙述化残段）。
@@ -657,32 +739,54 @@ export class AgentRunner {
           yield { type: 'retry', reason: 'narration', detail: '刚才把要做的事说成了文本，重新用真正的方式调用' };
           continue;
         }
-        // L1 缓存回填：最终答案按最后一条真实 user 消息入缓存（≥8 字符防短问题误命中）。
-        // 作用域规则：本轮历史含工具消息 → 答案可能依赖本会话工具观察 → 会话级（仅本会话可命中，
-        // 防跨会话复用陈旧观察）；纯问答（全程无工具）→ 全局可见，跨会话共享。
-        // M2 加固：钩子注入的 system 消息（【长期记忆】/【失败教训】等，history[0] 之外
-        // 的 system 均为注入）或超长问题（>2000 字符）同样意味着答案强依赖本会话上下文
-        // → 强制会话级，不全局共享。
+        // 最终 assistant 消息同步入库（下 run 组装与该轮序列纯追加 → 前缓存延续）
+        syncHistory();
+        const verification = opts.task
+          ? verifyTaskContract(opts.task, { answer: text, toolResults: runStats.toolResults, sandboxRoot })
+          : undefined;
+        let finalText = text;
+        if (verification) {
+          const verificationStep = this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'task-verification', inputSummary: opts.task!.objective, parentId: opts.parentStepId });
+          verificationStep[verification.verified ? 'finish' : 'fail'](
+            verification.verified ? '任务验收完成' : '任务验收未完成',
+            { outputSummary: JSON.stringify(verification.checks.map((check) => ({ ok: check.ok, reason: check.reason }))) },
+          );
+          const checks = verification.checks.length > 0
+            ? verification.checks.map((c) => ({ ok: c.ok, reason: c.reason }))
+            : [{ ok: false, reason: '任务缺少可检查的验收条件，无法验证完成' }];
+          const evidence = verification.evidence.map((e) => ({ source: e.source, detail: e.detail, traceStepId: verificationStep.id }));
+          yield verification.status === 'verified'
+            ? { type: 'task_verified', objective: opts.task!.objective, checks, evidence }
+            : verification.status === 'partial'
+              ? { type: 'task_partial', objective: opts.task!.objective, checks, evidence }
+              : { type: 'task_failed', objective: opts.task!.objective, checks, evidence };
+          if (!verification.verified) {
+            this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now() });
+            emitFinish('failed', q, text, turn + 1);
+            yield { type: 'error', error: `任务未通过验收：${checks.filter((c) => !c.ok).map((c) => c.reason ?? '未知条件').join('；')}`, kind: 'policy' };
+            return;
+          }
+          const evidenceLines = evidence.slice(0, 12).map((item) =>
+            `- ${item.source}: ${item.detail}（Trace ${item.traceStepId}）`,
+          );
+          const evidenceFooter = `\n\n【验证证据】\n${evidenceLines.join('\n')}`;
+          finalText = `${text}${evidenceFooter}`;
+          yield { type: 'delta', text: evidenceFooter };
+        }
+        // 只有通过任务验收的答案才进入缓存和成功统计，避免失败结果被后续请求复用。
         if (q.length >= 8 && text.trim()) {
-          const promptKey = createHash('sha256').update(`${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
+          // Provider 可能使用相同的模型名但拥有不同的 system 约束、计价和输出行为。
+          // 将 provider 纳入隔离键，避免跨 Provider 复用 L1 答案。
+          const promptKey = createHash('sha256').update(`${provider}\0${model}\0${systemPrompt}`).digest('hex').slice(0, 16);
           const hasInjectedSystem = llmCtx.history.some((m, i) => i > 0 && m.role === 'system');
           const scope = (llmCtx.history.some((m) => m.role === 'tool') || hasInjectedSystem || q.length > 2000)
             ? cacheScope : undefined;
           void this.kernel.cache.l1Set(q, text, promptKey, scope);
         }
-        // 任务画像（自适应性数据源）：harness 记录任务类型/轮数/成本/成败
-        this.kernel.budget.recordTask({
-          type: classifyTask(q),
-          turns: turn + 1,
-          cost: totalCost,
-          failed: false,
-          ts: Date.now(),
-        });
-        // 最终 assistant 消息同步入库（下 run 组装与该轮序列纯追加 → 前缓存延续）
-        syncHistory();
+        this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: false, ts: Date.now() });
         yield {
           type: 'assistant_done',
-          content: text,
+          content: finalText,
           reasoning: runReasoning,
           usage: { input: totalIn, output: totalOut },
           cost: totalCost,
@@ -694,11 +798,19 @@ export class AgentRunner {
       // ---- 动作：逐个执行工具，结果回填 ----
       // H7：本轮内命中角色移交时先记录，工具全部执行回填后再统一移交（不留孤儿 tool_calls）
       let pendingHandoff: { role: string; objective: string } | null = null;
-      for (const tc of collected) {
+      for (const [toolIndex, tc] of collected.entries()) {
         // 停止 = 剩余调用一个都不发起。旧行为是"轮与轮之间才看 abort"，
         // 于是一按停止，本轮后面排队的 write_file / powershell_execute 照跑完
         // （不响应 signal 的 fs/exec 类工具 JS 无法强杀）——取消必须发生在动手之前。
         if (signal?.aborted) throw new TaskStoppedError('已停止');
+        if (deadlineExpired()) {
+          const error = `任务已超过截止时间（${new Date(deadlineAt!).toISOString()}）`;
+          this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now() });
+          yield { type: 'task_failed', objective: opts.task!.objective, checks: [{ ok: false, reason: error }], evidence: [{ source: 'deadline', detail: error }] };
+          emitFinish('failed', q, '', turn + 1);
+          yield { type: 'error', error, kind: 'deadline' };
+          return;
+        }
         const tool = toolDefs.find((t) => t.name === tc.function.name);
         let args: unknown = {};
         try { args = JSON.parse(tc.function.arguments || '{}'); } catch { args = { _raw: tc.function.arguments }; }
@@ -710,7 +822,7 @@ export class AgentRunner {
           yield { type: 'tool_result', id: tc.id, name: tc.function.name, summary: `我没找到「${tc.function.name}」这个工具`, ok: false };
           continue;
         }
-        yield { type: 'tool_start', id: tc.id, name: tool.name, args };
+        yield { type: 'tool_start', id: tc.id, name: tool.name, args: redactTraceValue(args) };
         // ---- 钩子：工具执行前（权限策略 / 参数改写 / 拦截） ----
         const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args } };
         await this.emitHook('agent.before_tool', toolCtx);
@@ -721,8 +833,35 @@ export class AgentRunner {
           continue;
         }
         const toolArgs = toolCtx.tool?.args ?? args;
+        let result: ToolResult;
+        const effectKey = opts.executionId
+          ? `${(opts.turnOffset ?? 0) + turn}:${toolIndex}:${tool.name}:${createHash('sha256').update(JSON.stringify(toolArgs ?? null)).digest('hex').slice(0, 16)}`
+          : undefined;
+        const journalClaim = effectKey && opts.effectJournal ? opts.effectJournal.claim(effectKey) : undefined;
+        if (journalClaim?.state === 'done' && journalClaim.result) {
+          result = journalClaim.result;
+          noteToolCall(tool.name, !!result.ok, !!result.governed);
+          runStats.toolResults.push({ name: tool.name, ok: !!result.ok });
+          const replayCost = (result.data as { subagentCost?: { cost?: number; tokensIn?: number; tokensOut?: number } } | undefined)?.subagentCost;
+          if (replayCost && Number.isFinite(replayCost.cost)) {
+            totalCost += replayCost.cost ?? 0;
+            totalIn += replayCost.tokensIn ?? 0;
+            totalOut += replayCost.tokensOut ?? 0;
+          }
+          history.push({ role: 'tool', tool_call_id: tc.id, content: JSON.stringify(result) });
+          yield { type: 'tool_result', id: tc.id, name: tool.name, summary: `${summarize(result)}（从恢复账本回放）`, ok: !!result.ok };
+          continue;
+        }
+        if (journalClaim?.state === 'pending') {
+          const error = `工具 ${tool.name} 的上次执行结果未知，已阻止自动重放；请核对副作用后发起新任务`;
+          this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'effect-recovery-blocked', parentId: opts.parentStepId })
+            .fail(error, { errorCode: 'EFFECT_OUTCOME_UNKNOWN', outputSummary: effectKey });
+          emitFinish('failed', q, '', turn + 1);
+          yield { type: 'error', error, kind: 'policy' };
+          return;
+        }
         const tStep = this.kernel.trace.startStep({
-          traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(toolArgs),
+          traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(redactTraceValue(toolArgs)),
           parentId: opts.parentStepId,
         });
         // ToolContext 先构造（类型 = ToolContext ∪ 局部扩展字段，注解声明可携带扩展）：
@@ -739,14 +878,47 @@ export class AgentRunner {
           trace: this.kernel.trace,
           model,
           providerId: provider.id,
-          remainingBudget: opts.costBudget !== undefined ? Math.max(opts.costBudget - totalCost, 0) : undefined,
+          remainingBudget: costBudget !== undefined ? Math.max(costBudget - totalCost, 0) : undefined,
         };
-        let result: ToolResult;
+        const invokeTool = async (approved: boolean, approvalId?: string): Promise<ToolResult> => {
+          const maxAttempts = tool.idempotent && tool.retry ? Math.max(1, Math.min(3, Math.floor(tool.retry.maxAttempts ?? 2))) : 1;
+          for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const ac = new AbortController();
+            const onClientAbort = () => ac.abort();
+            if (signal?.aborted) ac.abort();
+            else signal?.addEventListener('abort', onClientAbort, { once: true });
+            let attemptResult: ToolResult;
+            try {
+              attemptResult = await withToolTimeout(
+                tool.handler(toolArgs, { ...tctx, approved, approvalId, policyApproved: toolCtx.policyApproved === true, signal: ac.signal }),
+                tool.timeoutMs ?? toolTimeout,
+                () => ac.abort(),
+              );
+            } catch (err) {
+              attemptResult = { ok: false, error: err instanceof Error ? err.message : String(err) };
+            } finally {
+              signal?.removeEventListener('abort', onClientAbort);
+            }
+            const retry = !attemptResult.ok && attempt + 1 < maxAttempts && shouldRetry(new Error(attemptResult.error ?? '工具失败'), attempt, maxAttempts);
+            if (!retry) return attemptResult;
+            const classified = classifyError(new Error(attemptResult.error ?? '工具失败'));
+            const delay = tool.retry?.backoffMs ?? classified.retryDelayMs;
+            this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'tool-retry', parentId: tStep.id })
+              .finish({ outputSummary: `${tool.name}: ${classified.code}，${delay}ms 后重试`, errorCategory: classified.category, retryable: true, retryDelayMs: delay });
+            try {
+              await abortableDelay(delay, signal);
+            } catch (err) {
+              if (signal?.aborted) return { ok: false, error: '已停止' };
+              throw err;
+            }
+          }
+          return { ok: false, error: '工具重试耗尽' };
+        };
         const gate = assessToolApproval(tool, toolArgs, tctx);
         if (gate.needsApproval && toolCtx.policyApproved && !tctx.approved) {
           // 用户策略规则放行了一次本应审批的调用：必须留痕（权限被绕过要可审计）
           this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'policy-allow', parentId: opts.parentStepId })
-            .finish({ outputSummary: `策略规则放行：${tool.name} ${summarize(toolArgs, 160)}` });
+            .finish({ outputSummary: `策略规则放行：${tool.name} ${summarize(redactTraceValue(toolArgs), 160)}` });
         }
         if (gate.needsApproval && !tctx.approved && !toolCtx.policyApproved) {
           // C-S2 审批强制下沉执行器：需要审批的调用在未获批准前不进入 handler
@@ -755,29 +927,13 @@ export class AgentRunner {
           result = {
             ok: false,
             needsApproval: true,
-            approvalSummary: `${gate.reason}。参数: ${summarize(toolArgs, 200)}`,
+            approvalSummary: `${gate.reason}。参数: ${summarize(redactTraceValue(toolArgs), 200)}`,
           };
         } else {
           // 每次工具调用独立取消域：客户端断线（signal）与工具超时都经同一
           // AbortController 传导给 handler——支持 signal 的工具（网络/等待类）
           // 超时即真正中断；fs 类不响应 signal 的工具行为不变（JS 无法强杀）。
-          const ac = new AbortController();
-          const onClientAbort = () => ac.abort();
-          if (signal?.aborted) ac.abort();
-          else signal?.addEventListener('abort', onClientAbort, { once: true });
-          try {
-            result = await withToolTimeout(
-              // policyApproved 透传给 handler（A8）：高危工具在 handler 侧做纵深防御时，
-              // 必须能区分「用户策略规则放行」与「绕过审批门」——前者是合法授权。
-              tool.handler(toolArgs, { ...tctx, policyApproved: toolCtx.policyApproved === true, signal: ac.signal }),
-              tool.timeoutMs ?? toolTimeout,
-              () => ac.abort(),
-            );
-          } catch (err) {
-            result = { ok: false, error: err instanceof Error ? err.message : String(err) };
-          } finally {
-            signal?.removeEventListener('abort', onClientAbort);
-          }
+          result = await invokeTool(false);
         }
 
         // ---- 审批挂起：工具请求用户审批时，执行器暂停等待（安全机制，不可绕过） ----
@@ -787,7 +943,7 @@ export class AgentRunner {
           const approvalId = randomUUID();
           const aStep = this.kernel.trace.startStep({
             traceId, turn, type: 'system', name: 'approval',
-            inputSummary: `等待用户审批: ${tool.name} ${summarize(args)}`,
+            inputSummary: `等待用户审批: ${tool.name} ${summarize(redactTraceValue(args))}`,
             parentId: opts.parentStepId,
           });
           yield {
@@ -795,7 +951,7 @@ export class AgentRunner {
             approvalId,
             name: tool.name,
             summary: result.approvalSummary ?? result.error ?? '',
-            args,
+            args: redactTraceValue(args),
           };
           // 审批挂起：注册进共享 ApprovalBoard（含 10 分钟超时自动拒绝）。
           // 共享板使子代理/并行 runner 的审批对服务端 /api/approvals/:id 同样可达。
@@ -812,7 +968,7 @@ export class AgentRunner {
               this.pendingApprovals.register(approvalId, {
                 name: tool.name,
                 summary: result.approvalSummary ?? result.error ?? '',
-                args,
+                args: redactTraceValue(args),
                 // 会话归属：刷新后前端才能把这张卡放回正确的聊天窗口
                 sessionId: opts.sessionId,
               }, settle);
@@ -830,27 +986,14 @@ export class AgentRunner {
           } else {
             aStep.finish({ outputSummary: `已批准: ${tool.name}` });
             // 已批准：带 approved 标记重试执行（approved=true → 不再触发执行器侧审批拦截）
-            const ac = new AbortController();
-            const onClientAbort = () => ac.abort();
-            if (signal?.aborted) ac.abort();
-            else signal?.addEventListener('abort', onClientAbort, { once: true });
-            try {
-              result = await withToolTimeout(
-                tool.handler(args, { ...tctx, approved: true, approvalId, signal: ac.signal }),
-                tool.timeoutMs ?? toolTimeout,
-                () => ac.abort(),
-              );
-            } catch (err) {
-              result = { ok: false, error: err instanceof Error ? err.message : String(err) };
-            } finally {
-              signal?.removeEventListener('abort', onClientAbort);
-            }
+            result = await invokeTool(true, approvalId);
           }
         }
         // ---- 钩子：工具执行后（结果过滤/改写） ----
         const afterTCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args: toolArgs }, result };
         await this.emitHook('agent.after_tool', afterTCtx);
         const finalResult = afterTCtx.result ?? result;
+        if (effectKey && opts.effectJournal) opts.effectJournal.complete(effectKey, finalResult);
         // ---- 输出校验（structured output 的机器侧）：声明了 outputSchema 的工具，
         // 结果结构不符即标注（不阻断——LLM 可拿原始结果自我修正，但"格式不符"必须被说破）。
         // 校验事件入 Trace：失败结构可追溯，LLM 不会对着坏格式继续编排。 ----
@@ -903,6 +1046,7 @@ export class AgentRunner {
           noteToolCall(tool.name, true);
           toolFailStreak = 0; // 成功一次即重置连败
         }
+        runStats.toolResults.push({ name: tool.name, ok: !!finalResult.ok });
         // observation 完整性 v2：小结果全文回填；大结果存入结果存储、历史只留摘要+引用
         // （recall_tool_result 零副作用重读；v1 截断后只能重算工具才能拿回全文）
         const rawResult = JSON.stringify(finalResult);
@@ -935,7 +1079,7 @@ export class AgentRunner {
       // ---- 断点（checkpoint）：本轮含工具回填的完整历史已就绪 → 持久化，中断可从此恢复 ----
       // 时机：工具执行完、下轮 LLM 调用前（恢复 = 从这个字节级相同的历史继续，L3 前缀不丢）。
       // 无工具调用的最终轮不存（任务已完成，无需恢复）。
-      opts.onCheckpoint?.(turn, history);
+      opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost });
     }
 
     syncHistory(); // 超限路径：最后一轮的工具/助理消息一并入库，续跑可命中前缀
@@ -1062,10 +1206,10 @@ export function stripThinking(text: string, reasoning: string): { clean: string;
   return { clean, extracted: extracted.slice(0, 8000) };
 }
 
-/** 摘要化（Trace 用，防大对象撑爆记录） */
+/** 摘要化（Trace 用，防大对象撑爆记录）：先按凭据键脱敏再截断 */
 function summarize(v: unknown, max = 300): string {
   let s: string;
-  try { s = typeof v === 'string' ? v : JSON.stringify(v); } catch { s = String(v); }
+  try { s = typeof v === 'string' ? v : (JSON.stringify(redactTraceValue(v)) ?? String(v)); } catch { s = String(v); }
   return s.length > max ? s.slice(0, max) + '…' : s;
 }
 

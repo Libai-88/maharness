@@ -101,6 +101,59 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
     } finally { rmSync(dir, { recursive: true, force: true }); }
   });
 
+  test('批量写入先提交文件再广播配置变更', () => {
+    const dir = tmp();
+    try {
+      const path = join(dir, 'config.json');
+      writeFileSync(path, JSON.stringify({ handWritten: { keep: true } }), 'utf-8');
+      const bus = new EventBus();
+      const c = new Config(bus, { context: { maxTokens: 60000 }, cache: { warmup: 'auto' } }, path);
+      let persistedAtPublish: Record<string, unknown> | undefined;
+      bus.on('config.changed', () => { persistedAtPublish = JSON.parse(readFileSync(path, 'utf-8')); });
+
+      assert.equal(c.setPersistentBatch([
+        ['context.maxTokens', 12000],
+        ['cache.warmup', 'off'],
+      ]), true);
+
+      assert.equal(c.get('context.maxTokens'), 12000);
+      assert.equal(c.get('cache.warmup'), 'off');
+      assert.deepEqual(persistedAtPublish?.context, { maxTokens: 12000 });
+      assert.deepEqual(persistedAtPublish?.cache, { warmup: 'off' });
+      assert.deepEqual(persistedAtPublish?.handWritten, { keep: true });
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('批量写入提交失败时保留原文件和运行配置', () => {
+    const dir = tmp();
+    try {
+      const path = join(dir, 'config.json');
+      const original = '{invalid config';
+      writeFileSync(path, original, 'utf-8');
+      const c = new Config(new EventBus(), { context: { maxTokens: 60000 } }, path);
+
+      assert.equal(c.setPersistentBatch([['context.maxTokens', 12000]]), false);
+      assert.equal(c.get('context.maxTokens'), 60000);
+      assert.equal(readFileSync(path, 'utf-8'), original);
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  test('批量写入检测外部版本变化并拒绝覆盖更新后的文件', () => {
+    const dir = tmp();
+    try {
+      const path = join(dir, 'config.json');
+      writeFileSync(path, JSON.stringify({ context: { maxTokens: 60000 } }), 'utf8');
+      const c = new Config(new EventBus(), {}, path);
+      const revision = c.getPersistedRevision();
+      writeFileSync(path, JSON.stringify({ context: { maxTokens: 70000 } }), 'utf8');
+
+      assert.equal(c.setPersistentBatch([['context.maxTokens', 12000]], revision), false);
+      assert.equal(c.getPersistentFailureCode(), 'concurrent_write');
+      assert.equal(JSON.parse(readFileSync(path, 'utf8')).context.maxTokens, 70000);
+      assert.equal(c.get('context.maxTokens'), 60000, '冲突时运行态也保持原值');
+    } finally { rmSync(dir, { recursive: true, force: true }); }
+  });
+
   test('对象值整子树覆盖：被删除的路由条目不残留', () => {
     const dir = tmp();
     try {

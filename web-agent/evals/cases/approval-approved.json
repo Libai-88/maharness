@@ -1,0 +1,27 @@
+{
+  "name": "approval-approved",
+  "description": "审批通过后才执行受保护工具并满足任务验收",
+  "messages": [{ "role": "user", "content": "Run the protected action after approval" }],
+  "approval": { "toolName": "eval_approval_action", "decision": "approve" },
+  "task": {
+    "objective": "The protected action must execute",
+    "acceptance": [{ "type": "tool_succeeded", "name": "eval_approval_action" }]
+  },
+  "requests": [
+    {
+      "chunks": [
+        { "type": "tool_call", "toolCall": { "id": "approval-call-1", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+        { "type": "usage", "input": 30, "output": 8 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "The protected action completed." },
+        { "type": "usage", "input": 40, "output": 8 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": { "llmCalls": 2, "noErrors": true, "taskOutcome": "verified", "approvalOutcome": "approved", "approvalHandlerCalls": 1 }
+}

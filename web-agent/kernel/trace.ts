@@ -3,10 +3,72 @@
  * append-only 结构：TraceSession(traceId) → Turn → Step。
  * 三态输出：① SSE 实时推送（trace.step 事件）② JSONL 审计落盘（异步批量）③ 内存环形缓冲。
  */
-import { appendFileSync, closeSync, fstatSync, openSync, mkdirSync, readdirSync, readSync, rmSync } from 'node:fs';
+import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { EventBus } from './bus';
 import type { StepHandle, TraceStats, TraceStep, TraceStepInit } from './types';
+
+export interface TraceValidationOptions {
+  /** 完整图校验：父节点必须出现在本批步骤中；默认允许跨 trace/分页批次的外部父 span。 */
+  requireResolvedParents?: boolean;
+}
+
+/** 校验一批 Trace 步骤的结构和局部因果关系；parentId 可指向批次外的父 span。 */
+export function validateTraceSteps(steps: readonly TraceStep[], options: TraceValidationOptions = {}): string[] {
+  const errors: string[] = [];
+  const ids = new Set<string>();
+  const validTypes = new Set(['llm_call', 'tool_call', 'cache_hit', 'user_msg', 'system', 'service_call']);
+  const validStatuses = new Set(['running', 'done', 'error', 'cancelled']);
+  const validCacheLayers = new Set(['L1', 'L2', 'L3']);
+  const validErrorCategories = new Set(['transient', 'auth', 'parameter', 'business', 'aborted', 'unknown']);
+  for (const step of steps) {
+    const label = typeof step.id === 'string' && step.id ? step.id : '(empty)';
+    if (typeof step.id !== 'string' || !step.id || ids.has(step.id)) errors.push(`重复或缺失步骤 id: ${label}`);
+    if (typeof step.id === 'string') ids.add(step.id);
+    if (typeof step.traceId !== 'string' || !step.traceId.trim()) errors.push(`步骤 ${label} 缺少 traceId`);
+    for (const [key, value] of Object.entries({ sessionId: step.sessionId, pluginId: step.pluginId, name: step.name, inputSummary: step.inputSummary, cacheKey: step.cacheKey, parentId: step.parentId, outputSummary: step.outputSummary, error: step.error, errorCode: step.errorCode })) {
+      if (value !== undefined && typeof value !== 'string') errors.push(`步骤 ${label} 的 ${key} 类型非法`);
+    }
+    if (!Number.isInteger(step.turn) || step.turn < 0) errors.push(`步骤 ${step.id || '(empty)'} 的 turn 非法`);
+    if (!Number.isInteger(step.attempt) || (step.attempt ?? 0) < 0) errors.push(`步骤 ${step.id || '(empty)'} 的 attempt 非法`);
+    if (!validTypes.has(step.type)) errors.push(`步骤 ${label} 的 type 非法`);
+    if (!validStatuses.has(step.status)) errors.push(`步骤 ${label} 的 status 非法`);
+    if (!Number.isFinite(step.ts) || step.ts < 0) errors.push(`步骤 ${label} 的 ts 非法`);
+    if (step.endTs !== undefined && (!Number.isFinite(step.endTs) || step.endTs < step.ts)) errors.push(`步骤 ${label} 的 endTs 非法`);
+    if (step.durationMs !== undefined && (!Number.isFinite(step.durationMs) || step.durationMs < 0)) errors.push(`步骤 ${label} 的 durationMs 非法`);
+    for (const [key, value] of Object.entries({ tokensIn: step.tokensIn, tokensOut: step.tokensOut, tokensCached: step.tokensCached })) {
+      if (value !== undefined && (!Number.isInteger(value) || value < 0)) errors.push(`步骤 ${label} 的 ${key} 非法`);
+    }
+    if (step.cost !== undefined && (!Number.isFinite(step.cost) || step.cost < 0)) errors.push(`步骤 ${label} 的 cost 非法`);
+    if (step.cacheLayer !== undefined && !validCacheLayers.has(step.cacheLayer)) errors.push(`步骤 ${label} 的 cacheLayer 非法`);
+    if (step.errorCategory !== undefined && !validErrorCategories.has(step.errorCategory)) errors.push(`步骤 ${label} 的 errorCategory 非法`);
+    if (step.retryable !== undefined && typeof step.retryable !== 'boolean') errors.push(`步骤 ${label} 的 retryable 类型非法`);
+    if (step.retryDelayMs !== undefined && (!Number.isFinite(step.retryDelayMs) || step.retryDelayMs < 0)) errors.push(`步骤 ${label} 的 retryDelayMs 非法`);
+    if (step.parentId === step.id) errors.push(`步骤 ${step.id} 不能引用自身为 parentId`);
+  }
+  const byId = new Map(steps.map((step) => [step.id, step]));
+  for (const step of steps) {
+    if (options.requireResolvedParents && step.parentId && !byId.has(step.parentId)) {
+      errors.push(`步骤 ${step.id} 的 parentId 未解析：${step.parentId}`);
+    }
+    const seen = new Set<string>();
+    let current = step;
+    while (current.parentId && byId.has(current.parentId)) {
+      if (seen.has(current.id)) {
+        errors.push(`步骤 ${step.id} 的 parentId 形成环`);
+        break;
+      }
+      seen.add(current.id);
+      current = byId.get(current.parentId)!;
+    }
+  }
+  return errors;
+}
+
+/** 旧 JSONL 在 attempt 字段加入前已存在，读取时兼容为首次尝试。 */
+function withCompatibleTraceDefaults(step: TraceStep): TraceStep {
+  return step.attempt === undefined ? { ...step, attempt: 0 } : step;
+}
 
 const RING_CAPACITY = 1000;
 /** 批量落盘：队列达到该条数立即 flush */
@@ -52,6 +114,20 @@ function readTailLines(path: string, maxLines: number): string[] {
   }
 }
 
+function readAt(path: string, offset: number, length: number): string | undefined {
+  let fd: number | undefined;
+  try {
+    fd = openSync(path, 'r');
+    const buf = Buffer.alloc(length);
+    const read = readSync(fd, buf, 0, length, offset);
+    return buf.subarray(0, read).toString('utf-8');
+  } catch {
+    return undefined;
+  } finally {
+    if (fd !== undefined) { try { closeSync(fd); } catch { /* 忽略 */ } }
+  }
+}
+
 export class Trace {
   private ring: TraceStep[] = [];
   private tracesDir: string;
@@ -90,9 +166,18 @@ export class Trace {
 
   /** 开始一个 Step，返回收尾句柄 */
   startStep(init: TraceStepInit): StepHandle {
+    const seq = ++this.stepSeq;
+    // 插件/工具扩展可能在缺少运行上下文时直接写 Trace；不要让空 traceId
+    // 污染归档或绕过 schema。为这类事件分配可查询的 unscoped run，真实主/子
+    // 代理路径仍使用调用方传入的 traceId 与 parentId。
+    const traceId = typeof init.traceId === 'string' && init.traceId.trim()
+      ? init.traceId
+      : `${this.pidPrefix}-unscoped-${seq}`;
     const step: TraceStep = {
       ...init,
-      id: `${this.pidPrefix}-${++this.stepSeq}`,
+      traceId,
+      attempt: Number.isInteger(init.attempt) && init.attempt! >= 0 ? init.attempt : 0,
+      id: `${this.pidPrefix}-${seq}`,
       status: 'running',
       ts: Date.now(),
     };
@@ -165,7 +250,21 @@ export class Trace {
       ? this.jsonlPath
       : (this.jsonlPath = join(this.tracesDir, `${today}.jsonl`));
     try {
+      const baseOffset = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
       appendFileSync(path, chunk);
+      const indexLines: string[] = [];
+      let offset = baseOffset;
+      for (const line of this.writeQueueSnapshot(chunk)) {
+        try {
+          const step = JSON.parse(line) as TraceStep;
+          if (step.traceId) indexLines.push(JSON.stringify({
+            traceId: step.traceId, sessionId: step.sessionId, pluginId: step.pluginId,
+            ts: step.ts, offset, length: Buffer.byteLength(line),
+          }));
+        } catch { /* 坏行仍由 JSONL 保留，索引跳过 */ }
+        offset += Buffer.byteLength(line) + 1;
+      }
+      if (indexLines.length) appendFileSync(join(this.tracesDir, `${today}.idx`), `${indexLines.join('\n')}\n`);
     } catch (err) {
       this.writeFailures++;
       this.counter.writeFailures = this.writeFailures;
@@ -179,6 +278,10 @@ export class Trace {
       this.lastPruneDay = today;
       this.pruneOld();
     }
+  }
+
+  private writeQueueSnapshot(chunk: string): string[] {
+    return chunk.split('\n').filter((line) => line.length > 0);
   }
 
   /** 归档保留期清理（缺陷 C2：此前按天只追加、无任何轮转/上限，磁盘单调增长）。
@@ -200,6 +303,7 @@ export class Trace {
       if (day >= cutoff) continue;
       try {
         rmSync(join(this.tracesDir, f), { force: true });
+        rmSync(join(this.tracesDir, `${day}.idx`), { force: true });
       } catch (err) {
         console.warn(`[trace] 归档清理失败（${f}）:`, err instanceof Error ? err.message : String(err));
       }
@@ -213,18 +317,95 @@ export class Trace {
 
   /** 查询轨迹：按 traceId / 步骤类型 / 名称 / 父步骤 过滤环形缓冲（最近 1000 条；可观察性的检索面）
    *  parentId：span 树下钻——查某步骤的全部子步骤（如 run_subagent 工具步骤下的子代理内部步骤） */
-  query(traceId?: string, filter?: { type?: string; name?: string; parentId?: string; limit?: number }): TraceStep[] {
+  query(traceId?: string, filter?: {
+    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
+    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
+  }): TraceStep[] {
     let out = traceId ? this.ring.filter((s) => s.traceId === traceId) : [...this.ring];
     if (filter?.type) out = out.filter((s) => s.type === filter.type);
     if (filter?.name) out = out.filter((s) => s.name === filter.name);
     if (filter?.parentId) out = out.filter((s) => s.parentId === filter.parentId);
+    if (filter?.sessionId) out = out.filter((s) => s.sessionId === filter.sessionId);
+    if (filter?.pluginId) out = out.filter((s) => s.pluginId === filter.pluginId);
+    if (filter?.fromTs !== undefined) out = out.filter((s) => s.ts >= filter.fromTs!);
+    if (filter?.toTs !== undefined) out = out.filter((s) => s.ts <= filter.toTs!);
+    if (filter?.beforeTs !== undefined) out = out.filter((s) => s.ts < filter.beforeTs!);
+    if (filter?.status) out = out.filter((s) => s.status === filter.status);
+    if (filter?.errorCategory) out = out.filter((s) => s.errorCategory === filter.errorCategory);
     if (filter?.limit && filter.limit > 0) out = out.slice(-filter.limit);
     return out;
   }
 
+  /** 为一批查询结果补齐 parentId 祖先；返回的 unresolvedParentIds 可用于 fail-closed 展示。 */
+  resolveParentChain(steps: readonly TraceStep[], maxDepth = 32): { steps: TraceStep[]; unresolvedParentIds: string[] } {
+    const expanded = [...steps];
+    const byId = new Map<string, TraceStep>();
+    for (const step of expanded) byId.set(step.id, step);
+    const pending = [...new Set(expanded.map((step) => step.parentId).filter((id): id is string => !!id))];
+    if (pending.length) {
+      for (const step of this.ring) byId.set(step.id, step);
+      for (const step of this.queryArchive(undefined, {}, { maxFiles: 14, maxLinesPerFile: 20_000 })) byId.set(step.id, step);
+    }
+    const unresolved = new Set<string>();
+    const seen = new Set<string>();
+    let depth = 0;
+    while (pending.length && depth++ < maxDepth) {
+      const parentId = pending.shift()!;
+      if (seen.has(parentId)) continue;
+      seen.add(parentId);
+      const parent = byId.get(parentId);
+      if (!parent) { unresolved.add(parentId); continue; }
+      if (!expanded.some((step) => step.id === parent.id)) expanded.push(parent);
+      if (parent.parentId) pending.push(parent.parentId);
+    }
+    for (const parentId of pending) unresolved.add(parentId);
+    const result = [...new Map(expanded.map((step) => [step.id, step])).values()]
+      .sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
+    return { steps: result, unresolvedParentIds: [...unresolved].sort() };
+  }
+
+  /** 从 JSONL 原始归档重建偏移索引；可重复执行，索引损坏或缺失不影响原始事件。 */
+  rebuildArchiveIndexes(): { files: number; entries: number } {
+    this.flush();
+    let files = 0;
+    let entries = 0;
+    let names: string[] = [];
+    try { names = readdirSync(this.tracesDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort(); } catch { return { files, entries }; }
+    for (const file of names) {
+      let text: string;
+      try { text = readFileSync(join(this.tracesDir, file), 'utf8'); } catch { continue; }
+      const indexLines: string[] = [];
+      let offset = 0;
+      for (const line of text.split('\n')) {
+        const length = Buffer.byteLength(line);
+        if (line.trim()) {
+          try {
+            const step = JSON.parse(line) as TraceStep;
+            if (step && step.id && step.traceId && Number.isFinite(step.ts)) {
+              indexLines.push(JSON.stringify({ traceId: step.traceId, sessionId: step.sessionId, pluginId: step.pluginId, ts: step.ts, offset, length }));
+              entries++;
+            }
+          } catch { /* 保留坏行，不让索引重建阻断服务 */ }
+        }
+        offset += length + 1;
+      }
+      const indexPath = join(this.tracesDir, `${file.slice(0, -6)}.idx`);
+      const tempPath = `${indexPath}.tmp`;
+      try {
+        writeFileSync(tempPath, indexLines.length ? `${indexLines.join('\n')}\n` : '', 'utf8');
+        renameSync(tempPath, indexPath);
+        files++;
+      } catch { try { rmSync(tempPath, { force: true }); } catch { /* ignore */ } }
+    }
+    return { files, entries };
+  }
+
   /** 归档查询：ring 未命中时回退 JSONL 审计文件（跨重启/跨日期的历史可检索）。
    *  只扫最近 maxFiles 个日志文件、每文件最近 maxLines 行（本机工具量级足够）。 */
-  queryArchive(traceId?: string, filter: { type?: string; name?: string; parentId?: string; limit?: number } = {},
+  queryArchive(traceId?: string, filter: {
+    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
+    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
+  } = {},
     opts: { maxFiles?: number; maxLinesPerFile?: number } = {}): TraceStep[] {
     const maxFiles = opts.maxFiles ?? 14;
     const maxLines = opts.maxLinesPerFile ?? 20_000;
@@ -233,24 +414,81 @@ export class Trace {
       files = readdirSync(this.tracesDir).filter((f) => f.endsWith('.jsonl')).sort().slice(-maxFiles);
     } catch { return []; }
     const out: TraceStep[] = [];
+    if (traceId) {
+      const indexed = this.queryArchiveIndex(traceId, filter, maxFiles);
+      if (indexed.length) return filter.limit && filter.limit > 0 ? indexed.slice(-filter.limit) : indexed;
+    }
     for (const file of files) {
       try {
         const lines = readTailLines(join(this.tracesDir, file), maxLines);
         for (const line of lines) {
           let step: TraceStep;
           try {
-            step = JSON.parse(line) as TraceStep;
+          step = withCompatibleTraceDefaults(JSON.parse(line) as TraceStep);
           } catch { continue; }
           if (!step || typeof step !== 'object' || !step.id || typeof step.ts !== 'number') continue;
           if (traceId && step.traceId !== traceId) continue;
           if (filter.type && step.type !== filter.type) continue;
           if (filter.name && step.name !== filter.name) continue;
           if (filter.parentId && step.parentId !== filter.parentId) continue;
+          if (filter.sessionId && step.sessionId !== filter.sessionId) continue;
+          if (filter.pluginId && step.pluginId !== filter.pluginId) continue;
+          if (filter.fromTs !== undefined && step.ts < filter.fromTs) continue;
+          if (filter.toTs !== undefined && step.ts > filter.toTs) continue;
+          if (filter.beforeTs !== undefined && step.ts >= filter.beforeTs) continue;
+          if (filter.status && step.status !== filter.status) continue;
+          if (filter.errorCategory && step.errorCategory !== filter.errorCategory) continue;
           out.push(step);
         }
       } catch { /* 单文件读取失败跳过 */ }
     }
     if (filter.limit && filter.limit > 0) return out.slice(-filter.limit);
+    return out;
+  }
+
+  private queryArchiveIndex(traceId: string, filter: {
+    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
+    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
+  }, maxFiles: number): TraceStep[] {
+    const out: TraceStep[] = [];
+    const candidates: { offset: number; length: number; day: string }[] = [];
+    let indexFiles: string[] = [];
+    try {
+      indexFiles = readdirSync(this.tracesDir).filter((f) => f.endsWith('.idx')).sort().slice(-maxFiles);
+    } catch { return out; }
+    for (const indexFile of indexFiles) {
+      const day = indexFile.slice(0, -4);
+      for (const line of readTailLines(join(this.tracesDir, indexFile), Number.MAX_SAFE_INTEGER)) {
+        let entry: { traceId?: string; ts?: number; offset?: number; length?: number };
+        try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
+        if (filter.fromTs !== undefined && typeof entry.ts === 'number' && entry.ts < filter.fromTs) continue;
+        if (filter.toTs !== undefined && typeof entry.ts === 'number' && entry.ts > filter.toTs) continue;
+        if (filter.beforeTs !== undefined && typeof entry.ts === 'number' && entry.ts >= filter.beforeTs) continue;
+        const offset = entry.offset;
+        const length = entry.length;
+        if (entry.traceId !== traceId || typeof offset !== 'number' || typeof length !== 'number'
+          || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length)) continue;
+        candidates.push({ offset, length, day });
+      }
+    }
+    const selected = filter.limit && filter.limit > 0 ? candidates.slice(-filter.limit) : candidates;
+    for (const candidate of selected) {
+        const raw = readAt(join(this.tracesDir, `${candidate.day}.jsonl`), candidate.offset, candidate.length);
+        if (!raw) continue;
+        let step: TraceStep;
+        try { step = withCompatibleTraceDefaults(JSON.parse(raw) as TraceStep); } catch { continue; }
+        if (filter.type && step.type !== filter.type) continue;
+        if (filter.name && step.name !== filter.name) continue;
+        if (filter.parentId && step.parentId !== filter.parentId) continue;
+        if (filter.sessionId && step.sessionId !== filter.sessionId) continue;
+        if (filter.pluginId && step.pluginId !== filter.pluginId) continue;
+        if (filter.fromTs !== undefined && step.ts < filter.fromTs) continue;
+        if (filter.toTs !== undefined && step.ts > filter.toTs) continue;
+        if (filter.beforeTs !== undefined && step.ts >= filter.beforeTs) continue;
+        if (filter.status && step.status !== filter.status) continue;
+        if (filter.errorCategory && step.errorCategory !== filter.errorCategory) continue;
+        out.push(step);
+      }
     return out;
   }
 

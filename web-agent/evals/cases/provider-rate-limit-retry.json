@@ -1,0 +1,10 @@
+{
+  "name": "provider-rate-limit-retry",
+  "description": "故障回放：Provider 429 限流后退避重试并完成",
+  "messages": [{ "role": "user", "content": "请回答限流重试后的结果" }],
+  "requests": [
+    { "chunks": [{ "type": "throw", "status": 429, "message": "rate limited" }] },
+    { "chunks": [{ "type": "delta", "text": "限流后完成" }, { "type": "usage", "input": 10, "output": 5 }, { "type": "done" }] }
+  ],
+  "expect": { "answerContains": ["限流后完成"], "llmCalls": 2, "noErrors": true }
+}

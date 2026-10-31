@@ -34,10 +34,81 @@ import { EffectScope } from './scope';
 import { dirDigest, fileDigest, materialize, pruneSnapshots, SNAPSHOT_SUFFIX, type Snapshot } from './plugin-snapshot';
 import { validateAgainstSchema } from './validate';
 import type {
-  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginManifest, PluginStorage, TraceLike, CacheLike,
+  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
+
+const CAPABILITY_KINDS = new Set<Capability['kind']>(['tool', 'listener', 'command', 'provider', 'service', 'persona', 'context', 'role', 'api']);
+let serviceTraceSeq = 0;
+const serviceTracePrefix = `service-${process.pid}-${Math.random().toString(16).slice(2, 8)}`;
+/** 插件清单兼容的宿主 API 版本；与产品版本解耦，避免补丁发布意外拒绝插件。 */
+export const PLUGIN_API_VERSION = '1.0.0';
+
+function semver(value: unknown): [number, number, number] | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
+  if (!match) return undefined;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareVersion(a: [number, number, number], b: [number, number, number]): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+function validateManifestCompatibility(manifest: PluginManifest): void {
+  const range = manifest.compatibility?.api;
+  if (range === undefined) return;
+  if (!range || typeof range !== 'object' || Array.isArray(range)) {
+    throw new Error(`插件 ${manifest.id} compatibility.api 必须是对象`);
+  }
+  const min = range.min === undefined ? undefined : semver(range.min);
+  const max = range.max === undefined ? undefined : semver(range.max);
+  if ((range.min !== undefined && !min) || (range.max !== undefined && !max)) {
+    throw new Error(`插件 ${manifest.id} compatibility.api.min/max 必须是完整 semver（例如 1.0.0）`);
+  }
+  if (min && max && compareVersion(min, max) > 0) {
+    throw new Error(`插件 ${manifest.id} compatibility.api.min 不能高于 max`);
+  }
+  const host = semver(PLUGIN_API_VERSION)!;
+  if ((min && compareVersion(host, min) < 0) || (max && compareVersion(host, max) > 0)) {
+    throw new Error(`插件 ${manifest.id} 不兼容宿主插件 API ${PLUGIN_API_VERSION}`);
+  }
+}
+
+function capabilityName(cap: Capability): string {
+  switch (cap.kind) {
+    case 'tool': return cap.tool.name;
+    case 'listener': return cap.event;
+    case 'command': return cap.command.name;
+    case 'provider': return cap.provider.id;
+    case 'service': return cap.service.id;
+    case 'persona': return cap.persona.id;
+    case 'context': return cap.context.id;
+    case 'role': return cap.role.id;
+    case 'api': return cap.api.mount;
+  }
+}
+
+function validatePermissions(manifest: PluginManifest): void {
+  if (manifest.permissions === undefined) return;
+  const caps = manifest.permissions?.capabilities;
+  if (!caps || typeof caps !== 'object' || Array.isArray(caps)) throw new Error(`插件 ${manifest.id} permissions.capabilities 必须是对象`);
+  for (const [kind, names] of Object.entries(caps)) {
+    if (!CAPABILITY_KINDS.has(kind as Capability['kind'])) throw new Error(`插件 ${manifest.id} 声明了未知 capability 类型: ${kind}`);
+    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim())) {
+      throw new Error(`插件 ${manifest.id} permissions.capabilities.${kind} 必须是字符串数组`);
+    }
+  }
+}
+
+function assertCapabilityPermission(manifest: PluginManifest, cap: Capability): void {
+  if (manifest.permissions === undefined) return;
+  const name = capabilityName(cap);
+  if (!manifest.permissions.capabilities[cap.kind]?.includes(name)) {
+    throw new Error(`插件 ${manifest.id} 未获准注册 capability ${cap.kind}:${name}`);
+  }
+}
 
 /** B6：config.changed → reloadChanged 的防抖窗口（ms）——连续配置写入合并为一次重载 */
 const CONFIG_RELOAD_DEBOUNCE_MS = 400;
@@ -176,6 +247,7 @@ interface ProviderBinding {
 
 export class PluginLoader {
   private registry = new Map<string, PluginInstance>();
+  private diagnosticLog: PluginDiagnostic[] = [];
   private watcher?: ReturnType<typeof watch>;
   private reloadTimer?: NodeJS.Timeout;
   /** rescan 在途互斥标记：watch 风暴下重入直接返回（防并发重扫/重复 reload） */
@@ -261,6 +333,7 @@ export class PluginLoader {
    *  生命周期控制：manifest.enabled=false 声明停用、lazy=true 声明惰性加载
    *  （类似 OS 驱动按需加载——注册可见，但不自动进入上下文，LLM 需要时 enable_plugin 激活） */
   async loadAll(): Promise<void> {
+    this.diagnosticLog = [];
     await this.scanDir(this.coreDir);
     await this.scanDir(this.userDir);
     for (const inst of this.topoSort([...this.registry.values()])) {
@@ -338,10 +411,14 @@ export class PluginLoader {
     let inst: PluginInstance | undefined;
     try {
       const manifest = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf-8')) as PluginManifest;
+      validateManifestCompatibility(manifest);
+      validatePermissions(manifest);
       const existing = this.registry.get(manifest.id);
       if (existing) {
         if (existing.dir !== dir) {
-          console.warn(`[plugin] 插件 id 冲突："${manifest.id}" 已由 ${existing.dir} 注册，忽略 ${dir}（core 与 plugins/ 不允许同 id）`);
+          const message = `插件 id 冲突："${manifest.id}" 已由 ${existing.dir} 注册，忽略 ${dir}（core 与 plugins/ 不允许同 id）`;
+          console.warn(`[plugin] ${message}`);
+          this.diagnosticLog.push({ id: manifest.id, kind: 'conflict', message, suggestion: '请修改冲突插件 plugin.json 的 id 为唯一值后重载。' });
         }
         return existing;
       }
@@ -527,6 +604,14 @@ export class PluginLoader {
       get trace() { return loader.resolveView<TraceLike>('service:trace', loader.ctxBase.trace); },
       get cache() { return loader.resolveView<CacheLike>('service:cache', loader.ctxBase.cache); },
       register: (cap: Capability) => {
+        try {
+          assertCapabilityPermission(inst.manifest, cap);
+        } catch (err) {
+          const name = capabilityName(cap);
+          const reason = err instanceof Error ? err.message : String(err);
+          this.bus.emit(EventBus.event('plugin.permission.denied', { pluginId: inst.manifest.id, kind: cap.kind, name, reason }));
+          throw err;
+        }
         // 可逆效应：登记能力并留下逆元（卸载时自动回收，无需作者手工 unregister）
         inst.caps.push(cap);
         if (cap.kind === 'service' && inst.state === 'started') {
@@ -924,8 +1009,13 @@ export class PluginLoader {
       }
     }
     if (traced && trace?.startStep) {
+      // service_call 发生在插件/服务解析边界，通常不属于某个用户 run；
+      // 仍必须拥有可查询、可通过 schema 校验的独立 traceId，不能写空字符串。
+      // 服务解析事件本身可能在 always 调试模式下重复产生；使用模块级单调序列
+      // 保证每个 service_call 都有独立 traceId，且进程前缀避免多进程碰撞。
       const step = trace.startStep({
-        traceId: '',
+        traceId: `${serviceTracePrefix}-${++serviceTraceSeq}`,
+        pluginId: binding.pluginId,
         turn: 0,
         type: 'service_call',
         name: key,
@@ -1307,6 +1397,11 @@ export class PluginLoader {
     }));
   }
 
+  /** 本次扫描产生的用户可见诊断，供管理 API 展示。 */
+  diagnostics(): PluginDiagnostic[] {
+    return this.diagnosticLog.map((d) => ({ ...d }));
+  }
+
   get(id: string): PluginInstance | undefined {
     return this.registry.get(id);
   }
@@ -1520,6 +1615,7 @@ export class PluginLoader {
 
   /** 用户插件目录重扫：新目录注册、变更重载（事务性）、删除卸载 */
   private async rescanUser(): Promise<void> {
+    this.diagnosticLog = [];
     const now = new Set<string>();
     if (existsSync(this.userDir)) {
       const entries = await readdir(this.userDir, { withFileTypes: true });

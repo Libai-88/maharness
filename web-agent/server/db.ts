@@ -69,6 +69,25 @@ export interface StoreKeyStatus {
   broken: { id: string; label: string; reason: string }[];
 }
 
+export interface AuthorizationAuditRow {
+  id: number;
+  occurredAt: number;
+  outcome: 'granted' | 'denied' | 'connected' | 'disconnected';
+  subject: string;
+  capability: string;
+  object: string;
+  reason: string | null;
+}
+
+/** Optimistic write failure: caller must reload the current row before retrying. */
+export class ConcurrentStoreWriteError extends Error {
+  readonly code = 'concurrent_write';
+  constructor(readonly entity: string, readonly id: string) {
+    super(`${entity} 已被其他写入者修改：${id}`);
+    this.name = 'ConcurrentStoreWriteError';
+  }
+}
+
 /** 模型能力行（一个 Provider 可挂多个模型，路由按能力谓词选路） */
 export interface ModelRow {
   providerId: string;
@@ -83,6 +102,9 @@ export interface ModelRow {
   enabled: number;
   /** pulled=拉取时顺带解析 / inferred=内置目录推断 / manual=用户手填 */
   source: string;
+  latencyMs: number | null;
+  privacyTier: 'local' | 'trusted' | 'external' | null;
+  riskLevel: 'low' | 'medium' | 'high' | null;
   updatedAt: number;
 }
 
@@ -114,6 +136,7 @@ export class Store {
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
   private readonly masterKey?: SecretKeyInfo;
+  private checkpointRetentionMs: number;
   /**
    * A7-2：本次运行中「解不开密」的 provider（id → 原因），读取时实时维护。
    * 只在内存——密钥换了就是换了，重启后按新一遍读取如实复现，比落库一个状态列更不易失真。
@@ -124,9 +147,10 @@ export class Store {
   /** 库里是否见过 v1: 密文（迁移循环/解密路径顺带记录，供状态接口） */
   private seenCiphertext = false;
 
-  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo } = {}) {
+  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo; checkpointRetentionMs?: number } = {}) {
     this.secretKey = opts.secretKey;
     this.masterKey = opts.masterKey;
+    this.checkpointRetentionMs = Number.isFinite(opts.checkpointRetentionMs) ? Math.max(60_000, Math.floor(opts.checkpointRetentionMs!)) : Store.CHECKPOINT_RETENTION_MS;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
     this.db.exec(`
@@ -139,7 +163,7 @@ export class Store {
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
         role TEXT NOT NULL, content TEXT, tool_calls TEXT, tool_call_id TEXT,
         tokens_in INTEGER DEFAULT 0, tokens_out INTEGER DEFAULT 0, cost REAL DEFAULT 0,
-        trace_id TEXT, created_at INTEGER NOT NULL
+        trace_id TEXT, task_verification TEXT, created_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_id, created_at);      CREATE TABLE IF NOT EXISTS plugin_state (
         plugin_id TEXT PRIMARY KEY, enabled INTEGER DEFAULT 1, version TEXT, loaded_at INTEGER
@@ -159,8 +183,13 @@ export class Store {
         id TEXT PRIMARY KEY, path TEXT NOT NULL, created_at INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS agent_checkpoints (
-        session_id TEXT PRIMARY KEY, turn INTEGER NOT NULL,
+        session_id TEXT PRIMARY KEY, turn INTEGER NOT NULL, run_id TEXT,
         history TEXT NOT NULL, created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS agent_tool_effects (
+        run_id TEXT NOT NULL, effect_key TEXT NOT NULL, status TEXT NOT NULL,
+        result TEXT, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+        PRIMARY KEY (run_id, effect_key)
       );
       CREATE TABLE IF NOT EXISTS models (
         provider_id TEXT NOT NULL, model_id TEXT NOT NULL,
@@ -168,9 +197,19 @@ export class Store {
         vision INTEGER NOT NULL DEFAULT 0, tools INTEGER NOT NULL DEFAULT 0,
         reasoning INTEGER NOT NULL DEFAULT 0,
         price_in REAL, price_out REAL, enabled INTEGER NOT NULL DEFAULT 1,
-        source TEXT NOT NULL DEFAULT 'manual', updated_at INTEGER NOT NULL,
+        source TEXT NOT NULL DEFAULT 'manual', latency_ms INTEGER, privacy_tier TEXT, risk_level TEXT, updated_at INTEGER NOT NULL,
         PRIMARY KEY (provider_id, model_id)
       );
+      CREATE TABLE IF NOT EXISTS authorization_audit (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        occurred_at INTEGER NOT NULL,
+        outcome TEXT NOT NULL CHECK (outcome IN ('granted', 'denied', 'connected', 'disconnected')),
+        subject TEXT NOT NULL,
+        capability TEXT NOT NULL,
+        object TEXT NOT NULL,
+        reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_authorization_audit_time ON authorization_audit(occurred_at DESC);
     `);
     // 迁移：providers.protocol 列（协议族，旧库默认 openai 兼容）
     const pCols = this.db.prepare(`PRAGMA table_info(providers)`).all() as { name: string }[];
@@ -182,8 +221,17 @@ export class Store {
     if (!cols.some((c) => c.name === 'reasoning')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN reasoning TEXT');
     }
+    if (!cols.some((c) => c.name === 'task_verification')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN task_verification TEXT');
+    }
     // 迁移：sessions.mode 列（普通/计划/目标模式）
     const sCols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
+    const cpCols = this.db.prepare('PRAGMA table_info(agent_checkpoints)').all() as { name: string }[];
+    if (!cpCols.some((c) => c.name === 'run_id')) this.db.exec('ALTER TABLE agent_checkpoints ADD COLUMN run_id TEXT');
+    const modelCols = this.db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
+    if (!modelCols.some((c) => c.name === 'latency_ms')) this.db.exec('ALTER TABLE models ADD COLUMN latency_ms INTEGER');
+    if (!modelCols.some((c) => c.name === 'privacy_tier')) this.db.exec('ALTER TABLE models ADD COLUMN privacy_tier TEXT');
+    if (!modelCols.some((c) => c.name === 'risk_level')) this.db.exec('ALTER TABLE models ADD COLUMN risk_level TEXT');
     if (!sCols.some((c) => c.name === 'mode')) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'");
     }
@@ -210,11 +258,14 @@ export class Store {
     if (this.secretKey) {
       const plainRows = this.db.prepare('SELECT id, api_key AS apiKey FROM providers').all() as { id: string; apiKey: string }[];
       const upd = this.db.prepare('UPDATE providers SET api_key = ? WHERE id = ?');
-      for (const row of plainRows) {
-        if (isEncrypted(row.apiKey)) this.seenCiphertext = true; // A7：库里确有密文
-        if (!row.apiKey || isEncrypted(row.apiKey)) continue;
-        upd.run(this.encryptKey(row.apiKey), row.id);
-      }
+      const migrate = this.db.transaction((rows: { id: string; apiKey: string }[]) => {
+        for (const row of rows) {
+          if (isEncrypted(row.apiKey)) this.seenCiphertext = true; // A7：库里确有密文
+          if (!row.apiKey || isEncrypted(row.apiKey)) continue;
+          upd.run(this.encryptKey(row.apiKey), row.id);
+        }
+      });
+      migrate(plainRows);
       if (plainRows.some((r) => r.apiKey && !isEncrypted(r.apiKey))) {
         console.log('[store] 已迁移明文 api_key 为加密存储');
       }
@@ -224,6 +275,24 @@ export class Store {
   /** 关闭数据库连接（嵌入场景清理临时数据目录前调用，释放 Windows 文件句柄） */
   close(): void {
     try { this.db.close(); } catch { /* 已关闭 */ }
+  }
+
+  appendAuthorizationAudit(entry: Omit<AuthorizationAuditRow, 'id' | 'occurredAt'> & { occurredAt?: number }): void {
+    const tx = this.db.transaction(() => {
+      this.db.prepare(`INSERT INTO authorization_audit (occurred_at, outcome, subject, capability, object, reason)
+        VALUES (?, ?, ?, ?, ?, ?)`).run(
+        entry.occurredAt ?? Date.now(), entry.outcome, entry.subject, entry.capability, entry.object, entry.reason,
+      );
+      this.db.prepare(`DELETE FROM authorization_audit WHERE id NOT IN
+        (SELECT id FROM authorization_audit ORDER BY id DESC LIMIT 10000)`).run();
+    });
+    tx();
+  }
+
+  listAuthorizationAudit(limit = 100): AuthorizationAuditRow[] {
+    const bounded = Math.max(1, Math.min(500, Math.floor(limit) || 100));
+    return this.db.prepare(`SELECT id, occurred_at AS occurredAt, outcome, subject, capability, object, reason
+      FROM authorization_audit ORDER BY id DESC LIMIT ?`).all(bounded) as AuthorizationAuditRow[];
   }
 
   /**
@@ -314,7 +383,7 @@ export class Store {
 
   upsertProvider(p: {
     id: string; label: string; baseUrl: string; apiKey: string; model: string;
-    protocol?: string; priceIn?: number; priceOut?: number; enabled?: number;
+    protocol?: string; priceIn?: number; priceOut?: number; enabled?: number; expectedUpdatedAt?: number;
   }): void {
     const now = Date.now();
     // A7-2 连带防护：api_key 不可解时 getProvider 返回空串，PATCH 会把它当成「新值」写回，
@@ -328,9 +397,13 @@ export class Store {
     const existing = this.getProvider(p.id);
     const protocol = p.protocol ?? existing?.protocol ?? 'openai';
     if (existing) {
-      this.db
-        .prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
-        .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, now, p.id);
+      const updatedAt = Math.max(now, existing.updatedAt + 1);
+      const result = p.expectedUpdatedAt === undefined
+        ? this.db.prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
+          .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, updatedAt, p.id)
+        : this.db.prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=? AND updated_at=?')
+          .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, updatedAt, p.id, p.expectedUpdatedAt);
+      if (p.expectedUpdatedAt !== undefined && result.changes !== 1) throw new ConcurrentStoreWriteError('Provider', p.id);
     } else {
       this.db
         .prepare('INSERT INTO providers (id, label, base_url, api_key, model, protocol, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
@@ -338,9 +411,15 @@ export class Store {
     }
   }
 
-  deleteProvider(id: string): void {
-    this.db.prepare('DELETE FROM providers WHERE id = ?').run(id);
-    this.db.prepare('DELETE FROM models WHERE provider_id = ?').run(id);
+  deleteProvider(id: string, expectedUpdatedAt?: number): void {
+    const tx = this.db.transaction((providerId: string) => {
+      this.db.prepare('DELETE FROM models WHERE provider_id = ?').run(providerId);
+      const result = expectedUpdatedAt === undefined
+        ? this.db.prepare('DELETE FROM providers WHERE id = ?').run(providerId)
+        : this.db.prepare('DELETE FROM providers WHERE id = ? AND updated_at = ?').run(providerId, expectedUpdatedAt);
+      if (expectedUpdatedAt !== undefined && result.changes !== 1) throw new ConcurrentStoreWriteError('Provider', providerId);
+    });
+    tx(id);
     // 故障记账随行 removal 一并清掉，否则状态接口会报一个不存在的 provider
     this.brokenKeys.delete(id);
     this.warnedKeys.delete(id);
@@ -353,16 +432,36 @@ export class Store {
   // ---------- models（Provider 下的模型与能力，路由的事实源） ----------
 
   listModels(providerId?: string): ModelRow[] {
-    const sql = 'SELECT provider_id AS providerId, model_id AS modelId, context_window AS contextWindow, max_output AS maxOutput, vision, tools, reasoning, price_in AS priceIn, price_out AS priceOut, enabled, source, updated_at AS updatedAt FROM models';
+    const sql = 'SELECT provider_id AS providerId, model_id AS modelId, context_window AS contextWindow, max_output AS maxOutput, vision, tools, reasoning, price_in AS priceIn, price_out AS priceOut, enabled, source, latency_ms AS latencyMs, privacy_tier AS privacyTier, risk_level AS riskLevel, updated_at AS updatedAt FROM models';
     return providerId
       ? this.db.prepare(`${sql} WHERE provider_id = ? ORDER BY model_id ASC`).all(providerId) as ModelRow[]
       : this.db.prepare(`${sql} ORDER BY provider_id ASC, model_id ASC`).all() as ModelRow[];
   }
 
   upsertModel(m: Partial<ModelRow> & { providerId: string; modelId: string }): void {
-    this.db.prepare(`
-      INSERT INTO models (provider_id, model_id, context_window, max_output, vision, tools, reasoning, price_in, price_out, enabled, source, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+    this.upsertModels([m]);
+  }
+
+  updateModel(m: Partial<ModelRow> & { providerId: string; modelId: string }, expectedUpdatedAt: number): void {
+    const previous = this.listModels(m.providerId).find((row) => row.modelId === m.modelId);
+    if (!previous) throw new ConcurrentStoreWriteError('Model', `${m.providerId}@${m.modelId}`);
+    const updatedAt = Math.max(Date.now(), previous.updatedAt + 1);
+    const result = this.db.prepare(`UPDATE models SET context_window=?, max_output=?, vision=?, tools=?, reasoning=?, price_in=?, price_out=?, enabled=?, source=?, latency_ms=?, privacy_tier=?, risk_level=?, updated_at=?
+      WHERE provider_id=? AND model_id=? AND updated_at=?`).run(
+      m.contextWindow ?? null, m.maxOutput ?? null, m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
+      m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual',
+      m.latencyMs ?? null, m.privacyTier ?? null, m.riskLevel ?? null, updatedAt,
+      m.providerId, m.modelId, expectedUpdatedAt,
+    );
+    if (result.changes !== 1) throw new ConcurrentStoreWriteError('Model', `${m.providerId}@${m.modelId}`);
+  }
+
+  /** Batch model refresh is all-or-nothing: a failed capability row cannot leave a partial catalog. */
+  upsertModels(models: (Partial<ModelRow> & { providerId: string; modelId: string })[]): void {
+    if (models.length === 0) return;
+    const statement = this.db.prepare(`
+      INSERT INTO models (provider_id, model_id, context_window, max_output, vision, tools, reasoning, price_in, price_out, enabled, source, latency_ms, privacy_tier, risk_level, updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
       ON CONFLICT(provider_id, model_id) DO UPDATE SET
         context_window=COALESCE(excluded.context_window, context_window),
         max_output=COALESCE(excluded.max_output, max_output),
@@ -371,12 +470,22 @@ export class Store {
         price_out=COALESCE(excluded.price_out, price_out),
         enabled=excluded.enabled,
         source=CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE models.source END,
+        latency_ms=COALESCE(excluded.latency_ms, latency_ms),
+        privacy_tier=COALESCE(excluded.privacy_tier, privacy_tier),
+        risk_level=COALESCE(excluded.risk_level, risk_level),
         updated_at=excluded.updated_at
-    `).run(
-      m.providerId, m.modelId, m.contextWindow ?? null, m.maxOutput ?? null,
-      m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
-      m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual', Date.now(),
-    );
+    `);
+    const tx = this.db.transaction((rows: (Partial<ModelRow> & { providerId: string; modelId: string })[]) => {
+      for (const m of rows) {
+        statement.run(
+          m.providerId, m.modelId, m.contextWindow ?? null, m.maxOutput ?? null,
+          m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
+          m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual',
+          m.latencyMs ?? null, m.privacyTier ?? null, m.riskLevel ?? null, Date.now(),
+        );
+      }
+    });
+    tx(models);
   }
 
   deleteModel(providerId: string, modelId: string): void {
@@ -529,8 +638,11 @@ export class Store {
   /** 清空会话消息（保留会话本身，/clear 命令用）
    *  同步清理断点：清空后 resume 不应再恢复旧任务历史 */
   clearSessionMessages(id: string): void {
-    this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(id);
-    this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(id);
+    const tx = this.db.transaction((sessionId: string) => {
+      this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
+      this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(sessionId);
+    });
+    tx(id);
   }
 
   // ---------- workspaces ----------
@@ -574,6 +686,7 @@ export class Store {
       tokensOut: r.tokens_out as number,
       cost: r.cost as number,
       traceId: (r.trace_id as string) ?? undefined,
+      taskVerification: r.task_verification ? JSON.parse(r.task_verification as string) as Message['taskVerification'] : undefined,
       createdAt: r.created_at as number,
     }));
   }
@@ -581,14 +694,14 @@ export class Store {
   addMessage(m: Omit<Message, 'id' | 'createdAt'>): Message {
     const msg: Message = { ...m, id: randomUUID(), createdAt: Date.now() };
     this.db
-      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`)
+      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, task_verification, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
       .run(
         msg.id, msg.sessionId, msg.role, msg.content,
         msg.reasoning ?? null,
         msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
         msg.toolCallId ?? null, msg.tokensIn ?? 0, msg.tokensOut ?? 0, msg.cost ?? 0,
-        msg.traceId ?? null, msg.createdAt,
+        msg.traceId ?? null, msg.taskVerification ? JSON.stringify(msg.taskVerification) : null, msg.createdAt,
       );
     return msg;
   }
@@ -598,8 +711,8 @@ export class Store {
   replaceSessionMessages(sessionId: string, messages: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]): void {
     const del = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
     const ins = this.db
-      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`);
+      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, task_verification, created_at)
+                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const tx = this.db.transaction((list: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]) => {
       del.run(sessionId);
       for (const m of list) {
@@ -608,11 +721,15 @@ export class Store {
           m.reasoning ?? null,
           m.toolCalls ? JSON.stringify(m.toolCalls) : null,
           m.toolCallId ?? null, m.tokensIn ?? 0, m.tokensOut ?? 0, m.cost ?? 0,
-          m.traceId ?? null, Date.now(),
+          m.traceId ?? null, m.taskVerification ? JSON.stringify(m.taskVerification) : null, Date.now(),
         );
       }
     });
     tx(messages);
+  }
+
+  updateMessageTaskVerification(id: string, verification: NonNullable<Message['taskVerification']>): void {
+    this.db.prepare('UPDATE messages SET task_verification=? WHERE id=?').run(JSON.stringify(verification), id);
   }
 
   /** 消息结算回填：assistant 消息经 onHistoryMessage 先入库（保持历史字节一致），
@@ -627,18 +744,30 @@ export class Store {
       );
   }
 
+  updateMessageContent(id: string, content: string): void {
+    this.db.prepare('UPDATE messages SET content = ? WHERE id = ?').run(content, id);
+  }
+
   // ---------- 断点续跑（checkpoint：turn 级自动保存完整历史，resume 从断点继续） ----------
 
   /** checkpoint 历史尺寸上限（M6）：超长任务（工具密集型可跑数百轮）不能把任意大的
    *  history 无界写进 DB——超过则保留最新 N 条并附截断标记字段。 */
   static readonly MAX_CHECKPOINT_HISTORY = 200;
+  /** checkpoint 单行 JSON 上限；超限继续从最早消息裁剪，避免单个会话撑爆 SQLite 页。 */
+  static readonly MAX_CHECKPOINT_BYTES = 512 * 1024;
+  static readonly CHECKPOINT_RETENTION_MS = 30 * 24 * 60 * 60 * 1000;
+  static readonly CHECKPOINT_SCHEMA_VERSION = 1;
+
+  setCheckpointRetentionMs(value: number): void {
+    if (Number.isFinite(value)) this.checkpointRetentionMs = Math.max(60_000, Math.floor(value));
+  }
 
   /** 保存会话最新断点（upsert：每会话只保留最新——长任务的恢复点是"最近完成的轮"）
    *  history 必须保存完整字段（role/content/tool_calls/tool_call_id）——恢复时
    *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。
    *  M6：超上限时保留最新 200 条并附 truncated/originalLength 标记；头部孤儿 tool
    *  回填（配对的 assistant tool_calls 已被截掉）一并丢弃——provider 拒绝无主 tool 消息。 */
-  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]): void {
+  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[], runId?: string, task?: import('../kernel/task-verifier').TaskContract, toolResults?: { name: string; ok: boolean }[], costUsd?: number): void {
     let kept = history;
     let truncated = false;
     const originalLength = history.length;
@@ -647,26 +776,40 @@ export class Store {
       while (kept.length > 0 && kept[0].role === 'tool') kept = kept.slice(1);
       truncated = true;
     }
-    const payload = truncated ? { messages: kept, truncated: true, originalLength } : { messages: kept };
+    let payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, ...(truncated ? { truncated: true, originalLength } : {}), ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }) };
+    while (JSON.stringify(payload).length > Store.MAX_CHECKPOINT_BYTES && kept.length > 1) {
+      kept = kept.slice(1);
+      truncated = true;
+      payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, truncated: true, originalLength, ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }) };
+    }
     this.db
-      .prepare(`INSERT INTO agent_checkpoints (session_id, turn, history, created_at) VALUES (?,?,?,?)
-                ON CONFLICT(session_id) DO UPDATE SET turn=excluded.turn, history=excluded.history, created_at=excluded.created_at`)
-      .run(sessionId, turn, JSON.stringify(payload), Date.now());
+      .prepare(`INSERT INTO agent_checkpoints (session_id, turn, run_id, history, created_at) VALUES (?,?,?,?,?)
+                ON CONFLICT(session_id) DO UPDATE SET turn=excluded.turn, run_id=COALESCE(excluded.run_id, agent_checkpoints.run_id), history=excluded.history, created_at=excluded.created_at`)
+      .run(sessionId, turn, runId ?? null, JSON.stringify(payload), Date.now());
   }
 
   /** 读取会话断点（无断点返回 undefined） */
-  loadCheckpoint(sessionId: string): { turn: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number } | undefined {
-    const r = this.db.prepare('SELECT turn, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
-      | { turn: number; history: string; createdAt: number }
+  loadCheckpoint(sessionId: string): { schemaVersion: number; turn: number; runId?: string; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean }[]; costUsd?: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number } | undefined {
+    const r = this.db.prepare('SELECT turn, run_id AS runId, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
+      | { turn: number; runId?: string | null; history: string; createdAt: number }
       | undefined;
     if (!r) return undefined;
+    if (Date.now() - r.createdAt > this.checkpointRetentionMs) {
+      this.clearCheckpoint(sessionId);
+      return undefined;
+    }
     try {
       const parsed = JSON.parse(r.history) as unknown;
       // 兼容两种格式：旧格式 history 列直接存消息数组；新格式存 { messages, truncated?, originalLength? }
-      if (Array.isArray(parsed)) return { turn: r.turn, history: parsed, createdAt: r.createdAt };
-      const obj = parsed as { messages?: unknown; truncated?: boolean; originalLength?: number };
+      if (Array.isArray(parsed)) return { schemaVersion: 0, turn: r.turn, runId: r.runId ?? undefined, history: parsed, createdAt: r.createdAt };
+      const obj = parsed as { schemaVersion?: unknown; messages?: unknown; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean }[]; costUsd?: number; truncated?: boolean; originalLength?: number };
+      const schemaVersion = obj?.schemaVersion === undefined ? 1 : obj.schemaVersion;
+      if (schemaVersion !== Store.CHECKPOINT_SCHEMA_VERSION) {
+        this.clearCheckpoint(sessionId);
+        return undefined;
+      }
       if (obj && Array.isArray(obj.messages)) {
-        return { turn: r.turn, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, createdAt: r.createdAt };
+        return { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, turn: r.turn, runId: r.runId ?? undefined, task: obj.task, toolResults: obj.toolResults, costUsd: obj.costUsd, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, createdAt: r.createdAt };
       }
       return undefined;
     } catch {
@@ -676,7 +819,37 @@ export class Store {
 
   /** 清除会话断点（任务完成/新任务开始时） */
   clearCheckpoint(sessionId: string): void {
-    this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(sessionId);
+    const tx = this.db.transaction((id: string) => {
+      this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(id);
+      this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id NOT IN (SELECT run_id FROM agent_checkpoints WHERE run_id IS NOT NULL)').run();
+    });
+    tx(sessionId);
+  }
+
+  claimToolEffect(runId: string, effectKey: string): { state: 'new' | 'done' | 'pending'; result?: import('../kernel/types').ToolResult } {
+    const now = Date.now();
+    let inserted: { changes: number } = { changes: 0 };
+    let row!: { status: string; result: string | null };
+    const tx = this.db.transaction(() => {
+      inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_tool_effects (run_id,effect_key,status,result,created_at,updated_at)
+        VALUES (?,?, 'pending', NULL, ?, ?)`).run(runId, effectKey, now, now);
+      row = this.db.prepare('SELECT status, result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as { status: string; result: string | null };
+    });
+    tx();
+    if (row.status === 'done' && row.result) {
+      try { return { state: 'done', result: JSON.parse(row.result) as import('../kernel/types').ToolResult }; }
+      catch { return { state: 'pending' }; }
+    }
+    return inserted.changes > 0 ? { state: 'new' } : { state: 'pending' };
+  }
+
+  completeToolEffect(runId: string, effectKey: string, result: import('../kernel/types').ToolResult): void {
+    this.db.prepare(`UPDATE agent_tool_effects SET status='done', result=?, updated_at=? WHERE run_id=? AND effect_key=? AND status='pending'`)
+      .run(JSON.stringify(result), Date.now(), runId, effectKey);
+  }
+
+  hasPendingToolEffects(runId: string): boolean {
+    return !!this.db.prepare("SELECT 1 FROM agent_tool_effects WHERE run_id=? AND status='pending' LIMIT 1").get(runId);
   }
 
   // ---------- 统计 ----------

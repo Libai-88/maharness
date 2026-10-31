@@ -1,0 +1,10 @@
+{
+  "name": "provider-timeout-retry",
+  "description": "故障回放：Provider 网络超时按瞬时错误退避重试后完成",
+  "messages": [{ "role": "user", "content": "请回答超时重试后的结果" }],
+  "requests": [
+    { "chunks": [{ "type": "throw", "message": "ETIMEDOUT: upstream request timed out" }] },
+    { "chunks": [{ "type": "delta", "text": "超时后完成" }, { "type": "usage", "input": 10, "output": 5 }, { "type": "done" }] }
+  ],
+  "expect": { "answerContains": ["超时后完成"], "llmCalls": 2, "noErrors": true }
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "name": "task-verification-regex-failure",
+  "description": "正则验收未命中时任务保持失败",
+  "messages": [{ "role": "user", "content": "Return a published reference" }],
+  "task": {
+    "objective": "Return a published reference identifier",
+    "acceptance": [{ "type": "output_matches", "pattern": "^REF-[0-9]{6}$" }]
+  },
+  "requests": [{ "chunks": [
+    { "type": "delta", "text": "The reference is still pending." },
+    { "type": "usage", "input": 19, "output": 7 },
+    { "type": "done" }
+  ] }],
+  "expect": { "llmCalls": 1, "noErrors": false, "taskOutcome": "failed" }
+}

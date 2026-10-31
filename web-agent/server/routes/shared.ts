@@ -18,6 +18,7 @@ import { promisify } from 'node:util';
 import type { Response } from 'express';
 import { lookup } from 'node:dns/promises';
 import { isIP } from 'node:net';
+import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 
 const execFileAsync = promisify(execFile);
 
@@ -26,6 +27,23 @@ export interface RouteDeps {
   kernel: Kernel;
   store: Store;
   tracker?: ClientTracker;
+  sseLimiter?: SseConnectionLimiter;
+  /** 活跃 chat run 计数（M3 自动停止机制的事实源；句柄审计对外暴露用） */
+  activeRunCount?: () => number;
+}
+
+/** 进程级 SSE 句柄配额，供全局事件流与聊天流共享。 */
+export class SseConnectionLimiter {
+  private readonly active = new Set<unknown>();
+  constructor(private readonly maxConnections = 8) {}
+  tryAcquire(connection: unknown): boolean {
+    if (this.active.has(connection)) return true;
+    if (this.active.size >= this.maxConnections) return false;
+    this.active.add(connection);
+    return true;
+  }
+  release(connection: unknown): void { this.active.delete(connection); }
+  get size(): number { return this.active.size; }
 }
 
 export interface ChatService {
@@ -41,7 +59,7 @@ export interface ChatService {
   compactHistory: (history: LLMMessage[], maxTokens: number, opts?: CompactOptions) => Promise<CompactResult>;
   annotateToolDef: (t: ToolDef) => ToolDef;
   routeForTask: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) =>
-    { provider: ProviderDef; model: string; reason: string } | undefined;
+    { provider: ProviderDef; model: string; reason: string; candidates: { providerId: string; model: string; score?: number; accepted: boolean; reasons: string[] }[] } | undefined;
   MODE_PROMPTS: Record<string, string>;
   ROLE_READONLY_TOOLS: ReadonlySet<string>;
   validateCheckpointHistory: (history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]) => string | null;
@@ -86,6 +104,7 @@ function capabilitiesOf(providerId: string, defaultModel: string, rows: ReturnTy
       vision: !!m.vision, tools: !!m.tools, reasoning: !!m.reasoning,
       priceIn: m.priceIn ?? inferred.priceIn, priceOut: m.priceOut ?? inferred.priceOut,
       enabled: !!m.enabled, source: m.source,
+      latencyMs: m.latencyMs ?? undefined, privacyTier: m.privacyTier ?? undefined, riskLevel: m.riskLevel ?? undefined,
     };
   });
   if (defaultModel && !out.some(m => m.modelId === defaultModel)) {
@@ -118,8 +137,7 @@ export function sse(res: Response, event: string, data: unknown): void {
 // 再抽公共模块）：网段表与 IPv4-mapped/6to4/NAT64 还原规则改一处必须同步改另一处，否则
 // 「web_fetch 允许的地址」与「providers 允许的地址」会漂移，弱的那一处就是 SSRF 入口。
 // 用例分别固化在 server/tests/ssrf.spec.ts 与 core/search/tests/ssrf.spec.ts。
-// 未做 DNS 钉扎：校验与真实连接各解析一次，**重绑定 TOCTOU 窗口仍在**（后续项，需 undici
-// connector/lookup 定制）。
+// Provider 直连请求将已校验 DNS 结果用于 socket lookup，避免校验与连接间重解析。
 
 /** 点分十进制 IPv4 → 32 位无符号数；非法返回 null（只认 4 段十进制，不接受 0x/八进制/单数形式） */
 export function ipv4ToNumber(ip: string): number | null {
@@ -253,30 +271,43 @@ export interface PublicUrlCheckOptions {
   allowPrivate?: boolean;
 }
 
-/** 校验 baseUrl：协议仅 http/https；主机名是 IP 字面量就直接判定，域名则 DNS 解析后逐条判定。
- *  allowPrivate 只放宽地址判定——放行本地地址不该顺带把 file:// 也放进来（A5 一致性项）。 */
-export async function assertPublicHttpUrl(raw: string, opts: PublicUrlCheckOptions = {}): Promise<void> {
-  let u: URL;
+type ResolvedAddress = { address: string; family: number };
+
+async function resolveHttpTarget(
+  raw: string,
+  opts: PublicUrlCheckOptions = {},
+  resolver: (hostname: string) => Promise<ResolvedAddress[]> = resolveHost,
+): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
+  let url: URL;
   try {
-    u = new URL(raw);
+    url = new URL(raw);
   } catch {
     throw new Error('地址格式无效');
   }
-  if (u.protocol !== 'http:' && u.protocol !== 'https:') {
-    throw new Error('仅支持 http/https 协议');
-  }
-  const host = u.hostname.replace(/^\[|\]$/g, '');
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('仅支持 http/https 协议');
+  const host = url.hostname.replace(/^\[|\]$/g, '');
   if (!host) throw new Error('地址缺少主机名');
-  if (opts.allowPrivate) return; // 豁免时不再解析（内网名对本机 DNS 可能不可解析）
-  if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error('不允许连接内网/环回/链路本地地址');
+  const addresses = isIP(host)
+    ? [{ address: host, family: isIP(host) }]
+    : await resolver(host);
+  if (!addresses.length) throw new Error('域名无法解析');
+  if (!opts.allowPrivate && addresses.some(({ address }) => isPrivateAddress(address))) {
+    throw new Error('不允许连接内网/环回/链路本地地址');
+  }
+  return { url, addresses };
+}
+
+/** 校验 baseUrl：协议仅 http/https；主机名是 IP 字面量就直接判定，域名则 DNS 解析后逐条判定。
+ *  allowPrivate 只放宽地址判定——放行本地地址不该顺带把 file:// 也放进来（A5 一致性项）。 */
+export async function assertPublicHttpUrl(raw: string, opts: PublicUrlCheckOptions = {}): Promise<void> {
+  if (opts.allowPrivate) {
+    let url: URL;
+    try { url = new URL(raw); } catch { throw new Error('地址格式无效'); }
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('仅支持 http/https 协议');
+    if (!url.hostname) throw new Error('地址缺少主机名');
     return;
   }
-  const addrs = await lookup(host, { all: true });
-  if (addrs.length === 0) throw new Error('域名无法解析');
-  for (const { address } of addrs) {
-    if (isPrivateAddress(address)) throw new Error('不允许连接内网/环回/链路本地地址');
-  }
+  await resolveHttpTarget(raw, opts);
 }
 
 /** providers 各入口共用的校验：把「是否豁免」的决定收在这一个 helper 里（A5 一致性项） */
@@ -297,6 +328,8 @@ function withoutCredentials(h: RequestInit['headers']): Headers {
 export interface GuardedFetchDeps {
   /** 单跳校验器；默认 assertProviderBaseUrl（含 AGENT_ALLOW_PRIVATE_URLS 豁免）。测试可注入。 */
   assertUrl?: (raw: string) => Promise<void>;
+  /** 可控解析器供确定性网络测试使用；生产默认使用同一解析结果完成校验和连接。 */
+  resolveAddresses?: (hostname: string) => Promise<ResolvedAddress[]>;
   /** 最多跟随几跳（与 core/search 的 fetchDoc 一致，默认 5），超限报错 */
   maxHops?: number;
 }
@@ -310,7 +343,7 @@ export type FetchResponse = Awaited<ReturnType<typeof fetch>>;
  *  baseUrl 指向公网端点，让它 302 → http://127.0.0.1:9200/_search，
  *  /api/providers/models 会把响应体解析后回吐给前端（可读型 SSRF），/test 则是盲 SSRF。
  *  这里自己逐跳走：每一跳先过 assertUrl 再发请求，超过 maxHops 直接拒绝。
- *  ⚠ TOCTOU 窗口仍在：校验时解析一次、连接时再解析一次，未做 IP 钉扎（后续项）。 */
+ *  默认路径将 DNS 解析结果同时用于地址校验和 socket lookup，避免校验/连接间重解析。 */
 export async function fetchWithPublicRedirects(
   url: string,
   init: RequestInit = {},
@@ -325,11 +358,48 @@ export async function fetchWithPublicRedirects(
   let body = init.body;
   let hops = 0;
   for (;;) {
-    await assertUrl(current);
-    const res: FetchResponse = await fetch(current, { ...init, headers, method, body, redirect: 'manual' });
-    if (!REDIRECT_STATUS.includes(res.status)) return res;
+    let target: { url: URL; addresses: ResolvedAddress[] };
+    if (deps.assertUrl) {
+      await assertUrl(current);
+      target = await resolveHttpTarget(current, { allowPrivate: true }, deps.resolveAddresses ?? resolveHost);
+    } else {
+      target = await resolveHttpTarget(current, { allowPrivate: allowsPrivateUrls() }, deps.resolveAddresses ?? resolveHost);
+    }
+    const pinned = new Set(target.addresses.map(({ address }) => address));
+    const dispatcher: Dispatcher = new Agent({
+      connect: {
+        lookup: (hostname, options, callback) => {
+          if (hostname !== target.url.hostname || !pinned.size) {
+            callback(new Error('连接主机与已校验主机不一致'), '', 0);
+            return;
+          }
+          const addresses = target.addresses;
+          if (options.all) callback(null, addresses);
+          else callback(null, addresses[0]!.address, addresses[0]!.family);
+        },
+      },
+    });
+    let res: FetchResponse;
+    try {
+      res = await undiciFetch(target.url.toString(), {
+        ...init,
+        headers: headers as import('undici').HeadersInit,
+        method,
+        body: body as import('undici').BodyInit | undefined,
+        redirect: 'manual',
+        dispatcher,
+      } as import('undici').RequestInit) as unknown as FetchResponse;
+    } catch (error) {
+      await dispatcher.close();
+      throw error;
+    }
+    if (!REDIRECT_STATUS.includes(res.status)) {
+      void dispatcher.close();
+      return res;
+    }
     const loc = res.headers.get('location');
     await res.body?.cancel().catch(() => { /* 跳转响应不消费，但要释放连接 */ });
+    await dispatcher.close();
     if (!loc) throw new Error(`重定向缺少 Location（HTTP ${res.status}）`);
     let next: URL;
     try {
@@ -347,6 +417,12 @@ export async function fetchWithPublicRedirects(
     }
     current = next.toString();
   }
+}
+
+async function resolveHost(hostname: string): Promise<ResolvedAddress[]> {
+  const host = hostname.replace(/^\[|\]$/g, '');
+  if (isIP(host)) return [{ address: host, family: isIP(host) }];
+  return lookup(host, { all: true });
 }
 
 /** 在沙箱根目录执行 git 命令（无 repo 时返回 null） */

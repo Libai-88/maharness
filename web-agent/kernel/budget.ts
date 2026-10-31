@@ -12,6 +12,7 @@ const TASK_PROFILE_MAX = 100;
 const SUBAGENT_WINDOW_MS = 10 * 60_000;
 const SUBAGENT_MAX_CALLS_PER_SESSION = 3;   // per-session 池：每会话窗口内上限
 const SUBAGENT_MAX_CALLS_TOTAL_DEFAULT = 8; // 进程级总上限默认值（可经构造参数配置）
+const SUBAGENT_MAX_ACTIVE_DEFAULT = 8;
 
 export interface TaskRecord {
   type: string;
@@ -21,11 +22,48 @@ export interface TaskRecord {
   ts: number;
 }
 
+export interface BudgetReservation {
+  shares: number[];
+  reserved: number;
+  settled: number;
+  remaining: number;
+  settle(index: number, actual: number): { reserved: number; actual: number; refund: number };
+}
+
+/** 并行预算的原子预留账本：先锁定份额，完成后按实际消耗结算并释放未用部分。 */
+export function reserveBudget(total: number, count: number): BudgetReservation {
+  const safeTotal = Number.isFinite(total) && total > 0 ? total : 0;
+  const n = Math.max(0, Math.floor(count));
+  const each = n ? Math.floor((safeTotal / n) * 1e12) / 1e12 : 0;
+  const shares = Array.from({ length: n }, () => each);
+  if (n) shares[n - 1] += safeTotal - each * n;
+  const settled = new Array(n).fill(false) as boolean[];
+  let settledTotal = 0;
+  let remaining = safeTotal;
+  return {
+    shares,
+    reserved: safeTotal,
+    get settled() { return settledTotal; },
+    get remaining() { return remaining; },
+    settle(index, actual) {
+      if (index < 0 || index >= n || settled[index]) return { reserved: 0, actual: 0, refund: 0 };
+      settled[index] = true;
+      const reserved = shares[index];
+      const used = Number.isFinite(actual) && actual > 0 ? actual : 0;
+      const refund = Math.max(0, reserved - used);
+      settledTotal += used;
+      remaining = Math.max(0, remaining - used);
+      return { reserved, actual: used, refund };
+    },
+  };
+}
+
 export class Budget {
   /** per-session 池：sessionId → 窗口内调用记录（每会话独立计数，防单会话饿死全局） */
   private sessionCalls = new Map<string, { ts: number }[]>();
   /** 进程级总池：全部会话合计的窗口内调用记录 */
   private totalCalls: { ts: number }[] = [];
+  private activeSubagents = 0;
   private tasks: TaskRecord[] = [];
   /** 任务画像落盘路径（不传 = 纯内存，重启清零） */
   private persistFile = '';
@@ -102,6 +140,22 @@ export class Budget {
       if (j >= 0) this.totalCalls.splice(j, 1);
     };
     return { allowed: true, remaining: Math.min(sessRemaining, totalRemaining) - 1, refund };
+  }
+
+  /** 跨 run_subagent、run_review 和 run_parallel 共享的进程级活动子任务上限。 */
+  reserveSubagentSlots(count: number): (() => void) | undefined {
+    if (!Number.isInteger(count) || count < 1 || this.activeSubagents + count > SUBAGENT_MAX_ACTIVE_DEFAULT) return undefined;
+    this.activeSubagents += count;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.activeSubagents -= count;
+    };
+  }
+
+  activeSubagentCount(): number {
+    return this.activeSubagents;
   }
 
   /** 重工具配额检查（旧 API，保留兼容；仅反映进程级池，新调用方请用 consumeSubagentQuota） */

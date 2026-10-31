@@ -4,7 +4,8 @@
 import type { Express } from 'express';
 import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
 import { approvalTokens } from './approvals';
-import { getChatService, type RouteDeps } from './shared';
+import { getChatService, SseConnectionLimiter, type RouteDeps } from './shared';
+import { auditSseLifecycle } from '../security-policy';
 
 // ---- M2 /api/events 事件类型白名单 ----
 // 只转发前端实际消费的事件（ui/src/App.tsx 确认：trace.step / plan.updated /
@@ -22,17 +23,28 @@ const SSE_BACKPRESSURE_BYTES = 1_048_576;
 
 export function registerEventRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, tracker } = deps;
+  const connectionLimiter = deps.sseLimiter ?? new SseConnectionLimiter(
+    Math.max(1, kernel.config.get<number>('sse.maxConnections', 8)),
+  );
 
   // ---------- 全局事件流（前端实时面板） ----------
   app.get('/api/events', (req, res) => {
+    if (!connectionLimiter.tryAcquire(res)) {
+      res.setHeader('Retry-After', '15');
+      return res.status(429).json({ error: '实时事件连接数已达上限，请稍后重试' });
+    }
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'X-SSE-Retry': '15000',
     });
+    // EventSource 会按该值自动重连；服务端不依赖客户端自定义重试逻辑。
+    res.write('retry: 15000\n\n');
     // 页面存活跟踪：SSE 常驻连接 = 前端页面开着的证据（关闭页面/刷新 → 连接断开）
     tracker?.onConnect(res);
+    auditSseLifecycle(kernel, deps.store, 'connected');
     /** 与事件总线同一帧格式写出去（回放也用同一个出口，格式不会漂移） */
     const writeEvent = (type: string, data: unknown, traceId?: string): void => {
       let frame: string;
@@ -85,6 +97,17 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
       }
       writeEvent(e.type, e.data, e.traceId);
     });
-    req.on('close', () => { off(); clearInterval(heartbeat); tracker?.onDisconnect(res); });
+    let cleaned = false;
+    const cleanup = (): void => {
+      if (cleaned) return;
+      cleaned = true;
+      off();
+      clearInterval(heartbeat);
+      connectionLimiter.release(res);
+      tracker?.onDisconnect(res);
+      auditSseLifecycle(kernel, deps.store, 'disconnected');
+    };
+    req.on('aborted', cleanup);
+    res.on('close', cleanup);
   });
 }

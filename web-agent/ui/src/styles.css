@@ -1545,6 +1545,31 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   gap: 10px;
   transition: border-color 0.2s;
 }
+
+.task-confirm-card {
+  display: grid;
+  gap: 8px;
+  margin: 0 0 10px;
+  padding: 12px;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--blue-soft);
+}
+.task-confirm-title { font-weight: 700; color: var(--text-1); }
+.task-confirm-objective { color: var(--text-2); font-size: 13px; }
+.task-confirm-hint { color: var(--text-3); font-size: 12px; }
+.task-confirm-card textarea {
+  width: 100%;
+  min-height: 52px;
+  resize: vertical;
+  box-sizing: border-box;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  background: var(--bg-input);
+  color: var(--text-1);
+}
+.task-confirm-card .btn-primary { justify-self: start; }
 .composer:focus-within { border-color: var(--accent); }
 
 .composer textarea {
@@ -1764,6 +1789,11 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
   min-height: 0;
 }
 
+/* 窄视口收起轨迹面板：观测面板是桌面增强，移动端让位给主对话流 */
+@media (max-width: 760px) {
+  .trail-panel { display: none; }
+}
+
 .trail-head {
   height: 48px;
   border-bottom: 1px solid var(--border);
@@ -1799,7 +1829,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 /* v5：Trace 统计数字升级为 Fraunces 衬线（缓存命中率/成本/步骤） */
 .ts-card .ts-value { font-size: 24px; font-weight: 700; font-family: var(--font-display); color: var(--text-1); line-height: 1.15; letter-spacing: -0.5px; font-variation-settings: 'SOFT' 70, 'opsz' 48; }
 .ts-card .ts-value.teal { color: var(--teal); }
-.ts-card .ts-hint { font-size: 10px; font-family: var(--font-mono); color: var(--text-4); }
+.ts-card .ts-hint { font-size: 10px; font-family: var(--font-mono); color: var(--text-3); }
 
 .trail-scroll { flex: 1; overflow-y: auto; padding: 8px 12px 16px; display: flex; flex-direction: column; gap: 8px; overscroll-behavior: contain; }
 
@@ -3019,6 +3049,7 @@ button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-
 .pv-foot { display: flex; align-items: center; justify-content: space-between; }
 .pv-foot-left { display: flex; align-items: center; gap: 8px; }
 .pv-latency { font-size: 11px; font-family: var(--font-mono); color: var(--teal); }
+.pv-diagnostic { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--line); font-size: 11px; color: var(--ink-muted); }
 
 /* ============================================================
    通用
@@ -5113,6 +5144,15 @@ textarea:focus-visible, [tabindex]:focus-visible {
 }
 .wx-failure .wf-retry:hover { background: var(--bg-active); }
 
+.wx-verification { max-width: min(680px, 100%); margin: 5px 0 4px; font-size: 12px; color: var(--text-2); }
+.wx-verification > summary { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; color: var(--text-2); }
+.wx-verification .wv-count { color: var(--text-4); font-family: var(--font-mono); font-size: 10px; }
+.wx-verification .wv-body { margin-top: 6px; padding: 7px 10px; border-left: 2px solid var(--ink); display: flex; flex-direction: column; gap: 4px; }
+.wv-check { display: flex; align-items: center; gap: 6px; }
+.wv-check.ok { color: var(--green, #287a50); }
+.wv-check.fail { color: var(--red); }
+.wv-check code { margin-left: auto; color: var(--text-4); font-size: 10px; }
+
 /* ---- 单条消息的花费：平时只有一个 ⓘ，悬停才报数（账单不该糊在脸上） ---- */
 .ma-cost {
   display: inline-flex;
@@ -5340,3 +5380,25 @@ textarea:focus-visible, [tabindex]:focus-visible {
   cursor: help;
 }
 
+
+/* ============================================================
+   窄视口适配（≤760px）：顶栏与输入区折叠为紧凑布局，
+   观测面板/快捷提示等桌面增强让位给主对话流
+   ============================================================ */
+@media (max-width: 760px) {
+  .sidebar { width: 240px; }
+  .topbar { padding: 0 12px; }
+  .topbar-right { gap: 4px; }
+  /* 模式/模型菜单折叠为图标触发器：390px 下文字按钮放不下 */
+  .topbar-right .menu > .tb-btn > *:not(.tb-compact-trigger) { display: none; }
+  .topbar-right .menu > .tb-btn { padding: 0 2px; }
+  .tb-compact-trigger { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 32px; }
+  .wx-header-center { max-width: 60%; }
+  .wx-header-sub { max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+  .comp-right { min-width: 0; }
+  .comp-right .menu > .tb-btn > *:not(.tb-compact-trigger) { display: none; }
+  .comp-right .menu > .tb-btn { padding: 0 2px; }
+  .comp-left .comp-tools-label { display: none; }
+  .brand-kbd { display: none; }
+  .composer-hint { display: none; }
+}

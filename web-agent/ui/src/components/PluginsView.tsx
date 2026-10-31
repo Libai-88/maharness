@@ -2,12 +2,13 @@
 import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
 import { pluginsApi } from '../api';
-import type { PluginInfo } from '../types';
+import type { PluginDiagnostic, PluginInfo } from '../types';
 import { IconCheck, IconClose, PluginIcon } from './Icon';
 import Confirm, { type ConfirmRequest } from './Confirm';
 
 interface Props {
   plugins: PluginInfo[];
+  diagnostics: PluginDiagnostic[];
   onAction: (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => Promise<void> | void;
 }
 
@@ -75,7 +76,7 @@ function PluginConfig({ pluginId }: { pluginId: string }) {
   );
 }
 
-export default function PluginsView({ plugins, onAction }: Props) {
+export default function PluginsView({ plugins, diagnostics, onAction }: Props) {
   const [selected, setSelected] = useState<PluginInfo | null>(null);
   const [q, setQ] = useState('');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
@@ -180,6 +181,17 @@ export default function PluginsView({ plugins, onAction }: Props) {
     <div className="plugins-layout">
       <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
       <div className="plugins-list">
+        {diagnostics.length > 0 && (
+          <div className="plugin-diagnostics" role="status">
+            <strong>加载诊断</strong>
+            {diagnostics.map((d, i) => (
+              <div key={`${d.id}-${d.kind}-${i}`} className="plugin-diagnostic">
+                <span>{d.message}</span>
+                {d.suggestion && <span className="plugin-desc">{d.suggestion}</span>}
+              </div>
+            ))}
+          </div>
+        )}
         <div className="page-head">
           <div className="ph-eyebrow">
             <span className="ph-no">04</span>

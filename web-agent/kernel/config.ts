@@ -10,9 +10,10 @@
  *  - `setPersistent(key, value)`：用户显式改动，落盘到 config.json（防抖 + 原子替换）。
  *    用于 /api/config 这类界面/外部发起的配置修改——用户改了就应该下次还在。
  */
-import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { EventBus } from './bus';
+import { atomicWriteFileSync, ConcurrentWriteError, fileRevisionSync } from './atomic-file';
 
 /** 防抖落盘间隔（毫秒）：一次 PATCH 会写多个键，合并成一次磁盘写 */
 const PERSIST_DEBOUNCE_MS = 200;
@@ -44,12 +45,15 @@ export class Config {
    *  逐个叶键合并会让被删除的路由条目残留在文件里。 */
   private pending = new Map<string, unknown>();
   private persistTimer?: NodeJS.Timeout;
+  private persistedRevision: string = 'missing';
+  private lastPersistError: 'concurrent_write' | 'write_failed' | undefined;
 
   constructor(
     private bus: EventBus,
     defaults: Record<string, unknown> = {},
     private readonly configPath?: string,
   ) {
+    this.persistedRevision = configPath ? fileRevisionSync(configPath) : 'missing';
     // 键路径归一化：defaults/config.json 里既可能写嵌套（{agent:{maxTurns:12}}），
     // 也可能写点路径平铺（{'agent.maxTurns':12}）——两种都应当可用。
     // 旧实现用 Object.assign 直接灌进 store，平铺键读不到（get 走点路径下钻，
@@ -90,6 +94,28 @@ export class Config {
     this.schedulePersist();
   }
 
+  /**
+   * Validate and persist a group of explicit changes before publishing them to runtime watchers.
+   * A failed disk commit leaves the supplied changes unapplied.
+   */
+  setPersistentBatch(entries: readonly (readonly [string, unknown])[], expectedRevision?: string): boolean {
+    if (entries.length === 0) return true;
+    if (!this.configPath) {
+      for (const [key, value] of entries) this.set(key, value);
+      return true;
+    }
+
+    const changes = new Map(this.pending);
+    for (const [key, value] of entries) changes.set(key, value);
+    if (!this.persistValues(changes, expectedRevision)) return false;
+
+    if (this.persistTimer) clearTimeout(this.persistTimer);
+    this.persistTimer = undefined;
+    this.pending.clear();
+    for (const [key, value] of entries) this.set(key, value);
+    return true;
+  }
+
   /** 防抖安排一次落盘 */
   private schedulePersist(): void {
     if (!this.configPath) return;
@@ -106,7 +132,24 @@ export class Config {
    *  返回是否成功写出。文件损坏时**拒绝覆写**——不销毁用户配置。 */
   persistNow(): boolean {
     if (!this.configPath || this.pending.size === 0) return false;
+    if (!this.persistValues(this.pending)) return false;
+    this.pending.clear();
+    return true;
+  }
+
+  /** Last persistence failure, exposed so HTTP callers can distinguish a stale writer. */
+  getPersistentFailureCode(): 'concurrent_write' | 'write_failed' | undefined {
+    return this.lastPersistError;
+  }
+
+  getPersistedRevision(): string {
+    return this.configPath ? fileRevisionSync(this.configPath) : this.persistedRevision;
+  }
+
+  private persistValues(values: ReadonlyMap<string, unknown>, expectedRevision?: string): boolean {
     const path = this.configPath;
+    if (!path) return false;
+    this.lastPersistError = undefined;
     let merged: Record<string, unknown> = {};
     if (existsSync(path)) {
       try {
@@ -123,20 +166,13 @@ export class Config {
       }
     }
     // 合并增量：每个待落盘键路径整值写入（对象值整颗子树覆盖）
-    for (const [keyPath, value] of this.pending) writeAtPath(merged, keyPath, value);
+    for (const [keyPath, value] of values) writeAtPath(merged, keyPath, value);
     try {
-      mkdirSync(dirname(path), { recursive: true });
-      const tmp = `${path}.tmp`;
-      writeFileSync(tmp, JSON.stringify(merged, null, 2), 'utf-8');
-      try {
-        renameSync(tmp, path);
-      } catch {
-        // Windows 上目标被占用时 rename 会失败：稍等重试一次，仍失败则告警（不影响内存态）
-        renameSync(tmp, path);
-      }
-      this.pending.clear();
+      atomicWriteFileSync(path, JSON.stringify(merged, null, 2), { expectedRevision: expectedRevision ?? this.persistedRevision });
+      this.persistedRevision = fileRevisionSync(path);
       return true;
     } catch (err) {
+      this.lastPersistError = err instanceof ConcurrentWriteError ? 'concurrent_write' : 'write_failed';
       console.warn('[config] 配置落盘失败:', err instanceof Error ? err.message : String(err));
       return false;
     }

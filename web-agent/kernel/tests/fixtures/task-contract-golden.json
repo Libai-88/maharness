@@ -1,0 +1,36 @@
+[
+  {
+    "name": "explicit-file-and-budget",
+    "objective": "请创建 reports/final.md，确保在 10 分钟内完成，预算为 $2",
+    "now": 1700000000000,
+    "acceptance": [{ "type": "file_exists", "path": "reports/final.md" }],
+    "risk": "medium",
+    "deadlineAt": 1700000600000,
+    "costBudgetUsd": 2,
+    "inference": { "confidence": 1, "basis": "explicit", "needsConfirmation": false, "rationale": "目标包含可直接验证的明确验收条件" }
+  },
+  {
+    "name": "open-action-needs-confirmation",
+    "objective": "请整理一份项目报告",
+    "acceptance": [],
+    "risk": "low",
+    "inference": { "confidence": 0.45, "basis": "inferred", "needsConfirmation": true, "rationale": "识别到行动意图，但未识别到可验证的完成标准" }
+  },
+  {
+    "name": "open-question-needs-confirmation",
+    "objective": "今天北京天气怎么样？",
+    "acceptance": [],
+    "risk": "low",
+    "inference": { "confidence": 0.1, "basis": "ambiguous", "needsConfirmation": true, "rationale": "目标是询问或开放式问题，缺少可验证的完成标准" }
+  },
+  {
+    "name": "explicit-output-and-tool",
+    "objective": "请回答「READY」，且工具 write_file 执行成功",
+    "acceptance": [
+      { "type": "output_contains", "value": "READY" },
+      { "type": "tool_succeeded", "name": "write_file" }
+    ],
+    "risk": "medium",
+    "inference": { "confidence": 1, "basis": "explicit", "needsConfirmation": false, "rationale": "目标包含可直接验证的明确验收条件" }
+  }
+]

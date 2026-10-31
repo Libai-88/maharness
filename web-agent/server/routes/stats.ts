@@ -83,6 +83,25 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
           })(),
         },
         savedCost: cache.savedCost,
+        // CT-07：不同缓存层的收益不可直接相加，按收益类型分别报告，
+        // 并保留原始计数以便从 Trace/Provider usage 复算。
+        metrics: {
+          hits: {
+            l1: cache.l1Hits,
+            l2: cache.l2Hits,
+            l3Estimated: cache.l3Hits,
+            l3Provider: cache.l3RealHits,
+          },
+          avoidedCalls: {
+            llm: cache.l1Hits,
+            tool: cache.l2Hits,
+          },
+          tokensSaved: {
+            l3Estimated: cache.l3Tokens,
+            l3Provider: cache.l3RealTokens,
+          },
+          costSaved: cache.savedCost,
+        },
         // 综合命中率口径（v3.3 修正）：L1/L2/L3 不同质（语义跳过调用/工具结果复用/
         // prompt 前缀折扣），直接加总做分母会超过 100%——single number 改用纯 L1
         // 请求命中率（语义缓存跳过的请求占比，天然 ≤100%）；served 保留"节省次数"

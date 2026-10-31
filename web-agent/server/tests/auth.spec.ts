@@ -50,13 +50,22 @@ process.env.MAHARNESS_API_TOKEN = 'unit-test-token';
 
 // 动态 import：以上环境变量必须先于模块加载生效（与 scripts/selftest.ts 同一手法）
 const { startServer, MUTATION_TOKEN_HEADER, requiredApiToken, createApiTokenGuard } = await import('../index');
+const { buildReadinessSnapshot, buildStorageSnapshot, readStorageSnapshot } = await import('../routes/index');
+const { SseConnectionLimiter } = await import('../routes/shared');
 const { Store, hasEncryptedProviderKeys } = await import('../db');
 const { resolveSecretKey, encryptSecret, isEncrypted, hardenSecretKeyPath } = await import('../secrets');
 const { ApprovalTokenRegistry, approvalTokens } = await import('../routes/approvals');
 const { assessWorkspaceRoot } = await import('../routes/workspaces');
 const { isBlanketAllow } = await import('../routes/rules');
+const { CredentialFailureLimiter, decideCredentialAuthorization } = await import('../security-policy');
 
 const base = `http://127.0.0.1:${PORT}`;
+
+/** 规则策略 PUT 需携带读取到的文件版本（乐观锁），先 GET 拿最新 revision */
+async function currentPolicyRevision(): Promise<string> {
+  const view = await (await fetch(`${base}/api/rules`)).json() as { policyRevisions: { global: string } };
+  return view.policyRevisions.global;
+}
 const TOKEN = 'unit-test-token';
 const TOKEN_HDR = { 'Content-Type': 'application/json', [MUTATION_TOKEN_HEADER]: TOKEN };
 let started: Awaited<ReturnType<typeof startServer>> | undefined;
@@ -96,6 +105,69 @@ after(async () => {
 });
 
 describe('A6-b 变更类端点的可选 token 门', () => {
+  test('API 错误使用版本化稳定外壳并保留既有文案', async () => {
+    const missing = await fetch(`${base}/api/workspaces/not-found`);
+    const missingBody = await jsonOf<{ schemaVersion: number; ok: boolean; code: string; error: string }>(missing);
+    assert.equal(missing.status, 404);
+    assert.equal(missingBody.schemaVersion, 1);
+    assert.equal(missingBody.ok, false);
+    assert.equal(missingBody.code, 'not_found');
+    assert.match(missingBody.error, /工作区不存在|不存在/);
+
+    const unknown = await fetch(`${base}/api/does-not-exist`);
+    const unknownBody = await jsonOf<{ schemaVersion: number; ok: boolean; code: string; error: string }>(unknown);
+    assert.equal(unknown.status, 404);
+    assert.deepEqual(
+      { schemaVersion: unknownBody.schemaVersion, ok: unknownBody.ok, code: unknownBody.code },
+      { schemaVersion: 1, ok: false, code: 'not_found' },
+    );
+  });
+
+  test('健康、就绪与存储端点返回稳定的非泄密契约', async () => {
+    const ready = await fetch(`${base}/api/ready`);
+    assert.ok([200, 503].includes(ready.status));
+    const readyBody = await jsonOf<{ schemaVersion: number; ok: boolean; checks: { providers: boolean } }>(ready);
+    assert.equal(readyBody.schemaVersion, 1);
+    assert.equal(typeof readyBody.ok, 'boolean');
+    assert.equal(typeof readyBody.checks.providers, 'boolean');
+
+    const storage = await fetch(`${base}/api/storage`);
+    assert.equal(storage.status, 200);
+    const storageBody = await jsonOf<{ schemaVersion: number; ok: boolean; status: string; totalBytes: number | null; freeBytes: number | null; freePercent: number | null; thresholds: { warningFreePercent: number; criticalFreePercent: number }; secret?: string }>(storage);
+    assert.equal(storageBody.schemaVersion, 1);
+    assert.equal(typeof storageBody.ok, 'boolean');
+    assert.ok(['ok', 'warning', 'critical', 'unknown'].includes(storageBody.status));
+    assert.ok(storageBody.totalBytes === null || typeof storageBody.totalBytes === 'number');
+    assert.ok(storageBody.freeBytes === null || typeof storageBody.freeBytes === 'number');
+    assert.ok(storageBody.freePercent === null || typeof storageBody.freePercent === 'number');
+    assert.deepEqual(storageBody.thresholds, { warningFreePercent: 10, criticalFreePercent: 5 });
+    assert.equal('secret' in storageBody, false);
+    assert.equal(JSON.stringify(storageBody).includes(TOKEN), false);
+  });
+
+  test('就绪与存储故障输入会 fail closed', () => {
+    assert.equal(buildReadinessSnapshot({ providerCount: 0, pluginErrors: 0, database: true }).ok, false);
+    assert.equal(buildReadinessSnapshot({ providerCount: 1, pluginErrors: 1, database: true }).ok, false);
+    assert.equal(buildReadinessSnapshot({ providerCount: 1, pluginErrors: 0, database: false }).ok, false);
+    assert.equal(buildReadinessSnapshot({ providerCount: 1, pluginErrors: 0, database: true, storage: false }).ok, false);
+    assert.deepEqual(readStorageSnapshot('D:/path-that-does-not-exist-maharness'), {
+      schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null,
+      thresholds: { warningFreePercent: 10, criticalFreePercent: 5 },
+    });
+    assert.equal(buildStorageSnapshot(100, 50).status, 'ok');
+    assert.equal(buildStorageSnapshot(100, 10).status, 'warning');
+    assert.equal(buildStorageSnapshot(100, 5).status, 'critical');
+    assert.equal(buildStorageSnapshot(100, 5).ok, false);
+    assert.equal(buildStorageSnapshot(100, -1).status, 'unknown');
+  });
+
+  test('HTTP token 与审批凭据共用授权决策：关闭、缺失、错误和正确凭据', () => {
+    assert.deepEqual(decideCredentialAuthorization({ enabled: false, supplied: false, valid: false }), { allowed: true });
+    assert.deepEqual(decideCredentialAuthorization({ enabled: true, supplied: false, valid: false }), { allowed: false, reason: 'required' });
+    assert.deepEqual(decideCredentialAuthorization({ enabled: true, supplied: true, valid: false }), { allowed: false, reason: 'invalid' });
+    assert.deepEqual(decideCredentialAuthorization({ enabled: true, supplied: true, valid: true }), { allowed: true });
+  });
+
   test('设置 MAHARNESS_API_TOKEN 后：无头 POST 得 401，带头 POST 成功', async () => {
     const noHeader = await post('/api/workspaces', { path: workspaceDir }, { 'Content-Type': 'application/json' });
     assert.equal(noHeader.status, 401, '变更类请求缺 token 必须 401');
@@ -144,6 +216,224 @@ describe('A6-b 变更类端点的可选 token 门', () => {
     assert.equal((await call('POST', {})).status, 401, '启用且缺头：401');
     assert.equal((await call('GET', {})).next, true, '只读方法：透传');
     assert.equal((await call('POST', { [MUTATION_TOKEN_HEADER]: TOKEN })).next, true, '带头：透传');
+  });
+
+  test('同一中间件逐请求读取 token：轮换后旧 token 立即失效且不回显', async () => {
+    const guard = createApiTokenGuard();
+    const call = (token: string) => new Promise<{ next: boolean; status: number; body: string }>((done) => {
+      let next = false;
+      let status = 0;
+      let body = '';
+      const res = {
+        status: (code: number) => {
+          status = code;
+          return { json: (value: unknown) => { body = JSON.stringify(value); done({ next, status, body }); } };
+        },
+      };
+      guard({ method: 'POST', headers: { [MUTATION_TOKEN_HEADER]: token } } as never, res as never, () => {
+        next = true;
+        done({ next, status, body });
+      });
+    });
+
+    const previous = process.env.MAHARNESS_API_TOKEN;
+    try {
+      process.env.MAHARNESS_API_TOKEN = 'rotation-old-secret';
+      assert.equal((await call('rotation-old-secret')).next, true);
+      process.env.MAHARNESS_API_TOKEN = 'rotation-new-secret';
+      const old = await call('rotation-old-secret');
+      assert.equal(old.status, 401);
+      assert.equal(old.body.includes('rotation-old-secret'), false);
+      assert.equal(old.body.includes('rotation-new-secret'), false);
+      assert.equal((await call('rotation-new-secret')).next, true);
+    } finally {
+      if (previous === undefined) delete process.env.MAHARNESS_API_TOKEN;
+      else process.env.MAHARNESS_API_TOKEN = previous;
+    }
+  });
+
+  test('错误 token 按来源触发临时锁定，锁定期间即使正确 token 也拒绝', async () => {
+    const limiter = new CredentialFailureLimiter(3, 60_000, 5_000);
+    const guard = createApiTokenGuard(undefined, undefined, limiter);
+    const call = (token: string) => new Promise<{ status: number; next: boolean; retryAfter?: string }>((done) => {
+      let status = 0;
+      let next = false;
+      const res = {
+        setHeader: (_name: string, value: string) => value,
+        status: (code: number) => {
+          status = code;
+          return { json: () => done({ status, next, retryAfter: status === 429 ? '5' : undefined }) };
+        },
+      };
+      guard({
+        method: 'POST', headers: { [MUTATION_TOKEN_HEADER]: token },
+        socket: { remoteAddress: '192.0.2.44' }, path: '/api/workspaces',
+      } as never, res as never, () => { next = true; done({ status, next }); });
+    });
+
+    const previous = process.env.MAHARNESS_API_TOKEN;
+    process.env.MAHARNESS_API_TOKEN = TOKEN;
+    try {
+      assert.equal((await call('wrong-1')).status, 401);
+      assert.equal((await call('wrong-2')).status, 401);
+      assert.equal((await call('wrong-3')).status, 401);
+      const locked = await call(TOKEN);
+      assert.equal(locked.status, 429);
+      assert.equal(locked.retryAfter, '5');
+      assert.equal((await call(TOKEN)).status, 429);
+    } finally {
+      if (previous === undefined) delete process.env.MAHARNESS_API_TOKEN;
+      else process.env.MAHARNESS_API_TOKEN = previous;
+    }
+  });
+
+  test('授权拒绝写入脱敏审计事件，不包含 token、审批 ID 或请求参数', async () => {
+    const events: unknown[] = [];
+    const off = started!.kernel.bus.on('security.authorization.denied', (event) => events.push(event.data));
+    try {
+      await post('/api/workspaces', { path: workspaceDir }, { 'Content-Type': 'application/json' });
+      await post('/api/workspaces', { path: workspaceDir }, {
+        ...TOKEN_HDR, [MUTATION_TOKEN_HEADER]: 'incorrect-api-token',
+      });
+      process.env.MAHARNESS_APPROVAL_TOKEN = '1';
+      await post('/api/approvals/private-approval-id', { approved: true });
+      await post('/api/approvals/another-private-id', { approved: true, approvalToken: 'incorrect-approval-token' });
+      const text = JSON.stringify(events);
+      assert.equal(events.length, 4);
+      assert.equal(text.includes(TOKEN), false);
+      assert.equal(text.includes('incorrect-api-token'), false);
+      assert.equal(text.includes('incorrect-approval-token'), false);
+      assert.equal(text.includes('private-approval-id'), false);
+      assert.equal(text.includes('another-private-id'), false);
+      assert.equal(text.includes(workspaceDir), false);
+      assert.match(text, /api-token-required/);
+      assert.match(text, /api-token-invalid/);
+      assert.match(text, /approval-token-required/);
+      assert.match(text, /approval-token-invalid/);
+      assert.match(text, /\/api\/approvals\/:id/);
+    } finally {
+      delete process.env.MAHARNESS_APPROVAL_TOKEN;
+      off();
+    }
+  });
+
+  test('成功的变更授权发布脱敏审计事件', async () => {
+    const grants: unknown[] = [];
+    const off = started!.kernel.bus.on('security.authorization.granted', (event) => grants.push(event.data));
+    try {
+      const response = await fetch(`${base}/api/rules/policy`, {
+        method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [], revision: await currentPolicyRevision() }),
+      });
+      assert.equal(response.status, 200);
+      assert.equal(grants.length, 1);
+      const text = JSON.stringify(grants);
+      assert.match(text, /api-token/);
+      assert.match(text, /http:put/);
+      assert.match(text, /\/api\/policy/);
+      assert.equal(text.includes(TOKEN), false);
+      const persisted = await fetch(`${base}/api/security/audit?limit=1`);
+      assert.equal(persisted.status, 200);
+      const audit = await persisted.json() as { events: { outcome: string; subject: string; capability: string }[] };
+      assert.equal(audit.events.length, 1);
+      assert.equal(audit.events[0]?.outcome, 'granted');
+      assert.equal(audit.events[0]?.subject, 'api-token');
+      assert.equal(audit.events[0]?.capability, 'http:put');
+    } finally {
+      off();
+    }
+  });
+
+  test('SSE 连接关闭时只清理一次，并持久化连接生命周期事件', async () => {
+    const clientCount = (): number => started!.tracker.size;
+    const beforeCount = started!.store.listAuthorizationAudit(500).length;
+    const response = await fetch(`${base}/api/events`);
+    assert.equal(response.status, 200);
+    assert.equal(clientCount(), 1);
+    const reader = response.body!.getReader();
+    await reader.read();
+    await reader.cancel();
+    for (let i = 0; i < 50 && clientCount() !== 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(clientCount(), 0);
+    const events = started!.store.listAuthorizationAudit(500).slice(0, beforeCount + 3);
+    const lifecycle = events.filter((event) => event.object === '/api/events');
+    assert.equal(lifecycle.filter((event) => event.outcome === 'connected').length, 1);
+    assert.equal(lifecycle.filter((event) => event.outcome === 'disconnected').length, 1);
+    assert.ok(lifecycle.every((event) => event.subject === 'local-client' && event.capability === 'sse:events'));
+  });
+
+  test('SSE 空闲心跳跨过一个周期后仍可读，关闭后释放连接资源', async () => {
+    const response = await fetch(`${base}/api/events`);
+    assert.equal(response.status, 200);
+    const reader = response.body!.getReader();
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const initial = await reader.read();
+      assert.equal(initial.done, false);
+      assert.match(Buffer.from(initial.value ?? []).toString('utf8'), /retry: 15000/);
+
+      const heartbeat = await Promise.race([
+        reader.read(),
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(() => reject(new Error('SSE 心跳在 20 秒内未送达')), 20_000);
+        }),
+      ]);
+      assert.equal(heartbeat.done, false);
+      assert.match(Buffer.from(heartbeat.value ?? []).toString('utf8'), /: ping/);
+    } finally {
+      if (timeout) clearTimeout(timeout);
+      await reader.cancel().catch(() => undefined);
+    }
+
+    for (let i = 0; i < 50 && started!.tracker.size !== 0; i++) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.equal(started!.tracker.size, 0, '长连接关闭后客户端跟踪器必须回到零');
+  });
+
+  test('SSE 连接配额可释放，超限连接必须等待自动重连', () => {
+    const limiter = new SseConnectionLimiter(2);
+    const first = {};
+    const second = {};
+    const third = {};
+    assert.equal(limiter.tryAcquire(first), true);
+    assert.equal(limiter.tryAcquire(second), true);
+    assert.equal(limiter.tryAcquire(third), false);
+    assert.equal(limiter.size, 2);
+    limiter.release(first);
+    assert.equal(limiter.tryAcquire(third), true);
+    limiter.release(second);
+    limiter.release(third);
+    limiter.release(third);
+    assert.equal(limiter.size, 0);
+  });
+
+  test('全局事件流与聊天流共用进程级 SSE 配额，并在断开后释放', async () => {
+    const streams: { response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }[] = [];
+    try {
+      for (let i = 0; i < 8; i++) {
+        const response = await fetch(`${base}/api/events`);
+        assert.equal(response.status, 200);
+        const reader = response.body!.getReader();
+        await reader.read();
+        streams.push({ response, reader });
+      }
+      const sessionResponse = await post('/api/sessions', { title: 'SSE quota' });
+      assert.equal(sessionResponse.status, 200);
+      const session = await jsonOf<{ id: string }>(sessionResponse);
+      const rejected = await post(`/api/sessions/${session.id}/chat`, { message: 'quota probe' });
+      assert.equal(rejected.status, 429);
+      assert.equal(rejected.headers.get('retry-after'), '15');
+    } finally {
+      await Promise.all(streams.map(({ reader }) => reader.cancel().catch(() => undefined)));
+    }
+    const sessionResponse = await post('/api/sessions', { title: 'SSE quota release' });
+    assert.equal(sessionResponse.status, 200);
+    const session = await jsonOf<{ id: string }>(sessionResponse);
+    const released = await post(`/api/sessions/${session.id}/chat`, { message: 'release probe' });
+    assert.notEqual(released.status, 429);
+    await released.body?.cancel().catch(() => undefined);
   });
 
   test('Host/Origin 白名单仍在（token 门不替代 DNS rebinding 防护）', async () => {
@@ -220,6 +510,7 @@ describe('A6-c 审批一次性凭据', () => {
     assert.equal(reg.verify(id, t), 'invalid', '一次性：重放必拒');
     const gone = reg.issue('a-2', undefined, Date.now() - 1);
     assert.equal(reg.verify('a-2', gone), 'expired', '挂起已超时不再接受');
+    assert.deepEqual(decideCredentialAuthorization({ enabled: false, supplied: true, valid: false }), { allowed: false, reason: 'invalid' }, '过期凭据不得按宽松模式放行');
     reg.prune(new Set(['a-1']));
     assert.equal(reg.size(), 1, '剪枝后只留仍在挂起的条目');
   });
@@ -260,12 +551,12 @@ describe('A6-3 策略注入旁路审批门', () => {
     assert.match(String((await jsonOf(blocked)).error ?? ''), /审批门/);
 
     const ok = await fetch(`${base}/api/rules/policy`, {
-      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [{ tool: 'read_file', effect: 'allow' }] }),
+      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [{ tool: 'read_file', effect: 'allow' }], revision: await currentPolicyRevision() }),
     });
     assert.equal(ok.status, 200, '具体工具的 allow 属正常用法');
 
     const confirmed = await fetch(`${base}/api/rules/policy`, {
-      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [{ tool: '*', effect: 'allow' }], confirm: true }),
+      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [{ tool: '*', effect: 'allow' }], confirm: true, revision: await currentPolicyRevision() }),
     });
     assert.equal(confirmed.status, 200, '显式 confirm:true 可放行');
     assert.equal(((await confirmed.json()) as { blanketAllow?: { tool: string }[] }).blanketAllow?.[0]?.tool, '*',
@@ -273,7 +564,7 @@ describe('A6-3 策略注入旁路审批门', () => {
 
     // 复位：别把通配 allow 留给后续用例
     const reset = await fetch(`${base}/api/rules/policy`, {
-      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [] }),
+      method: 'PUT', headers: TOKEN_HDR, body: JSON.stringify({ scope: 'global', rules: [], revision: await currentPolicyRevision() }),
     });
     assert.equal(reset.status, 200);
   });

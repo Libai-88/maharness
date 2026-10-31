@@ -12,8 +12,9 @@ import type { LLMMessage, LLMRole } from '../../kernel/types';
 import type { Message, Session } from '../../kernel/types';
 import { truncateHistory } from '../context';
 import { beginRun, endRun } from '../index';
-import { getChatService, getRunner, sse, type RouteDeps } from './shared';
+import { getChatService, getRunner, sse, SseConnectionLimiter, type RouteDeps } from './shared';
 import { scheduleWarmup } from './warmup';
+import { deriveTaskContract } from '../../kernel/task-contract';
 
 // ---- H3 同会话互斥：同一会话同时只允许一个 run ----
 // 并发 chat 会交叉写历史（onHistorySync 顺序不可控）、双份计费、断点互相覆盖。
@@ -24,6 +25,7 @@ const COST_WARNING_MARK = '【成本预警】';
 
 export function registerChatRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, store } = deps;
+  const sseLimiter = deps.sseLimiter ?? new SseConnectionLimiter(8);
 
   // ---------- 断点状态查询（前端可据此显示「继续任务」入口） ----------
   app.get('/api/sessions/:id/checkpoint', (req, res) => {
@@ -32,6 +34,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     const cp = store.loadCheckpoint(session.id);
     res.json({
       exists: !!cp,
+      schemaVersion: cp?.schemaVersion ?? null,
       turn: cp?.turn ?? 0,
       historyMessages: cp?.history.length ?? 0,
       createdAt: cp?.createdAt ?? 0,
@@ -82,6 +85,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       : undefined;
     const runProvider = routed?.provider ?? provider;
     const runModel = routed?.model ?? resolvedModel;
+    // 目标模式保留明确验收条件和执行约束，不从普通目标猜测成功条件。
+    const derivedTask = !resume && session.mode === 'goal' ? deriveTaskContract(String(message ?? '')) : undefined;
+    let taskContract = derivedTask && (derivedTask.acceptance.length > 0 || derivedTask.costBudgetUsd !== undefined || derivedTask.deadlineAt !== undefined)
+      ? derivedTask : undefined;
     // 经济性（harness 管理认知资源）：会话累计成本超预算 → 注入成本警告
     // （不是"请 LLM 自觉节约"，而是 harness 直接告诉它预算边界）
     // M1：成本汇总走 SQL 聚合（不再全量 listMessages 拉消息正文）
@@ -171,6 +178,10 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       return chatSvc.textualizeHistory(raw);
     }
     let history: LLMMessage[];
+    let executionId: string = randomUUID();
+    let turnOffset = 0;
+    let restoredToolResults: { name: string; ok: boolean }[] | undefined;
+    let restoredCostUsd = 0;
     if (resume) {
       // 断点续跑：用 checkpoint 的完整历史（含工具回填），末尾加恢复提示——
       // 恢复语义 = 从最后一轮继续决策，不追加用户消息、不落库（续跑结果由后续轮次落库）
@@ -184,13 +195,22 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         store.clearCheckpoint(session.id);
         return res.status(400).json({ error: `${invalid}——该断点已清除，请重新发起任务` });
       }
+      if (cp.runId && store.hasPendingToolEffects(cp.runId)) {
+        return res.status(409).json({ error: '断点包含结果未知的工具副作用，已阻止自动重放；请人工核对外部状态后发起新任务' });
+      }
       history = [
         ...cp.history as LLMMessage[],
         { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' },
       ];
+      executionId = cp.runId ?? executionId;
+      taskContract = cp.task;
+      restoredToolResults = cp.toolResults;
+      restoredCostUsd = cp.costUsd ?? 0;
+      turnOffset = cp.turn + 1;
       // H13：断点续跑同样注入成本预警（超预算的续跑更应收敛）
       history = appendCostWarning(history);
     } else {
+      store.clearCheckpoint(session.id);
       history = buildHistory(store.listMessages(session.id));
       // H13：成本预警追加在最新 user 消息之前（保持「user 结尾」的缓存友好形态）
       history = appendCostWarning(history);
@@ -200,7 +220,23 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     }
 
     const traceId = randomUUID();
+    if (routed) {
+      const routeStep = kernel.trace.startStep({
+        traceId,
+        sessionId: session.id,
+        turn: 0,
+        type: 'system',
+        name: 'model-route',
+        inputSummary: String(message ?? '').slice(0, 240),
+      });
+      routeStep.finish({
+        outputSummary: JSON.stringify({ reason: routed.reason, candidates: routed.candidates }).slice(0, 4000),
+      });
+    }
     const ac = new AbortController();
+    if (!sseLimiter.tryAcquire(res)) {
+      return res.status(429).setHeader('Retry-After', '15').json({ error: '实时事件连接数已达上限，请稍后重试' });
+    }
     // ---- 响应头与 start 事件先落地，再做压缩/截断等前置重活 ----
     // 旧顺序是「压缩完才 writeHead」：compactHistory 命中时要整次 LLM 调用（上限 30s），
     // 这期间前端连响应头都拿不到，界面只有一个本地造的「思考中」——长会话开口前先静默
@@ -212,21 +248,32 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       'Cache-Control': 'no-cache',
       Connection: 'keep-alive',
       'X-Accel-Buffering': 'no',
+      'X-SSE-Retry': '15000',
     });
+    res.write('retry: 15000\n\n');
     // SSE 心跳：审批等待等长挂起场景防代理/客户端超时断开
     const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
-    res.on('close', () => clearInterval(heartbeat));
+    res.on('close', () => {
+      clearInterval(heartbeat);
+      sseLimiter.release(res);
+    });
     sse(res, 'start', { traceId });
+    if (derivedTask?.inference?.needsConfirmation) {
+      sse(res, 'task_inference', {
+        objective: derivedTask.objective,
+        inference: derivedTask.inference,
+      });
+      // 开放式目标必须先补齐可验证标准。结束本次流，让用户的下一条消息
+      // 作为新的目标进入执行链；在确认前不压缩上下文、不调用 Provider、不写 checkpoint。
+      sse(res, 'end', {});
+      res.end();
+      return;
+    }
     /** 前置重活期间的"我在做什么"播报：超过阈值才开口（短会话不该闪一句无意义的话） */
     const announceWhile = async <T>(say: string, work: Promise<T>): Promise<T> => {
       const timer = setTimeout(() => { try { sse(res, 'status', { text: say }); } catch { /* 已关闭 */ } }, 900);
       try { return await work; } finally { clearTimeout(timer); }
     };
-    // 模型路由可观测：命中路由时记录 model-route 步骤（谁被路由到了哪）
-    if (routed?.reason) {
-      kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: 'model-route' })
-        .finish({ outputSummary: routed.reason });
-    }
     // 上下文管理 v2：超预算时优先 LLM 摘要压缩（compact：旧对话变【历史摘要】，不丢事实），
     // 压缩不可用/失败才截断（truncate：丢弃较早消息并注入说明）。
     // 对标 Anthropic context compaction——截断是物理删除，压缩是信息保鲜。
@@ -249,8 +296,11 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       droppedMessages = r.droppedMessages;
     }
     if (ctxMode === 'truncate') {
-      kernel.trace.startStep({ traceId, turn: 0, type: 'system', name: '上下文截断' })
-        .finish({ outputSummary: `超出预算（${maxCtx} tokens），已丢弃 ${droppedMessages} 条较早消息` });
+      kernel.trace.startStep({ traceId, sessionId: session.id, turn: 0, type: 'system', name: '上下文截断' })
+        .finish({
+          inputSummary: `history[0..${Math.max(0, droppedMessages - 1)}] · ${droppedMessages} 条较早消息`,
+          outputSummary: `超出预算（${maxCtx} tokens），已丢弃 ${droppedMessages} 条较早消息（原因：保留输出预算）`,
+        });
     }
     // 压缩/截断持久化：把处理后的消息序列写回 DB（摘要/说明 + 保留消息，字段完整）。
     // 下次 run 组装即得压缩后历史——不重复压缩、前缀在重建后持续稳定。
@@ -273,11 +323,18 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
             tokensOut: old?.tokensOut ?? 0,
             cost: old?.cost ?? 0,
             traceId: old?.traceId,
+            taskVerification: old?.taskVerification,
           };
         }));
       } catch (err) {
         console.warn('[routes] 压缩结果持久化失败（不影响本次对话）:', err instanceof Error ? err.message : String(err));
       }
+    }
+    if (!resume) {
+      store.saveCheckpoint(session.id, -1, ctxHistory.map((m) => ({
+        role: m.role, content: m.content ?? null,
+        tool_calls: m.tool_calls, tool_call_id: m.tool_call_id,
+      })), executionId, taskContract);
     }
     let assistantText = '';
     let assistantReasoning = '';
@@ -320,14 +377,25 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         // 失败恢复：备用 provider（主服务宕机/限流时自动切换，LLM 无感）
         fallbackProviders: chat.providers.filter((p) => p.id !== runProvider.id),
         // 成本实时熔断：剩余预算传执行器，超限强制停止（harness 硬边界）
-        costBudget: remainingBudget > 0 ? remainingBudget : undefined,
+        costBudget: taskContract?.costBudgetUsd !== undefined
+          ? Math.min(taskContract.costBudgetUsd, remainingBudget > 0 ? remainingBudget : taskContract.costBudgetUsd)
+          : (remainingBudget > 0 ? remainingBudget : undefined),
+        task: taskContract,
+        restoredToolResults,
+        restoredCostUsd,
+        executionId,
+        turnOffset,
+        effectJournal: {
+          claim: (key) => store.claimToolEffect(executionId, key),
+          complete: (key, result) => store.completeToolEffect(executionId, key, result),
+        },
         // 断点续跑：每轮工具执行完自动持久化完整历史（中断不白跑；resume 从断点继续）。
         // 必须存完整字段（tool_calls/tool_call_id 配对），否则恢复时 provider 校验失败。
-        onCheckpoint: (turn, hist) => {
+        onCheckpoint: (turn, hist, evidence) => {
           store.saveCheckpoint(session.id, turn, hist.map((m) => ({
             role: m.role, content: m.content ?? null,
             tool_calls: m.tool_calls, tool_call_id: m.tool_call_id,
-          })));
+          })), executionId, taskContract, evidence?.toolResults, evidence?.costUsd);
         },
         // 发送序列快照同步（assistant 含 tool_calls / tool 含 tool_call_id / 注入消息）：
         // DB = 发送序列的忠实镜像 → 跨 run 组装与上 run 序列构成纯追加 → L3 前缀逐字节延续。
@@ -378,6 +446,12 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         } else if (ev.type === 'budget_hit') {
           // 成本熔断：harness 硬边界触发（SSE 推送，前端可展示）
           sse(res, 'budget_hit', { cost: ev.cost, budget: ev.budget });
+        } else if (ev.type === 'task_verified' || ev.type === 'task_partial' || ev.type === 'task_failed') {
+          if (lastAssistantId) store.updateMessageTaskVerification(lastAssistantId, {
+            status: ev.type === 'task_verified' ? 'verified' : ev.type === 'task_partial' ? 'partial' : 'failed',
+            objective: ev.objective, checks: ev.checks, evidence: ev.evidence ?? [],
+          });
+          sse(res, ev.type, { objective: ev.objective, checks: ev.checks, evidence: ev.evidence ?? [] });
         } else if (ev.type === 'handoff') {
           // 角色移交：会话控制权交给目标角色（后续对话由该角色提示词/工具集接管）
           store.updateSession(session.id, { role: ev.role });
@@ -387,6 +461,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         } else if (ev.type === 'assistant_done') {
           usage = ev.usage;
           cost = ev.cost;
+          if (lastAssistantId) store.updateMessageContent(lastAssistantId, ev.content);
           // 任务正常完成 → 断点失效（恢复点只对未完成任务有意义）
           store.clearCheckpoint(session.id);
           sse(res, 'done', { content: ev.content, reasoning: ev.reasoning, usage: ev.usage, cost: ev.cost, cached: ev.cached ?? false });
@@ -425,7 +500,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 也拉入缓存窗口（跨 run 首轮不再全价 prefill）。
     // 预热仅在发送序列足够长时触发（≥3 条消息才有缓存价值；L1 命中的短序列跳过）
     const warmupMode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
-    if (seqAcc.length >= 3 && warmupMode !== 'off') {
+    if (!ac.signal.aborted && seqAcc.length >= 3 && warmupMode !== 'off') {
       scheduleWarmup(session.id, systemPrompt, seqAcc, runProvider, runModel, kernel, [{ role: 'system', content: worldState }]);
     }
     sse(res, 'end', {});

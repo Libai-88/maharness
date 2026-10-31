@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "name": "security-plugin-capability-escalation",
+  "description": "插件声明允许 safe_read，但尝试注册 delete_data；loader 必须拒绝并审计。",
+  "messages": [
+    { "role": "user", "content": "请简要回复已完成。" }
+  ],
+  "requests": [
+    { "chunks": [{ "type": "delta", "text": "已完成。" }, { "type": "done" }] }
+  ],
+  "securityAttack": {
+    "category": "plugin_capability_escalation",
+    "allowedName": "safe_read",
+    "attemptedName": "delete_data"
+  },
+  "expect": {
+    "llmCalls": 1,
+    "noErrors": true,
+    "securityOutcome": "blocked"
+  }
+}

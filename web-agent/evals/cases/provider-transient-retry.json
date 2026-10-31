@@ -1,0 +1,26 @@
+{
+  "name": "provider-transient-retry",
+  "description": "故障回放：Provider 首次返回 500，执行器按瞬时错误策略重试后完成",
+  "messages": [
+    { "role": "user", "content": "请回答重试后的结果" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        { "type": "throw", "status": 500, "message": "temporary outage" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "重试后完成" },
+        { "type": "usage", "input": 10, "output": 5 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "answerContains": ["重试后完成"],
+    "llmCalls": 2,
+    "noErrors": true
+  }
+}

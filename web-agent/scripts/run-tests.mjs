@@ -33,7 +33,7 @@ function collectTestFiles(dir, out = []) {
 }
 
 /** 测试根：内核 / server / 内置插件 / 现场插件（ui 的 e2e 走 npm run e2e，不在此列） */
-const roots = ['kernel', 'server', 'core', 'plugins'].map((r) => join(ROOT, r));
+const roots = ['kernel', 'server', 'core', 'plugins', 'evals'].map((r) => join(ROOT, r));
 
 const files = [];
 for (const r of roots) collectTestFiles(r, files);

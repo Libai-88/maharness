@@ -10,6 +10,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin, ToolContext } from '../../kernel/types';
+import { reviewPluginSource } from '../../kernel/plugin-review';
+import { runPluginTrial } from '../../kernel/plugin-trial';
 
 // 项目根 = 本文件上溯两级（core/self-extend/index.ts → <root>/）
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
@@ -126,7 +128,7 @@ export default {
           '自我扩展规则（maharness 核心理念：万物都是插件，你通过写插件来定义自己）：',
           '1. 需要新能力（新工具/新命令/事件监听）时，不要试图绕过限制，而是写一个新插件：用 create_plugin 生成（把完整 index.ts 源码放进 source 参数），或用 write_file 直接写 plugins/<id>/plugin.json 与 plugins/<id>/index.ts；',
           '2. 插件契约（务必遵守，否则加载失败或注册不上）：默认导出对象 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from "../../kernel/types"；工具注册成功后在运行时可用。注意：不是 initialize/execute/success 那套旧写法；',
-          '3. 创建后立即用 plugin_status 确认加载状态且 caps 非空；若 error 或 caps 为空，读取错误信息与插件文件，修复后保存（目录监听会自动重载），再验证；',
+          '3. 创建后先用 plugin_status 确认静态审查结果与能力白名单；新插件默认停用，确认安全后用 enable_plugin 显式进入试运行；若 error 或 caps 为空，读取错误信息与插件文件，修复后保存（目录监听会自动重载），再验证；',
           '4. 插件目录名必须等于 id（小写字母/数字/连字符）；',
           '5. 新插件注册的工具在下一轮对话生效（本轮不能立即调用），完成后告知用户新能力已就绪；',
           '6. 修改边界：agent 运行时核心（kernel/ 与 core/chat 的执行循环）不可修改；core/ 其余内置插件与 ui/ 前端同属插件体系，可按需修改（core/ 改动经服务重启生效，ui/ 改动经前端构建生效）。',
@@ -200,7 +202,7 @@ export default {
 
           const source = typeof args.source === 'string' && args.source.trim() ? args.source : defaultSource(id, name);
 
-          // 静态契约校验（启发式）：源码必须含核心契约要素，防止「假成功」插件
+          // 静态契约校验：先拒绝明显越权实现，再交给 loader 做完整 manifest/权限校验。
           const contractHints = ['onLoad', 'ctx.register', 'handler'];
           const missing = contractHints.filter((h) => !source.includes(h));
           if (missing.length) {
@@ -210,8 +212,35 @@ export default {
             };
           }
 
+          const review = reviewPluginSource(source);
+          if (!review.ok) {
+            return {
+              ok: false,
+              error: `源码未通过静态安全审查：${review.issues.map((i) => i.message).join('；')}`,
+              data: { id, capabilities: review.capabilities, issues: review.issues, highRisk: review.highRisk },
+            };
+          }
+
+          const permissions: Record<string, string[]> = {};
+          for (const cap of review.capabilities) (permissions[cap.kind] ??= []).push(cap.name);
+          const trial = await runPluginTrial({
+            id,
+            manifest: { id, name, version: '0.1.0', entry: 'index.ts', permissions: { capabilities: permissions } },
+            source,
+          });
+          if (!trial.ok) {
+            return {
+              ok: false,
+              error: `插件未通过隔离试运行: ${trial.error ?? `状态 ${trial.state ?? 'unknown'}`}`,
+              data: { id, state: trial.state, caps: trial.caps, error: trial.error },
+            };
+          }
+
           mkdirSync(dir, { recursive: true });
-          writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id, name, version: '0.1.0', entry: 'index.ts', enabled: true }, null, 2), 'utf8');
+          writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
+            id, name, version: '0.1.0', entry: 'index.ts', enabled: false,
+            permissions: { capabilities: permissions },
+          }, null, 2), 'utf8');
           writeFileSync(join(dir, 'index.ts'), source, 'utf8');
 
           // 等待热加载（目录监听防抖 500ms；最多等 3s；仅终态返回）
@@ -237,9 +266,9 @@ export default {
                   id, name, written: ['plugin.json', 'index.ts'], state: st.state,
                   caps: st.caps,
                   error: st.error,
-                  note: st.state === 'started'
+                    note: st.state === 'started'
                     ? '插件已加载，注册的能力在下一轮对话生效'
-                    : '插件加载失败：读取 plugins/<id>/ 下文件，按错误信息修复后保存会自动重载',
+                    : '插件加载失败：读取 plugins/<id>/ 下文件，按错误信息修复后保存会自动重载；审查通过后用 enable_plugin 试运行',
                 },
               };
             }
@@ -249,7 +278,7 @@ export default {
             ok: true,
             data: {
               id, name, written: ['plugin.json', 'index.ts'], state: 'pending',
-              note: '已写入 plugins/ 目录但未捕获到加载事件（目录监听可能不可用）。请用 plugin_status 确认，或在网页面板「插件」中手动重载。',
+              note: '已写入 plugins/ 目录并保持停用，完成审查后用 enable_plugin 进入隔离试运行。',
             },
           };
         },

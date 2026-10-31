@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { compactHistory, truncateHistory, SUMMARY_MARK } from '../compact';
+import { compactHistory, contextBoundaryPreservesTools, contextIntegrityPreservesConstraints, truncateHistory, SUMMARY_MARK } from '../compact';
 import type { LLMMessage, ProviderDef } from '../../../kernel/types';
 
 /** 摘要器替身：返回固定文本（默认以摘要标记开头，模拟"模型配合"） */
@@ -96,5 +96,83 @@ describe('truncateHistory：兼容导出仍保留头部 system', () => {
     assert.equal(r.truncated, true);
     assert.equal(r.messages[0].content, L0);
     assert.ok(r.droppedMessages > 0);
+  });
+});
+
+describe('compactHistory：Provider tokenizer 适配', () => {
+  it('使用 Provider tokenizer 的消息计数，而不是仅按字符估算', async () => {
+    const provider = stubProvider(`${SUMMARY_MARK}按原生 tokenizer 压缩。`);
+    provider.tokenizer = {
+      id: 'test-tokenizer',
+      countText: (text) => text.length,
+      countMessages: (messages) => messages.length * 50,
+    };
+    const history: LLMMessage[] = Array.from({ length: 5 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: 'x' }));
+    const result = await compactHistory(history, 100, { provider, model: 'stub-model' });
+    assert.equal(result.mode, 'compact');
+    assert.ok(result.compactedMessages > 0);
+  });
+});
+
+describe('compactHistory：工具调用完整性', () => {
+  it('切点不会拆开 assistant tool_call 与 tool 回执', async () => {
+    const history: LLMMessage[] = [
+      { role: 'user', content: '先查资料' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'search', arguments: '{}' } }] },
+      { role: 'tool', content: '结果', tool_call_id: 'call-1' },
+      { role: 'user', content: '继续总结这件事' },
+      { role: 'assistant', content: '当前结论' },
+      { role: 'user', content: '再补充一句' },
+    ];
+    assert.equal(contextBoundaryPreservesTools(history, 2), false);
+    assert.equal(contextBoundaryPreservesTools(history, 3), true);
+    const result = await compactHistory(history, 20, { provider: stubProvider(`${SUMMARY_MARK}保留工具事实。`), model: 'stub-model' });
+    const ids = result.messages.filter((message) => message.role === 'tool').map((message) => message.tool_call_id);
+    const calls = result.messages.flatMap((message) => Array.isArray(message.tool_calls) ? message.tool_calls.map((call) => (call as { id: string }).id) : []);
+    assert.deepEqual(ids, calls.filter((id) => ids.includes(id)));
+  });
+});
+
+describe('compactHistory：任务与记忆约束完整性', () => {
+  it('压缩切点跳过任务/验收/记忆约束消息并逐字保留', async () => {
+    const constraints: LLMMessage[] = [
+      { role: 'system', content: '【任务约束】必须在工作区完成任务。' },
+      { role: 'system', content: '【验收条件】输出必须包含 READY。' },
+      { role: 'user', content: '【核心记忆块】用户偏好：中文回复。' },
+      { role: 'user', content: '【长期记忆】项目主目录是 maharness。' },
+      ...longDialog(10),
+    ];
+    const result = await compactHistory(constraints, 100, { provider: stubProvider(`${SUMMARY_MARK}早期事实。`), model: 'stub-model' });
+    assert.equal(result.mode, 'compact');
+    assert.equal(contextIntegrityPreservesConstraints(constraints, result.messages), true);
+    for (const message of constraints.slice(0, 4)) {
+      assert.ok(result.messages.some((candidate) => candidate.content === message.content));
+    }
+  });
+
+  it('发现约束丢失时返回 false，作为压缩后的 fail-closed 守卫', () => {
+    const before: LLMMessage[] = [{ role: 'system', content: '【验收条件】必须包含 READY。' }];
+    const after: LLMMessage[] = [{ role: 'system', content: `${SUMMARY_MARK}READY` }];
+    assert.equal(contextIntegrityPreservesConstraints(before, after), false);
+  });
+});
+
+describe('compactHistory：可解释来源', () => {
+  it('压缩 Trace 同时记录来源范围与压缩原因', async () => {
+    const finished: Array<Record<string, unknown>> = [];
+    const trace = {
+      startStep: () => ({
+        id: 'compact-step',
+        finish: (extra?: Record<string, unknown>) => finished.push(extra ?? {}),
+        fail: () => undefined,
+        cancel: () => undefined,
+      }),
+    } as never;
+    const result = await compactHistory([{ role: 'system', content: L0 }, ...longDialog(10)], 100, {
+      provider: stubProvider(`${SUMMARY_MARK}可追溯摘要。`), model: 'stub-model', trace,
+    });
+    assert.equal(result.mode, 'compact');
+    assert.match(String(finished[0]?.inputSummary), /^history\[\d+\.\.\d+\]/);
+    assert.match(String(finished[0]?.outputSummary), /LLM 摘要压缩/);
   });
 });

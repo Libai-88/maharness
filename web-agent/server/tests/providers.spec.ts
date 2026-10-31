@@ -6,6 +6,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertPublicHttpUrl } from '../routes/shared';
+import { buildProviderDiagnostics } from '../routes/providers';
 
 describe('assertPublicHttpUrl SSRF 校验', () => {
   const reject = async (url: string, pattern: RegExp) => {
@@ -35,5 +36,26 @@ describe('assertPublicHttpUrl SSRF 校验', () => {
     await reject('ftp://example.com', /仅支持/);
     await reject('file:///etc/passwd', /仅支持/);
     await reject('not-a-url', /地址格式无效/);
+  });
+});
+
+describe('Provider 配置诊断', () => {
+  test('只返回可操作状态，不泄露 key，并区分缺失配置、模型探测和健康故障', () => {
+    const result = buildProviderDiagnostics({
+      id: 'p1', baseUrl: 'https://api.example', apiKey: 'sk-secret', model: 'missing', protocol: 'openai',
+    }, [{ providerId: 'p1', modelId: 'available', modelKey: 'p1@available', pricingId: 'p1@available', contextWindow: 128000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, source: 'inferred' }], {
+      failures: 2, authFailed: true, lastError: 'HTTP 401', lastErrorAt: 123,
+    });
+    assert.equal(result.configured.apiKey, true);
+    assert.equal(result.models[0]?.modelId, 'available');
+    assert.ok(result.issues.includes('默认模型未登记或未完成能力探测'));
+    assert.ok(result.issues.some((x) => x.includes('认证失败')));
+    assert.equal(JSON.stringify(result).includes('sk-secret'), false);
+  });
+
+  test('Ollama 无 key 可诊断为有效配置，空地址仍报错', () => {
+    const result = buildProviderDiagnostics({ id: 'local', protocol: 'ollama', model: 'llama3' }, [], undefined);
+    assert.deepEqual(result.issues, ['缺少 Provider 地址']);
+    assert.equal(result.configured.apiKey, false);
   });
 });

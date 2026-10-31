@@ -4,13 +4,66 @@
 import type { Express } from 'express';
 import { assertProviderBaseUrl, fetchWithPublicRedirects, getChatService, maskKey, refreshChatProviders, type RouteDeps } from './shared';
 import { extractFromProviderMeta, resolveCapabilities } from '../../kernel/modelCatalog';
-import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError } from '../../core/chat/provider-health';
+import { MODEL_SCHEMA_VERSION, stableModelIdentity } from '../../kernel/model-schema';
+import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError, LLMHttpError } from '../../core/chat/provider-health';
+import type { ProviderHealth } from '../../core/chat/provider-health';
+import { ConcurrentStoreWriteError } from '../db';
 
 /** 支持的协议族（本地/内网地址需 AGENT_ALLOW_PRIVATE_URLS=1） */
 type ProviderProtocol = 'openai' | 'anthropic' | 'ollama';
 const PROTOCOLS: ProviderProtocol[] = ['openai', 'anthropic', 'ollama'];
 
+function isConcurrentStoreWrite(error: unknown): error is ConcurrentStoreWriteError {
+  return error instanceof ConcurrentStoreWriteError;
+}
+
 interface PulledModel { id: string; label?: string; raw: unknown }
+
+export interface ProviderDiagnosticModel {
+  providerId: string;
+  modelId: string;
+  modelKey: string;
+  pricingId: string;
+  contextWindow: number;
+  maxOutput: number;
+  vision: boolean;
+  tools: boolean;
+  reasoning: boolean;
+  priceIn: number;
+  priceOut: number;
+  source: string;
+}
+
+export interface ProviderDiagnostics {
+  schemaVersion: typeof MODEL_SCHEMA_VERSION;
+  providerId: string;
+  protocol: string;
+  configured: { baseUrl: boolean; apiKey: boolean; defaultModel: boolean };
+  health: ProviderHealth | null;
+  models: ProviderDiagnosticModel[];
+  issues: string[];
+}
+
+/** 生成不含密钥材料的 Provider 配置诊断，供设置页和运维脚本共用。 */
+export function buildProviderDiagnostics(input: {
+  id: string; baseUrl?: string; apiKey?: string; model?: string; protocol?: string;
+}, models: ProviderDiagnosticModel[], health?: ProviderHealth): ProviderDiagnostics {
+  const configured = {
+    baseUrl: !!input.baseUrl?.trim(),
+    apiKey: !!input.apiKey?.trim(),
+    defaultModel: !!input.model?.trim(),
+  };
+  const issues: string[] = [];
+  if (!configured.baseUrl) issues.push('缺少 Provider 地址');
+  if (!configured.apiKey && input.protocol !== 'ollama') issues.push('缺少 API Key');
+  if (!configured.defaultModel) issues.push('缺少默认模型');
+  if (configured.defaultModel && models.length > 0 && !models.some((m) => m.modelId === input.model)) {
+    issues.push('默认模型未登记或未完成能力探测');
+  }
+  if (health?.authFailed) issues.push('最近请求认证失败，请检查 API Key 或权限');
+  else if ((health?.failures ?? 0) > 0) issues.push(`最近请求失败 ${health!.failures} 次`);
+  return { schemaVersion: MODEL_SCHEMA_VERSION, providerId: input.id, protocol: input.protocol ?? 'openai', configured, health: health ?? null, models, issues };
+}
 
 /** 各协议的最小可用探测请求（URL + 头 + 体） */
 function buildPing(base: string, protocol: string, key: string, model: string): [string, RequestInit] {
@@ -91,10 +144,22 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       priceIn: r.priceIn, priceOut: r.priceOut, enabled: !!r.enabled,
       apiKeyMasked: maskKey(r.apiKey), hasKey: !!r.apiKey,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
-      models: models.filter(m => m.providerId === r.id),
+      models: models.filter(m => m.providerId === r.id).map((m) => ({ ...m, ...stableModelIdentity(r.id, m.modelId) })),
       // 健康状态（failover 链上的真实调用回报）：401/403 → authFailed，设置页红标 + 会话横幅
       health: getProviderHealth(r.id),
     })));
+  });
+
+  app.get('/api/providers/:id/diagnose', (req, res) => {
+    const provider = store.getProvider(req.params.id);
+    if (!provider) return res.status(404).json({ error: '供应商不存在' });
+    const models = store.listModels(provider.id).map((m) => ({
+      ...stableModelIdentity(provider.id, m.modelId),
+      modelId: m.modelId, contextWindow: m.contextWindow ?? 0, maxOutput: m.maxOutput ?? 0,
+      vision: !!m.vision, tools: !!m.tools, reasoning: !!m.reasoning,
+      priceIn: m.priceIn ?? 0, priceOut: m.priceOut ?? 0, source: m.source ?? 'unknown',
+    }));
+    res.json(buildProviderDiagnostics(provider, models, getProviderHealth(provider.id)));
   });
 
   app.post('/api/providers', async (req, res) => {
@@ -125,6 +190,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   app.patch('/api/providers/:id', async (req, res) => {
     const existing = store.getProvider(req.params.id);
     if (!existing) return res.status(404).json({ error: '供应商不存在' });
+    if (!Number.isSafeInteger(req.body?.expectedUpdatedAt)) return res.status(428).json({ error: '更新供应商前须携带读取到的 updatedAt 版本' });
     const { label, baseUrl, apiKey, model, priceIn, priceOut, enabled } = req.body ?? {};
     const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : existing.protocol;
     // H5 SSRF：仅当地址被修改时校验（沿用已保存地址无需重复检查）；豁免判定同 assertProviderBaseUrl
@@ -135,26 +201,41 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
         return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
       }
     }
-    store.upsertProvider({
-      id: existing.id,
-      label: label?.trim() || existing.label,
-      baseUrl: baseUrl?.trim() || existing.baseUrl,
-      // Key 留空/不传 = 保持不变
-      apiKey: apiKey?.trim() || existing.apiKey,
-      model: model?.trim() || existing.model,
-      protocol: protocol as ProviderProtocol,
-      priceIn: priceIn === undefined ? (existing.priceIn ?? undefined) : priceIn === '' ? undefined : Number(priceIn),
-      priceOut: priceOut === undefined ? (existing.priceOut ?? undefined) : priceOut === '' ? undefined : Number(priceOut),
-      enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
-    });
+    try {
+      const expectedUpdatedAt = Number(req.body.expectedUpdatedAt);
+      store.upsertProvider({
+        id: existing.id,
+        label: label?.trim() || existing.label,
+        baseUrl: baseUrl?.trim() || existing.baseUrl,
+        // Key 留空/不传 = 保持不变
+        apiKey: apiKey?.trim() || existing.apiKey,
+        model: model?.trim() || existing.model,
+        protocol: protocol as ProviderProtocol,
+        priceIn: priceIn === undefined ? (existing.priceIn ?? undefined) : priceIn === '' ? undefined : Number(priceIn),
+        priceOut: priceOut === undefined ? (existing.priceOut ?? undefined) : priceOut === '' ? undefined : Number(priceOut),
+        enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
+        expectedUpdatedAt,
+      });
+    } catch (error) {
+      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '供应商已被其他写入者修改，请重新读取后再保存' });
+      throw error;
+    }
     refreshChatProviders(kernel, store);
     const row = store.getProvider(existing.id)!;
-    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey) });
+    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey), updatedAt: row.updatedAt });
   });
 
   app.delete('/api/providers/:id', (req, res) => {
-    if (!store.getProvider(req.params.id)) return res.status(404).json({ error: '供应商不存在' });
-    store.deleteProvider(req.params.id);
+    const existing = store.getProvider(req.params.id);
+    if (!existing) return res.status(404).json({ error: '供应商不存在' });
+    if (!Number.isSafeInteger(req.body?.expectedUpdatedAt)) return res.status(428).json({ error: '删除供应商前须携带读取到的 updatedAt 版本' });
+    try {
+      const expectedUpdatedAt = Number(req.body.expectedUpdatedAt);
+      store.deleteProvider(req.params.id, expectedUpdatedAt);
+    } catch (error) {
+      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '供应商已被其他写入者修改，请重新读取后再删除' });
+      throw error;
+    }
     refreshChatProviders(kernel, store);
     res.json({ ok: true });
   });
@@ -195,7 +276,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       if (!r.ok) {
         // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
         const error = `HTTP ${r.status}`;
-        if (pid) noteProviderFailure(pid, error);
+        if (pid) noteProviderFailure(pid, new LLMHttpError(r.status, error));
         return res.status(400).json({ ok: false, latencyMs, error, authFailed: isAuthError(error) });
       }
       await r.body?.cancel().catch(() => { /* 忽略 */ });
@@ -245,7 +326,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
         const meta = extractFromProviderMeta(m.raw);
         const caps = resolveCapabilities(m.id, pid, {}, meta);
         return {
-          id: m.id, label: m.label,
+          id: m.id, label: m.label, ...stableModelIdentity(pid, m.id),
           contextWindow: caps.contextWindow, maxOutput: caps.maxOutput,
           vision: caps.vision, tools: caps.tools, reasoning: caps.reasoning,
           priceIn: caps.priceIn, priceOut: caps.priceOut,
@@ -253,14 +334,12 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
         };
       });
       if (persist !== false && existingRow) {
-        for (const o of out) {
-          store.upsertModel({
+        store.upsertModels(out.map((o) => ({
             providerId: existingRow.id, modelId: o.id,
             contextWindow: o.contextWindow, maxOutput: o.maxOutput,
             vision: o.vision ? 1 : 0, tools: o.tools ? 1 : 0, reasoning: o.reasoning ? 1 : 0,
             priceIn: o.priceIn, priceOut: o.priceOut, source: o.source, enabled: 1,
-          });
-        }
+          })));
         refreshChatProviders(kernel, store);
       }
       res.json({ ok: true, protocol, count: out.length, models: out.slice(0, 500) });
@@ -272,7 +351,9 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   /** 已保存模型与能力（网页端展示/编辑） */
   app.get('/api/providers/:id/models', (req, res) => {
     if (!store.getProvider(req.params.id)) return res.status(404).json({ error: '供应商不存在' });
-    res.json({ models: store.listModels(req.params.id) });
+    res.json({ schemaVersion: MODEL_SCHEMA_VERSION, models: store.listModels(req.params.id).map((m) => ({
+      ...m, ...stableModelIdentity(m.providerId, m.modelId),
+    })) });
   });
 
   /** 手改单个模型的能力位/价格（modelId 走 query：模型名含 / : 等字符，不能进路径） */
@@ -283,18 +364,28 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     const prev = store.listModels(provider.id).find(m => m.modelId === modelId);
     if (!prev) return res.status(404).json({ error: '模型未登记，请先拉取模型列表' });
     const b = req.body ?? {};
-    store.upsertModel({
-      ...prev,
-      contextWindow: b.contextWindow === undefined ? prev.contextWindow : Number(b.contextWindow) || null,
-      maxOutput: b.maxOutput === undefined ? prev.maxOutput : Number(b.maxOutput) || null,
-      vision: b.vision === undefined ? prev.vision : (b.vision ? 1 : 0),
-      tools: b.tools === undefined ? prev.tools : (b.tools ? 1 : 0),
-      reasoning: b.reasoning === undefined ? prev.reasoning : (b.reasoning ? 1 : 0),
-      priceIn: b.priceIn === undefined ? prev.priceIn : Number(b.priceIn),
-      priceOut: b.priceOut === undefined ? prev.priceOut : Number(b.priceOut),
-      enabled: b.enabled === undefined ? prev.enabled : (b.enabled ? 1 : 0),
-      source: 'manual',
-    });
+    if (!Number.isSafeInteger(b.expectedUpdatedAt)) return res.status(428).json({ error: '更新模型画像前须携带读取到的 updatedAt 版本' });
+    try {
+      const expectedUpdatedAt = Number(b.expectedUpdatedAt);
+      store.updateModel({
+        ...prev,
+        contextWindow: b.contextWindow === undefined ? prev.contextWindow : Number(b.contextWindow) || null,
+        maxOutput: b.maxOutput === undefined ? prev.maxOutput : Number(b.maxOutput) || null,
+        vision: b.vision === undefined ? prev.vision : (b.vision ? 1 : 0),
+        tools: b.tools === undefined ? prev.tools : (b.tools ? 1 : 0),
+        reasoning: b.reasoning === undefined ? prev.reasoning : (b.reasoning ? 1 : 0),
+        priceIn: b.priceIn === undefined ? prev.priceIn : Number(b.priceIn),
+        priceOut: b.priceOut === undefined ? prev.priceOut : Number(b.priceOut),
+        enabled: b.enabled === undefined ? prev.enabled : (b.enabled ? 1 : 0),
+        source: 'manual',
+        latencyMs: b.latencyMs === undefined ? prev.latencyMs : Number(b.latencyMs) || null,
+        privacyTier: b.privacyTier === undefined ? prev.privacyTier : (['local', 'trusted', 'external'].includes(String(b.privacyTier)) ? b.privacyTier : null),
+        riskLevel: b.riskLevel === undefined ? prev.riskLevel : (['low', 'medium', 'high'].includes(String(b.riskLevel)) ? b.riskLevel : null),
+      }, expectedUpdatedAt);
+    } catch (error) {
+      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '模型画像已被其他写入者修改，请重新读取后再保存' });
+      throw error;
+    }
     refreshChatProviders(kernel, store);
     res.json({ ok: true });
   });
@@ -307,6 +398,8 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     res.json(chat.providers.flatMap((p) => {
       const list = p.models?.length ? p.models : [{ modelId: p.defaultModel, enabled: true, contextWindow: 0, maxOutput: 0, vision: false, tools: false, reasoning: false, priceIn: 0, priceOut: 0, source: 'inferred' }];
       return list.filter((m) => m.enabled).map((m) => ({
+        ...stableModelIdentity(p.id, m.modelId),
+        schemaVersion: MODEL_SCHEMA_VERSION,
         id: `${p.id}@${m.modelId}`,
         provider: p.id,
         label: p.label,

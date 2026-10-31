@@ -9,7 +9,7 @@ const SCALE = 120 / SHEEP_GRID;
 export default function BrandLogo({ size = 120 }: { size?: number }) {
   const maskId = 'mh-blog-eye';
   return (
-    <div className="brand-logo" style={{ width: size, height: size }} aria-label="maharness 品牌标志（负空间羊：羊毛 + M 角 + 光标眼）">
+    <div className="brand-logo" role="img" aria-label="maharness 品牌标志（负空间羊：羊毛 + M 角 + 光标眼）" style={{ width: size, height: size }}>
       <svg viewBox="0 0 120 120" width={size} height={size} fill="none">
         <defs>
           <linearGradient id="mh-ring" x1="0" y1="0" x2="1" y2="1">

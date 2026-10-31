@@ -5,6 +5,7 @@
  * （JSON body 解析、健康检查）；共享工具见 shared.ts，L3 缓存预热见 warmup.ts。
  */
 import express from 'express';
+import { existsSync, statfsSync } from 'node:fs';
 import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
 import type { Store } from '../db';
@@ -27,18 +28,86 @@ import { registerStatsRoutes } from './stats';
 import { registerApprovalRoutes } from './approvals';
 import { registerEventRoutes } from './events';
 import { registerCommandRoutes } from './commands';
+import { getChatService, SseConnectionLimiter } from './shared';
+import { activeRunCount } from '../index';
+import { activeWarmupCount } from './warmup';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
+
+export interface ReadinessChecks { kernel: boolean; database: boolean; providers: boolean; plugins: boolean; storage: boolean; }
+export interface ReadinessSnapshot { schemaVersion: 1; ok: boolean; checks: ReadinessChecks; }
+
+export const STORAGE_CAPACITY_THRESHOLDS = { warningFreePercent: 10, criticalFreePercent: 5 } as const;
+export type StorageStatus = 'ok' | 'warning' | 'critical' | 'unknown';
+export interface StorageSnapshot {
+  schemaVersion: 1;
+  ok: boolean;
+  status: StorageStatus;
+  totalBytes: number | null;
+  freeBytes: number | null;
+  freePercent: number | null;
+  thresholds: typeof STORAGE_CAPACITY_THRESHOLDS;
+}
+
+export function buildReadinessSnapshot(input: { providerCount: number; pluginErrors: number; database: boolean; storage?: boolean }): ReadinessSnapshot {
+  const checks: ReadinessChecks = { kernel: true, database: input.database, providers: input.providerCount > 0, plugins: input.pluginErrors === 0, storage: input.storage ?? true };
+  return { schemaVersion: 1, ok: Object.values(checks).every(Boolean), checks };
+}
+
+export function buildStorageSnapshot(totalBytes: number, freeBytes: number): StorageSnapshot {
+  if (!Number.isSafeInteger(totalBytes) || totalBytes <= 0
+    || !Number.isSafeInteger(freeBytes) || freeBytes < 0 || freeBytes > totalBytes) {
+    return { schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null, thresholds: STORAGE_CAPACITY_THRESHOLDS };
+  }
+  const freePercent = Math.round(freeBytes / totalBytes * 10_000) / 100;
+  const status: StorageStatus = freePercent <= STORAGE_CAPACITY_THRESHOLDS.criticalFreePercent
+    ? 'critical'
+    : freePercent <= STORAGE_CAPACITY_THRESHOLDS.warningFreePercent ? 'warning' : 'ok';
+  return { schemaVersion: 1, ok: status !== 'critical', status, totalBytes, freeBytes, freePercent, thresholds: STORAGE_CAPACITY_THRESHOLDS };
+}
+
+export function readStorageSnapshot(dataDir: string): StorageSnapshot {
+  try {
+    if (!existsSync(dataDir)) return { schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null, thresholds: STORAGE_CAPACITY_THRESHOLDS };
+    const stats = statfsSync(dataDir);
+    const totalBytes = Number(stats.blocks) * Number(stats.bsize);
+    const freeBytes = Number(stats.bavail) * Number(stats.bsize);
+    return buildStorageSnapshot(totalBytes, freeBytes);
+  } catch { return { schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null, thresholds: STORAGE_CAPACITY_THRESHOLDS }; }
+}
 
 export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker): void {
   app.use(express.json({ limit: '5mb' }));
 
-  const deps = { kernel, store, tracker };
+  const deps = {
+    kernel, store, tracker,
+    sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
+    activeRunCount: () => activeRunCount(),
+  };
 
   // ---------- 健康检查（M4 前置：bin 脚本据此校验进程身份/版本；无鉴权阻碍，只读无害） ----------
   app.get('/api/health', (_req, res) => {
     res.json({ ok: true, version: pkg.version, pid: process.pid });
   });
+
+  app.get('/api/ready', (_req, res) => {
+    const storage = readStorageSnapshot(kernel.paths.data);
+    const snapshot = buildReadinessSnapshot({ providerCount: store.listProviders().length, pluginErrors: kernel.plugins.list().filter((plugin) => plugin.state === 'error').length, database: true, storage: storage.status !== 'critical' && storage.status !== 'unknown' });
+    const chat = getChatService(kernel);
+    res.status(snapshot.ok ? 200 : 503).json({
+      ...snapshot,
+      resources: {
+        activeRuns: deps.activeRunCount(),
+        sseConnections: deps.sseLimiter?.size ?? 0,
+        pageConnections: tracker?.size ?? 0,
+        pendingApprovals: chat?.listApprovals().length ?? 0,
+        activeWarmups: activeWarmupCount(),
+        activeSubagentSlots: kernel.budget.activeSubagentCount(),
+      },
+    });
+  });
+
+  app.get('/api/storage', (_req, res) => res.json(readStorageSnapshot(kernel.paths.data)));
 
   registerProviderRoutes(app, deps);   // Provider 管理 + 模型列表
   registerPersonaRoutes(app, deps);    // 人设管理

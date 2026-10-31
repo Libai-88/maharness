@@ -16,12 +16,13 @@
  *    前端能显示「当前审批门已被策略整体放行」而不是靠 401/无审批反推。
  */
 import type { Express } from 'express';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
-import { join, resolve, dirname } from 'node:path';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { RouteDeps } from './shared';
 import { loadPolicyRules } from '../../kernel/rules';
 import type { PolicyRule } from '../../kernel/rules';
+import { atomicWriteFileSync, ConcurrentWriteError, fileRevisionSync } from '../../kernel/atomic-file';
 
 interface RulesService {
   sources: () => { scope: 'global' | 'project'; file: string; exists: boolean; chars: number }[];
@@ -79,11 +80,14 @@ export function policyPosture(kernel: RouteDeps['kernel']): {
   }
 }
 
-function atomicWrite(file: string, content: string): void {
-  mkdirSync(dirname(file), { recursive: true });
-  const tmp = `${file}.tmp`;
-  writeFileSync(tmp, content, 'utf8');
-  try { writeFileSync(file, content, 'utf8'); } finally { try { rmSync(tmp, { force: true }); } catch { /* 忽略 */ } }
+function atomicWrite(file: string, content: string, expectedRevision?: string): void {
+  atomicWriteFileSync(file, content, { expectedRevision });
+}
+
+function concurrentRuleWrite(res: { status: (code: number) => { json: (body: unknown) => unknown } }, error: unknown): boolean {
+  if (!(error instanceof ConcurrentWriteError)) return false;
+  res.status(409).json({ error: '规则文件已被其他写入者修改，请重新读取后再保存' });
+  return true;
 }
 
 export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
@@ -100,19 +104,28 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     const s = svc();
     if (!s) return res.status(503).json({ error: 'rules 插件未加载' });
     const p = s.paths();
-    const globalFiles = existsSync(p.globalDir)
-      ? readdirSync(p.globalDir).filter(f => f.endsWith('.md')).map(f => ({
+    const globalNames = existsSync(p.globalDir) ? readdirSync(p.globalDir).filter(f => f.endsWith('.md')) : [];
+    const globalFiles = globalNames.map(f => ({
         name: f,
         content: (() => { try { return readFileSync(join(p.globalDir, f), 'utf-8'); } catch { return ''; } })(),
-      }))
-      : [];
+        revision: fileRevisionSync(join(p.globalDir, f)),
+      }));
     const projectFiles = s.sources().filter(x => x.scope === 'project' && x.exists).map(x => ({
       name: x.file,
       content: (() => { try { return readFileSync(x.file, 'utf-8'); } catch { return ''; } })(),
+      revision: fileRevisionSync(x.file),
     }));
     res.json({
       paths: p,
       policy: s.policy(),
+      policyRevisions: {
+        global: fileRevisionSync(p.globalPolicy),
+        project: fileRevisionSync(join(p.projectRoot, '.maharness', 'rules.json')),
+      },
+      ruleFileRevisions: {
+        global: Object.fromEntries([...globalNames, 'maharness.md', 'new-rule.md'].map((name) => [name, fileRevisionSync(join(p.globalDir, name))])),
+        project: Object.fromEntries(['AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md', '.agents/AGENTS.md'].map((name) => [name, fileRevisionSync(join(p.projectRoot, name))])),
+      },
       policyFiles: [p.globalPolicy, join(p.projectRoot, '.maharness', 'rules.json')].filter(f => existsSync(f)),
       errors: s.errors(),
       globalFiles,
@@ -131,9 +144,13 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     if (content.length > 200_000) return res.status(400).json({ error: '单文件超过 200k 字符' });
     const file = join(s.paths().globalDir, name);
     if (!within(file, s.paths().globalDir)) return res.status(400).json({ error: '路径越界' });
-    atomicWrite(file, content);
+    const revision = typeof req.body?.revision === 'string' ? req.body.revision : undefined;
+    if (!revision) return res.status(428).json({ error: '保存规则前须携带读取到的文件版本' });
+    if (revision !== fileRevisionSync(file)) return res.status(409).json({ error: '规则文件已被其他写入者修改，请重新读取后再保存' });
+    try { atomicWrite(file, content, revision); }
+    catch (error) { if (concurrentRuleWrite(res, error)) return; throw error; }
     s.reload();
-    res.json({ ok: true, file });
+    res.json({ ok: true, file, revision: fileRevisionSync(file) });
   });
 
   // 写项目规则文件（只允许 AGENTS.md / CLAUDE.md / .maharness/rules/*.md）
@@ -149,9 +166,13 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     if (!within(file, root)) return res.status(400).json({ error: '路径越界' });
     const content = String(req.body?.content ?? '');
     if (content.length > 200_000) return res.status(400).json({ error: '单文件超过 200k 字符' });
-    atomicWrite(file, content);
+    const revision = typeof req.body?.revision === 'string' ? req.body.revision : undefined;
+    if (!revision) return res.status(428).json({ error: '保存规则前须携带读取到的文件版本' });
+    if (revision !== fileRevisionSync(file)) return res.status(409).json({ error: '规则文件已被其他写入者修改，请重新读取后再保存' });
+    try { atomicWrite(file, content, revision); }
+    catch (error) { if (concurrentRuleWrite(res, error)) return; throw error; }
     s.reload();
-    res.json({ ok: true, file: rel });
+    res.json({ ok: true, file: rel, revision: fileRevisionSync(file) });
   });
 
   // 策略规则：整表写入（scope=global → data/rules.json；project → <workspace>/.maharness/rules.json）
@@ -181,11 +202,15 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     const p = s.paths();
     const file = scope === 'project' ? join(p.projectRoot, '.maharness', 'rules.json') : p.globalPolicy;
     if (scope === 'project' && !within(file, p.projectRoot)) return res.status(400).json({ error: '路径越界' });
+    const expectedRevision = typeof req.body?.revision === 'string' ? req.body.revision : undefined;
+    if (!expectedRevision) return res.status(428).json({ error: '保存策略前须携带读取到的文件版本' });
+    if (expectedRevision !== fileRevisionSync(file)) return res.status(409).json({ error: '策略文件已被其他写入者修改，请重新读取后再保存' });
     const check = loadPolicyRules([file]);
-    atomicWrite(file, JSON.stringify({ rules: cleaned }, null, 2));
+    try { atomicWrite(file, JSON.stringify({ rules: cleaned }, null, 2), expectedRevision); }
+    catch (error) { if (concurrentRuleWrite(res, error)) return; throw error; }
     const after = loadPolicyRules([file]);
     if (after.errors.length) {
-      atomicWrite(file, JSON.stringify({ rules: check.rules }, null, 2));
+      atomicWrite(file, JSON.stringify({ rules: check.rules }, null, 2), fileRevisionSync(file));
       return res.status(400).json({ error: `写入后校验失败，已回滚: ${after.errors.join('; ')}` });
     }
     s.reload();
@@ -194,7 +219,7 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
       console.warn(`[rules] 已写入通配 allow 策略（${blanket.map((r) => r.tool).join(', ')}）→ ${file}：全部工具的审批门已被整体放行`);
     }
     res.json({
-      ok: true, file, count: cleaned.length,
+      ok: true, file, count: cleaned.length, revision: fileRevisionSync(file),
       // 前端据此出横幅：策略已把审批门整体放行（不写进响应就没人知道）
       blanketAllow: blanket.length ? blanket.map((r) => ({ id: r.id, tool: r.tool })) : undefined,
     });

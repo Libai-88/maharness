@@ -12,7 +12,7 @@ import { spawn } from 'node:child_process';
 import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
 import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
-import { walkFiles, matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol } from '../../kernel/fssearch';
+import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/fssearch';
 import type { EditOp } from '../../kernel/fssearch';
 
 export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
@@ -34,7 +34,7 @@ function invalidateFileCaches(tctx: ToolContext): void {
 function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown): unknown {
   const hit = cache.l2Get(key);
   if (hit.hit) {
-    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheKey: key }).finish({ outputSummary: '工具结果缓存命中' });
+    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key }).finish({ outputSummary: '工具结果缓存命中' });
     return hit.value;
   }
   const value = load();
@@ -84,8 +84,12 @@ function hasRipgrep(): Promise<boolean> {
 
 interface RgOut { matches: { file: string; line: number; text: string }[]; files: string[]; truncated: boolean }
 
-function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean; ignoreCase?: boolean; glob?: string; path?: string; limit: number }, signal?: AbortSignal): Promise<RgOut | null> {
-  return new Promise((resolveP) => {
+export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean; ignoreCase?: boolean; glob?: string; path?: string; limit: number }, signal?: AbortSignal): Promise<RgOut | null> {
+  return new Promise((resolveP, rejectP) => {
+    if (signal?.aborted) {
+      rejectP(signal.reason instanceof Error ? signal.reason : new Error('搜索已取消'));
+      return;
+    }
     const argv = ['--json', '--max-columns', '400', '--no-messages'];
     if (opts.ignoreCase) argv.push('-i');
     if (opts.literal) argv.push('-F');
@@ -96,8 +100,12 @@ function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean;
       child = spawn('rg', argv, { cwd: rootAbs, windowsHide: true, signal });
     } catch { resolveP(null); return; }
     let buf = '';
+    let spawnError: Error | undefined;
     const out: RgOut = { matches: [], files: [], truncated: false };
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* 忽略 */ } }, 20_000);
+    const timer = setTimeout(() => {
+      out.truncated = true;
+      try { child.kill(); } catch { /* 忽略 */ }
+    }, 20_000);
     child.stdout.on('data', (d: Buffer) => {
       buf += d.toString('utf8');
       let nl;
@@ -115,9 +123,15 @@ function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean;
         } catch { /* 非 JSON 行忽略 */ }
       }
     });
-    child.on('error', () => { clearTimeout(timer); resolveP(null); });
+    child.on('error', (err) => { spawnError = err; });
     child.on('close', (code) => {
       clearTimeout(timer);
+      if (signal?.aborted) {
+        rejectP(signal.reason instanceof Error ? signal.reason : new Error('搜索已取消'));
+        return;
+      }
+      if (spawnError) { resolveP(null); return; }
+      if (out.truncated && code !== 0 && code !== 1) { resolveP(out); return; }
       if (code === 1 && out.matches.length === 0) { resolveP(out); return; }   // 正常「无匹配」
       if (code === 0 || out.truncated || out.matches.length) { resolveP(out); return; }
       resolveP(null);                                                          // 异常/参数不支持 → 回落 JS
@@ -199,7 +213,7 @@ export default {
           if (!existsSync(dir)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, dir) || '.'}` };
           const st = statSync(dir);
           if (!st.isDirectory()) return { ok: false, error: '目标不是目录' };
-          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), String(st.mtimeMs), String(st.size)]);
+          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)]);
           const result = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
             return readdirSync(dir, { withFileTypes: true }).map((e) => {
               const full = resolve(dir, e.name);
@@ -248,10 +262,12 @@ export default {
           const offset = Math.max(1, Math.floor(Number(args.offset) || 1));
           const limit = Math.min(20_000, Math.max(1, Math.floor(Number(args.limit) || DEFAULT_READ_LINES)));
           const lineNumbers = args.lineNumbers === true;
-          const key = tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), String(st.mtimeMs), String(st.size), String(offset), String(limit), lineNumbers ? 'n' : '']);
-          const hit = tctx.cache.l2Get(key);
+          const fingerprint = fileFingerprint(file, 2_000_000);
+          const key = fingerprint === undefined ? ''
+            : tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), fingerprint, String(offset), String(limit), lineNumbers ? 'n' : '']);
+          const hit = key ? tctx.cache.l2Get(key) : { hit: false };
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '文件读取缓存命中' });
             return { ok: true, data: hit.value as ReadResult };
           }
@@ -265,7 +281,7 @@ export default {
             truncated: s.nextOffset ? true : undefined,
             totalLines: s.totalLines, startLine: s.startLine, endLine: s.endLine, nextOffset: s.nextOffset,
           };
-          tctx.cache.l2Set(key, result);
+          if (key) tctx.cache.l2Set(key, result);
           return { ok: true, data: result };
         },
       },
@@ -295,17 +311,27 @@ export default {
           const rootAbs = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.limit) || 200)));
-          const key = tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit)]);
-          const data = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
-            const { hits, truncated } = walkFiles(rootAbs, { maxFiles: 20_000, maxMs: 8_000, accept: rel => matchesGlob(rel, pattern) });
-            const sorted = hits.sort((a, b) => a.rel.localeCompare(b.rel));
+          const snapshot = treeFingerprint(rootAbs, { accept: rel => matchesGlob(rel, pattern), maxFiles: 20_000, maxMs: 8_000 });
+          const key = snapshot.complete
+            ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint])
+            : '';
+          const data = key ? cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
+            const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
             return {
               matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size })),
               total: sorted.length,
-              truncated: truncated || sorted.length > limit,
+              truncated: sorted.length >= 20_000 || sorted.length > limit,
               root: relative(tctx.sandboxRoot, rootAbs) || '.',
             };
-          });
+          }) : (() => {
+            const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
+            return {
+              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size })),
+              total: sorted.length,
+              truncated: !snapshot.complete || sorted.length > limit,
+              root: relative(tctx.sandboxRoot, rootAbs) || '.',
+            };
+          })();
           return { ok: true, data };
         },
       },
@@ -340,10 +366,20 @@ export default {
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.maxResults) || 200)));
           const ctxLines = Math.max(0, Math.min(5, Math.floor(Number(args.contextLines) || 0)));
-          const key = tctx.cache.makeKey(['grep', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, args.glob ?? '', args.ignoreCase ? 'i' : '', args.literal ? 'F' : '', String(ctxLines), String(limit)]);
-          const cached = tctx.cache.l2Get(key);
+          const snapshot = treeFingerprint(rootAbs, {
+            accept: rel => !args.glob || matchesGlob(rel, args.glob),
+            maxFiles: 30_000,
+            maxMs: 15_000,
+            includeContent: true,
+            maxContentBytes: 2_000_000,
+            maxTotalContentBytes: 8_000_000,
+          });
+          const key = snapshot.complete && snapshot.contentComplete
+            ? tctx.cache.makeKey(['grep', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, args.glob ?? '', args.ignoreCase ? 'i' : '', args.literal ? 'F' : '', String(ctxLines), String(limit), snapshot.fingerprint])
+            : '';
+          const cached = key ? tctx.cache.l2Get(key) : { hit: false };
           if (cached.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key }).finish({ outputSummary: '搜索结果缓存命中' });
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key }).finish({ outputSummary: '搜索结果缓存命中' });
             return { ok: true, data: cached.value };
           }
           const opts = { pattern, glob: args.glob, ignoreCase: args.ignoreCase, literal: args.literal };
@@ -360,7 +396,7 @@ export default {
             if (r.error) return { ok: false, error: r.error };
             data = { ...r, engine: 'js' };
           }
-          tctx.cache.l2Set(key, data);
+          if (key) tctx.cache.l2Set(key, data);
           return { ok: true, data };
         },
       },

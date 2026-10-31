@@ -19,7 +19,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
   isPrivateAddress, ipv4ToNumber, ipv6ToGroups, embeddedIpv4, isReservedIpv4,
-  assertPublicUrl, fetchDoc,
+  assertPublicUrl, fetchDoc, validateSearchProxy, getSearchDispatcher,
 } from '../index';
 
 const ENV_KEY = 'AGENT_ALLOW_PRIVATE_URLS';
@@ -179,6 +179,99 @@ describe('A3 URL 级拦截（web_fetch 真正走的入口 assertPublicUrl）', (
     } finally {
       delete process.env[ENV_KEY];
     }
+  });
+});
+
+describe('A3④ web_fetch DNS 钉扎', () => {
+  it('单次解析结果用于真实 socket 连接；任意网页抓取不经过 SEARCH_PROXY', async () => {
+    const hits: string[] = [];
+    const server = createServer((req, res) => {
+      hits.push(req.url ?? '/');
+      if (req.url === '/redirect') {
+        res.writeHead(302, { Location: `http://target.example.test:${(server.address() as AddressInfo).port}/ok` });
+        res.end();
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('pinned response');
+    });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    server.unref();
+    const port = (server.address() as AddressInfo).port;
+    const lookups: string[] = [];
+    const previousPrivate = process.env[ENV_KEY];
+    const previousProxy = process.env.SEARCH_PROXY;
+    process.env[ENV_KEY] = '1';
+    process.env.SEARCH_PROXY = 'http://127.0.0.1:1';
+    try {
+      const doc = await fetchDoc(`http://first.example.test:${port}/redirect`, undefined, undefined, {
+        resolveAddresses: async (hostname) => {
+          lookups.push(hostname);
+          return [{ address: '127.0.0.1', family: 4 }];
+        },
+      });
+      assert.equal(doc.body, 'pinned response');
+      assert.equal(doc.redirected, 1);
+      assert.deepEqual(lookups, ['first.example.test', 'target.example.test']);
+      assert.deepEqual(hits, ['/redirect', '/ok']);
+    } finally {
+      if (previousPrivate === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = previousPrivate;
+      if (previousProxy === undefined) delete process.env.SEARCH_PROXY;
+      else process.env.SEARCH_PROXY = previousProxy;
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+
+  it('DNS 答案混有公网和私网时 fail-closed 且不连接', async () => {
+    let hits = 0;
+    const server = createServer((_req, res) => { hits++; res.end('must not connect'); });
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    server.unref();
+    const port = (server.address() as AddressInfo).port;
+    try {
+      await assert.rejects(
+        () => fetchDoc(`http://mixed.example.test:${port}/`, undefined, undefined, {
+          resolveAddresses: async () => [
+            { address: '8.8.8.8', family: 4 },
+            { address: '127.0.0.1', family: 4 },
+          ],
+        }),
+        /解析到内网/,
+      );
+      assert.equal(hits, 0);
+    } finally {
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    }
+  });
+});
+
+describe('SEC-02 SEARCH_PROXY 可信配置边界', () => {
+  const previousProxy = process.env.SEARCH_PROXY;
+  after(() => {
+    if (previousProxy === undefined) delete process.env.SEARCH_PROXY;
+    else process.env.SEARCH_PROXY = previousProxy;
+    getSearchDispatcher();
+  });
+
+  it('只接受无凭据的 http/https 代理 URL', () => {
+    assert.equal(validateSearchProxy('http://127.0.0.1:7897').protocol, 'http:');
+    assert.equal(validateSearchProxy('https://proxy.example.test').hostname, 'proxy.example.test');
+    for (const value of ['file:///tmp/proxy', 'socks5://127.0.0.1:1080', 'http://user:pass@proxy.test', 'http://proxy.test/?token=x', 'not-a-url']) {
+      assert.throws(() => validateSearchProxy(value), /SEARCH_PROXY/);
+    }
+  });
+
+  it('代理配置变化时关闭并丢弃旧 dispatcher，清空后回到直连', () => {
+    process.env.SEARCH_PROXY = 'http://127.0.0.1:7897';
+    const first = getSearchDispatcher();
+    assert.ok(first);
+    process.env.SEARCH_PROXY = 'http://127.0.0.1:7898';
+    const second = getSearchDispatcher();
+    assert.ok(second);
+    assert.notEqual(second, first);
+    delete process.env.SEARCH_PROXY;
+    assert.equal(getSearchDispatcher(), undefined);
   });
 });
 

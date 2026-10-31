@@ -250,7 +250,7 @@ export class Cache {
     try {
       if (!existsSync(this.persistFile)) return;
       const raw = readFileSync(this.persistFile, 'utf8');
-      let data: { l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; expiresAt: number; hits: number }[] };
+      let data: { v?: number; l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; expiresAt: number; hits: number }[] };
       try {
         data = JSON.parse(raw) as typeof data;
       } catch {
@@ -263,6 +263,12 @@ export class Cache {
           console.warn('[cache] 缓存文件损坏且无备份，从空缓存开始');
           return;
         }
+      }
+      // Cache keys and entry metadata are versioned together. Unknown formats
+      // cold-start instead of risking a cross-version false hit.
+      if (data.v !== 2) {
+        console.warn(`[cache] 忽略不兼容的缓存 schema v${String(data.v ?? 'unknown')}，从空缓存开始`);
+        return;
       }
       const now = Date.now();
       let l1Restored = 0, l2Restored = 0, l1Skipped = 0, l2Skipped = 0;

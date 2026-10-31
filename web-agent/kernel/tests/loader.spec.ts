@@ -192,6 +192,22 @@ describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
     assert.ok((inst?.error ?? '').includes('缺少依赖'), '错误信息可诊断');
     assert.equal(f.kernel.plugins.get('ok-plugin')?.state, 'started', '其余插件正常启动');
   });
+
+  test('重复插件 id 产生结构化 conflict 诊断', async (t) => {
+    const f = setup({ duplicate: `` });
+    t.after(f.cleanup);
+    const duplicateDir = join(f.userPluginsDir, 'duplicate-copy');
+    mkdirSync(duplicateDir, { recursive: true });
+    writeFileSync(join(duplicateDir, 'plugin.json'), JSON.stringify({
+      id: 'duplicate', name: 'duplicate-copy', version: '0.1.0', entry: 'index.ts',
+    }));
+    writeFileSync(join(duplicateDir, 'index.ts'), `export default { id: 'duplicate', name: 'duplicate-copy', version: '0.1.0' };`);
+    await f.kernel.plugins.loadAll();
+    const diagnostic = f.kernel.plugins.diagnostics().find((d) => d.kind === 'conflict' && d.id === 'duplicate');
+    assert.ok(diagnostic, '重复 id 应进入结构化诊断');
+    assert.match(diagnostic!.message, /插件 id 冲突/);
+    assert.match(diagnostic!.suggestion ?? '', /唯一值/);
+  });
 });
 
 describe('PluginLoader enable/disable 生命周期', () => {
@@ -274,6 +290,73 @@ describe('PluginLoader 配置 schema 校验（v3.2）', () => {
     const inst = f.kernel.plugins.get('mycfg')!;
     assert.equal(inst.state, 'error', '配置不合规时进入 error 态');
     assert.ok(inst.error?.includes('配置校验失败'), `错误信息含配置校验失败（实际: ${inst.error}）`);
+  });
+});
+
+describe('PluginLoader capability 权限白名单', () => {
+  test('声明的 capability/name 可注册并启动', async (t) => {
+    const f = setup({
+      allowed: `ctx.register({ kind: 'tool', tool: { name: 'safe_read', description: 'read', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });`,
+    }, { allowed: { permissions: { capabilities: { tool: ['safe_read'] } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('allowed')?.state, 'started');
+    assert.deepEqual(f.kernel.plugins.capabilities('tool').map((c) => c.tool.name).filter((name) => name === 'safe_read'), ['safe_read']);
+  });
+
+  test('未声明的 capability/name 拒绝注册、发审计事件并回收插件效应', async (t) => {
+    const f = setup({
+      denied: `ctx.on('probe', () => {}); ctx.register({ kind: 'tool', tool: { name: 'delete_data', description: 'delete', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });`,
+    }, { denied: { permissions: { capabilities: { tool: ['safe_read'] } } } });
+    t.after(f.cleanup);
+    const events: { pluginId?: string; kind?: string; name?: string; reason?: string }[] = [];
+    f.kernel.bus.on('plugin.permission.denied', (event) => events.push(event.data as typeof events[number]));
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('denied'), undefined, '越权注册失败后不保留实例');
+    assert.equal(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'delete_data'), false);
+    assert.deepEqual(events.map(({ pluginId, kind, name }) => ({ pluginId, kind, name })), [
+      { pluginId: 'denied', kind: 'tool', name: 'delete_data' },
+    ]);
+    const entries = (f.kernel.bus as unknown as { entries: { pattern: string }[] }).entries;
+    assert.equal(entries.filter((entry) => entry.pattern === 'probe').length, 0, '失败插件已登记 listener 被清理');
+  });
+
+  test('permissions 格式错误时插件不加载', async (t) => {
+    const f = setup({ malformed: '' }, { malformed: { permissions: { capabilities: { tool: 'read' } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('malformed'), undefined);
+  });
+
+  test('未声明 permissions 的旧插件继续在 trusted 兼容模式加载', async (t) => {
+    const f = setup({ legacy: `ctx.register({ kind: 'tool', tool: { name: 'legacy_tool', description: 'legacy', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });` });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('legacy')?.state, 'started');
+    assert.ok(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'legacy_tool'));
+  });
+});
+
+describe('PluginLoader manifest API 兼容范围', () => {
+  test('当前 API 在声明范围内时插件正常加载', async (t) => {
+    const f = setup({ compatible: '' }, { compatible: { compatibility: { api: { min: '1.0.0', max: '1.2.0' } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('compatible')?.state, 'started');
+  });
+
+  test('当前 API 不在声明范围内时拒绝加载并清理 registry', async (t) => {
+    const f = setup({ incompatible: '' }, { incompatible: { compatibility: { api: { min: '2.0.0' } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('incompatible'), undefined);
+  });
+
+  test('兼容范围格式错误时拒绝加载', async (t) => {
+    const f = setup({ malformedCompat: '' }, { malformedCompat: { compatibility: { api: { min: '1.0' } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('malformedCompat'), undefined);
   });
 });
 
@@ -390,5 +473,55 @@ describe('卸载（v8）', () => {
       /不存在/,
       '不存在的插件应抛错',
     );
+  });
+
+  test('插件来源边界：user 插件受 watcher，core 插件明确标记为非 watcher', async (t) => {
+    const f = setup({ live: `` });
+    t.after(f.cleanup);
+    const coreDir = join(f.rootDir, 'core');
+    const corePluginDir = join(coreDir, 'builtin');
+    mkdirSync(corePluginDir, { recursive: true });
+    writeFileSync(join(corePluginDir, 'plugin.json'), JSON.stringify({
+      id: 'builtin', name: 'builtin', version: '0.1.0', entry: 'index.ts',
+    }));
+    writeFileSync(join(corePluginDir, 'index.ts'), `export default { id: 'builtin', name: 'builtin', version: '0.1.0' };`);
+    const isolated = new Kernel(f.rootDir, {}, { dataDir: join(f.rootDir, 'data-2'), userPluginsDir: f.userPluginsDir, corePluginsDir: coreDir });
+    try {
+      await isolated.plugins.loadAll();
+      const states = new Map(isolated.plugins.list().map((p) => [p.manifest.id, p.watched]));
+      assert.equal(states.get('live'), true);
+      assert.equal(states.get('builtin'), false);
+    } finally {
+      await isolated.stop();
+    }
+  });
+
+  test('来源 watcher 行为：用户插件保存自动重载，core 保存不自动重载', async (t) => {
+    const rootDir = mkdtempSync(join(tmpdir(), 'mh-watcher-'));
+    const userPluginsDir = join(rootDir, 'plugins');
+    const corePluginsDir = join(rootDir, 'core');
+    mkdirSync(join(userPluginsDir, 'live'), { recursive: true });
+    mkdirSync(join(corePluginsDir, 'builtin'), { recursive: true });
+    const writePlugin = (dir: string, id: string, tool: string) => {
+      writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', entry: 'index.ts' }));
+      writeFileSync(join(dir, 'index.ts'), `export default { id: '${id}', name: '${id}', version: '0.1.0', onLoad(ctx) { ctx.register({ kind: 'tool', tool: { name: '${tool}', description: 'probe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true }) } }); } };`);
+    };
+    writePlugin(join(userPluginsDir, 'live'), 'live', 'watch_v1');
+    writePlugin(join(corePluginsDir, 'builtin'), 'builtin', 'core_v1');
+    const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir, corePluginsDir });
+    t.after(async () => { await kernel.stop(); rmSync(rootDir, { recursive: true, force: true }); });
+    await kernel.start();
+    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v1'));
+    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v1'));
+    writePlugin(join(userPluginsDir, 'live'), 'live', 'watch_v2');
+    const deadline = Date.now() + 4_000;
+    while (Date.now() < deadline && !kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v2')) {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v2'), '用户插件保存后应自动热重载');
+    writePlugin(join(corePluginsDir, 'builtin'), 'builtin', 'core_v2');
+    await new Promise((resolve) => setTimeout(resolve, 700));
+    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v1'), 'core 修改不应触发 watcher 热重载');
+    assert.equal(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v2'), false);
   });
 });

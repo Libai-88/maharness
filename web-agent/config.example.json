@@ -33,6 +33,15 @@
     "subagentMaxTotal": 8
   },
 
+  "provider": {
+    "circuitBreakerThreshold": 3,
+    "circuitBreakerResetMs": 60000
+  },
+
+  "checkpoint": {
+    "retentionDays": 30
+  },
+
   "tools": {
     "writeRequiresApproval": false
   },

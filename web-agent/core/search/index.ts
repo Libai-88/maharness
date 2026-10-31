@@ -1,10 +1,10 @@
 /**
  * core/search/index.ts —— 联网搜索插件
  * 默认 DuckDuckGo HTML 搜索（零配置开箱可用）；配置 TAVILY_API_KEY 后走 Tavily（更稳定）。
- * SEARCH_PROXY 可指定 HTTP 代理（网络受限环境，经 undici ProxyAgent 实现）。
+ * SEARCH_PROXY 可代理固定的搜索服务请求；用户提供的抓取 URL 使用直连 DNS pinning。
  * L2 缓存：按「查询词 + max_results」缓存 10 分钟，重复问题零成本。
  */
-import { ProxyAgent, fetch as undiciFetch, type Response as UndiciResponse } from 'undici';
+import { Agent, ProxyAgent, fetch as undiciFetch, type Response as UndiciResponse } from 'undici';
 import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
 import type { Plugin, ToolContext } from '../../kernel/types';
@@ -17,14 +17,45 @@ interface SearchResult {
   snippet: string;
 }
 
-/** 可选代理：搜索请求走 HTTP 代理（如 http://127.0.0.1:7897），直连受限时使用
+/** 可选代理：固定搜索服务请求走 HTTP 代理（如 http://127.0.0.1:7897），直连受限时使用
  *  注意：必须用 undici 自带的 fetch + ProxyAgent（Node 全局 fetch 与其内嵌旧版 undici 不兼容）
  *  v3.1 惰性化：不再做模块顶层常量——SEARCH_PROXY 变更后（.env 热更新）无需 reload 也取新值；
  *  按 proxy 值缓存实例（同值复用，避免每次创建）。 */
 const dispatchers = new Map<string, import('undici').Dispatcher>();
-function getDispatcher(): import('undici').Dispatcher | undefined {
+let activeProxy: string | undefined;
+
+/** SEARCH_PROXY 是部署信任边界：只接受明确的 HTTP(S) 代理端点，不允许
+ * 把凭据、查询参数或片段混入连接配置，避免日志/错误链路意外携带秘密。 */
+export function validateSearchProxy(value: string): URL {
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error('SEARCH_PROXY 必须是合法的 http/https URL'); }
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    throw new Error('SEARCH_PROXY 仅支持 http/https 代理');
+  }
+  if (!url.hostname || url.username || url.password || url.search || url.hash) {
+    throw new Error('SEARCH_PROXY 不得包含凭据、查询参数或片段');
+  }
+  return url;
+}
+
+export function getSearchDispatcher(): import('undici').Dispatcher | undefined {
   const proxy = process.env.SEARCH_PROXY;
-  if (!proxy) return undefined;
+  if (!proxy) {
+    for (const dispatcher of dispatchers.values()) void dispatcher.close().catch(() => undefined);
+    dispatchers.clear();
+    activeProxy = undefined;
+    return undefined;
+  }
+  validateSearchProxy(proxy);
+  if (activeProxy !== proxy) {
+    for (const [key, dispatcher] of dispatchers) {
+      if (key !== proxy) {
+        void dispatcher.close().catch(() => undefined);
+        dispatchers.delete(key);
+      }
+    }
+    activeProxy = proxy;
+  }
   let d = dispatchers.get(proxy);
   if (!d) {
     d = new ProxyAgent(proxy);
@@ -215,28 +246,40 @@ const V4_RESERVED: readonly (readonly [number, number])[] = [
   [0xf000_0000, 4],  // 240.0.0.0/4   保留（含 255.255.255.255）
 ];
 
-/** 仅 http/https、拒绝解析到内网（AGENT_ALLOW_PRIVATE_URLS=1 放行本机 Ollama 等）。
- *  ⚠ TOCTOU 窗口仍在：这里解析一次、下面 fetch 连接时又解析一次，未做 IP 钉扎
- *  （钉扎需 undici connector/lookup 定制，列为后续项）。攻击者域名在两次解析之间
- *  把 A 记录切到内网 IP 即可绕过；重定向那一侧已做到逐跳复检（见 fetchDoc）。 */
+/** 校验 URL 并返回同一次 DNS 查询结果；fetchDoc 将该地址集合传给 socket lookup。 */
 export async function assertPublicUrl(raw: string): Promise<URL> {
+  return (await resolvePublicTarget(raw)).url;
+}
+
+type ResolvedAddress = { address: string; family: number };
+
+async function resolvePublicTarget(
+  raw: string,
+  resolver: (hostname: string) => Promise<ResolvedAddress[]> = (hostname) => dnsLookup(hostname, { all: true }),
+): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error('URL 不合法'); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`仅支持 http/https（当前 ${u.protocol}）`);
-  if (process.env.AGENT_ALLOW_PRIVATE_URLS === '1') return u;
+  if (process.env.AGENT_ALLOW_PRIVATE_URLS === '1') {
+    const host = stripBrackets(u.hostname);
+    if (!host) throw new Error('URL 缺少主机名');
+    const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await resolver(host);
+    if (!addresses.length) throw new Error('域名无法解析');
+    return { url: u, addresses };
+  }
   const host = stripBrackets(u.hostname);
   if (!host) throw new Error('URL 缺少主机名');
   if (isIP(host)) {
     if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址');
-    return u;
+    return { url: u, addresses: [{ address: host, family: isIP(host) }] };
   }
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
     throw new Error('拒绝访问内网主机名');
   }
-  const recs = await dnsLookup(host, { all: true });
+  const recs = await resolver(host);
   if (recs.length === 0) throw new Error('域名无法解析');
   if (recs.some(r => isPrivateAddress(r.address))) throw new Error('域名解析到内网地址（SSRF 拦截）');
-  return u;
+  return { url: u, addresses: recs };
 }
 
 interface FetchedDoc { finalUrl: string; contentType: string; body: string; bytes: number; redirected: number }
@@ -266,50 +309,76 @@ async function readBodyCapped(res: UndiciResponse, limit: number, onOverLimit: (
   return Buffer.concat(chunks, total);
 }
 
-/** 手动跟随重定向：每一跳都重新做 SSRF 校验（防 302 跳内网）
+/** 手动跟随重定向：每一跳都重新做 SSRF 校验和 DNS pinning（防 302 跳内网）
  *  maxBytes 默认取 FETCH_MAX_BYTES，留出可注入余量便于测试体积上限。 */
-export async function fetchDoc(url: string, signal?: AbortSignal, maxBytes = FETCH_MAX_BYTES): Promise<FetchedDoc> {
+export async function fetchDoc(
+  url: string,
+  signal?: AbortSignal,
+  maxBytes = FETCH_MAX_BYTES,
+  deps: { resolveAddresses?: (hostname: string) => Promise<ResolvedAddress[]> } = {},
+): Promise<FetchedDoc> {
   let current = url;
   let hops = 0;
   for (;;) {
-    const u = await assertPublicUrl(current);
-    const dispatcher = getDispatcher();
+    const target = await resolvePublicTarget(current, deps.resolveAddresses);
+    const u = target.url;
+    const addressSet = new Set(target.addresses.map(({ address }) => address));
+    // Arbitrary destinations stay direct so the validated IP is the socket peer;
+    // SEARCH_PROXY is reserved for the fixed search-provider endpoints below.
+    const dispatcher = new Agent({
+      connect: {
+        lookup: (hostname, options, callback) => {
+          if (hostname !== u.hostname || !addressSet.size) {
+            callback(new Error('连接主机与已校验主机不一致'), '', 0);
+            return;
+          }
+          if (options.all) callback(null, target.addresses);
+          else callback(null, target.addresses[0]!.address, target.addresses[0]!.family);
+        },
+      },
+    });
     // 本跳专属的中止控制器：体积超限时用它主动断连（readBodyCapped 的 onOverLimit）
     const limitCtrl = new AbortController();
     const signals: AbortSignal[] = [AbortSignal.timeout(20000), limitCtrl.signal];
     if (signal) signals.push(signal);
-    const res = await undiciFetch(u, {
-      headers: { 'User-Agent': DDG_UA, Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8' },
-      redirect: 'manual',
-      signal: AbortSignal.any(signals),
-      ...(dispatcher ? { dispatcher } : {}),
-    });
-    if ([301, 302, 303, 307, 308].includes(res.status)) {
-      const loc = res.headers.get('location');
-      // 跳转响应的正文不解析也要释放，否则连接悬挂（undici 不会替我们丢弃未读 body）
-      await res.body?.cancel().catch(() => { /* 忽略 */ });
-      if (!loc) throw new Error(`重定向缺少 Location（HTTP ${res.status}）`);
-      current = new URL(loc, u).toString();
-      hops++;
-      if (hops > 5) throw new Error('重定向次数过多（>5）');
-      continue;
+    try {
+      const res = await undiciFetch(u, {
+        headers: { 'User-Agent': DDG_UA, Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8' },
+        redirect: 'manual',
+        signal: AbortSignal.any(signals),
+        dispatcher,
+      });
+      if ([301, 302, 303, 307, 308].includes(res.status)) {
+        const loc = res.headers.get('location');
+        await res.body?.cancel().catch(() => { /* 忽略 */ });
+        if (!loc) throw new Error(`重定向缺少 Location（HTTP ${res.status}）`);
+        current = new URL(loc, u).toString();
+        hops++;
+        if (hops > 5) throw new Error('重定向次数过多（>5）');
+        continue;
+      }
+      if (!res.ok) {
+        await res.body?.cancel().catch(() => { /* 忽略 */ });
+        throw new Error(`HTTP ${res.status}`);
+      }
+      const cl = Number(res.headers.get('content-length') ?? '0');
+      if (cl > maxBytes) {
+        await res.body?.cancel().catch(() => { /* 忽略 */ });
+        throw new Error(`响应过大（${cl} 字节 > ${maxBytes}）`);
+      }
+      const buf = await readBodyCapped(res, maxBytes, () => limitCtrl.abort(new Error('响应超过体积上限')));
+      const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
+      return { finalUrl: current, contentType, body: buf.toString('utf8'), bytes: buf.length, redirected: hops };
+    } finally {
+      await dispatcher.close();
     }
-    if (!res.ok) {
-      await res.body?.cancel().catch(() => { /* 忽略 */ });
-      throw new Error(`HTTP ${res.status}`);
-    }
-    const cl = Number(res.headers.get('content-length') ?? '0');
-    if (cl > maxBytes) throw new Error(`响应过大（${cl} 字节 > ${maxBytes}）`);
-    const buf = await readBodyCapped(res, maxBytes, () => limitCtrl.abort(new Error('响应超过体积上限')));
-    const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
-    return { finalUrl: current, contentType, body: buf.toString('utf8'), bytes: buf.length, redirected: hops };
   }
 }
 
 // ---------- Tavily ----------
 
 async function searchTavily(query: string, max: number): Promise<SearchResult[]> {
-  const dispatcher = getDispatcher();
+  const dispatcher = getSearchDispatcher();
   const res = await undiciFetch('https://api.tavily.com/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -336,7 +405,7 @@ async function searchTavily(query: string, max: number): Promise<SearchResult[]>
 const DDG_UA = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36';
 
 async function searchDdg(query: string, max: number): Promise<SearchResult[]> {
-  const dispatcher = getDispatcher();
+  const dispatcher = getSearchDispatcher();
   const res = await undiciFetch(`https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`, {
     headers: { 'User-Agent': DDG_UA, Accept: 'text/html' },
     signal: AbortSignal.timeout(15000),
@@ -447,7 +516,7 @@ export default {
           const key = tctx.cache.makeKey(['web_search', 'v2', query.toLowerCase(), String(max)]);
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '搜索结果缓存命中' });
             return { ok: true, data: hit.value };
           }
@@ -494,7 +563,7 @@ export default {
           const key = tctx.cache.makeKey(['web_fetch', 'v1', raw.toLowerCase(), mode, String(maxChars)]);
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheKey: key })
+            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '网页抓取缓存命中' });
             return { ok: true, data: hit.value };
           }

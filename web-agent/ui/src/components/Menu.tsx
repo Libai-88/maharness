@@ -22,9 +22,11 @@ interface Props {
   disabled?: boolean;
   /** 向下空间不足时向上弹出（输入栏等贴底场景） */
   dropUp?: boolean;
+  /** 紧凑触发器（窄视口）：只渲染图标级内容，无文字 */
+  compactTrigger?: React.ReactNode;
 }
 
-export default function Menu({ trigger, items, selectedKey, onSelect, title, width = 230, triggerTitle, disabled, dropUp }: Props) {
+export default function Menu({ trigger, items, selectedKey, onSelect, title, width = 230, triggerTitle, disabled, dropUp, compactTrigger }: Props) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -54,7 +56,7 @@ export default function Menu({ trigger, items, selectedKey, onSelect, title, wid
         aria-expanded={open}
         disabled={disabled}
       >
-        {trigger}
+        {compactTrigger ?? trigger}
       </button>
       {open && (
         <motion.div

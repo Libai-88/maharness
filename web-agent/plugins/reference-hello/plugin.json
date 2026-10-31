@@ -1,0 +1,21 @@
+{
+  "id": "reference-hello",
+  "name": "Reference Hello",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": false,
+  "compatibility": {
+    "api": {
+      "min": "1.0.0",
+      "max": "1.0.0"
+    }
+  },
+  "permissions": {
+    "capabilities": {
+      "tool": [
+        "reference_hello"
+      ]
+    }
+  },
+  "cleanup": "keep"
+}

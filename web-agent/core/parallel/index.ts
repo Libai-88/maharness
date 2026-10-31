@@ -8,6 +8,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import { makeRunner } from '../../kernel/types';
+import { reserveBudget } from '../../kernel/budget';
 import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
@@ -19,6 +20,50 @@ const READ_ONLY_TOOLS = new Set([
 
 /** 单次并行任务的最大子任务数（认知资源配额：并行不等于无限） */
 const MAX_PARALLEL = 4;
+const MAX_PARALLEL_ACTIVE = MAX_PARALLEL * 2;
+
+export interface ParallelTaskResult {
+  taskId: string;
+  objective: string;
+  ok: boolean;
+  cost?: number;
+  tokensIn?: number;
+  tokensOut?: number;
+  cancelled?: boolean;
+  [key: string]: unknown;
+}
+
+export interface ParallelAggregate {
+  results: ParallelTaskResult[];
+  completed: number;
+  failed: number;
+  cancelled: number;
+  status: 'completed' | 'partial' | 'failed';
+  subagentCost: { cost: number; tokensIn: number; tokensOut: number };
+}
+
+/** 工具层成功语义：编排请求本身可能正常返回，但全失败不能伪装成成功工具结果。 */
+export function parallelToolSucceeded(aggregate: Pick<ParallelAggregate, 'status'>): boolean {
+  return aggregate.status !== 'failed';
+}
+
+/** 纯聚合函数：所有子任务都结算，失败/取消不丢失已产生的成本。 */
+export function aggregateParallelResults(results: ParallelTaskResult[]): ParallelAggregate {
+  const completed = results.filter((r) => r.ok).length;
+  const failed = results.length - completed;
+  return {
+    results,
+    completed,
+    failed,
+    cancelled: results.filter((r) => r.cancelled === true).length,
+    status: completed === results.length ? 'completed' : completed > 0 ? 'partial' : 'failed',
+    subagentCost: {
+      cost: results.reduce((sum, r) => sum + (Number.isFinite(r.cost) ? (r.cost ?? 0) : 0), 0),
+      tokensIn: results.reduce((sum, r) => sum + (Number.isFinite(r.tokensIn) ? (r.tokensIn ?? 0) : 0), 0),
+      tokensOut: results.reduce((sum, r) => sum + (Number.isFinite(r.tokensOut) ? (r.tokensOut ?? 0) : 0), 0),
+    },
+  };
+}
 
 const PARALLEL_SYSTEM_PROMPT = [
   '你是 maharness 的并行子代理（parallel subagent），由主代理在批量并行任务中委派，负责其中独立的一项。',
@@ -32,10 +77,13 @@ const PARALLEL_SYSTEM_PROMPT = [
  *  若把同一份预算拷贝 N 份，并行子任务各自熔断在"同一剩余额"上，总额最多超发 ~N 倍。 */
 export function splitBudget(budget: number | undefined, n: number): (number | undefined)[] {
   if (budget === undefined || n <= 0) return Array.from({ length: n }, () => undefined);
-  const each = Math.floor(budget / n);
-  const shares = Array.from({ length: n }, () => each);
-  shares[n - 1] = each + (budget - each * n);
-  return shares;
+  if (Number.isInteger(budget)) {
+    const each = Math.floor(budget / n);
+    const shares = Array.from({ length: n }, () => each);
+    shares[n - 1] = each + (budget - each * n);
+    return shares;
+  }
+  return reserveBudget(budget, n).shares;
 }
 
 export default {
@@ -71,7 +119,7 @@ export default {
         risk: 'low',
         costHint: 'high',
         limits: `一次最多 ${MAX_PARALLEL} 个并行子任务；受子代理配额约束；成本 ≈ 多次 LLM 调用，简单问题不要使用`,
-        output: '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?}], completed, failed}',
+        output: '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?, cancelled?}], completed, failed, cancelled, status}',
         timeoutMs: 240_000, // 并行子代理内部多轮，独立超时 4 分钟
         description: '将任务拆分为多个相互独立的部分，并发委派多个子代理并行执行（互不污染上下文，独立产出后统一汇总）。' +
           '用于：任务包含 N 个完全独立的子问题（如分别调研多个主题、分别分析多个文件）；' +
@@ -126,11 +174,16 @@ export default {
           if (!quota.allowed) {
             return { ok: false, error: `子代理配额不足（10 分钟窗口内限额，剩余 ${quota.remaining}）。请减少委派频率或稍后再试。` };
           }
-
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const toolsFor = (t: { tools?: string }): ToolDef[] => t.tools === 'all'
             ? allTools
             : allTools.filter((x) => READ_ONLY_TOOLS.has(x.name));
+
+          const releaseSlots = ctx.kernel.budget.reserveSubagentSlots(tasks.length);
+          if (!releaseSlots) {
+            quota.refund?.();
+            return { ok: false, error: `并行资源繁忙：当前最多同时运行 ${MAX_PARALLEL_ACTIVE} 个子任务；本批次未启动，配额已退还。` };
+          }
 
           // ---- 并发执行：每个子任务独立 AgentRunner 循环，Promise.allSettled 汇总 ----
           // H3 中断/预算透传：主循环 abort 与剩余预算传导给每个并行子循环
@@ -138,8 +191,11 @@ export default {
           const remainingBudget = (tctx as ToolContext & { remainingBudget?: number }).remainingBudget;
           // 共享预算均分（floor、余数归最后一项）：总消耗 ≤ 主任务剩余预算。
           // 若把同一份预算拷贝 N 份，并行子任务各自熔断在"同一剩余额"上，总额最多超发 ~N 倍。
-          const budgetShares = splitBudget(remainingBudget, tasks.length);
-          const results = await Promise.allSettled(tasks.map(async (t, i) => {
+          const reservation = remainingBudget === undefined ? undefined : reserveBudget(remainingBudget, tasks.length);
+          const budgetShares = reservation?.shares ?? splitBudget(undefined, tasks.length);
+          let results: PromiseSettledResult<ParallelTaskResult>[];
+          try {
+            results = await Promise.allSettled(tasks.map(async (t, i) => {
             const taskId = `par-${randomUUID().slice(0, 6)}`;
             const traceId = `par-${randomUUID().slice(0, 8)}`;
             emit('start', taskId, t.objective, { index: i }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
@@ -157,6 +213,7 @@ export default {
             let cost = 0;
             let toolCalls = 0;
             let error: string | undefined;
+            let cancelled = false;
             try {
               for await (const ev of runner.run({
                 provider,
@@ -185,16 +242,17 @@ export default {
                     data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                   });
                 }
-                else if (ev.type === 'error') error = ev.error;
+                else if (ev.type === 'error') { error = ev.error; cancelled = ev.kind === 'aborted'; }
               }
             } catch (err) {
               error = err instanceof Error ? err.message : String(err);
+              cancelled = tctx.signal?.aborted === true;
             }
             if (error) {
-              emit('fail', taskId, t.objective, { error }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
+              emit('fail', taskId, t.objective, { error, cancelled, cost }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
               return {
                 taskId, objective: t.objective, ok: false,
-                error: `并行子任务失败: ${error}`, toolCalls, tokensIn: 0, tokensOut: 0, cost: 0, traceId,
+                error: `并行子任务失败: ${error}`, cancelled, toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
               };
             }
             emit('done', taskId, t.objective, { toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost }, { sessionId: tctx.sessionId, total: tasks.length, index: i });
@@ -203,25 +261,24 @@ export default {
               answer: answer.trim(), toolCalls,
               tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
             };
-          }));
+            }));
+          } finally {
+            releaseSlots();
+          }
 
           const completed = results.map((r) => r.status === 'fulfilled' ? r.value : {
             taskId: 'par-unknown', objective: '?', ok: false, error: '内部异常',
           });
+          if (reservation) completed.forEach((result, index) => {
+            reservation.settle(index, Number((result as { cost?: number }).cost ?? 0));
+          });
           // C5 成本回传：聚合全部子任务的开销，主循环执行器并入 totalCost/熔断核算
-          const subagentCost = {
-            cost: completed.reduce((s, r) => s + ((r as { cost?: number }).cost ?? 0), 0),
-            tokensIn: completed.reduce((s, r) => s + ((r as { tokensIn?: number }).tokensIn ?? 0), 0),
-            tokensOut: completed.reduce((s, r) => s + ((r as { tokensOut?: number }).tokensOut ?? 0), 0),
-          };
+          const aggregate = aggregateParallelResults(completed as ParallelTaskResult[]);
           return {
-            ok: true,
+            ok: parallelToolSucceeded(aggregate),
             data: {
-              results: completed,
-              completed: completed.filter((r) => r.ok).length,
-              failed: completed.filter((r) => !r.ok).length,
-              summary: completed.map((r, i) => `${i + 1}. ${r.objective} → ${r.ok ? '完成' : '失败'}`).join('\n'),
-              subagentCost,
+              ...aggregate,
+              summary: aggregate.results.map((r, i) => `${i + 1}. ${r.objective} → ${r.ok ? '完成' : r.cancelled ? '取消' : '失败'}`).join('\n'),
             },
           };
         },

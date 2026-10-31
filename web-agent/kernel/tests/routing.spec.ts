@@ -31,6 +31,8 @@ describe('routeForTask 任务复杂度路由', () => {
     assert.ok(r);
     assert.equal(r?.provider.id, 'strong');
     assert.equal(r?.model, 'strong-reasoner');
+    assert.equal(r?.candidates.filter((candidate) => candidate.accepted).length, 1);
+    assert.ok(r?.candidates.find((candidate) => candidate.providerId === 'cheap')?.reasons.includes('未命中当前任务类型配置'));
   });
 
   test('未命中具体类型时走「默认」键兜底', () => {

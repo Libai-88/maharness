@@ -20,6 +20,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Kernel, KERNEL_PROVIDER_ID } from '../index';
+import { validateTraceSteps } from '../trace';
 
 interface Fixture {
   kernel: Kernel;
@@ -303,6 +304,20 @@ describe('service_call 埋点口径（C1）', () => {
       '依赖边只留痕一次（C1：旧实现每次解析都记，轮询即可灌满 ring）');
   });
 
+  test('service_call 事件拥有独立 traceId 并通过完整 Trace schema', async (t) => {
+    const stub = `ctx.provide('service:cache', { l1Get: async () => undefined, mark: 'schema-cache' }, 10);`;
+    const f = setup({ overrideCache: stub });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+
+    void f.kernel.cache;
+    const steps = f.kernel.trace.query(undefined, { type: 'service_call', limit: 50 });
+    assert.equal(steps.length, 1);
+    assert.match(steps[0]!.traceId, new RegExp(`^service-${process.pid}-[0-9a-f]+-[0-9]+$`));
+    assert.equal(steps[0]!.pluginId, 'overrideCache');
+    assert.deepEqual(validateTraceSteps(steps, { requireResolvedParents: true }), []);
+  });
+
   test('trace.serviceCall 可切口径：always 连内置也记，off 一律不记', async (t) => {
     const f = setup({});
     t.after(f.cleanup);
@@ -310,7 +325,12 @@ describe('service_call 埋点口径（C1）', () => {
 
     f.kernel.config.set('trace.serviceCall', 'always');
     void f.kernel.cache;
-    assert.ok(countServiceCalls(f) >= 1, 'always：内置提供者也埋点（调试用）');
+    void f.kernel.cache;
+    const alwaysSteps = f.kernel.trace.query(undefined, { type: 'service_call', limit: 50 });
+    assert.ok(alwaysSteps.length >= 2, 'always：内置提供者也埋点（调试用）');
+    assert.equal(new Set(alwaysSteps.map((step) => step.traceId)).size, alwaysSteps.length,
+      'always 模式下每条 service_call 都必须拥有独立 traceId');
+    assert.deepEqual(validateTraceSteps(alwaysSteps, { requireResolvedParents: true }), []);
 
     f.kernel.config.set('trace.serviceCall', 'off');
     const before = countServiceCalls(f);

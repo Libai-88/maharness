@@ -1,0 +1,17 @@
+{
+  "name": "task-verification-failure",
+  "description": "未满足验收条件时不进入完成状态",
+  "messages": [{ "role": "user", "content": "Complete and verify the requested task" }],
+  "task": {
+    "objective": "Answer with the required marker",
+    "acceptance": [{ "type": "output_contains", "value": "required marker" }]
+  },
+  "requests": [{
+    "chunks": [
+      { "type": "delta", "text": "I cannot confirm the result." },
+      { "type": "usage", "input": 20, "output": 8 },
+      { "type": "done" }
+    ]
+  }],
+  "expect": { "llmCalls": 1, "noErrors": false, "taskOutcome": "failed" }
+}

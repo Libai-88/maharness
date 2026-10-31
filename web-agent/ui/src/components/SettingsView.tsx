@@ -2,7 +2,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { configApi, getMutationToken, metaApi, providersApi, rulesApi, securityApi, setMutationToken, statsApi, type SecurityPosture } from '../api';
 import type { RulesView, RuntimeConfig } from '../api';
-import type { ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
+import type { ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
 import { IconCheck, IconClose } from './Icon';
@@ -30,6 +30,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [busy, setBusy] = useState<'save' | 'test' | 'pull' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
+  const [diagnostics, setDiagnostics] = useState<Record<string, ProviderDiagnostic | null>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
   // 删除 Provider 的二步确认走应用内弹层（原生 confirm 在这套界面里最出戏）
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
@@ -56,7 +57,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     let savedId: string | null = null;
     try {
       if (creating) { const p = await providersApi.create(form); savedId = p.id; await refresh(true, '已添加'); }
-      else if (editing) { await providersApi.update(editing.id, form); savedId = editing.id; await refresh(true, '已保存'); }
+      else if (editing) { await providersApi.update(editing.id, { ...form, expectedUpdatedAt: editing.updatedAt }); savedId = editing.id; await refresh(true, '已保存'); }
       else { return; }
     } catch (err) {
       await refresh(false, err instanceof Error ? err.message : String(err));
@@ -122,7 +123,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     if (togglingId) return;
     setTogglingId(p.id);
     try {
-      await providersApi.update(p.id, { enabled: !p.enabled });
+      await providersApi.update(p.id, { enabled: !p.enabled, expectedUpdatedAt: p.updatedAt });
       onChanged();
       toast.success(`「${p.label}」已${p.enabled ? '先歇着' : '开始干活'}`);
     } catch (err) {
@@ -139,7 +140,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       onOk: () => {
         void (async () => {
           try {
-            await providersApi.remove(p.id);
+            await providersApi.remove(p.id, p.updatedAt);
             onChanged();
             toast.success(`「${p.label}」已经删掉了`);
           } catch (err) {
@@ -183,6 +184,15 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     }
     // 红标即时更新（后端已联动健康状态）
     onChanged();
+  };
+
+  const runDiagnostic = async (p: ProviderInfo) => {
+    try {
+      const result = await providersApi.diagnose(p.id);
+      setDiagnostics((prev) => ({ ...prev, [p.id]: result }));
+    } catch (err) {
+      toast.error(`诊断失败：${err instanceof Error ? err.message : String(err)}`);
+    }
   };
 
   return (
@@ -253,6 +263,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       {providers.map((p) => {
         const connected = p.enabled && p.hasKey;
         const tr = testResult[p.id];
+        const diagnostic = diagnostics[p.id];
         return (
           <div key={p.id} className={`provider-card ${connected ? 'connected' : 'pending'}`}>
             <div className="pv-head">
@@ -304,6 +315,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             <div className="pv-foot">
               <div className="pv-foot-left">
                 <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runTest(p)} title="用已存储的 Key 发一次测试请求——验证密钥有效性并恢复健康状态">验证密钥</button>
+                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runDiagnostic(p)} title="查看配置完整性、模型登记和健康状态">诊断</button>
                 {tr && <span className="pv-latency" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: tr.ok ? 'var(--teal)' : 'var(--red)' }}>{tr.ok ? <IconCheck size={11} /> : <IconClose size={11} />} {tr.ms ? `${tr.ms}ms` : '失败'}</span>}
               </div>
               <div style={{ display: 'flex', gap: 8 }}>
@@ -311,6 +323,15 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
                 <button className="pd-btn danger" style={{ height: 28, fontSize: 11, padding: '0 10px' }} onClick={() => void remove(p)}>删除</button>
               </div>
             </div>
+            {diagnostic && (
+              <div className="pv-diagnostic" role="status">
+                <span>配置：{diagnostic.configured.baseUrl && diagnostic.configured.apiKey && diagnostic.configured.defaultModel ? '完整' : '不完整'}</span>
+                <span>模型：{diagnostic.models.length} 个</span>
+                {diagnostic.issues.length === 0
+                  ? <span style={{ color: 'var(--teal)' }}>未发现问题</span>
+                  : <span style={{ color: 'var(--red)' }}>{diagnostic.issues.join('；')}</span>}
+              </div>
+            )}
           </div>
         );
       })}
@@ -537,8 +558,16 @@ function RulesSection() {
     if (busy) return;
     setBusy(true);
     try {
-      if (scope === 'global') await rulesApi.putGlobal(file.endsWith('.md') ? file : `${file}.md`, draft);
-      else await rulesApi.putProject(file, draft);
+      if (scope === 'global') {
+        const name = file.endsWith('.md') ? file : `${file}.md`;
+        const revision = view?.ruleFileRevisions.global[name] ?? view?.globalFiles.find(f => f.name === name)?.revision;
+        if (!revision) throw new Error('缺少规则文件版本，请刷新后重试');
+        await rulesApi.putGlobal(name, draft, revision);
+      } else {
+        const revision = view?.ruleFileRevisions.project[file];
+        if (!revision) throw new Error('缺少规则文件版本，请刷新后重试');
+        await rulesApi.putProject(file, draft, revision);
+      }
       await load();
       setTip('规则已写入并在下一轮对话生效');
       setTimeout(() => setTip(null), 3000);
@@ -549,7 +578,7 @@ function RulesSection() {
   const togglePolicy = async (idx: number, patch: Record<string, unknown>) => {
     if (!view) return;
     const next = view.policy.map((r, i) => (i === idx ? { ...r, ...patch } : r));
-    const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    const r = await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
     if (!r.ok) { toast.error(r.error ?? '这条策略没保存上'); return; }
     await load();
   };
@@ -557,7 +586,7 @@ function RulesSection() {
   const addPolicy = async () => {
     if (!view) return;
     const next = [...view.policy, { id: `rule-${Date.now().toString(36)}`, effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run test', reason: '测试命令免审批', enabled: true }];
-    const r = await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    const r = await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
     if (!r.ok) { toast.error(r.error ?? '这条规则没加上'); return; }
     await load();
   };
@@ -565,7 +594,7 @@ function RulesSection() {
   const removePolicy = async (idx: number) => {
     if (!view) return;
     const next = view.policy.filter((_, i) => i !== idx);
-    await rulesApi.putPolicy(scope, next as RulesView['policy']);
+    await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
     await load();
   };
 

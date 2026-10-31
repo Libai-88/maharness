@@ -3,7 +3,7 @@ import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } fro
 import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
 import { useApprovals } from './hooks/useApprovals';
 import type { ErrorKind } from './api';
-import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginInfo, PluginNavItem, ProviderInfo, Session, TodoCard, TraceStep } from './types';
+import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TaskVerificationInfo, TodoCard, TraceStep } from './types';
 import { toolActivityLabel } from './types';
 // 演出重建：DB 行 → 界面消息（刷新前后同一形态）；文案中心：所有系统话术统一出口
 import { collectMembers, replayMessages } from './replay';
@@ -38,7 +38,7 @@ import TracePanel from './components/TracePanel';
 import Menu from './components/Menu';
 import { AnimatePresence, motion } from 'motion/react';
 import { pageVariants } from './motion';
-import { IconChevronDown, IconClose, IconPanel, IconPlugin, IconTodo, IconWorkbench } from './components/Icon';
+import { IconBrain, IconChevronDown, IconClose, IconPanel, IconPlugin, IconTodo, IconWorkbench } from './components/Icon';
 import { Toaster, toast } from 'sonner';
 import { applyFavicon } from './brand/favicon';
 
@@ -108,6 +108,7 @@ export default function App() {
   const [models, setModels] = useState<ModelInfo[]>([]);
   const [sel, setSel] = useState<{ provider: string; model: string } | null>(null);
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
+  const [pluginDiagnostics, setPluginDiagnostics] = useState<PluginDiagnostic[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [activeTab, setActiveTab] = useState<MainTab>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -128,6 +129,8 @@ export default function App() {
   // 旧的并行 Record 会随会话数无限增长，且与消息生命周期不同步。
   // 前置重活（历史压缩等）的播报文本：让"开口前的十几秒"有话说，而不是干等
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
+  const [pendingInference, setPendingInference] = useState<{ objective: string; rationale: string; confidence: number } | null>(null);
+  useEffect(() => { setPendingInference(null); }, [activeId]);
   // 与后端的常驻事件连接状态：断了要看得见（旧版"实时"灯常亮，数据其实早就不动了）
   const [liveState, setLiveState] = useState<'open' | 'down'>('open');
   // 并行小队进度（parallel.progress 广播）：按会话归集，渲染成"小队"气泡上的进度行。
@@ -327,10 +330,11 @@ export default function App() {
 
   async function loadAll() {
     try {
-      const [ss, ms, pl, pvs] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list()]);
+      const [ss, ms, pl, pvs, diagnostics] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list(), pluginsApi.diagnostics()]);
       setSessions(ss);
       setModels(ms);
       setPlugins(pl);
+      setPluginDiagnostics(diagnostics);
       setProviders(pvs);
       if (ms.length) setSel((prev) => {
         if (prev) return prev;
@@ -522,7 +526,9 @@ export default function App() {
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
       const r = await pluginsApi.action(id, action);
-      setPlugins(await pluginsApi.list());
+      const [latest, diagnostics] = await Promise.all([pluginsApi.list(), pluginsApi.diagnostics()]);
+      setPlugins(latest);
+      setPluginDiagnostics(diagnostics);
       const label = action === 'enable' ? '已启用' : action === 'disable' ? '已停用' : action === 'uninstall' ? '已卸载' : '已重载';
       toast.success(`${label}（${id} · ${r.state}）`);
     } catch (err) {
@@ -591,6 +597,29 @@ export default function App() {
       // 成本熔断：横幅展示（harness 硬边界）
       setBudgetHit({ cost, budget });
     },
+    onTaskVerified: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+      setStreamStatus('任务验收通过（有执行证据）');
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'verified', objective, checks, evidence: evidence ?? [] } } : m));
+    },
+    onTaskPartial: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+      setStreamStatus('任务部分完成（请查看未满足的验收条件）');
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'partial', objective, checks, evidence: evidence ?? [] } } : m));
+    },
+    onTaskFailed: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+      setStreamStatus('任务验收未通过（已保留执行证据）');
+      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'failed', objective, checks, evidence: evidence ?? [] } } : m));
+    },
+    onTaskInference: (objective: string, inference: { confidence: number; basis: 'explicit' | 'inferred' | 'ambiguous'; needsConfirmation: boolean; rationale: string }) => {
+      if (!inference.needsConfirmation) return;
+      flushStreamBuffer();
+      setPendingInference({ objective, rationale: inference.rationale, confidence: inference.confidence });
+      setMessages((prev) => [...prev, {
+        id: `task-inference-${Date.now()}`,
+        role: 'system',
+        content: `目标“${objective}”目前缺少可验证的完成标准（置信度 ${Math.round(inference.confidence * 100)}%）：${inference.rationale}。请补充产物、必须包含的内容或其他验收条件。`,
+        ts: Date.now(),
+      }]);
+    },
     onRetry: (reason: 'attempt' | 'failover' | 'narration', detail?: string) => {
       // provider 重试/换线路：截断边界记在消息上（含未冲刷增量），从该边界重新累积。
       // 同时把"刚才那次作废了"说出来——否则用户看到的是说过的话被一口气擦掉。
@@ -643,6 +672,7 @@ export default function App() {
 
   const send = useCallback(async (text: string) => {
     if (!activeId || !text.trim() || streaming) return;
+    setPendingInference(null);
 
     if (text.trim().startsWith('/')) {
       const systemMsg = (content: string) => setMessages((prev) => [...prev, { id: `cmd-${Date.now()}`, role: 'system', content, ts: Date.now() }]);
@@ -683,6 +713,12 @@ export default function App() {
 
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession, makeStreamHandlers]);
+
+  const confirmInference = useCallback((objective: string, acceptance: string) => {
+    const condition = acceptance.trim();
+    if (!condition) return;
+    void send(`${objective}\n验收条件：${condition}`);
+  }, [send]);
 
   /** 断点续跑（checkpoint）：从上次中断的轮次继续，复用完整对话流程 */
   const resumeTask = useCallback(async () => {
@@ -906,6 +942,7 @@ export default function App() {
               <>
                 <Menu
                   trigger={<><span className="mode-dot" style={{ background: modeColor }} />{modeLabel}<IconChevronDown size={11} /></>}
+                  compactTrigger={<span className="tb-compact-trigger"><span className="mode-dot" style={{ background: modeColor }} /></span>}
                   items={modeItems}
                   selectedKey={currentSession?.mode ?? 'normal'}
                   onSelect={(k) => void setSessionMode(k)}
@@ -915,6 +952,7 @@ export default function App() {
                 />
                 <Menu
                   trigger={<>{modelLabel || '未选择模型'}<IconChevronDown size={11} /></>}
+                  compactTrigger={<span className="tb-compact-trigger"><IconBrain size={14} /></span>}
                   items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
                   selectedKey={sel ? `${sel.provider}@${sel.model}` : undefined}
                   onSelect={(k) => void selectModel(k)}
@@ -960,6 +998,8 @@ export default function App() {
                   messages={messages}
                   streaming={streaming}
                   onSend={send}
+                  pendingInference={pendingInference}
+                  onConfirmInference={confirmInference}
                   onStop={stop}
                   hasModels={models.length > 0}
                   approvals={approvals.filter((a) => !a.sessionId || a.sessionId === activeId)}
@@ -1003,7 +1043,7 @@ export default function App() {
           ) : activeTab === 'files' ? (
             <FilesView />
           ) : activeTab === 'plugins' ? (
-            <PluginsView plugins={plugins} onAction={pluginAction} />
+            <PluginsView plugins={plugins} diagnostics={pluginDiagnostics} onAction={pluginAction} />
           ) : activePluginNav ? (
             /* 插件贡献的页面：通用容器渲染（iframe 完整页 / panel 片段），前端零插件知识。
                key 绑定插件 id：切换插件标签时强制重建容器与 iframe（否则 React 复用同一

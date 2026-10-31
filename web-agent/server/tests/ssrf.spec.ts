@@ -210,6 +210,43 @@ function firstHopFreeValidator(): { hops: string[]; assertUrl: (raw: string) => 
 }
 
 describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口）', () => {
+  it('DNS 解析结果只取一次，并由实际 socket connector 使用该地址', async () => {
+    const m = await startMock();
+    const host = 'pinned.example.test';
+    const resolves: string[] = [];
+    const previous = process.env[ENV_KEY];
+    process.env[ENV_KEY] = '1';
+    try {
+      const res = await fetchWithPublicRedirects(`http://${host}:${m.port}/ok`, {}, {
+        resolveAddresses: async (hostname) => {
+          resolves.push(hostname);
+          return [{ address: '127.0.0.1', family: 4 }];
+        },
+      });
+      assert.equal(res.status, 200);
+      assert.equal(await res.text(), JSON.stringify({ data: [{ id: 'm1' }] }));
+      assert.deepEqual(resolves, [host], '校验后不得再次对主机名执行 DNS 解析');
+      assert.equal(m.hits.filter((h) => h.url === '/ok').length, 1, '连接器使用注入的已验证地址到达目标');
+    } finally {
+      if (previous === undefined) delete process.env[ENV_KEY];
+      else process.env[ENV_KEY] = previous;
+    }
+  });
+
+  it('解析结果混有公网与私网地址时整体拒绝，不发起请求', async () => {
+    const m = await startMock();
+    await assert.rejects(
+      () => fetchWithPublicRedirects(`http://mixed.example.test:${m.port}/ok`, {}, {
+        resolveAddresses: async () => [
+          { address: '8.8.8.8', family: 4 },
+          { address: '127.0.0.1', family: 4 },
+        ],
+      }),
+      /不允许连接内网/,
+    );
+    assert.equal(m.hits.length, 0, 'DNS 返回集合中存在私网地址时不能尝试连接公网成员绕过策略');
+  });
+
   it('302 → http://127.0.0.1:xxx 被拒，且绝不向该目标发起请求', async () => {
     const m = await startMock();
     const v = firstHopFreeValidator();

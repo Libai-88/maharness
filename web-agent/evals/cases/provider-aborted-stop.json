@@ -1,0 +1,7 @@
+{
+  "name": "provider-aborted-stop",
+  "description": "故障回放：Provider AbortError 立即停止，不重试或切换线路",
+  "messages": [{ "role": "user", "content": "请停止这次请求" }],
+  "requests": [{ "chunks": [{ "type": "throw", "name": "AbortError", "message": "This operation was aborted" }] }],
+  "expect": { "llmCalls": 1, "noErrors": false }
+}

@@ -11,13 +11,30 @@
  * failover（继续计费）。见 noteProviderFailure 的 abort 短路。
  */
 
+/** 上游 Retry-After 可影响重试等待，但不能让不受信任的响应把执行器永久挂起。 */
+export const MAX_RETRY_AFTER_MS = 5 * 60_000;
+
+export function parseRetryAfterMs(value: string | null | undefined, now = Date.now()): number | undefined {
+  const raw = value?.trim();
+  if (!raw) return undefined;
+  if (/^[+-]?\d+(?:\.\d+)?$/.test(raw)) {
+    const seconds = Number(raw);
+    return Number.isFinite(seconds) && seconds >= 0 ? Math.min(MAX_RETRY_AFTER_MS, Math.round(seconds * 1000)) : undefined;
+  }
+  const timestamp = Date.parse(raw);
+  if (!Number.isFinite(timestamp)) return undefined;
+  return Math.min(MAX_RETRY_AFTER_MS, Math.max(0, timestamp - now));
+}
+
 /** 带 HTTP 状态码的 LLM 请求失败：让「401/403 需要人工换 key」按状态码判定，而不是猜错误文本 */
 export class LLMHttpError extends Error {
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly retryAfterMs?: number;
+  constructor(status: number, message: string, retryAfterMs?: number) {
     super(message);
     this.name = 'LLMHttpError';
     this.status = status;
+    if (Number.isFinite(retryAfterMs) && retryAfterMs! >= 0) this.retryAfterMs = Math.min(MAX_RETRY_AFTER_MS, retryAfterMs!);
   }
 }
 
@@ -41,11 +58,30 @@ export function isAbortError(error: unknown): boolean {
 export interface ProviderHealth {
   /** 连续失败次数（成功后清零） */
   failures: number;
+  /** 连续瞬时故障次数；认证/参数/业务故障不会污染熔断阈值。 */
+  transientFailures?: number;
   /** 401/403：密钥无效/无权限——人工修复类故障 */
   authFailed: boolean;
   /** 最近一次错误摘要（截断） */
   lastError: string;
   lastErrorAt: number;
+  /** 瞬时故障达到阈值后的熔断打开时刻；0/undefined 表示未熔断。 */
+  circuitOpenedAt?: number;
+  /** 本次熔断冷却结束时刻；仅用于诊断，不含凭据。 */
+  circuitResetAt?: number;
+}
+
+export const PROVIDER_CIRCUIT_THRESHOLD = 3;
+export const PROVIDER_CIRCUIT_RESET_MS = 60_000;
+export interface ProviderCircuitConfig {
+  threshold?: number;
+  resetMs?: number;
+}
+
+function isTransientFailure(error: unknown): boolean {
+  if (error instanceof LLMHttpError) return error.status === 408 || error.status === 429 || error.status >= 500;
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|连接.*超时|连接.*断/i.test(message);
 }
 
 import { sharedSingleton } from '../../kernel/shared';
@@ -66,16 +102,23 @@ export function isAuthError(error: unknown): boolean {
 
 /** 记录一次失败（agent failover 链上每个耗尽重试的 provider 都回报）。
  *  取消类错误一律不记账：用户按「停止」不该让某个 provider 背上"密钥失效"的红标。 */
-export function noteProviderFailure(providerId: string, error: unknown): ProviderHealth | undefined {
+export function noteProviderFailure(providerId: string, error: unknown, config: ProviderCircuitConfig = {}): ProviderHealth | undefined {
   if (isAbortError(error)) return health.get(providerId);
   const msg = (error instanceof Error ? error.message : String(error ?? '')).slice(0, 200);
   const prev = health.get(providerId);
   const next: ProviderHealth = {
     failures: (prev?.failures ?? 0) + 1,
+    transientFailures: isTransientFailure(error) ? (prev?.transientFailures ?? 0) + 1 : 0,
     authFailed: (prev?.authFailed ?? false) || isAuthError(error),
     lastError: msg,
     lastErrorAt: Date.now(),
   };
+  const threshold = Math.max(1, Math.floor(config.threshold ?? PROVIDER_CIRCUIT_THRESHOLD));
+  const resetMs = Math.max(1_000, Math.floor(config.resetMs ?? PROVIDER_CIRCUIT_RESET_MS));
+  if (isTransientFailure(error) && (next.transientFailures ?? 0) >= threshold) {
+    next.circuitOpenedAt = prev?.circuitOpenedAt || next.lastErrorAt;
+    next.circuitResetAt = next.circuitOpenedAt + resetMs;
+  }
   health.set(providerId, next);
   return next;
 }
@@ -87,6 +130,15 @@ export function noteProviderSuccess(providerId: string): boolean {
   if (!had) return false;
   health.delete(providerId);
   return true;
+}
+
+/** 熔断打开期间拒绝新的 Provider 请求；冷却到期放行一次半开探测。 */
+export function isProviderCircuitOpen(providerId: string, now = Date.now()): boolean {
+  const current = health.get(providerId);
+  if (!current?.circuitResetAt) return false;
+  if (now < current.circuitResetAt) return true;
+  health.set(providerId, { ...current, transientFailures: 0, circuitOpenedAt: undefined, circuitResetAt: undefined });
+  return false;
 }
 
 export function getProviderHealth(providerId: string): ProviderHealth | undefined {

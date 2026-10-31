@@ -2,6 +2,7 @@
  * kernel/types.ts —— 内核全局契约
  * 事件、插件、工具、Trace、LLM 的类型定义。所有模块共享，禁止循环依赖。
  */
+import type { TokenizerAdapter } from './tokens';
 
 // ============ 事件 ============
 
@@ -23,8 +24,16 @@ export interface PluginManifest {
   name: string;
   version: string;
   entry: string;            // 入口文件（相对插件目录）
+  /** 宿主插件 API 兼容范围；缺省表示兼容当前 API（旧 manifest 兼容）。 */
+  compatibility?: {
+    api?: { min?: string; max?: string };
+  };
   enabled?: boolean;        // 默认 true；false = 声明停用（不自动启动）
   requires?: string[];      // 依赖的插件 id（先加载）
+  /** 显式 capability 注册许可；一旦声明，未列出的类型或名称均拒绝。缺省表示本机 trusted 兼容模式。 */
+  permissions?: {
+    capabilities: Partial<Record<Capability['kind'], string[]>>;
+  };
   lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
                             // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
   /** 核心必要插件：即使 enabled=false 也不允许完全卸载（卸载=丧失关键能力）。
@@ -53,6 +62,16 @@ export interface PluginManifest {
   /** 前端页面贡献：声明一个顶层导航项 → 前端自动生成标签页（见 NavDef）。
    *  「前端是插件的一部分」由此从口号变成机制：前端不再为每个插件写组件与分支。 */
   nav?: NavDef;
+  /** 插件 API 响应契约：键为相对路由（如 GET /panel），值为 JSON Schema 子集。 */
+  api?: { responses?: Record<string, Record<string, unknown>> };
+}
+
+/** 用户可见的插件加载诊断；不包含源码、参数或凭据。 */
+export interface PluginDiagnostic {
+  id: string;
+  kind: 'conflict' | 'load' | 'dependency' | 'rollback';
+  message: string;
+  suggestion?: string;
 }
 
 /**
@@ -122,6 +141,8 @@ export interface KernelLike {
     /** 原子配额消耗（check-and-consume 一步完成，消 TOCTOU）：per-session 池 + 进程级总上限。
      *  refund 用于撤销本次记账（B2：委派前置校验失败时不能白扣额度）。 */
     consumeSubagentQuota(sessionId: string): { allowed: boolean; remaining: number; refund?: () => void };
+    /** 跨单代理、审查和并行批次共享预留活动子任务槽位；返回 release 或容量不足。 */
+    reserveSubagentSlots(count: number): (() => void) | undefined;
     recordTask(record: { type: string; turns: number; cost: number; failed: boolean; ts: number }): void;
     taskProfile(): { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
   };
@@ -340,6 +361,8 @@ export interface ApiDef {
   mount: string;
   /** server 层断言为 express 中间件 (req, res, next)；插件侧可用任意兼容签名 */
   router: (req: never, res: never, next?: never) => void;
+  /** 插件自定义响应契约，按 `METHOD /relative-path` 登记。 */
+  responses?: Record<string, Record<string, unknown>>;
 }
 
 /** 服务能力：插件对外暴露的实例（如 chat 服务），server 层通过 capability 获取，不依赖插件内部实现 */
@@ -398,6 +421,9 @@ export interface ToolDef {
   output?: string;
   /** 独立超时（毫秒）：重工具（如 run_subagent 内部多轮）需要比默认 30s 更长的执行窗口 */
   timeoutMs?: number;
+  /** 工具副作用契约：仅幂等工具允许执行器对瞬时失败自动重试。默认不重试。 */
+  idempotent?: boolean;
+  retry?: { maxAttempts?: number; backoffMs?: number };
   /** 输出格式的机器校验（JSONSchema 子集）：工具执行后对 result.data 做结构校验。
    *  校验失败不阻断（LLM 可拿到原始结果自我修正），但回填内容会附【输出校验】标注，
    *  且校验事件入 Trace——"成败机器可判"从工具返回值延伸到输出结构。 */
@@ -476,6 +502,10 @@ export interface ModelCapability {
   enabled: boolean;
   /** pulled | inferred | manual */
   source: string;
+  /** 可选运行画像：用于路由解释与排序，不影响未登记模型兼容性。 */
+  latencyMs?: number;
+  privacyTier?: 'local' | 'trusted' | 'external';
+  riskLevel?: 'low' | 'medium' | 'high';
 }
 
 export interface ProviderDef {
@@ -486,8 +516,20 @@ export interface ProviderDef {
   protocol?: string;
   /** 该 Provider 已知模型及能力（含默认模型） */
   models?: ModelCapability[];
+  /** 适配器级协议能力；模型级能力见 models。 */
+  capabilities?: ProviderCapabilities;
+  /** 可选 Provider 原生 tokenizer；缺失时回退 kernel 的确定性估算器。 */
+  tokenizer?: TokenizerAdapter;
   prices?: { in: number; out: number };  // USD / 百万 token，用于成本核算
   chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk>;
+}
+
+export interface ProviderCapabilities {
+  streaming: boolean;
+  toolCalls: boolean;
+  structuredOutput: boolean;
+  vision: boolean;
+  cancellation: boolean;
 }
 
 // ============ LLM ============
@@ -543,7 +585,13 @@ export type StepStatus = 'running' | 'done' | 'error' | 'cancelled';
 
 export interface TraceStepInit {
   traceId: string;
+  /** 可选会话维度，供跨重启归档查询与分页使用。 */
+  sessionId?: string;
+  /** 可选插件维度，供跨重启归档查询与分页使用。 */
+  pluginId?: string;
   turn: number;
+  /** 同一逻辑调用的尝试序号：首次为 0，重试/故障转移递增。旧归档可缺省。 */
+  attempt?: number;
   type: StepType;
   name?: string;
   inputSummary?: string;
@@ -567,6 +615,11 @@ export interface TraceStep extends TraceStepInit {
   tokensCached?: number;
   cost?: number;
   error?: string;
+  /** 统一错误分类与稳定码，便于重试审计和故障聚合 */
+  errorCategory?: 'transient' | 'auth' | 'parameter' | 'business' | 'aborted' | 'unknown';
+  errorCode?: string;
+  retryable?: boolean;
+  retryDelayMs?: number;
 }
 
 export interface StepHandle {
@@ -597,7 +650,7 @@ export interface AgentRunSummary {
   traceId: string;
   sessionId?: string;
   model: string;
-  outcome: 'answered' | 'cached' | 'handoff' | 'budget-hit' | 'max-turns';
+  outcome: 'answered' | 'cached' | 'handoff' | 'budget-hit' | 'max-turns' | 'failed';
   /** 触发本次 run 的用户原话 */
   question: string;
   /** 终态答案（可能为空，如 budget-hit） */
@@ -643,6 +696,16 @@ export interface KernelEvents {
   'kernel.stopped': Record<string, never>;
   'trace.step': TraceStep;
   'config.changed': { key: string; value: unknown };
+  'security.authorization.denied': {
+    subject: 'anonymous'; capability: string; object: string;
+    reason: 'api-token-required' | 'api-token-invalid' | 'approval-token-required'
+      | 'approval-token-invalid' | 'source-host-denied' | 'source-origin-denied';
+  };
+  'security.authorization.granted': {
+    subject: 'api-token' | 'approval-token'; capability: string; object: string;
+  };
+  'security.sse.connected': { subject: 'local-client'; capability: 'sse:events'; object: '/api/events' };
+  'security.sse.disconnected': { subject: 'local-client'; capability: 'sse:events'; object: '/api/events' };
   /** 一次 run 进入终态（answered/cached/handoff/budget-hit/max-turns）：
    *  自进化（技能提案）、统计持久化、任务后回顾的唯一挂载点。插件只读不改。 */
   'agent.run.finished': AgentRunSummary;
@@ -701,5 +764,11 @@ export interface Message {
   tokensOut?: number;
   cost?: number;
   traceId?: string;
+  taskVerification?: {
+    status: 'verified' | 'partial' | 'failed';
+    objective: string;
+    checks: { ok: boolean; reason?: string }[];
+    evidence: { source: string; detail: string; traceStepId?: string }[];
+  };
   createdAt: number;
 }

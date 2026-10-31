@@ -1,0 +1,11 @@
+{
+  "minCasePassRate": 1,
+  "maxLatencyRegressionPercent": 100,
+  "maxAverageCostRegressionPercent": 10,
+  "minSecurityAttackBlockRate": 1,
+  "maxCorrectToolRateRegressionPoints": 0.05,
+  "maxCompletionRateRegressionPoints": 0.05,
+  "maxInvalidToolCallRateIncreasePoints": 0.02,
+  "maxToolFailureRateIncreasePoints": 0.05,
+  "maxRetryRateIncreasePoints": 0.05
+}

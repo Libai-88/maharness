@@ -2,6 +2,7 @@
 // 触发路径覆盖三种确定性方式：真长按（mouse.down + 延时 + mouse.up）、右键、键盘（Shift+F10 / Enter）
 // 数据自给自足：models/providers/chat 全部 route-mock——CI 空库（data/ 被忽略）与本地有历史两种状态行为一致
 import { expect, test, type Page } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
 
 const INPUT_PLACEHOLDER = '跟小马说点什么…（按 / 看命令）';
 
@@ -122,6 +123,32 @@ test.describe('气泡长按菜单（微信式）', () => {
   });
 });
 
+test.describe('Provider 诊断', () => {
+  test('设置页展示配置完整性、模型数量和可操作问题', async ({ page }) => {
+    await mockModelApis(page);
+    await page.route('**/api/providers/e2e-provider/diagnose', (route) => route.fulfill({ json: {
+      schemaVersion: 1,
+      providerId: 'e2e-provider',
+      protocol: 'openai',
+      configured: { baseUrl: true, apiKey: false, defaultModel: true },
+      health: null,
+      models: [],
+      issues: ['缺少 API Key', '最近请求失败 2 次'],
+    } }));
+    await page.route('**/api/config', (route) => route.fulfill({ json: { routingTargets: [] } }));
+    await page.route('**/api/stats', (route) => route.fulfill({ json: { cache: {}, trace: {} } }));
+    await page.route('**/api/personas', (route) => route.fulfill({ json: [] }));
+    await page.goto('/');
+    await page.getByRole('button', { name: '设置' }).click();
+    await page.locator('.sn-item', { hasText: '模型与 Provider' }).click();
+    await expect(page.getByText('E2E Provider')).toBeVisible();
+    await page.getByRole('button', { name: '诊断' }).click();
+    await expect(page.getByRole('status')).toContainText('配置：不完整');
+    await expect(page.getByRole('status')).toContainText('模型：0 个');
+    await expect(page.getByRole('status')).toContainText('缺少 API Key');
+  });
+});
+
 test.describe('引用回复上送（mock 流式）', () => {
   test('发送带引用的消息：气泡含引用块、引用条清理、mock 回复渲染', async ({ page }) => {
     await setup(page);
@@ -135,6 +162,398 @@ test.describe('引用回复上送（mock 流式）', () => {
     // 引用条随发送清理；mock 回复到达
     await expect(page.getByTestId('quote-bar')).toHaveCount(0);
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('收到，这是一条 mock 回复。');
+  });
+});
+
+test.describe('任务验收证据', () => {
+  test('完成答复关联逐项验收结果与 Trace 步骤', async ({ page }) => {
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-task-trace"}',
+        '',
+        'event: delta',
+        'data: {"text":"报告已生成。"}',
+        '',
+        'event: task_verified',
+        'data: {"objective":"生成并检查报告","checks":[{"ok":true,"reason":"文件存在：reports/final.md"},{"ok":true,"reason":"文件包含指定文本：reports/final.md"}],"evidence":[{"source":"filesystem","detail":"文件存在：reports/final.md","traceStepId":"verify-step-1234"},{"source":"filesystem","detail":"文件包含指定文本：reports/final.md","traceStepId":"verify-step-1234"}]}',
+        '',
+        'event: done',
+        'data: {"content":"报告已生成。","usage":{"input":10,"output":5},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('请生成并检查报告');
+    await page.keyboard.press('Enter');
+
+    const assistant = page.getByTestId('msg-bubble-assistant').last();
+    await expect(assistant).toContainText('报告已生成。');
+    const verification = page.getByText('验收通过').locator('..').locator('..');
+    await expect(verification).toContainText('2/2');
+    await expect(verification).toContainText('文件存在：reports/final.md');
+    await expect(verification).toContainText('文件包含指定文本：reports/final.md');
+    const traceReference = verification.locator('code').first();
+    await expect(traceReference).toHaveAttribute('title', '对应 Trace 步骤');
+    await expect(traceReference).toHaveText('#verify-s');
+  });
+});
+
+test.describe('工具审批', () => {
+  for (const decision of [
+    { approved: true, label: '批准', button: '可以，去做吧' },
+    { approved: false, label: '拒绝', button: '先别' },
+  ]) {
+    test(`用户${decision.label}后提交一次性凭据并撤下审批卡`, async ({ page }) => {
+      await setup(page);
+      const responses: { approved: boolean; approvalToken?: string }[] = [];
+      await page.route('**/api/sessions/*/chat', async (route) => {
+        const body = [
+          'event: start',
+          'data: {"traceId":"e2e-approval-trace"}',
+          '',
+          'event: approval_required',
+          'data: {"approvalId":"approval-e2e-1","name":"delete_file","summary":"删除 reports/draft.md","approvalToken":"one-time-approval-token"}',
+          '',
+          'event: end',
+          'data: {}',
+          '',
+        ].join('\n');
+        await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+      });
+      await page.route('**/api/approvals/approval-e2e-1', async (route) => {
+        responses.push(route.request().postDataJSON() as { approved: boolean; approvalToken?: string });
+        await route.fulfill({ status: 200, json: { ok: true } });
+      });
+      await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
+      await page.keyboard.press('Enter');
+
+      const card = page.locator('.approval-card');
+      await expect(card).toContainText('删除 reports/draft.md');
+      await card.getByRole('button', { name: decision.button }).click();
+      await expect(card).toHaveCount(0);
+      expect(responses).toEqual([{ approved: decision.approved, approvalToken: 'one-time-approval-token' }]);
+    });
+  }
+});
+
+test.describe('子代理与并行任务', () => {
+  test('子代理成功时展示成员目标和结果摘要', async ({ page }) => {
+    await setup(page);
+    await page.unroute('**/api/sessions/*/chat');
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-subagent-trace"}',
+        '',
+        'event: tool_start',
+        'data: {"id":"sub-1","name":"run_subagent","args":{"objective":"核对报告"}}',
+        '',
+        'event: tool_result',
+        'data: {"id":"sub-1","name":"run_subagent","summary":"报告已核对","ok":true}',
+        '',
+        'event: done',
+        'data: {"content":"子任务已完成。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('请找帮手核对报告');
+    await page.keyboard.press('Enter');
+    const member = page.locator('.wx-member-speech').last();
+    await expect(member).toHaveClass(/ok/);
+    await expect(member.locator('.wx-member-name')).toContainText('子代理 · 核对报告');
+    await expect(member.locator('.wx-member-text')).toContainText('报告已核对');
+  });
+
+  test('并行任务失败时展示小队失败状态', async ({ page }) => {
+    await setup(page);
+    await page.unroute('**/api/sessions/*/chat');
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-parallel-trace"}',
+        '',
+        'event: tool_start',
+        'data: {"id":"parallel-1","name":"run_parallel","args":{"tasks":[{"objective":"扫描文件"}]}}',
+        '',
+        'event: tool_result',
+        'data: {"id":"parallel-1","name":"run_parallel","summary":"子任务执行失败","ok":false}',
+        '',
+        'event: done',
+        'data: {"content":"并行任务未完成。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('请并行扫描文件');
+    await page.keyboard.press('Enter');
+    const member = page.locator('.wx-member-speech').last();
+    await expect(member).toHaveClass(/err/);
+    await expect(member.locator('.wx-member-name')).toHaveText('并行小队');
+    await expect(member.locator('.wx-member-text')).toContainText('子任务执行失败');
+  });
+});
+
+test.describe('运行轨迹', () => {
+  test('span 树父子展开、错误定位与类型筛选平铺', async ({ page }) => {
+    let releaseTrace!: () => void;
+    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    await page.route('**/api/events', async (route) => {
+      await traceGate;
+      const t = Date.now();
+      const step = (data: Record<string, unknown>) => JSON.stringify({ type: 'trace.step', data: { traceId: 'e2e-span-run', ts: t, ...data } });
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          'event: event',
+          `data: ${step({ id: 'e2e-span-root', turn: 1, type: 'tool_call', name: 'run_subagent', outputSummary: '委派子任务', status: 'done', durationMs: 300 })}`,
+          '',
+          'event: event',
+          `data: ${step({ id: 'e2e-span-child', turn: 1, type: 'tool_call', name: 'read_file', parentId: 'e2e-span-root', outputSummary: '子任务读取失败', status: 'error', error: '文件不存在：missing.txt', durationMs: 12 })}`,
+          '',
+          'event: event',
+          `data: ${step({ id: 'e2e-span-other', turn: 1, type: 'llm_call', name: 'sub-answer', parentId: 'e2e-span-root', outputSummary: '子任务回答', status: 'done', durationMs: 90 })}`,
+          '',
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.route('**/api/trace/stats', (route) => route.fulfill({
+      status: 200,
+      json: { trace: { steps: 3, llmCalls: 1, toolCalls: 2 }, cache: {}, l1Enabled: false },
+    }));
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-span-run"}',
+        '',
+        'event: done',
+        'data: {"content":"子任务已结束。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+      setTimeout(releaseTrace, 200);
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('触发子任务轨迹');
+    await page.keyboard.press('Enter');
+
+    const panel = page.locator('.trail-panel');
+    const root = panel.locator('.tl-item').filter({ has: page.locator('.tl-title', { hasText: '找了个帮手' }) });
+    const child = panel.locator('.tl-item').filter({ hasText: '子任务读取失败' });
+    await expect(child).toBeVisible();
+    await expect(child).toContainText('文件不存在：missing.txt');
+    // 折叠父步骤 → 错误子步骤随之隐藏（span 树语义）；再展开恢复
+    await root.locator('.tl-head').first().click();
+    await expect(child).toBeHidden();
+    await root.locator('.tl-head').first().click();
+    await expect(child).toBeVisible();
+    // 类型筛选走平铺视图：tool_call 含错误步骤，llm_call 步骤不因父步骤被筛掉而消失
+    await panel.locator('select').selectOption('tool_call');
+    await expect(panel.locator('.tl-item')).toHaveCount(2);
+    await expect(panel.locator('.tl-item').filter({ hasText: '子任务读取失败' })).toBeVisible();
+    await panel.locator('select').selectOption('llm_call');
+    await expect(panel.locator('.tl-item')).toHaveCount(1);
+    await expect(panel.locator('.tl-item').filter({ hasText: '子任务回答' })).toBeVisible();
+  });
+
+  test('大事件量（200 步）渲染完整且可滚动', async ({ page }) => {
+    let releaseTrace!: () => void;
+    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    await page.route('**/api/events', async (route) => {
+      await traceGate;
+      const t = Date.now();
+      const lines: string[] = [];
+      for (let i = 0; i < 200; i++) {
+        const step = { id: `e2e-bulk-${i}`, traceId: 'e2e-bulk-run', turn: 1, type: 'llm_call', name: `bulk-step-${i}`, outputSummary: `批量步骤 ${i}`, status: 'done', durationMs: 1, ts: t - (200 - i) };
+        lines.push('event: event', `data: ${JSON.stringify({ type: 'trace.step', data: step })}`, '');
+      }
+      lines.push('');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: lines.join('\n') });
+    });
+    await page.route('**/api/trace/stats', (route) => route.fulfill({
+      status: 200,
+      json: { trace: { steps: 200, llmCalls: 200, toolCalls: 0 }, cache: {}, l1Enabled: false },
+    }));
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = ['event: start', 'data: {"traceId":"e2e-bulk-run"}', '', 'event: done', 'data: {"content":"批量完成。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+      setTimeout(releaseTrace, 200);
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('灌入批量轨迹');
+    await page.keyboard.press('Enter');
+
+    const panel = page.locator('.trail-panel');
+    await expect(panel.locator('.tl-item')).toHaveCount(200);
+    const scroller = panel.locator('.trail-scroll');
+    await expect(scroller).toBeVisible();
+    // 滚动到底部：首尾步骤都真实渲染（无虚拟化截断即全部可查）
+    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await expect(panel.locator('.tl-item').filter({ hasText: '批量步骤 0' })).toBeVisible();
+    await scroller.evaluate((el) => { el.scrollTop = 0; });
+    await expect(panel.locator('.tl-item').filter({ hasText: '批量步骤 199' })).toBeVisible();
+  });
+
+  test('接收当前 run 的 Trace 步骤，支持筛选和导出', async ({ page }) => {
+    let releaseTrace!: () => void;
+    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    await page.route('**/api/events', async (route) => {
+      await traceGate;
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          'event: event',
+          `data: ${JSON.stringify({
+            type: 'trace.step',
+            data: {
+              id: 'e2e-trace-step', traceId: 'e2e-trace-run', turn: 1,
+              type: 'llm_call', name: 'e2e-answer', outputSummary: '确定性回放完成',
+              status: 'done', durationMs: 42, ts: Date.now(),
+            },
+          })}`,
+          '',
+          'event: event',
+          `data: ${JSON.stringify({
+            type: 'trace.step',
+            data: {
+              id: 'e2e-trace-tool', traceId: 'e2e-trace-run', turn: 1,
+              type: 'tool_call', name: 'delete_file', outputSummary: '已删除临时文件',
+              status: 'done', durationMs: 18, ts: Date.now(),
+            },
+          })}`,
+          '',
+          '',
+        ].join('\n'),
+      });
+    });
+    await page.route('**/api/trace/stats', (route) => route.fulfill({
+      status: 200,
+      json: { trace: { steps: 2, llmCalls: 1, toolCalls: 1 }, cache: {}, l1Enabled: false },
+    }));
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-trace-run"}',
+        '',
+        'event: delta',
+        'data: {"text":"已完成回放。"}',
+        '',
+        'event: done',
+        'data: {"content":"已完成回放。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+      setTimeout(releaseTrace, 200);
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('运行一次回放');
+    await page.keyboard.press('Enter');
+
+    const panel = page.locator('.trail-panel');
+    const modelStep = panel.locator('.tl-item').filter({ hasText: 'e2e-answer' });
+    await expect(modelStep).toContainText('确定性回放完成');
+    await expect(modelStep.locator('.tl-dur')).toContainText('42ms');
+    await expect(panel.locator('.tl-item').filter({ hasText: '已删除临时文件' })).toBeVisible();
+    await panel.locator('select').selectOption('tool_call');
+    await expect(panel.locator('.tl-item')).toHaveCount(1);
+    await expect(panel.locator('.tl-item')).toContainText('已删除临时文件');
+    const downloadPromise = page.waitForEvent('download');
+    await panel.locator('button.manager-close[aria-label="导出 JSONL"]').click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^maharness-trace-.*\.jsonl$/);
+    const path = await download.path();
+    expect(path).not.toBeNull();
+    const jsonl = await readFile(path!, 'utf8');
+    expect(jsonl).toContain('e2e-trace-tool');
+    expect(jsonl).not.toContain('e2e-trace-step');
+  });
+
+  test('长上下文压缩步骤展示来源范围与省略原因', async ({ page }) => {
+    let releaseTrace!: () => void;
+    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    await page.route('**/api/events', async (route) => {
+      await traceGate;
+      const step = {
+        id: 'e2e-context-step', traceId: 'e2e-context-run', turn: 1,
+        type: 'system', name: '上下文压缩',
+        inputSummary: 'history[3..18] · 16 条早期消息',
+        outputSummary: '来源 history[3..18]；LLM 摘要压缩 16 条早期消息（2400 → 180 tokens，省 2220）',
+        status: 'done', durationMs: 120, ts: Date.now(),
+      };
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: [
+        'event: event', `data: ${JSON.stringify({ type: 'trace.step', data: step })}`, '', '',
+      ].join('\n') });
+    });
+    await page.route('**/api/trace/stats', (route) => route.fulfill({
+      status: 200, json: { trace: { steps: 1, llmCalls: 1, toolCalls: 0 }, cache: {}, l1Enabled: false },
+    }));
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      const body = ['event: start', 'data: {"traceId":"e2e-context-run"}', '', 'event: done', 'data: {"content":"已压缩上下文。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('继续处理长任务');
+    await page.keyboard.press('Enter');
+    releaseTrace();
+    const step = page.locator('.trail-panel .tl-item').filter({ hasText: '上下文压缩' });
+    await expect(step).toContainText('history[3..18]');
+    await expect(step).toContainText('省 2220');
+  });
+});
+
+test.describe('断点恢复', () => {
+  test('从可恢复检查点继续时发送 resume 请求并渲染恢复答复', async ({ page }) => {
+    await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({
+      status: 200,
+      json: { exists: true, turn: 2, historyMessages: 6, createdAt: Date.now() },
+    }));
+    await setup(page);
+    await expect(page.getByText('上次做到第 3 轮停下了，之前做完的都还在')).toBeVisible();
+
+    const requests: Record<string, unknown>[] = [];
+    await page.route('**/api/sessions/*/chat', async (route) => {
+      requests.push(route.request().postDataJSON() as Record<string, unknown>);
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-resume-trace"}',
+        '',
+        'event: delta',
+        'data: {"text":"恢复后的答复。"}',
+        '',
+        'event: done',
+        'data: {"content":"恢复后的答复。","usage":{"input":12,"output":6},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.getByRole('button', { name: '接着说' }).click();
+    await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('恢复后的答复。');
+    await expect.poll(() => requests.length).toBe(1);
+    expect(requests[0]).toMatchObject({ resume: true });
+    expect(requests[0]).not.toHaveProperty('message');
   });
 });
 

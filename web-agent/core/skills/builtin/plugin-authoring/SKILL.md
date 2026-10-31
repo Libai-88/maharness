@@ -1,12 +1,31 @@
 ---
 name: plugin-authoring
 description: maharness 插件契约速查。需要创建新插件（新工具/新命令/新能力/新前端页面）时使用，保证一次写对。
+triggers:
+  - 创建插件
+  - 开发工具插件
+  - 扩展 maharness 能力
+applies-when:
+  - 需要新增或修改插件契约
+  - 需要注册工具、服务、命令或前端页面
+reject-when:
+  - 仅修改业务逻辑
+  - 不涉及插件生命周期或能力声明
+input: 插件 id、能力类型、权限范围和生命周期需求
+output: plugin.json、入口文件、验证命令和测试结果
 ---
 
 # 插件编写契约（速查）
 
 ## 结构
 ```
+
+推荐先使用脚手架生成并校验：
+```bash
+node scripts/plugin-scaffold.mjs create my-plugin
+node scripts/plugin-scaffold.mjs validate plugins/my-plugin
+```
+脚手架会生成 `compatibility.api` 与 `permissions.capabilities`，目标目录已存在时拒绝覆盖。
 plugins/<id>/
 ├── plugin.json   # { id, name, version, entry: "index.ts", enabled: true }
 └── index.ts      # 默认导出 Plugin 对象
@@ -87,7 +106,7 @@ class MyService extends Service {
 
 ## 契约
 ```ts
-import type { Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
 
 export default {
   id: 'my-plugin',
@@ -109,6 +128,10 @@ export default {
 } satisfies Plugin;
 ```
 
+## 自扩展审查门
+
+现场生成插件先经过静态安全审查：禁止直接启动进程、访问宿主文件系统、动态执行代码、读取进程环境和裸发网络请求。生成的 `plugin.json` 默认 `enabled:false`，并按源码提取的能力写入 `permissions.capabilities`；使用 `plugin_status` 检查后，通过 `enable_plugin` 显式进入试运行。
+
 ## 组合设计（可组合的工具 = 1+1>2）
 - **描述说清输入/输出/限制**：`output` 字段声明返回结构（如 `{path, entries[]}`）、
   `limits` 声明限制、`risk`/`costHint`/`approval` 声明风险成本——组合链里 harness 才能正确判断审批与成本；
@@ -127,6 +150,7 @@ export default {
 - **钩子**：`agent.before_llm`（改写 history 注入上下文）、`agent.before_tool`（参数改写/拦截）等，见 ARCHITECTURE 4.3。
 
 ## 热重载契约（重要，v3.4+）
+- **来源边界必须按目录理解**：`plugins/` 是现场用户插件目录，受目录 watcher 监听，保存源码后会按内容快照热重载；`core/` 是随宿主发布的内置插件，不在 watcher 范围内，修改后需手动重载或重启；`vendor/` 只承载技能包（`SKILL.md` 与资源），由技能同步/索引流程管理，不作为 PluginLoader 插件加载，也不会触发插件生命周期热重载。
 - **配置/环境变量依赖必须显式声明**：`ctx.watchConfig('agent.thinkInEnglish', cb)`、`ctx.watchEnv('TAVILY_API_KEY', cb?)`——声明后配置/.env 变更会自动触发依赖驱动重载（reloadChanged），插件重跑 onLoad 拿到新值；
 - **代码改动自动生效，多文件组织不受限**：插件目录按内容取快照后加载（`kernel/plugin-snapshot.ts`），入口或其依赖文件的内容变化都会触发模块图重建——无需重启进程；
 - 建议仍在 onLoad/onStart 函数体内读取配置与 env：语义上更明确地表达"每次启动重新求值"，也便于他人阅读；

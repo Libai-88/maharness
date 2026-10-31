@@ -19,6 +19,8 @@ interface Props {
   messages: ChatMessage[];
   streaming: boolean;
   onSend: (text: string) => void;
+  pendingInference?: { objective: string; rationale: string; confidence: number } | null;
+  onConfirmInference?: (objective: string, acceptance: string) => void;
   onStop: () => void;
   hasModels: boolean;
   approvals: ApprovalItem[];
@@ -387,6 +389,7 @@ const MessageRow = memo(function MessageRow({ m, canResend, expanded, onToggleEx
   // 旁白：模型"决定调工具"那几轮说的话（多半是英文工作日志）。它不是答复，
   // 所以不进正文气泡；但它确实发生过，所以留在演出里，可折叠查看。
   const narration = (m.narration ?? []).filter((s) => s.trim());
+  const verification = m.taskVerification;
   // 微信式系统消息（子代理入群 / 斜杠命令反馈）：居中灰色系统条
   if (m.role === 'system') {
     return (
@@ -462,6 +465,23 @@ const MessageRow = memo(function MessageRow({ m, canResend, expanded, onToggleEx
                 )
                 : <ToolCard key={t.id ?? `${t.name}-${i}`} t={t} />
             ))}
+            {verification && (
+              <details className="wx-verification" open={verification.status !== 'verified'}>
+                <summary>
+                  <IconCheck size={12} />
+                  <span>{verification.status === 'verified' ? '验收通过' : verification.status === 'partial' ? '部分完成' : '验收未通过'}</span>
+                  <span className="wv-count">{verification.checks.filter((c) => c.ok).length}/{verification.checks.length}</span>
+                </summary>
+                <div className="wv-body">
+                  {verification.checks.map((check, i) => (
+                    <div className={`wv-check ${check.ok ? 'ok' : 'fail'}`} key={i}>
+                      <span>{check.ok ? '✓' : '×'}</span><span>{check.reason ?? '验收条件'}</span>
+                      {verification.evidence[i]?.traceStepId && <code title="对应 Trace 步骤">#{verification.evidence[i]!.traceStepId!.slice(0, 8)}</code>}
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
             {reasoning && reasoning.length > 0 && (
               <div className={`think-card ${expanded ? 'expanded' : ''} ${m.streaming ? 'streaming' : ''}`}>
                 <div className="think-head">
@@ -496,7 +516,7 @@ const MessageRow = memo(function MessageRow({ m, canResend, expanded, onToggleEx
               <div className="wx-stopped">{sys.stopped}</div>
             )}
             {m.error && (
-              <div className="wx-failure" title={m.errorRaw ?? undefined}>
+              <div className="wx-failure" role="status" title={m.errorRaw ?? undefined}>
                 <IconWarn size={12} />
                 <span>{m.error}</span>
                 {canResend && (
@@ -533,8 +553,9 @@ const MessageRow = memo(function MessageRow({ m, canResend, expanded, onToggleEx
   );
 });
 
-export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', models = [], onSelectModel, selectedModelId, streamStatus, squad, checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0, onSystemMsg, sessionKey, onRemoveMessage, providerAuthFailed, onOpenSettings }: Props) {
+export default function ChatView({ messages, streaming, onSend, onStop, hasModels, approvals, onApproval, plan, todos = [], modelLabel = '', modelTag = '', models = [], onSelectModel, selectedModelId, streamStatus, squad, checkpoint, onResume, resuming = false, role, onRoleReset, budgetHit, sessionCost = 0, onSystemMsg, sessionKey, onRemoveMessage, providerAuthFailed, onOpenSettings, pendingInference, onConfirmInference }: Props) {
   const [input, setInput] = useState('');
+  const [inferenceAcceptance, setInferenceAcceptance] = useState('');
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [pendingApprovals, setPendingApprovals] = useState<Record<string, 'approve' | 'reject'>>({});
   const [commands, setCommands] = useState<CommandInfo[]>([]);
@@ -659,6 +680,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
   }, []);
   // 切换会话清理瞬态（引用条 / 表情面板）
   useEffect(() => { setQuote(null); setEmojiOpen(false); }, [sessionKey]);
+  useEffect(() => { if (!pendingInference) setInferenceAcceptance(''); }, [pendingInference]);
 
   const matched = input.startsWith('/')
     ? commands.filter((c) => {
@@ -911,6 +933,26 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
       )}
 
       <div className="composer-area">
+        {pendingInference && (
+          <div className="task-confirm-card" data-testid="task-confirm-card">
+            <div className="task-confirm-title">补充任务验收条件</div>
+            <div className="task-confirm-objective">{pendingInference.objective}</div>
+            <div className="task-confirm-hint">{pendingInference.rationale} · 置信度 {Math.round(pendingInference.confidence * 100)}%</div>
+            <textarea
+              value={inferenceAcceptance}
+              onChange={(e) => setInferenceAcceptance(e.target.value)}
+              placeholder="例如：生成 report.md，并在文件中包含结论"
+              rows={2}
+              disabled={streaming}
+            />
+            <button
+              className="btn-primary"
+              data-testid="task-confirm-submit"
+              disabled={!inferenceAcceptance.trim() || streaming}
+              onClick={() => onConfirmInference?.(pendingInference.objective, inferenceAcceptance)}
+            >确认并执行</button>
+          </div>
+        )}
         <AnimatePresence>
         {cmdOpen && matched.length > 0 && (
           <div className="cmd-overlay" onClick={() => setCmdOpen(false)}>

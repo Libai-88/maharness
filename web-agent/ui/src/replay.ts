@@ -112,6 +112,7 @@ export function replayMessages(rows: Message[]): ChatMessage[] {
     b.reasoning = m.reasoning || undefined;
     if (m.tokensIn || m.tokensOut) b.usage = { input: m.tokensIn ?? 0, output: m.tokensOut ?? 0 };
     b.cost = m.cost ?? 0;
+    b.taskVerification = m.taskVerification;
     b.ts = m.createdAt;
     flush();
   }

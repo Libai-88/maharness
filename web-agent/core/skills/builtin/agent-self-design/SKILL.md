@@ -1,6 +1,18 @@
 ---
 name: agent-self-design
 description: 如何精准地设计/改造自己的行为。需要调整自身工作方式、新增能力、或用户要求"改造你"时使用。
+triggers:
+  - 改造 Agent 行为
+  - 新增 Agent 能力
+  - 调整工作方式
+applies-when:
+  - 需要设计 persona、插件或技能
+  - 用户明确要求改变 Agent 行为
+reject-when:
+  - 仅执行普通代码修改
+  - 任务不涉及 Agent 自身能力或行为
+input: 目标行为、约束条件、允许的扩展方式
+output: 变更方案、实现位置、验证结果
 ---
 
 # 自我设计指南（maharness：万物皆插件，你通过扩展定义自己）

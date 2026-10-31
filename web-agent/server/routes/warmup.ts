@@ -12,6 +12,7 @@ import { getChatService } from './shared';
 
 interface WarmupEntry {
   timer: NodeJS.Timeout | null;
+  controller: AbortController;
   systemPrompt: string;
   seq: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[];
   provider: ProviderDef;
@@ -27,6 +28,22 @@ const WARMUP_DELAY_MS = 12_000;       // 首次预热延迟（网关缓存写入
 const WARMUP_INTERVAL_MS = 90_000;  // 保活间隔（缓存 TTL 刷新）
 const WARMUP_MAX_ROUNDS = 20;       // 最长保活 30 分钟（会话无新活动则停止）
 
+function stopWarmup(entry: WarmupEntry): void {
+  if (entry.timer) clearTimeout(entry.timer);
+  entry.timer = null;
+  entry.controller.abort();
+}
+
+export function stopAllWarmups(): void {
+  for (const entry of warmups.values()) stopWarmup(entry);
+  warmups.clear();
+}
+
+/** 在途预热会话数（句柄审计用：取消/切换配置后应归零） */
+export function activeWarmupCount(): number {
+  return warmups.size;
+}
+
 /** 会话 run 结束后调度预热（新 run 到达时重置保活轮次） */
 export function scheduleWarmup(
   sessionId: string,
@@ -40,6 +57,8 @@ export function scheduleWarmup(
   const existing = warmups.get(sessionId);
   if (existing) {
     // 会话有新活动：重置保活轮次与计时
+    stopWarmup(existing);
+    existing.controller = new AbortController();
     existing.systemPrompt = systemPrompt;
     existing.seq = seq;
     existing.provider = provider;
@@ -53,19 +72,22 @@ export function scheduleWarmup(
   }
   warmups.set(sessionId, {
     timer: setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_DELAY_MS),
+    controller: new AbortController(),
     systemPrompt, seq, contextMessages, provider, model, rounds: 0, lastRunAt: Date.now(),
   });
 }
 
 /** 执行一次预热 + 调度下一次保活 */
-async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
+export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
   const entry = warmups.get(sessionId);
   if (!entry) return;
+  if (entry.timer) clearTimeout(entry.timer);
   entry.timer = null;
   const chat = getChatService(kernel);
-  if (!chat) { warmups.delete(sessionId); return; } // 对话服务不可用：本次预热放弃
+  if (!chat) { stopWarmup(entry); warmups.delete(sessionId); return; } // 对话服务不可用：本次预热放弃
   // 保活上限：会话长时间无新活动则停止（避免无限消耗）
   if (entry.rounds >= WARMUP_MAX_ROUNDS) {
+    stopWarmup(entry);
     warmups.delete(sessionId);
     return;
   }
@@ -92,24 +114,26 @@ async function warmupOnce(sessionId: string, kernel: Kernel): Promise<void> {
     const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(chat.annotateToolDef);
     let hit = 0, miss = 0;
     const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
-    if (mode === 'off') { warmups.delete(sessionId); return; }
+    if (mode === 'off') { stopWarmup(entry); warmups.delete(sessionId); return; }
     const probe = mode === 'auto' && entry.rounds === 1;
-    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools })) {
+    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools, signal: entry.controller.signal })) {
       if (chunk.type === 'usage') { hit = chunk.cachedInput ?? 0; miss = chunk.missInput ?? 0; }
     }
     console.log(`[warmup] ${sessionId.slice(0, 8)} 完成（round ${entry.rounds}，${msgs.length} 条，hit=${hit} miss=${miss}）`);
     if (probe && miss > 0) {
       kernel.config.set('cache.warmup', 'off');
+      stopWarmup(entry);
       warmups.delete(sessionId);
       console.log(`[warmup] ${sessionId.slice(0, 8)} 网关未报告前缀缓存命中，auto 已降级为 off`);
       return;
     }
   } catch (err) {
+    if (entry.controller.signal.aborted) return;
     console.warn(`[warmup] ${sessionId.slice(0, 8)} 预热失败:`, err instanceof Error ? err.message.slice(0, 120) : String(err));
   }
   // 调度下一次保活（会话有新 run 时 scheduleWarmup 会重置）
   const cur = warmups.get(sessionId);
-  if (cur) {
+  if (cur === entry && !entry.controller.signal.aborted) {
     cur.timer = setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_INTERVAL_MS);
   }
 }

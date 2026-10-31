@@ -20,6 +20,9 @@ import { policyPosture } from './routes/rules';
 import { approvalTokenRequired } from './routes/approvals';
 import { discoverProviders } from '../core/chat/provider';
 import { ClientTracker } from './client-tracker';
+import { auditAuthorizationDenial, auditAuthorizationGrant, CredentialFailureLimiter, decideCredentialAuthorization } from './security-policy';
+import { apiContractFor, setApiSchemaHeaders } from './api-contract';
+import { validateAgainstSchema } from '../kernel/validate';
 
 dotenv.config(); // 启动时读取 .env（初始快照）
 
@@ -40,6 +43,16 @@ export function activeRunCount(): number { return activeRuns; }
 export const MUTATION_TOKEN_HEADER = 'x-maharness-token';
 /** 需要显式授权的变更类方法（GET/HEAD 只读端点不受影响） */
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+
+function auditRouteObject(req: express.Request): string {
+  const path = typeof req.path === 'string'
+    ? req.path
+    : typeof req.originalUrl === 'string'
+      ? req.originalUrl.split('?', 1)[0]
+      : '';
+  const segments = path.split('/');
+  return `/api/${segments[2] ?? segments[1] ?? ''}`;
+}
 
 /**
  * 当前生效的 API token。
@@ -75,18 +88,56 @@ function tokenMatches(provided: string, expected: string): boolean {
  *  · 前端接线（设置后由页面自动带上该头）需要改 ui/（api.ts 单点 + 页面注入 token），
  *    属另一条改造；本门默认关闭即不影响现有前端。
  */
-export function createApiTokenGuard(): express.RequestHandler {
+export function createApiTokenGuard(
+  kernel?: Kernel,
+  store?: Store,
+  limiter: CredentialFailureLimiter = new CredentialFailureLimiter(),
+): express.RequestHandler {
   return (req, res, next) => {
     const expected = requiredApiToken();
-    if (!expected) return next(); // 未启用：与历史行为完全一致
     const method = String(req.method ?? '').toUpperCase();
     if (!MUTATING_METHODS.has(method)) return next();
+    const auditObject = auditRouteObject(req);
+    if (!expected) {
+      if (kernel) auditAuthorizationGrant(kernel, {
+        subject: 'local-client', capability: `http:${method.toLowerCase()}`, object: auditObject,
+      }, store);
+      return next(); // 本机免 token 模式仍记录通过来源校验的变更
+    }
+    const forwardedFor = req.headers['x-forwarded-for'];
+    const clientKey = req.socket?.remoteAddress
+      ?? req.ip
+      ?? (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor)
+      ?? 'unknown';
+    const retryAfter = limiter.retryAfterMs(clientKey);
+    if (retryAfter > 0) {
+      res.setHeader('Retry-After', String(Math.ceil(retryAfter / 1000)));
+      return res.status(429).json({ error: '凭据失败次数过多，请稍后重试' });
+    }
     const raw = req.headers[MUTATION_TOKEN_HEADER] ?? req.headers.authorization;
     const one = Array.isArray(raw) ? raw[0] : raw;
     const bearer = typeof one === 'string' ? /^Bearer\s+(.+)$/i.exec(one.trim()) : null;
     const provided = bearer ? bearer[1].trim() : (typeof one === 'string' ? one.trim() : '');
-    if (tokenMatches(provided, expected)) return next();
+    const decision = decideCredentialAuthorization({
+      enabled: true,
+      supplied: !!provided,
+      valid: tokenMatches(provided, expected),
+    });
+    if (decision.allowed) {
+      limiter.recordSuccess(clientKey);
+      if (expected && provided && kernel) auditAuthorizationGrant(kernel, {
+        subject: 'api-token', capability: `http:${method.toLowerCase()}`,
+        object: auditObject,
+      }, store);
+      return next();
+    }
     // 不回显期望值、不区分「没带」与「带错」的细节（只说需要哪个头），避免给探测者提示
+    if (kernel) auditAuthorizationDenial(kernel, {
+      subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
+      object: req.route?.path ? `${req.baseUrl}${req.route.path}` : auditObject,
+      reason: decision.reason === 'invalid' ? 'api-token-invalid' : 'api-token-required',
+    }, store);
+    if (decision.reason === 'invalid') limiter.recordFailure(clientKey);
     return res.status(401).json({
       error: `未授权：服务端已启用 MAHARNESS_API_TOKEN，变更类请求必须携带 ${MUTATION_TOKEN_HEADER} 头`,
     });
@@ -134,7 +185,11 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     if (keyInfo.state === 'created') console.log(line);
     else console.error(`[secret] 主密钥异常（${keyInfo.state}）—— ${line}`);
   }
-  const store = new Store(kernel.paths.dbFile, { secretKey: keyInfo.key, masterKey: keyInfo });
+  const store = new Store(kernel.paths.dbFile, {
+    secretKey: keyInfo.key,
+    masterKey: keyInfo,
+    checkpointRetentionMs: kernel.config.get<number>('checkpoint.retentionDays', 30) * 24 * 60 * 60 * 1000,
+  });
   seedDefaults(store);
   // A7-2：把「密钥不可解」的既成事实打出来（Store 读一遍即完成记账），
   // 否则用户只在真实请求 401 时才发现，归因会指向供应商而不是本机密钥文件。
@@ -160,6 +215,45 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
   const app = express();
 
+  // API-01：统一错误外壳。保留既有 `error` 文案，补充可机器消费的版本、状态和错误码。
+  // 通过包装 res.json 覆盖拆分路由，避免每个资源路由各自维护一套错误格式。
+  app.use((req, res, next) => {
+    if (!req.path.startsWith('/api')) return next();
+    setApiSchemaHeaders(res);
+    const originalJson = res.json.bind(res);
+    res.json = ((body: unknown) => {
+      if (res.statusCode < 400) {
+        const contract = apiContractFor(req.method, req.path);
+        let schema = contract?.schema;
+        if (!schema && req.path.startsWith('/api/plugins/')) {
+          const [, , , pluginId, ...parts] = req.path.split('/');
+          const api = kernel.plugins.get(pluginId)?.caps.find((cap) => cap.kind === 'api');
+          if (api?.kind === 'api') schema = api.api.responses?.[`${req.method} /${parts.slice(1).join('/')}`];
+        }
+        if (schema) {
+          const issues = validateAgainstSchema(body, schema);
+          if (issues.length) {
+            res.statusCode = 500;
+            body = { schemaVersion: 1, ok: false, code: 'response_schema_invalid', error: '响应不符合已登记的 API schema', issues };
+          }
+        }
+      }
+      if (res.statusCode >= 400 && body && typeof body === 'object' && !Array.isArray(body)) {
+        const value = body as Record<string, unknown>;
+        if (typeof value.error === 'string' && value.schemaVersion === undefined) {
+          const codeByStatus: Record<number, string> = {
+            400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 428: 'precondition_required',
+            404: 'not_found', 409: 'conflict', 429: 'rate_limited',
+            500: 'internal_error', 503: 'service_unavailable',
+          };
+          body = { schemaVersion: 1, ok: false, code: codeByStatus[res.statusCode] ?? 'request_failed', ...value };
+        }
+      }
+      return originalJson(body);
+    }) as typeof res.json;
+    next();
+  });
+
   // ---- C-S1 监听与请求校验（最高优先：防 DNS rebinding / 跨源滥用）----
   // 本服务是「本机个人的 Agent harness」，只服务本机浏览器与同机工具：
   //  (a) 只绑定回环地址，杜绝局域网直连；
@@ -179,10 +273,18 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   app.use((req, res, next) => {
     const host = String(req.headers.host ?? '').toLowerCase();
     if (!allowedHosts.has(host)) {
+      auditAuthorizationDenial(kernel, {
+        subject: 'anonymous', capability: `http:${String(req.method).toLowerCase()}`,
+        object: `/api/${req.path.split('/')[2] ?? ''}`, reason: 'source-host-denied',
+      }, store);
       return res.status(403).json({ error: 'Forbidden: Host 头不在本机白名单' });
     }
     const origin = req.headers.origin;
     if (origin !== undefined && !allowedOrigins.has(origin)) {
+      auditAuthorizationDenial(kernel, {
+        subject: 'anonymous', capability: `http:${String(req.method).toLowerCase()}`,
+        object: `/api/${req.path.split('/')[2] ?? ''}`, reason: 'source-origin-denied',
+      }, store);
       return res.status(403).json({ error: 'Forbidden: Origin 不在白名单' });
     }
     next();
@@ -192,7 +294,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   // 覆盖 /api/*（含下方插件 API 挂载点 /api/plugins/*），GET/HEAD 只读不受影响。
   // 未设 MAHARNESS_API_TOKEN 时逐请求透传 = 现有本机免鉴权行为不变。
   // 威胁模型与边界见 createApiTokenGuard 注释：这是「显式授权」门槛，不是进程隔离边界。
-  app.use('/api', createApiTokenGuard());
+  app.use('/api', createApiTokenGuard(kernel, store));
 
   // ---- A6/A7 安全姿态只读端点：把「当前哪些门是开着的、密钥是否可用」说清楚 ----
   // 只读、无副作用、不含任何密钥材料（token / api_key / secret.key 一律不外泄）。
@@ -220,6 +322,11 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     });
   });
 
+  app.get('/api/security/audit', (req, res) => {
+    const rawLimit = Number(req.query.limit ?? 100);
+    res.json({ events: store.listAuthorizationAudit(Number.isFinite(rawLimit) ? rawLimit : 100) });
+  });
+
   const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）
   registerRoutes(app, kernel, store, tracker);
 
@@ -245,10 +352,16 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     }
   });
 
+  // 未命中的 API 也使用同一错误契约；非 API 请求继续交给静态托管/SPA fallback。
+  app.use('/api', (_req, res, next) => {
+    if (res.headersSent) return next();
+    res.status(404).json({ error: '接口不存在' });
+  });
+
   // 兜底错误处理：handler 异常返回 500 而非进程崩溃（安装/卸载/文件操作等异步路径）
   app.use((err: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('[server] 请求处理异常:', err instanceof Error ? err.message : err);
-    if (!res.headersSent) res.status(500).json({ error: err instanceof Error ? err.message : String(err) });
+    if (!res.headersSent) res.status(500).json({ error: '服务器内部错误' });
   });
 
   // 生产：托管前端构建产物（SPA fallback；/api 未命中仍走 404）

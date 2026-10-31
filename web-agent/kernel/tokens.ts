@@ -16,6 +16,54 @@ export function estimateTokens(text: string | null | undefined): number {
   return Math.ceil(cjk + rest / perToken);
 }
 
+export interface TokenizerAdapter {
+  id: string;
+  countText(text: string): number;
+  countMessages?: (messages: PrefixMessage[]) => number;
+}
+
+export function countMessageTokens(messages: PrefixMessage[], tokenizer?: TokenizerAdapter): number {
+  if (tokenizer?.countMessages) return Math.max(0, Math.floor(tokenizer.countMessages(messages)));
+  return messages.reduce((sum, message) => {
+    let tokens = estimateTokens(message.content ?? '');
+    if (message.tool_calls !== undefined && message.tool_calls !== null) tokens += estimateTokens(JSON.stringify(message.tool_calls));
+    return sum + tokens;
+  }, 0);
+}
+
+export interface TokenBudgetAllocation {
+  total: number;
+  system: number;
+  task: number;
+  history: number;
+  tools: number;
+  memory: number;
+  output: number;
+}
+
+/**
+ * 将上下文总预算拆成可审计的固定分项。百分比只定义保留区，剩余额度归历史，
+ * 因而所有分项之和始终等于 total，调用方可以直接复算超限原因。
+ */
+export function allocateTokenBudget(total: number, reserves: Partial<Pick<TokenBudgetAllocation, 'system' | 'task' | 'tools' | 'memory' | 'output'>> = {}): TokenBudgetAllocation {
+  const normalized = Math.max(0, Math.floor(Number.isFinite(total) ? total : 0));
+  let remaining = normalized;
+  const reserve = (key: keyof typeof reserves, ratio: number): number => {
+    const explicit = reserves[key];
+    const value = explicit === undefined ? Math.floor(normalized * ratio) : Math.max(0, Math.floor(explicit));
+    const allocated = Math.min(remaining, value);
+    remaining -= allocated;
+    return allocated;
+  };
+  const system = reserve('system', 0.08);
+  const task = reserve('task', 0.08);
+  const tools = reserve('tools', 0.12);
+  const memory = reserve('memory', 0.05);
+  const output = reserve('output', 0.15);
+  const history = remaining;
+  return { total: normalized, system, task, history, tools, memory, output };
+}
+
 /** 前缀比较用的消息形状（role/content 之外，tool_calls 与 tool_call_id 也参与相等判断） */
 interface PrefixMessage {
   role?: string;

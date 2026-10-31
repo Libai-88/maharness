@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { globToRegex, matchesGlob, walkFiles, grepFiles, sliceLines, applyEdits, countOccurrences, detectEol, convertEol, toRel } from '../fssearch';
+import { globToRegex, matchesGlob, walkFiles, grepFiles, sliceLines, applyEdits, countOccurrences, detectEol, convertEol, toRel, directoryFingerprint, fileFingerprint, treeFingerprint } from '../fssearch';
 
 let root = '';
 
@@ -39,6 +39,53 @@ describe('glob 匹配', () => {
   it('globToRegex 转义点号', () => {
     assert.ok(!globToRegex('a.ts').test('Xats'));
     assert.ok(globToRegex('a.ts').test('a.ts'));
+  });
+});
+
+describe('文件缓存指纹', () => {
+  it('目录指纹覆盖外部新增、删除和重命名', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mh-dir-fingerprint-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(dir, { recursive: true });
+    const first = directoryFingerprint(dir);
+    writeFileSync(join(dir, 'created.txt'), 'same-size');
+    const added = directoryFingerprint(dir);
+    assert.notEqual(added, first);
+    writeFileSync(join(dir, 'renamed.txt'), 'same-size');
+    rmSync(join(dir, 'created.txt'));
+    const renamed = directoryFingerprint(dir);
+    assert.notEqual(renamed, added);
+    rmSync(join(dir, 'renamed.txt'));
+    assert.equal(directoryFingerprint(dir), first);
+  });
+
+  it('文件内容原位变化即使长度相同也会改变指纹', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mh-file-fingerprint-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    const file = join(dir, 'fingerprint-content.txt');
+    writeFileSync(file, 'AAAA');
+    const before = fileFingerprint(file);
+    writeFileSync(file, 'BBBB');
+    const after = fileFingerprint(file);
+    assert.notEqual(after, before);
+  });
+
+  it('树指纹包含内容并报告完整性，避免不完整快照进入缓存', (t) => {
+    const dir = mkdtempSync(join(tmpdir(), 'mh-tree-fingerprint-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    mkdirSync(join(dir, 'src'), { recursive: true });
+    const file = join(dir, 'src', 'a.ts');
+    writeFileSync(file, 'line1\nline2 target\n');
+    const snapshot = treeFingerprint(dir, { accept: rel => rel === 'src/a.ts', includeContent: true });
+    assert.equal(snapshot.complete, true);
+    assert.equal(snapshot.contentComplete, true);
+    assert.equal(snapshot.hits.length, 1);
+    const before = snapshot.fingerprint;
+    writeFileSync(file, 'line1\nline2 changed\n');
+    const after = treeFingerprint(dir, { accept: rel => rel === 'src/a.ts', includeContent: true });
+    assert.notEqual(after.fingerprint, before);
+    const overBudget = treeFingerprint(dir, { includeContent: true, maxTotalContentBytes: 1 });
+    assert.equal(overBudget.contentComplete, false);
   });
 });
 

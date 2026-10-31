@@ -3,7 +3,8 @@
  * 提供 glob 匹配、目录遍历、正则/literal 逐行搜索。
  * 设计约束：不跟随符号链接、忽略目录内置、有文件数与时间双预算（防大仓库扫穿）。
  */
-import { readdirSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
 import { resolve, relative, sep, join } from 'node:path';
 import { readTextSmart } from './sandbox';
 
@@ -65,7 +66,7 @@ export interface WalkOptions {
   accept?: (rel: string) => boolean;
 }
 
-export interface WalkHit { abs: string; rel: string; size: number }
+export interface WalkHit { abs: string; rel: string; size: number; mtimeMs: number; ctimeMs: number }
 
 /** 深度优先遍历目录（不跟随符号链接），超预算即停并标记 truncated */
 export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit[]; truncated: boolean } {
@@ -91,14 +92,111 @@ export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit
       const abs = join(dir, e.name);
       const rel = toRel(base, abs);
       if (opts.accept && !opts.accept(rel)) continue;
-      let size = 0;
-      try { size = statSync(abs).size; } catch { continue; }
-      hits.push({ abs, rel, size });
+      let st;
+      try { st = statSync(abs); } catch { continue; }
+      hits.push({ abs, rel, size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs });
       if (hits.length >= maxFiles) { truncated = true; return { hits, truncated }; }
     }
     if (Date.now() > deadline) { truncated = true; break; }
   }
   return { hits, truncated };
+}
+
+/**
+ * 文件缓存指纹：元数据用于快速发现常规变更，内容摘要覆盖“内容变了但大小/时间被还原”的外部变更。
+ * maxContentBytes 设为 0 时只使用元数据；超出非零上限时返回 undefined，由调用方跳过缓存。
+ */
+export function fileFingerprint(file: string, maxContentBytes = Number.POSITIVE_INFINITY): string | undefined {
+  let st;
+  try { st = statSync(file); } catch { return 'missing'; }
+  if (maxContentBytes > 0 && st.isFile() && st.size > maxContentBytes) return undefined;
+  const h = createHash('sha256');
+  h.update(`${st.size}\0${st.mtimeMs}\0${st.ctimeMs}\0`);
+  const includeContent = maxContentBytes !== 0 && st.isFile() && st.size <= maxContentBytes;
+  if (includeContent) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(file, 'r');
+      const buf = Buffer.allocUnsafe(64 * 1024);
+      let n = 0;
+      while ((n = readSync(fd, buf, 0, buf.length, null)) > 0) h.update(buf.subarray(0, n));
+    } catch {
+      h.update('unreadable');
+    } finally {
+      if (fd !== undefined) try { closeSync(fd); } catch { /* 文件可能已被外部删除 */ }
+    }
+  }
+  return h.digest('hex').slice(0, 32);
+}
+
+/**
+ * 目录的一层指纹。list_dir 的可见结果只有直接子项，因此不递归；逐项列举可以覆盖
+ * 外部新增/删除/重命名，即使目录 mtime 被恢复也不会复用旧结果。
+ */
+export function directoryFingerprint(dir: string): string {
+  const h = createHash('sha256');
+  let entries;
+  try { entries = readdirSync(dir, { withFileTypes: true }); }
+  catch { return 'missing'; }
+  for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+    const abs = join(dir, e.name);
+    try {
+      const st = statSync(abs);
+      h.update(`${e.name}\0${e.isDirectory() ? 'd' : 'f'}\0${st.size}\0${st.mtimeMs}\0${st.ctimeMs}\0`);
+    } catch {
+      h.update(`${e.name}\0unreadable\0`);
+    }
+  }
+  return h.digest('hex').slice(0, 32);
+}
+
+/**
+ * 与 glob/grep 查询范围一致的树指纹。includeContent=true 时对不超过 maxContentBytes
+ * 的文件加入内容摘要，保证 grep 不会因外部原位改写而误命中旧结果。
+ */
+export interface TreeFingerprint {
+  fingerprint: string;
+  complete: boolean;
+  contentComplete: boolean;
+  hits: WalkHit[];
+}
+
+export function treeFingerprint(root: string, opts: {
+  accept?: (rel: string) => boolean;
+  maxFiles?: number;
+  maxMs?: number;
+  includeContent?: boolean;
+  maxContentBytes?: number;
+  maxTotalContentBytes?: number;
+} = {}): TreeFingerprint {
+  const { hits, truncated } = walkFiles(root, {
+    accept: opts.accept,
+    maxFiles: opts.maxFiles ?? 30_000,
+    maxMs: opts.maxMs ?? 15_000,
+  });
+  const h = createHash('sha256');
+  h.update(`truncated:${truncated}\0`);
+  let contentComplete = true;
+  let contentBytesHashed = 0;
+  for (const hit of hits.sort((a, b) => a.rel.localeCompare(b.rel))) {
+    h.update(`${hit.rel}\0${hit.size}\0${hit.mtimeMs}\0${hit.ctimeMs}\0`);
+    if (opts.includeContent) {
+      const perFileLimit = opts.maxContentBytes ?? Number.POSITIVE_INFINITY;
+      const totalLimit = opts.maxTotalContentBytes ?? Number.POSITIVE_INFINITY;
+      if (hit.size > perFileLimit || contentBytesHashed + hit.size > totalLimit) {
+        contentComplete = false;
+        continue;
+      }
+      const fileHash = fileFingerprint(hit.abs, opts.maxContentBytes ?? Number.POSITIVE_INFINITY);
+      // grep 等上层会跳过超限文件；其元数据已经进入指纹，内容不读也不会造成误命中。
+      if (fileHash === undefined) contentComplete = false;
+      else {
+        h.update(fileHash);
+        contentBytesHashed += hit.size;
+      }
+    }
+  }
+  return { fingerprint: h.digest('hex').slice(0, 32), complete: !truncated, contentComplete, hits };
 }
 
 export interface GrepOptions {
