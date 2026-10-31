@@ -247,6 +247,8 @@ export class PluginLoader {
   private diagnosticLog: PluginDiagnostic[] = [];
   private watcher?: ReturnType<typeof watch>;
   private reloadTimer?: NodeJS.Timeout;
+  /** 防抖窗口内收集的全部事件路径（onFileChange 聚合分派用） */
+  private pendingPaths?: string[];
   /** rescan 在途互斥标记：watch 风暴下重入直接返回（防并发重扫/重复 reload） */
   private rescanning = false;
   /** 在途互斥期间收到过新事件：本轮收尾后需要补扫一次（否则删除事件可能被静默丢弃） */
@@ -1557,9 +1559,18 @@ export class PluginLoader {
     try {
       this.watcher = watch(this.userDir, { recursive: true }, (_event, filename) => {
         clearTimeout(this.reloadTimer);
-        // 归一化 Windows 反斜杠；null（某些平台事件）视为目录级
-        const name = filename ? String(filename).replace(/\\/g, '/') : null;
-        this.reloadTimer = setTimeout(() => void this.onFileChange(name), 500);
+        // 归一化 Windows 反斜杠；null（某些平台事件）视为目录级。窗口内收集全部
+        // 事件路径，防抖结束后聚合分派（单事件丢序问题见 onFileChange 注释）。
+        // 每个事件都重置窗口：事件流持续到达时窗口后移，文件写完（manifest+entry
+        // 都落盘）且静默 500ms 才分派——聚合又不破坏原防抖语义。
+        clearTimeout(this.reloadTimer);
+        if (!this.pendingPaths) this.pendingPaths = [];
+        this.pendingPaths.push(filename ? String(filename).replace(/\\/g, '/') : '');
+        this.reloadTimer = setTimeout(() => {
+          const paths = this.pendingPaths ?? [];
+          this.pendingPaths = [];
+          void this.onFileChange(paths);
+        }, 500);
       });
       // 目录监听不该钉住事件循环（缺陷 B15）：长驻 server 有自己的监听套接字保持存活；
       // CLI 脚本（selftest / agent-eval / cache-check）在 kernel.stop() 之后必须能自然退出。
@@ -1569,16 +1580,20 @@ export class PluginLoader {
     }
   }
 
-  /** 文件变更分派（防抖后执行）：filename 可定位到插件 → 定向 reload（只动一个插件，
+  /** 文件变更分派（防抖后执行）：窗口内事件路径定位到插件 → 定向 reload（只动一个插件，
    *  不再全目录重扫误伤无关插件）；定位不到（新建目录/null 事件）才全扫。
-   *  rescanning 互斥：在途重扫/重载期间的新分派直接返回。 */
-  private async onFileChange(filename: string | null): Promise<void> {
+   *  rescanning 互斥：在途重扫/重载期间的新分派记 pending，收尾补扫。
+   *  窗口收全部事件而非最后一个：inotify 窗口内事件乱序（插件目录删除事件先于
+   *  快照目录删除事件到达），只看最后一个会把整个窗口当快照噪声丢弃——
+   *  插件删除事件被吞，实例永久滞留注册表（Linux CI 稳定复现）。 */
+  private async onFileChange(changedPaths: string[]): Promise<void> {
     if (this.rescanning) { this.pendingRescan = true; return; }
-    // 内容快照的创建/删除同样落在监听目录里（快照与插件目录同级）：不是插件变更，直接忽略
-    if (filename && SNAPSHOT_SUFFIX.test(filename.split('/')[0])) return;
+    // 纯快照目录事件窗口：快照增删是 reload 自产的回声，忽略
+    const source = changedPaths.filter((p) => p && !SNAPSHOT_SUFFIX.test(p.split('/')[0]));
+    if (changedPaths.length > 0 && source.length === 0) return;
     this.rescanning = true;
     try {
-      const first = filename?.split('/')[0] ?? '';
+      const first = source[0]?.split('/')[0] ?? '';
       const target = first
         ? [...this.registry.values()].find((i) => i.dir.startsWith(this.userDir) && basename(i.dir) === first)
         : undefined;
@@ -1592,7 +1607,7 @@ export class PluginLoader {
         }
         // 文件级事件（filename 含路径分隔，如 "myplugin/index.ts"）：内容确已变化 → 直接 reload；
         // 目录级事件（filename 恰为目录名，多为 touch/句柄扰动）：mtime 未变则跳过
-        if (filename === first) {
+        if (source.length === 1 && source[0] === first) {
           const mtime = this.snapshotMtime(target.dir);
           const prev = this.dirMtimes.get(target.dir);
           this.dirMtimes.set(target.dir, mtime);
@@ -1610,7 +1625,7 @@ export class PluginLoader {
       // 就永远滞留注册表）。防抖器本轮没有新定时器在排队，收尾后串行跑一次全扫即可。
       if (this.pendingRescan) {
         this.pendingRescan = false;
-        void this.onFileChange(null);
+        void this.onFileChange([]);
       }
     }
   }
