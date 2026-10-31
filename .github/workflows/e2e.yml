@@ -83,8 +83,8 @@ jobs:
         run: |
           export AGENT_DATA_DIR=$(mktemp -d)
           npm start > /tmp/server.log 2>&1 &
-        for i in $(seq 1 30); do curl -sf http://localhost:3000/api/providers > /dev/null && break; sleep 2; done
-        curl -sf http://localhost:3000/api/providers > /dev/null || { echo '后端启动失败'; cat /tmp/server.log; exit 1; }
+          for i in $(seq 1 30); do curl -sf http://localhost:3000/api/providers > /dev/null && break; sleep 2; done
+          curl -sf http://localhost:3000/api/providers > /dev/null || { echo '后端启动失败'; cat /tmp/server.log; exit 1; }
 
       - name: 运行思考分流真机回归（R1 + Qwen 思考系）
         env:
