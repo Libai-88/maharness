@@ -915,8 +915,12 @@ export default {
   offErr();
   // 清理
   rmSync(dir, { recursive: true, force: true });
-  await new Promise((r) => setTimeout(r, 1200));
-  const cleaned = !kernel.plugins.list().some((p) => p.manifest.id === 'tmp-compose');
+  // 文件监听器卸载节奏随 runner 负载波动，轮询等待上限 5s，不放宽断言本身。
+  let cleaned = false;
+  for (let waited = 0; waited <= 5000; waited += 250) {
+    await new Promise((r) => setTimeout(r, 250));
+    if (!kernel.plugins.list().some((p) => p.manifest.id === 'tmp-compose')) { cleaned = true; break; }
+  }
   check('[compose] 删除目录自动卸载', cleaned);
 }
 
