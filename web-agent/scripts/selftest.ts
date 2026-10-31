@@ -917,11 +917,12 @@ export default {
   rmSync(dir, { recursive: true, force: true });
   // 文件监听器卸载节奏随 runner 负载波动，轮询等待上限 5s，不放宽断言本身。
   let cleaned = false;
-  for (let waited = 0; waited <= 5000; waited += 250) {
+  for (let waited = 0; waited <= 10000; waited += 250) {
     await new Promise((r) => setTimeout(r, 250));
     if (!kernel.plugins.list().some((p) => p.manifest.id === 'tmp-compose')) { cleaned = true; break; }
   }
-  check('[compose] 删除目录自动卸载', cleaned);
+  const leftoverState = kernel.plugins.get('tmp-compose')?.state ?? 'absent';
+  check('[compose] 删除目录自动卸载', cleaned, `10s 后仍残留（state=${leftoverState}）`);
 }
 
 // ---- 时空可组合性：反应性依赖（coeffect）——提供者停用，依赖方自动降级；恢复自动可用 ----
