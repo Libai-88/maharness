@@ -7,7 +7,8 @@
  */
 import Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { join } from 'node:path';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
 import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secrets';
 import type { SecretKeyInfo } from './secrets';
@@ -153,6 +154,84 @@ export class Store {
     this.checkpointRetentionMs = Number.isFinite(opts.checkpointRetentionMs) ? Math.max(60_000, Math.floor(opts.checkpointRetentionMs!)) : Store.CHECKPOINT_RETENTION_MS;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
+    try {
+      this.migrate(dbFile);
+      this.applyColumnMigrations();
+    } catch (err) {
+      // 启动自检失败时释放连接：否则损坏/版本不匹配的库会一直占着文件句柄，
+      // Windows 下既无法换入恢复备份，进程退出前也无法删除。
+      try { this.db.close(); } catch { /* 已关闭 */ }
+      throw err;
+    }
+  }
+
+  /** 当前数据库 schema 版本（PRAGMA user_version） */
+  get schemaVersion(): number {
+    return Number(this.db.pragma('user_version', { simple: true }));
+  }
+
+  /** 校验数据库完整性（integrity_check）；返回错误清单（空 = 通过） */
+  integrityCheck(): string[] {
+    const rows = this.db.pragma('integrity_check') as { integrity_check: string }[];
+    return rows.map((r) => r.integrity_check).filter((r) => r !== 'ok');
+  }
+
+  /** 一致性维护：checkpoint 清理 + WAL 截断（备份前/日常维护调用） */
+  vacuum(): void {
+    try { this.db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* 只读连接等场景下失败不致命 */ }
+  }
+
+  /** 热备份到目标路径（better-sqlite3 backup API：备份过程中页面写入不中断） */
+  backupTo(targetFile: string): Promise<void> {
+    return this.db.backup(targetFile) as unknown as Promise<void>;
+  }
+
+  /**
+   * schema 版本化迁移。
+   * - 新库：`user_version` 为 0 且无任何用户表 → 直接写入当前版本。
+   * - 旧库：`user_version` 为 0 但已有用户表 → 认定为 v1 之前的历史库；基线结构
+   *   与「新库直接建当前 schema」等价（列级增量由下方 CREATE 后的幂等 ALTER 兜底），
+   *   因此直接提升到当前版本，不重复执行已随时间累积过的变更。
+   * - 已知更高版本：库来自更新的程序版本，fail-closed 拒绝打开（不猜测降级行为）。
+   * - 未来新增破坏性变更：在 MIGRATIONS 追加 `from → run` 步骤（迁移内可再写 DDL），
+   *   每步完成后推进 user_version；失败中断且库保留在旧版本，启动自检拒绝运行。
+   */
+  private migrate(dbFile: string): void {
+    const current = Number(this.db.pragma('user_version', { simple: true }));
+    const hasUserTables = (() => {
+      const rows = this.db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'`).all() as { name: string }[];
+      return rows.length > 0;
+    })();
+    if (current > Store.DB_SCHEMA_VERSION) {
+      throw new Error(`数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`);
+    }
+    if (current === Store.DB_SCHEMA_VERSION) return;
+    if (current === 0) {
+      // 新库（无表）与历史库（本机制引入版本号之前建立、已有表）统一走基线建表：
+      // 基线 schema 与当前版本一致，CREATE IF NOT EXISTS 对两者都幂等。
+      this.createBaselineSchema();
+      this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
+      return;
+    }
+    for (const step of Store.MIGRATIONS) {
+      if (step.from < current) continue;
+      if (step.from !== current) break;
+      try {
+        this.db.transaction(() => {
+          step.run(this.db);
+          this.db.pragma(`user_version = ${step.to}`);
+        })();
+      } catch (err) {
+        throw new Error(`数据库迁移 ${step.from} → ${step.to} 失败，已保留在旧版本（可从备份恢复）: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
+    if (Number(this.db.pragma('user_version', { simple: true })) !== Store.DB_SCHEMA_VERSION) {
+      throw new Error(`数据库 schema 版本推进不完整（目标 ${Store.DB_SCHEMA_VERSION}），启动拒绝：${dbFile}`);
+    }
+  }
+
+  /** 基线建表（新库与历史库统一走这条路径；列级增量由幂等 ALTER 兜底） */
+  private createBaselineSchema(): void {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新会话',
@@ -211,6 +290,96 @@ export class Store {
       );
       CREATE INDEX IF NOT EXISTS idx_authorization_audit_time ON authorization_audit(occurred_at DESC);
     `);
+  }
+
+  /** 数据库自动维护：启动备份（保留最近 N 份）+ 完整性校验 + 损坏自动恢复。 */
+  static autoMaintain(dbFile: string): void {
+    const dataDir = dbFile.slice(0, dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
+    const backupDir = join(dataDir, 'backups');
+    const backupPath = join(backupDir, `agent-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
+    try { mkdirSync(backupDir, { recursive: true }); } catch { /* 已存在 */ }
+    try {
+      copyFileSync(dbFile, backupPath);
+      // WAL 内容一并复制（journal_mode=WAL 下主文件可能落后于最新提交）
+      for (const suffix of ['-wal', '-shm']) {
+        if (existsSync(dbFile + suffix)) copyFileSync(dbFile + suffix, backupPath + suffix);
+        else { try { rmSync(backupPath + suffix, { force: true }); } catch { /* 无伴生文件 */ } }
+      }
+    } catch (err) {
+      console.warn('[store] 启动备份失败（继续启动，不影响数据）:', err instanceof Error ? err.message : String(err));
+    }
+    // 轮转：只保留最近 N 份（按文件名排序，时间戳即字典序）
+    try {
+      const files = readdirSync(backupDir).filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f)).sort();
+      while (files.length > Store.BACKUP_KEEP) rmSync(join(backupDir, files.shift()!), { force: true });
+    } catch { /* 轮转失败不阻断启动 */ }
+    // 完整性校验：损坏则从最近备份恢复
+    try {
+      const probe = new Database(dbFile, { readonly: true });
+      try {
+        const rows = probe.pragma('integrity_check') as { integrity_check: string }[];
+        const bad = rows.map((r) => r.integrity_check).filter((r) => r !== 'ok');
+        if (bad.length === 0) return;
+        console.error(`[store] 数据库完整性校验失败: ${bad.slice(0, 5).join('; ')}——尝试从最近备份恢复`);
+      } finally { probe.close(); }
+    } catch (err) {
+      console.warn(`[store] 数据库无法只读打开（视为损坏）: ${err instanceof Error ? err.message : String(err)}——尝试从最近备份恢复`);
+    }
+    const backups = (() => {
+      try { return readdirSync(backupDir).filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f)).sort().reverse(); }
+      catch { return []; }
+    })();
+    for (const candidate of backups) {
+      const src = join(backupDir, candidate);
+      try {
+        const probe = new Database(src, { readonly: true });
+        try {
+          const rows = probe.pragma('integrity_check') as { integrity_check: string }[];
+          if (rows.some((r) => r.integrity_check !== 'ok')) continue;
+        } finally { probe.close(); }
+        // 校验通过 → 原子换入（先留损坏现场）
+        try { copyFileSync(dbFile, `${dbFile}.corrupt-${Date.now()}`); } catch { /* 损坏文件可能已不可读 */ }
+        copyFileSync(src, dbFile);
+        for (const suffix of ['-wal', '-shm']) {
+          try { rmSync(dbFile + suffix, { force: true }); } catch { /* 无伴生文件 */ }
+          if (existsSync(src + suffix)) copyFileSync(src + suffix, dbFile + suffix);
+        }
+        console.log(`[store] 已从备份 ${candidate} 恢复数据库`);
+        return;
+      } catch { continue; }
+    }
+    console.error('[store] 没有可用备份能通过完整性校验——保留损坏现场并继续启动（新写入可能失败）');
+  }
+
+  /** 版本化迁移步骤表：新 schema 变更在此追加，逐版本推进（每步事务化 + 可回滚） */
+  static readonly MIGRATIONS: readonly { from: number; to: number; run: (db: Database.Database) => void }[] = [
+    // 示例占位（v0 → v1 不在此表：历史库与新库都直接走 createBaselineSchema）。
+    // 未来新增破坏性变更时追加：{ from: 1, to: 2, run: (db) => db.exec('...') }
+  ];
+
+  /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
+  static readonly DB_SCHEMA_VERSION = 1;
+  /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
+  static readonly BACKUP_KEEP = 7;
+
+  /** 列出 data/backups/ 下现有备份文件（供管理端点展示） */
+  static listBackups(dbFile: string): { name: string; sizeBytes: number; modifiedAt: number }[] {
+    const dataDir = dbFile.slice(0, dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
+    const backupDir = join(dataDir, 'backups');
+    try {
+      return readdirSync(backupDir)
+        .filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f))
+        .sort()
+        .reverse()
+        .map((name) => {
+          const st = statSync(join(backupDir, name));
+          return { name, sizeBytes: st.size, modifiedAt: st.mtimeMs };
+        });
+    } catch { return []; }
+  }
+
+  /** 列级幂等迁移与凭据加密迁移（migrate 版本推进之后执行，兼容旧库增列） */
+  private applyColumnMigrations(): void {
     // 迁移：providers.protocol 列（协议族，旧库默认 openai 兼容）
     const pCols = this.db.prepare(`PRAGMA table_info(providers)`).all() as { name: string }[];
     if (!pCols.some((c) => c.name === 'protocol')) {

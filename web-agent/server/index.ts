@@ -185,6 +185,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     if (keyInfo.state === 'created') console.log(line);
     else console.error(`[secret] 主密钥异常（${keyInfo.state}）—— ${line}`);
   }
+  Store.autoMaintain(kernel.paths.dbFile);
   const store = new Store(kernel.paths.dbFile, {
     secretKey: keyInfo.key,
     masterKey: keyInfo,
@@ -325,6 +326,29 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   app.get('/api/security/audit', (req, res) => {
     const rawLimit = Number(req.query.limit ?? 100);
     res.json({ events: store.listAuthorizationAudit(Number.isFinite(rawLimit) ? rawLimit : 100) });
+  });
+
+  // ---- 数据库维护端点：schema 版本 / 完整性 / 启动备份清单 + 手动热备份 ----
+  app.get('/api/maintenance/db', (_req, res) => {
+    res.json({
+      schemaVersion: store.schemaVersion,
+      integrityOk: store.integrityCheck().length === 0,
+      issues: store.integrityCheck(),
+      backups: Store.listBackups(kernel.paths.dbFile),
+    });
+  });
+
+  app.post('/api/maintenance/db/backup', async (_req, res) => {
+    store.vacuum();
+    const name = `agent-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`;
+    const dataDir = kernel.paths.dbFile.slice(0, kernel.paths.dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
+    const target = join(dataDir, 'backups', name);
+    try {
+      await store.backupTo(target);
+      res.json({ ok: true, name });
+    } catch (err) {
+      res.status(500).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
+    }
   });
 
   const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）

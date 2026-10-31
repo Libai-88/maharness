@@ -4,7 +4,7 @@
 
 ## 现状证据
 
-Express、SSE、SQLite 和多类路由已存在。变更类 API 可通过 `MAHARNESS_API_TOKEN` 启用 token 校验，审批端点支持一次性审批凭据；授权与 SSE 生命周期审计持久化于 SQLite，并通过只读端点限量查询。`/api/health`、`/api/ready`、`/api/storage` 和 Provider 诊断端点已提供稳定、非泄密的运行状态；存储检查按 10%/5% 空间阈值报告警告/临界状态，Provider 真实探测故障进入健康账本并支持熔断诊断。鉴权仍是本机控制面保护，不构成用户身份或角色授权。多用户/多租户未建模，配置热更新不落盘，数据库/归档迁移、备份和部署边界不完整。
+Express、SSE、SQLite 和多类路由已存在。变更类 API 可通过 `MAHARNESS_API_TOKEN` 启用 token 校验，审批端点支持一次性审批凭据；授权与 SSE 生命周期审计持久化于 SQLite，并通过只读端点限量查询。`/api/health`、`/api/ready`、`/api/storage` 和 Provider 诊断端点已提供稳定、非泄密的运行状态；存储检查按 10%/5% 空间阈值报告警告/临界状态，Provider 真实探测故障进入健康账本并支持熔断诊断。数据库 schema 以 `PRAGMA user_version` 版本化管理（API-04）：启动时经基线/增量迁移推进版本，自动备份到 `data/backups/`（保留 7 份）并做完整性校验，损坏时自动从最近可用备份恢复；管理端点 `GET /api/maintenance/db` 与 `POST /api/maintenance/db/backup` 提供维护状态查询和手动热备份。鉴权仍是本机控制面保护，不构成用户身份或角色授权；多用户/多租户未建模，配置热更新不落盘。
 
 ## 目标
 
@@ -39,3 +39,5 @@ API-03 长连接资源补充（2026-10-31）：`server/tests/auth.spec.ts` 真�
 API-05 原子写入与审计补充（2026-10-31）：新增 `kernel/atomic-file.ts`，以同目录临时文件、完整写入后 `fsync`、原子替换和失败清理统一保护配置、规则和 `secret.key` 写入；`Config.setPersistentBatch` 让 `/api/config` 先整体提交再发布运行时变更，提交失败不广播部分状态。变更类 API 的成功/拒绝授权和 SSE 生命周期均写入脱敏审计，`createApiTokenGuard` 对真实 Express 请求与轻量测试请求使用同一路径兜底。原子文件、配置批量提交、失败注入、真实配置路由和授权审计回归均已覆盖：`server/tests/auth.spec.ts` `34/34`，全量 `npm test` `887/887`，`npm run typecheck`、`git diff --check` 通过。API-05 进入进行中，仍待 SQLite 写入事务、并发版本校验及真实崩溃注入覆盖。
 
 API-05 并发与崩溃防护（2026-10-31）：SQLite 写入全部事务化——审计事件、明文密钥迁移、批量模型 upsert、工具账本 `claimToolEffect`、会话消息与断点清理均为全成或全回滚；Provider 与模型行以 `updatedAt` 乐观版本防同毫秒覆盖，配置与规则文件以内容指纹 revision 做乐观锁，路由层缺失版本返回 428、冲突返回 409 并附最新版本，UI 保存/启停/删除自动携带版本。`server/tests/sqlite-crash.spec.ts` 以真实子进程在事务中 `exit(137)` 注入崩溃，重开数据库断言行已回滚，验证崩溃后配置与数据库无半写。专项（sqlite-crash、db、config-provider）`23/23`，全量 `npm test` `892/892`，`npm run typecheck`、`npm run ui:typecheck`、`git diff --check` 通过。API-05 验收条件已满足，登记为已验收。
+
+API-04 版本化迁移与自动维护（2026-11-01）：schema 版本通过 `PRAGMA user_version` 管理，新库与历史库统一经基线建表推进到当前版本，更高版本库 fail-closed 拒绝打开，未来破坏性变更经 `Store.MIGRATIONS` 步骤表逐版本事务化推进。启动时 `Store.autoMaintain` 在 Store 打开前热备份主库与 WAL/SHM 到 `data/backups/`（保留最近 7 份），只读 `integrity_check` 校验失败时保留损坏现场并从最近通过校验的备份自动恢复。`GET /api/maintenance/db` 返回 schema 版本、完整性和备份清单，`POST /api/maintenance/db/backup` 手动触发热备份（token guard 保护，契约已登记）。Trace 归档轮转由 `kernel/trace.ts` `pruneOld()` 按 `trace.retainDays` 执行。回归：`server/tests/db.spec.ts` 22/22（版本推进、更高版本拒绝、损坏恢复、轮转），全量 `npm test` 905/905、`npm run selftest` 91/91、`npm run eval:ci` 27/27、`npm run typecheck`、`git diff --check` 通过。

@@ -6,9 +6,10 @@
  */
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import Database from 'better-sqlite3';
 import { ConcurrentStoreWriteError, Store } from '../db';
 import { encryptSecret, decryptSecret, isEncrypted } from '../secrets';
 
@@ -25,6 +26,87 @@ after(() => {
   for (const root of roots) {
     try { rmSync(root, { recursive: true, force: true }); } catch { /* 句柄迟释放 */ }
   }
+});
+
+describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
+  test('新库与历史库都推进到当前 schema 版本，数据在重开后保留', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-db-mig-'));
+    try {
+      const dbPath = join(root, 'mig.db');
+      const fresh = new Store(dbPath);
+      const session = fresh.createSession('m');
+      assert.equal(fresh.schemaVersion, Store.DB_SCHEMA_VERSION);
+      fresh.close();
+
+      // 历史库：user_version=0 且已有表（等价于版本机制引入前的库）
+      const legacyPath = join(root, 'legacy.db');
+      copyFileSync(dbPath, legacyPath);
+      const legacy = new Database(legacyPath);
+      legacy.pragma('user_version = 0');
+      legacy.close();
+
+      const reopened = new Store(legacyPath);
+      try {
+        assert.equal(reopened.schemaVersion, Store.DB_SCHEMA_VERSION, '历史库自动推进到当前版本');
+        assert.equal(reopened.listSessions(10)[0]?.id, session.id, '数据保留');
+      } finally { reopened.close(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('更高版本的库 fail-closed 拒绝打开', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-db-future-'));
+    try {
+      const dbPath = join(root, 'future.db');
+      const store = new Store(dbPath);
+      store.close();
+      const raw = new Database(dbPath);
+      raw.pragma(`user_version = ${Store.DB_SCHEMA_VERSION + 1}`);
+      raw.close();
+      let rejected = false;
+      try { new Store(dbPath); } catch (err) {
+        rejected = true;
+        assert.match(err instanceof Error ? err.message : String(err), /高于本程序支持的/);
+      }
+      assert.equal(rejected, true, '更高版本的库应被拒绝打开');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('损坏自动恢复：主库损坏后 autoMaintain 从备份恢复数据', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-db-recover-'));
+    try {
+      const dbPath = join(root, 'agent.db');
+      const store = new Store(dbPath);
+      const session = store.createSession('m');
+      store.close();
+
+      mkdirSync(join(root, 'backups'), { recursive: true });
+      copyFileSync(dbPath, join(root, 'backups', 'agent-2026-01-01T00-00-00.db'));
+      writeFileSync(dbPath, 'not-a-sqlite-file');
+
+      Store.autoMaintain(dbPath);
+      const reopened = new Store(dbPath);
+      try {
+        assert.equal(reopened.listSessions(10)[0]?.id, session.id, '数据从备份恢复');
+      } finally { reopened.close(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('启动备份轮转：只保留最近 BACKUP_KEEP 份', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-db-rotate-'));
+    try {
+      const dbPath = join(root, 'agent.db');
+      const store = new Store(dbPath);
+      store.close();
+      mkdirSync(join(root, 'backups'), { recursive: true });
+      for (let i = 1; i <= 9; i++) {
+        const name = `agent-2026-01-${String(i).padStart(2, '0')}T00-00-00.db`;
+        writeFileSync(join(root, 'backups', name), Buffer.alloc(16));
+      }
+      Store.autoMaintain(dbPath);
+      const remaining = readdirSync(join(root, 'backups')).filter((f) => f.startsWith('agent-'));
+      assert.equal(remaining.length, Store.BACKUP_KEEP, `轮转后应剩 ${Store.BACKUP_KEEP} 份`);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 });
 
 describe('Store 级联清理（会话 ↔ 断点）', () => {

@@ -45,6 +45,8 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/approvals/:id', response: 'object', description: '回答审批' },
   { method: 'GET', path: '/api/security', response: 'object', description: '安全姿态' },
   { method: 'GET', path: '/api/security/audit', response: 'object', description: '授权审计' },
+  { method: 'GET', path: '/api/maintenance/db', response: 'object', description: '数据库维护状态（schema 版本/完整性/备份清单）' },
+  { method: 'POST', path: '/api/maintenance/db/backup', response: 'object', description: '手动触发数据库热备份' },
   { method: 'GET', path: '/api/config', response: 'object', description: '运行配置' },
   { method: 'PATCH', path: '/api/config', response: 'object', description: '更新运行配置' },
   { method: 'GET', path: '/api/meta/paths', response: 'object', description: '路径元数据' },
