@@ -252,6 +252,8 @@ export class PluginLoader {
   private reloadTimer?: NodeJS.Timeout;
   /** rescan 在途互斥标记：watch 风暴下重入直接返回（防并发重扫/重复 reload） */
   private rescanning = false;
+  /** 在途互斥期间收到过新事件：本轮收尾后需要补扫一次（否则删除事件可能被静默丢弃） */
+  private pendingRescan = false;
   /** 插件目录 → 上次观察的 mtime 快照（目录级事件跳过未变化插件） */
   private dirMtimes = new Map<string, number>();
   /** 能力集反应性订阅：onCapabilities(kind, cb)——某类能力集合变化时通知 */
@@ -1568,7 +1570,7 @@ export class PluginLoader {
    *  不再全目录重扫误伤无关插件）；定位不到（新建目录/null 事件）才全扫。
    *  rescanning 互斥：在途重扫/重载期间的新分派直接返回。 */
   private async onFileChange(filename: string | null): Promise<void> {
-    if (this.rescanning) return;
+    if (this.rescanning) { this.pendingRescan = true; return; }
     // 内容快照的创建/删除同样落在监听目录里（快照与插件目录同级）：不是插件变更，直接忽略
     if (filename && SNAPSHOT_SUFFIX.test(filename.split('/')[0])) return;
     this.rescanning = true;
@@ -1601,6 +1603,12 @@ export class PluginLoader {
       await this.rescanUser();
     } finally {
       this.rescanning = false;
+      // 补扫：互斥在途期间的新事件不能丢（尤其「删除插件目录」事件——丢一次该插件
+      // 就永远滞留注册表）。防抖器本轮没有新定时器在排队，收尾后串行跑一次全扫即可。
+      if (this.pendingRescan) {
+        this.pendingRescan = false;
+        void this.onFileChange(null);
+      }
     }
   }
 
