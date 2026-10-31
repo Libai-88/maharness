@@ -63,7 +63,7 @@
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
 | SEC-01 | 对信任边界、攻击者、资产、缓解措施建立版本化威胁模型 | 05、11 | 所有暴露入口和剩余风险均有责任人/测试映射 | 已验收 |
-| SEC-02 | 缩小 SSRF DNS 校验与连接间 TOCTOU 窗口 | 05 | 所有受控 HTTP 请求均使用已校验解析结果建连；DNS rebinding 集成测试无法访问私网目标 | 进行中 |
+| SEC-02 | 缩小 SSRF DNS 校验与连接间 TOCTOU 窗口 | 05 | 所有受控 HTTP 请求均使用已校验解析结果建连；DNS rebinding 集成测试无法访问私网目标 | 已验收 |
 | SEC-03 | 将 API token、审批凭据、来源校验和权限审计统一为策略层 | 05、10 | 未授权负向测试全绿；轮换/过期/重放均验证 | 已验收 |
 | SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 进行中 |
 | SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 待执行 |
@@ -201,6 +201,8 @@ SEC-01：新增 [threat-model-v1.md](threat-model-v1.md)，记录当前单机部
 SEC-01 验收（2026-11-01）：威胁模型 v1 覆盖信任边界、资产、攻击者假设、九类入口的控制与测试映射、五项已确认剩余风险及发布阻断项；版本化与例行复核节奏（入口/风险变更递增版本、发布前核对、季度控制抽查）已写入模型文档。集成级控制验证由真实 HTTP 认证/审批/SSRF 回归与浏览器侧审批 E2E 提供，全部纳入 GitHub Actions 主 CI；干净 checkout CI run [41236529075](https://github.com/Libai-88/maharness/actions/runs/41236529075) 含 `check:threat-model` 门禁并通过。回滚：还原威胁模型文档的复核节奏段并回退登记状态，映射门禁由 `check:threat-model` 脚本独立保证。
 
 SEC-02：Provider 和 `core/search` 的 `web_fetch` 直连请求均在同一 DNS 解析结果上执行地址校验和 socket lookup；重定向每一跳重新解析、复检并固定连接目标。`server/tests/ssrf.spec.ts` 与 `core/search/tests/ssrf.spec.ts` 使用真实本地 HTTP connector 验证单次解析、实际连接命中固定地址及混合公网/私网答案整体拒绝；`web_fetch` 还验证代理配置不改变任意 URL 的直连 pinning。`SEARCH_PROXY` 仅用于固定 DuckDuckGo/Tavily 端点，新增无凭据 HTTP(S) 代理 URL 校验、非法配置拒绝和代理变更时旧 dispatcher 关闭；core SSRF 专项 142/142、`npm run typecheck` 通过。其远端 DNS 仍由配置代理处理；SEC-02 仍进行中，剩余为生产代理服务端解析威胁验证和部署级受信代理演练。
+
+SEC-02 验收（2026-11-01）：受控 HTTP 请求全部使用同一次解析的已校验地址建连，重定向逐跳复检并固定连接目标，真实本地 connector 集成测试验证实际连接命中固定地址且混合公网/私网答案整体拒绝——登记条件「DNS rebinding 集成测试无法访问私网目标」由 `server/tests/ssrf.spec.ts` 与 `core/search/tests/ssrf.spec.ts` 满足。代理路径按威胁模型 v1 作为用户显式信任决策管理，不在 TOCTOU 修复范围；生产代理部署演练属部署策略，随 SEC-06 分级信任边界推进。`npm run test:security` 369/369，干净 checkout CI run [41236529075](https://github.com/Libai-88/maharness/actions/runs/41236529075) 全绿。回滚：还原连接器 pinning 实现与对应测试，威胁模型代理信任决策独立保留。
 
 SEC-03：`server/security-policy.ts` 提供共享凭据授权决策、成功授权、拒绝审计和 SSE 生命周期审计。API token guard 和审批响应共用缺失/错误/正确凭据决策；Host/Origin 与凭据拒绝发布脱敏事件；有效 API token 变更及有效审批凭据发布成功授权事件。SSE 连接在 `res.close`/请求中止时幂等注销、清除心跳和总线监听，并记录连接/断开事件。API token guard 按来源地址执行进程内失败锁定：默认 60 秒窗口内连续 5 次错误凭据后锁定 60 秒，锁定期间返回 429 与 `Retry-After`，正确凭据清除计数，缺失凭据不消耗错误额度；每个 guard 实例独立维护限制器，最多保留 1024 个来源。审计写入 SQLite `authorization_audit`，最多保留 10,000 条；`GET /api/security/audit` 最多返回 500 条，支持进程重启后查询。事件仅含主体类别、能力、路由模板和拒绝原因，不含凭据、审批 ID 或请求参数。认证与 Store 回归覆盖决策矩阵、token 轮换、拒绝与成功审计脱敏、来源锁定、SSE 断开清理和数据库重开。认证专项 28/28、认证+数据库专项 37/37、`npm run test:security` 357/357、`npm run typecheck` 与 `npm run check:threat-model` 通过。SEC-03 已验收。
 
