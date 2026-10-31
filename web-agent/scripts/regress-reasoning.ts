@@ -31,7 +31,7 @@ function resolveBaseUrl(): string {
 const apiKey = resolveApiKey();
 if (!apiKey) {
   const msg = '未提供 NEWAPI_API_KEY（CI secrets 或 .env）——真机思考分流回归需要真实 LLM，跳过';
-  if (process.env.CI) { console.error(`FAIL: ${msg}`); process.exit(1); }
+  // 抽样模型评测属非阻断门禁（QA-07）：缺钥只跳过，不让整个工作流失败。
   console.log(`SKIP: ${msg}`);
   process.exit(0);
 }
