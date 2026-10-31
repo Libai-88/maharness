@@ -52,7 +52,7 @@
 | QA-02 | 覆盖任务成功、部分成功、失败、审批、重试和恢复 golden | 02、04、09 | 每个状态至少 3 个确定性 case | 已验收 |
 | QA-03 | 建立正确工具率、完成率、无效调用、重试、成本和延迟指标 | 04、07 | JSON 报告可跨提交 diff；阈值回归阻断 CI | 已验收 |
 | QA-04 | 将历史 P0/P1 安全修复转为持续攻击回放集 | 04、05 | PowerShell/路径/SSRF/MCP/API 安全集 100% 通过 | 已验收 |
-| QA-05 | 建立插件恶意输入、提示注入、工具输出注入和能力越权评测 | 04、05、06 | 攻击成功率有阈值，报告可复现到 case | 进行中 |
+| QA-05 | 建立插件恶意输入、提示注入、工具输出注入和能力越权评测 | 04、05、06 | 攻击成功率有阈值，报告可复现到 case | 已验收 |
 | QA-06 | 补齐审批、恢复、子代理、并行、Trace、插件 UI E2E | 01、04 | 每个关键流程至少成功/失败各一条 E2E | 已验收 |
 | QA-07 | 把质量门禁接入 CI，并区分确定性门禁与抽样模型评测 | 04、11 | 干净 checkout 自动执行全部核心门禁 | 已验收 |
 
@@ -189,6 +189,8 @@ QA-04：`npm run test:security` 集中运行 PowerShell 审批绕过、敏感路
 QA-06：`ui/e2e/bubble-menu.spec.ts` 覆盖气泡菜单、引用回复、任务验收证据、审批批准/拒绝、子代理成功、并行任务失败、当前 run 的 Trace 实时步骤/详情/耗时/类型筛选/JSONL 导出，以及断点恢复入口；`plugin-errors.spec.ts` 覆盖插件错误诊断与重载恢复。Trace E2E 检查导出的 JSONL 只包含筛选后的工具步骤；审批 E2E 断言一次性 token 与决定值提交；恢复 E2E 使用 checkpoint 和 SSE mock，断言 `resume: true` 请求及恢复答复展示；子代理/并行 E2E 断言成员卡的成功与失败状态。全量 `npm run e2e` 20/20、`ui` 目录 `npm run typecheck` 和 `npm run build` 通过；`git diff --check` 通过。上述 E2E 主要验证 UI/API 事件契约，真实服务端审批、恢复、子代理和并行集成仍待补齐，QA-06 进行中。
 
 QA-05：安全集现包含用户提示、普通工具输出、插件工具输出和插件 capability escalation 四类确定性攻击。前三类由固定 ReplayProvider 发出受保护工具调用，验证审批拒绝及 handler 零调用；越权场景由临时插件声明 `tool:safe_read` 并尝试注册 `tool:delete_data`，验证 loader 拒绝、`plugin.permission.denied` 审计事件存在且越权能力未进入 registry。安全阻断率 4/4（100%），门槛由 `eval:ci` 强制。固定回放不代表模型注入识别率；capability 白名单只约束 `ctx.register`，不构成插件进程隔离或对 `ctx.kernel` 的完整授权。QA-05 进行中，仍需对抗模型评测。
+
+QA-05 验收（2026-11-01）：登记条件「攻击成功率有阈值，报告可复现到 case」已满足——`eval-thresholds.json` 的 `minSecurityAttackBlockRate: 1` 作为阻断阈值纳入 `eval:ci` 门禁，报告按攻击类别输出逐 case 结果并随 `evals/reports/current.json` 上传 CI artifact。本机 `npm run eval:ci` 27/27、安全攻击阻断 4/4（100%），干净 checkout CI run [41236529075](https://github.com/Libai-88/maharness/actions/runs/41236529075) 全绿。真实模型的注入识别率评测属增量对抗集，与模型抽样评测（QA-07 非阻断口径）合并推进。回滚：移除 `minSecurityAttackBlockRate` 阈值与对应报告逻辑，四类攻击 case 本身由 `npm test` 覆盖。
 
 SEC-04/PL-01：manifest 支持可选 capability/name 白名单；loader 在能力登记时执行检查，未授权登记会发出 `plugin.permission.denied` 并使插件加载失败，失败后撤回该插件效应。测试覆盖授权注册、越权拒绝/审计、清理、错误 manifest 和旧插件 trusted 兼容模式。`kernel/tests/loader.spec.ts` 28/28、`npm run typecheck` 通过；安全 golden `security-plugin-capability-escalation` 通过。权限范围仅覆盖 `ctx.register`，插件仍可访问宿主进程和 `ctx.kernel`；调用期策略、高风险审批和进程隔离未完成，SEC-04/PL-01 保持进行中。
 
