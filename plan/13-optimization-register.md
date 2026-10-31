@@ -149,7 +149,7 @@
 | DX-01 | 建立唯一、从零启动的开发环境与测试说明 | 11 | 干净 checkout 按文档 < 15 分钟跑完核心测试 | 待执行 |
 | DX-02 | 自动生成或校验 API、DB、事件、配置和插件契约文档 | 11 | CI 在注入漂移时稳定失败 | 待执行 |
 | DX-03 | 统一版本、迁移日志、兼容策略和弃用周期 | 11 | 发布产物与代码版本一致；有升级说明 | 待执行 |
-| DX-04 | 建立 lint/type/test/eval/build/E2E/security 的 CI 分层门禁 | 04、11 | PR 门禁可复现，失败可定位到步骤 | 待执行 |
+| DX-04 | 建立 lint/type/test/eval/build/E2E/security 的 CI 分层门禁 | 04、11 | PR 门禁可复现，失败可定位到步骤 | 已验收 |
 | DX-05 | 提供插件/Provider/技能的脚手架与测试 fixture | 06、11 | 示例可在 CI 构建、加载、调用和卸载 | 待执行 |
 | DX-06 | 建立 ADR、威胁模型、兼容矩阵和发布/回滚检查表 | 05、11、12 | 重大契约改动均有记录和发布检查 | 待执行 |
 | DX-07 | 减少诊断脚本、人工步骤与正式回归测试之间的职责混淆 | 04、11 | 诊断脚本不计入自动化覆盖；关键检查进入 CI | 待执行 |
@@ -360,6 +360,8 @@ LR-03 验收：执行器以 `executionId + turn/tool/name/args` 的稳定幂等�
 LR-06 验收：`Store.saveCheckpoint` 限制 200 条消息与 512 KiB JSON 字节，并保留 `truncated`/`originalLength` 标记；`loadCheckpoint` 兼容旧版直接消息数组格式，按可配置的 `checkpoint.retentionDays`（1-3650 天，默认 30 天）拒绝过期断点并清理孤立副作用账本。配置通过 `/api/config` 热更新，Store 重启时从配置恢复策略。`server/tests/db.spec.ts` 覆盖双上限、旧格式、默认过期清理和自定义保留期跨 Store 重开（10/10）；`server/tests/config-provider.spec.ts` 覆盖配置持久化、运行时应用及非法边界（3/3）。`npm test` 778/778、`npm run typecheck`、`npm run ui:typecheck`、`npm run eval:ci` 26/26 与 `git diff --check` 均通过，满足登记验收条件。
 
 当前登记总数：71 项。关闭任一条时必须补上实现提交、测试命令与结果、必要的迁移/文档链接和回滚方式。关闭全部条目后，对 11 个领域逐项复核，再更新 `00-master-plan.md` 的最终审计表。
+
+DX-04 验收（2026-11-01）：GitHub Actions `ci.yml` 分层门禁覆盖 test（kernel+server 901）、security（`test:security` 369 专项）、threat-model 映射检查、plugin manifest 校验、后端/前端 typecheck、selftest、eval baseline 阈值门禁（27 case，报告 artifact 上传）、build（UI+后端）、E2E（Playwright 43）、生产依赖启动检查；`e2e.yml` 独立冒烟与思考分流真机回归（缺凭据 SKIP 不阻断）。每层独立命名步骤，失败即定位到具体层；`on: push` 全分支 + `pull_request` 触发保证 PR 门禁可复现。干净 checkout run [41240113884](https://github.com/Libai-88/maharness/actions/runs/41240113884) success（含插件 manifest 校验新步骤）。回滚：还原 workflow 步骤清单，各检查脚本本地均可独立执行。
 
 PL-02 脚手架真实加载补充（2026-10-31）：`scripts/plugin-scaffold.mjs` 导出 `createPlugin`，`scripts/plugin-scaffold.spec.mjs` 在仓库 `plugins/` 下生成临时插件并交由真实 `Kernel/PluginLoader` 加载，核对生成 manifest、`started` 状态及 `<id>_hello` capability，测试结束清理插件与快照。脚手架专项 `3/3`、`npm run typecheck`、`git diff --check` 通过。PL-02 仍进行中，完整 SDK 类型包、参考插件和安装/卸载全流程尚待完成。
 
