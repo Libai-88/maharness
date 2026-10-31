@@ -195,9 +195,6 @@ interface PluginInstance {
   caps: Capability[];
   /** 可逆效应作用域：插件全部副作用的逆元在此累积，卸载按 LIFO 恢复 */
   scope: EffectScope;
-  /** 生命周期串行队列：公开的 start/stop/reload 统一排队到链尾，真串行执行；
-   *  reload 提交替换实例时新实例继承链尾（并发排队操作不丢失、不并行） */
-  chain: Promise<void>;
   /** 动态提供的服务键（ctx.provide 登记，供依赖图谱可查） */
   provides: string[];
   /** v3 智能重载：依赖声明收集器——插件在 buildContext 里通过 inject/onCapabilities/
@@ -430,7 +427,7 @@ export class PluginLoader {
       // 旧实现只在 reload 提交/回滚与卸载时剪枝，进程被中断/回滚失败/换分支留下的
       // 「内容已过期但目录还在」的脏副本会长期驻盘，并被工具链（测试 glob、人工阅读）误当源码。
       pruneSnapshots(dir, [snap.dir]);
-      inst = { manifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], chain: Promise.resolve(), circuitBreaker: { failures: 0, openedAt: 0 } };
+      inst = { manifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], circuitBreaker: { failures: 0, openedAt: 0 } };
       this.registry.set(id, inst);
       this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
 
@@ -1080,22 +1077,28 @@ export class PluginLoader {
     return !(manifest.enabled === false || manifest.lazy);
   }
 
-  // ---------- 生命周期（chain 串行队列：真排队，替代 check-then-act 惯性） ----------
+  // ---------- 生命周期（per-id 串行队列：真排队，替代 check-then-act 惯性） ----------
 
-  /** 排队一个生命周期操作到实例链尾。
-   *  run 的结果/错误返回给调用方；链尾挂 run.catch 吞错续链（队列不因单次失败断裂）。 */
-  private enqueue(inst: PluginInstance, body: () => Promise<void>): Promise<void> {
-    const run = inst.chain.then(body);
-    inst.chain = run.catch(() => {});
+  /** per-id 生命周期队列：队列挂在 loader 上、以插件 id 为键，与实例对象解耦。
+   *  reload 提交替换实例后，后续操作仍串到同一队列——registry 替换不再断链，
+   *  消除「在途 reload 与后入队操作并发执行」的竞态。 */
+  private chains = new Map<string, Promise<void>>();
+
+  /** 排队一个生命周期操作到该插件 id 的队尾。
+   *  run 的结果/错误返回给调用方；队尾挂 run.catch 吞错续链（队列不因单次失败断裂）。 */
+  private enqueue(id: string, body: () => Promise<void>): Promise<void> {
+    const tail = this.chains.get(id) ?? Promise.resolve();
+    const run = tail.then(body);
+    this.chains.set(id, run.catch(() => {}));
     return run;
   }
 
   async start(inst: PluginInstance): Promise<void> {
-    return this.enqueue(inst, () => this.startInternal(inst));
+    return this.enqueue(inst.manifest.id, () => this.startInternal(inst));
   }
 
   async stop(inst: PluginInstance): Promise<void> {
-    return this.enqueue(inst, () => this.stopInternal(inst));
+    return this.enqueue(inst.manifest.id, () => this.stopInternal(inst));
   }
 
   /** start 内部实现（不排队——已由 enqueue 保证串行，内部再排队会死锁）。
@@ -1211,14 +1214,15 @@ export class PluginLoader {
   async reload(id: string, start = true): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
-    return this.enqueue(inst, async () => {
+    return this.enqueue(id, async () => {
       const cur = this.registry.get(id);
       if (!cur) return; // 等待期间已被卸载删除
       await this.reloadInternal(cur, start);
     });
   }
 
-  /** reload 内部实现（不排队）。提交/回滚时新实例继承链尾（并发排队操作不丢失）。 */
+  /** reload 内部实现（不排队）。生命周期队列挂在 loader 上（per-id），
+   *  提交替换实例不会使队列断链，后续操作与新实例自动串行。 */
   private async reloadInternal(inst: PluginInstance, start: boolean): Promise<void> {
     const { dir } = inst;
     const registryId = inst.manifest.id;
@@ -1233,7 +1237,7 @@ export class PluginLoader {
 
     // 事务阶段 2：加载新版本（内容快照 + 独立作用域，暂不进入注册表）
     const snap = this.snapshotOf(dir);
-    const fresh: PluginInstance = { manifest: oldManifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], chain: inst.chain, circuitBreaker: { ...inst.circuitBreaker } };
+    const fresh: PluginInstance = { manifest: oldManifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], circuitBreaker: { ...inst.circuitBreaker } };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -1265,7 +1269,6 @@ export class PluginLoader {
           manifest: oldManifest, dir, loadDir: oldLoadDir, loadHash: inst.loadHash, state: 'registered',
           caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
           depHooks: [], depSignature: inst.depSignature,
-          chain: inst.chain,
           circuitBreaker: { ...inst.circuitBreaker },
         };
         await this.runLoad(rollback);
@@ -1478,7 +1481,7 @@ export class PluginLoader {
   async enable(id: string): Promise<void> {
     const inst = this.registry.get(id);
     if (!inst) throw new Error(`插件不存在: ${id}`);
-    return this.enqueue(inst, async () => {
+    return this.enqueue(id, async () => {
       const cur = this.registry.get(id);
       if (!cur) return; // 等待期间已被卸载删除
       await this.enableInternal(cur);
@@ -1507,7 +1510,7 @@ export class PluginLoader {
     if (inst.manifest.essential) {
       console.warn(`[plugin] ${id} 是核心必要插件（essential=true），disable 后进入降级模式（服务返回 503）`);
     }
-    return this.enqueue(inst, async () => {
+    return this.enqueue(id, async () => {
       const cur = this.registry.get(id);
       if (!cur) return; // 等待期间已被卸载删除
       await this.stopInternal(cur);
@@ -1527,7 +1530,7 @@ export class PluginLoader {
     if (!inst.dir.startsWith(this.userDir)) {
       throw new Error(`插件 "${id}" 是内置插件（core），不可卸载`);
     }
-    return this.enqueue(inst, async () => {
+    return this.enqueue(id, async () => {
       const cur = this.registry.get(id);
       if (!cur) return;
       // 停止 + 回收全部副作用
