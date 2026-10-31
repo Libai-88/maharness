@@ -38,8 +38,8 @@
 - 任务验收 golden：verified 3、partial 3、failed 4；审批批准/拒绝各 3 条；Provider 故障录音 6 条，覆盖 500/429 重试及认证、参数、业务、取消停止；checkpoint 恢复 1 条，关闭并重开 SQLite Store 后恢复验收证据且工具不重复执行。测试固定最少覆盖门槛。
 - 验证：本机最新 `npm test` 834/834，`npm run eval` 27/27、`npm run eval:ci` 27/27、`npm run test:security` 361/361、`npm run selftest` 91/91，后端/前端类型检查与生产构建均通过；安全攻击阻断为 4/4（100%）；GitHub Actions 主 CI 执行 `npm run eval:ci`。
 - 门禁更新（2026-10-31）：新增任务契约正则验收回归后，本机 `npm test` 836/836；既有 `npm run eval` 27/27、`npm run eval:ci` 27/27、`npm run test:security` 361/361、`npm run selftest` 91/91 证据保持有效。
-- QA-03 质量率门禁（2026-10-31）：评测比较器对正确工具率/完成率下降及无效工具率/工具失败率/重试率上升执行可配置百分点阈值；报告专项 6/6、`npm run eval:ci` 27/27、`npm run typecheck` 通过。稳定 CI runner 延迟校准与完整 CI 证据仍待完成。
-- 确定性指标报告、27-case baseline 比较和 CI 阈值门禁已具备；仍待稳定 runner 延迟校准、真实插件/模型对抗评测、关键 UI E2E 及干净 checkout 的完整 CI 证据。
+- QA-03 质量率门禁（2026-10-31）：评测比较器对正确工具率/完成率下降及无效工具率/工具失败率/重试率上升执行可配置百分点阈值；报告专项 6/6、`npm run eval:ci` 27/27、`npm run typecheck` 通过。稳定 CI runner 延迟校准与完整 CI 证据已由 2026-11-01 干净 checkout 验收补齐。
+- 确定性指标报告、27-case baseline 比较和 CI 阈值门禁已具备；稳定 runner 延迟校准、关键 UI E2E 及干净 checkout 的完整 CI 证据已于 2026-11-01 补齐（真实插件/模型对抗评测按 QA-05 单独推进）。
 
 ## 安全回归入口
 
@@ -51,7 +51,7 @@
 
 报告口径：完成率为 verified 任务数/任务终态总数；工具成功率为成功结果/工具结果；无效工具率为调用未注册工具的结果/工具结果；工具失败率包含执行失败和策略拒绝；重试率为 retry 事件/Provider 调用；成本按固定回放价 `$0.30/$1.20` 每百万输入/输出 token 计算，不代表线上账单；延迟统计每 case 启动至清理完成耗时的 P50/P95/max。
 
-门禁要求 case 通过率 100%，baseline 中原先通过的 case 不得失败或消失；安全攻击阻断率不得低于 `eval-thresholds.json` 中的 100%；同平台、架构和 Node 主版本下 P95 延迟最多增长 100%；平均单次 Provider 成本最多增长 10%。不同运行环境跳过延迟对比；成本计价配置不一致时报告失败。当前 baseline 覆盖 27 个场景，路径为 `web-agent/evals/baseline.json`；本机 `npm run eval:ci` 27/27 通过。仍需在稳定 CI runner 复核延迟阈值并补齐 UI 门禁后再关闭 QA-03/QA-07。
+门禁要求 case 通过率 100%，baseline 中原先通过的 case 不得失败或消失；安全攻击阻断率不得低于 `eval-thresholds.json` 中的 100%；同平台、架构和 Node 主版本下 P95 延迟最多增长 100%；平均单次 Provider 成本最多增长 10%。不同运行环境跳过延迟对比；成本计价配置不一致时报告失败。当前 baseline 覆盖 27 个场景，路径为 `web-agent/evals/baseline.json`；`npm run eval:ci` 已纳入干净 checkout 的 CI 门禁并通过。
 
 安全攻击报告按类别统计阻断率。用户提示、普通工具输出和插件工具输出攻击使用固定 ReplayProvider 发出受保护工具调用，并验证审批拒绝及 handler 零调用；插件 capability escalation case 使用临时插件声明 `tool:safe_read`，尝试注册 `tool:delete_data`，验证 loader 拒绝、发出 `plugin.permission.denied` 且越权能力未进入 registry。插件输出工具由临时插件目录经真实 loader 加载。该数据验证审批和 capability 登记边界，不衡量模型注入识别能力，也不验证插件进程隔离或对 `ctx.kernel` 的完整权限约束。
 

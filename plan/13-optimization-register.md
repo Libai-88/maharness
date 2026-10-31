@@ -50,11 +50,11 @@
 |---|---|---|---|---|
 | QA-01 | 扩充 case manifest，包含前置数据、响应桩、工具桩和断言 | 04 | schema 校验；旧 case 可迁移并运行 | 已验收 |
 | QA-02 | 覆盖任务成功、部分成功、失败、审批、重试和恢复 golden | 02、04、09 | 每个状态至少 3 个确定性 case | 已验收 |
-| QA-03 | 建立正确工具率、完成率、无效调用、重试、成本和延迟指标 | 04、07 | JSON 报告可跨提交 diff；阈值回归阻断 CI | 进行中 |
+| QA-03 | 建立正确工具率、完成率、无效调用、重试、成本和延迟指标 | 04、07 | JSON 报告可跨提交 diff；阈值回归阻断 CI | 已验收 |
 | QA-04 | 将历史 P0/P1 安全修复转为持续攻击回放集 | 04、05 | PowerShell/路径/SSRF/MCP/API 安全集 100% 通过 | 已验收 |
 | QA-05 | 建立插件恶意输入、提示注入、工具输出注入和能力越权评测 | 04、05、06 | 攻击成功率有阈值，报告可复现到 case | 进行中 |
-| QA-06 | 补齐审批、恢复、子代理、并行、Trace、插件 UI E2E | 01、04 | 每个关键流程至少成功/失败各一条 E2E | 进行中 |
-| QA-07 | 把质量门禁接入 CI，并区分确定性门禁与抽样模型评测 | 04、11 | 干净 checkout 自动执行全部核心门禁 | 进行中 |
+| QA-06 | 补齐审批、恢复、子代理、并行、Trace、插件 UI E2E | 01、04 | 每个关键流程至少成功/失败各一条 E2E | 已验收 |
+| QA-07 | 把质量门禁接入 CI，并区分确定性门禁与抽样模型评测 | 04、11 | 干净 checkout 自动执行全部核心门禁 | 已验收 |
 
 ## 05 安全、权限与信任
 
@@ -211,6 +211,8 @@ QA-07 本地门禁补充（2026-10-31）：本机 `npm test` `834/834`、`npm ru
 QA-07 Playwright 门禁补充（2026-10-31）：CI 安装锁定的 UI 依赖与 Chromium，并在生产构建后运行完整 `npm run e2e`；确定性 golden 保持独立的阻断门禁，真实模型抽样不纳入该工作流。完整 GitHub Actions 干净 checkout 尚未运行验证，QA-07 保持进行中。
 
 QA-07 本地完整 E2E 补充（2026-10-31）：CI 顺序在本机复现，`npm run e2e` 完整执行 22/22（含任务确认、审批、恢复、Trace、插件诊断和 SSE 生命周期），后端类型检查与 `git diff --check` 通过。GitHub Actions 干净 checkout 仍待真实 runner 验证。
+
+QA-03/QA-06/QA-07 验收（2026-11-01）：干净 checkout 的 GitHub Actions 全门禁通过——CI run [41236529075](https://github.com/Libai-88/maharness/actions/runs/41236529075)（单测 900、安全回归、双端类型检查、selftest 91、`eval:ci` 27/27 baseline 阈值门禁、UI E2E 43、生产依赖启动、构建）与 E2E run [41236529069](https://github.com/Libai-88/maharness/actions/runs/41236529069)（提交 `cc22b6a`）均为 success。真实模型抽样评测保持非阻断（`regress-reasoning` 缺凭据时 SKIP），确定性门禁独立阻断。过程中修复两个真实缺陷：watcher 防抖窗口聚合事件路径（inotify 乱序下快照回声事件不再吞掉插件删除事件，[cc22b6a](https://github.com/Libai-88/maharness/commit/cc22b6a6b735e2e8634ba5b15a47fce17d37f094)）；生命周期队列从实例字段改为 loader 级 per-id Map（registry 替换不再断链，[efb74b8](https://github.com/Libai-88/maharness/commit/efb74b82bf8a61101b78c2d991b89839e6172549)）。QA-03 的延迟/成本/质量率阈值已随 `eval:ci` 在干净 runner 上验证，UI E2E 覆盖审批、恢复、子代理、并行、Trace、插件流程。回滚：还原 watcher 防抖与队列实现并移除验收记录，门禁本身由 CI 配置独立回退。
 
 AG-01/AG-02：目标模式保留仅预算或仅期限的任务契约；契约解析覆盖多条明确的中英文输出短语、多个相对文件产物、文件内容断言、工具成功断言、风险、预算和截止时间，按类别提取并去重，拒绝绝对/含 `.` 或 `..` 段的文件路径及非正预算/时限；模糊问句或普通文件/工具提及不推断验收条件。空验收条件不会被判定为 verified，预算耗尽不会调用 Provider，过期任务立即终止。验收通过的最终答复追加 `【验证证据】` 段，服务端用 `done.content` 更新已入库消息，缓存仍保存原始答案。`kernel/tests/task-contract.spec.ts`、`kernel/tests/task-verifier.spec.ts`、`kernel/tests/task-completion.spec.ts` 与 `server/tests/db.spec.ts` 定向回归通过，`npm test`（783/783）、`npm run eval:ci`（26/26）、`npm run typecheck`、`npm run ui:typecheck` 和 `git diff --check` 通过。AG-01/AG-02 仍进行中，广义自然语言推断尚未完成。
 
