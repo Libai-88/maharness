@@ -47,6 +47,7 @@ process.env.AGENT_USER_PLUGINS_DIR = pluginsDir;
 process.env.SANDBOX_ROOT = workspaceDir;
 process.env.MAHARNESS_SECRET_KEY_ACL = '0'; // 单测不碰真实 ACL（icacls 只在真实数据目录跑）
 process.env.MAHARNESS_API_TOKEN = 'unit-test-token';
+process.env.AGENT_ALLOW_PRIVATE_URLS = '1'; // SSE 配额测试经 HTTP 注册 127.0.0.1 假 Provider
 
 // 动态 import：以上环境变量必须先于模块加载生效（与 scripts/selftest.ts 同一手法）
 const { startServer, MUTATION_TOKEN_HEADER, requiredApiToken, createApiTokenGuard } = await import('../index');
@@ -411,12 +412,14 @@ describe('A6-b 变更类端点的可选 token 门', () => {
 
   test('全局事件流与聊天流共用进程级 SSE 配额，并在断开后释放', async () => {
     const streams: { response: Response; reader: ReadableStreamDefaultReader<Uint8Array> }[] = [];
-    // 聊天入口在 Provider 检查之后才到达 SSE 配额门；注册一条假 Provider（不会
-    // 被真实调用——配额测试的 run 拿不到 429 就不会真正请求模型）保证链路能到门。
-    started!.store.upsertProvider({
-      id: 'auth-spec-quota-provider', label: 'Auth Spec Quota', baseUrl: 'http://127.0.0.1:9/unreachable',
+    // 聊天入口在 Provider 检查之后才到达 SSE 配额门；经 HTTP 路由注册一条假
+    // Provider（POST 才会触发 refreshChatProviders 热注入，直接写库不生效）。
+    // 配额测试的 run 拿不到 429 就不会真正请求模型。
+    const providerReg = await post('/api/providers', {
+      label: 'Auth Spec Quota', baseUrl: 'http://127.0.0.1:9/unreachable',
       apiKey: 'spec-quota', model: 'quota-model', protocol: 'openai',
     });
+    assert.equal(providerReg.status, 200, 'SSE 配额测试的前置 Provider 注册必须成功');
     try {
       for (let i = 0; i < 8; i++) {
         const response = await fetch(`${base}/api/events`);
