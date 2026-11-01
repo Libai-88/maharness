@@ -19,6 +19,11 @@
 - 版本/迁移/兼容策略 `plan/release-policy-v1.md`（DX-03）。
 - 部署模式 local/trusted/remote 与启动安全自检（API-02）。
 - Windows 运维手册：安装、升级、恢复、数据目录、密钥异常、remote 暴露前置与回滚（API-08）。
+- 供应链策略文档 `plan/supply-chain-policy-v1.md`：npm/技能包/插件三类对象的哈希锚定、升级与回滚路径（SEC-07）。
+
+### Security
+
+- 依赖供应链漏洞清零：`npm audit fix` 修复 body-parser（high）、proxy-addr（critical）、qs（moderate）、undici（high）与 DOMPurify（critical），双仓生产依赖 `npm audit` 0 漏洞（SEC-07）。
 
 ## [0.1.0]
 

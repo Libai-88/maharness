@@ -10,6 +10,8 @@
 
 变更类 API 的 token guard 在每个请求读取 `MAHARNESS_API_TOKEN`，支持运行期间轮换；审批凭据具备过期与一次性消费校验。共享 `server/security-policy.ts` 提供 API token 与审批响应共用的凭据决策，并为来源校验、凭据授权及 `/api/events` SSE 生命周期发布脱敏审计事件。事件仅记录主体类别、能力、路由模板与拒绝原因，不记录凭据或请求参数；记录持久化于 SQLite，最多保留 10,000 条，并可通过 `GET /api/security/audit` 查询最近记录。API token guard 按来源地址使用进程内失败锁定：默认 60 秒窗口内连续 5 次错误凭据后锁定 60 秒，正确凭据清除计数，缺失凭据只拒绝并审计而不消耗错误凭据额度；锁定返回 429 与 `Retry-After`。限制器按 guard 实例隔离，最多保留 1024 个来源，服务重启后状态清空。
 
+供应链审计按 [supply-chain-policy-v1.md](supply-chain-policy-v1.md) 执行：npm 依赖以双仓锁文件精确锚定并以 `npm ci` 为唯一安装方式；技能包以锁文件哈希 + 逐文件清单校验后原子换入；插件以内容聚合哈希快照 + manifest 兼容范围 + capabilities 白名单加载；升级与回滚路径按该文档操作（SEC-07）。
+
 ## 目标
 
 默认拒绝高风险行为，审批不可绕过，敏感数据不可由 Agent 工具读取或写入；插件权限、网络、进程和文件边界明确。

@@ -68,7 +68,7 @@
 | SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 已验收 |
 | SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 待执行 |
 | SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 待执行 |
-| SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 待执行 |
+| SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 已验收 |
 
 ## 06 插件与技能生态
 
@@ -442,3 +442,5 @@ API-04 验收（2026-11-01）：`web-agent/server/db.ts` 引入 schema 版本化
 API-02 验收（2026-11-01）：`web-agent/server/deploy-mode.ts` 定义 `MAHARNESS_MODE` 三种部署模式——`local`（默认，回环绑定，变更类请求 token 可选）、`trusted`（回环绑定，全 API 含 GET/SSE 强制 token 且审批凭据自动强制，必须配置 `MAHARNESS_API_TOKEN`）、`remote`（绑定 `MAHARNESS_BIND`，必须同时具备 token 与成对 `MAHARNESS_TLS_CERT/KEY`）。`resolveDeployMode()` 对无效模式、缺失 token、不成对 TLS、local/trusted 下设置 `MAHARNESS_BIND` 均返回 fail-closed 错误清单，`startServer()` 据此拒绝启动；remote 模式以 HTTPS 监听并支持 `MAHARNESS_ALLOWED_HOSTS/ORIGINS` 显式扩展 Host/Origin 白名单。`/api/security` 新增 `bind`/`deployMode`/`tls` 姿态字段（不含密钥材料）；前端 `api.ts` 全方法携带 token 头并给出 401 明确文案。回归：`server/tests/deploy-mode.spec.ts` 6/6（模式解析、remote 三前置缺一即拒、无效模式拒绝、trusted GET 401/带头放行、local 语义不变、审批自动强制），全量 `npm test` 911/911、`npm run selftest` 91/91、`npm run eval:ci` 27/27、`npm run typecheck`、`npm run ui:typecheck`、`npm run build`、`npm run check:threat-model`（威胁模型同步升版 1.1）通过。回滚：删除 `server/deploy-mode.ts` 与 `server/tests/deploy-mode.spec.ts`，还原 `server/index.ts` 的部署模式接线与 HTTPS 启动分支、`server/routes/approvals.ts` 的模式强制、UI 三处 token 头改动，恢复 README 与威胁模型 1.0。
 
 API-08 验收（2026-11-01）：`plan/windows-ops-runbook.md` 固化 Windows 运维全流程——安装（`npm run setup`）、升级（`git pull` + `npm ci` 双仓，数据目录与 `.env` 不受影响）、数据库损坏自动恢复路径与手动恢复步骤（含 WAL/SHM 伴生文件处理）、主密钥异常处置、端口冲突、remote 暴露前置配置与升级回滚步骤；`DEVELOPMENT.md` 文档索引与 `release-policy-v1.md` 升级说明同步引用。验收演练（Windows 11 本机，2026-11-01）：干净 checkout 拉取最新 `maharness` 分支完成升级（`npm ci` 双仓 + `npm run typecheck` + 全量 `npm test` 911/911）；隔离数据目录启动 → 停止 → 覆盖 `agent.db` 头部 512 字节模拟损坏 → 重启，启动日志确认 `[store] 已从备份 agent-*.db 恢复数据库` 且损坏现场保留为 `agent.db.corrupt-<时间戳>`，服务正常启动。文档交付，无代码变更，回滚方式为删除 runbook 并还原两处引用与登记状态。
+
+SEC-07 验收（2026-11-01）：`plan/supply-chain-policy-v1.md` 固化三类供应链对象的审计与升级策略——npm 依赖（双仓 `package-lock.json` v3 精确锚定，`npm ci` 为唯一安装方式，CI 缓存键锁定双锁文件，本轮以 `npm audit fix` 官方 registry 清零 5 个已知漏洞并回归全绿）、技能包（`skills-lock.json` 哈希锚点 + 逐文件哈希清单 + 临时目录校验原子换入 + force 不跳过校验）、插件（内容聚合哈希快照目录 + manifest compatibility.api 范围 + capabilities 白名单 + module 模式内容哈希 URL）。升级路径（依赖 npm audit fix → 锁文件提交；技能改锁文件哈希或显式 env 覆盖；插件内容寻址自动失效）与回滚路径（`git checkout` 锁文件 / 锁文件还原旧哈希 / 快照目录换回旧哈希）均有明确操作。本机验证：`npm audit --omit=dev` 双仓 0 漏洞，`npm test` 911/911、`npm run selftest` 91/91、`npm run build` 通过。回滚：删除策略文档并还原登记状态；漏洞修复锁文件变更按条目还原。
