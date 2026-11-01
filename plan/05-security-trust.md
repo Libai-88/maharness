@@ -47,6 +47,8 @@
 
 插件 manifest 可通过 `permissions.capabilities` 声明允许登记的 capability/name；`ctx.register` 拒绝未声明登记、发出 `plugin.permission.denied`，并在加载失败时回收插件已登记效应。未声明 `permissions` 的既有插件仍按本机 trusted 兼容模式加载。确定性回放新增 capability escalation 攻击，当前安全攻击阻断为 4/4。该白名单只约束 `ctx.register` 能力登记；插件仍在宿主进程执行并可访问 `ctx.kernel`，因此不构成完整权限沙箱或进程隔离。SEC-04 与 SEC-06 继续保持开放。
 
+SEC-05 验收（2026-11-01）：三种插件 UI 形态的隔离语义在渲染容器上直接明示——`ui/src/components/PluginTabView.tsx` 页头新增信任等级徽标：`module` 显示「受信任模块 · 宿主权限」（与宿主同源同 realm、可访问宿主 API，仅限本地自行安装插件），`iframe` 显示「iframe 沙箱」（sandbox 属性限制权限、无宿主 DOM/存储访问、不含 `allow-top-navigation`），`panel` 显示「净化片段」（DOMPurify 移除脚本与事件属性后内联渲染）。徽标带逐形态 title 说明与 `data-trust` 属性，样式按信任等级区分（module 橙色警示、iframe 青色）。跨域能力测试：iframe 页面运行在 `sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"` 下，无法接管宿主导航；panel HTML 经 DOMPurify 净化。回归：`ui/e2e/plugin-trust.spec.ts` 锁定 iframe 场景（徽标文案/属性/沙箱值及不含 `allow-top-navigation`）与 panel 场景（徽标文案/属性/净化渲染），UI E2E 全量 `47/47`、双端 `typecheck` 通过。回滚：删除徽标渲染与样式、恢复原页头条件渲染与 `plugin-trust.spec.ts`。
+
 ## 完成定义
 
 SEC-01 至 SEC-07 均完成代码、攻击回放、威胁模型、文档事实检查和可验证回滚；任何隔离逃逸均阻断 remote/team 发布。威胁模型 v1 已完成初版；CI 现校验引用路径存在及 `test:security` 测试映射。SEC-01 仍进行中：仍需将全部暴露入口纳入周期性版本复核，并为控制有效性补齐集成级验证。

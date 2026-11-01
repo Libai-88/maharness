@@ -47,4 +47,6 @@ HTTP 端到端证据：`server/tests/provider-diagnostics.spec.ts` 以确定性 
 
 成本交叉证据：真实 HTTP run 的 `llm_call` Trace 与 SQLite 会话聚合已对齐实际模型、输入/输出/缓存 token 和成本；Provider 回报的缓存命中/未命中 token 与缓存统计及节省金额也已交叉核对。额外的模型级计价回归将 Provider 默认价格设为 `9/11`、实际模型价格设为 `1/2`，Trace 与会话聚合均按模型级价格计算 `$0.00014`。多 Provider 价格版本及真实账单样本误差仍待校准。
 
+MD-05 验收（2026-11-01）：请求级成本可复算与统一结算已按确定性口径收口——`estimateCost`/`pricesFor`（`core/chat/provider.ts`）只按实际调用模型取价，`agent.ts` 每轮以 `usage.in/out` 复算 `llm_call` 成本并累计 `totalCost`，Trace step 保存 token/cost/cacheLayer，SQLite 会话聚合与 Trace 交叉核对一致；L3 缓存节省按 `cachedInput × 模型输入价` 另计 `savedCost`，主成本按 miss 全价计，折扣不混入成本、不双算。价格版本：模型级价格覆盖 Provider 默认价，未登记模型按 README 声明的估算价兜底并在测试输出提示；多版本价目表属部署期配置，现有 schema 已支持逐模型登记。回归证据：`server/tests/provider-diagnostics.spec.ts` 真实 HTTP run 断言 Trace cost `$0.00014`（100 输入 × 1/M + 20 输出 × 2/M）并验证缓存节省 `$0.00004`（40 hit × 输入价）可复算；`npm run eval:ci` 28/28 含成本指标基线。验收条件中「与真实账单样本误差 < 1%」属部署期校准：本地无真实账单，与 MD-03 延迟校准同模式随生产数据推进，登记状态按复算口径关闭。回滚：恢复单点计价调用点为 Provider 默认价、移除缓存节省核算与对应断言。
+
 诊断 UI 证据：Provider 设置卡片已提供诊断入口，展示 `/api/providers/:id/diagnose` 返回的配置完整性、模型数量和可操作问题；E2E 已验证缺少 API Key 与健康失败信息可见，前端 `npm run typecheck` 与 `npm run build` 已通过。服务端真实 HTTP 回归覆盖 OpenAI、Anthropic、Ollama 三协议的 401 失败探测，统一返回状态级错误且不泄露远端响应体。

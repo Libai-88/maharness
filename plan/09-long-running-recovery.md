@@ -62,6 +62,8 @@ checkpoint 保存任务契约、原始绝对截止时间、已完成工具的验
 
 checkpoint 版本化补充（2026-10-31）：断点 payload 使用 schema v1，旧版直接消息数组兼容读取，未知版本 fail-closed 并清理；`server/tests/db.spec.ts` 专项 16/16，后端/前端类型检查通过。进程强杀后的真实恢复演练仍待完成。
 
+LR-02 验收（2026-11-01）：长任务的暂停/取消/继续/交接/过期清理五类转移在状态与 UI 两层均有回归锁定。暂停=abort+checkpoint（agent.ts 每轮工具回填后保存断点）；取消传播（进程树、MCP、模型流、并行子任务）由 LR-05 专项锁定；继续=`server/tests/process-recovery.spec.ts` 真实强杀后 resume、UI E2E 三处 `resume:true` 断点续跑；交接=`core/selftest.ts` handoff 全链路 + `server/routes/chat.ts` SSE 帧持久化 `sessions.role`；过期清理=`server/tests/db.spec.ts` 断点 30 天保留期、可配置与清理副作用账本。本轮补齐 UI 缺口：`ui/e2e/main-flows.spec.ts` 新增「长任务语义（LR-02）」场景组——`budget_hit` 帧唤起预算横幅（已用/预算金额断言）且 `error kind:budget` 落为预算错误终态；`handoff` 帧落为系统消息「这活儿交给…」并同步会话列表渲染接管横幅。验证：主流程专项 `16/16`、UI E2E 全量 `47/47`、全量 `npm test` `911/911`、双端 `typecheck` 通过。回滚：删除 LR-02 场景组与 `ui/src/components/PluginTabView.tsx` 无关；恢复登记状态即可，后端语义不受影响。
+
 进程强杀恢复补充（2026-10-31）：新增 `server/tests/process-recovery.spec.ts` 与隔离 fixture。测试启动真实 `tsx server/index.ts` 子进程，在临时 `AGENT_DATA_DIR` 中写入带任务契约、run id、工具验收结果和已完成副作用账本的 checkpoint，随后强制终止第一进程；第二进程使用同一数据目录启动真实服务，先通过 Store 确认已完成账本仍返回 `done`，再调用真实 `/api/sessions/:id/chat`（`resume:true`）并接收 SSE `done`，确认 checkpoint 在任务完成后清理且没有重复认领副作用。专项 `1/1`、`npm run typecheck`、`git diff --check` 通过。该证据覆盖服务边界的强杀、重启、继续执行和完成清理；网络断开、Provider 故障与并行任务的更广泛故障演练仍待补齐。
 
 并行 Provider 负载补充（2026-10-31）：`server/tests/provider-diagnostics.spec.ts` 通过真实聊天 HTTP 入口执行四项并行子任务，峰值并发为 4，所有子任务完成后活动请求归零；父任务累计输入/输出 token 为 `50/25`，成本按子任务实际成本与汇总调用复算，六个 `llm_call` Trace 全部完成且四个子任务步骤挂接到并行工具父步骤。专项 `18/18`，全量 `npm test` `881/881`，类型检查和差异检查通过。该证据属于确定性 Provider 负载回归，线上 Provider 分布与故障恢复演练仍待补齐。

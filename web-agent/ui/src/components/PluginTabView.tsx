@@ -21,6 +21,22 @@ interface Props {
   item: PluginNavItem;
 }
 
+/** 信任等级明示（SEC-05）：三种渲染形态的隔离语义直接展示在页头，不依赖用户记忆 */
+const TRUST_LABEL: Record<PluginNavItem['mode'], { text: string; title: string }> = {
+  module: {
+    text: '受信任模块 · 宿主权限',
+    title: '与宿主同源同 realm 运行，可访问宿主 API 与凭据头。仅适用于本地编写或自行安装的插件。',
+  },
+  iframe: {
+    text: 'iframe 沙箱',
+    title: '在 sandbox iframe 中运行：无宿主 DOM/存储访问，不含 allow-top-navigation，无法接管宿主页面。',
+  },
+  panel: {
+    text: '净化片段',
+    title: 'HTML 片段经 DOMPurify 净化后内联渲染，脚本与事件属性被移除。',
+  },
+};
+
 /** 插件页面的错误边界：插件提供的页面/片段出问题时只坏这一页，不连累整个界面 */
 class PluginPageBoundary extends Component<{ children: React.ReactNode; pluginId: string }, { error: string | null }> {
   state: { error: string | null } = { error: null };
@@ -93,7 +109,7 @@ function PluginTabBody({ item }: Props) {
     return () => clearInterval(t);
   }, [fetchStatus, item.statusUrl, item.statusIntervalMs]);
 
-  const hasHeader = !!item.statusUrl || item.mode === 'iframe';
+  const trust = TRUST_LABEL[item.mode];
   const src = item.mode === 'iframe' ? `${item.url}${item.url.includes('?') ? '&' : '?'}_t=${reloadKey}` : '';
 
   return (
@@ -103,36 +119,35 @@ function PluginTabBody({ item }: Props) {
       data-plugin-mode={item.mode}
       style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
     >
-      {hasHeader && (
-        <div className="plugin-tab-bar">
-          <div className="plugin-tab-status">
-            {item.statusUrl && (
-              <>
-                <span className={`plugin-tab-dot ${status?.connected ? 'on' : ''}`} />
-                <span className="plugin-tab-text">{status?.text ?? `${item.pluginName}`}</span>
-                {status?.detail && <span className="plugin-tab-detail">{status.detail}</span>}
-              </>
-            )}
-            {!item.statusUrl && <span className="plugin-tab-text">{item.pluginName}</span>}
-          </div>
-          <div className="plugin-tab-actions">
-            {item.url && (
-              <button
-                className="plugin-tab-btn"
-                onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
-                title="在独立窗口打开"
-              >
-                <IconExternal size={13} /> 独立窗口
-              </button>
-            )}
-            {item.mode === 'iframe' && (
-              <button className="plugin-tab-btn" onClick={() => setReloadKey((k) => k + 1)} title="刷新">
-                <IconRefresh size={13} />
-              </button>
-            )}
-          </div>
+      <div className="plugin-tab-bar">
+        <span className="plugin-tab-trust" data-trust={item.mode} title={trust.title}>{trust.text}</span>
+        <div className="plugin-tab-status">
+          {item.statusUrl && (
+            <>
+              <span className={`plugin-tab-dot ${status?.connected ? 'on' : ''}`} />
+              <span className="plugin-tab-text">{status?.text ?? `${item.pluginName}`}</span>
+              {status?.detail && <span className="plugin-tab-detail">{status.detail}</span>}
+            </>
+          )}
+          {!item.statusUrl && <span className="plugin-tab-text">{item.pluginName}</span>}
         </div>
-      )}
+        <div className="plugin-tab-actions">
+          {item.url && (
+            <button
+              className="plugin-tab-btn"
+              onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
+              title="在独立窗口打开"
+            >
+              <IconExternal size={13} /> 独立窗口
+            </button>
+          )}
+          {item.mode === 'iframe' && (
+            <button className="plugin-tab-btn" onClick={() => setReloadKey((k) => k + 1)} title="刷新">
+              <IconRefresh size={13} />
+            </button>
+          )}
+        </div>
+      </div>
 
       {item.mode === 'module' ? (
         <PluginModuleView item={item} />

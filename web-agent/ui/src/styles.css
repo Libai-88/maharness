@@ -293,6 +293,18 @@ input, select, textarea {
   flex-shrink: 0;
 }
 .plugin-tab-status { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.plugin-tab-trust {
+  padding: 2px 8px;
+  border-radius: 5px;
+  border: 1px solid var(--border);
+  background: var(--bg-input);
+  font-size: 10px;
+  color: var(--text-3);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+.plugin-tab-trust[data-trust="module"] { color: var(--orange); border-color: var(--orange-soft); background: var(--orange-soft); }
+.plugin-tab-trust[data-trust="iframe"] { color: var(--teal); border-color: var(--teal-soft); background: var(--teal-soft); }
 .plugin-tab-dot {
   width: 8px; height: 8px; border-radius: 50%;
   background: var(--text-4);

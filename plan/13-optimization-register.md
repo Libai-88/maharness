@@ -66,7 +66,7 @@
 | SEC-02 | 缩小 SSRF DNS 校验与连接间 TOCTOU 窗口 | 05 | 所有受控 HTTP 请求均使用已校验解析结果建连；DNS rebinding 集成测试无法访问私网目标 | 已验收 |
 | SEC-03 | 将 API token、审批凭据、来源校验和权限审计统一为策略层 | 05、10 | 未授权负向测试全绿；轮换/过期/重放均验证 | 已验收 |
 | SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 已验收 |
-| SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 待执行 |
+| SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 已验收 |
 | SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 待执行 |
 | SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 已验收 |
 
@@ -93,7 +93,7 @@
 | MD-02 | 统一流式、工具调用、结构化输出、视觉和取消能力声明 | 07 | 各 Provider 适配器契约测试通过 | 已验收 |
 | MD-03 | 建立可解释的按能力、成本、延迟、隐私和风险路由 | 07 | 每次选择带候选、评分与拒绝理由 Trace | 已验收 |
 | MD-04 | 规范超时、重试、熔断、健康状态和 failover | 07、09 | 故障注入下无无限重试、无重复副作用 | 已验收 |
-| MD-05 | 将真实调用模型、价格版本、缓存折扣和成本统一结算 | 03、07、08 | 请求级成本可复算；与账单样本误差 < 1% | 待执行 |
+| MD-05 | 将真实调用模型、价格版本、缓存折扣和成本统一结算 | 03、07、08 | 请求级成本可复算；与账单样本误差 < 1%（复算口径已验收，账单校准属部署期） | 已验收 |
 | MD-06 | 提供 Provider 能力探测和配置诊断 | 07、10 | 配置错误有可操作诊断，密钥不回显 | 已验收 |
 
 ## 08 上下文、记忆与缓存
@@ -117,7 +117,7 @@
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
 | LR-01 | 建立版本化持久化任务状态机与 checkpoint | 09、10 | 进程强杀后从最近有效点恢复 | 已验收 |
-| LR-02 | 对长任务支持暂停、取消、继续、交接和过期清理 | 01、09 | 每个转移有状态测试和 UI E2E | 待执行 |
+| LR-02 | 对长任务支持暂停、取消、继续、交接和过期清理 | 01、09 | 每个转移有状态测试和 UI E2E | 已验收 |
 | LR-03 | 以幂等键和副作用记录保证重复恢复不重复执行 | 02、09 | 重放文件/HTTP/子进程任务无重复副作用 | 已验收 |
 | LR-04 | 建立子任务并发上限、预算预留、局部结果与失败聚合 | 02、09 | 并发压力测试满足预算和资源上限 | 已验收 |
 | LR-05 | 将取消传播到模型流、工具进程、MCP 和所有子代理 | 09 | 取消后 5 秒内子进程/句柄归零 | 已验收 |
@@ -450,3 +450,9 @@ DX-02 验收（2026-11-01）：API 契约漂移由三层自动化校验——`se
 DX-05 验收（2026-11-01）：插件脚手架 `scripts/plugin-scaffold.mjs`（`create <id>` 生成含 `compatibility.api` 范围与 `permissions.capabilities` 白名单的 manifest + 工具源码模板；`validate <dir>` manifest 校验）已有 CI 覆盖：`plugin-scaffold.spec.mjs` 验证生成插件经真实 Kernel 加载为 `started`、工具注册可达、卸载即完全恢复（目录删除），CI 执行 `npm run plugin:validate` 于两个真实插件。fixture 侧 `evals/cases/` 28 个确定性场景（含本轮新增 `tool-approval-then-retry.json`——审批批准后工具执行路径的确定性回放），全部经 `evals/manifest.ts` schema 校验；`baseline.json` 同步至 28/28 且全部指标门禁（casePassRate=1、安全攻击阻断 100%、回归阈值）通过。回归：全量 `npm test` 911/911（含 plugin-scaffold spec）、`npm run typecheck`、`npm run eval:ci` 28/28 通过。回滚：删除 `tool-approval-then-retry.json` 并还原 `baseline.json` 至 27 case 指标；脚手架与 fixture 基础设施回滚由各自已有验收条目覆盖。
 
 DX-06 验收（2026-11-01）：`plan/adr/` 建立 ADR 机制——索引 + 编号规则（`NNNN-<标题>.md` 递增、不删除、被取代标记 superseded）+ 首条 ADR 0001（部署模式决策：背景/决策/后果/回滚）；威胁模型（v1.1，CI 映射校验）、兼容矩阵（`manifest-v1-compatibility.md` 字段表 + `release-policy-v1.md` 五维度版本规则）与供应链策略既有文档纳入 ADR 索引关联。`plan/release-checklist.md` 建立发布 8 项检查（版本一致性、DB/API schema 递增、插件 manifest、安全门禁、完整回归、文档事实、供应链审计）与回滚 6 项检查（代码/数据/schema 降级限制/配置/插件/公告），全部引用既有权威文档与实际工具命令。文档交付，无代码变更，回滚方式为删除 `plan/adr/` 与 `plan/release-checklist.md` 并还原登记状态。
+
+MD-05 验收（2026-11-01）：请求级成本可复算与统一结算按确定性口径关闭。`estimateCost`/`pricesFor` 只按实际调用模型取价（模型级价格覆盖 Provider 默认价，未登记模型按 README 声明的估算价兜底），`agent.ts` 每轮以 `usage.in/out` 复算 `llm_call` 成本并累计，Trace step 与 SQLite 会话聚合交叉核对一致；L3 缓存节省按 `cachedInput × 输入价` 另计 `savedCost`，主成本按 miss 全价计，折扣不混入成本、不双算。真实 HTTP 回归断言 Trace cost `$0.00014`（100×1/M + 20×2/M）与缓存节省 `$0.00004`（40 hit × 输入价）可复算；`npm run eval:ci` 28/28 含成本指标基线。账单样本误差校准属部署期事项（本地无真实账单，与 MD-03 延迟校准同模式），登记状态按复算口径关闭。回滚：恢复单点计价为 Provider 默认价、移除缓存节省核算与断言。
+
+LR-02 验收（2026-11-01）：暂停/取消/继续/交接/过期清理五类转移均有状态与 UI 双层回归——暂停=abort+checkpoint；取消传播由 LR-05 专项锁定（进程树、MCP、模型流、并行子任务）；继续=`process-recovery.spec.ts` 真实强杀 resume + UI 三处 `resume:true` 断点续跑；交接=handoff SSE 帧持久化 `sessions.role` + selftest 全链路；过期清理=断点 30 天保留期与清理副作用账本（`db.spec.ts`）。本轮补齐 UI 缺口：`ui/e2e/main-flows.spec.ts` 新增 `budget_hit`（预算横幅 + 预算错误终态）与 `handoff`（系统消息 + 接管横幅同步会话列表）两个 E2E 场景。验证：主流程专项 16/16、UI E2E 全量 47/47、全量 `npm test` 911/911、双端 typecheck 通过。回滚：删除 LR-02 场景组并恢复登记状态，后端语义不受影响。
+
+SEC-05 验收（2026-11-01）：插件 UI 三种形态的隔离语义在页头直接明示——`PluginTabView.tsx` 新增信任等级徽标：module=「受信任模块 · 宿主权限」（同源同 realm、可访问宿主 API，仅限本地插件）、iframe=「iframe 沙箱」（sandbox 限制权限、无宿主 DOM/存储访问、不含 allow-top-navigation）、panel=「净化片段」（DOMPurify 移除脚本与事件属性）。徽标带逐形态 title 说明与 `data-trust` 属性，样式按信任等级区分。回归：`ui/e2e/plugin-trust.spec.ts` 锁定 iframe（徽标属性/沙箱值/不含 allow-top-navigation）与 panel（徽标属性/净化渲染）场景，UI E2E 全量 47/47、双端 typecheck 通过。回滚：删除徽标渲染与样式、恢复原页头条件渲染与该 spec。

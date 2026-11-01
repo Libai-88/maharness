@@ -507,3 +507,79 @@ test.describe('交互通道（UX-04）', () => {
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('这次成功了。');
   });
 });
+
+test.describe('长任务语义（LR-02）', () => {
+  test('成本熔断：budget_hit 帧唤起预算横幅，预算错误终态同步页面状态', async ({ page }) => {
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', (route) => route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+      body: sseBody([
+        'event: start',
+        'data: {"traceId":"lr02-budget"}',
+        '',
+        'event: delta',
+        'data: {"text":"长任务跑到一半，成本触顶。"}',
+        '',
+        'event: budget_hit',
+        'data: {"cost":0.42,"budget":0.42}',
+        '',
+        'event: error',
+        'data: {"error":"成本预算已耗尽","kind":"budget"}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ]),
+    }));
+    await send(page, '跑一个会烧穿预算的长任务');
+    const banner = page.locator('.sess-banner.budget');
+    await expect(banner).toContainText('预算用完了');
+    await expect(banner).toContainText('已用 $0.420 / 预算 $0.420');
+    await expect(page.locator('.wx-failure').last()).toContainText('预算用完了');
+    await expect(page.locator('.stream-cursor')).toHaveCount(0);
+    await expect(page.getByTestId('send-btn')).toBeVisible();
+  });
+
+  test('角色移交：handoff 帧落为系统消息与接管横幅', async ({ page }) => {
+    // role 横幅数据源是会话列表（服务端持久化 sessions.role）；
+    // 聊天流被 mock 后，handoff 帧到达时同步会话列表返回接管角色
+    let sessionId = 'lr02-handoff-sess';
+    let handedOff = false;
+    await page.route('**/api/sessions', (route) => {
+      if (route.request().method() === 'POST') {
+        const body = route.request().postDataJSON() as { title?: string } | null;
+        return route.fulfill({ json: { id: sessionId, title: body?.title ?? '新会话', model: 'e2e-model', provider: 'e2e-provider', mode: 'chat', planPending: 0, archived: 0, pinned: 0, role: '', createdAt: 1, updatedAt: 1 } });
+      }
+      return route.fulfill({ json: [{ id: sessionId, title: '移交会话', model: 'e2e-model', provider: 'e2e-provider', mode: 'chat', planPending: 0, archived: 0, pinned: 0, role: handedOff ? 'planner' : '', createdAt: 1, updatedAt: 1 }] });
+    });
+    await page.route('**/api/sessions/lr02-handoff-sess/messages', (route) => route.fulfill({ json: [] }));
+    await setup(page);
+    await page.route('**/api/sessions/*/chat', (route) => route.fulfill({
+      status: 200,
+      headers: { 'Content-Type': 'text/event-stream' },
+      body: sseBody([
+        'event: start',
+        'data: {"traceId":"lr02-handoff"}',
+        '',
+        'event: delta',
+        'data: {"text":"这个任务需要规划专家接手。"}',
+        '',
+        'event: handoff',
+        'data: {"role":"planner","objective":"拆解季度报告的执行步骤"}',
+        '',
+        'event: done',
+        'data: {"content":"已移交给规划专家。","usage":{"input":12,"output":6},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ]),
+    }));
+    await send(page, '把季度报告任务交给规划专家');
+    handedOff = true;
+    await expect(page.locator('.msg-system, .msg-row').filter({ hasText: '这活儿交给「planner」了' })).toBeVisible();
+    await expect(page.locator('.sess-banner.role')).toContainText('这件事现在由「planner」接手');
+    await expectSettled(page, '已移交给规划专家。');
+  });
+});
