@@ -31,6 +31,8 @@ jobs:
         run: npm run test:security
       - name: 威胁模型与安全测试映射检查
         run: npm run check:threat-model
+      - name: 契约文档事实校验（api-contract 字段一致性）
+        run: node scripts/check-doc-facts.mjs
       - name: 插件 manifest 校验
         run: |
           npm run plugin:validate -- plugins/reference-hello

@@ -143,6 +143,7 @@ const SCHEMA_BY_ROUTE: Record<string, ApiJsonSchema> = {
   'GET /api/trace': { type: 'object', required: ['steps', 'source'], properties: { steps: { type: 'array' }, source: { type: 'string' } } },
   'GET /api/nav': { type: 'object', required: ['items'], properties: { items: { type: 'array' } } },
   'GET /api/capabilities': { type: 'object', required: ['tools', 'contexts', 'personas', 'byRisk'], properties: { tools: { type: 'array' }, contexts: { type: 'array' }, personas: { type: 'array' }, byRisk: { type: 'object' } } },
+  'GET /api/security': { type: 'object', required: ['bind', 'deployMode', 'tls', 'mutationAuthRequired', 'mutationTokenHeader', 'approvalTokenRequired'], properties: { bind: { type: 'string' }, deployMode: { type: 'string', enum: ['local', 'trusted', 'remote'] }, tls: { type: 'boolean' }, mutationAuthRequired: { type: 'boolean' }, mutationTokenHeader: { type: 'string' }, approvalTokenRequired: { type: 'boolean' } } },
   'GET /api/plugins/:id/config': { type: 'object', required: ['id', 'config', 'schema'], properties: { id: { type: 'string' }, config: { type: 'object' }, schema: { type: ['object', 'null'] } } },
   'POST /api/plugins/:id/actions': { type: 'object', required: ['ok', 'state'], properties: { ok: { type: 'boolean' }, state: { type: 'string' } } },
   'POST /api/plugins/:id/open': { type: 'object', required: ['ok', 'path'], properties: { ok: { type: 'boolean' }, path: { type: 'string' } } },

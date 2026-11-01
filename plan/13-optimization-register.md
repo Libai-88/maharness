@@ -147,7 +147,7 @@
 | ID | 待优化项 | 执行计划 | 验收证据 | 状态 |
 |---|---|---|---|---|
 | DX-01 | 建立唯一、从零启动的开发环境与测试说明 | 11 | 干净 checkout 按文档 < 15 分钟跑完核心测试 | 已验收 |
-| DX-02 | 自动生成或校验 API、DB、事件、配置和插件契约文档 | 11 | CI 在注入漂移时稳定失败 | 待执行 |
+| DX-02 | 自动生成或校验 API、DB、事件、配置和插件契约文档 | 11 | CI 在注入漂移时稳定失败 | 已验收 |
 | DX-03 | 统一版本、迁移日志、兼容策略和弃用周期 | 11 | 发布产物与代码版本一致；有升级说明 | 已验收 |
 | DX-04 | 建立 lint/type/test/eval/build/E2E/security 的 CI 分层门禁 | 04、11 | PR 门禁可复现，失败可定位到步骤 | 已验收 |
 | DX-05 | 提供插件/Provider/技能的脚手架与测试 fixture | 06、11 | 示例可在 CI 构建、加载、调用和卸载 | 待执行 |
@@ -444,3 +444,5 @@ API-02 验收（2026-11-01）：`web-agent/server/deploy-mode.ts` 定义 `MAHARN
 API-08 验收（2026-11-01）：`plan/windows-ops-runbook.md` 固化 Windows 运维全流程——安装（`npm run setup`）、升级（`git pull` + `npm ci` 双仓，数据目录与 `.env` 不受影响）、数据库损坏自动恢复路径与手动恢复步骤（含 WAL/SHM 伴生文件处理）、主密钥异常处置、端口冲突、remote 暴露前置配置与升级回滚步骤；`DEVELOPMENT.md` 文档索引与 `release-policy-v1.md` 升级说明同步引用。验收演练（Windows 11 本机，2026-11-01）：干净 checkout 拉取最新 `maharness` 分支完成升级（`npm ci` 双仓 + `npm run typecheck` + 全量 `npm test` 911/911）；隔离数据目录启动 → 停止 → 覆盖 `agent.db` 头部 512 字节模拟损坏 → 重启，启动日志确认 `[store] 已从备份 agent-*.db 恢复数据库` 且损坏现场保留为 `agent.db.corrupt-<时间戳>`，服务正常启动。文档交付，无代码变更，回滚方式为删除 runbook 并还原两处引用与登记状态。
 
 SEC-07 验收（2026-11-01）：`plan/supply-chain-policy-v1.md` 固化三类供应链对象的审计与升级策略——npm 依赖（双仓 `package-lock.json` v3 精确锚定，`npm ci` 为唯一安装方式，CI 缓存键锁定双锁文件，本轮以 `npm audit fix` 官方 registry 清零 5 个已知漏洞并回归全绿）、技能包（`skills-lock.json` 哈希锚点 + 逐文件哈希清单 + 临时目录校验原子换入 + force 不跳过校验）、插件（内容聚合哈希快照目录 + manifest compatibility.api 范围 + capabilities 白名单 + module 模式内容哈希 URL）。升级路径（依赖 npm audit fix → 锁文件提交；技能改锁文件哈希或显式 env 覆盖；插件内容寻址自动失效）与回滚路径（`git checkout` 锁文件 / 锁文件还原旧哈希 / 快照目录换回旧哈希）均有明确操作。本机验证：`npm audit --omit=dev` 双仓 0 漏洞，`npm test` 911/911、`npm run selftest` 91/91、`npm run build` 通过。回滚：删除策略文档并还原登记状态；漏洞修复锁文件变更按条目还原。
+
+DX-02 验收（2026-11-01）：API 契约漂移由三层自动化校验——`server/tests/api-contract.spec.ts` 扫描全部 `server/routes/*.ts` 显式路由（未登记路由测试失败）、`api-contract.ts` 运行时 schema 校验成功响应必要字段（本轮补齐 `GET /api/security` 的 `bind`/`deployMode`/`tls`/`mutationAuthRequired`/`mutationTokenHeader`/`approvalTokenRequired` 六字段）、新增 `scripts/check-doc-facts.mjs`（CI 步骤）核对 `api-contract-v1.md` 引用的契约字段与 schema 登记一致，不一致即阻断合并。`api-contract-v1.md` 补充契约变更流程（改路由 → 登记契约与 schema → 更新文档 → 三处校验全绿）。注入漂移验证：`node scripts/check-doc-facts.mjs` 在文档与登记一致时通过（6 字段），缺任一字段即抛错失败。回归：`api-contract.spec.ts` 4/4、全量 `npm test` 911/911、`npm run typecheck`、`npm run ui:typecheck`、`npm run check:threat-model` 通过。回滚：删除 `scripts/check-doc-facts.mjs` 与 CI 步骤、还原 `api-contract.ts` schema 与文档描述、登记状态回退。
