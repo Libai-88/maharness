@@ -53,4 +53,4 @@
 
 ## 升级说明
 
-升级步骤按 [DEVELOPMENT.md](../web-agent/docs/DEVELOPMENT.md) 执行 `git pull` 后 `npm ci` 双仓;数据库迁移与启动备份自动完成,无需手动干预。降级需要从 `data/backups/` 手动恢复最近备份,并回退到对应版本代码。
+升级步骤按 [DEVELOPMENT.md](../web-agent/docs/DEVELOPMENT.md) 执行 `git pull` 后 `npm ci` 双仓；数据库迁移与启动备份自动完成，无需手动干预。Windows 完整安装/恢复/数据目录运维步骤见 [windows-ops-runbook.md](windows-ops-runbook.md)。降级需要从 `data/backups/` 手动恢复最近备份，并回退到对应版本代码（更高 schema 版本的库不允许被旧代码打开）。

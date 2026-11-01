@@ -17,6 +17,8 @@
 - 可访问性 axe-core 门禁（UX-05）。
 - 从零开发环境文档 `web-agent/docs/DEVELOPMENT.md`（DX-01）。
 - 版本/迁移/兼容策略 `plan/release-policy-v1.md`（DX-03）。
+- 部署模式 local/trusted/remote 与启动安全自检（API-02）。
+- Windows 运维手册：安装、升级、恢复、数据目录、密钥异常、remote 暴露前置与回滚（API-08）。
 
 ## [0.1.0]
 
