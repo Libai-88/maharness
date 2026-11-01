@@ -35,3 +35,5 @@
 测试使用干净 checkout 验证安装、核心测试、插件示例、文档生成、事实漂移和分层 CI；诊断脚本必须标注为诊断，不替代正式回归。
 
 DX-01 至 DX-07 均有可复现命令、文档事实检查、CI 证据、版本兼容说明和回滚路径后关闭。
+
+DX-01 验收（2026-11-01）：`web-agent/docs/DEVELOPMENT.md` 提供唯一从零入口——安装（`npm ci` 双仓）、核心验证（typecheck + 905 项单测）、完整验证（selftest/eval:ci/build/安全回归/威胁模型）、开发模式、常见问题与文档索引。干净 checkout 实测（Windows 11，2026-11-01）：`npm ci` 4s + `npm ci --prefix ui` 6s + `npm run typecheck` 5s + `npm test` 37s = **52 秒**，`npm run selftest` 26s，远低于 15 分钟验收门槛；CI runner（ubuntu-latest）完整门禁约 6 分钟同样达标。文档步骤与 CI workflow 逐条对应，命令即 CI 步骤。回滚：删除 `docs/DEVELOPMENT.md` 并还原登记状态。
