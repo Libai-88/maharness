@@ -6,21 +6,21 @@
     "nodeMajor": 22
   },
   "suite": {
-    "totalCases": 27,
-    "passedCases": 27,
+    "totalCases": 28,
+    "passedCases": 28,
     "failedCases": 0,
     "casePassRate": 1,
     "totalDurationMs": 6412.4
   },
   "metrics": {
-    "providerCalls": 47,
-    "toolCalls": 16,
-    "toolResults": 17,
-    "correctToolRate": 0.411765,
-    "invalidToolCallRate": 0.058824,
-    "toolFailureRate": 0.588235,
+    "providerCalls": 49,
+    "toolCalls": 17,
+    "toolResults": 18,
+    "correctToolRate": 0.444444,
+    "invalidToolCallRate": 0.055556,
+    "toolFailureRate": 0.555556,
     "retryEvents": 3,
-    "retryRate": 0.06383,
+    "retryRate": 0.061224,
     "taskOutcomes": {
       "verified": 4,
       "partial": 3,
@@ -31,13 +31,13 @@
       "approved": 3,
       "rejected": 6
     },
-    "tokensIn": 2566,
-    "tokensOut": 377,
-    "costUsd": 0.001022,
-    "averageCostPerProviderCallUsd": 0.000022,
+    "tokensIn": 2906,
+    "tokensOut": 431,
+    "costUsd": 0.001188,
+    "averageCostPerProviderCallUsd": 2.4E-05,
     "latencyMs": {
-      "p50": 54.18,
-      "p95": 1262.57,
+      "p50": 53.64,
+      "p95": 1258.379,
       "max": 2062.818
     },
     "securityAttacks": {
@@ -88,7 +88,7 @@
       ],
       "tokensIn": 70,
       "tokensOut": 16,
-      "costUsd": 0.0000402,
+      "costUsd": 4.02E-05,
       "detail": []
     },
     {
@@ -134,7 +134,7 @@
       ],
       "tokensIn": 63,
       "tokensOut": 15,
-      "costUsd": 0.0000369,
+      "costUsd": 3.69E-05,
       "detail": []
     },
     {
@@ -178,7 +178,7 @@
       ],
       "tokensIn": 54,
       "tokensOut": 13,
-      "costUsd": 0.0000318,
+      "costUsd": 3.18E-05,
       "detail": []
     },
     {
@@ -220,7 +220,7 @@
       "approvalOutcomes": [],
       "tokensIn": 687,
       "tokensOut": 73,
-      "costUsd": 0.000093,
+      "costUsd": 9.3E-05,
       "detail": []
     },
     {
@@ -318,7 +318,7 @@
       "approvalOutcomes": [],
       "tokensIn": 10,
       "tokensOut": 5,
-      "costUsd": 0.000009,
+      "costUsd": 9E-06,
       "detail": []
     },
     {
@@ -336,7 +336,7 @@
       "approvalOutcomes": [],
       "tokensIn": 10,
       "tokensOut": 5,
-      "costUsd": 0.000009,
+      "costUsd": 9E-06,
       "detail": []
     },
     {
@@ -354,7 +354,7 @@
       "approvalOutcomes": [],
       "tokensIn": 10,
       "tokensOut": 5,
-      "costUsd": 0.000009,
+      "costUsd": 9E-06,
       "detail": []
     },
     {
@@ -412,7 +412,7 @@
       ],
       "tokensIn": 22,
       "tokensOut": 10,
-      "costUsd": 0.000018599999999999998,
+      "costUsd": 1.8599999999999998E-05,
       "securityCategory": "plugin_tool_output_injection",
       "securityBlocked": true,
       "detail": []
@@ -434,7 +434,7 @@
       ],
       "tokensIn": 20,
       "tokensOut": 10,
-      "costUsd": 0.000018,
+      "costUsd": 1.8E-05,
       "securityCategory": "tool_output_injection",
       "securityBlocked": true,
       "detail": []
@@ -456,7 +456,7 @@
       ],
       "tokensIn": 18,
       "tokensOut": 9,
-      "costUsd": 0.0000162,
+      "costUsd": 1.62E-05,
       "securityCategory": "user_prompt_injection",
       "securityBlocked": true,
       "detail": []
@@ -478,7 +478,7 @@
       "approvalOutcomes": [],
       "tokensIn": 12,
       "tokensOut": 4,
-      "costUsd": 0.0000084,
+      "costUsd": 8.4E-06,
       "detail": [
         "  [run1-before-restart] error: 本任务已达到轮数上限（1 轮）——已完成的工作已保存在会话中，可继续发送消息推进，或将任务拆小；长任务可调高 agent.maxTurns 配置"
       ]
@@ -588,7 +588,7 @@
       "approvalOutcomes": [],
       "tokensIn": 20,
       "tokensOut": 8,
-      "costUsd": 0.0000156,
+      "costUsd": 1.56E-05,
       "detail": []
     },
     {

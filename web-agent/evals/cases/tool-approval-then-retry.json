@@ -1,0 +1,36 @@
+{
+  "name": "tool-approval-then-retry",
+  "description": "高风险工具先被审批挂起 → 批准后执行 → 下一轮给出最终回答（审批路径 + 工具序列断言）",
+  "messages": [
+    { "role": "user", "content": "请把结果写入 out/result.txt 文件" }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        {
+          "type": "tool_call",
+          "toolCall": {
+            "id": "call_r1_t1",
+            "type": "function",
+            "function": { "name": "write_file", "arguments": "{\"path\":\"out/result.txt\",\"content\":\"done\"}" }
+          }
+        },
+        { "type": "usage", "input": 130, "output": 28 },
+        { "type": "done" }
+      ]
+    },
+    {
+      "chunks": [
+        { "type": "delta", "text": "文件已写入 out/result.txt。最终回答：任务完成。" },
+        { "type": "usage", "input": 210, "output": 26 },
+        { "type": "done" }
+      ]
+    }
+  ],
+  "expect": {
+    "toolSequence": ["write_file"],
+    "answerContains": ["任务完成"],
+    "llmCalls": 2,
+    "noErrors": true
+  }
+}
