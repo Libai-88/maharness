@@ -37,3 +37,5 @@
 DX-01 至 DX-07 均有可复现命令、文档事实检查、CI 证据、版本兼容说明和回滚路径后关闭。
 
 DX-01 验收（2026-11-01）：`web-agent/docs/DEVELOPMENT.md` 提供唯一从零入口——安装（`npm ci` 双仓）、核心验证（typecheck + 905 项单测）、完整验证（selftest/eval:ci/build/安全回归/威胁模型）、开发模式、常见问题与文档索引。干净 checkout 实测（Windows 11，2026-11-01）：`npm ci` 4s + `npm ci --prefix ui` 6s + `npm run typecheck` 5s + `npm test` 37s = **52 秒**，`npm run selftest` 26s，远低于 15 分钟验收门槛；CI runner（ubuntu-latest）完整门禁约 6 分钟同样达标。文档步骤与 CI workflow 逐条对应，命令即 CI 步骤。回滚：删除 `docs/DEVELOPMENT.md` 并还原登记状态。
+
+DX-03 验收（2026-11-01）：`plan/release-policy-v1.md` 统一五个版本维度的载体与规则（应用 `package.json`、HTTP API schema、插件 manifest、数据库 `user_version`、插件快照 hash），明确各维度兼容承诺（新增字段兼容、破坏性变更递增版本）、迁移说明（数据库迁移自动执行、失败保留旧版本可从备份恢复）和弃用周期（字段/环境变量/能力/配置键各 1-2 个发布周期）。`CHANGELOG.md` 建立 Keep a Changelog 格式的版本日志，当前 Unreleased 段汇总已验收的 11 项能力。升级说明指向 `DEVELOPMENT.md`，发布产物与代码版本一致性由 `package.json` 单一来源保证。回滚：删除 `release-policy-v1.md` 与 `CHANGELOG.md` 并还原登记状态。
