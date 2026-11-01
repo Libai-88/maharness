@@ -67,7 +67,7 @@
 | SEC-03 | 将 API token、审批凭据、来源校验和权限审计统一为策略层 | 05、10 | 未授权负向测试全绿；轮换/过期/重放均验证 | 已验收 |
 | SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 已验收 |
 | SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 已验收 |
-| SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 待执行 |
+| SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 进行中 |
 | SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 已验收 |
 
 ## 06 插件与技能生态
@@ -456,3 +456,5 @@ MD-05 验收（2026-11-01）：请求级成本可复算与统一结算按确定�
 LR-02 验收（2026-11-01）：暂停/取消/继续/交接/过期清理五类转移均有状态与 UI 双层回归——暂停=abort+checkpoint；取消传播由 LR-05 专项锁定（进程树、MCP、模型流、并行子任务）；继续=`process-recovery.spec.ts` 真实强杀 resume + UI 三处 `resume:true` 断点续跑；交接=handoff SSE 帧持久化 `sessions.role` + selftest 全链路；过期清理=断点 30 天保留期与清理副作用账本（`db.spec.ts`）。本轮补齐 UI 缺口：`ui/e2e/main-flows.spec.ts` 新增 `budget_hit`（预算横幅 + 预算错误终态）与 `handoff`（系统消息 + 接管横幅同步会话列表）两个 E2E 场景。验证：主流程专项 16/16、UI E2E 全量 47/47、全量 `npm test` 911/911、双端 typecheck 通过。回滚：删除 LR-02 场景组并恢复登记状态，后端语义不受影响。
 
 SEC-05 验收（2026-11-01）：插件 UI 三种形态的隔离语义在页头直接明示——`PluginTabView.tsx` 新增信任等级徽标：module=「受信任模块 · 宿主权限」（同源同 realm、可访问宿主 API，仅限本地插件）、iframe=「iframe 沙箱」（sandbox 限制权限、无宿主 DOM/存储访问、不含 allow-top-navigation）、panel=「净化片段」（DOMPurify 移除脚本与事件属性）。徽标带逐形态 title 说明与 `data-trust` 属性，样式按信任等级区分。回归：`ui/e2e/plugin-trust.spec.ts` 锁定 iframe（徽标属性/沙箱值/不含 allow-top-navigation）与 panel（徽标属性/净化渲染）场景，UI E2E 全量 47/47、双端 typecheck 通过。回滚：删除徽标渲染与样式、恢复原页头条件渲染与该 spec。
+
+SEC-06 状态校准（2026-11-01）：验收条件「remote/team 启动强制 TLS 与认证」中的 remote 部分已由 API-02 交付——`resolveDeployMode` 对 remote 缺 token、缺/不配对 TLS 均拒绝启动，`server/tests/deploy-mode.spec.ts` 6/6 锁定，全量回归与 CI 双绿。剩余缺口为两项：团队模式（team）的身份/租户/隔离模型未实现（与 API-06 同一工程块）；插件仍在宿主进程执行，OS 级隔离（受限令牌/Job Object 或容器）为威胁模型 v1 的发布阻断项。按登记册状态约定（实现或验收证据未齐 = 进行中），SEC-06 由待执行校准为进行中，不再以「待执行」低估已有交付。
