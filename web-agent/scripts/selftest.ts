@@ -1,5 +1,7 @@
 /**
  * scripts/selftest.ts —— 工具冒烟测试（不依赖 LLM）
+ * 职责：正式回归（CI 门禁步骤）——非 LLM 用例失败非零退出；
+ * web_search 等外网用例为 informational，不计入。
  * 用法：npm run selftest
  *   SEARCH_PROXY=http://127.0.0.1:7897 npm run selftest  —— 走代理测联网搜索
  *   TAVILY_API_KEY=xxx npm run selftest                  —— 走 Tavily 测搜索

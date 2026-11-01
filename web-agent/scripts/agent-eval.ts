@@ -1,5 +1,7 @@
 /**
  * scripts/agent-eval.ts —— Agent 级回归评测（Record/Replay + Golden 断言）
+ * 职责：正式回归（QA 门禁）——npm run eval:ci 纳入 CI baseline 阈值阻断；
+ * --record 是录制诊断入口，录制产物需经 manifest 校验后才能成为回归场景。
  *
  * 2026 实践：agent 工程质量基线 = 确定性回放 + 轨迹断言 + golden 回归门禁。
  * 这是 maharness 审查报告 P0「零自动化测试」在 agent 循环层（决策-行动-观测/缓存/钩子）

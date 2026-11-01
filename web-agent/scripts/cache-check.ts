@@ -1,5 +1,7 @@
 /**
  * scripts/cache-check.ts —— 缓存模块聚焦验证（不联网，纯逻辑）
+ * 职责：诊断脚本——正式回归在 kernel/tests/cache.spec.ts（npm test）；
+ * 本脚本用于独立快速排查，不计入自动化覆盖，结果不作为门禁依据。
  * 用法：npx tsx scripts/cache-check.ts
  * 覆盖：usage 归一化 / L1 作用域隔离 / 多字停用词 / L3 真实命中 / L2 LRU 淘汰 / 持久化 roundtrip
  */

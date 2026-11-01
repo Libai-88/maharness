@@ -1,6 +1,9 @@
 import { join } from 'node:path';
 import { Kernel } from '../kernel/index.ts';
 
+// 职责：正式回归支撑脚本——kernel/tests/plugin-trial.spec.ts 经 runPluginTrial
+// 调用，属于 npm test 自动化覆盖，不是诊断脚本。
+
 // stdout is reserved for the machine-readable trial result.
 console.log = (...args) => process.stderr.write(`${args.join(' ')}\n`);
 console.warn = (...args) => process.stderr.write(`${args.join(' ')}\n`);

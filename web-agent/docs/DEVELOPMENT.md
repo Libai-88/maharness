@@ -78,3 +78,18 @@ npm run start:all      # 生产模式：构建前端后单端口 :3000
 - API 契约：[api-contract-v1.md](../../plan/api-contract-v1.md)。
 - 威胁模型：[threat-model-v1.md](../../plan/threat-model-v1.md)。
 - 优化登记册（当前状态）：[13-optimization-register.md](../../plan/13-optimization-register.md)。
+
+## 八、脚本职责矩阵（诊断 vs 正式回归）
+
+| 脚本 / 入口 | 职责 | 是否 CI 门禁 |
+| --- | --- | --- |
+| `npm test` | 正式回归（kernel + server + core + plugins 全量单测） | 是（阻断） |
+| `npm run eval:ci` | 正式回归（agent 循环 golden + baseline 阈值） | 是（阻断） |
+| `npm run selftest` | 正式回归（产品级冒烟，非 LLM） | 是（阻断） |
+| `npm run test:security` | 正式回归（安全集） | 是（阻断） |
+| `npm run e2e` | 正式回归（Playwright UI） | 是（阻断，独立 workflow） |
+| `scripts/cache-check.ts` | 诊断（缓存模块快速排查；正式覆盖在 `kernel/tests/cache.spec.ts`） | 否 |
+| `scripts/regress-reasoning.ts` | 真实模型抽样评测（QA-07 非阻断；缺凭据 SKIP） | 否（非阻断） |
+| `npm run eval -- --record` | 录制诊断入口（产物经 manifest 校验后才成为回归场景） | 否 |
+
+诊断脚本不计入自动化覆盖；关键检查一律落在 `*.spec.ts` 与 CI 步骤中。给脚本加新职责前先确认它属于哪一列。

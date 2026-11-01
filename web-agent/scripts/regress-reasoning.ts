@@ -1,4 +1,6 @@
 // scripts/regress-reasoning.ts —— 思考分流真机回归：五项断言（注册临时 provider → 发消息 → 校验 → 清理）
+// 职责：真实模型抽样评测（QA-07 非阻断门禁）——需要真实凭据，缺钥 SKIP；
+// 确定性思考分流回归在 core/chat 与 server 的 spec 中（npm test），不依赖本脚本。
 // 用法：node --import tsx scripts/regress-reasoning.ts
 //   本地：读 .env 的 NEWAPI_API_KEY / NEWAPI_BASE_URL
 //   CI：读环境变量 NEWAPI_API_KEY（密钥不落盘），用例经 REGRESS_MODELS 配置（逗号分隔）
