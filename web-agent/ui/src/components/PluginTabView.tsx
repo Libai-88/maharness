@@ -12,7 +12,7 @@
 // 本组件通用轮询并展示——插件不需要为了"在页头显示状态"而让前端为它写组件。
 import { Component, useCallback, useEffect, useState } from 'react';
 import type { PluginNavItem } from '../types';
-import { navApi } from '../api';
+import { getMutationToken, navApi } from '../api';
 import DOMPurify from 'dompurify';
 import PluginModuleView from './PluginModuleView';
 import { IconExternal, IconRefresh } from './Icon';
@@ -77,7 +77,8 @@ function PluginTabBody({ item }: Props) {
   const fetchStatus = useCallback(async () => {
     if (!item.statusUrl) return;
     try {
-      const res = await fetch(item.statusUrl);
+      const t = getMutationToken();
+      const res = await fetch(item.statusUrl, { headers: t ? { 'x-maharness-token': t } : {} });
       if (!res.ok) throw new Error(String(res.status));
       setStatus(await res.json() as StatusPayload);
     } catch {

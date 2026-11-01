@@ -92,6 +92,14 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
   - `MAHARNESS_APPROVAL_TOKEN`：回答审批必须回带该次挂起的一次性凭据（单次有效，重放被拒）。
   - 当前状态、主密钥是否可用、审批门是否已被通配 allow 策略整体放行，都在
     **设置 → 高级 → 安全**如实显示（`GET /api/security`，不含任何密钥材料）。
+- **部署模式（`MAHARNESS_MODE`，默认 `local`）**：
+  - `local`：本机单用户，只绑 127.0.0.1，变更类请求可选 token——既有用法不变。
+  - `trusted`：本机受信收紧档，仍只绑回环，但**全部 API（含只读与 SSE）强制 token**，
+    审批凭据自动强制；必须设置 `MAHARNESS_API_TOKEN`，否则启动自检拒绝。
+  - `remote`：对外暴露的最低安全线——必须同时提供 `MAHARNESS_API_TOKEN` 与
+    `MAHARNESS_TLS_CERT`/`MAHARNESS_TLS_KEY`（成对），服务以 HTTPS 监听 `MAHARNESS_BIND`；
+    Host/Origin 白名单按实际域名经 `MAHARNESS_ALLOWED_HOSTS/ORIGINS` 显式扩展。
+    插件仍在宿主进程执行，remote 只解决传输与凭据层，不等价于多租户隔离。
 - **密钥存储**：Provider 的 api_key 以 AES-256-GCM 落库，API 只回掩码；主密钥文件在 Windows 上
   用 `icacls` 收 DACL；解密失败标 `keyBroken` 并显示出来，不再静默当空串用；
   已有密文时拒绝静默重建主密钥（重建须显式 `MAHARNESS_ALLOW_SECRET_KEY_RESET=1` 且先备份原文件）。
@@ -193,7 +201,11 @@ Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外�
 | `TAVILY_API_KEY` | 未设 | 联网搜索用 Tavily；未配置自动降级 DuckDuckGo |
 | `SEARCH_PROXY` | 未设 | DuckDuckGo/Tavily 搜索服务请求走无凭据 HTTP(S) 代理（如 `http://127.0.0.1:7897`）；拒绝其他协议、凭据、查询参数和片段；用户提供的网页抓取 URL 直连并固定到已校验 IP |
 | `SANDBOX_ROOT` | 启动目录 | 文件工具与文件 API 的沙箱根（防穿越 + realpath） |
-| `PORT` | `3000` | 服务端口（始终只绑 127.0.0.1） |
+| `PORT` | `3000` | 服务端口 |
+| `MAHARNESS_MODE` | `local` | 部署模式：`local`（回环 + 变更类 token 可选）/ `trusted`（回环 + 全 API 强制 token 与审批凭据）/ `remote`（必须同时提供 API token 与 TLS 证书，否则拒绝启动） |
+| `MAHARNESS_BIND` | remote 时 `0.0.0.0` | remote 模式监听地址；local/trusted 不允许设置（固定回环） |
+| `MAHARNESS_TLS_CERT` / `MAHARNESS_TLS_KEY` | 未设 | remote 模式 HTTPS 证书与私钥路径，必须成对提供 |
+| `MAHARNESS_ALLOWED_HOSTS` / `MAHARNESS_ALLOWED_ORIGINS` | 未设 | remote 模式额外放行的 Host/Origin 白名单（逗号分隔，按实际域名配置） |
 | `DEV_ORIGIN_PORT` | `5173` | 额外放行的 Origin（Vite 开发服务器） |
 | `AUTO_STOP_IDLE_MS` | `30000` | 所有前端页关闭多久后自动停止后端；`0` = 关闭该行为 |
 | `AGENT_DATA_DIR` / `AGENT_USER_PLUGINS_DIR` | — | 数据目录 / 用户插件目录覆盖（测试与多实例隔离） |

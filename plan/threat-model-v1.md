@@ -1,12 +1,12 @@
 # maharness 威胁模型 v1
 
-版本：1.0
-核对日期：2026-10-30
-适用范围：当前 `web-agent` 单机本地部署
+版本：1.1
+核对日期：2026-11-01
+适用范围：当前 `web-agent` 单机部署（local / trusted / remote 三种部署模式）
 
 ## 系统边界
 
-maharness 由本机 HTTP 服务、浏览器 UI、Agent 内核、插件、工作区文件、SQLite 数据库、Trace 归档及外部 Provider/MCP/HTTP 目标组成。默认服务只绑定回环地址，产品当前按单机单用户设计。
+maharness 由本机 HTTP 服务、浏览器 UI、Agent 内核、插件、工作区文件、SQLite 数据库、Trace 归档及外部 Provider/MCP/HTTP 目标组成。服务按部署模式（`MAHARNESS_MODE`）启动：`local`（默认，只绑回环、token 可选）、`trusted`（仍只绑回环，全 API 强制 token 与审批凭据）、`remote`（必须提供 API token 与 TLS 证书，绑定 `MAHARNESS_BIND`，缺任一前置启动自检拒绝启动）。产品按单机单用户设计。
 
 信任边界包括：浏览器到本机 HTTP 服务、Agent 到工作区和操作系统进程、内核到插件、服务端到 Provider/MCP/任意 URL、服务端到本地密钥与持久化数据。
 
@@ -37,7 +37,7 @@ OS 管理员、已控制当前 OS 用户的攻击者和物理控制设备者不�
 
 | 入口 | 主要威胁 | 当前控制与证据 |
 |---|---|---|
-| HTTP/UI 控制面 | DNS rebinding、跨源请求、未授权配置变更 | 回环绑定及 Host/Origin 白名单；可选 `MAHARNESS_API_TOKEN` 保护变更方法。API mutation 与审批响应共用凭据决策函数；授权成功/拒绝及 `/api/events` SSE 生命周期发布脱敏事件，并写入 SQLite `authorization_audit`；`GET /api/security/audit` 对读取数量设上限。`server/tests/auth.spec.ts`、`server/tests/db.spec.ts` 覆盖决策、轮换、审计脱敏、SSE 清理、持久化与重启读取 |
+| HTTP/UI 控制面 | DNS rebinding、跨源请求、未授权配置变更 | 部署模式自检（`server/deploy-mode.ts`，remote 缺 TLS/token 拒绝启动、fail-closed）；回环绑定及 Host/Origin 白名单（remote 支持显式 `MAHARNESS_ALLOWED_HOSTS/ORIGINS` 扩展）；可选 `MAHARNESS_API_TOKEN` 保护变更方法，trusted/remote 模式下全 API（含 GET/SSE）强制。API mutation 与审批响应共用凭据决策函数；授权成功/拒绝及 `/api/events` SSE 生命周期发布脱敏事件，并写入 SQLite `authorization_audit`；`GET /api/security/audit` 对读取数量设上限。`server/tests/deploy-mode.spec.ts`、`server/tests/auth.spec.ts`、`server/tests/db.spec.ts` 覆盖部署模式解析与拒绝、决策、轮换、审计脱敏、SSE 清理、持久化与重启读取 |
 | 高风险工具审批 | 伪造、重放审批 | 一次性审批凭据在强制模式下校验；缺失或无效凭据发布脱敏拒绝审计事件。`server/tests/auth.spec.ts` 覆盖缺失、错误、重放和超时 |
 | 工作区与文件工具 | 路径越界、危险根目录登记 | workspace 注册和切换复检危险目录；文件操作受 sandbox 根约束。`server/tests/auth.spec.ts`、`kernel/tests/sandbox.spec.ts` 与对应工具测试覆盖边界 |
 | PowerShell | 只读白名单绕过、参数位注入、副作用命令 | 语法子集判定与审批策略；`core/powershell/tests/approval-bypass.spec.ts` 覆盖脚本块、成员调用、表达式和误拦样本 |

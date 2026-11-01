@@ -28,12 +28,17 @@ export function setMutationToken(token: string): void {
   } catch { /* 存不上（隐私模式等）就算了：门会退回未授权态，比假装安全诚实 */ }
 }
 
-/** 只有变更类方法带凭据头（GET/HEAD 不带，避免只读请求无谓失败） */
+/** 变更类方法始终带凭据头。trusted/remote 部署模式下服务端对 GET/SSE 也强制校验，
+ *  GET 401 时会触发 401 分支的重试逻辑（补带头重放一次）。 */
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
+const TOKEN_HEADER = 'x-maharness-token';
 function authHeaders(method?: string): Record<string, string> {
-  if (!MUTATING_METHODS.has(String(method ?? 'GET').toUpperCase())) return {};
   const t = getMutationToken();
-  return t ? { 'x-maharness-token': t } : {};
+  if (!t) return {};
+  const m = String(method ?? 'GET').toUpperCase();
+  // 变更类始终带；GET/HEAD 也带（local 模式服务端忽略该头，trusted/remote 必需）
+  if (MUTATING_METHODS.has(m) || m === 'GET' || m === 'HEAD') return { [TOKEN_HEADER]: t };
+  return {};
 }
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -45,6 +50,9 @@ export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
       ...(opts?.headers as Record<string, string> | undefined),
     },
   });
+  if (res.status === 401 && !getMutationToken()) {
+    throw new Error('本部署模式要求 API 凭据：请在 设置 → 高级 → 安全 录入服务端 MAHARNESS_API_TOKEN 的值');
+  }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
     try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
@@ -110,7 +118,7 @@ export async function streamChat(
   try {
     res = await fetch(`/api/sessions/${sessionId}/chat`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
       body: JSON.stringify(body),
       signal,
     });

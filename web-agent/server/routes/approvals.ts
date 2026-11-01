@@ -31,9 +31,11 @@ import { auditAuthorizationDenial, auditAuthorizationGrant, decideCredentialAuth
 /** 一次性审批凭据的请求头名（也可以放 body 的 approvalToken 字段） */
 export const APPROVAL_TOKEN_HEADER = 'x-maharness-approval-token';
 
-/** 是否强制要求凭据（默认关：不破坏现有前端；接线完成后设 1 即强制） */
+/** 是否强制要求凭据：显式 env 开关，或 trusted/remote 部署模式（API-02）下自动强制 */
 export function approvalTokenRequired(): boolean {
-  return process.env.MAHARNESS_APPROVAL_TOKEN === '1';
+  if (process.env.MAHARNESS_APPROVAL_TOKEN === '1') return true;
+  const mode = (process.env.MAHARNESS_MODE ?? 'local').trim().toLowerCase();
+  return mode === 'trusted' || mode === 'remote';
 }
 
 interface IssuedToken {

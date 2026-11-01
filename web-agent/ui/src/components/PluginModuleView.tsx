@@ -11,7 +11,7 @@ import * as React from 'react';
 import * as ReactDOM from 'react-dom/client';
 import { toast } from 'sonner';
 import type { BusEvent, PluginNavItem } from '../types';
-import { subscribeEvents } from '../api';
+import { getMutationToken, subscribeEvents } from '../api';
 
 /** 宿主注入插件 UI 的接口：插件对外交互的唯一通道 */
 export interface PluginHostApi {
@@ -52,7 +52,11 @@ const apiBase = (pluginId: string, path: string): string =>
   `/api/plugins/${pluginId}${path.startsWith('/') ? path : `/${path}`}`;
 
 async function request<T>(pluginId: string, path: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(apiBase(pluginId, path), init);
+  const t = getMutationToken();
+  const res = await fetch(apiBase(pluginId, path), {
+    ...init,
+    headers: { ...(init?.headers as Record<string, string> | undefined), ...(t ? { 'x-maharness-token': t } : {}) },
+  });
   if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
   const text = await res.text();
   return (text ? JSON.parse(text) : undefined) as T;

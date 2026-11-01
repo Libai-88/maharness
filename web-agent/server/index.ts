@@ -23,6 +23,7 @@ import { ClientTracker } from './client-tracker';
 import { auditAuthorizationDenial, auditAuthorizationGrant, CredentialFailureLimiter, decideCredentialAuthorization } from './security-policy';
 import { apiContractFor, setApiSchemaHeaders } from './api-contract';
 import { validateAgainstSchema } from '../kernel/validate';
+import { resolveDeployMode, methodRequiresAuth, type DeployConfig } from './deploy-mode';
 
 dotenv.config(); // 启动时读取 .env（初始快照）
 
@@ -92,17 +93,26 @@ export function createApiTokenGuard(
   kernel?: Kernel,
   store?: Store,
   limiter: CredentialFailureLimiter = new CredentialFailureLimiter(),
+  deployConfig?: DeployConfig,
 ): express.RequestHandler {
   return (req, res, next) => {
     const expected = requiredApiToken();
     const method = String(req.method ?? '').toUpperCase();
-    if (!MUTATING_METHODS.has(method)) return next();
+    // local：仅变更类方法受门；trusted/remote（authRequired）：全部 /api 方法（含 GET/SSE）受门
+    const LOCAL_DEFAULT = { mode: 'local', bindHost: '127.0.0.1', authRequired: false, approvalEnforced: false } as const;
+    const config = deployConfig ?? LOCAL_DEFAULT;
+    if (!MUTATING_METHODS.has(method) && !methodRequiresAuth(config)) return next();
     const auditObject = auditRouteObject(req);
-    if (!expected) {
+    // trusted/remote 下「服务端没配 token」也要拒绝（防御性兜底）；local 门关闭 = 完全放行（既有语义）
+    if (!expected && !config.authRequired) {
       if (kernel) auditAuthorizationGrant(kernel, {
         subject: 'local-client', capability: `http:${method.toLowerCase()}`, object: auditObject,
       }, store);
       return next(); // 本机免 token 模式仍记录通过来源校验的变更
+    }
+    if (!expected) {
+      // trusted/remote 配置要求鉴权但 token 缺失（理论上启动自检已拦，防御性兜底）
+      return res.status(401).json({ error: '未授权：当前部署模式要求 MAHARNESS_API_TOKEN，但服务端未配置' });
     }
     const forwardedFor = req.headers['x-forwarded-for'];
     const clientKey = req.socket?.remoteAddress
@@ -164,6 +174,13 @@ function seedDefaults(store: Store): void {
 }
 
 export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store; closeEnvWatcher: () => void }> {
+  // API-02：部署模式解析与启动自检——local/trusted/remote；安全前置不满足时 fail-closed 拒绝启动。
+  const deploy = resolveDeployMode();
+  if (!deploy.ok) {
+    for (const e of deploy.errors) console.error(`[deploy] ${e}`);
+    throw new Error(`部署模式配置未通过启动自检（MAHARNESS_MODE=${process.env.MAHARNESS_MODE ?? 'local'}）`);
+  }
+  const deployConfig: DeployConfig = deploy.config;
   // 数据目录/用户插件目录可经环境变量覆盖（AGENT_DATA_DIR / AGENT_USER_PLUGINS_DIR）：
   // selftest 等嵌入场景用临时目录隔离，不污染生产 DB；不设置时与默认行为完全一致。
   const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir }, {
@@ -256,20 +273,28 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
 
   // ---- C-S1 监听与请求校验（最高优先：防 DNS rebinding / 跨源滥用）----
-  // 本服务是「本机个人的 Agent harness」，只服务本机浏览器与同机工具：
+  // local/trusted（本机个人 harness，只服务本机浏览器与同机工具）：
   //  (a) 只绑定回环地址，杜绝局域网直连；
   //  (b) Host 头必须精确匹配本机回环主机名+端口——DNS rebinding 把域名解析到
   //      127.0.0.1 后，攻击页发出的请求 Host 是攻击者域名，此处直接 403；
   //  (c) Origin 头存在时必须在白名单（同源前端 + Vite 开发服务器）；
   //      无 Origin（curl / 同机非浏览器工具）放行。
+  // remote（API-02）：Host/Origin 白名单按 MAHARNESS_ALLOWED_HOSTS/ORIGINS 放开
+  // （逗号分隔；transport 层由 TLS + 全 API token 兜底）。
   // 必须注册在所有路由之前（含下方插件 API 与静态托管）。
   const allowedHosts = new Set([
     `localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`,
+    ...(deployConfig.mode === 'remote'
+      ? (process.env.MAHARNESS_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)
+      : []),
   ]);
   const devOriginPort = process.env.DEV_ORIGIN_PORT ?? '5173';
   const allowedOrigins = new Set([
     `http://localhost:${port}`, `http://127.0.0.1:${port}`,
     `http://localhost:${devOriginPort}`, `http://127.0.0.1:${devOriginPort}`,
+    ...(deployConfig.mode === 'remote'
+      ? (process.env.MAHARNESS_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean)
+      : []),
   ]);
   app.use((req, res, next) => {
     const host = String(req.headers.host ?? '').toLowerCase();
@@ -295,7 +320,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   // 覆盖 /api/*（含下方插件 API 挂载点 /api/plugins/*），GET/HEAD 只读不受影响。
   // 未设 MAHARNESS_API_TOKEN 时逐请求透传 = 现有本机免鉴权行为不变。
   // 威胁模型与边界见 createApiTokenGuard 注释：这是「显式授权」门槛，不是进程隔离边界。
-  app.use('/api', createApiTokenGuard(kernel, store));
+  app.use('/api', createApiTokenGuard(kernel, store, new CredentialFailureLimiter(), deployConfig));
 
   // ---- A6/A7 安全姿态只读端点：把「当前哪些门是开着的、密钥是否可用」说清楚 ----
   // 只读、无副作用、不含任何密钥材料（token / api_key / secret.key 一律不外泄）。
@@ -304,7 +329,9 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     const tokenRequired = requiredApiToken().length > 0;
     const broken = store.keyStatus();
     res.json({
-      bind: '127.0.0.1',
+      bind: deployConfig.bindHost,
+      deployMode: deployConfig.mode,
+      tls: !!deployConfig.tls,
       // 变更类端点是否需要 x-maharness-token
       mutationAuthRequired: tokenRequired,
       mutationTokenHeader: MUTATION_TOKEN_HEADER,
@@ -457,11 +484,26 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     console.warn('[env] .env 监听不可用（改动后需重启生效）:', err instanceof Error ? err.message : String(err));
   }
 
-  // C-S1：仅绑定回环地址——本机个人服务不对局域网/外网暴露
-  const server = app.listen(port, '127.0.0.1', () => {
+  // C-S1 + API-02：local/trusted 固定回环；remote 绑 MAHARNESS_BIND（默认 0.0.0.0）并启用 TLS
+  let server: ReturnType<express.Express['listen']>;
+  if (deployConfig.tls) {
+    const { createServer } = await import('node:https');
+    const { readFileSync } = await import('node:fs');
+    const httpsServer = createServer({
+      cert: readFileSync(deployConfig.tls.cert),
+      key: readFileSync(deployConfig.tls.key),
+    }, app);
+    httpsServer.listen(port, deployConfig.bindHost, () => {
+      console.log(`\n  Web Agent 已启动（remote 模式，HTTPS）: https://<host>:${port}（绑定 ${deployConfig.bindHost}）`);
+      console.log(`  沙箱根目录: ${kernel.config.get<string>('sandboxRoot', kernel.rootDir)}\n`);
+    });
+    server = httpsServer;
+  } else {
+    server = app.listen(port, deployConfig.bindHost, () => {
     console.log(`\n  Web Agent 已启动: http://localhost:${port}`);
     console.log(`  沙箱根目录: ${kernel.config.get<string>('sandboxRoot', kernel.rootDir)}\n`);
-  });
+    });
+  }
   // L6 监听失败（端口占用等）以 reject 呈现给调用方——嵌入场景（selftest）可在
   // finally 中清理资源后优雅退出，而不是被 process.exit 直接击穿。
   await new Promise<void>((resolve, reject) => {
