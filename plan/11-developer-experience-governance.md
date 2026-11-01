@@ -45,3 +45,5 @@ DX-07 验收（2026-11-01）：五个脚本头部标注职责类型——`cache-
 DX-02 验收（2026-11-01）：API 契约文档漂移由三层自动化校验闭环——路由扫描（api-contract.spec.ts 阻止未登记路由）、运行时 schema 校验（api-contract.ts 必要字段）、文档事实校验（`scripts/check-doc-facts.mjs` 为 CI 阻断步骤，核对 `api-contract-v1.md` 引用字段与 schema 登记一致）。本轮补齐 `GET /api/security` 六字段 schema 登记并注入漂移验证（缺字段即抛错失败）。回滚：删除校验脚本与 CI 步骤，还原 schema 与文档。
 
 DX-05 验收（2026-11-01）：插件脚手架（`npm run plugin:scaffold` 生成 manifest + 工具模板，`plugin:validate` CI 门禁校验真实插件）与 `plugin-scaffold.spec.mjs`（真实 Kernel 加载 → started → 工具可达 → 卸载完全恢复）覆盖插件对象；确定性 eval fixture 28 场景（schema 校验 + baseline 指标门禁）覆盖 agent 行为回归，新增 `tool-approval-then-retry.json` 审批路径回放。回滚：删除新增 case、还原 baseline 至 27 指标。
+
+DX-06 验收（2026-11-01）：`plan/adr/`（索引 + 编号规则 + ADR 0001 部署模式决策）、`plan/release-checklist.md`（发布 8 项 + 回滚 6 项检查表，逐项引用既有工具命令与权威文档）建立；威胁模型、兼容矩阵、供应链策略文档经 ADR 索引关联成治理闭环。回滚：删除 `plan/adr/` 与 `plan/release-checklist.md`。

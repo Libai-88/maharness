@@ -151,7 +151,7 @@
 | DX-03 | 统一版本、迁移日志、兼容策略和弃用周期 | 11 | 发布产物与代码版本一致；有升级说明 | 已验收 |
 | DX-04 | 建立 lint/type/test/eval/build/E2E/security 的 CI 分层门禁 | 04、11 | PR 门禁可复现，失败可定位到步骤 | 已验收 |
 | DX-05 | 提供插件/Provider/技能的脚手架与测试 fixture | 06、11 | 示例可在 CI 构建、加载、调用和卸载 | 已验收 |
-| DX-06 | 建立 ADR、威胁模型、兼容矩阵和发布/回滚检查表 | 05、11、12 | 重大契约改动均有记录和发布检查 | 待执行 |
+| DX-06 | 建立 ADR、威胁模型、兼容矩阵和发布/回滚检查表 | 05、11、12 | 重大契约改动均有记录和发布检查 | 已验收 |
 | DX-07 | 减少诊断脚本、人工步骤与正式回归测试之间的职责混淆 | 04、11 | 诊断脚本不计入自动化覆盖；关键检查进入 CI | 已验收 |
 
 ## 完成审计
@@ -448,3 +448,5 @@ SEC-07 验收（2026-11-01）：`plan/supply-chain-policy-v1.md` 固化三类供
 DX-02 验收（2026-11-01）：API 契约漂移由三层自动化校验——`server/tests/api-contract.spec.ts` 扫描全部 `server/routes/*.ts` 显式路由（未登记路由测试失败）、`api-contract.ts` 运行时 schema 校验成功响应必要字段（本轮补齐 `GET /api/security` 的 `bind`/`deployMode`/`tls`/`mutationAuthRequired`/`mutationTokenHeader`/`approvalTokenRequired` 六字段）、新增 `scripts/check-doc-facts.mjs`（CI 步骤）核对 `api-contract-v1.md` 引用的契约字段与 schema 登记一致，不一致即阻断合并。`api-contract-v1.md` 补充契约变更流程（改路由 → 登记契约与 schema → 更新文档 → 三处校验全绿）。注入漂移验证：`node scripts/check-doc-facts.mjs` 在文档与登记一致时通过（6 字段），缺任一字段即抛错失败。回归：`api-contract.spec.ts` 4/4、全量 `npm test` 911/911、`npm run typecheck`、`npm run ui:typecheck`、`npm run check:threat-model` 通过。回滚：删除 `scripts/check-doc-facts.mjs` 与 CI 步骤、还原 `api-contract.ts` schema 与文档描述、登记状态回退。
 
 DX-05 验收（2026-11-01）：插件脚手架 `scripts/plugin-scaffold.mjs`（`create <id>` 生成含 `compatibility.api` 范围与 `permissions.capabilities` 白名单的 manifest + 工具源码模板；`validate <dir>` manifest 校验）已有 CI 覆盖：`plugin-scaffold.spec.mjs` 验证生成插件经真实 Kernel 加载为 `started`、工具注册可达、卸载即完全恢复（目录删除），CI 执行 `npm run plugin:validate` 于两个真实插件。fixture 侧 `evals/cases/` 28 个确定性场景（含本轮新增 `tool-approval-then-retry.json`——审批批准后工具执行路径的确定性回放），全部经 `evals/manifest.ts` schema 校验；`baseline.json` 同步至 28/28 且全部指标门禁（casePassRate=1、安全攻击阻断 100%、回归阈值）通过。回归：全量 `npm test` 911/911（含 plugin-scaffold spec）、`npm run typecheck`、`npm run eval:ci` 28/28 通过。回滚：删除 `tool-approval-then-retry.json` 并还原 `baseline.json` 至 27 case 指标；脚手架与 fixture 基础设施回滚由各自已有验收条目覆盖。
+
+DX-06 验收（2026-11-01）：`plan/adr/` 建立 ADR 机制——索引 + 编号规则（`NNNN-<标题>.md` 递增、不删除、被取代标记 superseded）+ 首条 ADR 0001（部署模式决策：背景/决策/后果/回滚）；威胁模型（v1.1，CI 映射校验）、兼容矩阵（`manifest-v1-compatibility.md` 字段表 + `release-policy-v1.md` 五维度版本规则）与供应链策略既有文档纳入 ADR 索引关联。`plan/release-checklist.md` 建立发布 8 项检查（版本一致性、DB/API schema 递增、插件 manifest、安全门禁、完整回归、文档事实、供应链审计）与回滚 6 项检查（代码/数据/schema 降级限制/配置/插件/公告），全部引用既有权威文档与实际工具命令。文档交付，无代码变更，回滚方式为删除 `plan/adr/` 与 `plan/release-checklist.md` 并还原登记状态。
