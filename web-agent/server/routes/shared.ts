@@ -292,7 +292,7 @@ async function resolveHttpTarget(
     : await resolver(host);
   if (!addresses.length) throw new Error('域名无法解析');
   if (!opts.allowPrivate && addresses.some(({ address }) => isPrivateAddress(address))) {
-    throw new Error('不允许连接内网/环回/链路本地地址');
+    throw new Error('不允许连接内网/环回/链路本地地址（连接本机模型或本地网关：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
   }
   return { url, addresses };
 }

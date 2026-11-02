@@ -4,7 +4,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-const INPUT_PLACEHOLDER = '跟小马说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
 
 /** mock 流式接口：绕开真实 LLM（断言 UI 组合与渲染，不落库、不耗 token） */
 function mockChatStream(page: Page) {
@@ -98,7 +98,7 @@ test.describe('气泡长按菜单（微信式）', () => {
     await page.getByTestId('menu-quote').click();
     const bar = page.getByTestId('quote-bar');
     await expect(bar).toBeVisible();
-    await expect(bar.locator('.qb-author')).toContainText('小马');
+    await expect(bar.locator('.qb-author')).toContainText('小鲸');
     await page.getByTestId('quote-cancel').click();
     await expect(bar).toHaveCount(0);
   });
@@ -157,7 +157,7 @@ test.describe('引用回复上送（mock 流式）', () => {
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('引用测试正文');
     await page.keyboard.press('Enter');
     // 用户气泡 = 引用块 + 正文
-    await expect(page.getByTestId('msg-bubble-user').last()).toContainText('【引用 小马】');
+    await expect(page.getByTestId('msg-bubble-user').last()).toContainText('【引用 小鲸】');
     await expect(page.getByTestId('msg-bubble-user').last()).toContainText('引用测试正文');
     // 引用条随发送清理；mock 回复到达
     await expect(page.getByTestId('quote-bar')).toHaveCount(0);

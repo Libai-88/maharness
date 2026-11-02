@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-const INPUT_PLACEHOLDER = '跟小马说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
 
 test('开放式目标先确认验收条件，再消费原目标执行', async ({ page }) => {
   const session = {

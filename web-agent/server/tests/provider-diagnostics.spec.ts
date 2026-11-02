@@ -239,6 +239,18 @@ describe('GET /api/providers/:id/diagnose', () => {
     });
   });
 
+  test('Ollama 本地网关无需 API Key 即可保存', async () => {
+    const response = await fetch(`${base}/api/providers`, {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ label: 'Local Ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3', protocol: 'ollama' }),
+    });
+    // 测试环境未设 AGENT_ALLOW_PRIVATE_URLS：localhost 属私网会被拦截——
+    // 报错必须是 SSRF 指引而不是「Key 必填」（缺 Key 拒绝保存才是本次要锁的回归）。
+    assert.equal(response.status, 400);
+    const body = await response.json() as { error?: string };
+    assert.doesNotMatch(body.error ?? '', /Key.*必填|必填.*Key/);
+  });
+
   test('真实聊天请求按配置路由并在 Trace 中保留完整候选证据', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };

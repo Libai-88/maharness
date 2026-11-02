@@ -3,7 +3,7 @@
 // 无悬空 streaming 状态（输入区复位、无残留流式光标）。
 import { expect, test, type Page } from '@playwright/test';
 
-const INPUT_PLACEHOLDER = '跟小马说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
 
 async function setup(page: Page) {
   await page.route('**/api/providers', (route) => route.fulfill({ json: [{

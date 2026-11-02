@@ -1,4 +1,4 @@
-// ui/src/voice.ts —— 「小马」人设文案中心
+// ui/src/voice.ts —— 「小鲸」人设文案中心
 // 宗旨：这是一个像朋友一样聊天的界面。所有系统话术从这里出，不散落在组件里。
 // 三条铁律：
 //   1) 用户看到的永远是"人话"，技术原文进 title/console（可查，但不糊在脸上）；
@@ -6,8 +6,8 @@
 //   3) 一句人话后面必须跟"那我现在能干什么"（可操作动作，而不是报错码）。
 import type { ToolStep } from './types';
 
-/** 对手方的名字：模型自己也这么自称（"我是 maharness，你可以叫我小马"） */
-export const AGENT_NAME = '小马';
+/** 对手方的名字：模型自己也这么自称（"我是 maharness，你可以叫我小鲸"） */
+export const AGENT_NAME = '小鲸';
 export const AGENT_ID = 'maharness';
 
 /** 界面显示的版本号：值由构建期从 ui/package.json 注入（见 vite.config.ts 的 define 与

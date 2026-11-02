@@ -270,11 +270,11 @@ async function resolvePublicTarget(
   const host = stripBrackets(u.hostname);
   if (!host) throw new Error('URL 缺少主机名');
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址');
+    if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址（连接本地模型或本地网关：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
     return { url: u, addresses: [{ address: host, family: isIP(host) }] };
   }
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
-    throw new Error('拒绝访问内网主机名');
+    throw new Error('拒绝访问内网主机名（连接本地模型或本地网关：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
   }
   const recs = await resolver(host);
   if (recs.length === 0) throw new Error('域名无法解析');

@@ -36,6 +36,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
   const [models, setModels] = useState<PulledModel[]>([]);
+  // 本地网关（Ollama 等）无需 API Key——校验与占位提示随协议切换
+  const isLocal = (form.protocol ?? 'openai') === 'ollama';
 
   const refresh = async (ok: boolean, text: string) => {
     setMsg({ ok, text });
@@ -50,8 +52,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   };
 
   const save = async () => {
-    if (!form.label.trim() || !form.baseUrl.trim() || !form.model.trim() || (creating && !form.apiKey.trim())) {
-      return refresh(false, '名称 / 地址 / 模型必填，新建时 Key 必填');
+    if (!form.label.trim() || !form.baseUrl.trim() || !form.model.trim() || (!isLocal && creating && !form.apiKey.trim())) {
+      return refresh(false, isLocal ? '名称 / 地址 / 模型必填（本地网关无需 Key）' : '名称 / 地址 / 模型必填，新建时 Key 必填');
     }
     setBusy('save');
     let savedId: string | null = null;
@@ -70,8 +72,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   };
 
   const test = async () => {
-    if (!form.baseUrl.trim() || !form.model.trim() || (!creating && !form.apiKey.trim() && !editing?.hasKey)) {
-      return refresh(false, '请先填写地址 / 模型 / Key 再测试');
+    if (!form.baseUrl.trim() || !form.model.trim() || (!isLocal && !creating && !form.apiKey.trim() && !editing?.hasKey)) {
+      return refresh(false, isLocal ? '请先填写地址 / 模型再测试' : '请先填写地址 / 模型 / Key 再测试');
     }
     setBusy('test');
     try {
@@ -86,8 +88,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   };
 
   const pullModels = async () => {
-    if (!form.baseUrl.trim() || (!form.apiKey.trim() && !editing?.hasKey)) {
-      return refresh(false, '请先填写 Base URL 与 Key（编辑已保存 Provider 时 Key 可留空）');
+    if (!form.baseUrl.trim() || (!isLocal && !form.apiKey.trim() && !editing?.hasKey)) {
+      return refresh(false, isLocal ? '请先填写 Base URL' : '请先填写 Base URL 与 Key（编辑已保存 Provider 时 Key 可留空）');
     }
     setBusy('pull');
     try {
@@ -212,8 +214,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
           <span className="ss-title">{creating ? '新增 Provider' : `编辑 · ${editing!.label}`}</span>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label="Provider 名称" />
-            <input className="set-input" placeholder="Base URL（如 https://api.deepseek.com）" value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
-            <input className="set-input" placeholder="API Key" type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
+            <input className="set-input" placeholder={isLocal ? 'Base URL（如 http://localhost:11434/v1）' : 'Base URL（如 https://api.deepseek.com）'} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
+            <input className="set-input" placeholder={isLocal ? '本地网关无需 Key（留空即可）' : 'API Key'} type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
             <select className="set-input" value={form.protocol ?? 'openai'} onChange={(e) => setForm({ ...form, protocol: e.target.value })} aria-label="协议类型">
               <option value="openai">OpenAI 兼容（多数网关/国产）</option>
               <option value="anthropic">Anthropic 原生</option>
@@ -249,6 +251,11 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
                   </span>
                 </button>
               ))}
+            </div>
+          )}
+          {isLocal && (
+            <div className="provider-hint" style={{ marginTop: 2 }}>
+              本地网关提示：首次连接本机地址被拦截时，在 web-agent/.env 中加入 <code>AGENT_ALLOW_PRIVATE_URLS=1</code> 并保存——热生效，无需重启。
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>

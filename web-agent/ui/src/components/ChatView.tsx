@@ -1045,7 +1045,7 @@ export default function ChatView({ messages, streaming, onSend, onStop, hasModel
           <textarea
             ref={inputRef}
             value={input}
-            placeholder={hasModels ? '跟小马说点什么…（按 / 看命令）' : '先去左下角「设置」里配一个模型吧'}
+            placeholder={hasModels ? '跟小鲸说点什么…（按 / 看命令）' : '先去左下角「设置」里配一个模型吧'}
             rows={2}
             onChange={(e) => {
               setInput(e.target.value);

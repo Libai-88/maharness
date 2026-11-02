@@ -126,7 +126,7 @@ const apView = await page.evaluate(() => ({
   okBtn: (document.querySelector('.approval-card .btn-primary')?.textContent || '').trim(),
 }));
 check('审批卡按会话回到当前窗口（刷新回放机制的前端那一半）', apView.cards === 1, apView);
-check('审批卡说人话（谁想干什么 + 等了多久/还剩多久）', /小马想请你点头/.test(apView.title) && /等了 1 分钟/.test(apView.wait) && /还剩/.test(apView.wait), apView);
+check('审批卡说人话（谁想干什么 + 等了多久/还剩多久）', /小鲸想请你点头/.test(apView.title) && /等了 1 分钟/.test(apView.wait) && /还剩/.test(apView.wait), apView);
 check('审批动作是人话按钮', apView.okBtn.includes('可以，去做吧'), apView);
 
 // ---------- 4. 断线可见 ----------

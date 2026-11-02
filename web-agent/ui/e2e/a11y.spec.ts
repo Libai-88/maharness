@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const axePath = require.resolve('axe-core/axe.min.js');
 const axeSource = readFileSync(axePath, 'utf8');
 
-const INPUT_PLACEHOLDER = '跟小马说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
 
 async function setup(page: Page) {
   await page.route('**/api/providers', (route) => route.fulfill({ json: [{

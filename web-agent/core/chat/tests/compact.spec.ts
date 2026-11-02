@@ -12,7 +12,7 @@ const stubProvider = (reply: string): ProviderDef => ({
   },
 });
 
-const L0 = '【L0 哨兵】你是小马：以工具为感官，以行动完成使命，以诚实回报信任。';
+const L0 = '【L0 哨兵】你是小鲸：以工具为感官，以行动完成使命，以诚实回报信任。';
 
 /** 造一段必然超预算的对话（CJK ≈ 1 token/字） */
 const longDialog = (n: number): LLMMessage[] => Array.from({ length: n }, (_, i) => ({

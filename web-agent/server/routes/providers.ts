@@ -165,8 +165,14 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   app.post('/api/providers', async (req, res) => {
     const { label, baseUrl, apiKey, model, priceIn, priceOut } = req.body ?? {};
     const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : 'openai';
-    if (!label?.trim() || !baseUrl?.trim() || !apiKey?.trim() || !model?.trim()) {
-      return res.status(400).json({ error: '名称 / 地址 / Key / 模型 均为必填' });
+    // Ollama 等本地网关不需要 API Key——Key 必填只约束云端协议（与 /test、/models 的豁免口径一致）
+    const keyOptional = protocol === 'ollama';
+    if (!label?.trim() || !baseUrl?.trim() || !model?.trim() || (!keyOptional && !apiKey?.trim())) {
+      return res.status(400).json({
+        error: keyOptional
+          ? '名称 / 地址 / 模型 均为必填（本地网关无需 Key）'
+          : '名称 / 地址 / Key / 模型 均为必填',
+      });
     }
     // H5 SSRF：保存路径与 /test 同规则校验（真实对话会按此地址服务端 fetch）。
     // AGENT_ALLOW_PRIVATE_URLS=1 显式放行本地/内网地址（本机 Ollama 等本地模型场景）——
