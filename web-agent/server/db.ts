@@ -120,7 +120,8 @@ export interface PersonaRow {
   updatedAt: number;
 }
 
-/** 默认人设种子（用户可编辑/停用/删除）；L0 内核纪律（见 core/chat BASE_PROMPT）不在此重复 */
+/** 默认人设种子（用户可编辑/停用；id=default 这一行随代码升级合并刷新，
+ *  自定义人设不受影响）；L0 内核纪律（见 core/chat BASE_PROMPT）不在此重复 */
 export const DEFAULT_PERSONA = {
   id: 'default',
   name: '默认人设',

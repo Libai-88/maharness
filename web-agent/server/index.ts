@@ -167,9 +167,22 @@ function seedDefaults(store: Store): void {
     }
     if (envCfgs.length) console.log(`[seed] 已从 .env 导入 ${envCfgs.length} 个供应商到本地数据库`);
   }
-  if (store.listPersonas().length === 0) {
+  const personas = store.listPersonas();
+  const defaultPersona = personas.find((p) => p.id === DEFAULT_PERSONA.id);
+  if (personas.length === 0) {
     store.upsertPersona({ id: DEFAULT_PERSONA.id, name: DEFAULT_PERSONA.name, content: DEFAULT_PERSONA.content, sortOrder: 0 });
     console.log('[seed] 已写入默认人设（可在网页端「设置」编辑）');
+  } else if (defaultPersona && defaultPersona.content !== DEFAULT_PERSONA.content) {
+    // 库是旧版本启动时种下的：默认人设内容与代码种子不一致 → 以当前代码为准刷新，
+    // 否则内核身份升级（如「小鲸」人格）永远追不上已存在的旧库。自定义人设不参与合并。
+    store.upsertPersona({
+      id: defaultPersona.id,
+      name: DEFAULT_PERSONA.name,
+      content: DEFAULT_PERSONA.content,
+      enabled: defaultPersona.enabled,
+      sortOrder: defaultPersona.sortOrder,
+    });
+    console.log('[seed] 默认人设已与当前版本合并刷新（自定义内容以网页端「设置」新建人设保存）');
   }
 }
 
