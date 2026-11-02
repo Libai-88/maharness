@@ -184,7 +184,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     }
     const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'provider'}-${Math.random().toString(36).slice(2, 6)}`;
     store.upsertProvider({
-      id, label: label.trim(), baseUrl: baseUrl.trim(), apiKey: apiKey.trim(), model: model.trim(), protocol: protocol as ProviderProtocol,
+      id, label: label.trim(), baseUrl: baseUrl.trim(), apiKey: (apiKey ?? '').trim(), model: model.trim(), protocol: protocol as ProviderProtocol,
       priceIn: priceIn === '' || priceIn == null ? undefined : Number(priceIn),
       priceOut: priceOut === '' || priceOut == null ? undefined : Number(priceOut),
     });

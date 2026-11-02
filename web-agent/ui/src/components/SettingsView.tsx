@@ -255,7 +255,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
           )}
           {isLocal && (
             <div className="provider-hint" style={{ marginTop: 2 }}>
-              本地网关提示：首次连接本机地址被拦截时，在 web-agent/.env 中加入 <code>AGENT_ALLOW_PRIVATE_URLS=1</code> 并保存——热生效，无需重启。
+              本地网关提示：本机模式直接连接即可；Key 留空，地址填 http://localhost:11434/v1（Ollama 默认端口）。
             </div>
           )}
           <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>

@@ -260,7 +260,11 @@ async function resolvePublicTarget(
   let u: URL;
   try { u = new URL(raw); } catch { throw new Error('URL 不合法'); }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`仅支持 http/https（当前 ${u.protocol}）`);
-  if (process.env.AGENT_ALLOW_PRIVATE_URLS === '1') {
+  // 部署模式决定私网豁免：local/trusted 下唯一使用者是本机用户，web_fetch 允许抓本机
+  // 页面（本地开发服务器、内网文档站）；remote 下默认拦截，须显式 AGENT_ALLOW_PRIVATE_URLS=1。
+  const mode = (process.env.MAHARNESS_MODE ?? 'local').trim().toLowerCase();
+  const allowPrivate = mode !== 'remote' || process.env.AGENT_ALLOW_PRIVATE_URLS === '1';
+  if (allowPrivate) {
     const host = stripBrackets(u.hostname);
     if (!host) throw new Error('URL 缺少主机名');
     const addresses = isIP(host) ? [{ address: host, family: isIP(host) }] : await resolver(host);
@@ -270,11 +274,11 @@ async function resolvePublicTarget(
   const host = stripBrackets(u.hostname);
   if (!host) throw new Error('URL 缺少主机名');
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址（连接本地模型或本地网关：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
+    if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
     return { url: u, addresses: [{ address: host, family: isIP(host) }] };
   }
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
-    throw new Error('拒绝访问内网主机名（连接本地模型或本地网关：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
+    throw new Error('拒绝访问内网主机名（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
   }
   const recs = await resolver(host);
   if (recs.length === 0) throw new Error('域名无法解析');

@@ -22,11 +22,18 @@ import {
 import { isPrivateAddress as searchIsPrivateAddress } from '../../core/search/index';
 
 const ENV_KEY = 'AGENT_ALLOW_PRIVATE_URLS';
+const MODE_KEY = 'MAHARNESS_MODE';
 let savedEnv: string | undefined;
-before(() => { savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY]; });
+let savedMode: string | undefined;
+before(() => {
+  savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY];
+  savedMode = process.env[MODE_KEY]; process.env[MODE_KEY] = 'remote'; // A5② 的默认拒绝用例依赖拦截语义
+});
 after(() => {
   if (savedEnv === undefined) delete process.env[ENV_KEY];
   else process.env[ENV_KEY] = savedEnv;
+  if (savedMode === undefined) delete process.env[MODE_KEY];
+  else process.env[MODE_KEY] = savedMode;
 });
 
 // ---------------------------------------------------------------- ① 与 core/search 同口径
@@ -113,9 +120,17 @@ describe('A5① assertPublicHttpUrl：协议白名单与私网拦截', () => {
 // ---------------------------------------------------------------- ③ 豁免语义统一
 
 describe('A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则', () => {
-  it('默认（未设变量）：本机 Ollama 地址被拒', async () => {
-    assert.equal(allowsPrivateUrls(), false);
-    await assert.rejects(() => assertProviderBaseUrl('http://127.0.0.1:11434'), /不允许连接/);
+  it('local 模式默认放行本机 Ollama 地址（开箱即用，不需要环境变量）', async () => {
+    assert.equal(allowsPrivateUrls({ MAHARNESS_MODE: 'local' }), true);
+    assert.equal(allowsPrivateUrls({}), true);
+    delete process.env[ENV_KEY];
+    process.env[MODE_KEY] = 'local';
+    try {
+      await assertProviderBaseUrl('http://127.0.0.1:11434');
+      await assertProviderBaseUrl('http://localhost:11434');
+    } finally {
+      process.env[MODE_KEY] = 'remote';
+    }
   });
 
   it('设 =1：本机地址放行（此前 /api/providers/test 无条件校验，"验证密钥"连不上本机 Ollama）', async () => {
@@ -141,9 +156,9 @@ describe('A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则', 
   });
 
   it('只认 "1"（避免 true/0/yes 之类歧义写法在各处表现不同）', () => {
-    assert.equal(allowsPrivateUrls({ AGENT_ALLOW_PRIVATE_URLS: '1' }), true);
-    assert.equal(allowsPrivateUrls({ AGENT_ALLOW_PRIVATE_URLS: 'true' }), false);
-    assert.equal(allowsPrivateUrls({}), false);
+    assert.equal(allowsPrivateUrls({ MAHARNESS_MODE: 'remote', AGENT_ALLOW_PRIVATE_URLS: '1' }), true);
+    assert.equal(allowsPrivateUrls({ MAHARNESS_MODE: 'remote', AGENT_ALLOW_PRIVATE_URLS: 'true' }), false);
+    assert.equal(allowsPrivateUrls({ MAHARNESS_MODE: 'remote' }), false);
   });
 
   it('providers.ts 不再自己读 env、也不再裸调 fetch（A5 的一致性收口）', () => {

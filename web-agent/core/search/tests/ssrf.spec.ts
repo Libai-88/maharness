@@ -24,10 +24,18 @@ import {
 
 const ENV_KEY = 'AGENT_ALLOW_PRIVATE_URLS';
 let savedEnv: string | undefined;
-before(() => { savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY]; });
+const MODE_KEY = 'MAHARNESS_MODE';
+let savedMode: string | undefined;
+before(() => {
+  savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY];
+  // 本文件的拒绝用例锁定「remote 模式下 web_fetch 拦截私网」的默认语义
+  savedMode = process.env[MODE_KEY]; process.env[MODE_KEY] = 'remote';
+});
 after(() => {
   if (savedEnv === undefined) delete process.env[ENV_KEY];
   else process.env[ENV_KEY] = savedEnv;
+  if (savedMode === undefined) delete process.env[MODE_KEY];
+  else process.env[MODE_KEY] = savedMode;
 });
 
 /** 主机名 → 测试 URL（v6 字面量要加方括号） */

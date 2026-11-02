@@ -260,10 +260,15 @@ export function isPrivateAddress(ip: string): boolean {
   return true; // 不是 IP 字面量：调用方应走 DNS 分支
 }
 
-/** AGENT_ALLOW_PRIVATE_URLS 的统一读法（保存 / PATCH / /models / /test 四处共用，语义不再各写各的）。
- *  只认 '1'：与 core/search 的判定一致，避免 'true'/'0'/'yes' 之类歧义写法在各处表现不同。 */
+/** Provider 地址能否连本机/内网（保存 / PATCH / /models / /test 四处共用，语义不再各写各的）。
+ *  安全边界随部署模式走：local/trusted 模式下唯一使用者是本机用户（他本来就能直接访问
+ *  本机网关），默认放行——本地 Ollama 等开箱即用，不需要任何环境变量；remote 模式下
+ *  Provider 配置可能成为攻击者的 SSRF 跳板，默认拦截，须显式设 AGENT_ALLOW_PRIVATE_URLS=1
+ *  （只认 '1'，与 core/search 判定一致，避免歧义写法）。 */
 export function allowsPrivateUrls(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.AGENT_ALLOW_PRIVATE_URLS === '1';
+  const mode = (env.MAHARNESS_MODE ?? 'local').trim().toLowerCase();
+  if (mode === 'remote') return env.AGENT_ALLOW_PRIVATE_URLS === '1';
+  return true;
 }
 
 export interface PublicUrlCheckOptions {
