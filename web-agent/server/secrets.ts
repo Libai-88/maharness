@@ -36,6 +36,7 @@ import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import * as os from 'node:os';
 import { atomicWriteFileSync } from '../kernel/atomic-file';
+import { isPurposeEncrypted } from '../kernel/secret-box';
 
 export const SECRET_PREFIX = 'v1:';
 const KEY_FILE = 'secret.key';
@@ -228,6 +229,7 @@ export function encryptSecret(plain: string, key: Buffer): string {
 
 /** 解密；格式非法/密钥不符（GCM auth 失败）时抛错 */
 export function decryptSecret(blob: string, key: Buffer): string {
+  if (isPurposeEncrypted(blob)) throw new Error('v2 凭据需按用途解密');
   if (!blob.startsWith(SECRET_PREFIX)) return blob;
   const parts = blob.slice(SECRET_PREFIX.length).split(':');
   if (parts.length !== 3) throw new Error('凭据密文格式非法');
@@ -243,5 +245,5 @@ export function deriveKeyFrom(seed: string): Buffer {
 }
 
 export function isEncrypted(blob: string): boolean {
-  return blob.startsWith(SECRET_PREFIX);
+  return blob.startsWith(SECRET_PREFIX) || isPurposeEncrypted(blob);
 }

@@ -3,7 +3,10 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { loadPromptRules, loadPolicyRules, matchPolicy, rulesSignature } from '../rules';
+import {
+  diffPolicyRules, dryRunPolicy, evaluatePolicy, loadPromptRules, loadPolicyRules,
+  matchPolicy, rulesSignature, validatePolicyRules,
+} from '../rules';
 
 let dataDir = '';
 let projectRoot = '';
@@ -103,5 +106,63 @@ describe('策略规则', () => {
     const { rules, errors } = loadPolicyRules([broken]);
     assert.equal(rules.length, 0);
     assert.equal(errors.length, 1);
+  });
+
+  it('evaluatePolicy 返回默认判定与命中原因', () => {
+    const { rules } = loadPolicyRules([file()]);
+    const allowed = evaluatePolicy(rules, 'powershell_execute', { command: 'npm run test' });
+    assert.equal(allowed.decision, 'allow');
+    assert.equal(allowed.matched, true);
+    assert.equal(allowed.ruleId, 'allow-test');
+    assert.equal(allowed.reason, '测试免审批');
+    const fallback = evaluatePolicy(rules, 'write_file', { path: 'src/a.ts' });
+    assert.equal(fallback.decision, 'default');
+    assert.equal(fallback.matched, false);
+  });
+
+  it('diffPolicyRules 识别新增、删除与字段变化', () => {
+    const before = [
+      { id: 'keep', effect: 'allow' as const, tool: 'read_file' },
+      { id: 'change', effect: 'allow' as const, tool: 'write_file', pathPattern: 'docs/**' },
+      { id: 'remove', effect: 'deny' as const, tool: 'delete_file' },
+    ];
+    const after = [
+      { id: 'keep', effect: 'allow' as const, tool: 'read_file' },
+      { id: 'change', effect: 'deny' as const, tool: 'write_file', pathPattern: 'src/**' },
+      { id: 'add', effect: 'allow' as const, tool: 'powershell_execute', argPattern: 'npm run test' },
+    ];
+    const changes = diffPolicyRules(before, after);
+    assert.deepEqual(changes.map((item) => [item.id, item.change]).sort(), [
+      ['add', 'added'], ['change', 'changed'], ['remove', 'removed'],
+    ]);
+    assert.deepEqual(changes.find((item) => item.id === 'change')?.fields, ['effect', 'pathPattern']);
+  });
+
+  it('validatePolicyRules 拒绝非法规则并提示通配 allow', () => {
+    const issues = validatePolicyRules([
+      { id: 'bad-regex', effect: 'allow', tool: 'read_file', argPattern: '(' },
+      { id: 'blanket', effect: 'allow', tool: '*' },
+      { id: 'dup', effect: 'deny', tool: 'delete_file' },
+      { id: 'dup', effect: 'deny', tool: 'delete_file' },
+    ]);
+    assert.ok(issues.some((issue) => issue.code === 'invalid-regex' && issue.level === 'error'));
+    assert.ok(issues.some((issue) => issue.code === 'blanket-allow' && issue.level === 'warning'));
+    assert.ok(issues.some((issue) => issue.code === 'duplicate-id' && issue.level === 'warning'));
+  });
+
+  it('dryRunPolicy 只读比较候选策略且不改变输入', () => {
+    const current = [
+      { id: 'allow-test', effect: 'allow' as const, tool: 'powershell_execute', argPattern: 'npm run test' },
+    ];
+    const candidate = [
+      { id: 'allow-test', effect: 'deny' as const, tool: 'powershell_execute', argPattern: 'npm run test' },
+    ];
+    const before = JSON.stringify(current);
+    const result = dryRunPolicy(current, candidate, [{ tool: 'powershell_execute', args: { command: 'npm run test' } }]);
+    assert.equal(result.current[0].decision, 'allow');
+    assert.equal(result.candidate[0].decision, 'deny');
+    assert.equal(result.changed, true);
+    assert.equal(result.diff[0].change, 'changed');
+    assert.equal(JSON.stringify(current), before);
   });
 });

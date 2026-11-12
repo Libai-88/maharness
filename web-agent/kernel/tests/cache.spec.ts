@@ -100,12 +100,51 @@ describe('Cache 持久化', () => {
 });
 
 describe('Cache 作用域与命名空间隔离', () => {
+  it('L2 缓存键带租户作用域，跨租户与无租户调用不碰撞', () => {
+    const cache = new Cache();
+    const a = cache.makeKey(['read_file', 'x', 'v1'], { tenantId: 'tenant-a' });
+    const b = cache.makeKey(['read_file', 'x', 'v1'], { tenantId: 'tenant-b' });
+    const none = cache.makeKey(['read_file', 'x', 'v1']);
+    assert.notEqual(a, b);
+    assert.notEqual(a, none);
+    assert.equal(a, cache.makeKey(['read_file', 'x', 'v1'], { tenantId: 'tenant-a' }));
+    assert.ok(a.startsWith('read_file:'), '命名空间必须保持为 parts[0]，便于按工具失效');
+  });
+
   it('同一问题的不同 promptKey 和 session scope 不互相命中', async () => {
     const cache = new Cache();
     await cache.l1Set('请分析这个配置文件的内容', 'Provider A 的答案足够详细，可以直接使用。', 'provider-a', 'session-a');
     assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-b', 'session-a')).hit, false);
     assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-a', 'session-b')).hit, false);
     assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'provider-a', 'session-a')).hit, true);
+  });
+
+  it('L1 显式租户隔离：跨租户不命中，default 兼容旧全局条目', async () => {
+    const cache = new Cache();
+    await cache.l1Set('请分析这个配置文件的内容', '这是租户 A 的详细答案，包含完整的配置说明。', 'pk', undefined, 'tenant-a');
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk', undefined, 'tenant-a')).hit, true);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk', undefined, 'tenant-b')).hit, false);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk', undefined, 'default')).hit, false);
+    await cache.l1Set('请分析这个配置文件的内容', '这是无租户的通用答案，包含完整的配置说明。', 'pk2');
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk2', undefined, 'default')).hit, true);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk2', undefined, 'tenant-b')).hit, false);
+  });
+
+  it('按租户清理只移除该租户的 L1/L2 条目', async () => {
+    const cache = new Cache();
+    await cache.l1Set('请分析这个配置文件的内容', '这是租户 A 的详细答案，包含完整的配置说明。', 'pk-a', undefined, 'tenant-a');
+    await cache.l1Set('请分析这个配置文件的内容', '这是租户 B 的详细答案，包含完整的配置说明。', 'pk-b', undefined, 'tenant-b');
+    cache.l2Set('read_file:a', 'a', undefined, 'tenant-a');
+    cache.l2Set('read_file:b', 'b', undefined, 'tenant-b');
+    cache.l2Set('read_file:legacy', 'legacy');
+    const removed = cache.clearScope({ tenantId: 'tenant-a' });
+    assert.equal(removed.l1, 1);
+    assert.equal(removed.l2, 1);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk-a', undefined, 'tenant-a')).hit, false);
+    assert.equal((await cache.l1Get('请分析这个配置文件的内容', 'pk-b', undefined, 'tenant-b')).hit, true);
+    assert.equal(cache.l2Get('read_file:a').hit, false);
+    assert.equal(cache.l2Get('read_file:b').hit, true);
+    assert.equal(cache.l2Get('read_file:legacy').hit, true);
   });
 
   it('命名空间失效不误伤其他 L2 条目', () => {
@@ -115,6 +154,41 @@ describe('Cache 作用域与命名空间隔离', () => {
     cache.l2DeleteNamespace('read_file');
     assert.equal(cache.l2Get('read_file:key').hit, false);
     assert.equal(cache.l2Get('web_search:key').hit, true);
+  });
+
+  it('L2 命中返回可解释来源：命名空间、年龄、剩余 TTL 与命中次数', () => {
+    const cache = new Cache(undefined, { l2TtlMs: 60_000 });
+    const key = cache.makeKey(['read_file', 'v3', 'a.txt']);
+    cache.l2Set(key, { content: 'x' });
+
+    const first = cache.l2Get(key);
+    assert.equal(first.hit, true);
+    assert.equal(first.meta?.namespace, 'read_file');
+    assert.equal(first.meta?.hits, 1);
+    assert.ok((first.meta?.ttlRemainingMs ?? 0) > 0 && (first.meta?.ttlRemainingMs ?? 0) <= 60_000);
+    assert.ok((first.meta?.ageMs ?? -1) >= 0);
+
+    const second = cache.l2Get(key);
+    assert.equal(second.meta?.hits, 2);
+    assert.equal(second.meta?.createdAt, first.meta?.createdAt);
+  });
+
+  it('L1 命中返回匹配方式、作用域、剩余 TTL 与命中次数', async () => {
+    const cache = new Cache();
+    await cache.l1Set('请分析这个配置文件的内容', '配置文件包含三个服务与两个数据库连接。', 'pk', 'session-a');
+
+    const exact = await cache.l1Get('请分析这个配置文件的内容', 'pk', 'session-a');
+    assert.equal(exact.hit, true);
+    assert.equal(exact.meta?.match, 'exact');
+    assert.equal(exact.meta?.scope, 'session-a');
+    assert.equal(exact.meta?.promptKey, 'pk');
+    assert.equal(exact.meta?.hits, 1);
+    assert.ok((exact.meta?.ttlRemainingMs ?? 0) > 0);
+
+    const near = await cache.l1Get('请分析这个配置文件里内容', 'pk', 'session-a');
+    assert.equal(near.hit, true);
+    assert.notEqual(near.meta?.match, 'exact');
+    assert.equal(near.meta?.hits, 2);
   });
 });
 

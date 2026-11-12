@@ -68,13 +68,21 @@ test('开放式目标先确认验收条件，再消费原目标执行', async ({
   const card = page.getByTestId('task-confirm-card');
   await expect(card).toBeVisible();
   await expect(card).toContainText('请整理项目报告');
-  await expect(card).toContainText('未识别到可验证的完成标准');
   await expect(page.getByTestId('msg-bubble-assistant')).toHaveCount(0);
 
-  await card.locator('textarea').fill('生成 reports/final.md，并确保文件存在');
+  await card.getByRole('button', { name: '补充验收条件' }).click();
+  const sheet = page.getByRole('dialog', { name: '补充任务验收条件' });
+  await expect(sheet).toContainText('未识别到可验证的完成标准');
+  await sheet.getByRole('textbox', { name: '验收条件' }).fill('生成 reports/final.md，并确保文件存在');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  await expect(card.getByRole('button', { name: '补充验收条件' })).toBeFocused();
+  await card.getByRole('button', { name: '补充验收条件' }).click();
+  await expect(sheet.getByRole('textbox', { name: '验收条件' })).toHaveValue('生成 reports/final.md，并确保文件存在');
   await page.getByTestId('task-confirm-submit').click();
 
   await expect(card).toHaveCount(0);
+  await expect(sheet).toHaveCount(0);
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('报告已完成');
   await expect(page.getByText('验收通过')).toBeVisible();
   expect(chatCalls).toBe(2);

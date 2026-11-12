@@ -46,9 +46,29 @@
     "writeRequiresApproval": false
   },
 
+  "plugins": {
+    "allowedDependencies": []
+  },
+
   "skills": {
     "indexMaxTokens": 900,
     "descMaxChars": 160
+  },
+
+  "browser": {
+    "enabled": false,
+    "executablePath": "",
+    "headless": true,
+    "persistent": true,
+    "allowPrivate": false,
+    "maxChars": 8000
+  },
+
+  "otel": {
+    "enabled": false,
+    "endpoint": "",
+    "serviceName": "maharness",
+    "headers": {}
   },
 
   "trace": {
@@ -56,7 +76,34 @@
     "serviceCall": "takeover"
   },
 
+  "document": {
+    "_comment": "可选 OCR：命令行外部可执行文件，{file} 会替换为沙箱内图片路径；未配置时 ocr_image 明确报错。",
+    "ocr": {
+      "command": "",
+      "args": ["{file}", "stdout"],
+      "pdfCommand": "",
+      "pdfArgs": ["-png", "-r", "150", "{input}", "{outDir}/page"],
+      "timeoutMs": 30000
+    }
+  },
+
+  "codeIntel": {
+    "_comment": "可选 language server；command 由管理员配置，stdio LSP 由 code-intel 插件懒启动。",
+    "lsp": {
+      "typescript": {
+        "command": "npx",
+        "args": ["-y", "typescript-language-server", "--stdio"],
+        "extensions": [".ts", ".tsx", ".js", ".jsx"]
+      }
+    }
+  },
+
   "mcp": {
+    "_comment": "http server 可加 headers；认证推荐 auth: { type: 'bearer', tokenEnv: 'MCP_TOKEN' }，避免把令牌写入配置文件；OAuth server 用 auth: { type: 'oauth', authorizationUrl, tokenUrl, clientId, scopes, redirectUri }，通过 mcp_oauth_login / mcp_oauth_complete 完成 PKCE 授权。收到 401 时可配 auth.refresh（tokenUrl + refreshTokenEnv）或依赖 OAuth refresh_token 换新。可用 maxCallsPerMinute / maxConcurrentCalls 限制单 server 资源；circuitBreaker: { failureThreshold, cooldownMs } 控制连续失败后的快速失败窗口；tools / resources / prompts 是显式 allowlist。mcp.registry.url 可指向 MCP registry（默认官方地址），mcp_registry_search / mcp_registry_install 只接受 npm stdio 或 https remote。",
+    "server": {
+      "enabled": false,
+      "tools": ["read_file", "list_dir", "grep", "glob"]
+    },
     "servers": {
       "filesystem": {
         "type": "stdio",

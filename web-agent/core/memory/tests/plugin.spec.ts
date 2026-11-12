@@ -5,13 +5,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import memory from '../index';
 
-type RegisteredTool = { name: string; handler: (args: Record<string, unknown>) => Promise<{ ok: boolean; data?: any; error?: string }> };
+type RegisteredTool = {
+  name: string;
+  handler: (args: Record<string, unknown>, ctx?: { tenantId?: string }) => Promise<{ ok: boolean; data?: any; error?: string }>;
+};
 
 function loadTools(root: string): Map<string, RegisteredTool> {
   const tools = new Map<string, RegisteredTool>();
   const ctx = {
     paths: { data: root },
     register(entry: any) { if (entry.kind === 'tool') tools.set(entry.tool.name, entry.tool); },
+    inject(_key: string, apply: (value: unknown) => void) { apply(undefined); },
     on() { return () => undefined; },
     logger: { info() {}, warn() {}, error() {} },
   };
@@ -56,6 +60,32 @@ describe('长期记忆插件运行时契约', () => {
         assert.equal(result.ok, false);
       }
       assert.equal((await recall.handler({})).data.facts.length, 0);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('facts 与核心记忆块按租户隔离', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-memory-'));
+    try {
+      const tools = loadTools(root);
+      const remember = tools.get('remember_fact')!;
+      const recall = tools.get('recall_facts')!;
+      const setBlock = tools.get('set_memory_block')!;
+      const listBlocks = tools.get('list_memory_blocks')!;
+      const deleteBlock = tools.get('delete_memory_block')!;
+      const a = { tenantId: 'tenant-a' };
+      const b = { tenantId: 'tenant-b' };
+
+      const factA = await remember.handler({ text: 'A 的项目结论' }, a);
+      const factB = await remember.handler({ text: 'B 的项目结论' }, b);
+      assert.deepEqual((await recall.handler({}, a)).data.facts.map((f: any) => f.id), [factA.data.id]);
+      assert.deepEqual((await recall.handler({}, b)).data.facts.map((f: any) => f.id), [factB.data.id]);
+
+      assert.equal((await setBlock.handler({ name: 'profile', content: 'A 的偏好' }, a)).ok, true);
+      assert.equal((await setBlock.handler({ name: 'profile', content: 'B 的偏好' }, b)).ok, true);
+      assert.equal((await listBlocks.handler({}, a)).data.blocks[0].content, 'A 的偏好');
+      assert.equal((await listBlocks.handler({}, b)).data.blocks[0].content, 'B 的偏好');
+      assert.equal((await deleteBlock.handler({ name: 'profile' }, a)).ok, true);
+      assert.equal((await listBlocks.handler({}, b)).data.blocks.length, 1);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

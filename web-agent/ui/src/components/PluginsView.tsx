@@ -1,10 +1,24 @@
-// ui/src/components/PluginsView.tsx —— 插件面板（Screen 4）：列表 + 详情 + 插件贡献的面板 + 现场热加载指南
 import { useEffect, useState } from 'react';
 import DOMPurify from 'dompurify';
+import { FolderOpen, Plug, RefreshCw } from 'lucide-react';
+import { toast } from 'sonner';
 import { pluginsApi } from '../api';
 import type { PluginDiagnostic, PluginInfo } from '../types';
-import { IconCheck, IconClose, PluginIcon } from './Icon';
-import Confirm, { type ConfirmRequest } from './Confirm';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { CodeBlock, CodeBlockContent } from '@/components/ui/code-block';
+import { Empty, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import { Item, ItemActions, ItemContent, ItemDescription, ItemGroup, ItemMedia, ItemTitle } from '@/components/ui/item';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Spinner } from '@/components/ui/spinner';
+import { Switch } from '@/components/ui/switch';
+import { Table, TableBody, TableCell, TableRow } from '@/components/ui/table';
 
 interface Props {
   plugins: PluginInfo[];
@@ -12,313 +26,109 @@ interface Props {
   onAction: (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => Promise<void> | void;
 }
 
-const ICON_COLORS = ['#43a047', '#e0512f', '#e8930f', '#8a63e8', '#d94630', '#9c8d74'];
+const isRunning = (plugin: PluginInfo) => plugin.state === 'started' || plugin.state === 'loaded';
 
-/** 插件贡献的前端面板（前端是插件的一部分：插件通过 api 能力提供 GET /panel → { title, html }） */
-function PluginPanel({ pluginId }: { pluginId: string }) {
+function PluginExtras({ pluginId }: { pluginId: string }) {
   const [panel, setPanel] = useState<{ title: string; html: string } | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
+  const [config, setConfig] = useState<{ config: Record<string, unknown>; schema?: Record<string, unknown> } | null>(null);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
     let alive = true;
-    setPanel(null);
-    setErr(null);
-    fetch(`/api/plugins/${pluginId}/panel`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => { if (alive && d?.html) setPanel(d); })
-      .catch(() => { if (alive) setErr('该插件未提供面板'); });
+    setPanel(null); setConfig(null); setLoading(true);
+    void Promise.allSettled([
+      fetch(`/api/plugins/${pluginId}/panel`).then((response) => response.ok ? response.json() : null),
+      fetch(`/api/plugins/${pluginId}/config`).then((response) => response.ok ? response.json() : null),
+    ]).then(([panelResult, configResult]) => {
+      if (!alive) return;
+      if (panelResult.status === 'fulfilled' && panelResult.value?.html) setPanel(panelResult.value);
+      if (configResult.status === 'fulfilled' && configResult.value) setConfig(configResult.value);
+      setLoading(false);
+    });
     return () => { alive = false; };
   }, [pluginId]);
-
-  if (err) return null;
-  if (!panel) return <div className="pd-manifest"><span className="pm-title">PLUGIN PANEL</span><span className="sd-desc" style={{ color: 'var(--text-3)' }}>加载面板…</span></div>;
-  return (
-    <div className="pd-manifest">
-      <span className="pm-title">PLUGIN PANEL · {panel.title}</span>
-      <div className="plugin-panel-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} />
-    </div>
-  );
-}
-
-/** 插件配置只读展示：从 API 读取 config.<id>.* 键值对 */
-function PluginConfig({ pluginId }: { pluginId: string }) {
-  const [cfg, setCfg] = useState<Record<string, unknown> | null>(null);
-  const [schema, setSchema] = useState<Record<string, unknown> | null>(null);
-
-  useEffect(() => {
-    let alive = true;
-    fetch(`/api/plugins/${pluginId}/config`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((d) => { if (alive) { setCfg(d.config ?? {}); setSchema(d.schema); } })
-      .catch(() => { if (alive) setCfg({}); });
-    return () => { alive = false; };
-  }, [pluginId]);
-
-  if (cfg === null) return null;
-  const keys = Object.keys(cfg);
-  if (keys.length === 0 && !schema) return null;
-
-  return (
-    <div className="pd-manifest">
-      <span className="pm-title">CONFIG</span>
-      {keys.length > 0 ? keys.map((k) => (
-        <div className="pm-row" key={k}>
-          <span className="k">{k}</span>
-          <span className="v mono" style={{ fontSize: 12 }}>{typeof cfg[k] === 'object' ? JSON.stringify(cfg[k]) : String(cfg[k] ?? '—')}</span>
-        </div>
-      )) : <div style={{ fontSize: 12, color: 'var(--text-4)' }}>暂无配置</div>}
-      {schema && (
-        <div style={{ marginTop: 6, fontSize: 11, color: 'var(--text-4)' }}>
-          声明了 {Object.keys(schema as Record<string, unknown>).length} 个配置项（schema 已校验）
-        </div>
-      )}
-    </div>
-  );
+  if (loading) return <Skeleton className="h-24" />;
+  return <>
+    {config && (Object.keys(config.config ?? {}).length > 0 || config.schema) && (
+      <Card size="sm"><CardHeader><CardTitle>配置</CardTitle>{config.schema && <CardDescription>{Object.keys(config.schema).length} 个配置项</CardDescription>}</CardHeader><CardContent><CodeBlock size="sm"><CodeBlockContent wrap>{JSON.stringify(config.config ?? {}, null, 2)}</CodeBlockContent></CodeBlock></CardContent></Card>
+    )}
+    {panel && <Card size="sm"><CardHeader><CardTitle>{panel.title}</CardTitle></CardHeader><CardContent><div className="min-w-0 wrap-break-word" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} /></CardContent></Card>}
+  </>;
 }
 
 export default function PluginsView({ plugins, diagnostics, onAction }: Props) {
-  const [selected, setSelected] = useState<PluginInfo | null>(null);
-  const [q, setQ] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<{ text: string; onOk: () => void } | null>(null);
+  const [query, setQuery] = useState('');
   const [busy, setBusy] = useState<Record<string, boolean>>({});
-  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
-
-  // 当选中项被停用时清除
-  useEffect(() => {
-    if (selected) {
-      const cur = plugins.find((p) => p.id === selected.id);
-      if (cur) setSelected(cur);
-    }
-  }, [plugins]); // eslint-disable-line
-
+  const selected = plugins.find((plugin) => plugin.id === selectedId) ?? null;
+  const keyword = query.trim().toLowerCase();
+  const filtered = plugins.filter((plugin) => !keyword || [plugin.name, plugin.id, plugin.error, ...(plugin.caps ?? [])].some((value) => value?.toLowerCase().includes(keyword)));
+  const running = filtered.filter(isRunning);
+  const stopped = filtered.filter((plugin) => !isRunning(plugin));
   const act = async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     if (busy[id]) return;
-    setBusy((b) => ({ ...b, [id]: true }));
-    try { await onAction(id, action); } finally { setBusy((b) => ({ ...b, [id]: false })); }
+    setBusy((current) => ({ ...current, [id]: true }));
+    try { await onAction(id, action); if (action === 'uninstall') setSelectedId(null); }
+    finally { setBusy((current) => ({ ...current, [id]: false })); }
   };
-
-  const kw = q.trim().toLowerCase();
-  const match = (p: PluginInfo) => !kw || p.name.toLowerCase().includes(kw) || (p.caps?.some((c) => c.toLowerCase().includes(kw)) ?? false) || (p.error ?? '').toLowerCase().includes(kw);
-
-  const running = plugins.filter((p) => (p.state === 'started' || p.state === 'loaded') && match(p));
-  const stopped = plugins.filter((p) => !(p.state === 'started' || p.state === 'loaded') && match(p));
-  const none = kw !== '' && running.length === 0 && stopped.length === 0;
-
-  const renderCard = (p: PluginInfo, idx: number) => {
-    const isRun = p.state === 'started' || p.state === 'loaded';
-    const stateLabel = isRun ? '运行中' : p.state === 'error' ? '出错' : '已停止';
-    const color = ICON_COLORS[idx % ICON_COLORS.length];
-    return (
-      <div
-        key={p.id}
-        className={`plugin-card ${isRun ? '' : 'stopped'} ${selected?.id === p.id ? 'selected' : ''}`}
-        onClick={() => setSelected(p)}
-        role="button"
-        tabIndex={0}
-        aria-pressed={selected?.id === p.id}
-        onKeyDown={(e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); setSelected(p); } }}
-      >
-        <span className="plugin-icon" style={{ background: `${color}26`, color }}>
-          <PluginIcon id={p.name} size={20} />
-        </span>
-        <div className="plugin-info">
-          <div className="plugin-info-top">
-            <span className="plugin-name">{p.name}</span>
-            <span className="plugin-ver">v{p.version}</span>
-            {p.essential && <span className="plugin-tag" style={{ background: 'var(--purple-soft)', color: 'var(--purple)' }}>核心</span>}
-            {/* F5：只有用户插件目录受监听（保存即热重载）；core/ 内置插件改动需重载/重启，
-                此前对所有运行中插件一律打「热重载」标签是误导。 */}
-            {isRun && p.watched !== false && <span className="plugin-tag hot">热重载</span>}
-            {isRun && p.watched === false && <span className="plugin-tag" title="core/ 内置插件：源码改动需点「重载」或重启生效">内置</span>}
-            {p.error && <span className="plugin-tag" style={{ background: 'var(--red-soft)', color: 'var(--red)' }}>错误</span>}
-            {p.circuitBreaker && p.circuitBreaker.failures > 0 && (
-              <span className="plugin-tag" style={{ background: 'var(--orange-soft)', color: 'var(--orange)' }}>
-                熔断 {p.circuitBreaker.failures}次
-              </span>
-            )}
-          </div>
-          <span className="plugin-desc">{p.caps?.join(' · ') || '插件（能力注册于 PluginLoader）'}</span>
-          {p.error && <span className="plugin-desc" style={{ color: 'var(--red)', fontSize: 11, marginTop: 2, display: 'block' }}>{p.error.length > 60 ? p.error.slice(0, 60) + '…' : p.error}</span>}
-        </div>
-        <div className="plugin-right">
-          <span className={`plugin-status ${isRun ? 'running' : p.error ? 'error' : 'stopped-s'}`}>
-            <span className="ps-dot" />{stateLabel}
-          </span>
-          <div className="plugin-card-actions">
-            <button
-              className="pc-btn"
-              onClick={(e) => { e.stopPropagation(); void act(p.id, 'reload'); }}
-              disabled={!!busy[p.id]}
-              title="重新加载"
-            >
-              {busy[p.id] ? <span className="spin" /> : '↻'} Reload
-            </button>
-            <button
-              className={`pc-btn ${isRun ? '' : 'enable'}`}
-              onClick={(e) => { e.stopPropagation(); void act(p.id, isRun ? 'disable' : 'enable'); }}
-              disabled={!!busy[p.id]}
-              title={isRun ? '停用' : '启用'}
-            >
-              {isRun ? '停用' : '启用'}
-            </button>
-          </div>
-          <button
-            className={`toggle ${isRun ? 'on' : ''}`}
-            role="switch"
-            aria-checked={isRun}
-            aria-label={`${isRun ? '停用' : '启用'}插件 ${p.name}`}
-            disabled={!!busy[p.id]}
-            onClick={(e) => { e.stopPropagation(); void act(p.id, isRun ? 'disable' : 'enable'); }}
-            title={isRun ? '停用' : '启用'}
-          >
-            <span className="knob" />
-          </button>
-        </div>
-      </div>
-    );
-  };
-
+  const renderGroup = (title: string, items: PluginInfo[]) => (
+    <section className="flex flex-col gap-3">
+      <div className="flex items-center gap-2"><h2 className="text-sm font-medium">{title}</h2><Badge variant="secondary">{items.length}</Badge></div>
+      <ItemGroup>
+        {items.map((plugin) => (
+          <Item key={plugin.id} variant="outline" className="plugin-card">
+            <ItemMedia variant="icon"><Plug /></ItemMedia>
+            <ItemContent className="min-w-0">
+              <ItemTitle><Button variant="link" className="h-auto justify-start p-0" onClick={() => setSelectedId(plugin.id)}>{plugin.name}</Button><Badge variant="outline">v{plugin.version}</Badge>{plugin.essential && <Badge variant="secondary">核心</Badge>}{plugin.execution?.mode === 'process' && <Badge variant="secondary">进程隔离</Badge>}{plugin.watched === false ? <Badge variant="secondary">内置</Badge> : isRunning(plugin) && <Badge variant="secondary">热重载</Badge>}</ItemTitle>
+              <ItemDescription>{plugin.caps?.join(' · ') || '扩展插件'}</ItemDescription>
+              {plugin.error && <p className="line-clamp-2 text-xs text-destructive">{plugin.error}</p>}
+            </ItemContent>
+            <ItemActions>
+              <Badge variant={plugin.error ? 'destructive' : 'secondary'}>{isRunning(plugin) ? '运行中' : plugin.state === 'error' ? '出错' : '已停止'}</Badge>
+              <Button variant="ghost" size="icon-sm" title="重新加载" aria-label={`重载插件 ${plugin.name}`} disabled={busy[plugin.id]} onClick={() => void act(plugin.id, 'reload')}>{busy[plugin.id] ? <Spinner /> : <RefreshCw />}</Button>
+              <Switch checked={isRunning(plugin)} disabled={busy[plugin.id]} aria-label={`${isRunning(plugin) ? '停用' : '启用'}插件 ${plugin.name}`} onCheckedChange={(checked) => void act(plugin.id, checked ? 'enable' : 'disable')} />
+            </ItemActions>
+          </Item>
+        ))}
+      </ItemGroup>
+    </section>
+  );
   return (
-    <div className="plugins-layout">
-      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
-      <div className="plugins-list">
-        {diagnostics.length > 0 && (
-          <div className="plugin-diagnostics" role="status">
-            <strong>加载诊断</strong>
-            {diagnostics.map((d, i) => (
-              <div key={`${d.id}-${d.kind}-${i}`} className="plugin-diagnostic">
-                <span>{d.message}</span>
-                {d.suggestion && <span className="plugin-desc">{d.suggestion}</span>}
-              </div>
-            ))}
-          </div>
-        )}
-        <div className="page-head">
-          <div className="ph-eyebrow">
-            <span className="ph-no">04</span>
-            <span className="ph-label">PLUGIN CENTER</span>
-            <span className="ph-rule" />
-            <span className="ph-cn">插件管理</span>
-          </div>
-          <span className="ph-title">用插件扩展 maharness 的能力边界</span>
-          <span className="ph-sub">智能重载 · 依赖签名 · 事务回滚——每个插件都是一次签名，bumpFact 即生效。</span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 8 }}>
-          <span className="msg-tag">{plugins.length} 个插件</span>
-          <span style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
-            <input className="set-input" style={{ width: 180, height: 32 }} placeholder="搜索插件…" value={q} onChange={(e) => setQ(e.target.value)} />
-          </span>
-        </div>
-        <div className="plugin-group">运行中 · {running.length}</div>
-        <div className="plugin-grid">
-          {running.map((p, i) => renderCard(p, i))}
-        </div>
-        {none && <div className="empty-state" style={{ padding: '24px 12px' }}>没有匹配「{q.trim()}」的插件</div>}
-        {stopped.length > 0 && (
-          <>
-            <div className="plugin-group" style={{ marginTop: 12 }}>已停止 · {stopped.length}</div>
-            <div className="plugin-grid">
-              {stopped.map((p, i) => renderCard(p, running.length + i))}
-            </div>
-          </>
-        )}
+    <ScrollArea className="min-h-0 flex-1">
+      <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 p-4 md:p-6">
+        <header className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-[11px] tracking-[0.06em] text-muted-foreground">扩展</p><h1>插件管理</h1><p>管理插件的运行状态、能力和配置。</p></div><Badge variant="secondary">{plugins.length} 个插件</Badge></header>
+        <Input className="max-w-sm" aria-label="搜索插件" placeholder="搜索插件…" value={query} onChange={(event) => setQuery(event.target.value)} />
+        {diagnostics.length > 0 && <Alert role="status"><AlertTitle>加载诊断</AlertTitle><AlertDescription>{diagnostics.map((diagnostic, index) => <p key={`${diagnostic.id}-${index}`}>{diagnostic.message}{diagnostic.suggestion && ` · ${diagnostic.suggestion}`}</p>)}</AlertDescription></Alert>}
+        {running.length > 0 && renderGroup('运行中', running)}
+        {stopped.length > 0 && renderGroup('已停止', stopped)}
+        {filtered.length === 0 && <Empty><EmptyHeader><EmptyMedia variant="icon"><Plug /></EmptyMedia><EmptyTitle>{keyword ? '没有匹配的插件' : '暂无插件'}</EmptyTitle><EmptyDescription>{keyword ? `没有找到「${query.trim()}」，换个关键词试试。` : '插件加载后会显示在这里。'}</EmptyDescription></EmptyHeader></Empty>}
+        <Card><CardHeader><CardTitle>现场扩展</CardTitle><CardDescription>用户插件保存在 plugins/ 中，保存后自动重载。core/ 内置插件的改动需要重载或重启服务。</CardDescription></CardHeader><CardContent><CodeBlock size="sm"><CodeBlockContent wrap>{'plugins/clock/plugin.json\n{ "id": "clock", "name": "时钟工具", "version": "0.1.0", "entry": "index.ts", "enabled": true }'}</CodeBlockContent></CodeBlock></CardContent></Card>
       </div>
-
-      <aside className="manager-panel">
-        <div className="manager-head">
-          <span className="manager-title">插件详情</span>
-          <button className="manager-close" onClick={() => setSelected(null)} aria-label="关闭详情"><IconClose size={13} /></button>
-        </div>
-        <div className="manager-body">
-          {selected ? (
-            <>
-              <div className="plugin-detail-card">
-                <span className="pd-icon" style={{ background: `${ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#9c8d74'}26`, color: ICON_COLORS[plugins.findIndex((p) => p.id === selected.id) % ICON_COLORS.length] || '#9c8d74' }}>
-                  <PluginIcon id={selected.name} size={24} />
-                </span>
-                <span className="pd-name">{selected.name}</span>
-                <span className="pd-ver">v{selected.version}</span>
-                <div className="pd-status">
-                  <span className="ps-dot" style={{ background: 'currentColor' }} />
-                  {(selected.state === 'started' || selected.state === 'loaded')
-                    ? (selected.watched === false ? '运行中 · 内置插件（改动需重载/重启）' : '运行中 · 热重载已启用')
-                    : selected.state === 'error' ? '出错' : '已停止'}
-                </div>
-                <div className="pd-actions">
-                  <button className="pd-btn ghost" onClick={() => void act(selected.id, 'reload')} disabled={!!busy[selected.id]}>
-                    {busy[selected.id] ? <span className="spin" /> : null}重载
-                  </button>
-                  <button className="pd-btn ghost" onClick={() => void pluginsApi.open(selected.id)}>打开目录</button>
-                  <button className="pd-btn ghost" onClick={() => void act(selected.id, (selected.state === 'started' || selected.state === 'loaded') ? 'disable' : 'enable')} disabled={!!busy[selected.id]}>
-                    {(selected.state === 'started' || selected.state === 'loaded') ? '停用' : '启用'}
-                  </button>
-                  {!selected.essential && (
-                    <button
-                      className="pd-btn danger"
-                      onClick={() => {
-                        // 不可逆操作：应用内二步确认（原生 confirm 在这套界面里最出戏）
-                        setConfirmReq({
-                          text: `卸载插件「${selected.name}」？插件目录会一起删掉，不可恢复。`,
-                          okText: '卸载',
-                          danger: true,
-                          onOk: () => void act(selected.id, 'uninstall'),
-                        });
-                      }}
-                      disabled={!!busy[selected.id]}
-                    >
-                      卸载
-                    </button>
-                  )}
-                </div>
-                {selected.error && (
-                  <div style={{ marginTop: 8, padding: '8px 10px', background: 'var(--red-soft)', borderRadius: 6, fontSize: 12, color: 'var(--red)', lineHeight: 1.5 }}>
-                    <strong>错误：</strong>{selected.error}
-                    {selected.circuitBreaker && selected.circuitBreaker.failures >= 3 && (
-                      <div style={{ marginTop: 4, color: 'var(--orange)' }}>
-                        连续失败 {selected.circuitBreaker.failures} 次，已进入熔断态。系统会在 60s 后自动重试。
-                      </div>
-                    )}
-                  </div>
-                )}
-                {selected.fixSuggestion && (
-                  <div style={{ marginTop: 6, padding: '8px 10px', background: 'var(--teal-soft)', borderRadius: 6, fontSize: 12, color: 'var(--teal)', lineHeight: 1.5 }}>
-                    <strong>修复建议：</strong>{selected.fixSuggestion}
-                  </div>
-                )}
-              </div>
-              <div className="pd-manifest">
-                <span className="pm-title">MANIFEST</span>
-                <div className="pm-row"><span className="k">id</span><span className="v">{selected.id}</span></div>
-                <div className="pm-row"><span className="k">state</span><span className="v">{selected.state === 'started' ? 'started（运行中）' : selected.state === 'stopped' ? 'stopped（已停止）' : selected.state === 'error' ? 'error（出错）' : selected.state === 'loaded' ? 'loaded（已加载）' : selected.state}</span></div>
-                <div className="pm-row"><span className="k">caps</span><span className="v">{selected.caps?.join(', ') || '—'}</span></div>
-                <div className="pm-row"><span className="k">enabled</span><span className="v ok">{(selected.state === 'started' || selected.state === 'loaded') ? <>true <IconCheck size={10} /></> : 'false'}</span></div>
-              </div>
-              <PluginConfig pluginId={selected.id} />
-              {/* 插件贡献的前端面板：统一走 /panel 通道（DOMPurify 净化后渲染）。
-                  此前 todo 被特判成 React 原生组件——那是「前端认识某个插件」的硬编码；
-                  看板这类富交互页面由插件声明 nav（mode:iframe）在顶层标签页完整保真呈现。 */}
-              <PluginPanel pluginId={selected.id} />
-            </>
-          ) : (
-            <div className="empty-state">← 选择插件查看详情</div>
-          )}
-          <div className="pd-manifest">
-            <span className="pm-title">现场写插件（plugins/ 下保存即生效）</span>
-            <pre className="code-body" style={{ background: 'var(--bg-input)', borderRadius: 8, border: '1px solid var(--border)', overflowX: 'auto' }}>{`plugins/clock/plugin.json
-{ "id": "clock", "name": "时钟工具",
-  "version": "0.1.0", "entry": "index.ts", "enabled": true }
-
-// 保存即生效 → PluginLoader 热重载
-export default { id: 'clock', async onLoad(ctx) {
-  ctx.register({ kind: 'tool', tool: {
-    name: 'get_current_time', ... } }); } };`}</pre>
-            {/* F5：如实说明 core/ 内置插件不在监听范围内——此前页面通篇"保存即生效"，
-                但 watch() 只监听用户插件目录，改 core/ 下的文件不动。 */}
-            <div className="provider-hint" style={{ marginTop: 8 }}>
-              上表「内置」标签的插件位于 core/，不在目录监听范围内：改动需点上方「重载」或重启服务生效。
-            </div>
-          </div>
-        </div>
-      </aside>
-    </div>
+      <Sheet open={selected !== null} onOpenChange={(open) => { if (!open) setSelectedId(null); }}>
+        <SheetContent className="w-full sm:max-w-lg">
+          <SheetHeader><SheetTitle>{selected?.name ?? '插件详情'}</SheetTitle><SheetDescription>{selected ? `v${selected.version} · ${selected.id}` : '插件状态与配置'}</SheetDescription></SheetHeader>
+          {selected && <ScrollArea className="min-h-0 flex-1"><div className="flex flex-col gap-4 px-4 pb-6">
+            <div className="flex flex-wrap gap-2"><Badge variant={selected.error ? 'destructive' : 'secondary'}>{isRunning(selected) ? '运行中' : selected.state === 'error' ? '出错' : '已停止'}</Badge>{selected.execution?.mode === 'process' && <Badge variant="outline">子进程 · {selected.execution.memoryMb ?? 256}MB · {Math.round((selected.execution.timeoutMs ?? 30000) / 1000)}s</Badge>}{selected.circuitBreaker && selected.circuitBreaker.failures > 0 && <Badge variant="outline">连续失败 {selected.circuitBreaker.failures} 次</Badge>}</div>
+            <div className="flex flex-wrap gap-2"><Button variant="outline" size="sm" disabled={busy[selected.id]} onClick={() => void act(selected.id, 'reload')}><RefreshCw data-icon="inline-start" />重载</Button><Button variant="outline" size="sm" onClick={() => { void pluginsApi.open(selected.id).catch((err) => toast.error(String(err))); }}><FolderOpen data-icon="inline-start" />打开目录</Button><Button variant="outline" size="sm" disabled={busy[selected.id]} onClick={() => void act(selected.id, isRunning(selected) ? 'disable' : 'enable')}>{isRunning(selected) ? '停用' : '启用'}</Button>{!selected.essential && <Button variant="destructive" size="sm" disabled={busy[selected.id]} onClick={() => setConfirm({ text: `卸载插件「${selected.name}」？插件目录会一起删掉，不可恢复。`, onOk: () => void act(selected.id, 'uninstall') })}>卸载</Button>}</div>
+            {selected.error && <Alert variant="destructive"><AlertTitle>插件错误</AlertTitle><AlertDescription>{selected.error}{selected.circuitBreaker && selected.circuitBreaker.failures >= 3 && <p>已进入熔断态，系统将在 60 秒后自动重试。</p>}</AlertDescription></Alert>}
+            {selected.fixSuggestion && <Alert><AlertTitle>修复建议</AlertTitle><AlertDescription>{selected.fixSuggestion}</AlertDescription></Alert>}
+            <Card size="sm"><CardHeader><CardTitle>Manifest</CardTitle></CardHeader><CardContent><Table><TableBody>{[['id', selected.id], ['state', selected.state], ['caps', selected.caps?.join(', ') || '—'], ['enabled', String(isRunning(selected))]].map(([key, value]) => <TableRow key={key}><TableCell>{key}</TableCell><TableCell className="whitespace-normal break-all">{value}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
+            <PluginExtras key={selected.id} pluginId={selected.id} />
+          </div></ScrollArea>}
+        </SheetContent>
+      </Sheet>
+      <AlertDialog open={!!confirm} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>请确认</AlertDialogTitle>
+            <AlertDialogDescription className="leading-6">{confirm?.text}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { confirm?.onOk(); setConfirm(null); }}>卸载</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </ScrollArea>
   );
 }

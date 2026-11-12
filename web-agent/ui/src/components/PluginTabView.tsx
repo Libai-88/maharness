@@ -15,7 +15,13 @@ import type { PluginNavItem } from '../types';
 import { getMutationToken, navApi } from '../api';
 import DOMPurify from 'dompurify';
 import PluginModuleView from './PluginModuleView';
-import { IconExternal, IconRefresh } from './Icon';
+import { ExternalLink, RefreshCw, ShieldAlert } from 'lucide-react';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Spinner } from '@/components/ui/spinner';
 
 interface Props {
   item: PluginNavItem;
@@ -46,9 +52,7 @@ class PluginPageBoundary extends Component<{ children: React.ReactNode; pluginId
   render() {
     if (this.state.error) {
       return (
-        <div className="view-loading">
-          <span>插件页面渲染失败（{this.props.pluginId}）：{this.state.error}</span>
-        </div>
+        <Alert variant="destructive" className="m-4 w-auto"><ShieldAlert /><AlertTitle>插件页面渲染失败</AlertTitle><AlertDescription>{this.props.pluginId}：{this.state.error}</AlertDescription></Alert>
       );
     }
     return this.props.children;
@@ -114,37 +118,32 @@ function PluginTabBody({ item }: Props) {
 
   return (
     <div
-      className="plugin-tab"
+      className="flex min-h-0 min-w-0 flex-1 flex-col"
       data-plugin-id={item.pluginId}
       data-plugin-mode={item.mode}
-      style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0 }}
     >
-      <div className="plugin-tab-bar">
-        <span className="plugin-tab-trust" data-trust={item.mode} title={trust.title}>{trust.text}</span>
-        <div className="plugin-tab-status">
+      <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
+        <Badge variant="outline" data-trust={item.mode} title={trust.title}>{trust.text}</Badge>
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm">
           {item.statusUrl && (
             <>
-              <span className={`plugin-tab-dot ${status?.connected ? 'on' : ''}`} />
-              <span className="plugin-tab-text">{status?.text ?? `${item.pluginName}`}</span>
-              {status?.detail && <span className="plugin-tab-detail">{status.detail}</span>}
+              <Badge variant={status?.connected ? 'secondary' : 'outline'}>{status?.text ?? item.pluginName}</Badge>
+              {status?.detail && <span className="truncate text-xs text-muted-foreground" title={status.detail}>{status.detail}</span>}
             </>
           )}
-          {!item.statusUrl && <span className="plugin-tab-text">{item.pluginName}</span>}
+          {!item.statusUrl && <span>{item.pluginName}</span>}
         </div>
-        <div className="plugin-tab-actions">
+        <div className="ml-auto flex gap-2">
           {item.url && (
-            <button
-              className="plugin-tab-btn"
+            <Button variant="outline" size="sm"
               onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
               title="在独立窗口打开"
             >
-              <IconExternal size={13} /> 独立窗口
-            </button>
+              <ExternalLink data-icon="inline-start" />独立窗口
+            </Button>
           )}
           {item.mode === 'iframe' && (
-            <button className="plugin-tab-btn" onClick={() => setReloadKey((k) => k + 1)} title="刷新">
-              <IconRefresh size={13} />
-            </button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setReloadKey((k) => k + 1)} aria-label="刷新插件页面"><RefreshCw /></Button>
           )}
         </div>
       </div>
@@ -156,22 +155,18 @@ function PluginTabBody({ item }: Props) {
           key={reloadKey}
           src={src}
           title={item.label}
-          className="plugin-tab-iframe"
+          className="min-h-0 w-full flex-1 border-0"
           sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
-          style={{ flex: 1, border: 'none', width: '100%' }}
         />
       ) : panelError ? (
-        <div className="view-loading"><span>插件面板加载失败：{panelError}</span></div>
+        <Alert variant="destructive" className="m-4 w-auto"><ShieldAlert /><AlertTitle>插件面板加载失败</AlertTitle><AlertDescription>{panelError}</AlertDescription></Alert>
       ) : !panel ? (
-        <div className="view-loading" aria-busy="true">
-          <span className="spin" style={{ color: 'var(--accent)' }} />
+        <div className="flex min-h-32 flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground" aria-busy="true">
+          <Spinner />
           <span>加载插件页面…</span>
         </div>
       ) : (
-        <div className="plugin-tab-panel">
-          <div className="pm-title">PLUGIN PANEL · {panel.title}</div>
-          <div className="plugin-panel-body" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} />
-        </div>
+        <ScrollArea className="min-h-0 flex-1"><div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 p-4 md:p-6"><Card><CardHeader><CardTitle>{panel.title}</CardTitle></CardHeader><CardContent><div className="min-w-0 wrap-break-word" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} /></CardContent></Card></div></ScrollArea>
       )}
     </div>
   );

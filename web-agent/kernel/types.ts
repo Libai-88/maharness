@@ -3,6 +3,7 @@
  * 事件、插件、工具、Trace、LLM 的类型定义。所有模块共享，禁止循环依赖。
  */
 import type { TokenizerAdapter } from './tokens';
+import type { SecretBox } from './secret-box';
 
 // ============ 事件 ============
 
@@ -33,6 +34,16 @@ export interface PluginManifest {
   /** 显式 capability 注册许可；一旦声明，未列出的类型或名称均拒绝。缺省表示本机 trusted 兼容模式。 */
   permissions?: {
     capabilities: Partial<Record<Capability['kind'], string[]>>;
+    /** 插件外部依赖清单（仅记录已通过 plugins.allowedDependencies 的包）。 */
+    dependencies?: string[];
+    /** 运行时能力声明：声明后 loader 在加载前审查源码，越界直接拒绝。 */
+    runtime?: {
+      filesystem?: 'none' | 'storage' | 'sandbox' | 'full';
+      network?: 'none' | 'allowlist' | 'full';
+      /** network=allowlist 时的出口主机白名单；支持 `example.com`、`*.example.com`、`host:port`。 */
+      networkAllowlist?: string[];
+      process?: boolean;
+    };
   };
   lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
                             // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
@@ -51,10 +62,27 @@ export interface PluginManifest {
   limits?: {
     /** 生命周期方法（onLoad/onStart）超时（ms），默认 30000 */
     lifecycleTimeoutMs?: number;
+    /** 单插件工具调用频率（次/分钟）；0 或缺省 = 不限制 */
+    maxToolCallsPerMinute?: number;
+    /** 单插件工具并发上限；0 或缺省 = 不限制 */
+    maxConcurrentToolCalls?: number;
+    /** 插件私有存储总字节上限；0/缺省 = 不限制 */
+    maxStorageBytes?: number;
+    /** 插件私有存储文件数上限；0/缺省 = 不限制 */
+    maxStorageFiles?: number;
     /** 连续失败次数阈值，超过后自动进入熔断态（默认 3，0 = 不熔断） */
     circuitBreakerThreshold?: number;
     /** 熔断态持续时间（ms），过后自动重试（默认 60000） */
     circuitBreakerResetMs?: number;
+  };
+  /** 执行边界：缺省 = 宿主进程内加载（兼容既有插件）。
+   *  process = 独立子进程执行，仅支持 tool 能力；用于高风险或易崩溃的工具插件。 */
+  execution?: {
+    mode: 'process';
+    /** 子进程 V8 堆上限（MB），默认 256。 */
+    memoryMb?: number;
+    /** 单次工具调用超时（ms），默认 30000；超时后终止子进程。 */
+    timeoutMs?: number;
   };
   /** 卸载时对插件私有存储（ctx.storage）的处理：
    *  keep 保留（默认）/ archive 归档到 <data>/archive/<id>-<ts>/ / purge 清除 */
@@ -148,6 +176,8 @@ export interface KernelLike {
   };
   plugins: {
     capabilities<T extends Capability['kind']>(kind: T): Extract<Capability, { kind: T }>[];
+    /** 实际暴露给 Agent 的工具集（已做同名冲突消解） */
+    tools(): ToolDef[];
     /** 生命周期管理（dynamic capability loading）：按需激活/停用插件 */
     enable(id: string): Promise<void>;
     disable(id: string): Promise<void>;
@@ -165,6 +195,12 @@ export interface KernelLike {
      *  bump 指定 key（不传则全部已知 env 依赖）的版本并通知 watchEnv 订阅者，
      *  使 reloadChanged 对声明了该 env 依赖的插件生效（智能重载的 env 维度）。 */
     bumpEnv(names?: string[]): void;
+  };
+  /** 租户存储配额（server 注入；未配置时不做配额限制） */
+  tenantQuota?: {
+    assertWritable(tenantId: string, additionalBytes: number): void;
+    assertToolCall(tenantId: string): void;
+    invalidate(tenantId: string): void;
   };
 }
 
@@ -227,6 +263,8 @@ export interface PluginContext {
   effect<T>(callback: () => T | Promise<T>, makeInverse: (value: T) => () => void | Promise<void>): Promise<void>;
   /** 插件私有存储：持久化数据只写这里（内核创建该目录，卸载时按 manifest.cleanup 处理） */
   storage: PluginStorage;
+  /** 用途隔离的凭据加密：有主密钥时 encrypt/decrypt 生效，否则明文兜底（可用性通过 available() 判断） */
+  secrets: SecretBox;
   /** 界外发射台账：文件/HTTP/DB/子进程等不可逆动作登记在此，卸载时可枚举「它动过什么」 */
   outbound: { record(rec: OutboundRecord): void };
   logger: Logger;
@@ -278,6 +316,8 @@ export interface EventBusLike {
 export interface ConfigLike {
   get<T>(key: string, def?: T): T;
   set(key: string, value: unknown): void;
+  /** 显式持久化写入（用于用户确认后的安装/配置变更）；不可用时退回 set。 */
+  persist?(key: string, value: unknown): void;
   section(pluginId: string): Record<string, unknown>;
   /** 声明式配置对账：订阅配置键变化（支持 'a.b.*' 通配符），返回退订函数 */
   watch(pattern: string, cb: (key: string, value: unknown) => void): () => void;
@@ -289,20 +329,23 @@ export interface TraceLike {
 }
 
 export interface CacheLike {
-  l2Get(key: string): { hit: boolean; value?: unknown };
-  l2Set(key: string, value: unknown, ttlMs?: number): void;
+  l2Get(key: string): { hit: boolean; value?: unknown; meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number } };
+  l2Set(key: string, value: unknown, ttlMs?: number, tenantId?: string): void;
   l2Delete(key: string): void;
   /** 按命名空间批量失效（key 前缀 = parts[0]）：写操作后失效受影响工具的缓存，不误伤其他工具 */
   l2DeleteNamespace(ns: string): void;
-  makeKey(parts: string[]): string;
+  makeKey(parts: string[], scope?: { tenantId?: string }): string;
   setEmbeddingFn(fn: (text: string) => Promise<number[]>): void;
   /** L1 语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）；
    *  promptKey 为 systemPrompt 指纹，人设/插件规则不同则隔离缓存空间；
    *  scope 为会话级隔离键（如 traceId）：传入时仅命中「该会话自产」的答案，
    *  全局答案对所有会话可见（纯问答产物），会话答案只对本会话可见（依赖工具观察的产物）。
    *  hitScope：命中条目的作用域，供命中学习回填沿用。 */
-  l1Get(question: string, promptKey?: string, scope?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string }>;
-  l1Set(question: string, answer: string, promptKey?: string, scope?: string): Promise<void>;
+  l1Get(question: string, promptKey?: string, scope?: string, tenantId?: string): Promise<{
+    hit: boolean; answer?: string; key?: string; hitScope?: string;
+    meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number; promptKey: string; scope?: string; match: 'exact' | 'vector' | 'dice' };
+  }>;
+  l1Set(question: string, answer: string, promptKey?: string, scope?: string, tenantId?: string): Promise<void>;
   /** 失效指定会话的全部 L1 条目（会话级隔离键命中）：会话内写入文件成功后调用，
    *  使依赖旧观察的答案过期——同一问题应重新观察，而非复用陈旧事实 */
   l1InvalidateSession(sessionId: string): void;
@@ -423,6 +466,10 @@ export interface ToolDef {
   timeoutMs?: number;
   /** 工具副作用契约：仅幂等工具允许执行器对瞬时失败自动重试。默认不重试。 */
   idempotent?: boolean;
+  /** 副作用分类：read/none 不进入恢复账本（恢复时重新观察）；write/external/irreversible 进入账本。 */
+  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  /** 内容信任来源：untrusted（网页/文档/MCP/浏览器）会在执行后做提示注入与敏感信息扫描。 */
+  contentTrust?: 'trusted' | 'untrusted';
   retry?: { maxAttempts?: number; backoffMs?: number };
   /** 输出格式的机器校验（JSONSchema 子集）：工具执行后对 result.data 做结构校验。
    *  校验失败不阻断（LLM 可拿到原始结果自我修正），但回填内容会附【输出校验】标注，
@@ -440,14 +487,33 @@ export interface ContextDef {
   description: string;      // 给人类/harness 看（registry 可查）
   /** 注入优先级（越大越靠前，默认 0） */
   weight?: number;
+  /** 单次注入的独立 token 上限（缺省只受全局 context provider 预算约束） */
+  maxTokens?: number;
   /** 动态内容：返回 null/空串则不注入（按任务按需出现） */
-  contentFn(ctx: { history: LLMMessage[]; systemPrompt: string; scratchpad: Record<string, unknown> }): string | null;
+  contentFn(ctx: {
+    history: LLMMessage[];
+    systemPrompt: string;
+    scratchpad: Record<string, unknown>;
+    sessionId?: string;
+    tenantId?: string;
+  }): string | ContextContribution | null;
+}
+
+export interface ContextContribution {
+  content: string;
+  /** 来源标识（如 memory / skills），供 Trace 解释“谁喂了什么” */
+  source?: string;
+  confidence?: number;
 }
 
 export interface ToolResult {
   ok: boolean;
   data?: unknown;           // 成功时返回给 LLM 的结构化结果
   error?: string;           // 失败原因（会原样回给 LLM）
+  /** 可供任务验收或 UI 复核的观察证据；不替代 data。 */
+  evidence?: ToolEvidence[];
+  /** 外部内容安全警告：只标注，不替代审批或权限判定。 */
+  warnings?: ToolWarning[];
   cacheable?: boolean;      // 是否允许 L2 缓存（默认 true）
   needsApproval?: boolean;  // 需用户审批（执行器级挂起，不可绕过）
   approvalSummary?: string; // 审批卡片摘要（needsApproval 时必填）
@@ -459,14 +525,33 @@ export interface ToolResult {
   handoff?: { role: string; objective: string };
 }
 
+export interface ToolEvidence {
+  kind: 'file' | 'url' | 'command' | 'state' | 'content' | 'custom';
+  label: string;
+  ref?: string;
+  value?: unknown;
+}
+
+export interface ToolWarning {
+  kind: 'prompt-injection' | 'sensitive-data';
+  severity: 'low' | 'medium' | 'high';
+  label: string;
+  /** 已脱敏的匹配预览，可直接进入日志/UI */
+  preview: string;
+}
+
 export interface ToolContext {
   traceId?: string;
   turn: number;
   /** 当前会话 ID（server 层透传）：工具可据此把状态挂到具体会话（如 todo 插件的会话级 to do list） */
   sessionId?: string;
+  /** 当前租户：L2 缓存键必须纳入租户，避免跨租户复用工具观察。缺省视为 default。 */
+  tenantId?: string;
   /** 当前工具调用的 Trace 步骤 id：子任务（子代理/并行）用它挂 parentId，形成 span 树 */
   stepId?: string;
   sandboxRoot: string;      // 文件类工具的安全边界
+  /** 租户存储配额：写入类工具在落盘前调用；未注入时视为不限制 */
+  quota?: { assertWritable(additionalBytes: number): void; assertToolCall?(): void; invalidate?(): void };
   signal?: AbortSignal;
   cache: CacheLike;         // 工具自管理时效性缓存（L2）
   trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
@@ -532,6 +617,15 @@ export interface ProviderCapabilities {
   cancellation: boolean;
 }
 
+export type ResponseFormat =
+  | { type: 'json_object' }
+  | {
+      type: 'json_schema';
+      name: string;
+      schema: Record<string, unknown>;
+      strict?: boolean;
+    };
+
 // ============ LLM ============
 
 export type LLMRole = 'system' | 'user' | 'assistant' | 'tool';
@@ -575,6 +669,8 @@ export interface ChatOptions {
   signal?: AbortSignal;
   maxTokens?: number;
   temperature?: number;
+  /** 请求 Provider 返回结构化 JSON；不支持该能力的适配器可忽略。 */
+  responseFormat?: ResponseFormat;
 }
 
 // ============ Trace ============
@@ -734,6 +830,8 @@ export interface CacheStats {
 
 export interface Session {
   id: string;
+  /** 会话所属租户（默认 default；单用户模式不改变现有行为） */
+  tenantId?: string;
   title: string;
   model: string;
   provider: string;

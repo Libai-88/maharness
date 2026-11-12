@@ -9,7 +9,7 @@
  */
 import { join } from 'node:path';
 import type { Plugin } from '../../kernel/types';
-import { loadPromptRules, loadPolicyRules, rulesSignature, matchPolicy } from '../../kernel/rules';
+import { dryRunPolicy, loadPromptRules, loadPolicyRules, rulesSignature, matchPolicy } from '../../kernel/rules';
 import type { PolicyRule, RuleSource } from '../../kernel/rules';
 
 /** agent.before_tool 钩子负载中本插件用到的字段（与 core/chat/agent.ts 的 AgentHookCtx 对齐） */
@@ -124,6 +124,63 @@ export default {
         async handler() {
           refresh();
           return { ok: true, data: { sources: sources.filter(s => s.exists), promptChars: promptText.length, policy, errors } };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'check_policy',
+        risk: 'low',
+        costHint: 'low',
+        output: '{tool, decision, ruleId?, reason?, matched, candidate?}',
+        description: '模拟一次工具调用的策略判定：返回 allow / deny / require-approval / default 与命中的规则。传入 candidate 时只读对比候选策略，不落盘、不执行工具。',
+        parameters: {
+          type: 'object',
+          properties: {
+            tool: { type: 'string', description: '工具名，如 write_file' },
+            args: { description: '可选：模拟的工具参数（用于 argPattern/pathPattern）' },
+            candidate: {
+              type: 'array',
+              description: '可选：候选策略规则数组；提供时返回当前与候选的判定差异',
+              items: { type: 'object' },
+            },
+          },
+          required: ['tool'],
+        },
+        async handler(args: { tool?: string; args?: unknown; candidate?: PolicyRule[] }) {
+          refresh();
+          const tool = String(args.tool ?? '').trim();
+          if (!tool) return { ok: false, error: '缺少 tool' };
+          if (Array.isArray(args.candidate)) {
+            const result = dryRunPolicy(policy, args.candidate, [{ tool, args: args.args ?? {} }]);
+            return {
+              ok: true,
+              data: {
+                tool,
+                matched: result.current[0]?.matched ?? false,
+                decision: result.current[0]?.decision ?? 'default',
+                ruleId: result.current[0]?.ruleId,
+                reason: result.current[0]?.reason,
+                changed: result.changed,
+                diff: result.diff,
+                candidate: result.probes[0]?.candidate,
+                issues: result.issues,
+              },
+            };
+          }
+          const hit = matchPolicy(policy, tool, args.args ?? {});
+          return {
+            ok: true,
+            data: {
+              tool,
+              matched: !!hit,
+              decision: hit?.effect ?? 'default',
+              ruleId: hit?.id,
+              reason: hit?.reason ?? (hit ? undefined : '没有命中策略规则，使用默认审批/权限判定'),
+            },
+          };
         },
       },
     });

@@ -36,8 +36,8 @@ test('插件面板展示启动错误与修复建议', async ({ page }) => {
   await page.getByRole('button', { name: '插件', exact: true }).click();
   await expect(page.getByText('Broken Plugin')).toBeVisible();
   await page.getByText('Broken Plugin').click();
-  const detail = page.locator('.manager-body');
-  await expect(detail.getByText('错误：缺少依赖插件：provider-demo', { exact: false })).toBeVisible();
+  const detail = page.getByRole('dialog');
+  await expect(detail.getByText('缺少依赖插件：provider-demo', { exact: false })).toBeVisible();
   await expect(detail.getByText('请先安装并启用依赖插件「provider-demo」，然后重试。', { exact: false })).toBeVisible();
 });
 
@@ -66,9 +66,9 @@ test('插件失败后可通过重载恢复运行状态', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: '插件', exact: true }).click();
   await page.getByText('Recoverable Plugin').click();
-  const detail = page.locator('.manager-body');
-  await expect(detail.getByText('错误：入口文件不存在', { exact: false })).toBeVisible();
+  const detail = page.getByRole('dialog');
+  await expect(detail.getByText('入口文件不存在', { exact: false })).toBeVisible();
   await detail.getByRole('button', { name: '重载' }).click();
   await expect(page.getByText('运行中', { exact: true }).first()).toBeVisible();
-  await expect(detail.getByText('错误：入口文件不存在', { exact: false })).toHaveCount(0);
+  await expect(detail.getByText('入口文件不存在', { exact: false })).toHaveCount(0);
 });

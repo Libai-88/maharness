@@ -11,7 +11,9 @@ import { Trace } from './trace';
 import { Cache } from './cache';
 import { Budget } from './budget';
 import { PluginLoader } from './plugin-loader';
+import { createSecretBox } from './secret-box';
 import type { Paths } from './config';
+import type { SecretBox } from './secret-box';
 import type { KernelLike } from './types';
 
 export { EventBus } from './bus';
@@ -35,6 +37,12 @@ export class Kernel {
   readonly plugins: PluginLoader;
   readonly paths: Paths;
   readonly rootDir: string;
+  /** server 注入的租户存储配额检查；未设置时不限制 */
+  tenantQuota?: {
+    assertWritable(tenantId: string, additionalBytes: number): void;
+    assertToolCall(tenantId: string): void;
+    invalidate(tenantId: string): void;
+  };
 
   /** 内核内置实现（不在解析路径上）：仅作初始化与委托兜底。
    *  对外的 cache/trace/budget 是【解析视图】——见下方同名 getter。 */
@@ -51,7 +59,7 @@ export class Kernel {
    *   装载真实 core 插件栈（否则临时 rootDir 下没有 core/，内核只能跑空插件集）
    * （供 selftest 等场景做临时目录隔离，不污染生产数据；不传时行为与旧签名完全一致）
    */
-  constructor(rootDir: string, defaults: Record<string, unknown> = {}, opts: { dataDir?: string; userPluginsDir?: string; corePluginsDir?: string } = {}) {
+  constructor(rootDir: string, defaults: Record<string, unknown> = {}, opts: { dataDir?: string; userPluginsDir?: string; corePluginsDir?: string; secrets?: SecretBox } = {}) {
     this.rootDir = rootDir;
     const base = paths(rootDir);
     this.paths = opts.dataDir
@@ -99,6 +107,7 @@ export class Kernel {
         trace: this.builtinTrace,
         cache: this.builtinCache,
         budget: this.builtinBudget,
+        secrets: opts.secrets ?? createSecretBox(),
       },
       opts.corePluginsDir ?? join(rootDir, 'core'),
       opts.userPluginsDir ?? join(rootDir, 'plugins'),

@@ -111,7 +111,10 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
   try {
     // 预热请求：与最后发送序列同前缀 + 相同 tools（网关缓存键含 tools 参数，
     // 不带 tools 的预热建立的缓存对真实请求无效）。auto 首轮使用 1 token 探针。
-    const tools = kernel.plugins.capabilities('tool').map((c) => c.tool).map(chat.annotateToolDef);
+    const pluginTools = typeof kernel.plugins.tools === 'function'
+      ? kernel.plugins.tools()
+      : kernel.plugins.capabilities('tool').map((c) => c.tool);
+    const tools = pluginTools.map(chat.annotateToolDef);
     let hit = 0, miss = 0;
     const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
     if (mode === 'off') { stopWarmup(entry); warmups.delete(sessionId); return; }

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "cases": [
+    { "prompt": "帮我写一个插件并现场加载", "expect": "plugin-authoring", "topK": 3 },
+    { "prompt": "这个 SKILL.md 技能包怎么写", "expect": "skill-authoring", "topK": 3 },
+    { "prompt": "把多个能力组合成一个工作流", "expect": "capability-composition", "topK": 3 },
+    { "prompt": "设计系统提示词并建立可验证的推理流程", "expect": "thinking-chain", "topK": 3 },
+    { "prompt": "设计一个 agent 的自我扩展机制", "expect": "agent-self-design", "topK": 3 }
+  ]
+}

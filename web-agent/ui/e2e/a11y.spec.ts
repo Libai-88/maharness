@@ -26,7 +26,7 @@ async function setup(page: Page) {
   await expect
     .poll(async () => {
       const bubbles = await page.getByTestId('msg-bubble-assistant').or(page.getByTestId('msg-bubble-user')).count();
-      const hasHero = await page.locator('.brand-hero').count();
+      const hasHero = await page.getByTestId('chat-welcome').count();
       return bubbles + hasHero;
     })
     .toBeGreaterThan(0);
@@ -72,7 +72,7 @@ test.describe('可访问性（UX-05）', () => {
     }));
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('执行一个多阶段任务');
     await page.keyboard.press('Enter');
-    const failure = page.locator('.wx-failure').last();
+    const failure = page.getByTestId('message-failure').last();
     await expect(failure).toContainText('这个任务有点大');
     // 失败条声明为状态区（读屏主动播报），原始错误在 title 可查
     await expect(failure).toHaveAttribute('role', 'status');
@@ -98,10 +98,10 @@ test.describe('可访问性（UX-05）', () => {
     }));
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
     await page.keyboard.press('Enter');
-    const card = page.locator('.approval-card');
+    const card = page.getByTestId('approval-card');
     await expect(card).toBeVisible();
     // 键盘可达：审批按钮本身可聚焦（无 tabindex=-1、无 pointer-only 交互）
-    const approveBtn = card.locator('.btn-primary').first();
+    const approveBtn = card.getByRole('button', { name: '可以，去做吧' });
     await approveBtn.focus();
     await expect(approveBtn).toBeFocused();
     // 回答走可访问 API（读屏通过 toast aria-live 播报结果）；路由先注册避免误击真实端点

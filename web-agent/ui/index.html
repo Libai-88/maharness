@@ -8,18 +8,8 @@
     <meta property="og:type" content="website" />
     <meta property="og:title" content="maharness — 你的 AI 小助手" />
     <meta property="og:description" content="会学习、会记忆、会自己写插件的 AI Agent。文件读写、命令执行、联网搜索，说一声就好。" />
-    <meta name="theme-color" content="#f5eee0" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <!-- 字体非阻塞加载：Google Fonts 在部分网络环境（如大陆）不可达，
-         阻塞式 stylesheet 会让首屏白屏至超时。print→all 切换使其不阻塞渲染，
-         加载前使用系统回退字体（--font-sans 完整回退栈），加载后平滑换装。
-         涂鸦手账版：Caveat（马克笔手写·大标题/徽章）+ Kalam（正文手写）+ JetBrains Mono（代码技术层对比） -->
-    <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" />
-    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" media="print" onload="this.media='all'" />
-    <noscript><link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Kalam:wght@300;400;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap" /></noscript>
-    <!-- favicon 由 src/brand/favicon.ts 在首帧按主题写入（几何与侧栏/头像/大图同源）；
-         此处仅留占位，避免 404 图标。 -->
+    <meta name="theme-color" content="#f7f7f5" />
+    <!-- favicon 由 src/brand/favicon.ts 在首帧按主题写入；此处仅留占位，避免 404 图标。 -->
     <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3C/svg%3E" />
     <script>
       // 首帧主题预置（避免深/浅色闪烁）；未显式选择过时跟随系统
@@ -30,19 +20,11 @@
           t = (window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
         }
         document.documentElement.dataset.theme = t;
+        document.documentElement.classList.toggle('dark', t === 'dark');
       })();
     </script>
   </head>
   <body>
-    <!-- 手绘涂鸦 SVG 滤镜：feTurbulence 抖动 + feDisplacementMap 位移 -->
-    <svg width="0" height="0" style="position:absolute">
-      <defs>
-        <filter id="sketchy" x="-5%" y="-5%" width="110%" height="110%">
-          <feTurbulence type="turbulence" baseFrequency="0.03" numOctaves="2" seed="3" result="noise" />
-          <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.8" xChannelSelector="R" yChannelSelector="G" />
-        </filter>
-      </defs>
-    </svg>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

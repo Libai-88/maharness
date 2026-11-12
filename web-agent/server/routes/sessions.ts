@@ -3,21 +3,28 @@
  */
 import type { Express } from 'express';
 import { isHiddenMessage } from '../db';
-import type { RouteDeps } from './shared';
+import { tenantIdOf, type RouteDeps } from './shared';
 
 export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
   const { store } = deps;
 
-  app.get('/api/sessions', (_req, res) => res.json(store.listSessions()));
+  app.get('/api/sessions', (req, res) => res.json(store.listSessions(tenantIdOf(req))));
 
   app.post('/api/sessions', (req, res) => {
     const model = String(req.body?.model ?? '');
     const provider = String(req.body?.provider ?? '');
-    res.json(store.createSession(model, provider));
+    const tenantId = tenantIdOf(req);
+    const tenant = store.getTenant(tenantId);
+    if (tenant && tenant.maxSessions > 0 && store.countSessions(tenantId) >= tenant.maxSessions) {
+      return res.status(429).json({
+        error: `租户 ${tenantId} 的会话配额已用尽（${tenant.maxSessions}）。请删除旧会话或由管理员调整 maxSessions。`,
+      });
+    }
+    res.json(store.createSession(model, provider, tenantId));
   });
 
   app.get('/api/sessions/:id/messages', (req, res) => {
-    const session = store.getSession(req.params.id);
+    const session = store.getSession(req.params.id, tenantIdOf(req));
     if (!session) return res.status(404).json({ error: '会话不存在' });
     // 前端展示过滤：隐藏发送序列中的注入消息（失败教训/长期记忆/英文提醒/角色移交/续跑提示）
     // ——它们是 harness 内部上下文工程，不是用户可见的对话内容；
@@ -28,7 +35,8 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
   });
 
   app.patch('/api/sessions/:id', (req, res) => {
-    const session = store.getSession(req.params.id);
+    const tenantId = tenantIdOf(req);
+    const session = store.getSession(req.params.id, tenantId);
     if (!session) return res.status(404).json({ error: '会话不存在' });
     const { title, model, provider, mode, role, archived, pinned } = req.body ?? {};
     if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
@@ -48,12 +56,13 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
       ...(archived !== undefined ? { archived: archived ? 1 : 0 } : {}),
       ...(pinned !== undefined ? { pinned: pinned ? 1 : 0 } : {}),
     });
-    res.json(store.getSession(session.id));
+    res.json(store.getSession(session.id, tenantId));
   });
 
   app.delete('/api/sessions/:id', (req, res) => {
-    if (!store.getSession(req.params.id)) return res.status(404).json({ error: '会话不存在' });
-    store.deleteSession(req.params.id);
+    const tenantId = tenantIdOf(req);
+    if (!store.getSession(req.params.id, tenantId)) return res.status(404).json({ error: '会话不存在' });
+    store.deleteSessions([req.params.id], tenantId);
     res.json({ ok: true });
   });
 
@@ -63,7 +72,7 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
       ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500)
       : [];
     if (ids.length === 0) return res.status(400).json({ error: '缺少 ids' });
-    const removed = store.deleteSessions(ids);
+    const removed = store.deleteSessions(ids, tenantIdOf(req));
     res.json({ ok: true, removed });
   });
 }

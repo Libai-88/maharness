@@ -10,7 +10,7 @@
  * 本文件只放【形状】（类型与常量），不放行为：行为归默认实现（core/chat/agent.ts）。
  */
 import type {
-  AgentRunSummary, KernelLike, LLMMessage, PluginBus, ProviderDef, ToolCall, ToolDef, ToolResult,
+  AgentRunSummary, KernelLike, LLMMessage, PluginBus, ProviderDef, ResponseFormat, ToolCall, ToolDef, ToolResult,
 } from './types';
 import type { TaskContract } from './task-verifier';
 export type { ClassifiedError, ErrorCategory } from './error-policy';
@@ -25,6 +25,8 @@ export interface AgentHookCtx {
   traceId: string;
   turn: number;
   model: string;
+  sessionId?: string;
+  tenantId?: string;
   history: LLMMessage[];
   systemPrompt: string;                 // 信息展示；改 history[0].content 才真正生效
   tools: ToolDef[];
@@ -48,7 +50,7 @@ export type AgentEvent =
   | { type: 'reasoning'; text: string }
   /** id = tool_call_id：前端靠它把 start/result 精确配对成同一张卡（同名并发调用不会串卡） */
   | { type: 'tool_start'; id?: string; name: string; args: unknown }
-  | { type: 'tool_result'; id?: string; name: string; summary: string; ok: boolean; stored?: boolean }
+  | { type: 'tool_result'; id?: string; name: string; summary: string; ok: boolean; stored?: boolean; evidence?: { kind: string; label: string; ref?: string; value?: unknown }[] }
   | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
   | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
   | { type: 'task_verified' | 'task_partial' | 'task_failed'; objective: string; checks: { ok: boolean; reason?: string }[]; evidence?: { source: string; detail: string; traceStepId?: string }[] }
@@ -64,7 +66,7 @@ export type AgentEvent =
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
   /** 已完成轮次的工具验收证据，跨恢复保留且不从模型文本推断。 */
-  restoredToolResults?: { name: string; ok: boolean }[];
+  restoredToolResults?: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[];
   /** 本逻辑任务在已完成 checkpoint 轮次的累计费用；不计入本次 run 账单。 */
   restoredCostUsd?: number;
   provider: ProviderDef;
@@ -72,6 +74,8 @@ export interface RunOptions {
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
   /** 本轮临时上下文：发送给模型但不写回会话历史（如世界状态）。 */
   contextMessages?: LLMMessage[];
+  /** 请求模型返回结构化 JSON；由支持该能力的 Provider 适配器落地。 */
+  responseFormat?: ResponseFormat;
   systemPrompt?: string;
   tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
   traceId: string;
@@ -80,6 +84,8 @@ export interface RunOptions {
   scope?: string;
   /** 当前会话 ID：透传给工具（ToolContext.sessionId），工具可把状态挂到具体会话 */
   sessionId?: string;
+  /** 当前租户：透传给工具，用于缓存与数据作用域。缺省按 default 处理。 */
+  tenantId?: string;
   signal?: AbortSignal;
   maxTurns?: number;
   /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */
@@ -94,6 +100,8 @@ export interface RunOptions {
   task?: TaskContract;
   /** 同一逻辑任务跨 checkpoint 恢复时保持不变，用于副作用执行账本。 */
   executionId?: string;
+  /** 本次 run 的沙箱根（租户工作区）；缺省用全局 sandboxRoot。 */
+  sandboxRoot?: string;
   /** 恢复后延续逻辑轮数，避免同一轮副作用键发生漂移。 */
   turnOffset?: number;
   /** 持久化副作用账本；pending 表示执行结果未知，必须拒绝自动重放。 */
@@ -107,7 +115,15 @@ export interface RunOptions {
   compactFn?: (history: LLMMessage[]) => Promise<LLMMessage[]>;
   /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
    *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
-  onCheckpoint?: (turn: number, history: LLMMessage[], evidence?: { toolResults: { name: string; ok: boolean }[]; costUsd: number }) => void;
+  onCheckpoint?: (
+    turn: number,
+    history: LLMMessage[],
+    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number },
+    step?: {
+      phase: 'turn_end' | 'tool_pending';
+      pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string };
+    },
+  ) => void;
   /** 发送序列快照同步（L3 前缀缓存逼近 100% 的关键）：每次 LLM 调用前，把
    *  实际发送的消息序列中【尚未入库的增量】回调给 server 持久化。
    *  覆盖全部消息类型（含钩子注入的教训/记忆/英文提醒）——DB 成为发送序列的
@@ -137,6 +153,8 @@ export const SERVICE_KEYS = {
   trace: 'service:trace',
   /** 认知资源管理（内核内置实现可被接管） */
   budget: 'service:budget',
+  /** Provider 能力、路由、健康与 embedding 的统一网关 */
+  providerGateway: 'service:provider-gateway',
 } as const;
 
 /**

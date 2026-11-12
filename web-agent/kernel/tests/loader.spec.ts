@@ -101,6 +101,87 @@ describe('PluginLoader 事务性热重载', () => {
   });
 });
 
+describe('PluginLoader 工具运行时配额', () => {
+  test('单插件并发与频率上限在执行前拒绝，不进入 handler', async (t) => {
+    const f = setup({
+      limited: `ctx.register({ kind: 'tool', tool: { name: 'limited_tool', description: 'limited', parameters: { type: 'object' }, handler: async () => { await new Promise((r) => setTimeout(r, 150)); return { ok: true, data: 'ok' }; } } });`,
+      rate: `ctx.register({ kind: 'tool', tool: { name: 'rate_tool', description: 'rate', parameters: { type: 'object' }, handler: async () => ({ ok: true, data: 'ok' }) } });`,
+    }, {
+      limited: { limits: { maxConcurrentToolCalls: 1 } },
+      rate: { limits: { maxToolCallsPerMinute: 1 } },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const tools = f.kernel.plugins.capabilities('tool').map((c) => c.tool);
+    const ctx = { turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace };
+    const limited = tools.find((tool) => tool.name === 'limited_tool')!;
+    const [a, b] = await Promise.all([limited.handler({}, ctx), limited.handler({}, ctx)]);
+    assert.equal(a.ok, true);
+    assert.equal(b.ok, false);
+    assert.match(String(b.error), /并发工具调用/);
+
+    const rate = tools.find((tool) => tool.name === 'rate_tool')!;
+    assert.equal((await rate.handler({}, { ...ctx, tenantId: 'default' })).ok, true);
+    const denied = await rate.handler({}, { ...ctx, tenantId: 'default' });
+    assert.equal(denied.ok, false);
+    assert.match(String(denied.error), /调用频率/);
+    assert.equal((await rate.handler({}, { ...ctx, tenantId: 'tenant-b' })).ok, true, '另一租户不受影响');
+  });
+
+  test('非法 limits 在 manifest 加载阶段拒绝', async (t) => {
+    const f = setup({ bad: `ctx.register({ kind: 'tool', tool: { name: 'bad_tool', description: 'bad', parameters: { type: 'object' }, handler: async () => ({ ok: true }) } });` }, {
+      bad: { limits: { maxConcurrentToolCalls: -1 } },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('bad'), undefined, '非法 limits 的插件不得进入 registry');
+  });
+
+  test('插件私有存储按字节与文件数配额拒绝超限写入', async (t) => {
+    const f = setup({
+      store: `ctx.register({ kind: 'tool', tool: { name: 'store_tool', description: 'store', parameters: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] }, handler: async (args) => { try { ctx.storage.write(args.name, args.value); return { ok: true }; } catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) }; } } } });`,
+    }, {
+      store: { limits: { maxStorageBytes: 20, maxStorageFiles: 1 } },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const tool = f.kernel.plugins.capabilities('tool').map((c) => c.tool).find((item) => item.name === 'store_tool')!;
+    const ctx = { turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace };
+    assert.equal((await tool.handler({ name: 'a.txt', value: '1234567890' }, ctx)).ok, true);
+    const files = await tool.handler({ name: 'b.txt', value: 'x' }, ctx);
+    assert.equal(files.ok, false);
+    assert.match(String(files.error), /文件数/);
+    const bytes = await tool.handler({ name: 'a.txt', value: '123456789012345678901' }, ctx);
+    assert.equal(bytes.ok, false);
+    assert.match(String(bytes.error), /字节/);
+  });
+
+  test('声明 runtime 的插件在加载前拒绝越界源码', async (t) => {
+    const f = setup({
+      unsafe: `const fs = require('node:fs'); ctx.register({ kind: 'tool', tool: { name: 'unsafe_tool', description: 'unsafe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true, data: fs.existsSync('.') }) } });`,
+    }, {
+      unsafe: {
+        permissions: {
+          capabilities: { tool: ['unsafe_tool'] },
+          runtime: { filesystem: 'sandbox', network: 'none', process: false },
+        },
+      },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('unsafe'), undefined);
+  });
+
+  test('runtime 声明值非法时插件不加载', async (t) => {
+    const f = setup({ badRuntime: `` }, {
+      badRuntime: { permissions: { capabilities: {}, runtime: { filesystem: 'everything' } } },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('badRuntime'), undefined);
+  });
+});
+
 describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
   test('只重载声明了变化的依赖的插件（config 维度），其余零抖动', async (t) => {
     const f = setup({

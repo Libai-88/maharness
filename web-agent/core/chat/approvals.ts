@@ -36,6 +36,10 @@ interface ApprovalRecord {
 
 export class ApprovalBoard {
   private map = new Map<string, ApprovalRecord>();
+  /** 可选审计钩子：注册/决策/撤回时通知宿主持久化；异常不得影响审批流程 */
+  onRegister?: (approval: PendingApproval) => void;
+  onResolve?: (id: string, approved: boolean, reason: 'user' | 'timeout' | 'withdrawn') => void;
+  onWithdraw?: (id: string) => void;
 
   constructor(private timeoutMs: number = APPROVAL_TIMEOUT) {}
 
@@ -44,10 +48,14 @@ export class ApprovalBoard {
     const createdAt = Date.now();
     const expiresAt = createdAt + this.timeoutMs;
     const timer = setTimeout(() => {
-      if (this.map.delete(id)) resolve(false);
+      if (this.map.delete(id)) {
+        resolve(false);
+        try { this.onResolve?.(id, false, 'timeout'); } catch { /* 审计失败不影响审批 */ }
+      }
     }, this.timeoutMs);
     timer.unref?.();
     this.map.set(id, { resolve, timer, info, createdAt, expiresAt });
+    try { this.onRegister?.({ id, ...info, createdAt, expiresAt }); } catch { /* 审计失败不影响审批 */ }
   }
 
   /** 批准/拒绝：命中返回 true 并解除挂起（含超时计时器清理）；未知 ID 返回 false */
@@ -57,6 +65,7 @@ export class ApprovalBoard {
     this.map.delete(id);
     if (rec.timer) clearTimeout(rec.timer);
     rec.resolve(approved);
+    try { this.onResolve?.(id, approved, 'user'); } catch { /* 审计失败不影响审批 */ }
     return true;
   }
 
@@ -71,6 +80,7 @@ export class ApprovalBoard {
     if (!rec) return;
     this.map.delete(id);
     if (rec.timer) clearTimeout(rec.timer);
+    try { this.onWithdraw?.(id); } catch { /* 审计失败不影响审批 */ }
   }
 
   get(id: string): ApprovalInfo | undefined {

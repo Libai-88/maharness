@@ -4,7 +4,7 @@ import type { TaskContract, TaskCriterion } from '../kernel/task-verifier';
 
 const schema = JSON.parse(readFileSync(new URL('./case.schema.json', import.meta.url), 'utf8')) as Record<string, unknown>;
 const CHUNK_TYPES = new Set(['delta', 'reasoning', 'tool_call', 'usage', 'done', 'throw']);
-const TASK_CRITERIA = new Set(['output_contains', 'output_matches', 'tool_succeeded', 'file_exists', 'file_contains']);
+const TASK_CRITERIA = new Set(['output_contains', 'output_matches', 'tool_succeeded', 'tool_evidence', 'file_exists', 'file_contains']);
 
 export interface EvalCase {
   schemaVersion: 1;
@@ -129,6 +129,12 @@ function isTaskContract(task: TaskContract): boolean {
       try { new RegExp(criterion.pattern, criterion.flags); return true; } catch { return false; }
     }
     if (criterion.type === 'tool_succeeded') return typeof criterion.name === 'string' && criterion.name.length > 0;
+    if (criterion.type === 'tool_evidence') {
+      return typeof criterion.name === 'string' && criterion.name.length > 0
+        && (criterion.kind === undefined || ['file', 'url', 'command', 'state', 'content', 'custom'].includes(criterion.kind))
+        && (criterion.labelContains === undefined || typeof criterion.labelContains === 'string')
+        && (criterion.refContains === undefined || typeof criterion.refContains === 'string');
+    }
     if (criterion.type === 'file_exists') return typeof criterion.path === 'string' && criterion.path.length > 0;
     return typeof criterion.path === 'string' && criterion.path.length > 0 && typeof criterion.value === 'string';
   });

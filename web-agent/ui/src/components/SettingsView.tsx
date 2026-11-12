@@ -1,14 +1,33 @@
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useCallback, useEffect, useState } from 'react';
-import { configApi, getMutationToken, metaApi, providersApi, rulesApi, securityApi, setMutationToken, statsApi, type SecurityPosture } from '../api';
-import type { RulesView, RuntimeConfig } from '../api';
+import { configApi, getMutationToken, getTenantId, metaApi, providersApi, rulesApi, securityApi, setMutationToken, setTenantId, statsApi, type SecurityPosture } from '../api';
+import type { PolicyDryRunView, RulesView, RuntimeConfig } from '../api';
 import type { ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
-import { IconCheck, IconClose } from './Icon';
-import Confirm, { type ConfirmRequest } from './Confirm';
+import { Check, ChevronsUpDown, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
 import SkillsView from './SkillsView';
 import PersonaPanel from './PersonaPanel';
+import { Switch } from '@/components/ui/switch';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldTitle } from '@/components/ui/field';
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Skeleton } from '@/components/ui/skeleton';
+import { Slider } from '@/components/ui/slider';
+import { Spinner } from '@/components/ui/spinner';
+import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
+import { useIsMobile } from '@/hooks/use-mobile';
 
 interface Props {
   providers: ProviderInfo[];
@@ -23,19 +42,27 @@ type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'personas' |
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
 
+function SettingsHeading({ title, description, children }: { title: string; description: string; children?: React.ReactNode }) {
+  return <header className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h1>{title}</h1><p>{description}</p></div>{children}</header>;
+}
+
+function Notice({ ok = true, children }: { ok?: boolean; children: React.ReactNode }) {
+  return <Alert variant={ok ? 'default' : 'destructive'} role="status">{ok ? <Check /> : <ShieldAlert />}<AlertDescription>{children}</AlertDescription></Alert>;
+}
+
 function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[]; onChanged: () => void }) {
   const [editing, setEditing] = useState<ProviderInfo | null>(null);
   const [creating, setCreating] = useState(false);
   const [form, setForm] = useState<ProviderForm>(EMPTY);
   const [busy, setBusy] = useState<'save' | 'test' | 'pull' | null>(null);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number }>>({});
+  const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number; pending?: boolean }>>({});
   const [diagnostics, setDiagnostics] = useState<Record<string, ProviderDiagnostic | null>>({});
   const [togglingId, setTogglingId] = useState<string | null>(null);
-  // 删除 Provider 的二步确认走应用内弹层（原生 confirm 在这套界面里最出戏）
-  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
   const [models, setModels] = useState<PulledModel[]>([]);
+  const [modelOpen, setModelOpen] = useState(false);
+  const [confirm, setConfirm] = useState<{ text: string; onOk: () => void } | null>(null);
   // 本地网关（Ollama 等）无需 API Key——校验与占位提示随协议切换
   const isLocal = (form.protocol ?? 'openai') === 'ollama';
 
@@ -133,12 +160,9 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
     } finally { setTogglingId(null); }
   };
 
-  const remove = async (p: ProviderInfo) => {
-    // 二步确认：应用内弹层（原生 confirm 会弹出系统对话框，与手账界面完全两个世界）
-    setConfirmReq({
+  const remove = (p: ProviderInfo) => {
+    setConfirm({
       text: `删除 Provider「${p.label}」？这把钥匙的配置会一起删掉。`,
-      okText: '删除',
-      danger: true,
       onOk: () => {
         void (async () => {
           try {
@@ -156,7 +180,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   /** 验证密钥（用已存储的 Key 发一次测试请求）：结果联动 provider 健康——
    *  成功清除 authFailed 红标与会话横幅；失败标记失效。 */
   const verifyKey = async (id: string, base: string, model: string, protocol?: string) => {
-    setTestResult((r) => ({ ...r, [id]: { ok: false, ms: 0 } }));
+    setTestResult((r) => ({ ...r, [id]: { ok: false, ms: 0, pending: true } }));
     try {
       const r = await providersApi.test({ baseUrl: base, apiKey: '', model, protocol, providerId: id });
       setTestResult((prev) => ({ ...prev, [id]: { ok: r.ok, ms: r.latencyMs ?? 0 } }));
@@ -172,7 +196,8 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   };
 
   const runTest = async (p: ProviderInfo) => {
-    setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: 0 } }));
+    if (testResult[p.id]?.pending) return;
+    setTestResult((r) => ({ ...r, [p.id]: { ok: false, ms: 0, pending: true } }));
     try {
       // 传 providerId：后端用已存储的 Key 发起测试（前端拿不到明文 Key），
       // 结果联动健康状态（成功恢复红标消失 / 失败标记失效）
@@ -199,150 +224,107 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
 
   return (
     <>
-      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 4 }}>
-        <span className="page-title">模型与 Provider</span>
-        <span style={{ marginLeft: 'auto' }}>
-          <button className="btn-solid" onClick={startCreate}>+ 新增 Provider</button>
-        </span>
-      </div>
-      <div className="page-sub">填入 API Key 后自动出现在右上角模型下拉 · 多 Provider 热切换</div>
-      {msg && <div style={{ fontSize: 12, color: msg.ok ? 'var(--teal)' : 'var(--red)' }}>{msg.text}</div>}
+      <SettingsHeading title="模型与 Provider" description="管理模型、连接凭据与调用价格。"><Button onClick={startCreate}><Plus data-icon="inline-start" />新增 Provider</Button></SettingsHeading>
+      {msg && <Notice ok={msg.ok}>{msg.text}</Notice>}
 
       {(creating || editing) && (
-        <div className="set-sec" style={{ gap: 8 }}>
-          <span className="ss-title">{creating ? '新增 Provider' : `编辑 · ${editing!.label}`}</span>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <input className="set-input" placeholder="名称（如 DeepSeek）" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} aria-label="Provider 名称" />
-            <input className="set-input" placeholder={isLocal ? 'Base URL（如 http://localhost:11434/v1）' : 'Base URL（如 https://api.deepseek.com）'} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} aria-label="Base URL" />
-            <input className="set-input" placeholder={isLocal ? '本地网关无需 Key（留空即可）' : 'API Key'} type="password" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} aria-label="API Key" />
-            <select className="set-input" value={form.protocol ?? 'openai'} onChange={(e) => setForm({ ...form, protocol: e.target.value })} aria-label="协议类型">
-              <option value="openai">OpenAI 兼容（多数网关/国产）</option>
-              <option value="anthropic">Anthropic 原生</option>
-              <option value="ollama">Ollama 本地</option>
-            </select>
-            <input className="set-input" placeholder="模型（可拉取列表直接点选）" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} aria-label="模型名" list="provider-model-options" />
-            <datalist id="provider-model-options">
-              {models.map((m) => <option key={m.id} value={m.id} />)}
-            </datalist>
-            <input className="set-input" placeholder="输入价格 /1M tokens（拉取后自动填）" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} aria-label="输入价格" />
-            <input className="set-input" placeholder="输出价格 /1M tokens（拉取后自动填）" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} aria-label="输出价格" />
-          </div>
+        <Card>
+          <CardHeader><CardTitle>{creating ? '新增 Provider' : `编辑 · ${editing!.label}`}</CardTitle><CardDescription>保存后即可在对话中切换模型。</CardDescription></CardHeader>
+          <CardContent><FieldGroup className="grid grid-cols-1 md:grid-cols-2">
+            <Field><FieldLabel htmlFor="provider-label">Provider 名称</FieldLabel><Input id="provider-label" placeholder="如 DeepSeek" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="provider-base">Base URL</FieldLabel><Input id="provider-base" placeholder={isLocal ? 'http://localhost:11434/v1' : 'https://api.deepseek.com'} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="provider-key">API Key</FieldLabel><Input id="provider-key" placeholder={isLocal ? '本地网关可留空' : editing ? '留空保留已保存的密钥' : '输入 API Key'} type="password" autoComplete="off" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="provider-protocol">协议类型</FieldLabel>
+            <Select value={form.protocol ?? 'openai'} onValueChange={(value) => setForm({ ...form, protocol: value })}>
+              <SelectTrigger id="provider-protocol" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectGroup>
+                  <SelectItem value="openai">OpenAI 兼容（多数网关/国产）</SelectItem>
+                  <SelectItem value="anthropic">Anthropic 原生</SelectItem>
+                  <SelectItem value="ollama">Ollama 本地</SelectItem>
+                </SelectGroup>
+              </SelectContent>
+            </Select></Field>
+            <Field className="md:col-span-2"><FieldLabel htmlFor="provider-model">模型名</FieldLabel><Input id="provider-model" placeholder="输入模型 ID，或拉取后选择" value={form.model} onChange={(e) => setForm({ ...form, model: e.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="provider-price-in">输入价格（USD / 1M tokens）</FieldLabel><Input id="provider-price-in" inputMode="decimal" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} /></Field>
+            <Field><FieldLabel htmlFor="provider-price-out">输出价格（USD / 1M tokens）</FieldLabel><Input id="provider-price-out" inputMode="decimal" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} /></Field>
+          </FieldGroup>
           {models.length > 0 && (
-            <div className="pv-model-list" role="listbox" aria-label="拉取到的模型">
-              {models.slice(0, 60).map((m) => (
-                <button
-                  key={m.id}
-                  type="button"
-                  className={`pv-model${form.model === m.id ? ' on' : ''}`}
-                  onClick={() => setForm({
+            <Popover open={modelOpen} onOpenChange={setModelOpen}>
+              <PopoverTrigger asChild><Button variant="outline" className="mt-4 w-full justify-between" role="combobox" aria-label={`选择已拉取的模型（${models.length}）`} aria-expanded={modelOpen}>选择已拉取的模型（{models.length}）<ChevronsUpDown data-icon="inline-end" /></Button></PopoverTrigger>
+              <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start" aria-label="选择已拉取的模型"><Command><CommandInput placeholder="搜索模型…" aria-label="搜索已拉取的模型" /><CommandList><CommandEmpty>无匹配模型</CommandEmpty><CommandGroup heading="可用模型">
+              {models.map((m) => (
+                <CommandItem key={m.id} value={m.id} onSelect={() => { setForm({
                     ...form, model: m.id,
                     priceIn: form.priceIn?.trim() ? form.priceIn : String(m.priceIn ?? ''),
                     priceOut: form.priceOut?.trim() ? form.priceOut : String(m.priceOut ?? ''),
-                  })}
-                  title={`上下文 ${m.contextWindow} · 最大输出 ${m.maxOutput} · $${m.priceIn}/$${m.priceOut} per 1M${m.source === 'pulled' ? '（供应商返回）' : '（按模型名推断）'}`}
-                >
-                  <span className="pvm-id">{m.id}</span>
-                  <span className="pvm-caps">
-                    {m.vision && <span className="pvm-cap vis">视觉</span>}
-                    {m.tools && <span className="pvm-cap">工具</span>}
-                    {m.reasoning && <span className="pvm-cap">推理</span>}
-                    <span className="pvm-cap ctx">{m.contextWindow >= 1_000_000 ? `${Math.round(m.contextWindow / 1_000_000)}M` : `${Math.round(m.contextWindow / 1000)}k`}</span>
-                  </span>
-                </button>
+                  }); setModelOpen(false); }} title={`上下文 ${m.contextWindow} · 最大输出 ${m.maxOutput} · $${m.priceIn}/$${m.priceOut} per 1M`}>
+                  <span className="min-w-0 flex-1 truncate">{m.id}</span>
+                  {m.vision && <Badge variant="secondary">视觉</Badge>}{m.tools && <Badge variant="secondary">工具</Badge>}{m.reasoning && <Badge variant="secondary">推理</Badge>}
+                  {form.model === m.id && <Check />}
+                </CommandItem>
               ))}
-            </div>
+              </CommandGroup></CommandList></Command></PopoverContent>
+            </Popover>
           )}
           {isLocal && (
-            <div className="provider-hint" style={{ marginTop: 2 }}>
+            <p className="mt-4 text-sm text-muted-foreground">
               本地网关提示：本机模式直接连接即可；Key 留空，地址填 http://localhost:11434/v1（Ollama 默认端口）。
-            </div>
+            </p>
           )}
-          <div style={{ display: 'flex', gap: 8, marginTop: 4 }}>
-            <button className="btn-ok" onClick={save} disabled={busy !== null}>{busy === 'save' ? <span className="spin" /> : null}保存</button>
-            <button className="btn-ghost" onClick={() => void pullModels()} disabled={busy !== null}>{busy === 'pull' ? <span className="spin" /> : null}拉取模型列表</button>
-            <button className="btn-ghost" onClick={test} disabled={busy !== null}>{busy === 'test' ? <span className="spin" /> : null}测试连接</button>
-            <button className="btn-ghost" onClick={() => { setCreating(false); setEditing(null); }}>取消</button>
-          </div>
-        </div>
+          </CardContent><CardFooter className="flex-wrap gap-2">
+            <Button onClick={() => void save()} disabled={busy !== null}>{busy === 'save' && <Spinner data-icon="inline-start" />}保存</Button>
+            <Button variant="outline" onClick={() => void pullModels()} disabled={busy !== null}>{busy === 'pull' && <Spinner data-icon="inline-start" />}拉取模型列表</Button>
+            <Button variant="outline" onClick={() => void test()} disabled={busy !== null}>{busy === 'test' && <Spinner data-icon="inline-start" />}测试连接</Button>
+            <Button variant="ghost" disabled={busy !== null} onClick={() => { setCreating(false); setEditing(null); }}>取消</Button>
+          </CardFooter>
+        </Card>
       )}
 
       {providers.map((p) => {
-        const connected = p.enabled && p.hasKey;
+        const connected = p.enabled && (p.hasKey || p.protocol === 'ollama');
         const tr = testResult[p.id];
         const diagnostic = diagnostics[p.id];
         return (
-          <div key={p.id} className={`provider-card ${connected ? 'connected' : 'pending'}`}>
-            <div className="pv-head">
-              <div className="pv-head-left">
-                <span className="pv-logo" style={{ background: connected ? 'var(--teal-soft)' : 'var(--orange-soft)', color: connected ? 'var(--teal)' : 'var(--orange)' }}>
-                  {p.label[0]?.toUpperCase()}
-                </span>
-                <div>
-                  <div className="pv-name">{p.label}</div>
-                  <div className="pv-name-sub">{p.baseUrl}</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Card key={p.id}>
+            <CardHeader><CardTitle>{p.label}</CardTitle><CardDescription className="break-all">{p.baseUrl}</CardDescription>
+              <CardAction><div className="flex items-center gap-3">
                 {p.health?.authFailed && (
-                  <span className="pv-auth-bad" title={p.health.lastError}>密钥失效</span>
+                  <Badge variant="destructive" title={p.health.lastError}>密钥失效</Badge>
                 )}
-                <span className={`pv-status ${connected ? 'ok' : 'warn'}`}>
-                  <span className="pv-sd" />{connected ? (providers[0]?.id === p.id ? '已连接 · 默认' : '已连接') : p.hasKey ? '已停用' : '未配置'}
-                </span>
-                <button
-                  className={`toggle ${p.enabled ? 'on' : ''}`}
-                  role="switch"
-                  aria-checked={p.enabled}
+                <Switch
+                  checked={p.enabled}
                   aria-label={`${p.enabled ? '停用' : '启用'} Provider ${p.label}`}
                   disabled={togglingId === p.id}
-                  onClick={() => void toggle(p)}
+                  onCheckedChange={() => void toggle(p)}
                   title={p.enabled ? '停用' : '启用'}
-                ><span className="knob" /></button>
-              </div>
-            </div>
-            <div className="pv-grid">
-              <div className="pv-field"><span className="pf-label">API KEY</span><span className="pf-value">{p.apiKeyMasked || '—'}</span></div>
-              <div className="pv-field"><span className="pf-label">模型</span><span className="pf-value">{p.model}</span></div>
-              <div className="pv-field" style={{ flex: '0 0 170px' }}>
-                <span className="pf-label">价格 / 1M tokens</span>
-                {/* F2：币种统一 $（定价按 USD/1M，见 voice.money 的注释）——本文件 230 行的
-                    模型卡片 tooltip 早已用 $，这里曾是 ¥，同一界面两套货币符号。 */}
-                <span className="pf-value">${p.priceIn ?? '?'} in · ${p.priceOut ?? '?'} out</span>
-              </div>
-              <div className="pv-field" style={{ flex: '0 0 200px' }}>
-                <span className="pf-label">协议 / 能力</span>
-                <span className="pf-value pv-caps-inline">
-                  {p.protocol ?? 'openai'}
-                  {(p.models?.length ?? 0) > 0 && <span className="pvm-cap">{p.models!.length} 模型</span>}
-                  {(p.models ?? []).some((m) => !!m.vision) && <span className="pvm-cap vis">视觉</span>}
-                </span>
-              </div>
-            </div>
-            <div className="pv-foot">
-              <div className="pv-foot-left">
-                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runTest(p)} title="用已存储的 Key 发一次测试请求——验证密钥有效性并恢复健康状态">验证密钥</button>
-                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void runDiagnostic(p)} title="查看配置完整性、模型登记和健康状态">诊断</button>
-                {tr && <span className="pv-latency" style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: tr.ok ? 'var(--teal)' : 'var(--red)' }}>{tr.ok ? <IconCheck size={11} /> : <IconClose size={11} />} {tr.ms ? `${tr.ms}ms` : '失败'}</span>}
-              </div>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => startEdit(p)}>编辑</button>
-                <button className="pd-btn danger" style={{ height: 28, fontSize: 11, padding: '0 10px' }} onClick={() => void remove(p)}>删除</button>
-              </div>
-            </div>
+                />
+              </div></CardAction>
+            </CardHeader>
+            <CardContent className="flex flex-col gap-4"><div className="flex flex-wrap gap-2"><Badge variant={connected ? 'secondary' : 'outline'}>{connected ? (providers[0]?.id === p.id ? '已配置 · 默认' : '已配置') : !p.enabled ? '已停用' : '未配置密钥'}</Badge><Badge variant="outline">{p.protocol ?? 'openai'}</Badge>{(p.models?.length ?? 0) > 0 && <Badge variant="outline">{p.models!.length} 模型</Badge>}{(p.models ?? []).some((m) => !!m.vision) && <Badge variant="outline">视觉</Badge>}</div>
+              <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">{[['API Key', p.apiKeyMasked || '—'], ['模型', p.model], ['输入价格 / 1M tokens', `$${p.priceIn ?? '?'}`], ['输出价格 / 1M tokens', `$${p.priceOut ?? '?'}`]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono">{value}</dd></div>)}</dl>
             {diagnostic && (
-              <div className="pv-diagnostic" role="status">
-                <span>配置：{diagnostic.configured.baseUrl && diagnostic.configured.apiKey && diagnostic.configured.defaultModel ? '完整' : '不完整'}</span>
-                <span>模型：{diagnostic.models.length} 个</span>
-                {diagnostic.issues.length === 0
-                  ? <span style={{ color: 'var(--teal)' }}>未发现问题</span>
-                  : <span style={{ color: 'var(--red)' }}>{diagnostic.issues.join('；')}</span>}
-              </div>
+              <Notice ok={diagnostic.issues.length === 0}>配置：{diagnostic.configured.baseUrl && diagnostic.configured.apiKey && diagnostic.configured.defaultModel ? '完整' : '不完整'} · 模型 {diagnostic.models.length} 个 · {diagnostic.issues.length ? diagnostic.issues.join('；') : '未发现问题'}</Notice>
             )}
-          </div>
+            </CardContent><CardFooter className="flex-wrap gap-2"><Button variant="outline" size="sm" disabled={tr?.pending} onClick={() => void runTest(p)}>{tr?.pending && <Spinner data-icon="inline-start" />}验证密钥</Button><Button variant="ghost" size="sm" onClick={() => void runDiagnostic(p)}>诊断</Button>{tr && !tr.pending && <Badge variant={tr.ok ? 'secondary' : 'destructive'}>{tr.ok ? <Check /> : <X />}{tr.ms ? `${tr.ms}ms` : tr.ok ? '成功' : '失败'}</Badge>}<div className="ml-auto flex gap-2"><Button variant="outline" size="sm" onClick={() => startEdit(p)}>编辑</Button><Button variant="destructive" size="icon-sm" aria-label={`删除 Provider ${p.label}`} onClick={() => void remove(p)}><Trash2 /></Button></div></CardFooter>
+          </Card>
         );
       })}
-      {providers.length === 0 && <div className="empty-state">尚未配置 Provider —— 点击右上角「新增 Provider」开始</div>}
+      {providers.length === 0 && !creating && <Empty><EmptyHeader><EmptyTitle>尚未配置 Provider</EmptyTitle><EmptyDescription>添加模型提供商后即可开始对话。</EmptyDescription></EmptyHeader><Button variant="outline" onClick={startCreate}><Plus data-icon="inline-start" />新增 Provider</Button></Empty>}
+      <AlertDialog open={!!confirm} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>请确认</AlertDialogTitle>
+            <AlertDialogDescription className="leading-6">{confirm?.text}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { confirm?.onOk(); setConfirm(null); }}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }
@@ -351,17 +333,22 @@ function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [savedTip, setSavedTip] = useState<string | null>(null);
+  const [l1Draft, setL1Draft] = useState<number | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
     const loadStats = async () => { try { const s = await statsApi.get(); if (alive) setStats(s); } catch { /* 忽略 */ } };
-    const loadCfg = async () => { try { const c = await configApi.get(); if (alive) setCfg(c); } catch { /* 忽略 */ } };
+    const loadCfg = async () => { try { const c = await configApi.get(); if (alive) { setCfg(c); setError(null); } } catch (err) { if (alive) setError(err instanceof Error ? err.message : String(err)); } };
     void loadStats(); void loadCfg();
     const t = setInterval(loadStats, 5000);
     return () => { alive = false; clearInterval(t); };
   }, []);
 
   const patch = async (p: Parameters<typeof configApi.patch>[0], tip: string) => {
+    if (saving) return;
+    setSaving(true);
     try {
       await configApi.patch(p);
       const c = await configApi.get();
@@ -370,100 +357,74 @@ function ContextSection() {
       setTimeout(() => setSavedTip(null), 2500);
     } catch (err) {
       toast.error(`这项设置没保存上：${err instanceof Error ? err.message : String(err)}`);
-    }
+    } finally { setSaving(false); setL1Draft(null); }
   };
 
   // E3：后端各消费点的默认值统一是 60000（agent.ts / chat.ts / config.ts / stats.ts），
   // 此前这里的 30000 兜底与代码与 README 旧文案互相矛盾，三处对齐到 60000。
-  const maxTokens = stats?.context.maxTokens ?? cfg?.context.maxTokens ?? 60000;
+  const maxTokens = cfg?.context.maxTokens ?? stats?.context.maxTokens ?? 60000;
   const truncations = stats?.overview.truncations ?? 0;
   // E1：兜底优先用后端真实生效阈值（statsApi 已带出），其次 0.58（代码默认）——
   // 此前兜底 0.85 恰是缓存体系设计文档实测否决的值（中文同义改写 0.85 永不命中）。
-  const l1Threshold = stats?.cache.l1Threshold ?? cfg?.cache.l1Threshold ?? 0.58;
+  const l1Threshold = l1Draft ?? cfg?.cache.l1Threshold ?? stats?.cache.l1Threshold ?? 0.58;
   const l2TtlMin = cfg?.cache.l2TtlMin ?? stats?.cache.l2TtlMin ?? 30;
   const l3Enabled = cfg?.cache.l3Enabled ?? true;
 
   return (
     <>
-      <span className="page-title">上下文管理</span>
-      <div className="page-sub">会话历史预算、自动截断、三层缓存参数（即时生效）</div>
-      {savedTip && <div style={{ fontSize: 12, color: 'var(--teal)', display: 'inline-flex', alignItems: 'center', gap: 4 }}><IconCheck size={12} /> {savedTip}</div>}
-      <div className="set-sec">
-        <span className="ss-title">预算与截断</span>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">context.maxTokens</span>
-            <span className="set-row-desc">会话历史超出预算时自动截断较早消息</span>
-          </div>
-          <input
-            className="set-input" style={{ width: 140 }} defaultValue={maxTokens}
+      <SettingsHeading title="上下文管理" description="会话历史预算、自动截断与三层缓存，即时生效。" />
+      {savedTip && <Notice>{savedTip}</Notice>}
+      {error && <Notice ok={false}>{error}</Notice>}
+      {!cfg && !error && <Skeleton className="h-32" />}
+      <Card>
+        <CardHeader><CardTitle>预算与截断</CardTitle><CardDescription>控制每轮对话可使用的历史消息量。</CardDescription></CardHeader>
+        <CardContent><FieldGroup>
+        <Field orientation="responsive">
+          <FieldContent><FieldLabel htmlFor="context-max-tokens">context.maxTokens</FieldLabel><FieldDescription>超出预算时自动截断较早消息。</FieldDescription></FieldContent>
+          <Input
+            id="context-max-tokens" className="@md/field-group:w-36" type="number" min={1} key={maxTokens} defaultValue={maxTokens} disabled={!cfg || saving}
             onBlur={(e) => { const v = Number(e.target.value); if (v && v !== maxTokens) void patch({ context: { maxTokens: v } }, `maxTokens → ${v}`); }}
           />
-        </div>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">截断注入说明</span>
-            <span className="set-row-desc">截断时注入说明消息，全程在轨迹面板可见</span>
-          </div>
-          <button
-            className={`toggle ${cfg?.context.truncateInject ?? true ? 'on' : ''}`}
-            role="switch"
-            aria-checked={cfg?.context.truncateInject ?? true}
-            onClick={() => void patch({ context: { truncateInject: !(cfg?.context.truncateInject ?? true) } }, '截断注入已切换')}
+        </Field>
+        <Field orientation="horizontal">
+          <FieldContent><FieldLabel htmlFor="truncate-inject">截断注入说明</FieldLabel><FieldDescription>截断时注入说明，可在轨迹面板查看。</FieldDescription></FieldContent>
+          <Switch
+            id="truncate-inject" disabled={!cfg || saving}
+            checked={cfg?.context.truncateInject ?? true}
+            onCheckedChange={() => void patch({ context: { truncateInject: !(cfg?.context.truncateInject ?? true) } }, '截断注入已切换')}
             aria-label="截断注入说明"
-          ><span className="knob" /></button>
-        </div>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">累计截断次数</span>
-            <span className="set-row-desc">历史所有会话因超限被截断的总次数</span>
+          />
+        </Field>
+        <Field orientation="horizontal"><FieldContent><FieldTitle>累计截断次数</FieldTitle><FieldDescription>所有会话因超限被截断的总次数。</FieldDescription></FieldContent><Badge variant="secondary">{truncations}</Badge></Field>
+      </FieldGroup></CardContent></Card>
+      <Card><CardHeader><CardTitle>三层缓存</CardTitle><CardDescription>平衡相似度、结果有效期与前缀复用。</CardDescription></CardHeader><CardContent><FieldGroup>
+        <Field orientation="responsive">
+          <FieldContent><FieldLabel htmlFor="l1-threshold">L1 · 语义缓存阈值</FieldLabel><FieldDescription>bigram Dice 相似度达到阈值即命中，默认 0.58。较低阈值可能产生误命中。</FieldDescription></FieldContent>
+          <div className="flex items-center gap-4 @md/field-group:w-48">
+            <Slider id="l1-threshold" aria-label="L1 语义缓存阈值" min={0.5} max={1} step={0.01} value={[l1Threshold]} disabled={!cfg || saving} onValueChange={([value]) => setL1Draft(value)} onValueCommit={([value]) => void patch({ cache: { l1Threshold: value } }, `L1 阈值已保存为 ${value.toFixed(2)}`)} />
+            <output className="text-sm tabular-nums" htmlFor="l1-threshold">{l1Threshold.toFixed(2)}</output>
           </div>
-          <span className="sc-val orange" style={{ fontSize: 18 }}>{truncations}</span>
-        </div>
-      </div>
-      <div className="set-sec">
-        <span className="ss-title">三层缓存</span>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label"><span className="tag t1">L1</span>语义缓存阈值</span>
-            <span className="set-row-desc">bigram Dice 相似度 ≥ 阈值即命中，免 LLM 调用（0.58 为实测标定值：再高中文同义改写难命中，再低易误命中）</span>
-          </div>
-          <div className="set-slider">
-            <input
-              type="range" min={0.5} max={1} step={0.01}
-              value={l1Threshold}
-              onChange={(e) => void patch({ cache: { l1Threshold: Number(e.target.value) } }, `L1 阈值 → ${Number(e.target.value).toFixed(2)}`)}
-            />
-            <span className="sl-val">{l1Threshold.toFixed(2)}</span>
-          </div>
-        </div>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label"><span className="tag t2">L2</span>工具结果 TTL</span>
-            <span className="set-row-desc">工具结果缓存有效期，文件变更立即失效</span>
-          </div>
-          <input
-            className="set-input" style={{ width: 100 }} defaultValue={`${l2TtlMin} min`}
+        </Field>
+        <Field orientation="responsive">
+          <FieldContent><FieldLabel htmlFor="l2-ttl">L2 · 工具结果 TTL</FieldLabel><FieldDescription>缓存有效期（分钟），文件变更立即失效。</FieldDescription></FieldContent>
+          <Input
+            id="l2-ttl" className="@md/field-group:w-36" type="number" min={1} key={l2TtlMin} defaultValue={l2TtlMin} disabled={!cfg || saving}
             onBlur={(e) => {
               const m = Number(e.target.value.replace(/[^\d.]/g, ''));
               if (m && m !== l2TtlMin) void patch({ cache: { l2TtlMin: m } }, `L2 TTL → ${m} min`);
             }}
           />
-        </div>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label"><span className="tag t3">L3</span>prompt 前缀复用</span>
-            <span className="set-row-desc">消息只追加不重写，吃满 provider KV cache 折扣</span>
-          </div>
-          <button
-            className={`toggle ${l3Enabled ? 'on' : ''}`}
-            role="switch"
-            aria-checked={l3Enabled}
-            onClick={() => void patch({ cache: { l3Enabled: !l3Enabled } }, 'L3 已切换')}
+        </Field>
+        <Field orientation="horizontal">
+          <FieldContent><FieldLabel htmlFor="l3-enabled">L3 · prompt 前缀复用</FieldLabel><FieldDescription>消息只追加不重写，复用 provider KV cache。</FieldDescription></FieldContent>
+          <Switch
+            id="l3-enabled" disabled={!cfg || saving}
+            checked={l3Enabled}
+            onCheckedChange={() => void patch({ cache: { l3Enabled: !l3Enabled } }, 'L3 已切换')}
             aria-label="L3 prompt 前缀复用"
-          ><span className="knob" /></button>
-        </div>
-      </div>
+          />
+        </Field>
+      </FieldGroup></CardContent></Card>
     </>
   );
 }
@@ -494,46 +455,52 @@ function RoutingSection() {
 
   return (
     <>
-      <span className="page-title">模型路由</span>
-      <div className="page-sub">按任务类型把整轮对话路由到指定模型；能力不符时（如需要视觉）harness 会自动借道多模态模型再回切</div>
-      {tip && <div style={{ fontSize: 12, color: 'var(--teal)' }}><IconCheck size={12} /> {tip}</div>}
-      {targets.length === 0 && <div className="empty-state">尚未配置 Provider——先在「模型与 Provider」中添加并拉取模型列表</div>}
-      <div className="set-sec">
+      <SettingsHeading title="模型路由" description="按任务类型指定模型；需要视觉等能力时自动选择适合的模型。" />
+      {tip && <Notice>{tip}</Notice>}
+      {targets.length === 0 && <Empty><EmptyHeader><EmptyTitle>暂无可用路由模型</EmptyTitle><EmptyDescription>在「模型与 Provider」中添加 Provider 并拉取模型列表。</EmptyDescription></EmptyHeader></Empty>}
+      <Card><CardHeader><CardTitle>任务类型</CardTitle><CardDescription>未指定路由时，使用对话中当前选择的模型。</CardDescription></CardHeader><CardContent><FieldGroup>
         {types.map((t) => {
           const value = routing[t] ?? '';
           const target = targets.find(x => x.value === value);
           return (
-            <div className="set-row" key={t}>
-              <div className="set-row-l">
-                <span className="set-row-label">{t}</span>
-                <span className="set-row-desc">
+            <Field orientation="responsive" key={t}>
+              <FieldContent>
+                <FieldLabel htmlFor={`route-${t}`}>{t}</FieldLabel>
+                <FieldDescription>
                   {value ? (target ? `${target.contextWindow ? `${Math.round(target.contextWindow / 1000)}k · ` : ''}${target.vision ? '支持视觉' : '不支持视觉'}` : `已配置 ${value}（该模型未在 Provider 中登记）`) : '未配置，使用右上角当前模型'}
-                </span>
-              </div>
-              <select
-                className="set-input" style={{ width: 260 }} value={value} aria-label={`${t} 路由目标`}
-                onChange={(e) => {
+                </FieldDescription>
+              </FieldContent>
+              <Select
+                value={value || '__none__'}
+                onValueChange={(nextValue) => {
                   const next = { ...routing };
-                  if (!e.target.value) delete next[t]; else next[t] = e.target.value;
+                  const selected = nextValue === '__none__' ? '' : nextValue;
+                  if (!selected) delete next[t];
+                  else next[t] = selected;
                   void commit(next);
                 }}
               >
-                <option value="">（不路由）</option>
-                {targets.map((x) => <option key={x.value} value={x.value}>{x.vision ? '◉ ' : ''}{x.label}</option>)}
-              </select>
-            </div>
+                <SelectTrigger id={`route-${t}`} className="min-w-0 @md/field-group:w-56" aria-label={`${t} 路由目标`}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="__none__">（不路由）</SelectItem>
+                    {targets.map((target) => (
+                      <SelectItem key={target.value} value={target.value}>
+                        {target.vision ? '◉ ' : ''}{target.label}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+            </Field>
           );
         })}
         {used.map((t) => (
-          <div className="set-row" key={t}>
-            <div className="set-row-l">
-              <span className="set-row-label">{t}</span>
-              <span className="set-row-desc">自定义类目（非内置任务类型，按 classifyTask 结果匹配）</span>
-            </div>
-            <button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => { const next = { ...routing }; delete next[t]; void commit(next); }}>移除</button>
-          </div>
+          <Field orientation="horizontal" key={t}><FieldContent><FieldTitle>{t}</FieldTitle><FieldDescription>自定义类目，按 classifyTask 结果匹配。</FieldDescription></FieldContent><Button variant="ghost" size="sm" onClick={() => { const next = { ...routing }; delete next[t]; void commit(next); }}>移除</Button></Field>
         ))}
-      </div>
+      </FieldGroup></CardContent></Card>
     </>
   );
 }
@@ -546,18 +513,25 @@ function RulesSection() {
   const [draft, setDraft] = useState('');
   const [tip, setTip] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [policyDraft, setPolicyDraft] = useState<RulesView['policy'] | null>(null);
+  const [policyPreview, setPolicyPreview] = useState<PolicyDryRunView | null>(null);
+  const [policyBusy, setPolicyBusy] = useState(false);
 
   const load = async () => {
     try { setView(await rulesApi.get()); } catch (e) { toast.error(`规则没读到：${e instanceof Error ? e.message : String(e)}`); }
   };
-  useEffect(() => { void load(); }, []);
+  useEffect(() => {
+    let alive = true;
+    void rulesApi.get().then((next) => { if (alive) { setView(next); setDraft(next.projectFiles.find((item) => item.name === 'AGENTS.md' || item.name.endsWith('/AGENTS.md'))?.content ?? ''); } }).catch((error) => toast.error(String(error)));
+    return () => { alive = false; };
+  }, []);
 
   const options = scope === 'global'
     ? (view?.globalFiles ?? []).map(f => f.name)
     : ['AGENTS.md', 'CLAUDE.md', '.claude/CLAUDE.md', '.maharness/rules/'];
-  const pickFile = (name: string) => {
+  const pickFile = (name: string, nextScope = scope) => {
     setFile(name);
-    if (scope === 'global') setDraft(view?.globalFiles.find(f => f.name === name)?.content ?? '');
+    if (nextScope === 'global') setDraft(view?.globalFiles.find(f => f.name === name)?.content ?? '');
     else setDraft(view?.projectFiles.find(f => f.name.endsWith(name) || f.name === name)?.content ?? '');
   };
 
@@ -584,94 +558,154 @@ function RulesSection() {
 
   const togglePolicy = async (idx: number, patch: Record<string, unknown>) => {
     if (!view) return;
-    const next = view.policy.map((r, i) => (i === idx ? { ...r, ...patch } : r));
-    const r = await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
-    if (!r.ok) { toast.error(r.error ?? '这条策略没保存上'); return; }
-    await load();
+    const next = (policyDraft ?? view.policy).map((r, i) => (i === idx ? { ...r, ...patch } : r));
+    setPolicyDraft(next as RulesView['policy']);
+    setPolicyPreview(null);
   };
 
   const addPolicy = async () => {
     if (!view) return;
-    const next = [...view.policy, { id: `rule-${Date.now().toString(36)}`, effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run test', reason: '测试命令免审批', enabled: true }];
-    const r = await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
-    if (!r.ok) { toast.error(r.error ?? '这条规则没加上'); return; }
-    await load();
+    const next = [...(policyDraft ?? view.policy), { id: `rule-${Date.now().toString(36)}`, effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run test', reason: '测试命令免审批', enabled: true }];
+    setPolicyDraft(next as RulesView['policy']);
+    setPolicyPreview(null);
   };
 
   const removePolicy = async (idx: number) => {
     if (!view) return;
-    const next = view.policy.filter((_, i) => i !== idx);
-    await rulesApi.putPolicy(scope, next as RulesView['policy'], view.policyRevisions[scope]);
-    await load();
+    const next = (policyDraft ?? view.policy).filter((_, i) => i !== idx);
+    setPolicyDraft(next as RulesView['policy']);
+    setPolicyPreview(null);
   };
 
-  if (!view) return <div className="empty-state">读取规则中…</div>;
+  const previewPolicy = async () => {
+    if (!view || policyBusy) return;
+    setPolicyBusy(true);
+    try {
+      const next = await rulesApi.dryRun(scope, policyDraft ?? view.policy);
+      setPolicyPreview(next);
+    } catch (e) { toast.error(`策略演练失败：${e instanceof Error ? e.message : String(e)}`); }
+    finally { setPolicyBusy(false); }
+  };
+
+  const savePolicy = async () => {
+    if (!view || !policyDraft || policyBusy) return;
+    setPolicyBusy(true);
+    try {
+      const r = await rulesApi.putPolicy(scope, policyDraft, view.policyRevisions[scope]);
+      if (!r.ok) { toast.error(r.error ?? '策略没保存上'); return; }
+      await load();
+      setPolicyDraft(null);
+      setPolicyPreview(null);
+      toast.success('策略已保存');
+    } catch (e) { toast.error(`策略没保存上：${e instanceof Error ? e.message : String(e)}`); }
+    finally { setPolicyBusy(false); }
+  };
+
+  if (!view) return <div className="flex flex-col gap-4" aria-label="读取规则中" aria-busy="true"><Skeleton className="h-8 w-40" /><Skeleton className="h-64" /></div>;
+  const policy = policyDraft ?? view.policy;
 
   return (
     <>
-      <span className="page-title">用户规则</span>
-      <div className="page-sub">告诉 maharness 你/这个项目要求什么。规则文件即事实源，可 git 版本化；工作区切换自动重读</div>
-      {tip && <div style={{ fontSize: 12, color: 'var(--teal)' }}><IconCheck size={12} /> {tip}</div>}
-      {view.errors.length > 0 && <div style={{ fontSize: 12, color: 'var(--red)' }}>策略文件问题：{view.errors.join('；')}</div>}
+      <SettingsHeading title="用户规则" description="规则文件随工作区自动重读，可使用 Git 管理版本。" />
+      {tip && <Notice>{tip}</Notice>}
+      {view.errors.length > 0 && <Notice ok={false}>策略文件问题：{view.errors.join('；')}</Notice>}
 
-      <div className="set-sec">
-        <span className="ss-title">提示规则</span>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">作用域</span>
-            <span className="set-row-desc">当前注入 {view.promptChars} 字符 · 生效路径：全局 data/rules/ + 项目 AGENTS.md/CLAUDE.md/.maharness/rules/</span>
-          </div>
-          <div style={{ display: 'flex', gap: 6 }}>
-            {(['project', 'global'] as const).map((s) => (
-              <button key={s} className={`btn-ghost${scope === s ? ' on' : ''}`} style={{ height: 28, fontSize: 11 }} onClick={() => { setScope(s); const first = s === 'global' ? (view.globalFiles[0]?.name ?? 'maharness.md') : 'AGENTS.md'; pickFile(first); }}>
-                {s === 'project' ? '项目' : '全局'}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-          <select className="set-input" style={{ width: 240 }} value={options.includes(file) ? file : options[0] ?? ''} onChange={(e) => pickFile(e.target.value)} aria-label="规则文件">
-            {options.length === 0 && <option value="">（暂无文件）</option>}
-            {options.map(o => <option key={o} value={o}>{o}</option>)}
-          </select>
+      <Card>
+        <CardHeader><CardTitle>提示规则</CardTitle><CardDescription>当前注入 {view.promptChars} 字符 · 全局 data/rules/ 与项目规则文件共同生效。</CardDescription></CardHeader>
+        <CardContent><FieldGroup>
+        <Field orientation="responsive">
+          <FieldContent><FieldTitle id="rules-scope-label">作用域</FieldTitle><FieldDescription>选择要编辑的规则来源。</FieldDescription></FieldContent>
+          <ToggleGroup type="single" variant="outline" value={scope} aria-labelledby="rules-scope-label" disabled={busy} onValueChange={(next) => { if (next !== 'project' && next !== 'global') return; setScope(next); setPolicyDraft(null); setPolicyPreview(null); pickFile(next === 'global' ? view.globalFiles[0]?.name ?? 'maharness.md' : 'AGENTS.md', next); }}>
+            <ToggleGroupItem value="project">项目</ToggleGroupItem><ToggleGroupItem value="global">全局</ToggleGroupItem>
+          </ToggleGroup>
+        </Field>
+        <Field>
+          <FieldLabel htmlFor="rule-file">规则文件</FieldLabel>
+        <div className="flex flex-wrap items-center gap-2">
+          <Select
+            value={file || '__none__'}
+            disabled={busy}
+            onValueChange={(value) => {
+              if (value !== '__none__') pickFile(value);
+            }}
+          >
+            <SelectTrigger id="rule-file" className="min-w-0 flex-1" aria-label="规则文件">
+              <SelectValue placeholder="（暂无文件）" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectGroup>
+                {options.length === 0 && <SelectItem value="__none__">（暂无文件）</SelectItem>}
+                {options.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
+                {!options.includes(file) && file && <SelectItem value={file}>{file}</SelectItem>}
+              </SelectGroup>
+            </SelectContent>
+          </Select>
           {scope === 'global' && (
-            <button className="btn-ghost" style={{ height: 30, fontSize: 11 }} onClick={() => { setFile('new-rule.md'); setDraft(''); }}>新建 .md</button>
+            <Button variant="outline" disabled={busy} onClick={() => { setFile('new-rule.md'); setDraft(''); }}><Plus data-icon="inline-start" />新建 .md</Button>
           )}
         </div>
-        <textarea
-          className="set-input rule-editor" rows={12} value={draft}
+        </Field>
+        <Field><FieldLabel htmlFor="rule-body">规则正文</FieldLabel>
+        <Textarea
+          id="rule-body" className="min-h-64 font-mono" rows={12} value={draft} disabled={busy}
           onChange={(e) => setDraft(e.target.value)}
           placeholder={'写自然语言即可，例如：\n- 提交信息用中文，遵循 feat/fix/chore 前缀\n- 改完代码必须跑 npm run typecheck\n- 不要动 src/legacy/ 下的文件'}
           aria-label="规则正文"
         />
-        <div>
-          <button className="btn-ok" onClick={() => void save()} disabled={busy}>{busy ? <span className="spin" /> : null}保存规则</button>
-        </div>
-      </div>
+        </Field></FieldGroup></CardContent>
+        <CardFooter><Button onClick={() => void save()} disabled={busy}>{busy && <Spinner data-icon="inline-start" />}保存规则</Button></CardFooter>
+      </Card>
 
-      <div className="set-sec">
-        <span className="ss-title">策略规则（审批与拦截）</span>
-        <div className="page-sub">allow = 该类调用免审批（每次放行都进轨迹留痕）；deny = 直接拒绝；作用于 {scope === 'project' ? '本项目 .maharness/rules.json' : '全局 data/rules.json'}</div>
-        {view.policy.length === 0 && <div className="empty-state" style={{ padding: '12px' }}>尚无策略规则——默认按内置白名单判定（只读命令免审批）</div>}
-        {view.policy.map((r, i) => (
-          <div className="set-row" key={r.id ?? i}>
-            <div className="set-row-l">
-              <span className="set-row-label"><code>{r.tool}</code> {r.argPattern ? <code>/{r.argPattern}/</code> : null}</span>
-              <span className="set-row-desc">{r.reason || '（无说明）'}</span>
+      <Card>
+        <CardHeader><CardTitle>策略规则</CardTitle><CardDescription>allow 免审批，deny 拒绝。写入{scope === 'project' ? '项目 .maharness/rules.json' : '全局 data/rules.json'}。</CardDescription></CardHeader>
+        <CardContent><FieldGroup>
+        {policy.length === 0 && <Empty><EmptyHeader><EmptyTitle>暂无策略规则</EmptyTitle><EmptyDescription>按内置白名单判定，只读命令免审批。</EmptyDescription></EmptyHeader></Empty>}
+        {policy.map((r, i) => (
+          <Field orientation="responsive" key={r.id ?? i}>
+            <FieldContent className="min-w-0 break-all"><FieldTitle>{r.tool}</FieldTitle><FieldDescription>{r.argPattern ? `/${r.argPattern}/ · ` : ''}{r.reason || '无说明'}</FieldDescription></FieldContent>
+            <div className="flex items-center gap-3">
+              <Select value={r.effect} onValueChange={(value) => void togglePolicy(i, { effect: value })}>
+                <SelectTrigger className="w-32" aria-label={`${r.tool} 策略效果`}><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectGroup>
+                    <SelectItem value="allow">allow</SelectItem>
+                    <SelectItem value="deny">deny</SelectItem>
+                    <SelectItem value="require-approval">需审批</SelectItem>
+                  </SelectGroup>
+                </SelectContent>
+              </Select>
+              <Switch checked={r.enabled !== false} aria-label="启用策略" onCheckedChange={() => void togglePolicy(i, { enabled: r.enabled === false })} />
+              <Button variant="ghost" size="icon-sm" aria-label={`删除策略 ${r.tool}`} onClick={() => void removePolicy(i)}><Trash2 /></Button>
             </div>
-            <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-              <select className="set-input" style={{ width: 120, height: 28 }} value={r.effect} onChange={(e) => void togglePolicy(i, { effect: e.target.value })} aria-label="策略效果">
-                <option value="allow">allow</option>
-                <option value="deny">deny</option>
-                <option value="require-approval">需审批</option>
-              </select>
-              <button className={`toggle ${r.enabled === false ? '' : 'on'}`} role="switch" aria-checked={r.enabled !== false} aria-label="启用策略" onClick={() => void togglePolicy(i, { enabled: r.enabled === false })}><span className="knob" /></button>
-              <button className="pd-btn danger" style={{ height: 28, fontSize: 11, padding: '0 10px' }} onClick={() => void removePolicy(i)}>删</button>
-            </div>
-          </div>
+          </Field>
         ))}
-        <div><button className="btn-ghost" style={{ height: 28, fontSize: 11 }} onClick={() => void addPolicy()}>+ 添加策略（npm run test 免审批）</button></div>
-      </div>
+          {policyDraft ? <Notice>策略有未保存的修改。保存前可先预览变化，确认后再写入。</Notice> : null}
+          {policyPreview ? (
+            <div className="flex flex-col gap-2 rounded-md border p-3 text-sm">
+              <div className="font-medium">
+                {policyPreview.changed ? '策略判定将发生变化' : '判定结果不变'}
+                {' · '}新增 {policyPreview.diff.filter((item) => item.change === 'added').length}
+                {' · '}修改 {policyPreview.diff.filter((item) => item.change === 'changed').length}
+                {' · '}删除 {policyPreview.diff.filter((item) => item.change === 'removed').length}
+              </div>
+              {policyPreview.probes.map((probe) => (
+                <div key={probe.tool} className="text-muted-foreground">
+                  {probe.tool}：{probe.current.decision} → {probe.candidate.decision}
+                </div>
+              ))}
+              {policyPreview.issues.map((issue, index) => (
+                <div key={`${issue.code}-${index}`} className={issue.level === 'error' ? 'text-destructive' : 'text-amber-600 dark:text-amber-400'}>
+                  {issue.level === 'error' ? '错误' : '提示'}：{issue.message}
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </FieldGroup></CardContent><CardFooter className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void addPolicy()} disabled={policyBusy}><Plus data-icon="inline-start" />添加策略（npm run test 免审批）</Button>
+          <Button variant="outline" onClick={() => void previewPolicy()} disabled={policyBusy}>{policyBusy && <Spinner data-icon="inline-start" />}预览影响</Button>
+          <Button onClick={() => void savePolicy()} disabled={policyBusy || !policyDraft}>{policyBusy && <Spinner data-icon="inline-start" />}保存策略</Button>
+        </CardFooter>
+      </Card>
     </>
   );
 }
@@ -680,76 +714,52 @@ function readAutoScroll(): boolean {
   try { return localStorage.getItem('maharness-auto-scroll') !== 'off'; } catch { return true; }
 }
 
-const BRANDS: { key: Brand; label: string; dots: string }[] = [
-  { key: 'doodle', label: '涂鸦手账（珊瑚红 · 草绿 · 橘）', dots: 'linear-gradient(90deg,#ff6a45,#4fb8a5,#ffa62b)' },
-  { key: 'ink', label: '墨线单色（低刺激，适合长时间编码）', dots: 'linear-gradient(90deg,#d8d2c8,#8f8a80,#b6afa3)' },
-  { key: 'moss', label: '苔绿（安静耐用）', dots: 'linear-gradient(90deg,#6fa87c,#4e9c8f,#d2a25c)' },
+const BRANDS: { key: Brand; label: string }[] = [
+  { key: 'doodle', label: '暖砂' },
+  { key: 'ink', label: '墨灰' },
+  { key: 'moss', label: '苔绿' },
 ];
 
 function GeneralSection({ theme, onThemeChange, brand, onBrandChange }: { theme: Theme; onThemeChange: (t: Theme) => void; brand: Brand; onBrandChange: (b: Brand) => void }) {
   const [autoScroll, setAutoScroll] = useState(readAutoScroll);
   return (
     <>
-      <span className="page-title">通用</span>
-      <div className="page-sub">外观、语言与基础行为</div>
-      <div className="set-sec">
-        <span className="ss-title">外观</span>
-        <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">深色主题</span>
-            <span className="set-row-desc">{theme === 'dark' ? '深色（当前）· 深夜炭纸手账涂鸦' : '浅色（当前）· 米白点阵纸手账涂鸦'}</span>
-          </div>
-          <button
-            className={`toggle ${theme === 'dark' ? 'on' : ''}`}
-            role="switch"
-            aria-checked={theme === 'dark'}
-            onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
+      <SettingsHeading title="通用" description="外观与对话偏好。" />
+      <Card><CardHeader><CardTitle>外观</CardTitle><CardDescription>明暗主题与品牌强调色独立组合。</CardDescription></CardHeader><CardContent><FieldGroup>
+        <Field orientation="horizontal">
+          <FieldContent><FieldLabel htmlFor="dark-theme">深色主题</FieldLabel><FieldDescription>{theme === 'dark' ? '当前使用深色外观。' : '当前使用浅色外观。'}</FieldDescription></FieldContent>
+          <Switch
+            id="dark-theme"
+            checked={theme === 'dark'}
+            onCheckedChange={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
             aria-label="切换深色主题"
-          >
-            <span className="knob" />
-          </button>
-        </div>
-        <div className="set-row">
-          <div className="set-row-l">
-            <span className="set-row-label">品牌色板</span>
-            <span className="set-row-desc">同一套手账骨架下切换品牌身份，与明暗正交组合（3 套 × 2 明暗）</span>
-          </div>
-          <div className="brand-swatches">
+          />
+        </Field>
+        <Field orientation="responsive">
+          <FieldContent><FieldTitle id="brand-label">品牌色板</FieldTitle><FieldDescription>暖砂、墨灰与苔绿。</FieldDescription></FieldContent>
+          <ToggleGroup type="single" variant="outline" aria-labelledby="brand-label" value={brand} onValueChange={(next) => { if (next === 'doodle' || next === 'ink' || next === 'moss') onBrandChange(next); }}>
             {BRANDS.map((b) => (
-              <button
-                key={b.key}
-                type="button"
-                className={`brand-swatch${brand === b.key ? ' on' : ''}`}
-                style={{ background: b.dots }}
-                title={b.label}
-                aria-label={b.label}
-                aria-pressed={brand === b.key}
-                onClick={() => onBrandChange(b.key)}
-              />
+              <ToggleGroupItem key={b.key} value={b.key} aria-label={b.label}>{b.label}</ToggleGroupItem>
             ))}
-          </div>
-        </div>
-      </div>
-      <div className="set-sec">
-        <span className="ss-title">对话</span>
-        <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">流式输出</span><span className="set-row-desc">SSE 逐字渲染回复（服务端控制，常开）</span></div>
-          <span className="badge-ok">已开启</span>
-        </div>
-        <div className="set-row">
-          <div className="set-row-l"><span className="set-row-label">自动滚动</span><span className="set-row-desc">新消息自动滚动到底部</span></div>
-          <button
-            className={`toggle ${autoScroll ? 'on' : ''}`}
-            role="switch"
-            aria-checked={autoScroll}
+          </ToggleGroup>
+        </Field>
+      </FieldGroup></CardContent></Card>
+      <Card><CardHeader><CardTitle>对话</CardTitle><CardDescription>消息输出与阅读偏好。</CardDescription></CardHeader><CardContent><FieldGroup>
+        <Field orientation="horizontal"><FieldContent><FieldTitle>流式输出</FieldTitle><FieldDescription>SSE 逐字呈现回复，由服务端控制。</FieldDescription></FieldContent><Badge variant="secondary">已开启</Badge></Field>
+        <Field orientation="horizontal">
+          <FieldContent><FieldLabel htmlFor="auto-scroll">自动滚动</FieldLabel><FieldDescription>新消息自动跟随，阅读历史时暂停。</FieldDescription></FieldContent>
+          <Switch
+            id="auto-scroll"
+            checked={autoScroll}
             aria-label="自动滚动"
-            onClick={() => {
+            onCheckedChange={() => {
               const next = !autoScroll;
               setAutoScroll(next);
               try { localStorage.setItem('maharness-auto-scroll', next ? 'on' : 'off'); } catch { /* 忽略 */ }
             }}
-          ><span className="knob" /></button>
-        </div>
-      </div>
+          />
+        </Field>
+      </FieldGroup></CardContent></Card>
     </>
   );
 }
@@ -765,6 +775,7 @@ function GeneralSection({ theme, onThemeChange, brand, onBrandChange }: { theme:
 function SecuritySection() {
   const [posture, setPosture] = useState<SecurityPosture | null>(null);
   const [tokenDraft, setTokenDraft] = useState(() => getMutationToken());
+  const [tenantDraft, setTenantDraft] = useState(() => getTenantId());
   const [err, setErr] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -780,114 +791,132 @@ function SecuritySection() {
     void load();
   };
 
+  const saveTenant = () => {
+    const next = tenantDraft.trim();
+    if (next && !/^[A-Za-z0-9_-]{1,64}$/.test(next)) {
+      toast.error('租户 id 仅支持字母/数字/下划线/连字符，长度 1-64');
+      return;
+    }
+    setTenantId(tenantDraft);
+    toast.success(next ? `已切换到租户 ${next}` : '已恢复默认租户');
+    window.location.reload();
+  };
+
   const blanket = posture?.policy.blanketAllow ?? [];
 
   return (
-    <div className="set-sec">
-      <span className="ss-title">安全</span>
-      {err && <div className="page-sub">安全状态没读到：{err}</div>}
-      {!posture && !err && <div className="page-sub">读取安全状态…</div>}
+    <Card>
+      <CardHeader><CardTitle>安全</CardTitle><CardDescription>凭据、审批与密钥状态。</CardDescription></CardHeader>
+      <CardContent><FieldGroup>
+      {err && <Notice ok={false}>安全状态读取失败：{err}</Notice>}
+      {!posture && !err && <Skeleton className="h-32" />}
 
       {posture && (
         <>
-          <div className="set-row">
-            <div className="set-row-l">
-              <span className="set-row-label">监听地址</span>
-              <span className="set-row-desc">只服务本机；局域网与外网不可达（Host/Origin 另挡 DNS rebinding 与跨源页）</span>
-            </div>
-            <span className="sc-val" style={{ fontSize: 13 }}>{posture.bind}</span>
-          </div>
+          <Field orientation="responsive"><FieldContent><FieldTitle>监听地址</FieldTitle><FieldDescription>服务地址及 Host/Origin 访问校验。</FieldDescription></FieldContent><Badge variant="outline">{posture.bind}</Badge></Field>
 
-          <div className="set-row">
-            <div className="set-row-l">
-              <span className="set-row-label">变更类操作显式授权</span>
-              <span className="set-row-desc">
+          <Field>
+            <FieldContent>
+              <FieldTitle>当前租户</FieldTitle>
+              <FieldDescription>
+                每次 API 请求携带 <code>x-maharness-tenant</code>；留空使用服务端默认租户。切换后页面会重载。
+              </FieldDescription>
+            </FieldContent>
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="outline">当前 {getTenantId() || 'default'}</Badge>
+              <Input
+                className="min-w-40 flex-1"
+                aria-label="当前租户"
+                placeholder="default"
+                value={tenantDraft}
+                onChange={(event) => setTenantDraft(event.target.value)}
+              />
+              <Button variant="outline" onClick={saveTenant}>切换</Button>
+            </div>
+          </Field>
+
+          <Field orientation="responsive">
+            <FieldContent>
+              <FieldTitle>变更类操作显式授权</FieldTitle>
+              <FieldDescription>
                 服务端 {posture.mutationAuthRequired ? '已要求' : '未要求'} <code>{posture.mutationTokenHeader}</code> 头
                 （挡无意图的本机进程一次调用就批准危险命令 / 切沙箱根 / 注入 allow 策略；
                 不是进程隔离边界——同用户身份的代码本就能改 data/ 下的文件）
-              </span>
-            </div>
-            <span className={`sc-val ${posture.mutationAuthRequired ? 'teal' : 'orange'}`} style={{ fontSize: 13 }}>
+              </FieldDescription>
+            </FieldContent>
+            <Badge variant={posture.mutationAuthRequired ? 'secondary' : 'outline'}>
               {posture.mutationAuthRequired ? '已启用' : '未启用'}
-            </span>
-          </div>
+            </Badge>
+          </Field>
 
           {posture.mutationAuthRequired && (
-            <div className="set-row">
-              <div className="set-row-l">
-                <span className="set-row-label">录入变更凭据</span>
-                <span className="set-row-desc">
+            <Field>
+              <FieldContent>
+                <FieldLabel htmlFor="mutation-token">录入变更凭据</FieldLabel>
+                <FieldDescription>
                   填服务端 <code>MAHARNESS_API_TOKEN</code> 的值（只存这台浏览器，不从服务端取——
                   服务端下发等于对本机所有进程公开）。留空并保存 = 本机不再自动带凭据。
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-                <input
-                  className="set-input" style={{ width: 200 }} type="password" autoComplete="off"
+                </FieldDescription>
+              </FieldContent>
+              <div className="flex gap-2">
+                <Input
+                  id="mutation-token" className="min-w-0 flex-1" type="password" autoComplete="off"
                   aria-label="变更凭据" placeholder="与服务端 env 一致"
                   value={tokenDraft} onChange={(e) => setTokenDraft(e.target.value)}
                 />
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={saveToken}>保存</button>
+                <Button variant="outline" onClick={saveToken}>保存</Button>
               </div>
-            </div>
+            </Field>
           )}
 
-          <div className="set-row">
-            <div className="set-row-l">
-              <span className="set-row-label">审批一次性凭据</span>
-              <span className="set-row-desc">回答审批必须回带该次挂起的凭据（单次有效，重放被拒）。凭据随审批卡一起下发，本页已自动回带</span>
-            </div>
-            <span className={`sc-val ${posture.approvalTokenRequired ? 'teal' : 'orange'}`} style={{ fontSize: 13 }}>
+          <Field orientation="responsive">
+            <FieldContent><FieldTitle>审批一次性凭据</FieldTitle><FieldDescription>凭据随审批卡下发并自动回带，单次有效。</FieldDescription></FieldContent>
+            <Badge variant={posture.approvalTokenRequired ? 'secondary' : 'outline'}>
               {posture.approvalTokenRequired ? '强制' : '已下发但未强制'}
-            </span>
-          </div>
+            </Badge>
+          </Field>
 
-          <div className="set-row">
-            <div className="set-row-l">
-              <span className="set-row-label">主密钥</span>
-              <span className="set-row-desc">
+          <Field orientation="responsive">
+            <FieldContent>
+              <FieldTitle>主密钥</FieldTitle>
+              <FieldDescription className="break-all">
                 {posture.masterKey.message || posture.masterKey.state}
                 {posture.masterKey.backupPath ? `（原文件已备份为 ${posture.masterKey.backupPath}）` : ''}
-              </span>
-            </div>
-            <span className={`sc-val ${posture.masterKey.available ? 'teal' : 'red'}`} style={{ fontSize: 13 }}>
+              </FieldDescription>
+            </FieldContent>
+            <Badge variant={posture.masterKey.available ? 'secondary' : 'destructive'}>
               {posture.masterKey.available ? '可用' : '异常'}
-            </span>
-          </div>
+            </Badge>
+          </Field>
 
           {posture.credentials.broken.length > 0 && (
-            <div className="set-row">
-              <div className="set-row-l">
-                <span className="set-row-label">密钥不可解的供应商</span>
-                <span className="set-row-desc">
+            <Alert variant="destructive"><ShieldAlert />
+                <AlertTitle>密钥不可解的供应商 · {posture.credentials.broken.length} 个</AlertTitle>
+                <AlertDescription>
                   {posture.credentials.broken.map((b) => `${b.label || b.id}（${b.reason === 'no-master-key' ? '没有主密钥' : '密文损坏或密钥已换'}）`).join('、')}
                   —— 请在「模型与 Provider」里重新录入 Key；这不是你按错了什么
-                </span>
-              </div>
-              <span className="sc-val red" style={{ fontSize: 13 }}>{posture.credentials.broken.length} 个</span>
-            </div>
+                </AlertDescription>
+            </Alert>
           )}
 
           {blanket.length > 0 && (
-            <div className="set-row">
-              <div className="set-row-l">
-                <span className="set-row-label">审批门已被整体放行</span>
-                <span className="set-row-desc">
+            <Alert variant="destructive"><ShieldAlert />
+                <AlertTitle>审批门已被整体放行</AlertTitle>
+                <AlertDescription>
                   策略里有对全部工具放行的 allow 规则（{blanket.map((b) => `${b.tool} ← ${b.file}`).join('、')}）。
                   这意味着高危调用不再逐个询问你——如果不是你本意，请到「用户规则」删掉它。
-                </span>
-              </div>
-              <span className="sc-val red" style={{ fontSize: 13 }}>注意</span>
-            </div>
+                </AlertDescription>
+            </Alert>
           )}
         </>
       )}
-    </div>
+    </FieldGroup></CardContent></Card>
   );
 }
 
 export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
+  const mobile = useIsMobile();
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
     { key: 'general', label: '通用' },
     { key: 'providers', label: '模型与 Provider' },
@@ -900,51 +929,58 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
   ];
 
   return (
-    <div className="settings-layout">
-      <div className="settings-nav">
-        <div className="sn-title">设置</div>
-        {navs.map((n) => (
-          <div key={n.key} className={`sn-item ${tab === n.key ? 'active' : ''}`} onClick={() => setTab(n.key)}>
-            <span>{n.label}</span>
-            {n.badge && <span className="sn-badge">{n.badge}</span>}
-          </div>
-        ))}
-      </div>
-      <div className="settings-content">
-        {tab === 'general' && <GeneralSection theme={theme} onThemeChange={onThemeChange} brand={brand} onBrandChange={onBrandChange} />}
-        {tab === 'providers' && <ProvidersSection providers={providers} onChanged={onChanged} />}
-        {tab === 'context' && <ContextSection />}
-        {tab === 'routing' && <RoutingSection />}
-        {tab === 'personas' && <PersonaPanel />}
-        {tab === 'rules' && <RulesSection />}
-        {tab === 'skills' && <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}><SkillsView /></div>}
-        {tab === 'advanced' && (
+    <Tabs
+      value={tab}
+      onValueChange={(value) => setTab(value as SettingTab)}
+      orientation={mobile ? 'horizontal' : 'vertical'}
+      className="min-h-0 min-w-0 flex-1 gap-0"
+    >
+      <nav aria-label="设置分类" className="shrink-0 overflow-x-auto border-b p-3 md:w-44 md:overflow-y-auto md:border-r md:border-b-0">
+        <TabsList aria-label="设置分类" className="md:w-full">
+          {navs.map((nav) => (
+            <TabsTrigger
+              key={nav.key}
+              value={nav.key}
+              className="md:min-h-9"
+            >
+              <span>{nav.label}</span>
+              {nav.badge && <Badge variant="secondary">{nav.badge}</Badge>}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </nav>
+      <ScrollArea className="min-h-0 min-w-0 flex-1"><div className="mx-auto w-full max-w-4xl p-4 md:p-6">
+        <TabsContent value="general" className="flex flex-col gap-3">
+          <GeneralSection theme={theme} onThemeChange={onThemeChange} brand={brand} onBrandChange={onBrandChange} />
+        </TabsContent>
+        <TabsContent value="providers" className="flex flex-col gap-3">
+          <ProvidersSection providers={providers} onChanged={onChanged} />
+        </TabsContent>
+        <TabsContent value="context" className="flex flex-col gap-3">
+          <ContextSection />
+        </TabsContent>
+        <TabsContent value="routing" className="flex flex-col gap-3">
+          <RoutingSection />
+        </TabsContent>
+        <TabsContent value="personas" className="flex flex-col gap-3">
+          <PersonaPanel />
+        </TabsContent>
+        <TabsContent value="rules" className="flex flex-col gap-3">
+          <RulesSection />
+        </TabsContent>
+        <TabsContent value="skills" className="flex flex-col gap-3">
+          <SkillsView />
+        </TabsContent>
+        <TabsContent value="advanced" className="flex flex-col gap-3">
           <>
-            <span className="page-title">高级</span>
-            <div className="page-sub">调试与实验性选项</div>
-            <div className="set-sec">
-              <span className="ss-title">审计</span>
-              <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">JSONL 审计日志</span><span className="set-row-desc">每次运行的结构化轨迹落盘（data/traces）</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('traces')}>查看目录</button>
-              </div>
-              <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">数据存储</span><span className="set-row-desc">本地 SQLite 数据库位置（data/agent.db）</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('db')}>打开</button>
-              </div>
-              <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">沙箱根目录</span><span className="set-row-desc">文件工具与文件 API 的可访问范围</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('sandbox')}>打开</button>
-              </div>
-              <div className="set-row">
-                <div className="set-row-l"><span className="set-row-label">用户配置</span><span className="set-row-desc">config.json（分层配置，运行时修改优先）</span></div>
-                <button className="btn-ghost" style={{ height: 30, fontSize: 12 }} onClick={() => void metaApi.open('config')}>打开</button>
-              </div>
-            </div>
+            <SettingsHeading title="高级" description="审计日志、本地存储与安全。" />
+            <Card><CardHeader><CardTitle>审计与存储</CardTitle><CardDescription>打开本地数据、配置及工作区。</CardDescription></CardHeader><CardContent><FieldGroup>
+              {[['traces', 'JSONL 审计日志', 'data/traces'], ['db', '数据存储', 'data/agent.db'], ['sandbox', '沙箱根目录', '文件工具与文件 API 的可访问范围'], ['config', '用户配置', 'config.json']].map(([kind, label, description]) => <Field key={kind} orientation="horizontal"><FieldContent><FieldTitle>{label}</FieldTitle><FieldDescription>{description}</FieldDescription></FieldContent><Button variant="outline" size="sm" aria-label={`打开${label}`} onClick={() => { void metaApi.open(kind).catch((error) => toast.error(String(error))); }}>打开</Button></Field>)}
+            </FieldGroup></CardContent></Card>
             <SecuritySection />
           </>
-        )}
-      </div>
-    </div>
+        </TabsContent>
+      </div></ScrollArea>
+    </Tabs>
   );
 }

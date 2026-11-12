@@ -81,6 +81,23 @@ const doneStream = async function* (): AsyncIterable<LLMChunk> {
 // ---------- ApprovalBoard ----------
 
 describe('ApprovalBoard 共享注册表', () => {
+  test('审计钩子记录注册、用户决策与撤回', () => {
+    const board = new ApprovalBoard(1000);
+    const registered: string[] = [];
+    const resolved: string[] = [];
+    const withdrawn: string[] = [];
+    board.onRegister = (approval) => { registered.push(`${approval.id}:${approval.name}`); };
+    board.onResolve = (id, approved, reason) => { resolved.push(`${id}:${approved}:${reason}`); };
+    board.onWithdraw = (id) => { withdrawn.push(id); };
+    board.register('audit-1', { name: 'write_file', summary: 's' }, () => {});
+    assert.deepEqual(registered, ['audit-1:write_file']);
+    assert.equal(board.approve('audit-1', true), true);
+    assert.deepEqual(resolved, ['audit-1:true:user']);
+    board.register('audit-2', { name: 'delete_file', summary: 's' }, () => {});
+    board.withdraw('audit-2');
+    assert.deepEqual(withdrawn, ['audit-2']);
+  });
+
   test('register → approve 可达并解除挂起；未知 ID 返回 false', () => {
     const board = new ApprovalBoard(1000);
     let resolved: boolean | null = null;

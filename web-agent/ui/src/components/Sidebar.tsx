@@ -1,29 +1,51 @@
-// ui/src/components/Sidebar.tsx —— 左侧边栏（羊 Logo + Tab + 会话列表 + 批量管理 + Footer）
-// 微信式聊天列表：头像 + 名字 + 最后一句摘要 + 时间 + 未读点；
-// Tab 数据驱动：内置 4 tab + 插件可注册扩展 tab；
-// memo 化：配合 App 侧稳定引用回调，流式渲染期间跳过整个侧边栏 reconcile。
-import { memo, useCallback, useEffect, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { Archive, Bot, ChartNoAxesCombined, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Puzzle, Settings, Trash2, X } from 'lucide-react';
 import type { Session } from '../types';
-import { hueFrom } from '../types';
 import { AGENT_NAME, APP_VERSION, chatTime, displayTitle, previewOf } from '../voice';
-import Confirm, { type ConfirmRequest } from './Confirm';
-import { IconArchive, IconChat, IconClose, IconFolder, IconManage, IconPin, IconPlugin, IconPlus, IconSettings, IconSheep, IconStats, IconTrash } from './Icon';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Checkbox } from '@/components/ui/checkbox';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Input } from '@/components/ui/input';
+import {
+  Sidebar as SidebarRoot,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuAction,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+  useSidebar,
+} from '@/components/ui/sidebar';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
+import { cn } from '@/lib/utils';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 export type MainTab = string;
 
-/** Tab 定义：插件可通过注册 UI tab 扩展侧边栏导航 */
 export interface TabDef {
   key: string;
   label: string;
   icon: React.ReactNode;
 }
 
-/** 内置 tab（核心功能，不可卸载） */
 export const BUILTIN_TABS: TabDef[] = [
-  { key: 'chat', label: '会话', icon: <IconChat size={14} /> },
-  { key: 'files', label: '文件', icon: <IconFolder size={14} /> },
-  { key: 'plugins', label: '插件', icon: <IconPlugin size={14} /> },
-  { key: 'stats', label: '统计', icon: <IconStats size={14} /> },
+  { key: 'chat', label: '会话', icon: <MessageCircle /> },
+  { key: 'files', label: '文件', icon: <Folder /> },
+  { key: 'plugins', label: '插件', icon: <Puzzle /> },
+  { key: 'stats', label: '统计', icon: <ChartNoAxesCombined /> },
 ];
 
 interface Props {
@@ -31,7 +53,6 @@ interface Props {
   activeId: string | null;
   activeTab: MainTab;
   onTab: (t: MainTab) => void;
-  /** 插件扩展 tab：由 App 按插件运行状态动态计算（插件停用即消失） */
   pluginTabs?: TabDef[];
   onSelect: (id: string) => void;
   onCreate: () => void;
@@ -44,41 +65,65 @@ interface Props {
   settingsOpen: boolean;
   onToggleSettings: () => void;
   pluginRunning: number;
-  /** 正在流式回答的会话 id：列表里显示"正在输入…"（微信式在场感） */
   streamingId?: string | null;
-  /** 版本号（来自 package.json，避免写死在 UI 里） */
   version?: string;
 }
 
-// ---- 已读水位：纯前端（localStorage），不落库、不增加后端口径 ----
 const READS_KEY = 'maharness-reads';
+
 function loadReads(): Record<string, number> {
-  try { return JSON.parse(localStorage.getItem(READS_KEY) ?? '{}') as Record<string, number>; } catch { return {}; }
+  try {
+    return JSON.parse(localStorage.getItem(READS_KEY) ?? '{}') as Record<string, number>;
+  } catch {
+    return {};
+  }
 }
 
 export default memo(function Sidebar({
-  sessions, activeId, activeTab, onTab, pluginTabs = [], onSelect, onCreate, onDelete, onArchive, onPin, onRename,
-  onBatchDelete, onBatchArchive, settingsOpen, onToggleSettings, pluginRunning, streamingId, version,
+  sessions,
+  activeId,
+  activeTab,
+  onTab,
+  pluginTabs = [],
+  onSelect,
+  onCreate,
+  onDelete,
+  onArchive,
+  onPin,
+  onRename,
+  onBatchDelete,
+  onBatchArchive,
+  settingsOpen,
+  onToggleSettings,
+  pluginRunning,
+  streamingId,
+  version,
 }: Props) {
-  const [hoverId, setHoverId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
   const [managing, setManaging] = useState(false);
   const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
   const [reads, setReads] = useState<Record<string, number>>(loadReads);
+  const [confirm, setConfirm] = useState<{ text: string; okText?: string; danger?: boolean; onOk: () => void } | null>(null);
+  const renameCommitted = useRef(false);
+  const { setOpenMobile } = useSidebar();
 
   const markRead = useCallback((id: string | null) => {
     if (!id) return;
     setReads((prev) => {
       const next = { ...prev, [id]: Date.now() };
-      try { localStorage.setItem(READS_KEY, JSON.stringify(next)); } catch { /* 隐私模式忽略 */ }
+      try {
+        localStorage.setItem(READS_KEY, JSON.stringify(next));
+      } catch {
+        // localStorage may be unavailable in privacy mode.
+      }
       return next;
     });
   }, []);
 
-  // 打开哪个会话就算读过了（含首屏自动选中的那个）
-  useEffect(() => { markRead(activeId); }, [activeId, markRead]);
+  useEffect(() => {
+    markRead(activeId);
+  }, [activeId, markRead]);
 
   const pinned = sessions.filter((s) => s.pinned && !s.archived);
   const normal = sessions.filter((s) => !s.pinned && !s.archived);
@@ -87,7 +132,9 @@ export default memo(function Sidebar({
   const allSelected = allIds.length > 0 && allIds.every((id) => selected.has(id));
 
   const commitRename = () => {
-    if (editingId) onRename(editingId, draft);
+    if (renameCommitted.current) return;
+    renameCommitted.current = true;
+    if (editingId && draft.trim()) onRename(editingId, draft.trim());
     setEditingId(null);
   };
 
@@ -101,187 +148,286 @@ export default memo(function Sidebar({
   };
 
   const toggleAll = () => setSelected(allSelected ? new Set() : new Set(allIds));
+  const exitManage = () => {
+    setManaging(false);
+    setSelected(new Set());
+  };
 
-  const exitManage = () => { setManaging(false); setSelected(new Set()); };
-
-  // 危险操作一律走应用内确认（原来的 window.confirm 在微信式界面里非常出戏）
   const doBatchDelete = () => {
     if (!selected.size) return;
     const n = selected.size;
-    setConfirmReq({
+    setConfirm({
       text: `删掉这 ${n} 段对话？删了就找不回来了。`,
       okText: '删除',
       danger: true,
-      onOk: () => { onBatchDelete([...selected]); exitManage(); },
+      onOk: () => {
+        onBatchDelete([...selected]);
+        exitManage();
+      },
     });
   };
+
   const doBatchArchive = () => {
     if (!selected.size) return;
     const n = selected.size;
-    setConfirmReq({ text: `把这 ${n} 段对话收进归档？之后随时能翻出来。`, okText: '归档', onOk: () => { onBatchArchive([...selected]); exitManage(); } });
+    setConfirm({
+      text: `把这 ${n} 段对话收进归档？之后随时能翻出来。`,
+      okText: '归档',
+      onOk: () => {
+        onBatchArchive([...selected]);
+        exitManage();
+      },
+    });
   };
 
-  const askDelete = (s: Session) => setConfirmReq({
+  const askDelete = (s: Session) => setConfirm({
     text: `删掉「${displayTitle(s.title)}」这段对话？删了就找不回来了。`,
     okText: '删除',
     danger: true,
     onOk: () => onDelete(s.id),
   });
 
-  // 微信聊天列表样式：涂鸦头像 + 标题行（名字/时间）+ 摘要行（最后一句话）
   const renderItem = (s: Session) => {
     const modeText = s.mode === 'plan' ? '计划模式' : s.mode === 'goal' ? '目标模式' : '';
     const preview = previewOf(s.lastRole, s.lastMsg);
     const typing = streamingId === s.id;
     const unread = s.id !== activeId && !managing && s.lastRole === 'assistant' && s.updatedAt > (reads[s.id] ?? 0);
-    return (
-      <div
-        key={s.id}
-        className={`sb-session-item ${s.id === activeId ? 'active' : ''} ${managing ? 'managing' : ''} ${unread ? 'unread' : ''}`}
-        onClick={() => { if (managing) toggleSelect(s.id); else { markRead(s.id); onSelect(s.id); } }}
-        onDoubleClick={() => { if (!managing) { setEditingId(s.id); setDraft(s.title || ''); } }}
-        onMouseEnter={() => setHoverId(s.id)}
-        onMouseLeave={() => setHoverId(null)}
-        title={s.title || '新会话'}
-        role="button"
-        tabIndex={0}
-        aria-current={s.id === activeId ? 'true' : undefined}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); if (managing) toggleSelect(s.id); else { markRead(s.id); onSelect(s.id); } }
-          if (e.key === 'F2' && !managing) { setEditingId(s.id); setDraft(s.title || ''); }
-        }}
-      >
-        {managing ? (
-          <span className={`sb-check ${selected.has(s.id) ? 'checked' : ''}`} onClick={(e) => { e.stopPropagation(); toggleSelect(s.id); }} role="checkbox" aria-checked={selected.has(s.id)} aria-label={`选择 ${s.title || '新会话'}`} />
-        ) : (
-          <span className="wx-sb-avatar" style={{ '--h': hueFrom(s.id) } as React.CSSProperties} aria-hidden>
-            <IconSheep size={15} />
-            {unread && <span className="sb-unread-dot" aria-label="有新回复" />}
-          </span>
-        )}
-        {editingId === s.id ? (
-          <input
-            className="sb-rename-input"
-            value={draft}
-            autoFocus
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') commitRename();
-              else if (e.key === 'Escape') setEditingId(null);
-              e.stopPropagation();
-            }}
-            onBlur={commitRename}
-            onClick={(e) => e.stopPropagation()}
-          />
-        ) : (
-          <div className="wx-sb-main">
-            <div className="wx-sb-line1">
-              <span className="name">{displayTitle(s.title)}</span>
-              <span className="time">{chatTime(s.updatedAt)}</span>
-            </div>
-            <div className="wx-sb-line2">
-              {/* 摘要 = 最后一句真正说出口的话（微信的样子），而不是恒为「私聊」的死文本 */}
-              {typing
-                ? <span className="wx-sb-preview typing">{AGENT_NAME}正在输入…</span>
-                : preview
-                  ? <span className={`wx-sb-preview ${s.lastRole === 'user' ? 'mine' : ''}`}>{preview}</span>
-                  : s.role
-                    ? <span className="wx-sb-preview role">{s.role} 接手了</span>
-                    : modeText
-                      ? <span className="wx-sb-preview mode">{modeText}</span>
-                      : <span className="wx-sb-preview empty">还没聊过，打个招呼吧</span>}
-            </div>
+    const active = s.id === activeId;
+
+    if (editingId === s.id) {
+      return (
+        <SidebarMenuItem key={s.id}>
+          <div className="flex min-h-14 items-center gap-2.5 rounded-md px-2 py-2">
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
+              <Bot size={15} />
+            </span>
+            <Input
+              className="min-w-0 flex-1"
+              aria-label="重命名会话"
+              value={draft}
+              autoFocus
+              onFocus={() => { renameCommitted.current = false; }}
+              onChange={(event) => setDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') { event.preventDefault(); commitRename(); }
+                else if (event.key === 'Escape') { renameCommitted.current = true; setEditingId(null); }
+                event.stopPropagation();
+              }}
+              onBlur={commitRename}
+            />
           </div>
-        )}
-        {!managing && hoverId === s.id && (
-          <span className="item-actions" onClick={(e) => e.stopPropagation()}>
-            <button title="置顶" aria-label="置顶" onClick={() => onPin(s.id, !s.pinned)}><IconPin size={12} /></button>
-            <button title="归档" aria-label="归档" onClick={() => onArchive(s.id, !s.archived)}><IconArchive size={12} /></button>
-            <button title="删除" aria-label="删除" onClick={() => askDelete(s)}><IconTrash size={12} /></button>
+        </SidebarMenuItem>
+      );
+    }
+
+    return (
+      <SidebarMenuItem key={s.id}>
+        {managing && <Checkbox checked={selected.has(s.id)} onCheckedChange={() => toggleSelect(s.id)} aria-label={`选择会话 ${displayTitle(s.title)}`} className="absolute top-4 left-2" />}
+        <SidebarMenuButton
+          isActive={managing ? selected.has(s.id) : active}
+          size="lg"
+          className={cn('h-auto min-h-14 items-start gap-2.5 py-2 pr-8', managing && 'pl-9')}
+          onClick={() => {
+            if (managing) toggleSelect(s.id);
+            else {
+              markRead(s.id);
+              onSelect(s.id);
+              setOpenMobile(false);
+            }
+          }}
+          onDoubleClick={() => {
+            if (!managing) {
+              setEditingId(s.id);
+              setDraft(s.title || '');
+            }
+          }}
+          onKeyDown={(event) => {
+            if (event.key === 'F2' && !managing) {
+              event.preventDefault();
+              setEditingId(s.id);
+              setDraft(s.title || '');
+            }
+          }}
+          title={s.title || '新会话'}
+          aria-current={active ? 'page' : undefined}
+        >
+          {!managing && (
+            <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
+              <Bot size={15} />
+              {unread && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border-2 border-sidebar bg-primary" />}
+            </span>
+          )}
+          <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
+            <span className="flex items-baseline gap-2">
+              <span className="min-w-0 flex-1 truncate text-[13px] font-medium tracking-[-0.01em]">{displayTitle(s.title)}</span>
+              <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground">{chatTime(s.updatedAt)}</span>
+            </span>
+            <span className="min-h-4 truncate text-[11px] leading-4 text-foreground/70">
+              {typing ? (
+                <span className="text-primary">{AGENT_NAME}正在输入…</span>
+              ) : preview ? (
+                <span className={cn(s.lastRole === 'user' && 'text-foreground/65')}>{preview}</span>
+              ) : s.role ? (
+                <span>{s.role} 接手了</span>
+              ) : modeText ? (
+                <span>{modeText}</span>
+              ) : (
+                <span>还没聊过，打个招呼吧</span>
+              )}
+            </span>
           </span>
+        </SidebarMenuButton>
+
+        {!managing && (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <SidebarMenuAction showOnHover aria-label={`管理会话 ${displayTitle(s.title)}`}>
+                <MoreHorizontal />
+              </SidebarMenuAction>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-36">
+              <DropdownMenuGroup>
+                <DropdownMenuItem onSelect={() => onPin(s.id, !s.pinned)}>
+                  <Pin />
+                  {s.pinned ? '取消置顶' : '置顶'}
+                </DropdownMenuItem>
+                <DropdownMenuItem onSelect={() => onArchive(s.id, !s.archived)}>
+                  <Archive />
+                  {s.archived ? '移出归档' : '归档'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem variant="destructive" onSelect={() => askDelete(s)}>
+                  <Trash2 />
+                  删除
+                </DropdownMenuItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         )}
-      </div>
+      </SidebarMenuItem>
     );
   };
 
   return (
-    <aside className="sidebar">
-      <div className="sb-logo">
-        <div className="sb-logo-left">
-          <div className="sb-logo-mark"><IconSheep size={17} /></div>
-          <div className="sb-logo-title">maharness</div>
+    <SidebarRoot collapsible="offcanvas" className="border-r border-sidebar-border">
+      <SidebarHeader className="h-16 flex-row items-center gap-2.5 px-3">
+        <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
+          <Bot size={17} />
         </div>
-      </div>
+        <div className="min-w-0">
+          <div className="truncate text-[15px] font-semibold tracking-[-0.02em]">maharness</div>
+          <div className="text-[11px] text-muted-foreground">Agent workspace</div>
+        </div>
+      </SidebarHeader>
 
-      <div className="sb-tabs">
-        {BUILTIN_TABS.slice(0, 2).concat(pluginTabs, BUILTIN_TABS.slice(2)).map((tab) => (
-          <button key={tab.key} className={`sb-tab ${activeTab === tab.key ? 'active' : ''}`} onClick={() => onTab(tab.key)}>
-            {tab.icon}{tab.label}
-          </button>
-        ))}
-      </div>
+      <SidebarContent>
+        <SidebarGroup>
+          <SidebarGroupLabel>工作区</SidebarGroupLabel>
+          <SidebarMenu>
+            {BUILTIN_TABS.slice(0, 2).concat(pluginTabs, BUILTIN_TABS.slice(2)).map((tab) => (
+              <SidebarMenuItem key={tab.key}>
+                <SidebarMenuButton isActive={activeTab === tab.key && !settingsOpen} tooltip={tab.label} onClick={() => { onTab(tab.key); setOpenMobile(false); }}>
+                  {tab.icon}
+                  <span>{tab.label}</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            ))}
+          </SidebarMenu>
+        </SidebarGroup>
 
-      <div className="sb-divider" />
-
-      <div className="sb-new-row">
-        <button className="sb-new-chat" onClick={() => { if (!managing) onCreate(); }}><IconPlus size={15} />新会话</button>
-        <button
-          className={`sb-manage-btn ${managing ? 'active' : ''}`}
-          onClick={() => { if (managing) exitManage(); else setManaging(true); }}
-          title={managing ? '退出批量管理' : '批量管理会话'}
-          aria-label={managing ? '退出批量管理' : '批量管理会话'}
-        >
-          {managing ? <IconClose size={15} /> : <IconManage size={15} />}
-        </button>
-      </div>
-
-      <div className="sb-session-scroll">
-        {managing && (
-          <div className="sb-manage-bar">
-            <button className="sb-mg-link" onClick={toggleAll}>{allSelected ? '取消全选' : '全选'}</button>
-            <span className="sb-mg-count">{selected.size} 已选</span>
+        <SidebarGroup>
+          <SidebarGroupLabel>对话</SidebarGroupLabel>
+          <div className="flex gap-2 px-2 pb-2">
+            <Button className="flex-1 justify-start" disabled={managing} onClick={() => { onCreate(); setOpenMobile(false); }}>
+              <Plus data-icon="inline-start" />新会话
+            </Button>
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => { if (managing) exitManage(); else setManaging(true); }}
+              title={managing ? '退出批量管理' : '批量管理会话'}
+              aria-label={managing ? '退出批量管理' : '批量管理会话'}
+            >
+              {managing ? <X /> : <ListChecks />}
+            </Button>
           </div>
+
+          {managing && (
+            <div className="mx-2 mb-1.5 flex items-center justify-between rounded-lg bg-sidebar-accent px-2.5 py-1.5 text-[11px]">
+              <label className="flex cursor-pointer items-center gap-2"><Checkbox checked={allSelected ? true : selected.size ? 'indeterminate' : false} onCheckedChange={toggleAll} />全选</label>
+              <span className="text-muted-foreground">{selected.size} 已选</span>
+            </div>
+          )}
+
+          {sessions.length === 0 && (
+            <Empty className="px-3 py-8"><EmptyHeader><EmptyTitle>还没有对话</EmptyTitle><EmptyDescription>点击「新会话」开始。</EmptyDescription></EmptyHeader></Empty>
+          )}
+        </SidebarGroup>
+
+        {pinned.length > 0 && (
+          <SidebarGroup className="py-0">
+            <SidebarGroupLabel>置顶</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{pinned.map(renderItem)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
         )}
-        {sessions.length === 0 && <div className="empty-state" style={{ padding: '24px 12px' }}>还没有对话，点上面「新会话」开始</div>}
-        {pinned.length > 0 && <div className="sb-group-label">已置顶</div>}
-        {pinned.map(renderItem)}
-        {normal.length > 0 && <div className="sb-group-label">会话</div>}
-        {normal.map(renderItem)}
+
+        {normal.length > 0 && (
+          <SidebarGroup className="py-0">
+            <SidebarGroupLabel>最近</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{normal.map(renderItem)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+
         {archived.length > 0 && (
+          <SidebarGroup className="py-0">
+            <SidebarGroupLabel>归档</SidebarGroupLabel>
+            <SidebarGroupContent>
+              <SidebarMenu>{archived.map(renderItem)}</SidebarMenu>
+            </SidebarGroupContent>
+          </SidebarGroup>
+        )}
+      </SidebarContent>
+
+      <SidebarFooter className="border-t border-sidebar-border p-2">
+        {managing ? (
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" className="flex-1" onClick={doBatchArchive} disabled={!selected.size}><Archive data-icon="inline-start" />归档</Button>
+            <Button variant="destructive" size="sm" className="flex-1" onClick={doBatchDelete} disabled={!selected.size}><Trash2 data-icon="inline-start" />删除</Button>
+            <Button size="sm" onClick={exitManage}>完成</Button>
+          </div>
+        ) : (
           <>
-            <div className="sb-group-label">归档</div>
-            {archived.map(renderItem)}
+            <div className="mb-2 flex items-center justify-between px-0.5">
+              <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px] font-medium text-muted-foreground">{pluginRunning} 个插件运行中</Badge>
+              <span className="font-mono text-[10px] text-muted-foreground">v{version ?? APP_VERSION}</span>
+            </div>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton isActive={settingsOpen} onClick={() => { onToggleSettings(); setOpenMobile(false); }}>
+                  <Settings />设置
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+            </SidebarMenu>
           </>
         )}
-      </div>
-
-      {managing ? (
-        <div className="sb-manage-actions">
-          <button className="sb-ma-btn" onClick={doBatchArchive} disabled={!selected.size} title="归档选中会话">
-            <IconArchive size={13} />归档
-          </button>
-          <button className="sb-ma-btn danger" onClick={doBatchDelete} disabled={!selected.size} title="删除选中会话">
-            <IconTrash size={13} />删除
-          </button>
-          <button className="sb-ma-btn primary" onClick={exitManage}>完成</button>
-        </div>
-      ) : (
-        <div className="sb-footer">
-          <div className="sb-foot-row">
-            <div className="sb-foot-left">
-              <span className="sb-foot-chip" title="正在运行的插件数">{pluginRunning} 个插件在跑</span>
-            </div>
-            {/* E10：去掉第 4 处版本字面量兜底——不传时统一用 voice.APP_VERSION（构建期
-                由 package.json 注入），全站只有一处能"写错版本号"。 */}
-            <span className="sb-foot-chip ver">v{version ?? APP_VERSION}</span>
-          </div>
-          <button className={`sb-settings-btn ${settingsOpen ? 'active' : ''}`} onClick={onToggleSettings}>
-            <IconSettings size={14} />
-            <span>设置</span>
-          </button>
-        </div>
-      )}
-      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
-    </aside>
+      </SidebarFooter>
+      <AlertDialog open={!!confirm} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>请确认</AlertDialogTitle>
+            <AlertDialogDescription className="leading-6">{confirm?.text}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant={confirm?.danger ? 'destructive' : 'default'} onClick={() => { confirm?.onOk(); setConfirm(null); }}>{confirm?.okText ?? '好'}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+      <SidebarRail />
+    </SidebarRoot>
   );
 });

@@ -1,6 +1,6 @@
 /**
  * core/search/index.ts —— 联网搜索插件
- * 默认 DuckDuckGo HTML 搜索（零配置开箱可用）；配置 TAVILY_API_KEY 后走 Tavily（更稳定）。
+ * 搜索 provider 优先级：SEARXNG_BASE_URL → TAVILY_API_KEY → DuckDuckGo（零配置兜底）。
  * SEARCH_PROXY 可代理固定的搜索服务请求；用户提供的抓取 URL 使用直连 DNS pinning。
  * L2 缓存：按「查询词 + max_results」缓存 10 分钟，重复问题零成本。
  */
@@ -15,6 +15,61 @@ interface SearchResult {
   title: string;
   url: string;
   snippet: string;
+}
+
+function searchTerms(query: string): string[] {
+  const terms = new Set<string>();
+  for (const word of query.toLowerCase().match(/[a-z0-9_]{2,}|[\u4e00-\u9fff]{2,}/g) ?? []) {
+    terms.add(word);
+    if (/^[\u4e00-\u9fff]+$/.test(word)) {
+      for (let index = 0; index < word.length - 1; index++) terms.add(word.slice(index, index + 2));
+    }
+  }
+  return [...terms];
+}
+
+function canonicalResultUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    url.hash = '';
+    if (url.pathname.length > 1) url.pathname = url.pathname.replace(/\/+$/, '');
+    return url.toString().toLowerCase();
+  } catch {
+    return raw.trim().toLowerCase();
+  }
+}
+
+/** 去重并保留首次出现顺序。 */
+export function dedupeSearchResults(results: SearchResult[]): SearchResult[] {
+  const seen = new Set<string>();
+  return results.filter((result) => {
+    const key = canonicalResultUrl(result.url);
+    if (!key || seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/** 轻量本地重排：标题命中权重高于摘要和 URL，不依赖额外模型/网络。 */
+export function rerankSearchResults(query: string, results: SearchResult[]): SearchResult[] {
+  const terms = searchTerms(query);
+  if (!terms.length) return results;
+  const scoreOf = (result: SearchResult): number => {
+    const title = result.title.toLowerCase();
+    const snippet = result.snippet.toLowerCase();
+    const url = result.url.toLowerCase();
+    let score = 0;
+    for (const term of terms) {
+      if (title.includes(term)) score += 6;
+      if (snippet.includes(term)) score += 2;
+      if (url.includes(term)) score += 1;
+    }
+    return score;
+  };
+  return results
+    .map((result, index) => ({ result, index, score: scoreOf(result) }))
+    .sort((a, b) => b.score - a.score || a.index - b.index)
+    .map(({ result }) => result);
 }
 
 /** 可选代理：固定搜索服务请求走 HTTP 代理（如 http://127.0.0.1:7897），直连受限时使用
@@ -381,6 +436,52 @@ export async function fetchDoc(
 
 // ---------- Tavily ----------
 
+export function resolveSearchProvider(env: NodeJS.ProcessEnv = process.env): 'searxng' | 'tavily' | 'duckduckgo' {
+  if (env.SEARXNG_BASE_URL) return 'searxng';
+  if (env.TAVILY_API_KEY) return 'tavily';
+  return 'duckduckgo';
+}
+
+export function parseSearxngResults(payload: unknown, max: number): SearchResult[] {
+  const results = payload && typeof payload === 'object'
+    ? (payload as { results?: unknown }).results
+    : undefined;
+  if (!Array.isArray(results)) return [];
+  return results.slice(0, max).flatMap((item) => {
+    if (!item || typeof item !== 'object') return [];
+    const row = item as { title?: unknown; url?: unknown; content?: unknown; snippet?: unknown };
+    if (typeof row.url !== 'string' || !row.url) return [];
+    return [{
+      title: typeof row.title === 'string' ? row.title : '',
+      url: row.url,
+      snippet: typeof row.content === 'string'
+        ? row.content.slice(0, 500)
+        : typeof row.snippet === 'string' ? row.snippet.slice(0, 500) : '',
+    }];
+  });
+}
+
+async function searchSearxng(query: string, max: number): Promise<SearchResult[]> {
+  const rawBase = process.env.SEARXNG_BASE_URL;
+  if (!rawBase) throw new Error('SEARXNG_BASE_URL 未配置');
+  let base: URL;
+  try { base = new URL(rawBase); } catch { throw new Error('SEARXNG_BASE_URL 不是合法 URL'); }
+  if (base.protocol !== 'http:' && base.protocol !== 'https:') throw new Error('SEARXNG_BASE_URL 仅支持 http/https');
+  if (base.username || base.password) throw new Error('SEARXNG_BASE_URL 不得包含凭据');
+  const target = new URL('/search', base);
+  target.searchParams.set('q', query);
+  target.searchParams.set('format', 'json');
+  target.searchParams.set('safesearch', '0');
+  const dispatcher = getSearchDispatcher();
+  const res = await undiciFetch(target, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(15000),
+    ...(dispatcher ? { dispatcher } : {}),
+  });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return parseSearxngResults(await res.json(), max);
+}
+
 async function searchTavily(query: string, max: number): Promise<SearchResult[]> {
   const dispatcher = getSearchDispatcher();
   const res = await undiciFetch('https://api.tavily.com/search', {
@@ -471,6 +572,7 @@ export default {
     // v3.1 env 依赖声明：.env 变更（TAVILY_API_KEY / SEARCH_PROXY）→ reloadChanged 重载本插件
     // （dispatcher 已惰性化，即使不重载请求也会拿到新值；声明使「改动即生效」的心智模型一致）
     ctx.watchEnv('TAVILY_API_KEY');
+    ctx.watchEnv('SEARXNG_BASE_URL');
     ctx.watchEnv('SEARCH_PROXY');
 
     // L2 人设：约束 LLM 正确使用搜索
@@ -487,8 +589,9 @@ export default {
           '2. 引用搜索结果时标注来源（标题 + URL），绝不编造链接或内容；',
           '3. 搜索失败或结果为空时如实说明，不要编造；可换更准确的关键词重试；',
           '4. 关键词要准确简洁，必要时分多次搜索交叉验证；',
-          '5. 搜索结果只有摘要时，需要全文就用 web_fetch 抓取该 URL（HTML 会转成文本/Markdown）；',
-          '6. web_fetch 拒绝内网地址与 file:// 协议，不要尝试绕过。',
+          '5. 搜索结果只有摘要时，单个页面用 web_fetch，多篇资料一次抓取用 web_crawl；',
+          '6. 引用多页资料时保留每页的 title 与 URL，并区分“来源原文”和“自己的推断”；',
+          '7. web_fetch / web_crawl 拒绝内网地址与 file:// 协议，不要尝试绕过。',
         ].join('\n'),
       },
     });
@@ -499,9 +602,11 @@ export default {
         name: 'web_search',
         risk: 'low',
         costHint: 'medium',
+        sideEffect: 'read',
+        contentTrust: 'untrusted',
         limits: '外部搜索服务；结果可能不完整',
         output: '{source, count, results: [{title, url, snippet}]}',
-        description: '联网搜索（Tavily / DuckDuckGo）：返回结果列表（标题、URL、摘要）。适合查询时事、外部信息、文档资料等。',
+        description: '联网搜索（SearXNG / Tavily / DuckDuckGo）：返回结果列表（标题、URL、摘要）。适合查询时事、外部信息、文档资料等。',
         parameters: {
           type: 'object',
           properties: {
@@ -514,27 +619,30 @@ export default {
           const query = String(args.query ?? '').trim();
           if (!query) return { ok: false, error: '缺少 query 参数' };
           const max = Math.min(Math.max(Math.trunc(Number(args.max_results) || 5), 1), 10);
-          const source = process.env.TAVILY_API_KEY ? 'tavily' : 'duckduckgo';
+          const source = resolveSearchProvider();
 
           // L2 缓存：同查询 30 分钟内命中（TTL 由内核管理）；v2 命名空间：结果格式变更时旧缓存失效
-          const key = tctx.cache.makeKey(['web_search', 'v2', query.toLowerCase(), String(max)]);
+          const key = tctx.cache.makeKey(['web_search', 'v2', query.toLowerCase(), String(max)], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: '搜索结果缓存命中' });
+              .finish({ outputSummary: hit.meta ? `web_search 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '搜索结果缓存命中' });
             return { ok: true, data: hit.value };
           }
 
           try {
-            const results = source === 'tavily' ? await searchTavily(query, max) : await searchDdg(query, max);
+            const rawResults = source === 'searxng'
+              ? await searchSearxng(query, max)
+              : source === 'tavily' ? await searchTavily(query, max) : await searchDdg(query, max);
+            const results = rerankSearchResults(query, dedupeSearchResults(rawResults));
             const data = { query, source, count: results.length, results };
-            tctx.cache.l2Set(key, data, SEARCH_TTL);
+            tctx.cache.l2Set(key, data, SEARCH_TTL, tctx.tenantId);
             return { ok: true, data };
           } catch (err) {
             const reason = err instanceof Error ? err.message : String(err);
             return {
               ok: false,
-              error: `${source === 'tavily' ? 'Tavily' : 'DuckDuckGo'} 搜索失败（${reason}）。可稍后重试；若网络受限，可配置 SEARCH_PROXY 代理或 TAVILY_API_KEY。`,
+              error: `${source === 'searxng' ? 'SearXNG' : source === 'tavily' ? 'Tavily' : 'DuckDuckGo'} 搜索失败（${reason}）。可稍后重试；可配置 SEARXNG_BASE_URL / TAVILY_API_KEY 或 SEARCH_PROXY。`,
             };
           }
         },
@@ -547,6 +655,8 @@ export default {
         name: 'web_fetch',
         risk: 'medium',
         costHint: 'medium',
+        sideEffect: 'read',
+        contentTrust: 'untrusted',
         limits: '仅 http/https；单页 ≤5MB；正文默认截断 8000 字符；拒绝内网地址（SSRF）',
         output: '{url, title, contentType, text, totalChars, truncated}',
         description: '抓取指定 URL 的正文（HTML 自动转纯文本或轻量 Markdown，保留标题/链接/列表/代码块）。用于读文档、issue、博客正文——web_search 只给摘要，需要全文时用本工具。',
@@ -564,11 +674,11 @@ export default {
           if (!raw) return { ok: false, error: '缺少 url 参数' };
           const mode = (args.format === 'markdown' ? 'markdown' : args.format === 'html' ? 'html' : 'text') as 'text' | 'markdown' | 'html';
           const maxChars = Math.min(40_000, Math.max(500, Math.floor(Number(args.maxChars) || 8000)));
-          const key = tctx.cache.makeKey(['web_fetch', 'v1', raw.toLowerCase(), mode, String(maxChars)]);
+          const key = tctx.cache.makeKey(['web_fetch', 'v1', raw.toLowerCase(), mode, String(maxChars)], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: '网页抓取缓存命中' });
+              .finish({ outputSummary: hit.meta ? `web_fetch 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '网页抓取缓存命中' });
             return { ok: true, data: hit.value };
           }
           try {
@@ -581,8 +691,12 @@ export default {
               text: text.slice(0, maxChars), totalChars: text.length, truncated: text.length > maxChars,
               redirected: doc.redirected || undefined,
             };
-            tctx.cache.l2Set(key, data, SEARCH_TTL);
-            return { ok: true, data };
+            tctx.cache.l2Set(key, data, SEARCH_TTL, tctx.tenantId);
+            return {
+              ok: true,
+              data,
+              evidence: [{ kind: 'url', label: title || doc.finalUrl, ref: doc.finalUrl }],
+            };
           } catch (err) {
             return { ok: false, error: `抓取失败：${err instanceof Error ? err.message : String(err)}` };
           }
@@ -590,8 +704,92 @@ export default {
       },
     });
 
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'web_crawl',
+        risk: 'medium',
+        costHint: 'medium',
+        sideEffect: 'read',
+        contentTrust: 'untrusted',
+        limits: '1-5 个 http/https URL；每页 ≤5MB；单次总正文 ≤32000 字符；默认 3 并发；拒绝内网地址',
+        output: '{count, failed, totalChars, pages: [{url, finalUrl, title, text, totalChars, truncated, error?}], citations: [{index, title, url}]}',
+        description: '并发抓取多个网页并统一清洗为正文，用于一次收集多篇资料、对比来源和建立引用。单页精读仍用 web_fetch。',
+        parameters: {
+          type: 'object',
+          properties: {
+            urls: {
+              type: 'array',
+              items: { type: 'string' },
+              minItems: 1,
+              maxItems: 5,
+              description: '要抓取的 http/https URL（1-5 个）',
+            },
+            maxChars: { type: 'integer', minimum: 500, maximum: 12000, description: '单页正文上限（默认 6000；总预算会进一步均分）' },
+            format: { type: 'string', enum: ['text', 'markdown'], description: '正文格式，默认 markdown' },
+          },
+          required: ['urls'],
+        },
+        async handler(args: { urls?: string[]; maxChars?: number; format?: string }, tctx: ToolContext) {
+          const urls = [...new Set((Array.isArray(args.urls) ? args.urls : []).map((url) => String(url).trim()).filter(Boolean))];
+          if (!urls.length) return { ok: false, error: '缺少 urls' };
+          if (urls.length > 5) return { ok: false, error: `最多抓取 5 个 URL（收到 ${urls.length}）` };
+          const mode = args.format === 'text' ? 'text' : 'markdown';
+          const requested = Math.min(12_000, Math.max(500, Math.floor(Number(args.maxChars) || 6_000)));
+          const perPage = Math.min(requested, Math.floor(32_000 / urls.length));
+          const pages: {
+            url: string; finalUrl?: string; title?: string; text?: string;
+            totalChars?: number; truncated?: boolean; error?: string;
+          }[] = new Array(urls.length);
+          let next = 0;
+          const worker = async (): Promise<void> => {
+            for (;;) {
+              const index = next++;
+              if (index >= urls.length) return;
+              const raw = urls[index]!;
+              const key = tctx.cache.makeKey(['web_crawl', 'v1', raw.toLowerCase(), mode, String(perPage)], { tenantId: tctx.tenantId });
+              const hit = tctx.cache.l2Get(key);
+              if (hit.hit) {
+                pages[index] = hit.value as typeof pages[number];
+                continue;
+              }
+              try {
+                const doc = await fetchDoc(raw, tctx.signal);
+                const isHtml = doc.contentType.includes('html') || /^\s*</.test(doc.body);
+                const text = isHtml ? htmlToText(doc.body, mode) : doc.body;
+                const page = {
+                  url: raw, finalUrl: doc.finalUrl,
+                  title: isHtml ? extractTitle(doc.body) : undefined,
+                  text: text.slice(0, perPage), totalChars: text.length, truncated: text.length > perPage,
+                };
+                pages[index] = page;
+                tctx.cache.l2Set(key, page, SEARCH_TTL, tctx.tenantId);
+              } catch (err) {
+                pages[index] = { url: raw, error: err instanceof Error ? err.message : String(err) };
+              }
+            }
+          };
+          await Promise.all(Array.from({ length: Math.min(3, urls.length) }, () => worker()));
+          const completed = pages.filter((page) => !page.error);
+          if (!completed.length) {
+            return { ok: false, error: `全部页面抓取失败：${pages.map((page) => `${page.url}: ${page.error}`).join('；')}` };
+          }
+          return {
+            ok: true,
+            data: {
+              count: completed.length,
+              failed: pages.length - completed.length,
+              totalChars: completed.reduce((sum, page) => sum + (page.totalChars ?? 0), 0),
+              pages,
+              citations: completed.map((page, index) => ({ index: index + 1, title: page.title, url: page.finalUrl ?? page.url })),
+            },
+          };
+        },
+      },
+    });
+
     ctx.logger.info(process.env.TAVILY_API_KEY
-      ? '工具就绪: web_search（Tavily）+ web_fetch'
-      : '工具就绪: web_search（DuckDuckGo 降级，配置 TAVILY_API_KEY 可升级）+ web_fetch');
+      ? '工具就绪: web_search（Tavily）+ web_fetch + web_crawl'
+      : '工具就绪: web_search（DuckDuckGo 降级，配置 TAVILY_API_KEY 可升级）+ web_fetch + web_crawl');
   },
 } satisfies Plugin;

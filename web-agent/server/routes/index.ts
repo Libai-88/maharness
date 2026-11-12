@@ -28,6 +28,9 @@ import { registerStatsRoutes } from './stats';
 import { registerApprovalRoutes } from './approvals';
 import { registerEventRoutes } from './events';
 import { registerCommandRoutes } from './commands';
+import { registerTenantRoutes } from './tenants';
+import { registerScheduleRoutes } from './schedules';
+import type { Scheduler } from '../scheduler';
 import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
@@ -76,11 +79,12 @@ export function readStorageSnapshot(dataDir: string): StorageSnapshot {
   } catch { return { schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null, thresholds: STORAGE_CAPACITY_THRESHOLDS }; }
 }
 
-export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker): void {
+export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): void {
   app.use(express.json({ limit: '5mb' }));
 
   const deps = {
     kernel, store, tracker,
+    ...(scheduler ? { scheduler } : {}),
     sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
     activeRunCount: () => activeRunCount(),
   };
@@ -115,6 +119,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerEvolveRoutes(app, deps);     // 技能提案（自进化）
   registerRulesRoutes(app, deps);      // 用户规则（全局/项目/策略）
   registerSessionRoutes(app, deps);    // 会话 CRUD / 消息 / 批量删除
+  registerTenantRoutes(app, deps);     // OPS-01 租户注册表
+  registerScheduleRoutes(app, deps);   // 长任务到点续跑
   registerChatRoutes(app, deps);       // 对话（SSE）+ 断点
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）

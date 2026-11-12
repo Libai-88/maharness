@@ -35,11 +35,11 @@ test('iframe 插件页头明示沙箱信任等级，iframe 带 sandbox 属性', 
   await mockShell(page);
   await page.goto('/');
   await page.getByRole('button', { name: '看板' }).click();
-  const trust = page.locator('.plugin-tab-trust');
+  const trust = page.locator('[data-trust]');
   await expect(trust).toContainText('iframe 沙箱');
   await expect(trust).toHaveAttribute('data-trust', 'iframe');
   await expect(trust).toHaveAttribute('title', /sandbox/);
-  const iframe = page.locator('iframe.plugin-tab-iframe');
+  const iframe = page.getByTitle('看板', { exact: true });
   await expect(iframe).toHaveAttribute('sandbox', 'allow-same-origin allow-scripts allow-forms allow-popups allow-downloads');
   // 沙箱属性不含 allow-top-navigation / allow-popups-to-escape-sandbox：
   // 插件页面无法接管宿主导航或脱离沙箱弹窗
@@ -57,8 +57,8 @@ test('panel 插件页头明示净化片段信任等级', async ({ page }) => {
   }));
   await page.goto('/');
   await page.getByRole('button', { name: '面板', exact: true }).click();
-  const trust = page.locator('.plugin-tab-trust');
+  const trust = page.locator('[data-trust]');
   await expect(trust).toContainText('净化片段');
   await expect(trust).toHaveAttribute('data-trust', 'panel');
-  await expect(page.locator('.plugin-panel-body')).toContainText('面板内容');
+  await expect(page.getByRole('paragraph')).toContainText('面板内容');
 });

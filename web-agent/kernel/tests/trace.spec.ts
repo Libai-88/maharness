@@ -295,6 +295,11 @@ describe('Trace 归档读取与保留期（C2）', () => {
       writeFileSync(logPath, `${lines.join('\n')}\n`, 'utf-8');
       writeFileSync(indexPath, `${indexes.join('\n')}\n`, 'utf-8');
       const trace = new Trace(new EventBus(), dir);
+      const coldStarted = performance.now();
+      const cold = trace.queryArchive('old-target');
+      const coldMs = performance.now() - coldStarted;
+      assert.equal(cold.length, 1);
+      assert.ok(coldMs < 2_000, `冷启动索引解析耗时 ${coldMs.toFixed(1)}ms`);
       const samples: number[] = [];
       for (let i = 0; i < 5; i++) {
         const started = performance.now();
@@ -334,7 +339,13 @@ describe('Trace 归档读取与保留期（C2）', () => {
       const trace = new Trace(new EventBus(), dir);
       const samples: number[] = [];
       const seen = new Set<string>();
-      let before = Number.POSITIVE_INFINITY;
+      const coldStarted = performance.now();
+      const cold = trace.queryArchive('page-run', { limit: 100 });
+      const coldMs = performance.now() - coldStarted;
+      assert.equal(cold.length, 100);
+      assert.ok(coldMs < 2_000, `冷启动分页索引解析耗时 ${coldMs.toFixed(1)}ms`);
+      for (const step of cold) seen.add(step.id);
+      let before = cold[0]!.ts;
       for (let pageNo = 0; pageNo < 5; pageNo++) {
         const started = performance.now();
         const page = trace.queryArchive('page-run', { beforeTs: before, limit: 100 });

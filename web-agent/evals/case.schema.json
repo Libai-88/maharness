@@ -52,11 +52,14 @@
             "type": "object",
             "required": ["type"],
             "properties": {
-              "type": { "type": "string", "enum": ["output_contains", "output_matches", "tool_succeeded", "file_exists", "file_contains"] },
+              "type": { "type": "string", "enum": ["output_contains", "output_matches", "tool_succeeded", "tool_evidence", "file_exists", "file_contains"] },
               "value": { "type": "string" },
               "pattern": { "type": "string" },
               "flags": { "type": "string" },
               "name": { "type": "string" },
+              "kind": { "type": "string", "enum": ["file", "url", "command", "state", "content", "custom"] },
+              "labelContains": { "type": "string" },
+              "refContains": { "type": "string" },
               "path": { "type": "string" }
             }
           }

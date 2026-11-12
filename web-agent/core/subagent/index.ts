@@ -46,11 +46,12 @@ const REVIEWER_SYSTEM_PROMPT = [
 ].join('\n');
 
 /** 从审查者输出中稳健抽取 JSON（容忍代码围栏/前后废话）；抽取失败时降级为 concern */
-function parseReview(text: string): {
+export function parseReview(text: string): {
   verdict: 'pass' | 'concern' | 'fail';
   summary: string;
   issues: { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string }[];
   confidence: number;
+  parsed: boolean;
 } {
   try {
     const start = text.indexOf('{');
@@ -64,11 +65,16 @@ function parseReview(text: string): {
         ? obj.issues.filter((i): i is { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string } =>
           !!i && typeof i === 'object' && typeof (i as { point?: unknown }).point === 'string')
         : [];
+      const parsed = (obj.verdict === 'pass' || obj.verdict === 'concern' || obj.verdict === 'fail')
+        && typeof obj.summary === 'string'
+        && Array.isArray(obj.issues)
+        && typeof obj.confidence === 'number';
       return {
         verdict,
         summary: typeof obj.summary === 'string' ? obj.summary : '',
         issues,
         confidence: typeof obj.confidence === 'number' ? Math.max(0, Math.min(1, obj.confidence)) : 0.5,
+        parsed,
       };
     }
   } catch { /* 落入降级 */ }
@@ -77,6 +83,7 @@ function parseReview(text: string): {
     summary: '审查输出无法解析为结构化 JSON，请人工查看原文',
     issues: [{ severity: 'major', point: '非结构化输出', evidence: text.slice(0, 500) }],
     confidence: 0,
+    parsed: false,
   };
 }
 
@@ -87,7 +94,10 @@ export default {
   onLoad(ctx) {
     // 反应性共效应（coeffect）：声明依赖 chat 服务——提供者激活/停用/换主时自动更新引用。
     // 依赖不可用 → 优雅降级（返回明确错误而非悬空引用）；提供者恢复 → 自动可用，无需重启。
-    let chatSvc: { providers: ProviderDef[] } | undefined;
+    let chatSvc: {
+      providers: ProviderDef[];
+      routeForTask?: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) => { provider: ProviderDef; model: string } | undefined;
+    } | undefined;
     const chatDep = ctx.inject('service:chat', (v) => {
       chatSvc = v as { providers: ProviderDef[] } | undefined;
     });
@@ -97,7 +107,7 @@ export default {
     });
     const withUserRules = (base: string): string =>
       rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base;
-    chatSvc = chatDep.value as { providers: ProviderDef[] } | undefined;
+    chatSvc = chatDep.value as typeof chatSvc;
 
     ctx.register({
       kind: 'tool',
@@ -142,8 +152,14 @@ export default {
           const maxTurns = Math.max(1, Math.min(12, Math.floor(Number(args.maxTurns) || 6)));
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
-          const provider = chatSvc?.providers?.[0];
+          const route = chatSvc?.routeForTask?.(
+            objective,
+            ctx.config.get<Record<string, string>>('agent.modelRouting', {}),
+            chatSvc.providers,
+          );
+          const provider = route?.provider ?? chatSvc?.providers?.[0];
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派子代理' };
+          const model = route?.model ?? provider.defaultModel;
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const tools: ToolDef[] = args.tools === 'all'
@@ -182,7 +198,7 @@ export default {
           try {
             for await (const ev of runner.run({
               provider,
-              model: provider.defaultModel,
+              model,
               messages: [{ role: 'user', content: objective }],
               systemPrompt: withUserRules(SUB_SYSTEM_PROMPT),
               tools,
@@ -192,6 +208,8 @@ export default {
               signal: tctx.signal,
               // 会话归属透传：子代理的审批也要能归到具体会话（刷新后卡片才回得到原位）
               sessionId: tctx.sessionId,
+              tenantId: tctx.tenantId,
+              sandboxRoot: tctx.sandboxRoot,
               costBudget: remainingBudget,
             })) {
               if (ev.type === 'delta') answer += ev.text;
@@ -281,9 +299,7 @@ export default {
           const target = String(args.target ?? '').trim();
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
-
-          const provider = chatSvc?.providers?.[0];
-          if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
+          if (!chatSvc?.providers?.[0]) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const tools: ToolDef[] = allTools.filter((t) => READ_ONLY_TOOLS.has(t.name)); // 审查者只读世界
@@ -304,6 +320,14 @@ export default {
           const traceId = `rev-${randomUUID().slice(0, 8)}`;
           const criteria = args.criteria ? String(args.criteria).trim() : '正确性与需求符合度';
           const objective = `审查以下产出。审查标准：${criteria}。\n\n【待审查产出/说明】\n${target}`;
+          const route = chatSvc?.routeForTask?.(
+            objective,
+            ctx.config.get<Record<string, string>>('agent.modelRouting', {}),
+            chatSvc.providers,
+          );
+          const provider = route?.provider ?? chatSvc?.providers?.[0];
+          if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
+          const model = route?.model ?? provider.defaultModel;
           let answer = '';
           let usage = { input: 0, output: 0 };
           let cost = 0;
@@ -313,7 +337,7 @@ export default {
           try {
             for await (const ev of runner.run({
               provider,
-              model: provider.defaultModel,
+              model,
               messages: [{ role: 'user', content: objective }],
               systemPrompt: withUserRules(REVIEWER_SYSTEM_PROMPT),
               tools,
@@ -322,7 +346,10 @@ export default {
               parentStepId: tctx.stepId, // span 树：审查子任务挂到 run_review 工具步骤下
               signal: tctx.signal,
               sessionId: tctx.sessionId,
+              tenantId: tctx.tenantId,
+              sandboxRoot: tctx.sandboxRoot,
               costBudget: remainingBudget,
+              ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
@@ -335,11 +362,49 @@ export default {
             releaseSlot();
           }
           if (error) return { ok: false, error: `审查失败: ${error}` };
-          const review = parseReview(answer);
+          let review = parseReview(answer);
+          if (!review.parsed) {
+            // schema repair：模型偶尔会无视 JSON 约束。给一次无工具、低温的修复轮，
+            // 只要求按 schema 重写；修复失败则保留原始 concern 降级结果。
+            const repairPrompt = [
+              '把下面这段审查输出重写为严格 JSON，只输出 JSON，不要解释或代码围栏。',
+              'schema: {"verdict":"pass|concern|fail","summary":"一句话","issues":[{"severity":"critical|major|minor","point":"问题","evidence":"证据"}],"confidence":0-1}',
+              `原文：\n${answer.slice(0, 4000)}`,
+            ].join('\n');
+            let repaired = '';
+            let repairUsage = { input: 0, output: 0 };
+            let repairCost = 0;
+            try {
+              for await (const ev of runner.run({
+                provider,
+                model,
+                messages: [{ role: 'user', content: repairPrompt }],
+                systemPrompt: '你是 JSON 修复器。只输出符合 schema 的 JSON，不要输出其他内容。',
+                tools: [],
+                traceId,
+                maxTurns: 1,
+                parentStepId: tctx.stepId,
+                signal: tctx.signal,
+                sessionId: tctx.sessionId,
+                tenantId: tctx.tenantId,
+                sandboxRoot: tctx.sandboxRoot,
+                costBudget: remainingBudget === undefined ? undefined : Math.max(remainingBudget - cost, 0),
+                ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
+              })) {
+                if (ev.type === 'delta') repaired += ev.text;
+                else if (ev.type === 'assistant_done') { repairUsage = ev.usage; repairCost = ev.cost; }
+              }
+            } catch { /* 修复失败保留原降级结果 */ }
+            usage = { input: usage.input + repairUsage.input, output: usage.output + repairUsage.output };
+            cost += repairCost;
+            const repairedReview = parseReview(repaired);
+            if (repairedReview.parsed) review = repairedReview;
+          }
+          const { parsed: _parsed, ...reviewData } = review;
           return {
             ok: true,
             data: {
-              ...review,
+              ...reviewData,
               toolCalls,
               tokensIn: usage.input,
               tokensOut: usage.output,

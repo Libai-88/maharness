@@ -170,6 +170,21 @@ function argPathOf(args: unknown): string | null {
 
 /** 匹配策略：后定义者（更具体的项目规则）优先 */
 export function matchPolicy(rules: PolicyRule[], toolName: string, args: unknown): PolicyRule | null {
+  return evaluatePolicy(rules, toolName, args).rule ?? null;
+}
+
+export type PolicyDecision = PolicyRule['effect'] | 'default';
+
+export interface PolicyEvaluation {
+  decision: PolicyDecision;
+  matched: boolean;
+  ruleId?: string;
+  reason?: string;
+  rule?: PolicyRule;
+}
+
+/** 纯函数策略判定：与运行时 agent.before_tool 使用同一套匹配规则。 */
+export function evaluatePolicy(rules: PolicyRule[], toolName: string, args: unknown): PolicyEvaluation {
   for (let i = rules.length - 1; i >= 0; i--) {
     const r = rules[i];
     if (r.enabled === false) continue;
@@ -183,7 +198,136 @@ export function matchPolicy(rules: PolicyRule[], toolName: string, args: unknown
       const p = argPathOf(args);
       if (!p || !matchesGlob(p.replace(/\\/g, '/'), r.pathPattern)) continue;
     }
-    return r;
+    return { decision: r.effect, matched: true, ruleId: r.id, reason: r.reason, rule: r };
   }
-  return null;
+  return { decision: 'default', matched: false };
+}
+
+export interface PolicyRuleChange {
+  id: string;
+  change: 'added' | 'removed' | 'changed';
+  before?: PolicyRule;
+  after?: PolicyRule;
+  fields?: string[];
+}
+
+const POLICY_FIELDS: (keyof PolicyRule)[] = ['effect', 'tool', 'argPattern', 'pathPattern', 'reason', 'enabled'];
+
+function indexedRuleKeys(rules: PolicyRule[]): Map<string, PolicyRule> {
+  const out = new Map<string, PolicyRule>();
+  rules.forEach((rule, index) => {
+    const base = rule.id || `${rule.tool}#${index}`;
+    let key = base;
+    let suffix = 1;
+    while (out.has(key)) key = `${base}#${suffix++}`;
+    out.set(key, rule);
+  });
+  return out;
+}
+
+/** 比较两份策略规则：按 id（缺省按 tool#index）识别新增、删除与字段变化。 */
+export function diffPolicyRules(before: PolicyRule[], after: PolicyRule[]): PolicyRuleChange[] {
+  const oldRules = indexedRuleKeys(before);
+  const newRules = indexedRuleKeys(after);
+  const changes: PolicyRuleChange[] = [];
+  for (const [id, oldRule] of oldRules) {
+    const newRule = newRules.get(id);
+    if (!newRule) {
+      changes.push({ id, change: 'removed', before: oldRule });
+      continue;
+    }
+    const fields = POLICY_FIELDS.filter((field) => JSON.stringify(oldRule[field]) !== JSON.stringify(newRule[field]));
+    if (fields.length) changes.push({ id, change: 'changed', before: oldRule, after: newRule, fields });
+  }
+  for (const [id, newRule] of newRules) {
+    if (!oldRules.has(id)) changes.push({ id, change: 'added', after: newRule });
+  }
+  return changes;
+}
+
+export interface PolicyValidationIssue {
+  level: 'error' | 'warning';
+  code: 'missing-tool' | 'invalid-effect' | 'invalid-regex' | 'duplicate-id' | 'blanket-allow';
+  ruleId?: string;
+  message: string;
+}
+
+/** 纯通配工具名（`*`、`**`、`?*`……）：不含任何具体字符 → 覆盖所有工具 */
+export function isWildcardTool(tool: string): boolean {
+  return /^[*?]+$/.test(String(tool ?? '').trim());
+}
+
+/** 一条策略规则是否等于「整体关掉审批」 */
+export function isBlanketAllow(rule: PolicyRule): boolean {
+  return !!rule && rule.effect === 'allow' && isWildcardTool(rule.tool);
+}
+
+/** 写入/预览前校验候选策略；error 拒绝保存，warning 只提示。 */
+export function validatePolicyRules(rules: PolicyRule[]): PolicyValidationIssue[] {
+  const issues: PolicyValidationIssue[] = [];
+  const ids = new Set<string>();
+  rules.forEach((rule, index) => {
+    const id = rule.id || `${rule.tool}#${index}`;
+    if (!rule || typeof rule.tool !== 'string' || !rule.tool.trim()) {
+      issues.push({ level: 'error', code: 'missing-tool', ruleId: id, message: '每条规则必须有 tool' });
+      return;
+    }
+    if (!['allow', 'deny', 'require-approval'].includes(rule.effect)) {
+      issues.push({ level: 'error', code: 'invalid-effect', ruleId: id, message: `effect 非法: ${String(rule.effect)}` });
+    }
+    if (rule.argPattern) {
+      try { new RegExp(rule.argPattern, 'i'); }
+      catch { issues.push({ level: 'error', code: 'invalid-regex', ruleId: id, message: `argPattern 不是合法正则: ${rule.argPattern}` }); }
+    }
+    if (rule.id) {
+      if (ids.has(rule.id)) issues.push({ level: 'warning', code: 'duplicate-id', ruleId: rule.id, message: `规则 id 重复: ${rule.id}` });
+      ids.add(rule.id);
+    }
+    if (isBlanketAllow(rule)) {
+      issues.push({
+        level: 'warning', code: 'blanket-allow', ruleId: id,
+        message: `通配 allow（tool=${rule.tool}）会整体放行审批门，需显式确认`,
+      });
+    }
+  });
+  return issues;
+}
+
+export interface PolicyProbe {
+  tool: string;
+  args?: unknown;
+}
+
+export interface PolicyDryRunResult {
+  current: PolicyEvaluation[];
+  candidate: PolicyEvaluation[];
+  changed: boolean;
+  probes: { tool: string; args?: unknown; current: PolicyEvaluation; candidate: PolicyEvaluation; changed: boolean }[];
+  diff: PolicyRuleChange[];
+  issues: PolicyValidationIssue[];
+}
+
+/** 只读演练：同一组探针分别跑当前策略与候选策略，不执行工具、不落盘。 */
+export function dryRunPolicy(
+  currentRules: PolicyRule[],
+  candidateRules: PolicyRule[],
+  probes: PolicyProbe[],
+): PolicyDryRunResult {
+  const current = probes.map((probe) => evaluatePolicy(currentRules, probe.tool, probe.args ?? {}));
+  const candidate = probes.map((probe) => evaluatePolicy(candidateRules, probe.tool, probe.args ?? {}));
+  const diff = diffPolicyRules(currentRules, candidateRules);
+  return {
+    current,
+    candidate,
+    changed: diff.length > 0 || current.some((item, index) => item.decision !== candidate[index].decision || item.ruleId !== candidate[index].ruleId),
+    probes: probes.map((probe, index) => ({
+      tool: probe.tool,
+      args: probe.args,
+      current: current[index],
+      candidate: candidate[index],
+      changed: current[index].decision !== candidate[index].decision || current[index].ruleId !== candidate[index].ruleId,
+    })),
+    diff,
+    issues: validatePolicyRules(candidateRules),
+  };
 }

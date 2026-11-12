@@ -68,6 +68,23 @@ const tool: ToolDef = {
 };
 
 describe('AgentRunner 副作用恢复账本', () => {
+  test('工具执行前写入 tool_pending 步骤断点，轮末写入 turn_end', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-step-checkpoint-'));
+    try {
+      const runner = new AgentRunner(kernelStub(root), bus);
+      const steps: { phase?: string; pendingTool?: { name: string } }[] = [];
+      for await (const _event of runner.run({
+        provider: replayToolProvider('step-call', 'record_effect', { value: 1 }),
+        model: 'm', messages: [{ role: 'user', content: 'do it' }],
+        tools: [tool], traceId: 'trace-step', maxTurns: 3,
+        onCheckpoint: (_turn, _history, _evidence, step) => { if (step) steps.push(step as { phase?: string; pendingTool?: { name: string } }); },
+      })) { /* 消费事件 */ }
+      const pending = steps.find((step) => step.phase === 'tool_pending');
+      assert.equal(pending?.pendingTool?.name, 'record_effect');
+      assert.equal(steps[steps.length - 1]?.phase, 'turn_end');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test('多次重启累计费用并扣减工具预算，完成事件只结算当前调用', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-cost-restart-'));
     const dbPath = join(root, 'agent.db');

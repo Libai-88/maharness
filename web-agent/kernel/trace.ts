@@ -13,6 +13,13 @@ export interface TraceValidationOptions {
   requireResolvedParents?: boolean;
 }
 
+interface ArchiveIndexEntry {
+  traceId: string;
+  ts?: number;
+  offset: number;
+  length: number;
+}
+
 /** 校验一批 Trace 步骤的结构和局部因果关系；parentId 可指向批次外的父 span。 */
 export function validateTraceSteps(steps: readonly TraceStep[], options: TraceValidationOptions = {}): string[] {
   const errors: string[] = [];
@@ -149,6 +156,8 @@ export class Trace {
     totalTokensIn: 0, totalTokensOut: 0, totalCost: 0,
     writeFailures: 0,
   };
+  /** 归档 .idx 解析缓存：按 mtime + size 失效，避免每次分页重复解析整份索引。 */
+  private archiveIndexCache = new Map<string, { mtimeMs: number; size: number; entries: ArchiveIndexEntry[] }>();
   /** 进程退出前兜底 flush（同步 appendFileSync 在 exit 钩子内可执行） */
   private readonly exitFlush = () => this.flush();
 
@@ -397,6 +406,7 @@ export class Trace {
         files++;
       } catch { try { rmSync(tempPath, { force: true }); } catch { /* ignore */ } }
     }
+    this.archiveIndexCache.clear();
     return { files, entries };
   }
 
@@ -456,19 +466,45 @@ export class Trace {
     try {
       indexFiles = readdirSync(this.tracesDir).filter((f) => f.endsWith('.idx')).sort().slice(-maxFiles);
     } catch { return out; }
+    const active = new Set(indexFiles);
+    for (const key of this.archiveIndexCache.keys()) {
+      if (!active.has(key)) this.archiveIndexCache.delete(key);
+    }
     for (const indexFile of indexFiles) {
       const day = indexFile.slice(0, -4);
-      for (const line of readTailLines(join(this.tracesDir, indexFile), Number.MAX_SAFE_INTEGER)) {
-        let entry: { traceId?: string; ts?: number; offset?: number; length?: number };
-        try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
+      const indexPath = join(this.tracesDir, indexFile);
+      let entries: ArchiveIndexEntry[];
+      try {
+        const stat = statSync(indexPath);
+        const cached = this.archiveIndexCache.get(indexFile);
+        if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+          entries = cached.entries;
+        } else {
+          entries = [];
+          for (const line of readTailLines(indexPath, Number.MAX_SAFE_INTEGER)) {
+            let entry: { traceId?: string; ts?: number; offset?: number; length?: number };
+            try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
+            if (typeof entry.traceId !== 'string' || typeof entry.offset !== 'number'
+              || typeof entry.length !== 'number' || !Number.isSafeInteger(entry.offset)
+              || !Number.isSafeInteger(entry.length)) continue;
+            entries.push({
+              traceId: entry.traceId,
+              ...(typeof entry.ts === 'number' ? { ts: entry.ts } : {}),
+              offset: entry.offset,
+              length: entry.length,
+            });
+          }
+          this.archiveIndexCache.set(indexFile, { mtimeMs: stat.mtimeMs, size: stat.size, entries });
+        }
+      } catch {
+        continue;
+      }
+      for (const entry of entries) {
         if (filter.fromTs !== undefined && typeof entry.ts === 'number' && entry.ts < filter.fromTs) continue;
         if (filter.toTs !== undefined && typeof entry.ts === 'number' && entry.ts > filter.toTs) continue;
         if (filter.beforeTs !== undefined && typeof entry.ts === 'number' && entry.ts >= filter.beforeTs) continue;
-        const offset = entry.offset;
-        const length = entry.length;
-        if (entry.traceId !== traceId || typeof offset !== 'number' || typeof length !== 'number'
-          || !Number.isSafeInteger(offset) || !Number.isSafeInteger(length)) continue;
-        candidates.push({ offset, length, day });
+        if (entry.traceId !== traceId) continue;
+        candidates.push({ offset: entry.offset, length: entry.length, day });
       }
     }
     const selected = filter.limit && filter.limit > 0 ? candidates.slice(-filter.limit) : candidates;

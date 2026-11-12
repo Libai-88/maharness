@@ -1,0 +1,7 @@
+{
+  "id": "otel",
+  "name": "OTLP 追踪导出",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

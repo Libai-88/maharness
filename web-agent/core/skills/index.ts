@@ -13,14 +13,15 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Plugin } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/types';
+import type { AgentHookCtx } from '../../kernel/loop';
 import { parseFrontMatter, fmString, fmList, fmMap } from '../../kernel/frontmatter';
-import { contentWords, bigramSet, dice } from '../../kernel/cache';
 import { estimateTokens } from '../../kernel/tokens';
+import { listSkillBackups, rollbackSkill } from '../../kernel/skillsSync';
+import { scoreSkillEntries } from './router';
 
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
 const builtinDir = join(rootDir, 'core', 'skills', 'builtin');
-const userDir = join(rootDir, 'data', 'skills');
 const vendorDir = join(rootDir, 'vendor');
 
 /** get_skill_file 单文件读取上限（字符） */
@@ -43,6 +44,8 @@ export interface SkillInfo {
   /** 同名技能被更高优先级覆盖时列出 */
   shadowed?: SkillSource[];
   license?: string;
+  version?: string;
+  requires?: string[];
   allowedTools?: string[];
   metadata?: Record<string, string>;
   /** 触发技能候选的用户意图关键词或短语 */
@@ -91,6 +94,7 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
   const fm = parseFrontMatter(md);
   const meta = fmMap(fm.data, 'metadata');
   const allowed = fmList(fm.data, 'allowed-tools').length ? fmList(fm.data, 'allowed-tools') : fmList(fm.data, 'allowed_tools');
+  const requires = fmList(fm.data, 'requires');
   const triggers = fmList(fm.data, 'triggers');
   const appliesWhen = fmList(fm.data, 'applies-when').length ? fmList(fm.data, 'applies-when') : fmList(fm.data, 'applies_when');
   const rejectWhen = fmList(fm.data, 'reject-when').length ? fmList(fm.data, 'reject-when') : fmList(fm.data, 'reject_when');
@@ -108,6 +112,8 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
     description: fmString(fm.data, 'description') || '(无描述)',
     source, packRoot, dir,
     license: fmString(fm.data, 'license') || undefined,
+    version: fmString(fm.data, 'version') || undefined,
+    requires: requires.length ? requires : undefined,
     allowedTools: allowed.length ? allowed : undefined,
     metadata: Object.keys(meta).length ? meta : undefined,
     triggers: triggers.length ? triggers : undefined,
@@ -123,6 +129,8 @@ function publicInfo(e: SkillEntry, shadows: SkillSource[]): SkillInfo {
   const info: SkillInfo = { name: e.name, description: e.description, source: e.source };
   if (shadows.length) info.shadowed = shadows;
   if (e.license) info.license = e.license;
+  if (e.version) info.version = e.version;
+  if (e.requires?.length) info.requires = e.requires;
   if (e.allowedTools?.length) info.allowedTools = e.allowedTools;
   if (e.metadata) info.metadata = e.metadata;
   if (e.triggers) info.triggers = e.triggers;
@@ -147,6 +155,13 @@ export default {
     const configuredVendorDir = ctx.config.get<string>('skills.vendorDir', vendorDir);
     const skillVendorDir = resolve(configuredVendorDir);
     const usageFile = join(ctx.paths.data, 'skill-usage.json');
+    const userSkillsDir = join(ctx.paths.data, 'skills');
+    const activeSkills = new Map<string, { name: string; at: number }>();
+    let embedding: { embed(text: string): Promise<number[]> } | undefined;
+    ctx.inject?.('service:embedding', (value) => {
+      embedding = value as typeof embedding;
+    });
+    const skillVectors = new Map<string, number[]>();
 
     let scanCache: { at: number; entries: SkillEntry[]; index: Map<string, { entry: SkillEntry; shadows: SkillSource[] }> } | null = null;
 
@@ -155,7 +170,7 @@ export default {
       const projectRoot = ctx.config.get<string>('sandboxRoot', rootDir);
       const parents: { dir: string; source: SkillSource; packRoot?: string; selfName?: string }[] = [];
       for (const rel of PROJECT_DIRS) parents.push({ dir: join(resolve(projectRoot), rel), source: 'project' });
-      parents.push({ dir: userDir, source: 'user' });
+      parents.push({ dir: userSkillsDir, source: 'user' });
       for (const { packRoot, skillParent, selfAsSkill } of packRoots(skillVendorDir)) {
         parents.push({ dir: skillParent, source: 'pack', packRoot, selfName: selfAsSkill });
       }
@@ -190,8 +205,16 @@ export default {
 
     const list = (): SkillInfo[] => {
       const { index } = scan();
+      const available = new Set(index.keys());
       return [...index.values()]
-        .map(v => publicInfo(v.entry, v.shadows))
+        .map(v => {
+          const info = publicInfo(v.entry, v.shadows);
+          const missing = (v.entry.requires ?? []).filter((name) => !available.has(name));
+          if (missing.length) {
+            info.contractWarnings = [...(info.contractWarnings ?? []), `缺少依赖技能: ${missing.join(', ')}`];
+          }
+          return info;
+        })
         .sort((a, b) => PRECEDENCE.indexOf(a.source) - PRECEDENCE.indexOf(b.source) || a.name.localeCompare(b.name));
     };
 
@@ -222,27 +245,34 @@ export default {
     (usageTimer as { unref?: () => void }).unref?.();
 
     // ---- 相关性路由 ----
-    function scoreSkills(query: string): { name: string; score: number }[] {
-      const { index } = scan();
-      const qNorm = query.replace(/\s+/g, ' ').trim().toLowerCase();
-      const qWords = new Set(contentWords(qNorm));
-      const qBi = bigramSet(contentWords(qNorm));
-      return [...index.values()].map(({ entry }) => {
-        const hay = `${entry.name} ${entry.description}`.toLowerCase();
-        let score = dice(qBi, bigramSet(contentWords(hay)));
-        for (const w of qWords) if (w.length > 1 && hay.includes(w)) score += 0.15;
-        if (qNorm && hay.includes(qNorm)) score += 0.5;
-        return { name: entry.name, score };
-      }).sort((a, b) => b.score - a.score);
+    async function ensureSkillVectors(): Promise<void> {
+      if (!embedding) return;
+      const {index} = scan();
+      for (const {entry} of index.values()) {
+        if (skillVectors.has(entry.name)) continue;
+        try {
+          const vector = await embedding.embed(`${entry.name}: ${entry.description}`.slice(0, 500));
+          if (vector.length) skillVectors.set(entry.name, vector);
+        } catch { /* embedding 不可用 → bigram 回退 */ }
+      }
     }
 
-    function buildIndex(userText: string): string | null {
+    function scoreSkills(query: string, queryVector?: number[]): { name: string; score: number }[] {
+      const { index } = scan();
+      return scoreSkillEntries(
+        [...index.values()].map(({ entry }) => entry),
+        query,
+        { queryVector, vectors: skillVectors },
+      );
+    }
+
+    function buildIndex(userText: string, queryVector?: number[]): string | null {
       if (mode === 'off') return null;
       const { index } = scan();
       if (!index.size) return null;
       const ranked = mode === 'all'
         ? [...index.keys()].map(name => ({ name, score: 1 }))
-        : scoreSkills(userText).filter(s => s.score > 0);
+        : scoreSkills(userText, queryVector).filter(s => s.score > 0);
       const picked = ranked.slice(0, topK);
       let out = '';
       const shown: string[] = [];
@@ -262,19 +292,56 @@ export default {
       return head + out + (hidden > 0 ? `\n（另有 ${hidden} 个技能与当前任务相关性低未列出，需要时用 list_skills 查看）` : '');
     }
 
+    ctx.on?.('agent.before_llm', async (e) => {
+      const h = e.data as AgentHookCtx;
+      if (!embedding || !Array.isArray(h.history)) return;
+      let lastUser = '';
+      for (let i = h.history.length - 1; i >= 0; i--) {
+        if (h.history[i].role === 'user') { lastUser = String(h.history[i].content ?? ''); break; }
+      }
+      if (!lastUser) return;
+      const text = lastUser.slice(0, 500);
+      const previous = h.scratchpad.skillsQuery as { text: string; vector: number[] } | undefined;
+      if (previous?.text === text) return;
+      await ensureSkillVectors();
+      try {
+        const vector = await embedding.embed(text);
+        if (vector.length) h.scratchpad.skillsQuery = { text, vector };
+      } catch { /* embedding 失败 → bigram 回退 */ }
+    });
+
+    ctx.on?.('agent.before_tool', (e) => {
+      const h = e.data as { sessionId?: string; tool?: { name?: string }; blocked?: boolean; blockReason?: string };
+      const sessionId = h.sessionId ?? '_default';
+      const active = activeSkills.get(sessionId);
+      if (!active) return;
+      if (Date.now() - active.at > 10 * 60_000) {
+        activeSkills.delete(sessionId);
+        return;
+      }
+      const allowed = entryOf(active.name)?.allowedTools;
+      if (!allowed?.length) return;
+      const toolName = h.tool?.name ?? '';
+      if (!toolName || toolName === 'get_skill' || toolName === 'get_skill_file' || allowed.includes(toolName)) return;
+      h.blocked = true;
+      h.blockReason = `技能「${active.name}」声明 allowed-tools，未授权调用 ${toolName}`;
+    });
+
     ctx.register({
       kind: 'context',
       context: {
         id: 'skills-index',
         description: '按需注入的技能索引（相关性 top-K，仅名称与描述，正文零成本）',
         weight: 20,
-        contentFn({ history }) {
+        maxTokens: indexMaxTokens,
+        contentFn({ history, scratchpad }) {
           let lastUser = '';
           for (let i = history.length - 1; i >= 0; i--) {
             if (history[i].role === 'user') { lastUser = String(history[i].content ?? ''); break; }
           }
           if (!lastUser) return null;
-          return buildIndex(lastUser);
+          const content = buildIndex(lastUser, (scratchpad.skillsQuery as { vector?: number[] } | undefined)?.vector);
+          return content ? { content, source: 'skills' } : null;
         },
       },
     });
@@ -321,6 +388,7 @@ export default {
         name: 'list_skills',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{count, skills: [{name, description, source, shadowed?, allowedTools?, bodyChars?}]}',
         description: '列出全部可用技能（项目级 / 已安装 / 技能包 / 内置）：名称、描述、来源。同名技能按 project>user>pack>builtin 生效，被覆盖者标 shadowed。',
         parameters: { type: 'object', properties: {} },
@@ -337,21 +405,23 @@ export default {
         name: 'get_skill',
         risk: 'low',
         costHint: 'low',
-        output: '{name, source, content}；content 为 SKILL.md 全文',
+        sideEffect: 'read',
+        output: '{name, source, version?, requires?, allowedTools?, content}；content 为 SKILL.md 全文',
         description: '读取指定技能全文（SKILL.md，含 frontmatter 与正文）。任务与某技能相关时先读它再执行；正文较长时优先看其中的流程与清单。',
         parameters: {
           type: 'object',
           properties: { name: { type: 'string', description: '技能名称（list_skills 可查）' } },
           required: ['name'],
         },
-        async handler(args: { name?: string }) {
+        async handler(args: { name?: string }, tctx: ToolContext) {
           const r = get(String(args.name ?? ''));
           if (!r.ok) return { ok: false, error: r.error };
           const e = entryOf(String(args.name ?? ''));
           const row = usageRow(String(args.name));
           row.reads++; row.bodyTokens += estimateTokens(r.content ?? ''); row.lastReadAt = Date.now();
           usageDirty = true;
-          return { ok: true, data: { name: e?.name ?? args.name, source: e?.source, allowedTools: e?.allowedTools, content: r.content } };
+          activeSkills.set(tctx.sessionId ?? '_default', { name: String(args.name ?? ''), at: Date.now() });
+          return { ok: true, data: { name: e?.name ?? args.name, source: e?.source, version: e?.version, requires: e?.requires, allowedTools: e?.allowedTools, content: r.content } };
         },
       },
     });
@@ -362,6 +432,7 @@ export default {
         name: 'get_skill_file',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         limits: `仅限技能目录/技能包根内；单文件 ${FILE_CHAR_LIMIT} 字符上限`,
         description: '读取技能内资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能包的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）。大文档先用 grep 参数定位章节再读，避免整文塞满上下文。',
         parameters: {
@@ -373,9 +444,10 @@ export default {
           },
           required: ['skill', 'path'],
         },
-        async handler(args: { skill?: string; path?: string; grep?: string }) {
+        async handler(args: { skill?: string; path?: string; grep?: string }, tctx: ToolContext) {
           const entry = entryOf(String(args.skill ?? ''));
           if (!entry) return { ok: false, error: `技能不存在: ${args.skill}（用 list_skills 查看）` };
+          activeSkills.set(tctx.sessionId ?? '_default', { name: entry.name, at: Date.now() });
           const rel = String(args.path ?? '');
           const candidates = [safeResolve(entry.dir, rel)];
           if (entry.packRoot) candidates.push(safeResolve(entry.packRoot, rel));
@@ -427,6 +499,52 @@ export default {
             ok: false,
             error: `文件不存在: ${rel}（技能内路径相对技能根；shared/ scripts/ docs/ .claude/ 相对技能包根，已自动尝试两者）${avail.length ? `。可用文件: ${avail.join('、')}` : ''}`,
           };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'list_skill_backups',
+        risk: 'low',
+        costHint: 'low',
+        output: '{name, count, backups}',
+        description: '列出某个已安装技能保留的历史版本备份（覆盖安装前自动生成，最多 5 份）。',
+        parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
+        async handler(args: { name?: string }) {
+          const name = String(args.name ?? '').trim();
+          if (!name) return { ok: false, error: '缺少 name' };
+          const backups = listSkillBackups(name, userSkillsDir);
+          return { ok: true, data: { name, count: backups.length, backups } };
+        },
+      },
+    });
+
+    ctx.register({
+      kind: 'tool',
+      tool: {
+        name: 'rollback_skill',
+        risk: 'medium',
+        costHint: 'low',
+        approval: true,
+        output: '{name, installed, files, backup}',
+        description: '把已安装技能回滚到最近一次（或指定）备份；回滚走原子换入，失败时当前版本保持不变。',
+        parameters: {
+          type: 'object',
+          properties: {
+            name: { type: 'string', description: '技能名称' },
+            backup: { type: 'string', description: '可选：list_skill_backups 返回的备份目录；省略则用最近一份' },
+          },
+          required: ['name'],
+        },
+        async handler(args: { name?: string; backup?: string }) {
+          const name = String(args.name ?? '').trim();
+          if (!name) return { ok: false, error: '缺少 name' };
+          const result = rollbackSkill(name, userSkillsDir, args.backup ? String(args.backup) : undefined);
+          if (!result.ok) return { ok: false, error: result.error ?? '回滚失败' };
+          scanCache = null;
+          return { ok: true, data: result };
         },
       },
     });

@@ -2,13 +2,17 @@
  * server/routes/trace.ts —— Trace 观测
  */
 import type { Express } from 'express';
-import type { RouteDeps } from './shared';
+import { DEFAULT_TENANT, tenantIdOf, type RouteDeps } from './shared';
 
 export function registerTraceRoutes(app: Express, deps: RouteDeps): void {
-  const { kernel } = deps;
+  const { kernel, store } = deps;
 
   app.get('/api/trace', (req, res) => {
     const traceId = req.query.trace_id ? String(req.query.trace_id) : undefined;
+    const tenantId = tenantIdOf(req);
+    const tenantSessions = tenantId === DEFAULT_TENANT
+      ? null
+      : new Set(store.listSessions(tenantId).map((session) => session.id));
     const type = req.query.type ? String(req.query.type) : undefined;
     const name = req.query.name ? String(req.query.name) : undefined;
     const parentId = req.query.parent_id ? String(req.query.parent_id) : undefined;
@@ -30,11 +34,16 @@ export function registerTraceRoutes(app: Express, deps: RouteDeps): void {
     const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(500, Math.floor(requestedLimit))) : 100;
     const baseFilter = { type, name, parentId, sessionId, pluginId, fromTs, toTs, beforeTs, status, errorCategory, limit };
     let steps = kernel.trace.query(traceId, baseFilter);
+    if (tenantSessions) {
+      if (sessionId && !tenantSessions.has(sessionId)) steps = [];
+      else steps = steps.filter((step) => !!step.sessionId && tenantSessions.has(step.sessionId));
+    }
     let source: 'ring' | 'archive' = 'ring';
     if (steps.length === 0 && (traceId || parentId || sessionId || pluginId)) {
       // ring 未命中（重启/跨日期）→ 回退 JSONL 归档；带维度过滤时仍可控，
       // 无任何定位条件的全量归档查询继续禁止。
       steps = kernel.trace.queryArchive(traceId, baseFilter);
+      if (tenantSessions) steps = steps.filter((step) => !!step.sessionId && tenantSessions.has(step.sessionId));
       source = 'archive';
     }
     let unresolvedParentIds: string[] = [];

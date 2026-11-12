@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import { ConcurrentStoreWriteError, Store } from '../db';
 import { encryptSecret, decryptSecret, isEncrypted } from '../secrets';
+import { decryptPurposeSecret, isPurposeEncrypted, secretPurpose } from '../../kernel/secret-box';
 
 const roots: string[] = [];
 
@@ -163,6 +164,13 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       store.saveCheckpoint(s.id, 2, [{ role: 'user', content: '继续' }], 'run-1');
       assert.equal(store.loadCheckpoint(s.id)?.runId, 'run-1');
       assert.equal(store.loadCheckpoint(s.id)?.schemaVersion, Store.CHECKPOINT_SCHEMA_VERSION);
+      store.saveCheckpoint(s.id, 2, [{ role: 'user', content: '继续' }], 'run-1', undefined, undefined, 0, {
+        phase: 'tool_pending',
+        pendingTool: { name: 'write_file', toolCallId: 'call-1', sideEffect: 'write', argsPreview: 'a.txt' },
+      });
+      const step = store.loadCheckpoint(s.id)?.step;
+      assert.equal(step?.phase, 'tool_pending');
+      assert.equal(step?.pendingTool?.name, 'write_file');
       const first = store.claimToolEffect('run-1', '2:0:write_file:abc');
       assert.equal(first.state, 'new');
       assert.equal(store.hasPendingToolEffects('run-1'), true);
@@ -188,6 +196,25 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       store.deleteSession(s.id);
       assert.equal(store.getSession(s.id), undefined);
       assert.equal(store.loadCheckpoint(s.id), undefined, '删除会话应级联清理断点');
+    } finally { cleanup(); }
+  });
+
+  test('审批审计持久化：注册、决策与按租户/会话查询', () => {
+    const { store, cleanup } = newStore();
+    try {
+      const s = store.createSession('m', '', 'tenant-a');
+      store.saveApprovalRequest({
+        id: 'ap-1', sessionId: s.id, tenantId: 'tenant-a', name: 'write_file',
+        summary: '写入文件', args: { path: 'a.txt' }, createdAt: 100, expiresAt: 200,
+      });
+      const pending = store.listApprovalRequests('tenant-a', s.id);
+      assert.equal(pending.length, 1);
+      assert.equal(pending[0]?.decision, null);
+      store.decideApprovalRequest('ap-1', 'approved', 'user');
+      const decided = store.listApprovalRequests('tenant-a', s.id);
+      assert.equal(decided[0]?.decision, 'approved');
+      assert.equal(decided[0]?.reason, 'user');
+      assert.equal(store.listApprovalRequests('tenant-b').length, 0);
     } finally { cleanup(); }
   });
 
@@ -381,6 +408,24 @@ describe('Store api_key 加密存储（R1）', () => {
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
+  test('用途隔离：v2 密文按 provider id 派生，不能跨用途解密', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-db-purpose-'));
+    try {
+      const providerKey = `sk-purpose-${'test-value'}`;
+      const store = new Store(join(root, 'purpose.db'), { secretKey: KEY });
+      store.upsertProvider({ id: 'p1', label: 'P1', baseUrl: 'https://x.example', apiKey: providerKey, model: 'm' });
+      store.close();
+      const raw = new Store(join(root, 'purpose.db'));
+      try {
+        const blob = raw.getProvider('p1')?.apiKey ?? '';
+        assert.equal(isPurposeEncrypted(blob), true);
+        assert.equal(secretPurpose(blob), 'provider:p1');
+        assert.equal(decryptPurposeSecret(blob, KEY, 'provider:p1'), providerKey);
+        assert.throws(() => decryptPurposeSecret(blob, KEY, 'provider:p2'), /用途不匹配/);
+      } finally { raw.close(); }
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test('encryptSecret/decryptSecret 密码学往返（GCM：每次 IV 随机）', () => {
     const KEY1 = KEY;
     const blob = encryptSecret('hello-凭据', KEY1);
@@ -388,5 +433,39 @@ describe('Store api_key 加密存储（R1）', () => {
     assert.equal(blob.startsWith('v1:'), true);
     assert.equal(decryptSecret(blob, KEY1), 'hello-凭据');
     assert.notEqual(encryptSecret('hello-凭据', KEY1), blob, '相同明文两次加密密文不同');
+  });
+});
+
+describe('OPS-01 会话租户作用域', () => {
+  test('列表、读取、批量删除均按 tenantId 隔离', () => {
+    const { store, cleanup } = newStore();
+    try {
+      const a = store.createSession('m', '', 'tenant-a');
+      const b = store.createSession('m', '', 'tenant-b');
+      const d = store.createSession('m');
+      assert.deepEqual(store.listSessions('tenant-a').map((s) => s.id), [a.id]);
+      assert.deepEqual(store.listSessions('tenant-b').map((s) => s.id), [b.id]);
+      assert.deepEqual(store.listSessions('default').map((s) => s.id), [d.id]);
+      assert.equal(store.getSession(a.id, 'tenant-b'), undefined);
+      assert.equal(store.getSession(a.id, 'tenant-a')?.id, a.id);
+      assert.equal(store.deleteSessions([a.id], 'tenant-b'), 0, '跨租户删除必须无效');
+      assert.equal(store.getSession(a.id, 'tenant-a')?.id, a.id, '跨租户删除后原会话仍在');
+      assert.equal(store.deleteSessions([a.id], 'tenant-a'), 1);
+      assert.equal(store.getSession(a.id, 'tenant-a'), undefined);
+    } finally { cleanup(); }
+  });
+
+  test('统计聚合按租户过滤', () => {
+    const { store, cleanup } = newStore();
+    try {
+      const a = store.createSession('m', '', 'tenant-a');
+      store.createSession('m', '', 'tenant-b');
+      store.addMessage({ sessionId: a.id, role: 'user', content: 'hello' });
+      assert.equal(store.statsOverview('tenant-a').sessions, 1);
+      assert.equal(store.statsOverview('tenant-a').messages, 1);
+      assert.equal(store.statsOverview('tenant-b').messages, 0);
+      assert.equal(store.aggregateSessions('tenant-a')[0]?.sessionId, a.id);
+      assert.equal(store.aggregateSessions('tenant-b').length, 0);
+    } finally { cleanup(); }
   });
 });

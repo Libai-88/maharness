@@ -12,6 +12,8 @@ import * as ReactDOM from 'react-dom/client';
 import { toast } from 'sonner';
 import type { BusEvent, PluginNavItem } from '../types';
 import { getMutationToken, subscribeEvents } from '../api';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
 
 /** 宿主注入插件 UI 的接口：插件对外交互的唯一通道 */
 export interface PluginHostApi {
@@ -124,14 +126,13 @@ export default function PluginModuleView({ item }: { item: PluginNavItem }) {
     };
   }, [item.moduleUrl, item.pluginId, item]);
 
-  if (!item.moduleUrl) return <div className="view-loading"><span>插件未声明模块入口（nav.module）</span></div>;
-  if (error) return <div className="view-loading"><span>插件模块加载失败（{item.pluginId}）：{error}</span></div>;
+  if (!item.moduleUrl) return <Empty><EmptyHeader><EmptyTitle>未声明模块入口</EmptyTitle><EmptyDescription>插件需配置 nav.module。</EmptyDescription></EmptyHeader></Empty>;
+  if (error) return <Alert variant="destructive" className="m-4 w-auto"><AlertTitle>插件模块加载失败</AlertTitle><AlertDescription>{item.pluginId}：{error}</AlertDescription></Alert>;
   return (
     <div
       ref={ref}
-      className="plugin-module"
+      className="min-h-0 flex-1 overflow-auto p-4"
       data-plugin-id={item.pluginId}
-      style={{ flex: 1, minHeight: 0, overflow: 'auto', padding: 16 }}
     />
   );
 }

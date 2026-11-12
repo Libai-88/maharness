@@ -1,0 +1,28 @@
+{
+  "version": 1,
+  "plugins": {
+    "reference-hello": {
+      "version": "0.1.0",
+      "integrity": "f511be1323",
+      "compatibility": {
+        "api": {
+          "min": "1.0.0",
+          "max": "1.0.0"
+        }
+      },
+      "permissions": {
+        "capabilities": {
+          "tool": [
+            "reference_hello"
+          ]
+        }
+      },
+      "updatedAt": 1794419204040
+    },
+    "workbench": {
+      "version": "0.2.0",
+      "integrity": "21a585e58d",
+      "updatedAt": 1794419204041
+    }
+  }
+}

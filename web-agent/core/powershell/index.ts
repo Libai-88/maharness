@@ -469,11 +469,11 @@ export default {
           const wanted = (args.commands ?? []).map(c => String(c).trim()).filter(c => /^[A-Za-z0-9_.+-]{1,32}$/.test(c));
           const cmds = wanted.length ? wanted : PROBE_DEFAULTS;
           const withVersion = !!args.withVersion;
-          const key = tctx.cache.makeKey(['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : '']);
+          const key = tctx.cache.makeKey(['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : ''], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: '环境探测缓存命中' });
+              .finish({ outputSummary: hit.meta ? `env_probe 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '环境探测缓存命中' });
             return { ok: true, data: hit.value };
           }
           const list = cmds.map(c => `'${c}'`).join(',');
@@ -487,7 +487,7 @@ export default {
               return { name: (name || '').trim(), found: !!(path || '').trim(), path: (path || '').trim() || undefined, version: (version || '').trim() || undefined };
             });
             const data = { platform: process.platform, node: process.version, tools };
-            tctx.cache.l2Set(key, data);
+            tctx.cache.l2Set(key, data, undefined, tctx.tenantId);
             return { ok: true, data };
           } catch (err) {
             return { ok: false, error: err instanceof Error ? err.message : String(err) };

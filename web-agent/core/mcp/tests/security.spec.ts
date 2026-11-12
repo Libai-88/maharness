@@ -16,14 +16,18 @@ import type { AddressInfo } from 'node:net';
 import {
   buildSpawnEnv,
   buildSpawnPlan,
+  buildHttpHeaders,
   assessApprovalGate,
   taskkillArgs,
   assertSafeMcpUrl,
   isPrivateHostAddress,
+  filterMcpToolsByAllowlist,
+  mcpToolMetadata,
   wrapMcpTool,
   MCP_PROTOCOL_VERSION,
   StdioConnection,
   HttpConnection,
+  McpCallLimiter,
   type ServerCfg,
 } from '../index';
 
@@ -252,6 +256,42 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
   });
 });
 
+describe('MCP HTTP 认证头', () => {
+  it('从 tokenEnv 或显式 token 生成 Bearer，不把令牌写进配置', () => {
+    assert.equal(
+      buildHttpHeaders({ auth: { type: 'bearer', tokenEnv: 'MCP_TOKEN' } }, { MCP_TOKEN: 'secret' }).Authorization,
+      'Bearer secret',
+    );
+    assert.equal(
+      buildHttpHeaders({ auth: { type: 'bearer', token: 'literal' } }, {}).Authorization,
+      'Bearer literal',
+    );
+    assert.deepEqual(buildHttpHeaders({}, {}), {});
+  });
+
+  it('缺少令牌、令牌换行和头注入均 fail-closed', () => {
+    assert.throws(() => buildHttpHeaders({ auth: { type: 'bearer', tokenEnv: 'MISSING' } }, {}), /令牌未配置/);
+    assert.throws(() => buildHttpHeaders({ auth: { type: 'bearer', token: 'a\nb' } }, {}), /不得包含换行/);
+    assert.throws(() => buildHttpHeaders({ headers: { 'X-Test': 'a\r\nb' } }, {}), /请求头值/);
+    assert.throws(() => buildHttpHeaders({ headers: { 'Bad Header': 'x' } }, {}), /请求头名称/);
+  });
+});
+
+describe('MCP server 调用配额', () => {
+  test('并发与频率上限在 acquire 时拒绝，release 后并发槽恢复', () => {
+    const concurrent = new McpCallLimiter(0, 1);
+    assert.equal(concurrent.acquire(), undefined);
+    assert.match(String(concurrent.acquire()), /并发调用超出配额/);
+    concurrent.release();
+    assert.equal(concurrent.acquire(), undefined);
+
+    const rate = new McpCallLimiter(1, 0);
+    assert.equal(rate.acquire(), undefined);
+    assert.match(String(rate.acquire()), /调用频率超出配额/);
+    rate.release();
+  });
+});
+
 describe('LR-05 MCP 取消传播与 pending 回收', () => {
   it('取消发送 $/cancelRequest，释放 pending，连接可继续调用', async () => {
     const conn = new StdioConnection('fixture', {
@@ -293,6 +333,41 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
       server.closeAllConnections();
       await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
     }
+  });
+});
+
+describe('MCP 工具 allowlist', () => {
+  it('未配置或空数组注册全部，配置后只保留命中工具', () => {
+    const tools = [
+      { name: 'echo', inputSchema: { type: 'object' } },
+      { name: 'write', inputSchema: { type: 'object' } },
+    ];
+    assert.deepEqual(filterMcpToolsByAllowlist(tools).map((t) => t.name), ['echo', 'write']);
+    assert.deepEqual(filterMcpToolsByAllowlist(tools, []).map((t) => t.name), ['echo', 'write']);
+    assert.deepEqual(filterMcpToolsByAllowlist(tools, ['echo']).map((t) => t.name), ['echo']);
+    assert.deepEqual(filterMcpToolsByAllowlist(tools, [' echo ', 'missing']).map((t) => t.name), ['echo']);
+  });
+});
+
+describe('MCP tool annotations', () => {
+  it('readOnly/idempotent/destructive 映射到内核工具契约', () => {
+    const readOnly = mcpToolMetadata({
+      name: 'read',
+      annotations: { readOnlyHint: true, idempotentHint: true, openWorldHint: true },
+      outputSchema: { type: 'object', properties: { ok: { type: 'boolean' } } },
+    });
+    assert.equal(readOnly.risk, 'low');
+    assert.equal(readOnly.sideEffect, 'read');
+    assert.equal(readOnly.idempotent, true);
+    assert.deepEqual(readOnly.retry, { maxAttempts: 2, backoffMs: 500 });
+    assert.ok(readOnly.outputSchema);
+    const destructive = mcpToolMetadata({ name: 'delete', annotations: { destructiveHint: true } });
+    assert.equal(destructive.risk, 'high');
+    assert.equal(destructive.sideEffect, 'irreversible');
+    assert.equal(destructive.idempotent, undefined);
+    const unknown = mcpToolMetadata({ name: 'unknown' });
+    assert.equal(unknown.risk, 'medium');
+    assert.equal(unknown.sideEffect, 'external');
   });
 });
 

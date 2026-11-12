@@ -5,7 +5,7 @@ import type { Express } from 'express';
 import { existsSync, readdirSync, readFileSync, mkdirSync, cpSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { RouteDeps } from './shared';
-import { readLockFile, installSkill } from '../../kernel/skillsSync';
+import { readLockFile, installSkill, validateLockFile } from '../../kernel/skillsSync';
 import { parseFrontMatter, fmString } from '../../kernel/frontmatter';
 import type { SkillSource } from '../../core/skills/index';
 
@@ -53,16 +53,19 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
   // skills-lock.json（GitHub 源 + 哈希锁）：可同步项与本地状态
   app.get('/api/skills/lock', (_req, res) => {
     const { file, data, error } = readLockFile(kernel.rootDir);
+    const validation = data ? validateLockFile(data) : undefined;
     const installed = new Set((getSkillsService()?.list() ?? []).map(s => s.name));
     const skills = Object.entries(data?.skills ?? {}).map(([name, e]) => ({
       name,
       source: e.source,
       sourceType: e.sourceType ?? 'github',
       skillPath: e.skillPath,
+      version: e.version,
+      requires: e.requires,
       computedHash: e.computedHash,
       installed: installed.has(name),
     }));
-    res.json({ file, error, count: skills.length, skills });
+    res.json({ file, error, count: skills.length, skills, validation });
   });
 
   // 按锁文件安装（默认只装缺失项；force=true 覆盖并放行哈希不符）
@@ -72,6 +75,13 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
     const { data, error } = readLockFile(kernel.rootDir);
     if (error) return res.status(400).json({ error });
     if (!data) return res.status(404).json({ error: '未找到 skills-lock.json' });
+    const validation = validateLockFile(data);
+    if (!validation.ok) {
+      return res.status(400).json({
+        error: `skills-lock 依赖图校验失败: ${validation.errors.join('；')}`,
+        validation,
+      });
+    }
     mkdirSync(userSkillsDir, { recursive: true });
     const results = [];
     for (const [name, entry] of Object.entries(data.skills)) {

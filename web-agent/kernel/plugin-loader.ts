@@ -27,19 +27,51 @@
  */
 import { appendFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
-import { basename, dirname, join } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { EventBus } from './bus';
 import { EffectScope } from './scope';
 import { dirDigest, fileDigest, materialize, pruneSnapshots, SNAPSHOT_SUFFIX, type Snapshot } from './plugin-snapshot';
 import { validateAgainstSchema } from './validate';
+import { reviewPluginRuntimeSource } from './plugin-review';
+import { pluginLockEntryOf, readPluginLock, verifyPluginLock } from './plugin-lock';
+import { ProcessPluginHost } from './plugin-process';
 import type {
-  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike,
+  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike, ToolDef,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
 
 const CAPABILITY_KINDS = new Set<Capability['kind']>(['tool', 'listener', 'command', 'provider', 'service', 'persona', 'context', 'role', 'api']);
+export interface ToolCatalogEntry {
+  pluginId: string;
+  tool: ToolDef;
+  /** 被同名的更高优先级工具遮蔽时，记录胜出者插件 id */
+  shadowedBy?: string;
+}
+
+/** 同名工具冲突消解：非 MCP 优先于 MCP；同源按插件 id 字典序，保证顺序稳定。 */
+export function resolveToolConflicts(entries: ToolCatalogEntry[]): ToolCatalogEntry[] {
+  const list = entries.map((entry) => ({ ...entry }));
+  const winners = new Map<string, ToolCatalogEntry>();
+  for (const entry of list) {
+    const name = entry.tool.name;
+    const current = winners.get(name);
+    if (!current) {
+      winners.set(name, entry);
+      continue;
+    }
+    const currentIsMcp = current.pluginId === 'mcp' || name.startsWith('mcp_');
+    const nextIsMcp = entry.pluginId === 'mcp' || name.startsWith('mcp_');
+    if (currentIsMcp && !nextIsMcp) {
+      current.shadowedBy = entry.pluginId;
+      winners.set(name, entry);
+    } else {
+      entry.shadowedBy = current.pluginId;
+    }
+  }
+  return list;
+}
 let serviceTraceSeq = 0;
 const serviceTracePrefix = `service-${process.pid}-${Math.random().toString(16).slice(2, 8)}`;
 /** 插件清单兼容的宿主 API 版本；与产品版本解耦，避免补丁发布意外拒绝插件。 */
@@ -99,6 +131,85 @@ function validatePermissions(manifest: PluginManifest): void {
     if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim())) {
       throw new Error(`插件 ${manifest.id} permissions.capabilities.${kind} 必须是字符串数组`);
     }
+  }
+}
+
+function validateManifestLimits(manifest: PluginManifest): void {
+  const limits = manifest.limits;
+  if (!limits) return;
+  for (const [key, value] of Object.entries(limits)) {
+    if (value === undefined) continue;
+    if (!Number.isInteger(value) || value < 0) {
+      throw new Error(`插件 ${manifest.id} limits.${key} 必须是非负整数`);
+    }
+  }
+}
+
+function validateManifestExecution(manifest: PluginManifest): void {
+  const execution = manifest.execution;
+  if (execution === undefined) return;
+  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
+    throw new Error(`插件 ${manifest.id} execution 必须是对象`);
+  }
+  if (execution.mode !== 'process') {
+    throw new Error(`插件 ${manifest.id} execution.mode 仅支持 process`);
+  }
+  if (execution.memoryMb !== undefined
+    && (!Number.isInteger(execution.memoryMb) || execution.memoryMb < 32 || execution.memoryMb > 2048)) {
+    throw new Error(`插件 ${manifest.id} execution.memoryMb 必须是 32..2048 的整数`);
+  }
+  if (execution.timeoutMs !== undefined
+    && (!Number.isInteger(execution.timeoutMs) || execution.timeoutMs < 1_000 || execution.timeoutMs > 300_000)) {
+    throw new Error(`插件 ${manifest.id} execution.timeoutMs 必须是 1000..300000 的整数`);
+  }
+  const caps = manifest.permissions?.capabilities;
+  if (!caps?.tool?.length) {
+    throw new Error(`插件 ${manifest.id} 使用 process 执行时必须声明 permissions.capabilities.tool`);
+  }
+  for (const kind of Object.keys(caps)) {
+    if (kind !== 'tool' && Array.isArray((caps as Record<string, unknown>)[kind])) {
+      throw new Error(`插件 ${manifest.id} 的 process 执行仅支持 tool 能力，不能声明 ${kind}`);
+    }
+  }
+  if (manifest.nav || manifest.api || manifest.provides?.length) {
+    throw new Error(`插件 ${manifest.id} 的 process 执行不支持 nav/api/provides`);
+  }
+}
+
+export function validateRuntimePermissions(manifest: PluginManifest): void {
+  const runtime = manifest.permissions?.runtime;
+  if (runtime === undefined) return;
+  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
+    throw new Error(`插件 ${manifest.id} permissions.runtime 必须是对象`);
+  }
+  if (runtime.filesystem !== undefined && !['none', 'storage', 'sandbox', 'full'].includes(runtime.filesystem)) {
+    throw new Error(`插件 ${manifest.id} permissions.runtime.filesystem 不受支持`);
+  }
+  if (runtime.filesystem !== undefined && runtime.filesystem !== 'full' && manifest.execution?.mode !== 'process') {
+    throw new Error(`插件 ${manifest.id} 的 filesystem=${runtime.filesystem} 需要 execution.mode=process 才能执行路径策略`);
+  }
+  if (runtime.network !== undefined && !['none', 'allowlist', 'full'].includes(runtime.network)) {
+    throw new Error(`插件 ${manifest.id} permissions.runtime.network 不受支持`);
+  }
+  if (runtime.networkAllowlist !== undefined) {
+    if (!Array.isArray(runtime.networkAllowlist)
+      || runtime.networkAllowlist.some((host) => typeof host !== 'string' || !host.trim())) {
+      throw new Error(`插件 ${manifest.id} permissions.runtime.networkAllowlist 必须是非空字符串数组`);
+    }
+    if (runtime.network !== 'allowlist') {
+      throw new Error(`插件 ${manifest.id} networkAllowlist 仅在 runtime.network=allowlist 时有效`);
+    }
+  }
+  if (runtime.network === 'allowlist') {
+    if (manifest.execution?.mode !== 'process') {
+      throw new Error(`插件 ${manifest.id} 的 network=allowlist 需要 execution.mode=process 才能执行出口策略`);
+    }
+    if (!runtime.networkAllowlist?.length) {
+      throw new Error(`插件 ${manifest.id} 的 network=allowlist 必须提供 networkAllowlist`);
+    }
+  }
+  if (runtime.process !== undefined && typeof runtime.process !== 'boolean') {
+    throw new Error(`插件 ${manifest.id} permissions.runtime.process 必须是布尔值`);
   }
 }
 
@@ -192,6 +303,7 @@ interface PluginInstance {
   dir: string;
   state: PluginState;
   plugin?: Plugin;
+  processHost?: ProcessPluginHost;
   caps: Capability[];
   /** 可逆效应作用域：插件全部副作用的逆元在此累积，卸载按 LIFO 恢复 */
   scope: EffectScope;
@@ -259,6 +371,9 @@ export class PluginLoader {
   private capSubs = new Map<string, Set<() => void>>();
   /** 服务共效应注册表：key → 当前【生效】提供者绑定（仲裁结果的视图，供解析与追踪读取） */
   private providers = new Map<string, ProviderBinding>();
+  /** 单插件工具调用滑动窗口与并发计数：运行时资源治理，不进入插件可见状态。 */
+  private toolCallWindows = new Map<string, number[]>();
+  private activeToolCalls = new Map<string, number>();
   /** 服务键 → 全部候选绑定（含未生效者）。生效者 = arbitrate(key) 的胜出者。
    *  多提供者并存是可接管的实现基础：高优先级接管，卸载后自动回退次高者。
    *  每个（键, 插件）至多一条绑定：同插件重复 provide 同一键时按最新一次语义生效——
@@ -414,6 +529,32 @@ export class PluginLoader {
       const manifest = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf-8')) as PluginManifest;
       validateManifestCompatibility(manifest);
       validatePermissions(manifest);
+      validateManifestLimits(manifest);
+      validateManifestExecution(manifest);
+      validateRuntimePermissions(manifest);
+      const runtime = manifest.permissions?.runtime;
+      if (runtime) {
+        const entryFile = join(dir, manifest.entry);
+        const rel = relative(dir, entryFile);
+        if (!rel || rel.startsWith(`..${sep}`) || rel === '..' || isAbsolute(rel)) {
+          throw new Error(`插件 ${manifest.id} entry 越出插件目录: ${manifest.entry}`);
+        }
+        const source = readFileSync(entryFile, 'utf-8');
+        const review = reviewPluginRuntimeSource(source, runtime, {
+          allowedDependencies: this.ctxBase.config.get<string[]>('plugins.allowedDependencies', []),
+        });
+        if (!review.ok) {
+          throw new Error(`插件 ${manifest.id} 运行时能力审查失败: ${review.issues.map((issue) => issue.message).join('；')}`);
+        }
+      }
+      if (this.ctxBase.config.get<boolean>('plugins.enforceLock', false)
+        && resolve(dir).toLowerCase().startsWith(`${resolve(this.userDir).toLowerCase()}${sep}`)) {
+        const lock = readPluginLock(this.ctxBase.paths.root);
+        if (lock.error) throw new Error(`plugins-lock.json 无效: ${lock.error}`);
+        if (!lock.data) throw new Error('plugins.enforceLock=true 但未找到 plugins-lock.json');
+        const verified = verifyPluginLock(pluginLockEntryOf(lock.data, manifest.id), dir, manifest);
+        if (!verified.ok) throw new Error(`插件 ${manifest.id} 未通过锁文件校验: ${verified.errors.join('；')}`);
+      }
       const existing = this.registry.get(manifest.id);
       if (existing) {
         if (existing.dir !== dir) {
@@ -440,8 +581,35 @@ export class PluginLoader {
       void manifest.requires;
 
       // 动态加载入口（从内容快照目录加载：目录内容变即换基址，整张模块图按内容重建）
-      const mod = await import(this.entryUrl(inst.loadDir, manifest.entry, inst.loadHash));
-      inst.plugin = (mod.default ?? mod) as Plugin;
+      if (manifest.execution?.mode === 'process') {
+        const processHost = new ProcessPluginHost({
+          manifest,
+          loadDir: inst.loadDir,
+          storageDir: this.storageDir(manifest.id),
+          config: this.ctxBase.config.section(manifest.id),
+          timeoutMs: manifest.execution.timeoutMs ?? 30_000,
+          memoryMb: manifest.execution.memoryMb ?? 256,
+          runtime: manifest.permissions?.runtime ? {
+            network: manifest.permissions.runtime.network,
+            networkAllowlist: manifest.permissions.runtime.networkAllowlist,
+            filesystem: manifest.permissions.runtime.filesystem,
+            sandboxRoot: this.ctxBase.config.get<string>('sandboxRoot', this.ctxBase.kernel.paths.root),
+          } : undefined,
+          bus: this.bus,
+          eventBus: this.bus,
+          logger: {
+            info: (msg, meta) => console.log(`[${manifest.id}] ${msg}`, meta ?? ''),
+            warn: (msg, meta) => console.warn(`[${manifest.id}] ${msg}`, meta ?? ''),
+            error: (msg, meta) => console.error(`[${manifest.id}] ${msg}`, meta ?? ''),
+            debug: (msg, meta) => { if (process.env.DEBUG) console.debug(`[${manifest.id}] ${msg}`, meta ?? ''); },
+          },
+        });
+        inst.processHost = processHost;
+        inst.plugin = processHost.facade();
+      } else {
+        const mod = await import(this.entryUrl(inst.loadDir, manifest.entry, inst.loadHash));
+        inst.plugin = (mod.default ?? mod) as Plugin;
+      }
       await this.runLoad(inst);
       return inst;
     } catch (err) {
@@ -450,6 +618,7 @@ export class PluginLoader {
       // 副作用回收：onLoad 已执行的 ctx.on/register/provide 等逆元全部清除——
       // 否则加载失败的插件会残留事件订阅、能力与服务绑定（旧实现只删 registry）
       if (inst) {
+        try { await inst.processHost?.dispose(); } catch { /* 忽略子进程终止失败 */ }
         try { await inst.scope.dispose(); } catch { /* 忽略 */ }
       }
       const msg = err instanceof Error ? err.message : String(err);
@@ -517,10 +686,37 @@ export class PluginLoader {
   private makeStorage(inst: PluginInstance): PluginStorage {
     const dir = this.storageDir(inst.manifest.id);
     const at = (name: string): string => join(dir, basename(name));
+    const maxBytes = Math.max(0, Math.trunc(Number(inst.manifest.limits?.maxStorageBytes) || 0));
+    const maxFiles = Math.max(0, Math.trunc(Number(inst.manifest.limits?.maxStorageFiles) || 0));
+    const usage = (): { bytes: number; files: number } => {
+      if (!existsSync(dir)) return { bytes: 0, files: 0 };
+      let bytes = 0;
+      let files = 0;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (!entry.isFile()) continue;
+        files++;
+        try { bytes += statSync(join(dir, entry.name)).size; } catch { /* 忽略瞬时消失 */ }
+      }
+      return { bytes, files };
+    };
     return {
       dir,
       read: (name) => { try { return readFileSync(at(name), 'utf-8'); } catch { return null; } },
-      write: (name, content) => { mkdirSync(dir, { recursive: true }); writeFileSync(at(name), content, 'utf-8'); },
+      write: (name, content) => {
+        const target = at(name);
+        const current = usage();
+        const existing = existsSync(target) ? statSync(target).size : 0;
+        const nextBytes = current.bytes - existing + Buffer.byteLength(content, 'utf8');
+        const nextFiles = current.files + (existsSync(target) ? 0 : 1);
+        if (maxBytes > 0 && nextBytes > maxBytes) {
+          throw new Error(`插件 ${inst.manifest.id} 私有存储超出配额（${nextBytes} > ${maxBytes} 字节）`);
+        }
+        if (maxFiles > 0 && nextFiles > maxFiles) {
+          throw new Error(`插件 ${inst.manifest.id} 私有存储文件数超出配额（${nextFiles} > ${maxFiles}）`);
+        }
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(target, content, 'utf-8');
+      },
       list: () => { try { return readdirSync(dir); } catch { return []; } },
       remove: (name) => { try { rmSync(at(name), { force: true }); } catch { /* 已不存在 */ } },
     };
@@ -570,6 +766,11 @@ export class PluginLoader {
     const config = {
       get: <T>(key: string, def?: T): T => this.getContextConfig(inst, key, def),
       set: (key: string, value: unknown) => this.ctxBase.config.set(key, value),
+      persist: (key: string, value: unknown) => {
+        const c = this.ctxBase.config as typeof this.ctxBase.config & { setPersistent?: (k: string, v: unknown) => void };
+        if (typeof c.setPersistent === 'function') c.setPersistent(key, value);
+        else c.set(key, value);
+      },
       section: (pluginId: string) => {
         const base = { ...this.ctxBase.config.section(pluginId) };
         for (const layer of inst.configOverrides) {
@@ -596,6 +797,7 @@ export class PluginLoader {
       paths: this.ctxBase.kernel.paths,
       bus,
       storage: this.makeStorage(inst),
+      secrets: this.ctxBase.secrets,
       outbound: this.makeOutbound(inst),
       config,
       // ctx.trace / ctx.cache 走与 kernel.* **同一条解析链**（缺陷 R3）：
@@ -612,6 +814,45 @@ export class PluginLoader {
           const reason = err instanceof Error ? err.message : String(err);
           this.bus.emit(EventBus.event('plugin.permission.denied', { pluginId: inst.manifest.id, kind: cap.kind, name, reason }));
           throw err;
+        }
+        if (cap.kind === 'tool') {
+          const maxPerMinute = Math.max(0, Math.trunc(Number(inst.manifest.limits?.maxToolCallsPerMinute) || 0));
+          const maxConcurrent = Math.max(0, Math.trunc(Number(inst.manifest.limits?.maxConcurrentToolCalls) || 0));
+          if (maxPerMinute || maxConcurrent) {
+            const original = cap.tool.handler;
+            cap.tool.handler = async (args, tctx) => {
+              const pluginId = inst.manifest.id;
+              const tenantId = tctx.tenantId ?? 'default';
+              const rateKey = `${pluginId}\u0000${tenantId}`;
+              const now = Date.now();
+              if (maxPerMinute) {
+                const window = (this.toolCallWindows.get(rateKey) ?? []).filter((ts) => now - ts < 60_000);
+                if (window.length >= maxPerMinute) {
+                  this.bus.emit(EventBus.event('plugin.quota.denied', {
+                    pluginId, tenantId, tool: cap.tool.name, quota: 'maxToolCallsPerMinute', limit: maxPerMinute,
+                  }));
+                  return { ok: false, error: `插件 ${pluginId} 在租户 ${tenantId} 的工具调用频率超出配额（${maxPerMinute}/分钟）` };
+                }
+                window.push(now);
+                this.toolCallWindows.set(rateKey, window);
+              }
+              const active = this.activeToolCalls.get(pluginId) ?? 0;
+              if (maxConcurrent && active >= maxConcurrent) {
+                this.bus.emit(EventBus.event('plugin.quota.denied', {
+                    pluginId, tenantId, tool: cap.tool.name, quota: 'maxConcurrentToolCalls', limit: maxConcurrent,
+                }));
+                return { ok: false, error: `插件 ${pluginId} 的并发工具调用超出配额（${maxConcurrent}）` };
+              }
+              this.activeToolCalls.set(pluginId, active + 1);
+              try {
+                return await original(args, tctx);
+              } finally {
+                const left = (this.activeToolCalls.get(pluginId) ?? 1) - 1;
+                if (left > 0) this.activeToolCalls.set(pluginId, left);
+                else this.activeToolCalls.delete(pluginId);
+              }
+            };
+          }
         }
         // 可逆效应：登记能力并留下逆元（卸载时自动回收，无需作者手工 unregister）
         inst.caps.push(cap);
@@ -1167,6 +1408,7 @@ export class PluginLoader {
       // 失败回收：onLoad/onStart 已入 scope 的副作用（订阅/能力/服务绑定）一并清除——
       // stopInternal 对 error 态直接返回，不清理；不回收则 error 实例滞留监听器/服务，
       // 热重载/enable 重试后出现旧副作用与新实例叠加
+      await inst.processHost?.dispose().catch(() => undefined);
       await inst.scope.dispose().catch(() => undefined);
       inst.scope = new EffectScope();
       inst.state = 'error';
@@ -1424,6 +1666,24 @@ export class PluginLoader {
       for (const cap of inst.caps) if (cap.kind === kind) out.push(cap as Extract<Capability, { kind: T }>);
     }
     return out;
+  }
+
+  /** 全量工具目录（含被遮蔽项）：供管理 API、诊断与冲突消解使用。 */
+  toolCatalog(): ToolCatalogEntry[] {
+    const entries: ToolCatalogEntry[] = [];
+    for (const id of [...this.registry.keys()].sort()) {
+      const inst = this.registry.get(id);
+      if (!inst || inst.state !== 'started') continue;
+      for (const cap of inst.caps) {
+        if (cap.kind === 'tool') entries.push({ pluginId: id, tool: cap.tool });
+      }
+    }
+    return resolveToolConflicts(entries);
+  }
+
+  /** 实际暴露给 Agent 的工具集：同名只保留一个，避免模型看到重复定义。 */
+  tools(): ToolDef[] {
+    return this.toolCatalog().filter((entry) => !entry.shadowedBy).map((entry) => entry.tool);
   }
 
   /** 插件 API 清单（含所属插件 id）：server 层按 /api/plugins/<id>/<mount> 动态分发 */

@@ -2,7 +2,8 @@ import type { Kernel } from '../kernel';
 import type { Store } from './db';
 
 export type AuthorizationDenialReason = 'api-token-required' | 'api-token-invalid'
-  | 'approval-token-required' | 'approval-token-invalid' | 'source-host-denied' | 'source-origin-denied';
+  | 'approval-token-required' | 'approval-token-invalid' | 'source-host-denied' | 'source-origin-denied'
+  | 'tenant-scope-denied';
 
 export interface AuthorizationDenial {
   subject: 'anonymous';
@@ -12,7 +13,7 @@ export interface AuthorizationDenial {
 }
 
 export interface AuthorizationGrant {
-  subject: 'api-token' | 'approval-token' | 'local-client';
+  subject: 'api-token' | 'api-token:viewer' | 'approval-token' | 'local-client';
   capability: string;
   object: string;
 }

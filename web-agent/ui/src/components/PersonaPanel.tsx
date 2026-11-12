@@ -1,13 +1,17 @@
-// ui/src/components/PersonaPanel.tsx —— 人设管理（L1 用户人设，指引 LLM 的关键）
-// 三层系统提示词：L0 内核纪律固定 · L1 以下人设按序叠加（热生效）· L2 插件规则随插件自动增减。
-// 历史：本组件曾在 eb2557e 的"顶栏菜单化"重构中从 App 上摘掉而未删除，导致人设管理
-// 一度没有 UI 入口（后端 /api/personas 与 personasApi 一直可用）。现作为设置页
-// 「人设与提示词」子页重新接线（缺陷清单 F1 的处置：不是删掉死代码，而是把丢失的能力接回来）。
 import { useCallback, useEffect, useState } from 'react';
 import { toast } from 'sonner';
 import { personasApi } from '../api';
 import type { PersonaInfo } from '../types';
-import Confirm, { type ConfirmRequest } from './Confirm';
+import { Plus } from 'lucide-react';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import { Button } from '@/components/ui/button';
+import { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import { Input } from '@/components/ui/input';
+import { Switch } from '@/components/ui/switch';
+import { Textarea } from '@/components/ui/textarea';
 
 export default function PersonaPanel() {
   const [personas, setPersonas] = useState<PersonaInfo[]>([]);
@@ -15,7 +19,8 @@ export default function PersonaPanel() {
   const [creating, setCreating] = useState(false);
   const [name, setName] = useState('');
   const [content, setContent] = useState('');
-  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [confirm, setConfirm] = useState<{ text: string; onOk: () => void } | null>(null);
 
   const load = useCallback(async () => {
     try { setPersonas(await personasApi.list()); }
@@ -28,7 +33,9 @@ export default function PersonaPanel() {
   const closeForm = () => { setCreating(false); setEditing(null); };
 
   const save = async () => {
+    if (saving) return;
     if (!name.trim() || !content.trim()) { toast.error('名称与内容均为必填'); return; }
+    setSaving(true);
     try {
       if (creating) { await personasApi.create({ name: name.trim(), content: content.trim() }); toast.success('人设已创建，下一轮对话即生效'); }
       else if (editing) { await personasApi.update(editing.id, { name: name.trim(), content: content.trim() }); toast.success('人设已保存（热生效）'); }
@@ -36,7 +43,7 @@ export default function PersonaPanel() {
       await load();
     } catch (err) {
       toast.error(`没保存上：${err instanceof Error ? err.message : String(err)}`);
-    }
+    } finally { setSaving(false); }
   };
 
   const toggle = async (p: PersonaInfo) => {
@@ -45,10 +52,8 @@ export default function PersonaPanel() {
   };
 
   const remove = (p: PersonaInfo) => {
-    setConfirmReq({
+    setConfirm({
       text: `删除人设「${p.name}」？该人设的提示词会立即从系统提示词里撤下。`,
-      okText: '删除',
-      danger: true,
       onOk: async () => {
         try { await personasApi.remove(p.id); await load(); toast.success('已删除'); }
         catch (err) { toast.error(`删除失败：${err instanceof Error ? err.message : String(err)}`); }
@@ -59,52 +64,23 @@ export default function PersonaPanel() {
   const showForm = creating || editing;
 
   return (
-    <div className="provider-panel">
-      <span className="page-title">人设与提示词</span>
-      <div className="page-sub">L0 内核纪律固定 · L1 以下人设按序叠加（热生效）· L2 插件规则随插件自动增减</div>
-
-      {!showForm && (
-        <>
-          <button className="btn new-session" onClick={startCreate}>＋ 新建人设</button>
-          {personas.map((p) => (
-            <div key={p.id} className={`provider-card ${p.enabled ? '' : 'disabled'}`}>
-              <div className="provider-head">
-                <span className="provider-name">{p.name}</span>
-                <button className={`toggle ${p.enabled ? 'on' : ''}`} onClick={() => void toggle(p)}>
-                  {p.enabled ? '启用中' : '已停用'}
-                </button>
-              </div>
-              <div className="provider-meta persona-preview">{p.content.slice(0, 120)}{p.content.length > 120 ? '…' : ''}</div>
-              <div className="provider-actions">
-                <button onClick={() => startEdit(p)}>编辑</button>
-                <button onClick={() => remove(p)} className="danger">删除</button>
-              </div>
-            </div>
-          ))}
-          {personas.length === 0 && <div className="empty-hint">还没有人设——新建一个，定义 Agent 的身份与规则</div>}
-        </>
-      )}
-
-      {showForm && (
-        <div className="provider-form">
-          <div className="provider-form-title">{creating ? '新建人设' : `编辑 · ${editing!.name}`}</div>
-          <label>名称<input value={name} onChange={(e) => setName(e.target.value)} placeholder="如：代码助手 / 写作助手" /></label>
-          <label>提示词内容（身份 / 语气 / 能力边界 / 规则）
-            <textarea
-              className="persona-textarea"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              placeholder={'身份：…\n语气：…\n能力边界：…\n规则：\n1. 不要编造数据\n2. …'}
-              rows={10}
-            />
-          </label>
-          <div className="provider-actions">
-            <button className="primary" onClick={() => void save()}>保存（热生效）</button>
-            <button onClick={closeForm}>取消</button>
-          </div>
-        </div>
-      )}
-      <Confirm req={confirmReq} onClose={() => setConfirmReq(null)} />
+    <div className="flex flex-col gap-5">
+      <header className="flex flex-wrap items-start justify-between gap-3"><div><h1>人设与提示词</h1><p>L1 人设按序叠加，即时生效。L0 内核纪律固定，L2 规则随插件调整。</p></div><Button onClick={startCreate}><Plus data-icon="inline-start" />新建人设</Button></header>
+      {personas.map((persona) => <Card key={persona.id}><CardHeader><CardTitle>{persona.name}</CardTitle><CardDescription>{persona.enabled ? '启用中' : '已停用'}</CardDescription><CardAction><Switch checked={!!persona.enabled} aria-label={`${persona.enabled ? '停用' : '启用'}人设 ${persona.name}`} onCheckedChange={() => void toggle(persona)} /></CardAction></CardHeader><CardContent><p className="line-clamp-3 whitespace-pre-wrap text-sm text-muted-foreground">{persona.content}</p></CardContent><CardFooter className="justify-end gap-2"><Button variant="outline" size="sm" onClick={() => startEdit(persona)}>编辑</Button><Button variant="destructive" size="sm" onClick={() => remove(persona)}>删除</Button></CardFooter></Card>)}
+      {personas.length === 0 && <Empty><EmptyHeader><EmptyTitle>还没有人设</EmptyTitle><EmptyDescription>新建一个，定义 Agent 的身份与规则。</EmptyDescription></EmptyHeader></Empty>}
+      <Dialog open={!!showForm} onOpenChange={(open) => { if (!open && !saving) closeForm(); }}><DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl"><DialogHeader><DialogTitle>{creating ? '新建人设' : `编辑 · ${editing?.name ?? ''}`}</DialogTitle><DialogDescription>身份、语气、能力边界与规则</DialogDescription></DialogHeader><form onSubmit={(event) => { event.preventDefault(); void save(); }} className="flex flex-col gap-5"><FieldGroup><Field><FieldLabel htmlFor="persona-name">名称</FieldLabel><Input id="persona-name" value={name} onChange={(event) => setName(event.target.value)} placeholder="如：代码助手 / 写作助手" required /></Field><Field><FieldLabel htmlFor="persona-content">提示词内容</FieldLabel><Textarea id="persona-content" value={content} onChange={(event) => setContent(event.target.value)} placeholder={'身份：…\n语气：…\n能力边界：…\n规则：…'} rows={10} required /></Field></FieldGroup><DialogFooter><Button type="button" variant="outline" onClick={closeForm} disabled={saving}>取消</Button><Button type="submit" disabled={saving || !name.trim() || !content.trim()}>保存（热生效）</Button></DialogFooter></form></DialogContent></Dialog>
+      <AlertDialog open={!!confirm} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>请确认</AlertDialogTitle>
+            <AlertDialogDescription className="leading-6">{confirm?.text}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>再想想</AlertDialogCancel>
+            <AlertDialogAction variant="destructive" onClick={() => { confirm?.onOk(); setConfirm(null); }}>删除</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

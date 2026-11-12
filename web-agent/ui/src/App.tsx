@@ -1,13 +1,14 @@
-// ui/src/App.tsx —— 主布局（Screen 1–8 导航枢纽）
-import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+// ui/src/App.tsx —— 应用状态协调器
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
 import { useApprovals } from './hooks/useApprovals';
+import { useTraceSteps } from './hooks/useTraceSteps';
 import type { ErrorKind } from './api';
-import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TaskVerificationInfo, TodoCard, TraceStep } from './types';
+import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TaskVerificationInfo, TodoCard, ToolEvidence, ToolWarning, TraceStep } from './types';
 import { toolActivityLabel } from './types';
 // 演出重建：DB 行 → 界面消息（刷新前后同一形态）；文案中心：所有系统话术统一出口
 import { collectMembers, replayMessages } from './replay';
-import { AGENT_ID, AGENT_NAME, APP_VERSION, humanizeError, sys } from './voice';
+import { humanizeError, sys } from './voice';
 
 /** 切到后台时的消息提醒：标题角标 + 一声轻响（像微信的消息音） */
 let audioCtxRef: AudioContext | null = null;
@@ -31,31 +32,16 @@ function dingOnce() {
     o.stop(ctx.currentTime + 0.5);
   } catch { /* 音频不可用时静默 */ }
 }
-import Sidebar from './components/Sidebar';
 import type { MainTab } from './components/Sidebar';
-import ChatView from './components/ChatView';
-import TracePanel from './components/TracePanel';
-import Menu from './components/Menu';
-import { AnimatePresence, motion } from 'motion/react';
-import { pageVariants } from './motion';
-import { IconBrain, IconChevronDown, IconClose, IconPanel, IconPlugin, IconTodo, IconWorkbench } from './components/Icon';
-import { Toaster, toast } from 'sonner';
+import { Blocks, ClipboardCheck, BriefcaseBusiness } from 'lucide-react';
+import { toast } from 'sonner';
 import { applyFavicon } from './brand/favicon';
+import AppView from './components/AppView';
 
 // 次要视图路由级代码分割：首屏只需 Chat 视图，文件/插件/统计/设置
 // 按需加载（首屏 JS 体积显著下降），挂载后 idle 时预取保证首次点击无感。
 // 注意：插件页面【不在】此列表——它们由插件在 plugin.json 声明 nav，
 // 前端遍历 /api/nav 生成标签页，内容由 PluginTabView 通用渲染（前端不认识任何插件）。
-const FilesView = lazy(() => import('./components/FilesView'));
-const PluginsView = lazy(() => import('./components/PluginsView'));
-const StatsView = lazy(() => import('./components/StatsView'));
-const SettingsView = lazy(() => import('./components/SettingsView'));
-import PluginTabView from './components/PluginTabView';
-
-/** 轨迹面板保留的步骤上限（F4：此前硬编码在 slice(-199) 里，且淘汰策略会先砍掉父步骤，
- *  导致子代理/并行整棵子树变孤儿。现在按「先淘汰叶子」的策略使用这个显式常量。） */
-const TRACE_MAX = 400;
-
 function preloadSecondaryViews() {
   void import('./components/FilesView');
   void import('./components/PluginsView');
@@ -69,9 +55,9 @@ function preloadSecondaryViews() {
  */
 function pluginIcon(name: string | null): React.ReactNode {
   switch (name) {
-    case 'workbench': return <IconWorkbench size={14} />;
-    case 'todo': return <IconTodo size={14} />;
-    default: return <IconPlugin size={14} />;
+    case 'workbench': return <BriefcaseBusiness size={14} />;
+    case 'todo': return <ClipboardCheck size={14} />;
+    default: return <Blocks size={14} />;
   }
 }
 
@@ -112,9 +98,8 @@ export default function App() {
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
   const [activeTab, setActiveTab] = useState<MainTab>('chat');
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [traceSteps, setTraceSteps] = useState<TraceStep[]>([]);
+  const { steps: traceSteps, open: traceOpen, setOpen: setTraceOpen, record: recordTraceStep, clear: clearTraceSteps } = useTraceSteps();
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
-  const [traceOpen, setTraceOpen] = useState(true);
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
@@ -190,6 +175,7 @@ export default function App() {
   // 主题：写 dataset + localStorage + Sonner 主题同步（首帧由 main.tsx 预置，避免闪烁）
   useEffect(() => {
     document.documentElement.dataset.theme = theme;
+    document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.setAttribute('data-sonner-theme', theme);
     // 浏览器窗口 chrome（标题栏/状态栏）跟随明暗主题
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#f5eee0');
@@ -215,40 +201,13 @@ export default function App() {
   // 初始加载
   useEffect(() => { void loadAll(); }, []);
 
-  // 全局事件订阅：trace.step 仅在轨迹面板打开时入库——面板关闭时逐事件 setState
-  // 会让整个 App 树空转重渲染（流式运行时每秒可达数十次）
-  const traceOpenRef = useRef(traceOpen);
-  traceOpenRef.current = traceOpen;
   useEffect(() => {
     const off = subscribeEvents((e: BusEvent) => {
       if (e.type === 'trace.step') {
         // 只收本会话的：/api/events 是全局广播，不过滤就会在 A 会话面板里看到 B 会话的步骤
         const step = e.data as TraceStep;
-        if (!traceOpenRef.current || !traceIdsRef.current.has(step.traceId)) return;
-        // upsert：同一 step 先来 running 帧、后来 settle 帧，原地覆盖而不是堆两条
-        setTraceSteps((prev) => {
-          const i = prev.findIndex((s) => s.id === step.id);
-          if (i === -1) {
-            const next = [...prev, step];
-            if (next.length <= TRACE_MAX) return next;
-            // F4 修复：旧实现 slice(-199) 直接砍最旧的——而最旧的往往正是 run_subagent /
-            // run_parallel 的父步骤，父一没、整棵子树全成孤儿（面板只剩"孤儿步骤"兜底展示）。
-            // 现在优先淘汰【不被任何步骤当作 parentId 引用】的叶子步骤（同样从最旧端开始），
-            // 父步骤保命；全是叶子仍超额时才轮到父（此时孤儿兜底接手）。
-            const parents = new Set<string>();
-            for (const s of next) if (s.parentId) parents.add(s.parentId);
-            let drop = next.length - TRACE_MAX;
-            const keep: TraceStep[] = [];
-            for (const s of next) {
-              if (drop > 0 && !parents.has(s.id)) { drop--; continue; }
-              keep.push(s);
-            }
-            return drop > 0 ? keep.slice(drop) : keep; // 极端深树：叶子不够砍时再砍最旧的（含父）
-          }
-          const next = prev.slice();
-          next[i] = step;
-          return next;
-        });
+        if (!traceIdsRef.current.has(step.traceId)) return;
+        recordTraceStep(step);
       }
       else if (e.type === 'plan.updated') {
         // 计划同样按会话归属过滤：全局广播里别的会话的目标不该顶到你的窗口上
@@ -375,7 +334,7 @@ export default function App() {
   const selectSession = useCallback(async (id: string) => {
     setActiveId(id);
     setMessages([]);
-    setTraceSteps([]);
+    clearTraceSteps();
     traceIdsRef.current = new Set();   // 换会话 = 换 trace 域：旧会话的步骤不再串进面板
     setStreamStatus(null);
     setPlan(null);
@@ -404,7 +363,8 @@ export default function App() {
       setSessions((prev) => [s, ...prev]);
       setActiveId(s.id);
       setMessages([]);
-      setTraceSteps([]);
+      clearTraceSteps();
+      traceIdsRef.current.clear();
       setPlan(null);
       setCheckpoint(null);
       setBudgetHit(null);
@@ -427,7 +387,7 @@ export default function App() {
       const next = prev.filter((s) => s.id !== id);
       if (activeId === id) {
         if (next.length) void selectSession(next[0].id);
-        else { setActiveId(null); setMessages([]); }
+        else { setActiveId(null); setMessages([]); clearTraceSteps(); traceIdsRef.current.clear(); setPlan(null); }
       }
       return next;
     });
@@ -462,7 +422,7 @@ export default function App() {
       if (activeId && ids.includes(activeId)) {
         const next = sessions.filter((s) => !ids.includes(s.id));
         if (next.length) void selectSession(next[0].id);
-        else { setActiveId(null); setMessages([]); setTraceSteps([]); setPlan(null); }
+        else { setActiveId(null); setMessages([]); clearTraceSteps(); traceIdsRef.current.clear(); setPlan(null); }
       }
       toast.success(`已删除 ${r.removed ?? ids.length} 个会话`);
     } catch (err) {
@@ -578,11 +538,11 @@ export default function App() {
         };
       }));
     },
-    onToolResult: (id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean) => {
+    onToolResult: (id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean, evidence?: ToolEvidence[], warnings?: ToolWarning[]) => {
       flushStreamBuffer();
       setMessages((prev) => prev.map((m) => m.id === assistantId ? {
         ...m, tools: (m.tools ?? []).map((t) => t.status === 'running' && (t.id ? t.id === id : t.name === name) ? {
-          ...t, summary, ok, stored, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
+          ...t, summary, ok, stored, evidence, warnings, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
         } : t),
       } : m));
     },
@@ -825,7 +785,6 @@ export default function App() {
   }, []);
   const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
   const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
-  const modeColor = currentSession?.mode === 'plan' ? 'var(--purple)' : currentSession?.mode === 'goal' ? 'var(--orange)' : 'var(--text-3)';
   const selModel = sel ? models.find((m) => m.id === `${sel.provider}@${sel.model}`) : undefined;
   const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : (sel?.model ? `${sel.provider} · ${sel.model}` : '');
   const modelTag = selModel?.model ?? sel?.model ?? '';
@@ -879,206 +838,74 @@ export default function App() {
     setSettingsOpen(false);
   }, []);
 
-  // Suspense 兜底（lazy 视图 chunk 加载间隙）：与设计系统一致的极简加载态。
-  // 注意：边界必须包在 AnimatePresence 外面——mode="wait" 不支持会挂起的新子树
-  // （挂起会卡住交换，旧视图停留在透明退出态，内容"消失"）
-  const viewFallback = (
-    <div className="view-loading" aria-busy="true">
-      <span className="spin" style={{ color: 'var(--accent)' }} />
-      <span>加载中…</span>
-    </div>
-  );
-
   return (
-    <div className="app">
-      <Sidebar
-        sessions={sessions}
-        activeId={activeId}
-        activeTab={activeTab}
-        onTab={onTab}
-        pluginTabs={pluginTabs}
-        onSelect={selectSession}
-        onCreate={createSession}
-        onDelete={deleteSession}
-        onArchive={archiveSession}
-        onPin={pinSession}
-        onRename={renameSession}
-        onBatchDelete={batchDelete}
-        onBatchArchive={batchArchive}
-        settingsOpen={settingsOpen}
-        onToggleSettings={toggleSettings}
-        pluginRunning={pluginRunning}
-        streamingId={streaming ? activeId : null}
-        version={APP_VERSION}
-      />
-
-      <main className="main">
-        <header className={`topbar ${activeTab === 'chat' ? 'wx-chat-header' : ''}`}>
-          {activeTab === 'chat' ? (
-            <div className="wx-header-center" key="wx-center">
-              <span className="wx-header-title">{currentSession?.title ?? '新会话'}</span>
-              {/* 会话头只有一处状态字（气泡里不再重复"正在输入"）；断线时优先报断线 */}
-              {liveState === 'down' ? (
-                <span className="wx-header-sub off"><span className="wx-offline-dot" />{sys.offline}</span>
-              ) : streaming ? (
-                <span className="wx-header-sub run">{activity ?? streamStatus ?? sys.started}</span>
-              ) : groupMembers.length ? (
-                <span className="wx-header-sub"><span className="wx-online-dot" />群聊 · {groupMembers.length} 位帮手在群里</span>
-              ) : (
-                <span className="wx-header-sub"><span className="wx-online-dot" />{AGENT_NAME} · 在线</span>
-              )}
-            </div>
-          ) : (
-            <div className="topbar-left">
-              <div className="crumb">
-                <span className="prev">{AGENT_ID}</span>
-                <span className="sep">/</span>
-                <span className="cur">{activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}</span>
-              </div>
-            </div>
-          )}
-          <div className="topbar-right">
-            {activeTab === 'chat' && (
-              <>
-                <Menu
-                  trigger={<><span className="mode-dot" style={{ background: modeColor }} />{modeLabel}<IconChevronDown size={11} /></>}
-                  compactTrigger={<span className="tb-compact-trigger"><span className="mode-dot" style={{ background: modeColor }} /></span>}
-                  items={modeItems}
-                  selectedKey={currentSession?.mode ?? 'normal'}
-                  onSelect={(k) => void setSessionMode(k)}
-                  title="会话模式"
-                  width={220}
-                  triggerTitle="会话模式"
-                />
-                <Menu
-                  trigger={<>{modelLabel || '未选择模型'}<IconChevronDown size={11} /></>}
-                  compactTrigger={<span className="tb-compact-trigger"><IconBrain size={14} /></span>}
-                  items={models.map((m) => ({ key: m.id, label: m.label, sub: m.model }))}
-                  selectedKey={sel ? `${sel.provider}@${sel.model}` : undefined}
-                  onSelect={(k) => void selectModel(k)}
-                  title="切换模型"
-                  width={280}
-                  triggerTitle="切换模型"
-                  disabled={models.length === 0}
-                />
-                <button
-                  className={`tb-icon-btn ${traceOpen ? 'active' : ''}`}
-                  onClick={() => setTraceOpen((v) => !v)}
-                  title="运行轨迹面板"
-                  aria-label="运行轨迹面板"
-                >
-                  {traceOpen ? <IconClose size={14} /> : <IconPanel size={15} />}
-                </button>
-              </>
-            )}
-            {activeTab !== 'chat' && (
-              <span className={`tb-live ${liveState === 'down' ? 'off' : ''}`} title={liveState === 'down' ? sys.offline : '与后端的实时事件通道正常'}>
-                <span className="live-dot" />{liveState === 'down' ? '重连中' : '实时'}
-              </span>
-            )}
-          </div>
-        </header>
-
-        <Suspense fallback={viewFallback}>
-        <AnimatePresence mode="wait" initial={false}>
-          <motion.div
-            className="tab-content"
-            key={settingsOpen ? 'settings' : activeTab}
-            variants={pageVariants}
-            initial="initial"
-            animate="enter"
-            exit="exit"
-          >
-          {settingsOpen ? (
-            <SettingsView providers={providers} onChanged={refreshProviders} theme={theme} onThemeChange={setTheme} brand={brand} onBrandChange={setBrand} />
-          ) : activeTab === 'chat' ? (
-            <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-              <div style={{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
-                <ChatView
-                  messages={messages}
-                  streaming={streaming}
-                  onSend={send}
-                  pendingInference={pendingInference}
-                  onConfirmInference={confirmInference}
-                  onStop={stop}
-                  hasModels={models.length > 0}
-                  approvals={approvals.filter((a) => !a.sessionId || a.sessionId === activeId)}
-                  onApproval={respondApproval}
-                  plan={plan}
-                  todos={todos.filter((t) => !t.sessionId || t.sessionId === currentSession?.id)}
-                  modelLabel={modelLabel}
-                  modelTag={modelTag}
-                  models={models}
-                  onSelectModel={(k) => void selectModel(k)}
-                  selectedModelId={sel ? `${sel.provider}@${sel.model}` : undefined}
-                  // 前置重活（历史压缩/换线路）的播报：气泡里显示"它正在做什么"
-                  streamStatus={streamStatus}
-                  // 并行小队进度（parallel.progress）：挂在"小队"成员气泡上
-                  squad={squad[activeId ?? '']}
-                  // 会话状态感知（agent harness 前端特征）：断点恢复 / 角色接管 / 成本熔断 / 会话成本
-                  checkpoint={checkpoint}
-                  onResume={() => void resumeTask()}
-                  resuming={resuming}
-                  role={currentSession?.role}
-                  onRoleReset={handleRoleReset}
-                  budgetHit={budgetHit}
-                  sessionCost={sessionCost}
-                  onSystemMsg={pushSystem}
-                  sessionKey={activeId ?? undefined}
-                  onRemoveMessage={removeMessage}
-                  providerAuthFailed={providerAuthFailed}
-                  onOpenSettings={() => { setActiveTab('chat'); setSettingsOpen(true); }}
-                />
-              </div>
-              {traceOpen && (
-                <aside className="trail-panel">
-                  <TracePanel
-                    steps={traceSteps}
-                    stats={traceStats}
-                    onRefresh={refreshTraceStats}
-                  />
-                </aside>
-              )}
-            </div>
-          ) : activeTab === 'files' ? (
-            <FilesView />
-          ) : activeTab === 'plugins' ? (
-            <PluginsView plugins={plugins} diagnostics={pluginDiagnostics} onAction={pluginAction} />
-          ) : activePluginNav ? (
-            /* 插件贡献的页面：通用容器渲染（iframe 完整页 / panel 片段），前端零插件知识。
-               key 绑定插件 id：切换插件标签时强制重建容器与 iframe（否则 React 复用同一
-               iframe 节点、浏览器保留旧 src，出现「标签已切、页面还是上一个插件」） */
-            <PluginTabView key={activePluginNav.key} item={activePluginNav} />
-          ) : (
-            <StatsView />
-          )}
-          </motion.div>
-        </AnimatePresence>
-        </Suspense>
-      </main>
-
-      <Toaster
-        theme={theme}
-        richColors
-        position="bottom-right"
-        gap={8}
-        visibleToasts={4}
-        toastOptions={{
-          style: {
-            background: 'var(--bg-elev)',
-            border: '1px solid var(--border)',
-            color: 'var(--text-1)',
-            fontFamily: 'var(--font-sans)',
-            fontSize: '12.5px',
-            boxShadow: 'var(--shadow-pop)',
-          },
-          classNames: {
-            success: 'sonner-toast-success',
-            error: 'sonner-toast-error',
-            info: 'sonner-toast-info',
-          },
-        }}
-      />
-    </div>
+    <AppView
+      sessions={sessions}
+      activeId={activeId}
+      messages={messages}
+      streaming={streaming}
+      models={models}
+      sel={sel}
+      plugins={plugins}
+      pluginDiagnostics={pluginDiagnostics}
+      providers={providers}
+      activeTab={activeTab}
+      settingsOpen={settingsOpen}
+      traceSteps={traceSteps}
+      traceStats={traceStats}
+      traceOpen={traceOpen}
+      plan={plan}
+      todos={todos}
+      theme={theme}
+      brand={brand}
+      checkpoint={checkpoint}
+      resuming={resuming}
+      budgetHit={budgetHit}
+      sessionCost={sessionCost}
+      streamStatus={streamStatus}
+      liveState={liveState}
+      squad={squad}
+      approvals={approvals}
+      providerAuthFailed={providerAuthFailed}
+      currentSession={currentSession}
+      groupMembers={groupMembers}
+      activity={activity}
+      modeLabel={modeLabel}
+      modelLabel={modelLabel}
+      modelTag={modelTag}
+      pluginRunning={pluginRunning}
+      modeItems={modeItems}
+      pluginTabs={pluginTabs}
+      activePluginNav={activePluginNav}
+      pendingInference={pendingInference}
+      onTab={onTab}
+      onSelectSession={(id) => void selectSession(id)}
+      onCreateSession={() => void createSession()}
+      onDeleteSession={(id) => void deleteSession(id)}
+      onArchiveSession={(id, archived) => void archiveSession(id, archived)}
+      onPinSession={(id, pinned) => void pinSession(id, pinned)}
+      onRenameSession={(id, title) => void renameSession(id, title)}
+      onBatchDelete={(ids) => void batchDelete(ids)}
+      onBatchArchive={(ids) => void batchArchive(ids)}
+      onToggleSettings={toggleSettings}
+      onSetSessionMode={(mode) => void setSessionMode(mode)}
+      onSelectModel={(id) => void selectModel(id)}
+      onSend={send}
+      onStop={stop}
+      onResume={() => void resumeTask()}
+      onApproval={respondApproval}
+      onConfirmInference={confirmInference}
+      onRoleReset={() => void handleRoleReset()}
+      onRefreshTrace={refreshTraceStats}
+      onRefreshProviders={() => void refreshProviders()}
+      onPluginAction={pluginAction}
+      onSystemMessage={pushSystem}
+      onRemoveMessage={removeMessage}
+      onTraceOpenChange={setTraceOpen}
+      onThemeChange={setTheme}
+      onBrandChange={setBrand}
+      onActiveTabChange={setActiveTab}
+      onSettingsOpenChange={setSettingsOpen}
+    />
   );
 }

@@ -4,7 +4,7 @@
  * 对话模式/角色等策略见 core/chat/policy.ts。
  */
 import type { Express } from 'express';
-import { getChatService, type RouteDeps } from './shared';
+import { getChatService, tenantIdOf, type RouteDeps } from './shared';
 
 /** 内置命令表：[/name, 参数说明, 说明] */
 const BUILTIN_COMMANDS: [string, string, string][] = [
@@ -52,7 +52,7 @@ export function registerCommandRoutes(app: Express, deps: RouteDeps): void {
         return res.json({ ok: true, type: 'action', data: { action: 'new_session' } });
       case 'clear': {
         if (!sessionId) return fail('缺少会话');
-        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        if (!store.getSession(sessionId, tenantIdOf(req))) return fail('会话不存在', 404);
         store.clearSessionMessages(sessionId);
         return res.json({ ok: true, type: 'action', data: { action: 'clear' } });
       }
@@ -60,7 +60,7 @@ export function registerCommandRoutes(app: Express, deps: RouteDeps): void {
       case 'goal':
       case 'normal': {
         if (!sessionId) return fail('缺少会话');
-        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        if (!store.getSession(sessionId, tenantIdOf(req))) return fail('会话不存在', 404);
         // normal = 回到主代理（handoff 角色清空）+ 普通模式；plan/goal 保留角色（角色与模式正交）
         const roleReset = name === 'normal' ? { role: '' } : {};
         store.updateSession(sessionId, { mode: name, planPending: name === 'plan' ? 1 : 0, ...roleReset });
@@ -68,7 +68,7 @@ export function registerCommandRoutes(app: Express, deps: RouteDeps): void {
       }
       case 'model': {
         if (!sessionId) return fail('缺少会话');
-        if (!store.getSession(sessionId)) return fail('会话不存在', 404);
+        if (!store.getSession(sessionId, tenantIdOf(req))) return fail('会话不存在', 404);
         const chat = getChatService(kernel);
         const p = chat?.providers.find((x) => x.defaultModel === arg || x.label === arg.toUpperCase() || x.id === arg);
         if (!p) return fail(`未找到模型: ${arg}（用 /help 查看，或查看右上角模型列表）`);

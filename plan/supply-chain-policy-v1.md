@@ -19,6 +19,7 @@
 | 来源锚定 | 每条目记录 `source`（owner/repo）、`sourceType`、`skillPath` | `kernel/skillsSync.ts` 锁文件格式 |
 | 字节校验 | `computedHash`（SKILL.md sha256）为历史锚点；`files` 逐文件哈希清单覆盖全部文件时清单外文件拒绝落盘 | `skillsSync.ts` A9 收口：临时目录校验 → 原子换入，失败不留半成品 |
 | 校验不可跳过 | `force` 语义为覆盖已安装，不跳过完整性校验；哈希不符即失败并回报实际哈希 | 接受上游变更须改锁文件或显式 `MAHARNESS_ALLOW_SKILL_HASH_MISMATCH=1` |
+| 签名 | 可选 Ed25519 detached signature；签名对象为去除 `signature` 的规范化 JSON | `npm run skill:lock:sign`（`MAHARNESS_LOCK_SIGNING_KEY`）/ `npm run skill:lock:verify`（`MAHARNESS_SKILL_LOCK_PUBLIC_KEY`）；已签名但缺公钥 fail-closed |
 | 升级路径 | 上游变更 → 更新锁文件哈希（或逐文件清单）→ `POST /api/skills/sync` → 校验结果确认 computed/mismatch 字段 | `/api/skills/lock` 返回 computedHash 与逐文件状态 |
 | 回滚路径 | 还原锁文件旧哈希后重新 sync；换入前旧目录整体让位，无混合状态 | 原子 rename 语义 |
 
@@ -30,5 +31,8 @@
 | 版本兼容 | manifest 声明 `compatibility.api` 范围，加载前校验，越界拒绝 | `plugin-loader.ts` `validateManifestCompatibility` |
 | 能力白名单 | `permissions.capabilities` 声明允许登记的能力；未声明走本机 trusted 兼容模式 | `ctx.register` 拒绝未声明登记并发布 `plugin.permission.denied` |
 | 前端模块 | `nav.mode='module'` 的 URL 携带内容哈希（`?v=<digest>`），UI 改动即时生效且无缓存漂移 | `plugin-loader.ts` `moduleUrlOf` + 服务端 `Cache-Control: no-store` |
+| 锁文件 | `plugins-lock.json` 记录 `version`、`integrity`、`compatibility`、`permissions`、`execution`；`plugins.enforceLock=true` 时加载前逐项比对 | `kernel/plugin-lock.ts`、`npm run plugin:lock:verify` |
+| 签名 | 可选 Ed25519 detached signature，公钥由部署侧提供，锁内公钥不作为信任根 | `npm run plugin:lock:sign` / `npm run plugin:lock:verify`；公钥 `MAHARNESS_PLUGIN_LOCK_PUBLIC_KEY` |
 | 升级路径 | 文件变更 → 内容哈希变化 → 新快照目录自动生效；manifest 不兼容时加载失败并给出诊断 | 插件诊断面板 `/api/plugins/diagnostics` |
+| 升级后的锁更新 | 审查确认新版本 → `npm run plugin:lock` 重写锁文件 → `plugin:lock:verify` 与全量回归通过后发布 | 锁文件原子写入；未更新锁时加载直接拒绝 |
 | 回滚路径 | 恢复旧版本文件（内容哈希回到旧快照目录名）或停用插件（卸载即完全恢复） | 快照目录内容寻址，旧快照保留 |

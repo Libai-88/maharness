@@ -36,6 +36,7 @@ describe('LR-05 warmup cancellation', () => {
           textualizeHistory: (messages: LLMMessage[]) => messages,
           annotateToolDef: (tool: ToolDef) => tool,
         }),
+        tools: () => [],
         capabilities: () => [],
       },
       config: {

@@ -45,7 +45,10 @@ if (files.length === 0) {
 }
 
 console.log(`[test] ${files.length} 个测试文件（已排除插件内容快照 @<hash> 目录）`);
-const res = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...files], {
+const requested = Math.trunc(Number(process.env.TEST_CONCURRENCY) || 4);
+const concurrency = Math.max(1, Math.min(8, requested));
+console.log(`[test] test-concurrency=${concurrency}`);
+const res = spawnSync(process.execPath, ['--import', 'tsx', '--test', `--test-concurrency=${concurrency}`, ...files], {
   stdio: 'inherit',
   cwd: ROOT,
 });

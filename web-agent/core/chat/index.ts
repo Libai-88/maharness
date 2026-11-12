@@ -12,12 +12,14 @@ import type { PersonaDef, Plugin } from '../../kernel/types';
 import { SERVICE_KEYS } from '../../kernel/types';
 import { AgentRunner, defaultRunnerFactory, textualizeHistory, annotateToolDef, redactTraceValue } from './agent';
 import { compactHistory } from './compact';
-import { routeForTask } from './routing';
+import { routeForCapability, routeForTask, type CapabilityNeed } from './routing';
+import { getProviderHealth } from './provider-health';
 import { MODE_PROMPTS, ROLE_READONLY_TOOLS, validateCheckpointHistory } from './policy';
 import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig } from './provider';
 import { resultStore, sessionKeyOf } from './result-store';
 // 审批共享板：挂起清单要能经服务接口暴露（刷新页面后审批卡原位复原，不再"卡没了但服务端还在等"）
 import { globalApprovalBoard, type PendingApproval } from './approvals';
+import type { ProviderGateway } from '../../kernel/provider-gateway';
 
 /**
  * L0 内核框架：不可修改的执行纪律（提示词系统 v1.0 定稿，见 docs/提示词系统定稿.md）。
@@ -88,7 +90,10 @@ export default {
   version: '0.1.0',
   async onLoad(ctx) {
     const providers = discoverProviders().map(createProvider);
-    setupEmbedding(ctx); // 配置了 EMBEDDING_* 则激活 L1 语义缓存
+    const embeddingService = setupEmbedding(ctx); // 配置了 EMBEDDING_* 则激活 L1 语义缓存
+    if (embeddingService) {
+      ctx.register({ kind: 'service', service: { id: 'embedding', instance: embeddingService } });
+    }
     const runner = new AgentRunner(ctx.kernel, ctx.bus);
 
     // ---- 执行循环即插件：把默认循环注册为 service:runner ----
@@ -235,6 +240,23 @@ export default {
       kind: 'service',
       service: { id: 'chat', instance: service },
     });
+
+    const providerGateway: ProviderGateway = {
+      providers: () => service.providers,
+      getProvider: (id) => service.providers.find((provider) => provider.id === id),
+      models: (providerId) => service.providers
+        .filter((provider) => !providerId || provider.id === providerId)
+        .flatMap((provider) => (provider.models ?? []).map((model) => ({
+          providerId: provider.id,
+          providerLabel: provider.label,
+          model,
+        }))),
+      routeTask: (taskText, routing) => routeForTask(taskText, routing, service.providers),
+      routeCapability: (need, current) => routeForCapability(need as CapabilityNeed, service.providers, current),
+      health: (providerId) => getProviderHealth(providerId),
+      embedding: () => embeddingService ?? undefined,
+    };
+    ctx.register({ kind: 'service', service: { id: 'provider-gateway', instance: providerGateway } });
 
     // ---- 工具结果重读：大结果存于结果存储（回填只留摘要+引用），按 id 零副作用重读 ----
     ctx.register({

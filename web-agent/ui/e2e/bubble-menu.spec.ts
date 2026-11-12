@@ -1,5 +1,5 @@
-// ui/e2e/bubble-menu.spec.ts —— 微信式气泡菜单 / 引用回复 / 表情面板 E2E 冒烟
-// 触发路径覆盖三种确定性方式：真长按（mouse.down + 延时 + mouse.up）、右键、键盘（Shift+F10 / Enter）
+// ui/e2e/bubble-menu.spec.ts —— 消息菜单 / 引用回复 / 表情面板 E2E
+// 触发路径覆盖触摸长按、右键、键盘（Shift+F10 / Enter）
 // 数据自给自足：models/providers/chat 全部 route-mock——CI 空库（data/ 被忽略）与本地有历史两种状态行为一致
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
@@ -41,34 +41,33 @@ async function mockModelApis(page: Page) {
 /** 统一前置：mock 模型接口 + 首屏就绪 + 保证至少有一轮对话气泡（空库时自动种子一条 mock 对话） */
 async function setup(page: Page) {
   await mockModelApis(page);
+  await mockChatStream(page);
   await page.goto('/');
   await expect
     .poll(async () => {
       const bubbles = await page.getByTestId('msg-bubble-assistant').or(page.getByTestId('msg-bubble-user')).count();
-      const hasHero = await page.locator('.brand-hero').count();
+      const hasHero = await page.getByTestId('chat-welcome').count();
       return bubbles + hasHero;
     })
     .toBeGreaterThan(0);
-  if ((await page.getByTestId('msg-bubble-assistant').count()) === 0) {
-    await mockChatStream(page);
-    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('e2e 种子消息');
-    await page.keyboard.press('Enter');
-    await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('收到，这是一条 mock 回复。');
-  }
+  await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('e2e 种子消息');
+  await page.keyboard.press('Enter');
+  await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('收到，这是一条 mock 回复。');
 }
 
-test.describe('气泡长按菜单（微信式）', () => {
-  test('真长按 480ms 呼出菜单，点外部关闭', async ({ page }) => {
+test.describe('消息菜单', () => {
+  test('触摸长按呼出菜单，点外部关闭', async ({ page }) => {
     await setup(page);
     const bubble = page.getByTestId('msg-bubble-assistant').last();
     const box = await bubble.boundingBox();
     expect(box).not.toBeNull();
-    await page.mouse.move(box!.x + box!.width / 2, box!.y + box!.height / 2);
-    await page.mouse.down();
-    await page.waitForTimeout(700);
-    await page.mouse.up();
+    const touch = await page.context().newCDPSession(page);
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }] });
     await expect(page.getByTestId('bubble-menu')).toBeVisible();
-    await page.locator('.wx-menu-overlay').click({ position: { x: 10, y: 10 } });
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await touch.detach();
+    await expect(page.getByTestId('bubble-menu')).toBeVisible();
+    await page.mouse.click(10, 10);
     await expect(page.getByTestId('bubble-menu')).toHaveCount(0);
   });
 
@@ -85,7 +84,7 @@ test.describe('气泡长按菜单（微信式）', () => {
     await bubble.focus();
     await bubble.press('Shift+F10');
     await expect(page.getByTestId('bubble-menu')).toBeVisible();
-    await page.locator('.wx-menu-overlay').click({ position: { x: 10, y: 10 } });
+    await page.keyboard.press('Escape');
     await expect(page.getByTestId('bubble-menu')).toHaveCount(0);
     await bubble.focus();
     await bubble.press('Enter');
@@ -98,7 +97,7 @@ test.describe('气泡长按菜单（微信式）', () => {
     await page.getByTestId('menu-quote').click();
     const bar = page.getByTestId('quote-bar');
     await expect(bar).toBeVisible();
-    await expect(bar.locator('.qb-author')).toContainText('小鲸');
+    await expect(bar).toContainText('引用 小鲸');
     await page.getByTestId('quote-cancel').click();
     await expect(bar).toHaveCount(0);
   });
@@ -140,11 +139,11 @@ test.describe('Provider 诊断', () => {
     await page.route('**/api/personas', (route) => route.fulfill({ json: [] }));
     await page.goto('/');
     await page.getByRole('button', { name: '设置' }).click();
-    await page.locator('.sn-item', { hasText: '模型与 Provider' }).click();
+    await page.getByRole('tab', { name: '模型与 Provider' }).click();
     await expect(page.getByText('E2E Provider')).toBeVisible();
     await page.getByRole('button', { name: '诊断' }).click();
     await expect(page.getByRole('status')).toContainText('配置：不完整');
-    await expect(page.getByRole('status')).toContainText('模型：0 个');
+    await expect(page.getByRole('status')).toContainText('模型 0 个');
     await expect(page.getByRole('status')).toContainText('缺少 API Key');
   });
 });
@@ -193,8 +192,9 @@ test.describe('任务验收证据', () => {
 
     const assistant = page.getByTestId('msg-bubble-assistant').last();
     await expect(assistant).toContainText('报告已生成。');
-    const verification = page.getByText('验收通过').locator('..').locator('..');
+    const verification = page.getByTestId('verification');
     await expect(verification).toContainText('2/2');
+    await verification.getByRole('button').click();
     await expect(verification).toContainText('文件存在：reports/final.md');
     await expect(verification).toContainText('文件包含指定文本：reports/final.md');
     const traceReference = verification.locator('code').first();
@@ -232,7 +232,7 @@ test.describe('工具审批', () => {
       await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
       await page.keyboard.press('Enter');
 
-      const card = page.locator('.approval-card');
+      const card = page.getByTestId('approval-card');
       await expect(card).toContainText('删除 reports/draft.md');
       await card.getByRole('button', { name: decision.button }).click();
       await expect(card).toHaveCount(0);
@@ -267,10 +267,12 @@ test.describe('子代理与并行任务', () => {
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('请找帮手核对报告');
     await page.keyboard.press('Enter');
-    const member = page.locator('.wx-member-speech').last();
-    await expect(member).toHaveClass(/ok/);
-    await expect(member.locator('.wx-member-name')).toContainText('子代理 · 核对报告');
-    await expect(member.locator('.wx-member-text')).toContainText('报告已核对');
+    const member = page.getByTestId('subagent-step').last();
+    await expect(member).toHaveAttribute('data-status', 'done');
+    await expect(member.locator('[data-slot="trace-title"]').first()).toContainText('子代理 · 核对报告');
+    await expect(member.getByRole('button').first()).toHaveAttribute('aria-expanded', 'false');
+    await member.getByRole('button').first().click();
+    await expect(member.locator('[data-slot="trace-collapsible-content"]')).toContainText('报告已核对');
   });
 
   test('并行任务失败时展示小队失败状态', async ({ page }) => {
@@ -298,10 +300,10 @@ test.describe('子代理与并行任务', () => {
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('请并行扫描文件');
     await page.keyboard.press('Enter');
-    const member = page.locator('.wx-member-speech').last();
-    await expect(member).toHaveClass(/err/);
-    await expect(member.locator('.wx-member-name')).toHaveText('并行小队');
-    await expect(member.locator('.wx-member-text')).toContainText('子任务执行失败');
+    const member = page.getByTestId('subagent-step').last();
+    await expect(member).toHaveAttribute('data-status', 'error');
+    await expect(member.locator('[data-slot="trace-title"]').first()).toHaveText('并行小队');
+    await expect(member.locator('[data-slot="trace-collapsible-content"]')).toContainText('子任务执行失败');
   });
 });
 
@@ -352,24 +354,27 @@ test.describe('运行轨迹', () => {
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('触发子任务轨迹');
     await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '运行轨迹面板' }).click();
 
-    const panel = page.locator('.trail-panel');
-    const root = panel.locator('.tl-item').filter({ has: page.locator('.tl-title', { hasText: '找了个帮手' }) });
-    const child = panel.locator('.tl-item').filter({ hasText: '子任务读取失败' });
+    const panel = page.getByTestId('trace-panel');
+    const root = panel.getByTestId('trace-step').filter({ has: page.locator('[data-slot="trace-title"]', { hasText: '找了个帮手' }) });
+    const child = panel.getByTestId('trace-step').filter({ hasText: '子任务读取失败' });
     await expect(child).toBeVisible();
     await expect(child).toContainText('文件不存在：missing.txt');
     // 折叠父步骤 → 错误子步骤随之隐藏（span 树语义）；再展开恢复
-    await root.locator('.tl-head').first().click();
+    await root.getByRole('button').first().click();
     await expect(child).toBeHidden();
-    await root.locator('.tl-head').first().click();
+    await root.getByRole('button').first().click();
     await expect(child).toBeVisible();
     // 类型筛选走平铺视图：tool_call 含错误步骤，llm_call 步骤不因父步骤被筛掉而消失
-    await panel.locator('select').selectOption('tool_call');
-    await expect(panel.locator('.tl-item')).toHaveCount(2);
-    await expect(panel.locator('.tl-item').filter({ hasText: '子任务读取失败' })).toBeVisible();
-    await panel.locator('select').selectOption('llm_call');
-    await expect(panel.locator('.tl-item')).toHaveCount(1);
-    await expect(panel.locator('.tl-item').filter({ hasText: '子任务回答' })).toBeVisible();
+    await panel.getByRole('combobox', { name: '步骤类型筛选' }).click();
+    await page.getByRole('option', { name: 'TOOL', exact: true }).click();
+    await expect(panel.getByTestId('trace-step')).toHaveCount(2);
+    await expect(panel.getByTestId('trace-step').filter({ hasText: '子任务读取失败' })).toBeVisible();
+    await panel.getByRole('combobox', { name: '步骤类型筛选' }).click();
+    await page.getByRole('option', { name: 'LLM', exact: true }).click();
+    await expect(panel.getByTestId('trace-step')).toHaveCount(1);
+    await expect(panel.getByTestId('trace-step').filter({ hasText: '子任务回答' })).toBeVisible();
   });
 
   test('大事件量（200 步）渲染完整且可滚动', async ({ page }) => {
@@ -398,16 +403,17 @@ test.describe('运行轨迹', () => {
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('灌入批量轨迹');
     await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '运行轨迹面板' }).click();
 
-    const panel = page.locator('.trail-panel');
-    await expect(panel.locator('.tl-item')).toHaveCount(200);
-    const scroller = panel.locator('.trail-scroll');
+    const panel = page.getByTestId('trace-panel');
+    await expect(panel.getByTestId('trace-step')).toHaveCount(200);
+    const scroller = panel.getByTestId('trace-scroll').locator('[data-slot="scroll-area-viewport"]');
     await expect(scroller).toBeVisible();
     // 滚动到底部：首尾步骤都真实渲染（无虚拟化截断即全部可查）
     await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
-    await expect(panel.locator('.tl-item').filter({ hasText: '批量步骤 0' })).toBeVisible();
+    await expect(panel.getByTestId('trace-step').filter({ hasText: '批量步骤 0' })).toBeVisible();
     await scroller.evaluate((el) => { el.scrollTop = 0; });
-    await expect(panel.locator('.tl-item').filter({ hasText: '批量步骤 199' })).toBeVisible();
+    await expect(panel.getByTestId('trace-step').filter({ hasText: '批量步骤 199' })).toBeVisible();
   });
 
   test('接收当前 run 的 Trace 步骤，支持筛选和导出', async ({ page }) => {
@@ -468,17 +474,19 @@ test.describe('运行轨迹', () => {
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('运行一次回放');
     await page.keyboard.press('Enter');
+    await page.getByRole('button', { name: '运行轨迹面板' }).click();
 
-    const panel = page.locator('.trail-panel');
-    const modelStep = panel.locator('.tl-item').filter({ hasText: 'e2e-answer' });
+    const panel = page.getByTestId('trace-panel');
+    const modelStep = panel.getByTestId('trace-step').filter({ hasText: 'e2e-answer' });
     await expect(modelStep).toContainText('确定性回放完成');
-    await expect(modelStep.locator('.tl-dur')).toContainText('42ms');
-    await expect(panel.locator('.tl-item').filter({ hasText: '已删除临时文件' })).toBeVisible();
-    await panel.locator('select').selectOption('tool_call');
-    await expect(panel.locator('.tl-item')).toHaveCount(1);
-    await expect(panel.locator('.tl-item')).toContainText('已删除临时文件');
+    await expect(modelStep.locator('[data-slot="trace-description"]')).toContainText('42ms');
+    await expect(panel.getByTestId('trace-step').filter({ hasText: '已删除临时文件' })).toBeVisible();
+    await panel.getByRole('combobox', { name: '步骤类型筛选' }).click();
+    await page.getByRole('option', { name: 'TOOL', exact: true }).click();
+    await expect(panel.getByTestId('trace-step')).toHaveCount(1);
+    await expect(panel.getByTestId('trace-step')).toContainText('已删除临时文件');
     const downloadPromise = page.waitForEvent('download');
-    await panel.locator('button.manager-close[aria-label="导出 JSONL"]').click();
+    await panel.getByRole('button', { name: '导出 JSONL', exact: true }).click();
     const download = await downloadPromise;
     expect(download.suggestedFilename()).toMatch(/^maharness-trace-.*\.jsonl$/);
     const path = await download.path();
@@ -515,7 +523,8 @@ test.describe('运行轨迹', () => {
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('继续处理长任务');
     await page.keyboard.press('Enter');
     releaseTrace();
-    const step = page.locator('.trail-panel .tl-item').filter({ hasText: '上下文压缩' });
+    await page.getByRole('button', { name: '运行轨迹面板' }).click();
+    const step = page.getByTestId('trace-panel').getByTestId('trace-step').filter({ hasText: '上下文压缩' });
     await expect(step).toContainText('history[3..18]');
     await expect(step).toContainText('省 2220');
   });

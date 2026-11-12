@@ -2,15 +2,28 @@
  * server/routes/stats.ts —— 统计（上下文用量 / 缓存命中率 / 总体概览）
  */
 import type { Express } from 'express';
-import type { RouteDeps } from './shared';
+import { tenantIdOf, type RouteDeps } from './shared';
+import { tenantStorageBytes } from '../tenant-quota';
 
 export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, store } = deps;
 
-  app.get('/api/stats', (_req, res) => {
+  app.post('/api/cache/clear', (req, res) => {
+    const tenantId = tenantIdOf(req);
+    const scope = req.body?.scope === 'l1' ? 'l1' : req.body?.scope === 'l2' ? 'l2' : 'all';
+    const removed = kernel.cache.clearScope({
+      tenantId,
+      l1: scope !== 'l2',
+      l2: scope !== 'l1',
+    });
+    res.json({ ok: true, tenantId, scope, removed });
+  });
+
+  app.get('/api/stats', (req, res) => {
+    const tenantId = tenantIdOf(req);
     const trace = kernel.trace.stats();
     const cache = kernel.cache.stats();
-    const overview = store.statsOverview();
+    const overview = store.statsOverview(tenantId);
     const maxCtx = kernel.config.get<number>('context.maxTokens', 60000);
     const rate = (hits: number, misses: number): { hits: number; misses: number; rate: number } => {
       const total = hits + misses;
@@ -21,8 +34,8 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
     // 不再逐会话 listMessages 全量拉 content。estimatedTokens 无法在 SQL 里区分 CJK
     //（estimateTokens = CJK数 + 非CJK/4），改用聚合字符数 /2 近似（全中文上界 1.0、
     // 全英文下界 0.25 的折中）——仅用于 contextUsage 粗展示，精确计费走 tokens 聚合。
-    const agg = new Map(store.aggregateSessions().map((a) => [a.sessionId, a]));
-    const perSession = store.listSessions().map((s) => {
+    const agg = new Map(store.aggregateSessions(tenantId).map((a) => [a.sessionId, a]));
+    const perSession = store.listSessions(tenantId).map((s) => {
       const a = agg.get(s.id);
       const estimatedTokens = Math.ceil((a?.chars ?? 0) / 2);
       return {
@@ -45,7 +58,7 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
     //   "工具定义塞满上下文"是 context rot 的已知诱因之一）。
     const sysSteps = kernel.trace.query(undefined, { type: 'system' });
     const countByName = (name: string): number => sysSteps.filter((s) => s.name === name).length;
-    const toolDefs = kernel.plugins.capabilities('tool').map((c) => c.tool);
+    const toolDefs = kernel.plugins.tools();
     const quality = {
       injections: countByName('context-inject'),
       compactions: countByName('上下文压缩'),
@@ -55,6 +68,28 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
       toolDefinitions: toolDefs.length,
       toolDefBytes: toolDefs.reduce((s, t) => s + (t.description?.length ?? 0) + JSON.stringify(t.parameters ?? {}).length, 0),
     };
+    const pluginList = kernel.plugins.list();
+    const mcpService = kernel.plugins.resolveService('service:mcp-status') as { snapshot?: () => unknown } | undefined;
+    const tenantRecord = store.getTenant(tenantId);
+    const storageLimit = tenantRecord?.maxStorageBytes ?? 0;
+    const ecosystem = {
+      tenant: {
+        id: tenantId,
+        sessions: store.countSessions(tenantId),
+        storageBytes: storageLimit > 0
+          ? tenantStorageBytes(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantId)
+          : 0,
+        maxStorageBytes: storageLimit,
+      },
+      plugins: {
+        total: pluginList.length,
+        started: pluginList.filter((item) => item.state === 'started').length,
+        error: pluginList.filter((item) => item.state === 'error').length,
+        watched: pluginList.filter((item) => item.watched).length,
+      },
+      diagnostics: kernel.plugins.diagnostics().slice(0, 8),
+      mcp: mcpService?.snapshot?.() ?? null,
+    };
     res.json({
       overview: { ...overview, cacheHitSteps: trace.cacheHits },
       process: {
@@ -63,6 +98,7 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
       },
       context: { maxTokens: maxCtx, perSession, quality },
       taskProfile: kernel.budget.taskProfile(),
+      ecosystem,
       cache: {
         l1Enabled: kernel.cache.l1Enabled,
         // E1：把真实生效阈值暴露给前端——此前 UI 硬编码 0.85（而 0.85 恰是缓存体系

@@ -1,10 +1,12 @@
 import { existsSync, readFileSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
+import type { ToolEvidence } from './types';
 
 export type TaskCriterion =
   | { type: 'output_contains'; value: string }
   | { type: 'output_matches'; pattern: string; flags?: string }
   | { type: 'tool_succeeded'; name: string }
+  | { type: 'tool_evidence'; name: string; kind?: ToolEvidence['kind']; labelContains?: string; refContains?: string }
   | { type: 'file_exists'; path: string }
   | { type: 'file_contains'; path: string; value: string };
 
@@ -28,7 +30,7 @@ export interface TaskContract {
 
 export interface TaskVerificationInput {
   answer: string;
-  toolResults: { name: string; ok: boolean }[];
+  toolResults: { name: string; ok: boolean; evidence?: ToolEvidence[] }[];
   sandboxRoot: string;
 }
 
@@ -62,9 +64,15 @@ export function validateTaskContract(contract: TaskContract): string[] {
     if (criterion.type === 'output_contains' && (!criterion.value || typeof criterion.value !== 'string')) issues.push(`acceptance[${i}].value 必须是非空字符串`);
     if (criterion.type === 'output_matches' && (!criterion.pattern || typeof criterion.pattern !== 'string')) issues.push(`acceptance[${i}].pattern 必须是非空字符串`);
     if (criterion.type === 'tool_succeeded' && (!criterion.name || typeof criterion.name !== 'string')) issues.push(`acceptance[${i}].name 必须是非空字符串`);
+    if (criterion.type === 'tool_evidence') {
+      if (!criterion.name || typeof criterion.name !== 'string') issues.push(`acceptance[${i}].name 必须是非空字符串`);
+      if (criterion.kind !== undefined && !['file', 'url', 'command', 'state', 'content', 'custom'].includes(criterion.kind)) issues.push(`acceptance[${i}].kind 不受支持`);
+      if (criterion.labelContains !== undefined && typeof criterion.labelContains !== 'string') issues.push(`acceptance[${i}].labelContains 必须是字符串`);
+      if (criterion.refContains !== undefined && typeof criterion.refContains !== 'string') issues.push(`acceptance[${i}].refContains 必须是字符串`);
+    }
     if ((criterion.type === 'file_exists' || criterion.type === 'file_contains') && (!criterion.path || typeof criterion.path !== 'string')) issues.push(`acceptance[${i}].path 必须是非空字符串`);
     if (criterion.type === 'file_contains' && (!criterion.value || typeof criterion.value !== 'string')) issues.push(`acceptance[${i}].value 必须是非空字符串`);
-    if (!['output_contains', 'output_matches', 'tool_succeeded', 'file_exists', 'file_contains'].includes(criterion.type)) issues.push(`acceptance[${i}].type 不受支持`);
+    if (!['output_contains', 'output_matches', 'tool_succeeded', 'tool_evidence', 'file_exists', 'file_contains'].includes(criterion.type)) issues.push(`acceptance[${i}].type 不受支持`);
   });
   return issues;
 }
@@ -89,7 +97,7 @@ export function verifyTaskContract(contract: TaskContract, input: TaskVerificati
   const evidence: TaskVerificationResult['evidence'] = [];
   const sourceOf = (criterion: TaskCriterion): TaskVerificationResult['evidence'][number]['source'] => {
     if (criterion.type === 'output_contains' || criterion.type === 'output_matches') return 'answer';
-    if (criterion.type === 'tool_succeeded') return 'tool';
+    if (criterion.type === 'tool_succeeded' || criterion.type === 'tool_evidence') return 'tool';
     return 'filesystem';
   };
   const checks = contract.acceptance.map((criterion) => {
@@ -106,6 +114,19 @@ export function verifyTaskContract(contract: TaskContract, input: TaskVerificati
           const matched = input.toolResults.some((r) => r.name === criterion.name && r.ok);
           evidence.push({ criterion, source: 'tool', detail: matched ? `工具 ${criterion.name} 返回成功` : `工具 ${criterion.name} 没有成功结果` });
           return { criterion, ok: matched, reason: matched ? `工具 ${criterion.name} 已成功` : `工具 ${criterion.name} 未成功` };
+        }
+        case 'tool_evidence': {
+          const matched = input.toolResults
+            .filter((r) => r.name === criterion.name && r.ok)
+            .flatMap((r) => r.evidence ?? [])
+            .find((e) => (!criterion.kind || e.kind === criterion.kind)
+              && (!criterion.labelContains || e.label.includes(criterion.labelContains))
+              && (!criterion.refContains || (e.ref ?? '').includes(criterion.refContains)));
+          const detail = matched
+            ? `工具 ${criterion.name} 提供证据：${matched.label}${matched.ref ? `（${matched.ref}）` : ''}`
+            : `工具 ${criterion.name} 没有匹配的证据`;
+          evidence.push({ criterion, source: 'tool', detail });
+          return { criterion, ok: !!matched, reason: detail };
         }
         case 'file_exists': {
           const target = safePath(input.sandboxRoot, criterion.path);

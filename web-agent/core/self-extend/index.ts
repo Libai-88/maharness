@@ -12,6 +12,7 @@ import { fileURLToPath } from 'node:url';
 import type { Plugin, ToolContext } from '../../kernel/types';
 import { reviewPluginSource } from '../../kernel/plugin-review';
 import { runPluginTrial } from '../../kernel/plugin-trial';
+import { SNAPSHOT_SUFFIX } from '../../kernel/plugin-snapshot';
 
 // 项目根 = 本文件上溯两级（core/self-extend/index.ts → <root>/）
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
@@ -73,6 +74,7 @@ export default {
   name: '自我扩展',
   version: '0.1.0',
   onLoad(ctx) {
+    const allowedDependencies = ctx.config.get<string[]>('plugins.allowedDependencies', []);
     // ---- 通过总线事件跟踪插件加载状态（纯插件方案，不触碰内核） ----
     const runtime = new Map<string, RuntimeState>();
     ctx.on('plugin.registered', (e) => {
@@ -212,7 +214,7 @@ export default {
             };
           }
 
-          const review = reviewPluginSource(source);
+          const review = reviewPluginSource(source, undefined, { allowedDependencies });
           if (!review.ok) {
             return {
               ok: false,
@@ -225,7 +227,10 @@ export default {
           for (const cap of review.capabilities) (permissions[cap.kind] ??= []).push(cap.name);
           const trial = await runPluginTrial({
             id,
-            manifest: { id, name, version: '0.1.0', entry: 'index.ts', permissions: { capabilities: permissions } },
+            manifest: {
+              id, name, version: '0.1.0', entry: 'index.ts',
+              permissions: { capabilities: permissions, dependencies: review.dependencies },
+            },
             source,
           });
           if (!trial.ok) {
@@ -239,7 +244,7 @@ export default {
           mkdirSync(dir, { recursive: true });
           writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
             id, name, version: '0.1.0', entry: 'index.ts', enabled: false,
-            permissions: { capabilities: permissions },
+            permissions: { capabilities: permissions, dependencies: review.dependencies },
           }, null, 2), 'utf8');
           writeFileSync(join(dir, 'index.ts'), source, 'utf8');
 
@@ -301,6 +306,7 @@ export default {
           if (existsSync(userPluginsDir)) {
             for (const e of readdirSync(userPluginsDir, { withFileTypes: true })) {
               if (!e.isDirectory()) continue;
+              if (SNAPSHOT_SUFFIX.test(e.name)) continue;
               const manifestPath = join(userPluginsDir, e.name, 'plugin.json');
               if (!existsSync(manifestPath)) continue;
               let manifest: Record<string, unknown> = {};

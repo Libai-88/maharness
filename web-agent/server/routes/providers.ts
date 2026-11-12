@@ -7,6 +7,7 @@ import { extractFromProviderMeta, resolveCapabilities } from '../../kernel/model
 import { MODEL_SCHEMA_VERSION, stableModelIdentity } from '../../kernel/model-schema';
 import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError, LLMHttpError } from '../../core/chat/provider-health';
 import type { ProviderHealth } from '../../core/chat/provider-health';
+import type { ProviderGateway } from '../../kernel/provider-gateway';
 import { ConcurrentStoreWriteError } from '../db';
 
 /** 支持的协议族（本地/内网地址需 AGENT_ALLOW_PRIVATE_URLS=1） */
@@ -63,6 +64,24 @@ export function buildProviderDiagnostics(input: {
   if (health?.authFailed) issues.push('最近请求认证失败，请检查 API Key 或权限');
   else if ((health?.failures ?? 0) > 0) issues.push(`最近请求失败 ${health!.failures} 次`);
   return { schemaVersion: MODEL_SCHEMA_VERSION, providerId: input.id, protocol: input.protocol ?? 'openai', configured, health: health ?? null, models, issues };
+}
+
+/** Provider Gateway 的公开快照：不含地址、密钥或可执行方法。 */
+export function buildProviderGatewaySnapshot(gateway: ProviderGateway): {
+  schemaVersion: 1;
+  providers: { id: string; label: string; protocol: string; defaultModel: string }[];
+  models: ReturnType<ProviderGateway['models']>;
+  health: Record<string, ReturnType<ProviderGateway['health']>>;
+} {
+  const providers = gateway.providers().map((provider) => ({
+    id: provider.id, label: provider.label, protocol: provider.protocol ?? 'openai', defaultModel: provider.defaultModel,
+  }));
+  return {
+    schemaVersion: 1,
+    providers,
+    models: gateway.models(),
+    health: Object.fromEntries(providers.map((provider) => [provider.id, gateway.health(provider.id)])),
+  };
 }
 
 /** 各协议的最小可用探测请求（URL + 头 + 体） */
@@ -136,6 +155,12 @@ async function fetchProviderModels(base: string, protocol: ProviderProtocol, key
 
 export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, store } = deps;
+
+  app.get('/api/providers/gateway', (_req, res) => {
+    const gateway = kernel.plugins.resolveService('service:provider-gateway') as ProviderGateway | undefined;
+    if (!gateway) return res.status(503).json({ error: 'Provider Gateway 未加载（对话引擎插件未启用）' });
+    res.json(buildProviderGatewaySnapshot(gateway));
+  });
 
   app.get('/api/providers', (_req, res) => {
     const models = store.listModels();

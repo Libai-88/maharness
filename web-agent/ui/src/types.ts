@@ -157,6 +157,7 @@ export interface PluginInfo {
   /** F5：true = 位于用户插件目录，受目录监听（保存即热重载）；
    *  false = core/ 内置插件，源码改动需手动重载或重启。 */
   watched?: boolean;
+  execution?: { mode: 'process'; memoryMb?: number; timeoutMs?: number };
   circuitBreaker?: { failures: number; openedAt: number };
 }
 
@@ -196,6 +197,8 @@ export interface SkillInfo {
   /** 同名技能被更高优先级来源覆盖时列出被覆盖的来源 */
   shadowed?: string[];
   license?: string;
+  version?: string;
+  requires?: string[];
   allowedTools?: string[];
   metadata?: Record<string, string>;
   bodyChars?: number;
@@ -222,8 +225,16 @@ export interface LockSkill {
   source: string;
   sourceType: string;
   skillPath: string;
+  version?: string;
+  requires?: string[] | Record<string, string>;
   computedHash?: string;
   installed: boolean;
+}
+
+export interface LockValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
 }
 
 export interface SkillUsageRow {
@@ -301,6 +312,12 @@ export interface StatsInfo {
   };
   /** 任务画像（harness 自适应数据源）：类型 → 次数/平均轮数/成本/失败率 */
   taskProfile: { type: string; count: number; avgTurns: number; avgCost: number; failRate: number }[];
+  ecosystem?: {
+    tenant: { id: string; sessions: number; storageBytes?: number; maxStorageBytes?: number };
+    plugins: { total: number; started: number; error: number; watched: number };
+    diagnostics: PluginDiagnostic[];
+    mcp: { name: string; type: string; state: string; tools: number; health?: { state: string; failures: number }; auth?: { state: string } }[] | null;
+  };
   cache: {
     l1Enabled: boolean;
     /** 后端真实生效的 L1 命中阈值（E1：UI 不再硬编码，展示与生效值同源） */
@@ -450,6 +467,24 @@ export interface ToolStep {
   durationMs?: number;
   /** 大结果已存入结果存储（recall_tool_result 可零副作用重读） */
   stored?: boolean;
+  /** 工具执行返回的结构化观察证据（文件/URL/命令/状态等） */
+  evidence?: ToolEvidence[];
+  /** 外部内容安全警告（提示注入/敏感信息），仅标注不阻断 */
+  warnings?: ToolWarning[];
+}
+
+export interface ToolEvidence {
+  kind: string;
+  label: string;
+  ref?: string;
+  value?: unknown;
+}
+
+export interface ToolWarning {
+  kind: 'prompt-injection' | 'sensitive-data';
+  severity: 'low' | 'medium' | 'high';
+  label: string;
+  preview: string;
 }
 
 export interface ApprovalItem {

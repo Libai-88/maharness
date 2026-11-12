@@ -9,7 +9,7 @@
 3. API schema：涉及契约变更时 `API_SCHEMA_VERSION` 已按 release-policy 递增；`npm test` 的 api-contract 契约扫描 + `node scripts/check-doc-facts.mjs` 通过。
 4. 插件 manifest：涉及 manifest 语义变更时 `manifest-v1-compatibility.md` 与 `HOST_PLUGIN_API` 同步；`npm run plugin:validate` 双插件通过。
 5. 安全门禁：`npm run test:security` 全绿；`npm run check:threat-model` 通过；威胁模型在安全边界变更时已升版。
-6. 完整回归：`npm test`、`npm run typecheck`、`npm run ui:typecheck`、`npm run build`、`npm run selftest`、`npm run eval:ci` 全绿；GitHub Actions quality + e2e 双绿。
+6. 完整回归：`npm test`、`npm run typecheck`、`npm run ui:typecheck`、`npm run build`、`npm run selftest`、`npm run eval:ci`、`npm run skill:eval`、`npm run plugin:lock:verify` 全绿；GitHub Actions quality + e2e 双绿。
 7. 文档事实：CHANGELOG 覆盖全部面向用户的变化；环境变量表与实际实现一致；ADR 在重大契约改动时已登记。
 8. 供应链：`npm audit --omit=dev` 双仓 0 漏洞；锁文件变更仅含本版本有意引入的修复/升级。
 

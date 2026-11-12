@@ -1,8 +1,9 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, Message, ModelInfo, PersonaInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, LockValidation, Message, ModelInfo, PersonaInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, ToolEvidence, ToolWarning, TraceStep, TreeEntry, WorkspaceInfo } from './types';
 
 // ---- 变更类端点的显式授权凭据（A6-b 的前端侧）----
 const TOKEN_KEY = 'maharness-api-token';
+const TENANT_KEY = 'maharness-tenant';
 
 
 /**
@@ -28,17 +29,31 @@ export function setMutationToken(token: string): void {
   } catch { /* 存不上（隐私模式等）就算了：门会退回未授权态，比假装安全诚实 */ }
 }
 
+export function getTenantId(): string {
+  try { return localStorage.getItem(TENANT_KEY) ?? ''; } catch { return ''; }
+}
+
+export function setTenantId(tenantId: string): void {
+  try {
+    if (tenantId.trim()) localStorage.setItem(TENANT_KEY, tenantId.trim());
+    else localStorage.removeItem(TENANT_KEY);
+  } catch { /* 存不上则使用服务端默认租户 */ }
+}
+
 /** 变更类方法始终带凭据头。trusted/remote 部署模式下服务端对 GET/SSE 也强制校验，
  *  GET 401 时会触发 401 分支的重试逻辑（补带头重放一次）。 */
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 const TOKEN_HEADER = 'x-maharness-token';
 function authHeaders(method?: string): Record<string, string> {
   const t = getMutationToken();
-  if (!t) return {};
+  const headers: Record<string, string> = {};
+  const tenant = getTenantId();
+  if (tenant) headers['x-maharness-tenant'] = tenant;
+  if (!t) return headers;
   const m = String(method ?? 'GET').toUpperCase();
   // 变更类始终带；GET/HEAD 也带（local 模式服务端忽略该头，trusted/remote 必需）
-  if (MUTATING_METHODS.has(m) || m === 'GET' || m === 'HEAD') return { [TOKEN_HEADER]: t };
-  return {};
+  if (MUTATING_METHODS.has(m) || m === 'GET' || m === 'HEAD') headers[TOKEN_HEADER] = t;
+  return headers;
 }
 
 export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
@@ -73,7 +88,7 @@ export interface ChatHandlers {
   onReasoning(text: string): void;
   /** id = tool_call_id：同名并发调用靠它配对，不会把两次 read_file 结算成一张卡 */
   onToolStart(id: string | undefined, name: string, args: unknown): void;
-  onToolResult(id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean): void;
+  onToolResult(id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean, evidence?: ToolEvidence[], warnings?: ToolWarning[]): void;
   /** 审批挂起：approvalToken 是该次挂起的一次性回答凭据（A6-c），存下并在回答时回带 */
   onApprovalRequired(approvalId: string, name: string, summary: string, approvalToken?: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
@@ -169,7 +184,15 @@ export async function streamChat(
           case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
           case 'tool_start': h.onToolStart(d.id ? String(d.id) : undefined, String(d.name ?? ''), d.args); break;
           case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? ''), d.approvalToken ? String(d.approvalToken) : undefined); break;
-          case 'tool_result': h.onToolResult(d.id ? String(d.id) : undefined, String(d.name ?? ''), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored)); break;
+          case 'tool_result': h.onToolResult(
+            d.id ? String(d.id) : undefined,
+            String(d.name ?? ''),
+            String(d.summary ?? ''),
+            Boolean(d.ok),
+            Boolean(d.stored),
+            Array.isArray(d.evidence) ? d.evidence as ToolEvidence[] : undefined,
+            Array.isArray(d.warnings) ? d.warnings as ToolWarning[] : undefined,
+          ); break;
           case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
           case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
           case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
@@ -328,7 +351,7 @@ export const skillsApi = {
   read: (name: string, source: string) =>
     api<{ name: string; content: string }>(`/api/skills/${source}/${name}/read`),
   /** skills-lock.json（GitHub 源 + 哈希锁）的可同步清单 */
-  lock: () => api<{ file: string | null; error?: string; count: number; skills: LockSkill[] }>('/api/skills/lock'),
+  lock: () => api<{ file: string | null; error?: string; count: number; skills: LockSkill[]; validation?: LockValidation }>('/api/skills/lock'),
   /** 按锁文件安装（默认只装缺失项；force 覆盖并放行哈希不符） */
   sync: (body?: { names?: string[]; force?: boolean }) =>
     api<{ ok: boolean; results: { name: string; ok: boolean; installed?: boolean; skipped?: string; mismatch?: boolean; error?: string }[] }>(
@@ -358,6 +381,28 @@ export interface RulesView {
   promptChars: number;
 }
 
+export interface PolicyDiffEntry {
+  id: string;
+  change: 'added' | 'removed' | 'changed';
+  fields?: string[];
+}
+
+export interface PolicyDryRunView {
+  ok: boolean;
+  changed: boolean;
+  diff: PolicyDiffEntry[];
+  probes: { tool: string; changed: boolean; current: { decision: string; ruleId?: string }; candidate: { decision: string; ruleId?: string } }[];
+  issues: { level: 'error' | 'warning'; code: string; ruleId?: string; message: string }[];
+  blanketAllow?: { id?: string; tool: string }[];
+}
+
+export interface PolicySnapshot {
+  name: string;
+  scope: 'global' | 'project';
+  createdAt: number;
+  bytes: number;
+}
+
 export const rulesApi = {
   get: () => api<RulesView>('/api/rules'),
   putGlobal: (name: string, content: string, revision: string) =>
@@ -366,6 +411,21 @@ export const rulesApi = {
     api<{ ok: boolean }>('/api/rules/project', { method: 'PUT', body: JSON.stringify({ path, content, revision }) }),
   putPolicy: (scope: 'global' | 'project', rules: RulesView['policy'], revision: string) =>
     api<{ ok: boolean; revision: string; error?: string }>('/api/rules/policy', { method: 'PUT', body: JSON.stringify({ scope, rules, revision }) }),
+  dryRun: (scope: 'global' | 'project', rules: RulesView['policy'], probes: { tool: string; args?: unknown }[] = []) =>
+    api<PolicyDryRunView>('/api/rules/policy/dry-run', { method: 'POST', body: JSON.stringify({ scope, rules, probes }) }),
+  history: (scope?: 'global' | 'project') =>
+    api<PolicySnapshot[]>(`/api/rules/policy/history${scope ? `?scope=${scope}` : ''}`),
+  rollback: (scope: 'global' | 'project', snapshot: string, revision: string) =>
+    api<{ ok: boolean; revision: string; snapshot?: string; error?: string }>('/api/rules/policy/rollback', {
+      method: 'POST', body: JSON.stringify({ scope, snapshot, revision }),
+    }),
+};
+
+export const cacheApi = {
+  clear: (scope: 'all' | 'l1' | 'l2' = 'all') =>
+    api<{ ok: boolean; tenantId: string; scope: string; removed: { l1: number; l2: number } }>('/api/cache/clear', {
+      method: 'POST', body: JSON.stringify({ scope }),
+    }),
 };
 
 export const workspacesApi = {

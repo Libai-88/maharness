@@ -8,16 +8,20 @@ import type { Express } from 'express';
 import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { resolveInSandbox, readTextSmart, isProtectedWritePath, isDeniedReadPath } from '../../kernel/sandbox';
-import { openInExplorer, type RouteDeps } from './shared';
+import { openInExplorer, tenantIdOf, type RouteDeps } from './shared';
+import { tenantSandboxRoot } from '../tenant-workspace';
+import { assertTenantStorage, invalidateTenantStorage, TenantStorageQuotaError } from '../tenant-quota';
 
 export function registerFileRoutes(app: Express, deps: RouteDeps): void {
-  const { kernel } = deps;
+  const { kernel, store } = deps;
+  const sandboxOf = (req: { headers: Record<string, string | string[] | undefined> }): string =>
+    tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantIdOf(req));
 
   /** 文件树（单层，前端懒加载展开；忽略噪音目录） */
   const TREE_IGNORE = new Set(['node_modules', '.git', 'dist', 'data', '.dsh', '.idea', '__pycache__', 'coverage']);
   app.get('/api/files/tree', (req, res) => {
     try {
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const dir = resolveInSandbox(sandbox, String(req.query.path ?? '.'));
       if (!existsSync(dir)) return res.status(404).json({ error: '目录不存在' });
       const entries = readdirSync(dir, { withFileTypes: true })
@@ -41,7 +45,8 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
   // ---------- 文件（沙箱内） ----------
   app.get('/api/files', (req, res) => {
     try {
-      const dir = resolveInSandbox(kernel.config.get<string>('sandboxRoot', kernel.rootDir), String(req.query.path ?? '.'));
+      const sandbox = sandboxOf(req);
+      const dir = resolveInSandbox(sandbox, String(req.query.path ?? '.'));
       if (!existsSync(dir)) return res.status(404).json({ error: '目录不存在' });
       const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
         const full = resolve(dir, e.name);
@@ -52,7 +57,7 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
           return { name: e.name, type: e.isDirectory() ? 'dir' : 'file' };
         }
       }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
-      res.json({ path: relative(kernel.config.get<string>('sandboxRoot', kernel.rootDir), dir) || '.', entries });
+      res.json({ path: relative(sandbox, dir) || '.', entries });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
@@ -60,7 +65,7 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
 
   app.get('/api/files/read', (req, res) => {
     try {
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const file = resolveInSandbox(sandbox, String(req.query.path ?? ''));
       // C-S4/H10 + A2：与 Agent 工具同一读边界，且按「沙箱根 ∪ 项目根」双基座判定
       //（只按沙箱根算相对路径时，`<项目根>/data/agent.db` 这类路径不被拦截）
@@ -80,17 +85,29 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
     try {
       const { path, content } = req.body ?? {};
       if (!path || content === undefined) return res.status(400).json({ error: '需要 path 与 content' });
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const file = resolveInSandbox(sandbox, String(path));
       // C-S4/H10：与 Agent 工具同一写边界（kernel/、core/chat/ 核心代码写拒；
       // AGENT_ALLOW_CORE_EDIT=1 放行——由 tools-fs 契约函数统一判定）
       if (isProtectedWritePath(file, sandbox)) {
         return res.status(403).json({ error: '拒绝写入受保护路径（kernel/ 与 core/chat/ 核心代码；如确需修改请设置 AGENT_ALLOW_CORE_EDIT=1）' });
       }
+      const tenantId = tenantIdOf(req);
+      const contentText = String(content);
+      const existingBytes = existsSync(file) ? statSync(file).size : 0;
+      const nextBytes = Buffer.byteLength(contentText, 'utf8');
+      assertTenantStorage({
+        base: kernel.config.get<string>('sandboxRoot', kernel.rootDir),
+        tenantId,
+        limitBytes: store.getTenant(tenantId)?.maxStorageBytes ?? 0,
+        additionalBytes: Math.max(0, nextBytes - existingBytes),
+      });
       mkdirSync(resolve(file, '..'), { recursive: true });
-      writeFileSync(file, String(content), 'utf8');
+      writeFileSync(file, contentText, 'utf8');
+      invalidateTenantStorage(tenantId);
       res.json({ ok: true, path: relative(sandbox, file) });
     } catch (err) {
+      if (err instanceof TenantStorageQuotaError) return res.status(413).json({ error: err.message, code: err.code });
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
     }
   });
@@ -100,7 +117,7 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
     try {
       const q = String(req.query.q ?? '').trim().toLowerCase();
       if (!q) return res.json({ query: '', results: [] });
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const skip = new Set(['node_modules', '.git', 'dist', '.dsh', 'data']);
       const results: { path: string; size: number }[] = [];
       const walk = (dir: string, rel: string): void => {
@@ -131,7 +148,7 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
   app.post('/api/files/open', (req, res) => {
     try {
       const relPath = String(req.body?.path ?? '');
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const target = relPath ? resolveInSandbox(sandbox, relPath) : sandbox;
       if (!existsSync(target)) return res.status(404).json({ error: '路径不存在' });
       openInExplorer(target);

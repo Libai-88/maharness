@@ -65,6 +65,24 @@ describe('task verifier', () => {
     assert.equal(result.evidence.length, 2);
   });
 
+  test('tool_evidence 必须匹配工具返回的结构化证据', () => {
+    const criterion = { type: 'tool_evidence' as const, name: 'write_file', kind: 'file' as const, refContains: 'out/result.txt' };
+    const matched = verifyTaskContract({ objective: '证明写入', acceptance: [criterion] }, {
+      answer: '完成',
+      toolResults: [{ name: 'write_file', ok: true, evidence: [{ kind: 'file', label: '已写入 out/result.txt', ref: 'out/result.txt' }] }],
+      sandboxRoot: process.cwd(),
+    });
+    assert.equal(matched.status, 'verified');
+    assert.equal(matched.evidence[0]?.source, 'tool');
+    assert.match(matched.evidence[0]?.detail ?? '', /out\/result\.txt/);
+
+    const missing = verifyTaskContract({ objective: '证明写入', acceptance: [criterion] }, {
+      answer: '完成', toolResults: [{ name: 'write_file', ok: true }], sandboxRoot: process.cwd(),
+    });
+    assert.equal(missing.status, 'failed');
+    assert.match(missing.checks[0]?.reason ?? '', /没有匹配的证据/);
+  });
+
   test('正则验证异常仍保留与检查项一一对应的证据顺序', () => {
     const result = verifyTaskContract({ objective: 'regex error', acceptance: [
       { type: 'output_matches', pattern: '[' },

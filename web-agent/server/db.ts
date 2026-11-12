@@ -6,12 +6,17 @@
  *     缓存**不落库**，落 data/cache.json（见 kernel/cache.ts 的 save/load）。
  */
 import Database from 'better-sqlite3';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
 import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secrets';
+import { decryptPurposeSecret, encryptPurposeSecret, isPurposeEncrypted, PURPOSE_SECRET_PREFIX } from '../kernel/secret-box';
 import type { SecretKeyInfo } from './secrets';
+
+function providerPurpose(providerId: string): string {
+  return `provider:${providerId}`;
+}
 
 /**
  * 不该出现在用户眼里的消息前缀——**单一出处**。
@@ -238,8 +243,29 @@ export class Store {
       CREATE TABLE IF NOT EXISTS sessions (
         id TEXT PRIMARY KEY, title TEXT NOT NULL DEFAULT '新会话',
         model TEXT NOT NULL DEFAULT '', provider TEXT NOT NULL DEFAULT '',
+        tenant_id TEXT NOT NULL DEFAULT 'default',
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
+      CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC);
+      CREATE TABLE IF NOT EXISTS tenants (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
+        max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
+        max_storage_bytes INTEGER NOT NULL DEFAULT 0,
+        max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL
+      );
+      CREATE TABLE IF NOT EXISTS api_tokens (
+        id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, role TEXT NOT NULL,
+        token_hash TEXT NOT NULL UNIQUE, label TEXT,
+        created_at INTEGER NOT NULL, expires_at INTEGER, revoked_at INTEGER, last_used_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS idx_api_tokens_tenant ON api_tokens(tenant_id, created_at);
+      CREATE TABLE IF NOT EXISTS approval_requests (
+        id TEXT PRIMARY KEY, session_id TEXT, tenant_id TEXT NOT NULL, name TEXT NOT NULL,
+        summary TEXT, args TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+        decided_at INTEGER, decision TEXT, reason TEXT
+      );
+      CREATE INDEX IF NOT EXISTS idx_approval_requests_tenant ON approval_requests(tenant_id, created_at);
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY, session_id TEXT NOT NULL,
         role TEXT NOT NULL, content TEXT, tool_calls TEXT, tool_call_id TEXT,
@@ -425,20 +451,70 @@ export class Store {
     if (!sCols.some((c) => c.name === 'provider')) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN provider TEXT NOT NULL DEFAULT ''");
     }
+    if (!sCols.some((c) => c.name === 'tenant_id')) {
+      this.db.exec("ALTER TABLE sessions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'");
+    }
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC)');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS tenants (
+      id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
+      max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
+      max_storage_bytes INTEGER NOT NULL DEFAULT 0,
+      max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    )`);
+    this.db.exec(`CREATE TABLE IF NOT EXISTS api_tokens (
+      id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, role TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE, label TEXT,
+      created_at INTEGER NOT NULL, expires_at INTEGER, revoked_at INTEGER, last_used_at INTEGER
+    )`);
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_api_tokens_tenant ON api_tokens(tenant_id, created_at)');
+    this.db.exec(`CREATE TABLE IF NOT EXISTS approval_requests (
+      id TEXT PRIMARY KEY, session_id TEXT, tenant_id TEXT NOT NULL, name TEXT NOT NULL,
+      summary TEXT, args TEXT, created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL,
+      decided_at INTEGER, decision TEXT, reason TEXT
+    )`);
+    this.db.exec('CREATE INDEX IF NOT EXISTS idx_approval_requests_tenant ON approval_requests(tenant_id, created_at)');
+    const tenantCols = this.db.prepare('PRAGMA table_info(tenants)').all() as { name: string }[];
+    if (!tenantCols.some((c) => c.name === 'max_sessions')) {
+      this.db.exec('ALTER TABLE tenants ADD COLUMN max_sessions INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!tenantCols.some((c) => c.name === 'max_active_runs')) {
+      this.db.exec('ALTER TABLE tenants ADD COLUMN max_active_runs INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!tenantCols.some((c) => c.name === 'max_cost_usd')) {
+      this.db.exec('ALTER TABLE tenants ADD COLUMN max_cost_usd REAL NOT NULL DEFAULT 0');
+    }
+    if (!tenantCols.some((c) => c.name === 'max_storage_bytes')) {
+      this.db.exec('ALTER TABLE tenants ADD COLUMN max_storage_bytes INTEGER NOT NULL DEFAULT 0');
+    }
+    if (!tenantCols.some((c) => c.name === 'max_tool_calls_per_minute')) {
+      this.db.exec('ALTER TABLE tenants ADD COLUMN max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0');
+    }
+    this.db.prepare('INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (?,?,?)')
+      .run('default', 'Default', Date.now());
     // 凭据迁移：带主密钥首次启动时，已存在的明文 api_key 自动加密落库（幂等）
     if (this.secretKey) {
       const plainRows = this.db.prepare('SELECT id, api_key AS apiKey FROM providers').all() as { id: string; apiKey: string }[];
       const upd = this.db.prepare('UPDATE providers SET api_key = ? WHERE id = ?');
       const migrate = this.db.transaction((rows: { id: string; apiKey: string }[]) => {
         for (const row of rows) {
-          if (isEncrypted(row.apiKey)) this.seenCiphertext = true; // A7：库里确有密文
-          if (!row.apiKey || isEncrypted(row.apiKey)) continue;
-          upd.run(this.encryptKey(row.apiKey), row.id);
+          if (!row.apiKey) continue;
+          if (isPurposeEncrypted(row.apiKey)) { this.seenCiphertext = true; continue; }
+          if (isEncrypted(row.apiKey)) {
+            this.seenCiphertext = true; // A7：库里确有密文
+            // v1 → v2：把历史全局密钥密文升级为 provider 用途隔离密文（解密失败则保留原值）
+            try {
+              const plain = decryptSecret(row.apiKey, this.secretKey!);
+              upd.run(encryptPurposeSecret(plain, this.secretKey!, providerPurpose(row.id)), row.id);
+            } catch { /* 保留原密文，由 keyBroken 状态暴露 */ }
+            continue;
+          }
+          upd.run(this.encryptKey(row.apiKey, row.id), row.id);
         }
       });
       migrate(plainRows);
-      if (plainRows.some((r) => r.apiKey && !isEncrypted(r.apiKey))) {
-        console.log('[store] 已迁移明文 api_key 为加密存储');
+      if (plainRows.some((r) => r.apiKey && !isPurposeEncrypted(r.apiKey))) {
+        console.log('[store] 已迁移 provider 凭据为用途隔离加密存储');
       }
     }
   }
@@ -475,16 +551,18 @@ export class Store {
    * 「不可解」这个故障由 keyBroken 字段承载，前端据此出真实横幅。
    */
   private decryptKey(blob: string, providerId?: string): string {
-    if (isEncrypted(blob)) this.seenCiphertext = true;
+    if (isEncrypted(blob) || isPurposeEncrypted(blob)) this.seenCiphertext = true;
     if (!this.secretKey || !blob) {
       // 库里是密文而本次运行没有主密钥（secret.key 丢失/异常被保留）：返回值口径
       // 保持历史行为（密文原样透传，见 server/tests/db.spec.ts 对无密钥 Store 的断言），
       // 但**必须记账**：否则调用方只看 apiKey 时又回到「看起来已配置」的假象。
-      if (isEncrypted(blob) && providerId) this.brokenKeys.set(providerId, 'no-master-key');
+      if ((isEncrypted(blob) || isPurposeEncrypted(blob)) && providerId) this.brokenKeys.set(providerId, 'no-master-key');
       return blob;
     }
     try {
-      const plain = decryptSecret(blob, this.secretKey);
+      const plain = isPurposeEncrypted(blob)
+        ? decryptPurposeSecret(blob, this.secretKey, providerId ? providerPurpose(providerId) : undefined)
+        : decryptSecret(blob, this.secretKey);
       if (providerId) this.brokenKeys.delete(providerId); // 修好了就摘掉故障标记，不留残余
       return plain;
     } catch (err) {
@@ -502,9 +580,11 @@ export class Store {
   }
 
   /** 加密落库（唯一入口）；无主密钥时明文写入（向后兼容测试/无密钥环境） */
-  private encryptKey(plain: string): string {
+  private encryptKey(plain: string, providerId?: string): string {
     if (!this.secretKey || !plain) return plain;
-    return encryptSecret(plain, this.secretKey);
+    return providerId
+      ? encryptPurposeSecret(plain, this.secretKey, providerPurpose(providerId))
+      : encryptSecret(plain, this.secretKey);
   }
 
   /** 给读取到的行补 keyBroken 字段（唯一装配点，避免各处漏填） */
@@ -560,7 +640,7 @@ export class Store {
     // A7-2 连带防护：api_key 不可解时 getProvider 返回空串，PATCH 会把它当成「新值」写回，
     // 于是库里那段仍可恢复的密文被空串覆盖（真·二次数据丢失）。语义改为
     // 「空 = 不改动」：留空时原样保留已存的密文/明文，绝不用空串覆盖。
-    let storedKey = this.encryptKey(p.apiKey);
+    let storedKey = this.encryptKey(p.apiKey, p.id);
     if (!p.apiKey) {
       const raw = (this.db.prepare('SELECT api_key AS k FROM providers WHERE id = ?').get(p.id) as { k?: string } | undefined)?.k;
       if (raw) storedKey = raw;
@@ -700,7 +780,157 @@ export class Store {
 
   // ---------- sessions ----------
 
-  listSessions(): Session[] {
+  listTenants(): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number }[] {
+    return this.db
+      .prepare('SELECT id, name, max_sessions AS maxSessions, max_active_runs AS maxActiveRuns, max_cost_usd AS maxCostUsd, max_storage_bytes AS maxStorageBytes, max_tool_calls_per_minute AS maxToolCallsPerMinute, created_at AS createdAt FROM tenants ORDER BY created_at ASC, id ASC')
+      .all() as { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number }[];
+  }
+
+  hasTenant(id: string): boolean {
+    return !!this.db.prepare('SELECT 1 AS x FROM tenants WHERE id = ?').get(id);
+  }
+
+  getTenant(id: string): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } | undefined {
+    return this.db
+      .prepare('SELECT id, name, max_sessions AS maxSessions, max_active_runs AS maxActiveRuns, max_cost_usd AS maxCostUsd, max_storage_bytes AS maxStorageBytes, max_tool_calls_per_minute AS maxToolCallsPerMinute, created_at AS createdAt FROM tenants WHERE id = ?')
+      .get(id) as { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } | undefined;
+  }
+
+  createTenant(id: string, name: string, maxSessions = 0, maxActiveRuns = 0, maxCostUsd = 0, maxStorageBytes = 0, maxToolCallsPerMinute = 0): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } {
+    const safeId = String(id ?? '').trim();
+    const safeName = String(name ?? '').trim() || safeId;
+    if (!safeId) throw new Error('租户 id 不能为空');
+    const limit = Math.max(0, Math.min(100_000, Math.trunc(Number(maxSessions) || 0)));
+    const runLimit = Math.max(0, Math.min(1_000, Math.trunc(Number(maxActiveRuns) || 0)));
+    const costLimit = Math.max(0, Math.min(1_000_000_000, Number(maxCostUsd) || 0));
+    const storageLimit = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(maxStorageBytes) || 0)));
+    const toolLimit = Math.max(0, Math.min(1_000_000, Math.trunc(Number(maxToolCallsPerMinute) || 0)));
+    const now = Date.now();
+    this.db.prepare('INSERT INTO tenants (id, name, max_sessions, max_active_runs, max_cost_usd, max_storage_bytes, max_tool_calls_per_minute, created_at) VALUES (?,?,?,?,?,?,?,?)')
+      .run(safeId, safeName, limit, runLimit, costLimit, storageLimit, toolLimit, now);
+    return { id: safeId, name: safeName, maxSessions: limit, maxActiveRuns: runLimit, maxCostUsd: costLimit, maxStorageBytes: storageLimit, maxToolCallsPerMinute: toolLimit, createdAt: now };
+  }
+
+  updateTenantQuotas(id: string, patch: {
+    maxSessions?: number; maxActiveRuns?: number; maxCostUsd?: number; maxStorageBytes?: number; maxToolCallsPerMinute?: number;
+  }): ReturnType<Store['getTenant']> {
+    const existing = this.getTenant(id);
+    if (!existing) return undefined;
+    const sessions = patch.maxSessions === undefined ? existing.maxSessions : Math.max(0, Math.min(100_000, Math.trunc(Number(patch.maxSessions) || 0)));
+    const runs = patch.maxActiveRuns === undefined ? existing.maxActiveRuns : Math.max(0, Math.min(1_000, Math.trunc(Number(patch.maxActiveRuns) || 0)));
+    const cost = patch.maxCostUsd === undefined ? existing.maxCostUsd : Math.max(0, Math.min(1_000_000_000, Number(patch.maxCostUsd) || 0));
+    const storage = patch.maxStorageBytes === undefined ? existing.maxStorageBytes : Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(patch.maxStorageBytes) || 0)));
+    const tools = patch.maxToolCallsPerMinute === undefined ? existing.maxToolCallsPerMinute : Math.max(0, Math.min(1_000_000, Math.trunc(Number(patch.maxToolCallsPerMinute) || 0)));
+    this.db.prepare('UPDATE tenants SET max_sessions = ?, max_active_runs = ?, max_cost_usd = ?, max_storage_bytes = ?, max_tool_calls_per_minute = ? WHERE id = ?')
+      .run(sessions, runs, cost, storage, tools, id);
+    return this.getTenant(id);
+  }
+
+  createApiToken(input: {
+    tenantId: string;
+    role: 'admin' | 'member' | 'readonly';
+    label?: string;
+    expiresAt?: number;
+  }): { id: string; token: string; tenantId: string; role: string; label?: string; createdAt: number; expiresAt?: number } {
+    const id = randomUUID();
+    const token = `mh_${randomBytes(32).toString('base64url')}`;
+    const createdAt = Date.now();
+    this.db.prepare(`INSERT INTO api_tokens (id, tenant_id, role, token_hash, label, created_at, expires_at)
+      VALUES (?,?,?,?,?,?,?)`).run(
+      id, input.tenantId, input.role, this.hashApiToken(token),
+      input.label ?? null, createdAt, input.expiresAt ?? null,
+    );
+    return {
+      id, token, tenantId: input.tenantId, role: input.role,
+      ...(input.label ? { label: input.label } : {}), createdAt,
+      ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
+    };
+  }
+
+  findApiToken(token: string): {
+    id: string; tenantId: string; role: 'admin' | 'member' | 'readonly'; createdAt: number; expiresAt?: number;
+  } | undefined {
+    if (!token) return undefined;
+    const row = this.db.prepare(`SELECT id, tenant_id AS tenantId, role, created_at AS createdAt, expires_at AS expiresAt
+      FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`).get(this.hashApiToken(token)) as {
+        id: string; tenantId: string; role: 'admin' | 'member' | 'readonly'; createdAt: number; expiresAt?: number;
+      } | undefined;
+    if (!row) return undefined;
+    if (row.expiresAt && row.expiresAt <= Date.now()) return undefined;
+    try { this.db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), row.id); } catch { /* 统计失败不影响鉴权 */ }
+    return row;
+  }
+
+  listApiTokens(tenantId?: string): {
+    id: string; tenantId: string; role: string; label?: string;
+    createdAt: number; expiresAt?: number; revokedAt?: number; lastUsedAt?: number;
+  }[] {
+    const rows = tenantId
+      ? this.db.prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
+          expires_at AS expiresAt, revoked_at AS revokedAt, last_used_at AS lastUsedAt
+          FROM api_tokens WHERE tenant_id = ? ORDER BY created_at DESC`).all(tenantId)
+      : this.db.prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
+          expires_at AS expiresAt, revoked_at AS revokedAt, last_used_at AS lastUsedAt
+          FROM api_tokens ORDER BY created_at DESC`).all();
+    return rows as {
+      id: string; tenantId: string; role: string; label?: string;
+      createdAt: number; expiresAt?: number; revokedAt?: number; lastUsedAt?: number;
+    }[];
+  }
+
+  revokeApiToken(id: string): boolean {
+    const result = this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
+      .run(Date.now(), id);
+    return result.changes > 0;
+  }
+
+  saveApprovalRequest(input: {
+    id: string; sessionId?: string; tenantId: string; name: string; summary: string;
+    args?: unknown; createdAt: number; expiresAt: number;
+  }): void {
+    this.db.prepare(`INSERT INTO approval_requests
+      (id, session_id, tenant_id, name, summary, args, created_at, expires_at)
+      VALUES (?,?,?,?,?,?,?,?)
+      ON CONFLICT(id) DO UPDATE SET
+        session_id=excluded.session_id, tenant_id=excluded.tenant_id, name=excluded.name,
+        summary=excluded.summary, args=excluded.args, created_at=excluded.created_at, expires_at=excluded.expires_at`)
+      .run(
+        input.id, input.sessionId ?? null, input.tenantId, input.name, input.summary,
+        input.args === undefined ? null : JSON.stringify(input.args), input.createdAt, input.expiresAt,
+      );
+  }
+
+  decideApprovalRequest(id: string, decision: 'approved' | 'rejected' | 'expired' | 'withdrawn', reason?: string): void {
+    this.db.prepare('UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ?')
+      .run(Date.now(), decision, reason ?? null, id);
+  }
+
+  listApprovalRequests(tenantId: string, sessionId?: string): {
+    id: string; sessionId?: string | null; tenantId: string; name: string; summary: string;
+    createdAt: number; expiresAt: number; decidedAt?: number | null; decision?: string | null; reason?: string | null;
+  }[] {
+    const rows = sessionId
+      ? this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
+          created_at AS createdAt, expires_at AS expiresAt, decided_at AS decidedAt, decision, reason
+          FROM approval_requests WHERE tenant_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT 100`).all(tenantId, sessionId)
+      : this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
+          created_at AS createdAt, expires_at AS expiresAt, decided_at AS decidedAt, decision, reason
+          FROM approval_requests WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100`).all(tenantId);
+    return rows as {
+      id: string; sessionId?: string | null; tenantId: string; name: string; summary: string;
+      createdAt: number; expiresAt: number; decidedAt?: number | null; decision?: string | null; reason?: string | null;
+    }[];
+  }
+
+  private hashApiToken(token: string): string {
+    return createHash('sha256').update(String(token)).digest('hex');
+  }
+
+  countSessions(tenantId: string = 'default'): number {
+    return (this.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?').get(tenantId) as { n: number }).n;
+  }
+
+  listSessions(tenantId: string = 'default'): Session[] {
     // lastMsg/lastRole：侧栏摘要用「最后一句真正说出口的话」——
     // 只取 user / assistant，且排除带 tool_calls 的过程轮（那是旁白不是消息）、
     // 排除空正文（纯工具调用轮的 content 为 null，会渲染成空白气泡/空白摘要）、
@@ -708,7 +938,7 @@ export class Store {
     // 相关子查询按 session_id 走 messages_session_idx 反向取一行，会话数量级下开销可忽略。
     const hidden = HIDDEN_MSG_PREFIXES.map((p) => `AND m.content NOT LIKE '${p.replace(/'/g, "''")}%'`).join('\n                           ');
     const rows = this.db
-      .prepare(`SELECT s.id, s.title, s.model, s.provider, s.mode, s.plan_pending AS planPending, s.role,
+      .prepare(`SELECT s.id, s.title, s.model, s.provider, s.mode, s.plan_pending AS planPending, s.role, s.tenant_id AS tenantId,
                        s.archived, s.pinned, s.created_at AS createdAt, s.updated_at AS updatedAt,
                        (SELECT SUBSTR(m.content, 1, 120) FROM messages m
                          WHERE m.session_id = s.id AND m.role IN ('user','assistant')
@@ -722,13 +952,14 @@ export class Store {
                            AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
                            ${hidden}
                          ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastRole
-                FROM sessions s ORDER BY s.pinned DESC, s.updated_at DESC`)
-      .all() as Array<Record<string, unknown>>;
+                FROM sessions s WHERE s.tenant_id = ? ORDER BY s.pinned DESC, s.updated_at DESC`)
+      .all(tenantId) as Array<Record<string, unknown>>;
     return rows.map((r) => ({
       id: r.id as string, title: r.title as string, model: r.model as string,
       provider: (r.provider as string) ?? '',
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
       role: (r.role as string) || undefined,
+      tenantId: (r.tenantId as string) ?? 'default',
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
       lastMsg: (r.lastMsg as string) ?? '',
@@ -736,30 +967,32 @@ export class Store {
     }));
   }
 
-  getSession(id: string): Session | undefined {
-    const r = this.db
-      .prepare('SELECT id, title, model, provider, mode, plan_pending AS planPending, role, archived, pinned, created_at AS createdAt, updated_at AS updatedAt FROM sessions WHERE id = ?')
-      .get(id) as Record<string, unknown> | undefined;
+  getSession(id: string, tenantId?: string): Session | undefined {
+    const sql = `SELECT id, title, model, provider, mode, plan_pending AS planPending, role, tenant_id AS tenantId,
+                        archived, pinned, created_at AS createdAt, updated_at AS updatedAt
+                 FROM sessions WHERE id = ?${tenantId ? ' AND tenant_id = ?' : ''}`;
+    const r = (tenantId ? this.db.prepare(sql).get(id, tenantId) : this.db.prepare(sql).get(id)) as Record<string, unknown> | undefined;
     if (!r) return undefined;
     return {
       id: r.id as string, title: r.title as string, model: r.model as string,
       provider: (r.provider as string) ?? '',
       mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
       role: (r.role as string) || undefined,
+      tenantId: (r.tenantId as string) ?? 'default',
       archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
       createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
     };
   }
 
-  createSession(model: string, provider: string = ''): Session {
+  createSession(model: string, provider: string = '', tenantId: string = 'default'): Session {
     const s: Session = {
       id: randomUUID(), title: '新会话', model, provider, mode: 'normal', planPending: 0,
-      archived: 0, pinned: 0,
+      archived: 0, pinned: 0, tenantId,
       createdAt: Date.now(), updatedAt: Date.now(),
     };
     this.db
-      .prepare('INSERT INTO sessions (id, title, model, provider, mode, plan_pending, archived, pinned, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .run(s.id, s.title, s.model, s.provider, s.mode, s.planPending, s.archived, s.pinned, s.createdAt, s.updatedAt);
+      .prepare('INSERT INTO sessions (id, title, model, provider, mode, plan_pending, archived, pinned, tenant_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+      .run(s.id, s.title, s.model, s.provider, s.mode, s.planPending, s.archived, s.pinned, tenantId, s.createdAt, s.updatedAt);
     return s;
   }
 
@@ -790,8 +1023,10 @@ export class Store {
 
   /** 批量删除会话（事务原子：全部成功或全部失败）
    *  同步清理 agent_checkpoints——否则删除后 resume=true 会从孤儿断点"复活"已删会话 */
-  deleteSessions(ids: string[]): number {
+  deleteSessions(ids: string[], tenantId?: string): number {
     if (ids.length === 0) return 0;
+    const allowed = tenantId ? ids.filter((id) => !!this.getSession(id, tenantId)) : ids;
+    if (allowed.length === 0) return 0;
     const delMsg = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
     const delCp = this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?');
     const delSess = this.db.prepare('DELETE FROM sessions WHERE id = ?');
@@ -802,8 +1037,8 @@ export class Store {
         delSess.run(id);
       }
     });
-    tx(ids);
-    return ids.length;
+    tx(allowed);
+    return allowed.length;
   }
 
   /** 清空会话消息（保留会话本身，/clear 命令用）
@@ -938,7 +1173,7 @@ export class Store {
    *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。
    *  M6：超上限时保留最新 200 条并附 truncated/originalLength 标记；头部孤儿 tool
    *  回填（配对的 assistant tool_calls 已被截掉）一并丢弃——provider 拒绝无主 tool 消息。 */
-  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[], runId?: string, task?: import('../kernel/task-verifier').TaskContract, toolResults?: { name: string; ok: boolean }[], costUsd?: number): void {
+  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[], runId?: string, task?: import('../kernel/task-verifier').TaskContract, toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[], costUsd?: number, step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } }): void {
     let kept = history;
     let truncated = false;
     const originalLength = history.length;
@@ -947,11 +1182,11 @@ export class Store {
       while (kept.length > 0 && kept[0].role === 'tool') kept = kept.slice(1);
       truncated = true;
     }
-    let payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, ...(truncated ? { truncated: true, originalLength } : {}), ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }) };
+    let payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, ...(truncated ? { truncated: true, originalLength } : {}), ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }), ...(step ? { step } : {}) };
     while (JSON.stringify(payload).length > Store.MAX_CHECKPOINT_BYTES && kept.length > 1) {
       kept = kept.slice(1);
       truncated = true;
-      payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, truncated: true, originalLength, ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }) };
+      payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, truncated: true, originalLength, ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }), ...(step ? { step } : {}) };
     }
     this.db
       .prepare(`INSERT INTO agent_checkpoints (session_id, turn, run_id, history, created_at) VALUES (?,?,?,?,?)
@@ -960,7 +1195,7 @@ export class Store {
   }
 
   /** 读取会话断点（无断点返回 undefined） */
-  loadCheckpoint(sessionId: string): { schemaVersion: number; turn: number; runId?: string; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean }[]; costUsd?: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number } | undefined {
+  loadCheckpoint(sessionId: string): { schemaVersion: number; turn: number; runId?: string; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[]; costUsd?: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number; step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } } } | undefined {
     const r = this.db.prepare('SELECT turn, run_id AS runId, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
       | { turn: number; runId?: string | null; history: string; createdAt: number }
       | undefined;
@@ -973,14 +1208,14 @@ export class Store {
       const parsed = JSON.parse(r.history) as unknown;
       // 兼容两种格式：旧格式 history 列直接存消息数组；新格式存 { messages, truncated?, originalLength? }
       if (Array.isArray(parsed)) return { schemaVersion: 0, turn: r.turn, runId: r.runId ?? undefined, history: parsed, createdAt: r.createdAt };
-      const obj = parsed as { schemaVersion?: unknown; messages?: unknown; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean }[]; costUsd?: number; truncated?: boolean; originalLength?: number };
+      const obj = parsed as { schemaVersion?: unknown; messages?: unknown; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[]; costUsd?: number; truncated?: boolean; originalLength?: number; step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } } };
       const schemaVersion = obj?.schemaVersion === undefined ? 1 : obj.schemaVersion;
       if (schemaVersion !== Store.CHECKPOINT_SCHEMA_VERSION) {
         this.clearCheckpoint(sessionId);
         return undefined;
       }
       if (obj && Array.isArray(obj.messages)) {
-        return { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, turn: r.turn, runId: r.runId ?? undefined, task: obj.task, toolResults: obj.toolResults, costUsd: obj.costUsd, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, createdAt: r.createdAt };
+        return { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, turn: r.turn, runId: r.runId ?? undefined, task: obj.task, toolResults: obj.toolResults, costUsd: obj.costUsd, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, ...(obj.step ? { step: obj.step } : {}), createdAt: r.createdAt };
       }
       return undefined;
     } catch {
@@ -1029,30 +1264,32 @@ export class Store {
    *  走 GROUP BY，不再逐会话 listMessages 全量拉 content。
    *  truncations = system 注入的截断说明消息计数（与 statsOverview 同口径）；
    *  chars = content 字符数合计（供上下文占用近似估算）。 */
-  aggregateSessions(): { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[] {
+  aggregateSessions(tenantId: string = 'default'): { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[] {
     return this.db
-      .prepare(`SELECT session_id AS sessionId,
-                  COALESCE(SUM(tokens_in), 0) AS tokensIn,
-                  COALESCE(SUM(tokens_out), 0) AS tokensOut,
-                  COALESCE(SUM(cost), 0) AS cost,
+      .prepare(`SELECT m.session_id AS sessionId,
+                  COALESCE(SUM(m.tokens_in), 0) AS tokensIn,
+                  COALESCE(SUM(m.tokens_out), 0) AS tokensOut,
+                  COALESCE(SUM(m.cost), 0) AS cost,
                   COUNT(*) AS messages,
-                  COALESCE(SUM(CASE WHEN role = 'system' AND content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations,
-                  COALESCE(SUM(LENGTH(COALESCE(content, ''))), 0) AS chars
-                FROM messages GROUP BY session_id`)
-      .all() as { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[];
+                  COALESCE(SUM(CASE WHEN m.role = 'system' AND m.content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations,
+                  COALESCE(SUM(LENGTH(COALESCE(m.content, ''))), 0) AS chars
+                FROM messages m JOIN sessions s ON s.id = m.session_id
+                WHERE s.tenant_id = ? GROUP BY m.session_id`)
+      .all(tenantId) as { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[];
   }
 
   /** 全局聚合：会话数 / 消息数 / tokens / 成本 / 上下文截断次数（system 注入的截断说明消息计数） */
-  statsOverview(): { sessions: number; messages: number; tokensIn: number; tokensOut: number; cost: number; truncations: number } {
-    const s = this.db.prepare('SELECT COUNT(*) AS n FROM sessions').get() as { n: number };
+  statsOverview(tenantId: string = 'default'): { sessions: number; messages: number; tokensIn: number; tokensOut: number; cost: number; truncations: number } {
+    const s = this.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?').get(tenantId) as { n: number };
     const m = this.db
       .prepare(`SELECT COUNT(*) AS n,
-                  COALESCE(SUM(tokens_in), 0) AS tokensIn,
-                  COALESCE(SUM(tokens_out), 0) AS tokensOut,
-                  COALESCE(SUM(cost), 0) AS cost,
-                  COALESCE(SUM(CASE WHEN role = 'system' AND content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations
-                FROM messages`)
-      .get() as Record<string, number>;
+                  COALESCE(SUM(m.tokens_in), 0) AS tokensIn,
+                  COALESCE(SUM(m.tokens_out), 0) AS tokensOut,
+                  COALESCE(SUM(m.cost), 0) AS cost,
+                  COALESCE(SUM(CASE WHEN m.role = 'system' AND m.content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations
+                FROM messages m JOIN sessions s ON s.id = m.session_id
+                WHERE s.tenant_id = ?`)
+      .get(tenantId) as Record<string, number>;
     return {
       sessions: s.n, messages: m.n,
       tokensIn: m.tokensIn, tokensOut: m.tokensOut, cost: m.cost, truncations: m.truncations,
@@ -1078,7 +1315,7 @@ export function hasEncryptedProviderKeys(dbFile: string): boolean {
     try {
       const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='providers'`).all();
       if (!tables.length) return false; // 老库/空库：没有 providers 表
-      const hit = db.prepare(`SELECT 1 AS x FROM providers WHERE api_key LIKE '${SECRET_PREFIX}%' LIMIT 1`)
+      const hit = db.prepare(`SELECT 1 AS x FROM providers WHERE api_key LIKE '${SECRET_PREFIX}%' OR api_key LIKE '${PURPOSE_SECRET_PREFIX}%' LIMIT 1`)
         .get() as { x?: number } | undefined;
       return !!hit?.x;
     } finally {
@@ -1088,7 +1325,7 @@ export function hasEncryptedProviderKeys(dbFile: string): boolean {
     console.warn('[store] 只读探测 api_key 密文失败，改用字节扫描兜底:', err instanceof Error ? err.message : String(err));
     try {
       const raw = readFileSync(dbFile, 'latin1');
-      return raw.includes(SECRET_LIKE_PREFIX);
+      return raw.includes(SECRET_LIKE_PREFIX) || raw.includes(PURPOSE_SECRET_PREFIX);
     } catch {
       return true; // 读都读不动：按「可能有密文」处理，宁可拒绝重建密钥
     }

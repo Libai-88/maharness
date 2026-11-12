@@ -20,7 +20,7 @@ async function setup(page: Page) {
   await expect
     .poll(async () => {
       const bubbles = await page.getByTestId('msg-bubble-assistant').or(page.getByTestId('msg-bubble-user')).count();
-      const hasHero = await page.locator('.brand-hero').count();
+      const hasHero = await page.getByTestId('chat-welcome').count();
       return bubbles + hasHero;
     })
     .toBeGreaterThan(0);
@@ -91,7 +91,7 @@ test.describe('三条主流程（UX-01）', () => {
       ]),
     }));
     await send(page, '帮我读一下 notes.md');
-    const toolCard = page.locator('.tool-card, [class*="tool"]').filter({ hasText: '读一个文件' }).first();
+    const toolCard = page.getByTestId('tool-step').filter({ hasText: '读一个文件' }).first();
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('已读完 notes.md，共 3 条要点。');
     // 工具卡终态：完成状态，非 running
     await expect(page.locator('.stream-cursor')).toHaveCount(0);
@@ -121,7 +121,7 @@ test.describe('三条主流程（UX-01）', () => {
     }));
     await send(page, '执行一个多阶段任务');
     // 服务端 kind=max-turns → humanize 文案；原始错误保留在 title（页面终态与 SSE 终态一致映射）
-    const failure = page.locator('.wx-failure').last();
+    const failure = page.getByTestId('message-failure').last();
     await expect(failure).toContainText('这个任务有点大');
     await expect(failure).toHaveAttribute('title', /本任务已达到轮数上限/);
     // 失败前内容保留可见 + 流式复位（无残留光标，发送可用）
@@ -162,8 +162,8 @@ test.describe('三条主流程（UX-01）', () => {
     await stopBtn.click({ force: true });
     const startedAt = Date.now();
     // 用户停止：温和的停止文案（不报红错）+ 断点恢复入口立即出现
-    await expect(page.locator('.wx-stopped')).toContainText('你打断了');
-    await expect(page.locator('.sess-banner.resume')).toContainText('上次做到第 2 轮停下了');
+    await expect(page.getByTestId('message-stopped')).toContainText('你打断了');
+    await expect(page.getByTestId('resume-banner')).toContainText('上次做到第 2 轮停下了');
     await expect(page.locator('.stream-cursor')).toHaveCount(0);
     expect(Date.now() - startedAt).toBeLessThan(2000);
   });
@@ -224,13 +224,13 @@ test.describe('全流程状态链（UX-02）', () => {
     await send(page, '整理季度报告');
 
     // 目标条：plan.updated 广播或 planApi 轮询 — 直接断言既有 plan 加载渲染
-    const goalStrip = page.locator('.goal-strip');
+    const goalStrip = page.getByTestId('goal-plan');
     await expect(goalStrip).toContainText('目标进行中');
     await expect(goalStrip).toContainText('整理季度报告并交付');
     await expect(goalStrip).toContainText('1/3');
 
     // 审批卡：SSE approval_required → 卡片出现 → 批准（带一次性凭据）
-    const approvalCard = page.locator('.approval-card');
+    const approvalCard = page.getByTestId('approval-card');
     await expect(approvalCard).toBeVisible();
     const approvalReq = page.waitForRequest((r) => r.url().includes('/api/approvals/') && r.method() === 'POST');
     await approvalCard.locator('button').first().click();
@@ -262,15 +262,15 @@ test.describe('全流程状态链（UX-02）', () => {
     await send(page, '继续交付');
     // 截断兜底：error 后无 end → 「话说到一半断了」（errSeen 置位后实际不触发，
     // 这里 mock 流天然结束触发的兜底文案；title 保留最后一条错误原文）
-    await expect(page.locator('.wx-failure').last()).toContainText('这件事我没办成');
+    await expect(page.getByTestId('message-failure').last()).toContainText('这件事我没办成');
     // 恢复入口：checkpoint.exists=true（turn=2）→ 「接着说」
-    await expect(page.locator('.sess-banner.resume')).toContainText('上次做到第 3 轮停下了');
+    await expect(page.getByTestId('resume-banner')).toContainText('上次做到第 3 轮停下了');
   });
 });
 
 test.describe('状态覆盖（UX-03）', () => {
   test('空数据：无历史会话时展示品牌首屏，无 loading 悬空', async ({ page }) => {
-    // 全空 mock：无历史会话、无模型 → 自动建一个会话，首屏 brand-hero 提示引导配置模型
+    // 无历史会话、无模型时，欢迎页提供模型配置入口。
     await page.route('**/api/sessions', (route) => route.fulfill({
       json: route.request().method() === 'GET' ? [] : { id: 'empty-e2e', title: '新会话', model: '', provider: '', mode: 'chat', planPending: 0, archived: 0, pinned: 0, createdAt: 1, updatedAt: 1 },
     }));
@@ -281,8 +281,8 @@ test.describe('状态覆盖（UX-03）', () => {
     await page.route('**/api/trace/stats', (route) => route.fulfill({ json: { trace: {}, cache: {}, l1Enabled: false } }));
     await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({ json: { exists: false, turn: 0, historyMessages: 0, createdAt: 0 } }));
     await page.goto('/');
-    await expect(page.locator('.brand-hero')).toBeVisible();
-    await expect(page.locator('.brand-note')).toContainText('还没给我配模型');
+    await expect(page.getByTestId('chat-welcome')).toBeVisible();
+    await expect(page.getByTestId('chat-welcome')).toContainText('还没给我配模型');
     // 无 loading 悬空：首屏稳定后不再有 aria-busy 区域
     await expect(page.locator('.view-loading')).toHaveCount(0);
   });
@@ -292,7 +292,8 @@ test.describe('状态覆盖（UX-03）', () => {
     // 浏览器 offline 事件 → subscribeEvents 主动关闭连接并置 down
     await page.evaluate(() => window.dispatchEvent(new Event('offline')));
     // 离线横幅：聊天页头部状态字切换为断线提示（实时灯在非聊天页展示）
-    await expect(page.locator('.wx-header-sub.off')).toContainText('跟后端的连线断了一下');
+    await expect(page.getByTestId('connection-status')).toHaveAttribute('data-state', 'down');
+    await expect(page.getByTestId('connection-status')).toContainText('跟后端的连线断了一下');
   });
 
   test('Provider 错误：provider.error 事件触发告警提示与 Provider 列表刷新', async ({ page }) => {
@@ -332,7 +333,7 @@ test.describe('状态覆盖（UX-03）', () => {
       ]),
     }));
     await send(page, '读一下 missing.md');
-    const toolCard = page.locator('.tool-card.err');
+    const toolCard = page.getByTestId('tool-step').filter({ has: page.locator('[data-status="error"]') });
     await expect(toolCard).toContainText('没成');
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('这个文件我找不到');
     await expect(page.locator('.stream-cursor')).toHaveCount(0);
@@ -363,11 +364,11 @@ test.describe('状态覆盖（UX-03）', () => {
       ]),
     }));
     await send(page, '生成完整报告');
-    const verification = page.locator('.wx-verification');
+    const verification = page.getByTestId('verification');
     await expect(verification).toContainText('部分完成');
     await expect(verification).toContainText('1/2');
     await expect(verification).toContainText('附录缺失：appendix.md');
-    await expect(verification).toHaveAttribute('open', '');
+    await expect(verification.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');
     await expectSettled(page, '报告主体已生成，附录还在补。');
   });
 });
@@ -402,8 +403,8 @@ test.describe('交互通道（UX-04）', () => {
     await expect(page.getByRole('button', { name: '停止' })).toBeVisible();
     await page.keyboard.press('Escape');
     const startedAt = Date.now();
-    await expect(page.locator('.wx-stopped')).toContainText('你打断了');
-    await expect(page.locator('.sess-banner.resume')).toContainText('上次做到第 2 轮停下了');
+    await expect(page.getByTestId('message-stopped')).toContainText('你打断了');
+    await expect(page.getByTestId('resume-banner')).toContainText('上次做到第 2 轮停下了');
     await expect(page.locator('.stream-cursor')).toHaveCount(0);
     expect(Date.now() - startedAt).toBeLessThan(2000);
   });
@@ -431,11 +432,11 @@ test.describe('交互通道（UX-04）', () => {
       await route.fulfill({ status: 200, json: { ok: true } });
     });
     await send(page, '删除草稿文件');
-    const approveBtn = page.locator('.approval-card').getByRole('button', { name: '可以，去做吧' });
+    const approveBtn = page.getByTestId('approval-card').getByRole('button', { name: '可以，去做吧' });
     await expect(approveBtn).toBeVisible();
     await approveBtn.focus();
     await page.keyboard.press('Enter');
-    await expect(page.locator('.approval-card')).toHaveCount(0);
+    await expect(page.getByTestId('approval-card')).toHaveCount(0);
     expect(responses).toEqual([{ approved: true, approvalToken: 'ux04-token' }]);
   });
 
@@ -463,7 +464,7 @@ test.describe('交互通道（UX-04）', () => {
     }));
     await send(page, '先跑一段然后被打断');
     // 错误回调拉取 checkpoint → 恢复横幅出现
-    await expect(page.locator('.sess-banner.resume')).toContainText('上次做到第 3 轮停下了');
+    await expect(page.getByTestId('resume-banner')).toContainText('上次做到第 3 轮停下了');
     const requests: Record<string, unknown>[] = [];
     await page.unroute('**/api/sessions/*/chat');
     await page.route('**/api/sessions/*/chat', async (route) => {
@@ -481,7 +482,7 @@ test.describe('交互通道（UX-04）', () => {
       ].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
     });
-    const resumeBtn = page.locator('.sess-banner.resume').getByRole('button', { name: '接着说' });
+    const resumeBtn = page.getByTestId('resume-banner').getByRole('button', { name: '接着说' });
     await resumeBtn.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('恢复后的答复。');
@@ -492,19 +493,22 @@ test.describe('交互通道（UX-04）', () => {
   test('键盘重试：失败气泡的「再试一次」Tab+Enter 激活并重发原文', async ({ page }) => {
     await setup(page);
     let calls = 0;
+    const prompts: string[] = [];
     await page.route('**/api/sessions/*/chat', (route) => {
       calls += 1;
+      prompts.push(route.request().postDataJSON().message);
       const body = calls === 1
         ? sseBody(['event: start', 'data: {"traceId":"ux04-retry-1"}', '', 'event: delta', 'data: {"text":"先试了一半…"}', '', 'event: error', 'data: {"error":"后端打了个盹","kind":"transient"}', '', 'event: end', 'data: {}', ''])
         : sseBody(['event: start', 'data: {"traceId":"ux04-retry-2"}', '', 'event: done', 'data: {"content":"这次成功了。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '']);
       return route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
     });
     await send(page, '重试我这条任务');
-    const retryBtn = page.locator('.wf-retry');
+    const retryBtn = page.getByTestId('message-failure').getByRole('button', { name: '再试一次' });
     await expect(retryBtn).toBeVisible();
     await retryBtn.focus();
     await page.keyboard.press('Enter');
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('这次成功了。');
+    expect(prompts).toEqual(['重试我这条任务', '重试我这条任务']);
   });
 });
 
@@ -533,10 +537,10 @@ test.describe('长任务语义（LR-02）', () => {
       ]),
     }));
     await send(page, '跑一个会烧穿预算的长任务');
-    const banner = page.locator('.sess-banner.budget');
+    const banner = page.getByTestId('budget-banner');
     await expect(banner).toContainText('预算用完了');
     await expect(banner).toContainText('已用 $0.420 / 预算 $0.420');
-    await expect(page.locator('.wx-failure').last()).toContainText('预算用完了');
+    await expect(page.getByTestId('message-failure').last()).toContainText('预算用完了');
     await expect(page.locator('.stream-cursor')).toHaveCount(0);
     await expect(page.getByTestId('send-btn')).toBeVisible();
   });
@@ -578,8 +582,8 @@ test.describe('长任务语义（LR-02）', () => {
     }));
     await send(page, '把季度报告任务交给规划专家');
     handedOff = true;
-    await expect(page.locator('.msg-system, .msg-row').filter({ hasText: '这活儿交给「planner」了' })).toBeVisible();
-    await expect(page.locator('.sess-banner.role')).toContainText('这件事现在由「planner」接手');
+    await expect(page.getByTestId('system-message').filter({ hasText: '这活儿交给「planner」了' })).toBeVisible();
+    await expect(page.getByTestId('role-banner')).toContainText('这件事现在由「planner」接手');
     await expectSettled(page, '已移交给规划专家。');
   });
 });

@@ -1,0 +1,7 @@
+{
+  "id": "code-intel",
+  "name": "代码智能",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

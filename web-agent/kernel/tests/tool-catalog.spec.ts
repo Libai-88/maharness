@@ -1,0 +1,38 @@
+import { describe, it } from 'node:test';
+import assert from 'node:assert/strict';
+import { resolveToolConflicts, type ToolCatalogEntry } from '../plugin-loader';
+import type { ToolDef } from '../types';
+
+function tool(name: string): ToolDef {
+  return { name, description: name, parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } };
+}
+
+describe('tool catalog conflict resolution', () => {
+  it('同名工具保留内置、遮蔽 MCP', () => {
+    const entries: ToolCatalogEntry[] = [
+      { pluginId: 'core-search', tool: tool('search') },
+      { pluginId: 'mcp', tool: tool('search') },
+    ];
+    const resolved = resolveToolConflicts(entries);
+    assert.equal(resolved[0].shadowedBy, undefined);
+    assert.equal(resolved[1].shadowedBy, 'core-search');
+  });
+
+  it('同为内置时按插件 id 稳定保留首个', () => {
+    const entries: ToolCatalogEntry[] = [
+      { pluginId: 'a-plugin', tool: tool('shared') },
+      { pluginId: 'b-plugin', tool: tool('shared') },
+    ];
+    const resolved = resolveToolConflicts(entries);
+    assert.equal(resolved[0].shadowedBy, undefined);
+    assert.equal(resolved[1].shadowedBy, 'a-plugin');
+  });
+
+  it('不同名工具互不影响', () => {
+    const resolved = resolveToolConflicts([
+      { pluginId: 'a', tool: tool('one') },
+      { pluginId: 'b', tool: tool('two') },
+    ]);
+    assert.equal(resolved.every((entry) => !entry.shadowedBy), true);
+  });
+});

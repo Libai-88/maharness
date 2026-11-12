@@ -1,9 +1,9 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mergeData, mergeDiary, mergeMeta } from '../index';
+import { mergeData, mergeDiary, mergeMeta, type Note, type Project, type Task } from '../model';
 
-const t = (id: string, updatedAt: number, extra: Record<string, unknown> = {}) =>
-  ({ id, title: id, updatedAt, ...extra });
+const t = (id: string, updatedAt: number, extra: Partial<Task> = {}): Task =>
+  ({ id, title: id, prio: 3, due: '', start: '', done: false, pid: '', createdAt: updatedAt, doneAt: null, rolls: 0, repeat: '', pomo: 0, subs: [], tags: [], link: '', note: '', status: 'todo', est: 0, updatedAt, ...extra });
 
 describe('workbench 桥合并', () => {
   it('LWW：updatedAt 大者胜出', () => {
@@ -57,8 +57,8 @@ describe('workbench 桥合并', () => {
 
   it('notes / projects 独立合并，互不串档', () => {
     const m = mergeData(
-      { tasks: [], notes: [{ id: 'n1', text: 'x', tags: [], createdAt: 1, updatedAt: 5 }], projects: [], tomb: {} },
-      { tasks: [], notes: [], projects: [{ id: 'p1', name: 'P', stage: '', next: '', blocker: '', status: 'active', updatedAt: 5 }], tomb: {} },
+      { tasks: [], notes: [{ id: 'n1', text: 'x', tags: [], createdAt: 1, updatedAt: 5 } as Note], projects: [], tomb: {} },
+      { tasks: [], notes: [], projects: [{ id: 'p1', name: 'P', stage: '', next: '', blocker: '', status: 'active', updatedAt: 5 } as Project], tomb: {} },
     );
     assert.equal(m.notes.length, 1);
     assert.equal(m.projects.length, 1);

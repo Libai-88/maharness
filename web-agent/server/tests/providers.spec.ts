@@ -6,7 +6,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { assertPublicHttpUrl } from '../routes/shared';
-import { buildProviderDiagnostics } from '../routes/providers';
+import { buildProviderDiagnostics, buildProviderGatewaySnapshot } from '../routes/providers';
 
 describe('assertPublicHttpUrl SSRF 校验', () => {
   const reject = async (url: string, pattern: RegExp) => {
@@ -57,5 +57,24 @@ describe('Provider 配置诊断', () => {
     const result = buildProviderDiagnostics({ id: 'local', protocol: 'ollama', model: 'llama3' }, [], undefined);
     assert.deepEqual(result.issues, ['缺少 Provider 地址']);
     assert.equal(result.configured.apiKey, false);
+  });
+});
+
+describe('Provider Gateway 快照', () => {
+  test('只暴露 identity/能力/健康，不包含地址或密钥', () => {
+    const snapshot = buildProviderGatewaySnapshot({
+      providers: () => [{ id: 'p1', label: 'P1', defaultModel: 'm1', protocol: 'openai', chat: async function* () {} }],
+      getProvider: () => undefined,
+      models: () => [{ providerId: 'p1', providerLabel: 'P1', model: { modelId: 'm1', contextWindow: 1000, maxOutput: 100, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'manual' } }],
+      routeTask: () => undefined,
+      routeCapability: () => undefined,
+      health: () => ({ failures: 1, authFailed: false, lastError: 'timeout', lastErrorAt: 1 }),
+      embedding: () => undefined,
+    });
+    assert.equal(snapshot.providers[0]?.id, 'p1');
+    assert.equal(snapshot.models[0]?.model.modelId, 'm1');
+    assert.equal(snapshot.health.p1?.failures, 1);
+    assert.equal(JSON.stringify(snapshot).includes('sk-secret'), false);
+    assert.equal(JSON.stringify(snapshot).includes('secret'), false);
   });
 });

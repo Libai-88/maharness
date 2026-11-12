@@ -11,7 +11,7 @@
 
 ## Optional fields
 
-`enabled` defaults to `true`; `lazy` defaults to `false`; `requires` is an array of plugin ids; `essential` prevents complete uninstall; `provides` declares service keys; `nav` declares a frontend contribution; `limits` controls lifecycle timeout and circuit breaker; `cleanup` is `keep`, `archive`, or `purge`.
+`enabled` defaults to `true`; `lazy` defaults to `false`; `requires` is an array of plugin ids; `essential` prevents complete uninstall; `provides` declares service keys; `nav` declares a frontend contribution; `limits` controls lifecycle timeout, circuit breaker, `maxToolCallsPerMinute`, `maxConcurrentToolCalls`, `maxStorageBytes`, and `maxStorageFiles`; `permissions.runtime` declares filesystem/network/process scopes and triggers load-time source review; `cleanup` is `keep`, `archive`, or `purge`.
 
 ### API compatibility
 

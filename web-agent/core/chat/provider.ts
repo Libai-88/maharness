@@ -19,7 +19,7 @@ import {
 } from './anthropic';
 import type {
   ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
-  ProviderCapabilities,
+  ProviderCapabilities, ResponseFormat,
 } from '../../kernel/types';
 
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
@@ -80,8 +80,21 @@ export function adapterCapabilities(protocol: string = 'openai'): ProviderCapabi
     case 'ollama':
       return { streaming: true, toolCalls: true, structuredOutput: false, vision: false, cancellation: true };
     default:
-      return { streaming: true, toolCalls: true, structuredOutput: false, vision: true, cancellation: true };
+      return { streaming: true, toolCalls: true, structuredOutput: true, vision: true, cancellation: true };
   }
+}
+
+export function openAIResponseFormat(format?: ResponseFormat): Record<string, unknown> | undefined {
+  if (!format) return undefined;
+  if (format.type === 'json_object') return { type: 'json_object' };
+  return {
+    type: 'json_schema',
+    json_schema: {
+      name: format.name,
+      schema: format.schema,
+      strict: format.strict ?? true,
+    },
+  };
 }
 
 /** 常见模型价格表（USD / 百万 token；如有出入以 .env 覆盖为准） */
@@ -218,6 +231,8 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
           function: { name: t.name, description: t.description, parameters: t.parameters },
         }));
       }
+      const responseFormat = openAIResponseFormat(opts.responseFormat);
+      if (responseFormat) body.response_format = responseFormat;
       if (process.env.TRACE_LLM_BODY === 'on') {
         const { appendFileSync } = await import('node:fs');
         try { appendFileSync('llm-full.log', JSON.stringify(body) + '\n'); } catch { /* ignore */ }
@@ -398,13 +413,18 @@ async function* anthropicStream(
   yield { type: 'done' };
 }
 
-/** 若配置了 EMBEDDING_* 环境变量，激活 L1 语义缓存 */
-export function setupEmbedding(ctx: PluginContext): void {
+export interface EmbeddingService {
+  model: string;
+  embed(text: string): Promise<number[]>;
+}
+
+/** 若配置了 EMBEDDING_* 环境变量，激活 L1 语义缓存并暴露 embedding 服务 */
+export function setupEmbedding(ctx: PluginContext): EmbeddingService | undefined {
   const baseUrl = process.env.EMBEDDING_BASE_URL;
   const apiKey = process.env.EMBEDDING_API_KEY;
   const model = process.env.EMBEDDING_MODEL;
-  if (!baseUrl || !apiKey || !model) return;
-  ctx.cache.setEmbeddingFn(async (text: string) => {
+  if (!baseUrl || !apiKey || !model) return undefined;
+  const embed = async (text: string): Promise<number[]> => {
     // 本地 embedding（本机 Ollama 等）常见，不做私网限制；超时防 L1 查询被无期限网络请求拖住
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
       method: 'POST',
@@ -415,6 +435,8 @@ export function setupEmbedding(ctx: PluginContext): void {
     if (!res.ok) throw new Error(`Embedding 请求失败 ${res.status}`);
     const json = (await res.json()) as { data: { embedding: number[] }[] };
     return json.data[0]?.embedding ?? [];
-  });
+  };
+  ctx.cache.setEmbeddingFn(embed);
   ctx.logger.info(`L1 语义缓存已激活（${model}）`);
+  return { model, embed };
 }

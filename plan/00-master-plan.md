@@ -11,7 +11,7 @@
 - 架构：内核、插件加载、服务接管、Agent 循环、工具审批、Trace、缓存、记忆、计划、MCP 和自扩展均已存在。
 - 历史缺陷批次已完成：缺陷清单记录 Batch 1-5、F3 和新增 B17/B18 均已验收；安全、配置、Trace 噪声、压缩、缓存、前端事实问题已有回归护栏。
 - 当前边界：插件完全信任；无多用户/多租户；不适合公网或局域网共享；`core/` 与现场插件的热加载边界仍需产品化；关键 Agent 流程 E2E、任务结果验证、长任务恢复和开发者生态仍不完整。
-- 历史缺陷证据与已完成批次见 `maharness-缺陷清单与修复方案.md`；本目录只规划后续优化，不重复安排已完成修复。
+- 历史缺陷证据与已完成批次已并入 `plan/13-optimization-register.md` 与 `CHANGELOG.md`；本目录只规划后续优化，不重复安排已完成修复。
 
 ## 优先级
 
@@ -50,7 +50,7 @@ API 鉴权/租户边界 ─> P3 部署
 
 ### P3 出口
 
-API 鉴权、数据迁移、备份恢复、部署清单和运维指标达到可控上线条件；公网部署前完成威胁模型复核。
+API 鉴权、数据迁移、备份恢复、部署清单和运维指标达到可控上线条件；租户工作区可通过 `tenant-workspace backup|restore` 快照与回滚；公网部署前完成威胁模型复核。容器级强隔离为可选 L3 provider，未具备时 remote/team 保持 fail-closed，不作为 local/trusted 发布前置。
 
 ## 全局验收清单
 
@@ -67,6 +67,10 @@ API 鉴权、数据迁移、备份恢复、部署清单和运维指标达到可�
 ## 最终审计表
 
 逐项待办的唯一登记册为 [13-optimization-register.md](13-optimization-register.md)，共有 71 条验收项。领域计划必须覆盖登记册对应 ID；登记册状态变化后同步此表。
+
+功能性升级路线见 [14-functional-upgrade-plan.md](14-functional-upgrade-plan.md)，按内核底座、内置插件和质量门禁分波次执行。
+
+跨工具、缓存、技能、MCP、插件、Agent 核心、安全、观测、评测与租户的统一成熟度路线见 [15-system-optimization-roadmap.md](15-system-optimization-roadmap.md)。
 
 | 优化面 | 计划 | 状态判定依据 |
 |---|---|---|

@@ -57,6 +57,21 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
     });
   });
 
+  app.get('/api/tools', (_req, res) => {
+    res.json(kernel.plugins.toolCatalog().map((entry) => ({
+      name: entry.tool.name,
+      pluginId: entry.pluginId,
+      shadowedBy: entry.shadowedBy ?? null,
+      risk: entry.tool.risk ?? 'low',
+      costHint: entry.tool.costHint ?? 'low',
+      sideEffect: entry.tool.sideEffect ?? 'external',
+      idempotent: entry.tool.idempotent ?? false,
+      contentTrust: entry.tool.contentTrust ?? 'trusted',
+      approval: entry.tool.approval ?? false,
+      description: entry.tool.description,
+    })));
+  });
+
   // ---------- 前端页面贡献（声明式导航） ----------
   /**
    * 插件声明的前端标签页清单。前端据此自动生成导航，不再为每个插件写组件与分支——
@@ -117,6 +132,7 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
       error: p.error,
       fixSuggestion: p.error ? suggestFix(p.error) : undefined,
       essential: p.manifest.essential,
+      execution: p.manifest.execution,
       circuitBreaker: p.circuitBreaker,
       // F5：是否受目录监听（true = 保存即热重载；false = core/ 内置插件，改动需重载/重启）
       watched: p.watched === true,

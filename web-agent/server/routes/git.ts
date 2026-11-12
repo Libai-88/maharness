@@ -2,14 +2,17 @@
  * server/routes/git.ts —— Git（沙箱仓库状态 / 提交 / 推送）
  */
 import type { Express } from 'express';
-import { gitIn, type RouteDeps } from './shared';
+import { gitIn, tenantIdOf, type RouteDeps } from './shared';
+import { tenantSandboxRoot } from '../tenant-workspace';
 
 export function registerGitRoutes(app: Express, deps: RouteDeps): void {
   const { kernel } = deps;
+  const sandboxOf = (req: { headers: Record<string, string | string[] | undefined> }): string =>
+    tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantIdOf(req));
 
-  app.get('/api/git/status', async (_req, res) => {
+  app.get('/api/git/status', async (req, res) => {
     try {
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const out = await gitIn(sandbox, ['status', '--porcelain=v1', '-b']);
       if (out === null) return res.json({ repo: false, branch: '', ahead: 0, staged: [], changes: [] });
       const lines = out.split('\n').filter(Boolean);
@@ -33,7 +36,7 @@ export function registerGitRoutes(app: Express, deps: RouteDeps): void {
 
   app.post('/api/git/commit', async (req, res) => {
     try {
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const message = String(req.body?.message ?? '').trim();
       if (!message) return res.status(400).json({ error: '提交信息不能为空' });
       await gitIn(sandbox, ['add', '-A']);
@@ -52,7 +55,7 @@ export function registerGitRoutes(app: Express, deps: RouteDeps): void {
       if (req.body?.confirm !== true) {
         return res.status(400).json({ error: '推送需要显式确认：请在请求体传 { "confirm": true }' });
       }
-      const sandbox = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+      const sandbox = sandboxOf(req);
       const out = await gitIn(sandbox, ['push']);
       if (out === null) return res.status(400).json({ error: '沙箱不是 git 仓库' });
       res.json({ ok: true });

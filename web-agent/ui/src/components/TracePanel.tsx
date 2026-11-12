@@ -1,9 +1,23 @@
-// ui/src/components/TracePanel.tsx —— 运行轨迹面板（Screen 1 右侧）：实时步骤（span 树）+ 缓存/成本统计
-// memo 化：配合 App 侧稳定 onRefresh，流式 token 渲染期间跳过面板 reconcile（仅新步骤/统计变化时更新）
 import { memo, useEffect, useMemo, useState } from 'react';
 import type { TraceStep } from '../types';
 import { toolDisplayName } from '../voice';
-import { IconCheck, IconChevronDown, IconDownload, IconRefresh } from './Icon';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty';
+import { Spinner } from '@/components/ui/spinner';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import {
+  Trace,
+  TraceCollapsible,
+  TraceCollapsibleContent,
+  TraceCollapsibleTrigger,
+  TraceDescription,
+  TraceLine,
+  TraceTitle,
+} from '@/components/ui/trace';
+import { Check as IconCheck, Download as IconDownload, RefreshCw as IconRefresh } from 'lucide-react';
 
 interface Props {
   steps: TraceStep[];
@@ -19,12 +33,11 @@ const TYPE_BADGE: Record<string, { label: string; cls: string }> = {
   system: { label: 'SYS', cls: 'sys' },
 };
 
-/** 内部步骤名 → 人话（轨迹是给用户看的，不该混着一串英文函数名） */
 const STEP_NAMES: Record<string, string> = {
   'model-route': '挑了条更合适的线路',
   failover: '换备用线路',
   'thinking-strip': '剥掉混进正文的思考',
-  'narration-fix': '纠正"把调用写成了文字"',
+  'narration-fix': '纠正“把调用写成了文字”',
   'cost-breaker': '成本熔断',
   '上下文截断': '上下文截断',
   '上下文压缩': '上下文压缩',
@@ -32,11 +45,10 @@ const STEP_NAMES: Record<string, string> = {
   approval: '等你点头',
 };
 
-/** 步骤显示名：工具用中文动作，系统步骤用上面的映射，其余原样（原始名进 title 可查） */
-function stepTitle(s: TraceStep): string {
-  if (s.type === 'tool_call' && s.name) return toolDisplayName(s.name);
-  if (s.name && STEP_NAMES[s.name]) return STEP_NAMES[s.name];
-  return s.name ?? '步骤';
+function stepTitle(step: TraceStep): string {
+  if (step.type === 'tool_call' && step.name) return toolDisplayName(step.name);
+  if (step.name && STEP_NAMES[step.name]) return STEP_NAMES[step.name];
+  return step.name ?? '步骤';
 }
 
 function fmtMs(ms?: number): string {
@@ -44,110 +56,122 @@ function fmtMs(ms?: number): string {
   return ms >= 1000 ? `${(ms / 1000).toFixed(1)}s` : `${ms}ms`;
 }
 
-/** 当前可见步骤导出为 JSONL 审计文件（本地下载） */
 function exportJsonl(steps: TraceStep[]) {
   if (!steps.length) return;
-  const blob = new Blob([steps.map((s) => JSON.stringify(s)).join('\n')], { type: 'application/x-ndjson' });
+  const blob = new Blob([steps.map((step) => JSON.stringify(step)).join('\n')], { type: 'application/x-ndjson' });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `maharness-trace-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`;
-  a.click();
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `maharness-trace-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.jsonl`;
+  anchor.click();
   URL.revokeObjectURL(url);
 }
 
-/** 单条步骤渲染（span 树：子步骤缩进 + 可折叠下钻，OpenAI/Anthropic agent 调试器风格）
- *  进行中的步骤显示跳动圆点 + 实时计时（旧版只推 settle 帧，长工具执行期间面板是静止的）。 */
-function StepRow({ s, depth, collapsed, hasChildren, onToggle, now }: { s: TraceStep; depth: number; collapsed: boolean; hasChildren: boolean; onToggle: () => void; now: number }) {
-  const b = TYPE_BADGE[s.type] ?? { label: s.type.toUpperCase(), cls: 'sys' };
-  const toggleable = hasChildren;
-  const running = s.status === 'running';
+function StepRow({
+  step,
+  depth,
+  collapsed,
+  hasChildren,
+  onToggle,
+  now,
+}: {
+  step: TraceStep;
+  depth: number;
+  collapsed: boolean;
+  hasChildren: boolean;
+  onToggle: () => void;
+  now: number;
+}) {
+  const badge = TYPE_BADGE[step.type] ?? { label: step.type.toUpperCase(), cls: 'sys' };
+  const running = step.status === 'running';
+  const failed = step.status === 'error';
+  const hasDetails = Boolean(step.tokensIn || step.tokensOut || step.cost || step.inputSummary || step.outputSummary || step.error);
+  const expandable = hasChildren || hasDetails;
+  const line = (
+    <TraceLine
+      status={running ? 'running' : failed ? 'error' : undefined}
+      className="w-full"
+    >
+      <Badge variant="secondary">
+        {badge.label}
+      </Badge>
+      <TraceTitle title={step.name}>{stepTitle(step)}</TraceTitle>
+      {step.traceId && depth > 0 && (
+        <Badge variant="outline">子任务</Badge>
+      )}
+      {running && <Spinner className="size-3" />}
+      {step.cacheLayer && (
+        <Badge variant="outline">
+          L{step.cacheLayer}<IconCheck size={9} />
+        </Badge>
+      )}
+      <TraceDescription className="ml-auto">
+        {running ? fmtMs(Math.max(0, now - step.ts)) : fmtMs(step.durationMs)}
+      </TraceDescription>
+    </TraceLine>
+  );
+
+  const details = (
+    <TraceCollapsibleContent className="flex flex-col gap-1">
+      {(step.tokensIn || step.tokensOut || step.cost) && (
+        <span>↑{step.tokensIn ?? 0} ↓{step.tokensOut ?? 0}{step.cost ? ` · $${step.cost.toFixed(4)}` : ''}</span>
+      )}
+      {step.inputSummary && <span>来源：{step.inputSummary}</span>}
+      {step.outputSummary && <span>{step.outputSummary}</span>}
+      {step.error && <span className="text-destructive">{step.error}</span>}
+    </TraceCollapsibleContent>
+  );
+
   return (
-    <div
-      className={`tl-item ${running ? 'streaming running' : ''}`}
+    <Trace
+      data-testid="trace-step"
+      data-status={step.status}
       style={{ paddingLeft: 8 + depth * 14 }}
     >
-      <div
-        className="tl-head"
-        onClick={toggleable ? onToggle : undefined}
-        style={toggleable ? { cursor: 'pointer' } : undefined}
-        role={toggleable ? 'button' : undefined}
-        tabIndex={toggleable ? 0 : -1}
-        aria-expanded={toggleable ? !collapsed : undefined}
-        aria-label={toggleable ? `折叠/展开步骤 ${stepTitle(s)}` : undefined}
-        onKeyDown={toggleable ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onToggle(); } } : undefined}
-      >
-        <div className="tl-left">
-          {toggleable && (
-            <span className={`tl-arrow ${collapsed ? '' : 'open'}`}><IconChevronDown size={9} /></span>
-          )}
-          <span className={`tl-badge ${b.cls}`}>{b.label}</span>
-          <span className="tl-title" title={s.name}>{stepTitle(s)}</span>
-          {s.traceId && depth > 0 && <span className="tl-child-tag" title="子任务（span 树下钻：子代理/并行）">子任务</span>}
-        </div>
-        <div className="tl-right">
-          {running && <span className="tl-live" title="这一步正在做"><i /><i /><i /></span>}
-          {s.cacheLayer && <span style={{ color: 'var(--teal)', fontSize: 10, fontFamily: 'var(--font-mono)', display: 'inline-flex', alignItems: 'center', gap: 2 }}>L{s.cacheLayer} <IconCheck size={9} /></span>}
-          <span className="tl-dur">{running ? fmtMs(Math.max(0, now - s.ts)) : fmtMs(s.durationMs)}</span>
-        </div>
-      </div>
-      {!collapsed && (
-        <>
-          {(s.tokensIn || s.tokensOut || s.cost) && (
-            <div className="tl-body">↑{s.tokensIn ?? 0} ↓{s.tokensOut ?? 0}{s.cost ? ` · $${s.cost.toFixed(4)}` : ''}</div>
-          )}
-          {s.inputSummary && <div className="tl-body" style={{ color: 'var(--text-3)' }}>来源：{s.inputSummary}</div>}
-          {s.outputSummary && <div className="tl-body" style={{ color: 'var(--text-3)' }}>{s.outputSummary}</div>}
-          {s.error && <div className="tl-body" style={{ color: 'var(--red)' }}>{s.error}</div>}
-        </>
-      )}
-    </div>
+      {expandable ? (
+        <TraceCollapsible open={!collapsed} onOpenChange={(open) => { if (open === collapsed) onToggle(); }}>
+          <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+          {details}
+        </TraceCollapsible>
+      ) : line}
+    </Trace>
   );
 }
 
 export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
   const [typeFilter, setTypeFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  // 进行中步骤的实时计时：只在真的有 running 步骤时才起 1s 心跳（空闲零开销）
-  const runningCount = useMemo(() => steps.filter((s) => s.status === 'running').length, [steps]);
+  const runningCount = useMemo(() => steps.filter((step) => step.status === 'running').length, [steps]);
   const [now, setNow] = useState(() => Date.now());
+
   useEffect(() => {
     if (!runningCount) return;
     setNow(Date.now());
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
   }, [runningCount]);
-  // span 树组装：root = 无 parentId 的步骤；children 按 parentId 索引。
-  // 跨 traceId 也成立——子代理步骤的 parentId 指向调用方工具步骤（OpenAI tracing 层级）
-  // 类型筛选时改用平铺视图：被筛掉的父步骤若仍作树根，其子树会整棵消失（审计场景不可接受）
+
   const tree = useMemo(() => {
-    const filtered = typeFilter ? steps.filter((s) => s.type === typeFilter) : steps;
+    const filtered = typeFilter ? steps.filter((step) => step.type === typeFilter) : steps;
     if (typeFilter) return { roots: filtered, byParent: new Map<string, TraceStep[]>() };
     const byParent = new Map<string, TraceStep[]>();
-    for (const s of filtered) {
-      if (!s.parentId) continue;
-      const arr = byParent.get(s.parentId) ?? [];
-      arr.push(s);
-      byParent.set(s.parentId, arr);
+    for (const step of filtered) {
+      if (!step.parentId) continue;
+      const children = byParent.get(step.parentId) ?? [];
+      children.push(step);
+      byParent.set(step.parentId, children);
     }
-    const roots = filtered.filter((s) => !s.parentId);
-    return { roots, byParent };
+    return { roots: filtered.filter((step) => !step.parentId), byParent };
   }, [steps, typeFilter]);
+
   const visibleSteps = useMemo(
-    () => typeFilter ? steps.filter((s) => s.type === typeFilter) : steps,
+    () => typeFilter ? steps.filter((step) => step.type === typeFilter) : steps,
     [steps, typeFilter],
   );
+
   const { roots, byParent } = tree;
-  // 缓存命中率优先用「provider 真实命中率」（token 口径，唯一权威）：
-  // L3 前缀缓存是 agent 成本主战场（DeepSeek 命中/未命中价差 50~120 倍），
-  // L1/L2 只对重复问题/重复工具调用生效——全新问答命中为 0 是正常设计，不能作为主指标。
-  // 无 provider 反馈（不支持缓存/无命中字段）时回退 trace.cacheHits 口径。
   const cache = stats?.cache ?? {};
   const realTotal = (cache.l3RealTokens ?? 0) + (cache.l3RealMissTokens ?? 0);
-  // C3 修复：回退口径此前把 toolCalls 混进分母（cacheHits / (llmCalls + toolCalls)），
-  // 工具调用越多命中率被压得越低——那是**系统性低估**且语义不成立（缓存命中数与
-  // 工具调用数不是同类事件）。回退口径改为「缓存命中步骤 / (LLM 调用 + 缓存命中)」，
-  // 即"本可发生的模型调用里有多少被缓存挡掉"，并在 UI 上标明这是估算口径。
   const cacheRate = realTotal > 0
     ? Math.round(((cache.l3RealTokens ?? 0) / realTotal) * 100)
     : stats?.trace?.cacheHits
@@ -155,102 +179,124 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
       : 0;
   const cacheRateIsReal = realTotal > 0;
 
-  // 深度优先渲染（倒序：最新在前），子步骤折叠时只显示一行
   const renderTree = (): React.ReactNode[] => {
-    const out: React.ReactNode[] = [];
-    const visit = (s: TraceStep, depth: number) => {
-      const children = byParent.get(s.id) ?? [];
-      const isCollapsed = !!collapsed[s.id];
-      out.push(
+    const output: React.ReactNode[] = [];
+    const visit = (step: TraceStep, depth: number) => {
+      const children = byParent.get(step.id) ?? [];
+      const isCollapsed = !!collapsed[step.id];
+      output.push(
         <StepRow
-          key={s.id}
-          s={s}
+          key={step.id}
+          step={step}
           depth={depth}
           collapsed={isCollapsed}
           hasChildren={children.length > 0}
           now={now}
-          onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))}
+          onToggle={() => setCollapsed((current) => ({ ...current, [step.id]: !current[step.id] }))}
         />,
       );
       if (!isCollapsed) {
-        for (const c of [...children].reverse()) visit(c, depth + 1);
+        for (const child of [...children].reverse()) visit(child, depth + 1);
       }
     };
+
     const rendered = new Set<string>();
-    for (const s of [...roots].reverse()) { rendered.add(s.id); visit(s, 0); }
-    // 孤儿（父步骤已被环形缓冲淘汰）：仍展示（depth 1，可下钻自己）
-    const known = new Set(visibleSteps.map((x) => x.id));
-    for (const s of [...visibleSteps].reverse()) {
-      if (!rendered.has(s.id) && s.parentId && !known.has(s.parentId)) {
-        out.push(<StepRow key={`or-${s.id}`} s={s} depth={1} collapsed={!!collapsed[s.id]} hasChildren={false} now={now} onToggle={() => setCollapsed((c) => ({ ...c, [s.id]: !c[s.id] }))} />);
+    for (const step of [...roots].reverse()) {
+      rendered.add(step.id);
+      visit(step, 0);
+    }
+    const known = new Set(visibleSteps.map((step) => step.id));
+    for (const step of [...visibleSteps].reverse()) {
+      if (!rendered.has(step.id) && step.parentId && !known.has(step.parentId)) {
+        output.push(
+          <StepRow
+            key={`orphan-${step.id}`}
+            step={step}
+            depth={1}
+            collapsed={!!collapsed[step.id]}
+            hasChildren={false}
+            now={now}
+            onToggle={() => setCollapsed((current) => ({ ...current, [step.id]: !current[step.id] }))}
+          />,
+        );
       }
     }
-    return out;
+    return output;
   };
 
   return (
     <>
-      <div className="trail-head">
-        <div className="th-left">
-          <span className="th-dot" />
-          <span className="th-title">运行轨迹</span>
-          {stats && <span className="msg-tag">{steps.length} 条</span>}
-          {runningCount > 0 && <span className="th-running" title="正在进行中的步骤"><i />{runningCount} 步在做</span>}
+      <div className="flex shrink-0 items-center justify-between gap-2 border-b px-4 py-3">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className="text-sm font-medium">运行轨迹</span>
+          {stats && <Badge variant="secondary">{steps.length} 条</Badge>}
+          {runningCount > 0 && (
+            <Badge variant="outline">
+              <Spinner />{runningCount} 步在做
+            </Badge>
+          )}
         </div>
-        <div className="th-right" style={{ display: 'flex', gap: 4 }}>
-          <button className="manager-close" title="刷新" aria-label="刷新" onClick={onRefresh}><IconRefresh size={13} /></button>
-          <button className="manager-close" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length}><IconDownload size={13} /></button>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="icon-xs" title="刷新" aria-label="刷新" onClick={onRefresh}>
+            <IconRefresh size={13} />
+          </Button>
+          <Button variant="ghost" size="icon-xs" title="导出 JSONL" aria-label="导出 JSONL" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length}>
+            <IconDownload size={13} />
+          </Button>
         </div>
       </div>
 
       {stats && (
-        <div className="trail-stats">
-          <div className="ts-grid">
-            <div className="ts-card">
-              <span className="ts-label">缓存命中率{cacheRateIsReal ? '' : '（估算）'}</span>
-              <span className="ts-value teal">{cacheRate}%</span>
-              <span className="ts-hint">
+        <div className="flex shrink-0 flex-col gap-3 p-4">
+          <div className="grid grid-cols-2 gap-2">
+            <Card size="sm">
+              <CardHeader><CardDescription>缓存命中率{cacheRateIsReal ? '' : '（估算）'}</CardDescription><CardTitle>{cacheRate}%</CardTitle></CardHeader>
+              <CardContent className="text-xs text-muted-foreground">
                 {cacheRateIsReal
                   ? `L3 真实命中 ${(cache.l3RealTokens ?? 0).toLocaleString()} tok · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`
-                  : `无 provider 命中反馈，按「缓存命中 / (LLM 调用 + 命中)」估算 · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`}
-              </span>
-            </div>
-            <div className="ts-card">
-              <span className="ts-label">本次成本</span>
-              <span className="ts-value">${(stats.trace.totalCost ?? 0).toFixed(3)}</span>
-              <span className="ts-hint">in {stats.trace.totalTokensIn ?? 0} · out {stats.trace.totalTokensOut ?? 0}</span>
-            </div>
+                  : `无 provider 命中反馈 · L1 ${cache.l1Hits ?? 0} · L2 ${cache.l2Hits ?? 0}`}
+              </CardContent>
+            </Card>
+            <Card size="sm">
+              <CardHeader><CardDescription>本次成本</CardDescription><CardTitle>${(stats.trace.totalCost ?? 0).toFixed(3)}</CardTitle></CardHeader>
+              <CardContent className="text-xs text-muted-foreground">输入 {stats.trace.totalTokensIn ?? 0} · 输出 {stats.trace.totalTokensOut ?? 0}</CardContent>
+            </Card>
           </div>
-          <div className="ts-grid">
-            <div className="ts-card" style={{ flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px' }}>
-              <span className="ts-label">步骤</span>
-              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.steps ?? 0}</span>
-              <span className="ts-label">LLM 调用</span>
-              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.llmCalls ?? 0}</span>
-              <span className="ts-label">工具</span>
-              <span className="ts-value" style={{ fontSize: 16 }}>{stats.trace.toolCalls ?? 0}</span>
-            </div>
+          <div className="flex items-center gap-2">
+            <Badge variant="secondary">步骤 {stats.trace.steps ?? 0}</Badge>
+            <Badge variant="secondary">LLM {stats.trace.llmCalls ?? 0}</Badge>
+            <Badge variant="secondary">工具 {stats.trace.toolCalls ?? 0}</Badge>
           </div>
-          <select
-            className="set-input" style={{ height: 28, fontSize: 11, width: '100%' }}
-            aria-label="步骤类型筛选"
-            value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}
-          >
-            <option value="">全部步骤</option>
-            {Object.entries(TYPE_BADGE).map(([v, x]) => <option key={v} value={v}>{x.label}</option>)}
-          </select>
         </div>
       )}
 
-      <div className="trail-scroll">
+      <div className="shrink-0 px-4 pb-3">
+        <Select value={typeFilter || 'all'} onValueChange={(value) => setTypeFilter(value === 'all' ? '' : value)}>
+          <SelectTrigger aria-label="步骤类型筛选" className="w-full"><SelectValue /></SelectTrigger>
+          <SelectContent><SelectGroup>
+            <SelectItem value="all">全部步骤</SelectItem>
+            {Object.entries(TYPE_BADGE).map(([value, badge]) => <SelectItem key={value} value={value}>{badge.label}</SelectItem>)}
+          </SelectGroup></SelectContent>
+        </Select>
+      </div>
+      <ScrollArea data-testid="trace-scroll" className="min-h-0 flex-1">
+        <div className="flex flex-col gap-4 px-3 pb-4">
         {steps.length === 0 && (
-          <div className="empty-state">暂无运行记录——发送消息后这里会实时显示每一步动作</div>
+          <Empty className="py-10">
+            <EmptyHeader>
+              <EmptyTitle>暂无运行记录</EmptyTitle>
+              <EmptyDescription>发送消息后，每一步动作都会实时出现在这里。</EmptyDescription>
+            </EmptyHeader>
+          </Empty>
         )}
         {renderTree()}
-        <div style={{ display: 'flex', justifyContent: 'center', padding: '10px 0 4px' }}>
-          <button className="tl-export" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length} title="导出当前筛选结果为 JSONL 审计文件">导出 JSONL 审计 →</button>
+        <div className="flex justify-center px-0 py-2.5">
+          <Button variant="outline" size="xs" onClick={() => exportJsonl(visibleSteps)} disabled={!visibleSteps.length} title="导出当前筛选结果为 JSONL 审计文件">
+            导出 JSONL 审计
+          </Button>
         </div>
-      </div>
+        </div>
+      </ScrollArea>
     </>
   );
 });

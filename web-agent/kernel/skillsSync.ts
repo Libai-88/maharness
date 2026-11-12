@@ -29,11 +29,16 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
+import { verifyLockFile, type LockSignature } from './lock-signature';
 
 export interface LockSkillEntry {
   source: string;
   sourceType?: string;
   skillPath: string;
+  /** 技能版本（semver）；用于依赖范围校验。 */
+  version?: string;
+  /** 依赖技能：数组写作 name / name@range，或对象写作 { name: range }。 */
+  requires?: string[] | Record<string, string>;
   /** SKILL.md 的 sha256（历史唯一锚点；保留，向后兼容） */
   computedHash?: string;
   /**
@@ -45,7 +50,156 @@ export interface LockSkillEntry {
   files?: Record<string, string> | Array<{ path: string; sha256?: string; hash?: string }>;
 }
 
-export interface LockFile { version?: number; skills: Record<string, LockSkillEntry> }
+export interface LockFile {
+  version?: number;
+  skills: Record<string, LockSkillEntry>;
+  signature?: LockSignature;
+}
+
+export interface LockValidation {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+}
+
+type Semver = [number, number, number];
+
+function parseSemver(raw: string): Semver | null {
+  const match = /^v?(\d+)\.(\d+)\.(\d+)(?:[-+][0-9A-Za-z.-]+)?$/.exec(String(raw ?? '').trim());
+  if (!match) return null;
+  return [Number(match[1]), Number(match[2]), Number(match[3])];
+}
+
+function compareSemver(a: Semver, b: Semver): number {
+  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
+}
+
+function parseComparator(raw: string): { op: '=' | '^' | '~' | '>=' | '<=' | '>' | '<'; version: Semver } | null {
+  const text = String(raw ?? '').trim().replace(/^v/, '');
+  const match = /^(>=|<=|>|<|\^|~|=)?\s*(\d+\.\d+\.\d+)$/.exec(text);
+  if (!match) return null;
+  const version = parseSemver(match[2]!);
+  if (!version) return null;
+  return { op: (match[1] as '=' | '^' | '~' | '>=' | '<=' | '>' | '<' | undefined) ?? '=', version };
+}
+
+function comparatorMatches(version: Semver, comparator: { op: string; version: Semver }): boolean {
+  const cmp = compareSemver(version, comparator.version);
+  switch (comparator.op) {
+    case '=': return cmp === 0;
+    case '>': return cmp > 0;
+    case '>=': return cmp >= 0;
+    case '<': return cmp < 0;
+    case '<=': return cmp <= 0;
+    case '^': {
+      const [major, minor, patch] = comparator.version;
+      const upper: Semver = major > 0 ? [major + 1, 0, 0] : minor > 0 ? [0, minor + 1, 0] : [0, 0, patch + 1];
+      return cmp >= 0 && compareSemver(version, upper) < 0;
+    }
+    case '~': {
+      const [major, minor] = comparator.version;
+      return cmp >= 0 && compareSemver(version, [major, minor + 1, 0]) < 0;
+    }
+    default: return false;
+  }
+}
+
+export function isValidVersionRange(range: string): boolean {
+  const raw = String(range ?? '').trim();
+  if (['*', 'latest', 'any'].includes(raw.toLowerCase())) return true;
+  const alternatives = String(range ?? '').trim().split('||');
+  if (alternatives.length === 0 || alternatives.some((part) => !part.trim())) return false;
+  return alternatives.every((part) => {
+    const comparators = part.trim().split(/\s+/).filter(Boolean);
+    return comparators.length > 0 && comparators.every((token) => parseComparator(token) !== null);
+  });
+}
+
+export function satisfiesVersionRange(version: string, range: string): boolean {
+  const parsed = parseSemver(version);
+  const raw = String(range ?? '').trim();
+  if (!parsed || !isValidVersionRange(range)) return false;
+  if (!raw || ['*', 'latest', 'any'].includes(raw.toLowerCase())) return true;
+  return raw.split('||').some((part) => {
+    const comparators = part.trim().split(/\s+/).filter(Boolean).map(parseComparator);
+    return comparators.length > 0 && comparators.every((item) => item !== null && comparatorMatches(parsed, item));
+  });
+}
+
+/** 校验锁文件的依赖图：缺失依赖、非法范围、版本不满足和循环依赖均在安装前拒绝。 */
+export function validateLockFile(lock: LockFile, opts: { publicKey?: string } = {}): LockValidation {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  if (lock.version !== undefined && ![1, 2].includes(lock.version)) {
+    warnings.push(`未知的 skills-lock version=${lock.version}，按当前兼容语义执行`);
+  }
+  const names = Object.keys(lock.skills ?? {});
+  const dependencies = new Map<string, Set<string>>();
+  for (const name of names) {
+    if (!/^[A-Za-z0-9._-]{1,64}$/.test(name)) errors.push(`技能名非法: ${name}`);
+    const entry = lock.skills[name]!;
+    if (entry.version && !parseSemver(entry.version)) errors.push(`${name}: version 不是合法 semver: ${entry.version}`);
+    const deps = new Set<string>();
+    const requires = entry.requires;
+    if (Array.isArray(requires)) {
+      for (const raw of requires) {
+        const text = String(raw ?? '').trim();
+        if (!text) continue;
+        const at = text.lastIndexOf('@');
+        const dep = at > 0 ? text.slice(0, at) : text;
+        const range = at > 0 ? text.slice(at + 1) : undefined;
+        if (!lock.skills[dep]) errors.push(`${name}: 依赖不存在 ${dep}`);
+        if (range !== undefined) {
+          if (!isValidVersionRange(range)) errors.push(`${name}: 依赖 ${dep} 的版本范围非法: ${range}`);
+          else if (!lock.skills[dep]?.version) errors.push(`${name}: 依赖 ${dep} 缺少 version，无法校验范围 ${range}`);
+          else if (!satisfiesVersionRange(lock.skills[dep]!.version!, range)) {
+            errors.push(`${name}: 依赖 ${dep}@${range} 不满足实际版本 ${lock.skills[dep]!.version}`);
+          }
+        }
+        deps.add(dep);
+      }
+    } else if (requires && typeof requires === 'object') {
+      for (const [dep, range] of Object.entries(requires)) {
+        if (!lock.skills[dep]) errors.push(`${name}: 依赖不存在 ${dep}`);
+        if (!isValidVersionRange(range)) errors.push(`${name}: 依赖 ${dep} 的版本范围非法: ${range}`);
+        else if (!lock.skills[dep]?.version) errors.push(`${name}: 依赖 ${dep} 缺少 version，无法校验范围 ${range}`);
+        else if (!satisfiesVersionRange(lock.skills[dep]!.version!, range)) {
+          errors.push(`${name}: 依赖 ${dep}@${range} 不满足实际版本 ${lock.skills[dep]!.version}`);
+        }
+        deps.add(dep);
+      }
+    } else if (requires !== undefined) {
+      errors.push(`${name}: requires 须为字符串数组或 { name: range } 对象`);
+    }
+    dependencies.set(name, deps);
+  }
+  const visiting = new Set<string>();
+  const visited = new Set<string>();
+  const visit = (name: string, stack: string[]): void => {
+    if (visiting.has(name)) {
+      errors.push(`技能依赖存在环: ${[...stack, name].join(' → ')}`);
+      return;
+    }
+    if (visited.has(name)) return;
+    visiting.add(name);
+    for (const dep of dependencies.get(name) ?? []) {
+      if (lock.skills[dep]) visit(dep, [...stack, name]);
+    }
+    visiting.delete(name);
+    visited.add(name);
+  };
+  for (const name of names) visit(name, []);
+  if (!names.length) warnings.push('锁文件没有任何技能条目');
+  if (lock.signature) {
+    const publicKey = opts.publicKey ?? process.env.MAHARNESS_SKILL_LOCK_PUBLIC_KEY;
+    if (!publicKey) errors.push('skills-lock.json 已签名但未配置 MAHARNESS_SKILL_LOCK_PUBLIC_KEY');
+    else {
+      const result = verifyLockFile(lock as unknown as Record<string, unknown>, publicKey);
+      if (!result.ok) errors.push(`技能锁签名校验失败: ${result.reason}`);
+    }
+  }
+  return { ok: errors.length === 0, errors, warnings };
+}
 
 /** 一个文件的相对路径 + 实际 sha256 */
 export interface SkillFileHash { path: string; sha256: string }
@@ -69,6 +223,8 @@ export interface SyncResult {
   skippedUnlisted?: string[];
   /** 人类可读告警（不阻断安装，但必须让人看见） */
   warnings?: string[];
+  /** 覆盖安装前保留的旧版本目录 */
+  backup?: string;
 }
 
 function run(cmd: string, args: string[], cwd?: string, timeoutMs = 120_000): Promise<{ code: number; stdout: string; stderr: string }> {
@@ -155,6 +311,68 @@ function copyTree(src: string, dest: string): void {
     const d = join(dest, e.name);
     if (e.isDirectory()) copyTree(s, d);
     else if (e.isFile()) copyFileSync(s, d);
+  }
+}
+
+const MAX_SKILL_BACKUPS = 5;
+
+function backupRootOf(destSkillsDir: string, name: string): string {
+  return join(workRootOf(destSkillsDir), 'skill-backups', name);
+}
+
+export function listSkillBackups(name: string, destSkillsDir: string): string[] {
+  const root = backupRootOf(destSkillsDir, String(name).replace(/[^\w.-]/g, ''));
+  try {
+    return readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => join(root, entry.name))
+      .sort()
+      .reverse();
+  } catch {
+    return [];
+  }
+}
+
+function backupExistingSkill(name: string, destDir: string, destSkillsDir: string): string | undefined {
+  if (!existsSync(destDir)) return undefined;
+  const root = backupRootOf(destSkillsDir, name);
+  mkdirSync(root, { recursive: true });
+  const target = join(root, new Date().toISOString().replace(/[:.]/g, '-'));
+  copyTree(destDir, target);
+  const backups = listSkillBackups(name, destSkillsDir);
+  for (const stale of backups.slice(MAX_SKILL_BACKUPS)) {
+    try { rmSync(stale, { recursive: true, force: true }); } catch { /* 旧备份清理失败无害 */ }
+  }
+  return target;
+}
+
+/** 恢复最近一次（或指定）备份；恢复本身也走原子换入。 */
+export function rollbackSkill(name: string, destSkillsDir: string, backup?: string): SyncResult {
+  const safeName = String(name).replace(/[^\w.-]/g, '');
+  if (!safeName) return { name, ok: false, error: '技能名不合法' };
+  const root = backupRootOf(destSkillsDir, safeName);
+  const selected = backup ? resolve(backup) : listSkillBackups(safeName, destSkillsDir)[0];
+  if (!selected) return { name: safeName, ok: false, error: '没有可回滚的技能备份' };
+  if (selected !== root && !selected.startsWith(root + sep)) {
+    return { name: safeName, ok: false, error: '备份路径不在技能备份目录内' };
+  }
+  if (!existsSync(join(selected, 'SKILL.md'))) {
+    return { name: safeName, ok: false, error: `备份缺少 SKILL.md: ${selected}` };
+  }
+  const workRoot = workRootOf(destSkillsDir);
+  mkdirSync(workRoot, { recursive: true });
+  mkdirSync(destSkillsDir, { recursive: true });
+  const stagingParent = mkdtempSync(join(workRoot, `.skill-rollback-${safeName}-`));
+  const stagingDir = join(stagingParent, safeName);
+  try {
+    copyTree(selected, stagingDir);
+    const destDir = join(destSkillsDir, safeName);
+    atomicSwap(stagingDir, destDir, destSkillsDir);
+    return { name: safeName, ok: true, installed: true, files: countFiles(destDir), backup: selected };
+  } catch (err) {
+    return { name: safeName, ok: false, error: err instanceof Error ? err.message : String(err) };
+  } finally {
+    try { rmSync(stagingParent, { recursive: true, force: true }); } catch { /* 清理失败无害 */ }
   }
 }
 
@@ -428,7 +646,8 @@ export function installFromSourceTree(
       console.warn(`[skills] ${safeName}: 接受哈希不符的内容（不建议；应把新哈希写回 skills-lock.json）`);
     }
 
-    // 3) 原子换入（失败即目标目录维持原样）
+    // 3) 覆盖前保留旧版本快照，再原子换入
+    const backup = backupExistingSkill(safeName, destDir, destSkillsDir);
     atomicSwap(stagingDir, destDir, destSkillsDir);
     const files = countFiles(destDir);
     return {
@@ -438,6 +657,7 @@ export function installFromSourceTree(
       unverified: report.unverified.length ? report.unverified : undefined,
       skippedUnlisted: unlisted.length ? unlisted : (report.skippedUnlisted.length ? report.skippedUnlisted : undefined),
       warnings: warnings.length ? warnings : undefined,
+      backup,
     };
   } catch (err) {
     return { name: safeName, ok: false, error: err instanceof Error ? err.message : String(err) };

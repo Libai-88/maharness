@@ -50,7 +50,7 @@ process.env.MAHARNESS_API_TOKEN = 'unit-test-token';
 process.env.AGENT_ALLOW_PRIVATE_URLS = '1'; // SSE 配额测试经 HTTP 注册 127.0.0.1 假 Provider
 
 // 动态 import：以上环境变量必须先于模块加载生效（与 scripts/selftest.ts 同一手法）
-const { startServer, MUTATION_TOKEN_HEADER, requiredApiToken, createApiTokenGuard } = await import('../index');
+const { startServer, MUTATION_TOKEN_HEADER, requiredApiToken, readonlyApiToken, readonlyTenant, createApiTokenGuard } = await import('../index');
 const { buildReadinessSnapshot, buildStorageSnapshot, readStorageSnapshot } = await import('../routes/index');
 const { SseConnectionLimiter } = await import('../routes/shared');
 const { Store, hasEncryptedProviderKeys } = await import('../db');
@@ -217,6 +217,39 @@ describe('A6-b 变更类端点的可选 token 门', () => {
     assert.equal((await call('POST', {})).status, 401, '启用且缺头：401');
     assert.equal((await call('GET', {})).next, true, '只读方法：透传');
     assert.equal((await call('POST', { [MUTATION_TOKEN_HEADER]: TOKEN })).next, true, '带头：透传');
+  });
+
+  test('readonly token 只能读，admin token 可变更；trusted 模式全部 API 受门', async () => {
+    const previousAdmin = process.env.MAHARNESS_API_TOKEN;
+    const previousViewer = process.env.MAHARNESS_READONLY_TOKEN;
+    const previousTenant = process.env.MAHARNESS_READONLY_TENANT;
+    process.env.MAHARNESS_API_TOKEN = 'admin-token';
+    process.env.MAHARNESS_READONLY_TOKEN = 'viewer-token';
+    process.env.MAHARNESS_READONLY_TENANT = 'tenant-a';
+    try {
+      assert.equal(readonlyApiToken(), 'viewer-token');
+      assert.equal(readonlyTenant(), 'tenant-a');
+      const guard = createApiTokenGuard(undefined, undefined, undefined, {
+        mode: 'trusted', bindHost: '127.0.0.1', authRequired: true, approvalEnforced: false,
+      } as never);
+      const call = (method: string, token?: string, tenantId?: string) => new Promise<{ next: boolean; status: number }>((done) => {
+        let next = false;
+        let status = 0;
+        const res = { status: (code: number) => { status = code; return { json: () => done({ next, status }) }; } };
+        guard({ method, tenantId, headers: token ? { [MUTATION_TOKEN_HEADER]: token } : {} } as never, res as never, () => { next = true; done({ next, status }); });
+      });
+      assert.equal((await call('GET', 'viewer-token', 'tenant-a')).next, true);
+      assert.equal((await call('GET', 'viewer-token', 'tenant-b')).status, 403);
+      assert.equal((await call('GET', 'viewer-token')).status, 403);
+      assert.equal((await call('GET', 'admin-token', 'tenant-b')).next, true);
+      assert.equal((await call('POST', 'viewer-token')).status, 401);
+      assert.equal((await call('POST', 'admin-token')).next, true);
+      assert.equal((await call('GET')).status, 401);
+    } finally {
+      if (previousAdmin === undefined) delete process.env.MAHARNESS_API_TOKEN; else process.env.MAHARNESS_API_TOKEN = previousAdmin;
+      if (previousViewer === undefined) delete process.env.MAHARNESS_READONLY_TOKEN; else process.env.MAHARNESS_READONLY_TOKEN = previousViewer;
+      if (previousTenant === undefined) delete process.env.MAHARNESS_READONLY_TENANT; else process.env.MAHARNESS_READONLY_TENANT = previousTenant;
+    }
   });
 
   test('同一中间件逐请求读取 token：轮换后旧 token 立即失效且不回显', async () => {

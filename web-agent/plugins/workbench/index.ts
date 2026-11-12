@@ -11,6 +11,9 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, watch, statSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Plugin } from '../../kernel/types';
+import { mergeData, mergeDiary, mergeMeta, nextDue, shift } from './model';
+
+const todayStr = () => new Date().toISOString().slice(0, 10);
 
 // ═══════════════════════════════════════════════════════════
 // 桥文件数据模型（workbench-data.json 的完整形状）
@@ -78,118 +81,6 @@ interface BridgeFile {
 // 合并纯函数（逐行移植自原版 JS，语义完全一致）
 // ═══════════════════════════════════════════════════════════
 
-function mergeKindList<T extends { _s?: unknown }>(lArr: T[], rArr: T[]) {
-  const lReal = lArr.some(x => !x._s), rReal = rArr.some(x => !x._s);
-  let l = lArr, r = rArr;
-  if (lReal && !rReal) r = [];
-  else if (rReal && !lReal) l = [];
-  else if (lReal && rReal) { l = l.filter(x => !x._s); r = r.filter(x => !x._s); }
-  return { l, r };
-}
-
-function mergeLists<T extends { id: string; updatedAt: number; _s?: unknown }>(
-  lArr: T[], rArr: T[], tomb: Record<string, number>,
-): T[] {
-  const { l, r } = mergeKindList(lArr, rArr);
-  const lm = new Map(l.map(x => [String(x.id), x]));
-  const rm = new Map(r.map(x => [String(x.id), x]));
-  const out: T[] = [];
-  new Set([...lm.keys(), ...rm.keys()]).forEach(id => {
-    const lx = lm.get(id), rx = rm.get(id);
-    const lT = lx ? Number(lx.updatedAt) || 0 : 0;
-    const rT = rx ? Number(rx.updatedAt) || 0 : 0;
-    const dT = Number(tomb[id]) || 0;
-    if (dT && dT >= Math.max(lT, rT)) return;   // 墓碑有效：记录仍被删除
-    if (dT) delete tomb[id];                    // 新编辑推翻删除 → 复活
-    if (!lx) out.push(rx!);
-    else if (!rx) out.push(lx);
-    else out.push(lT >= rT ? lx : rx);          // LWW by updatedAt
-  });
-  return out;
-}
-
-type Mergeable = { id: string; updatedAt: number; _s?: unknown };
-interface MergeInput<T1 extends Mergeable, T2 extends Mergeable, T3 extends Mergeable> {
-  tasks?: T1[];
-  notes?: T2[];
-  projects?: T3[];
-  tomb?: Record<string, number>;
-}
-
-export function mergeData<T1 extends Mergeable, T2 extends Mergeable, T3 extends Mergeable>(
-  local: MergeInput<T1, T2, T3>, remote: MergeInput<T1, T2, T3>,
-) {
-  const tomb: Record<string, number> = { ...(local.tomb || {}), ...(remote.tomb || {}) };
-  const cut = Date.now() - 90 * 864e5;
-  Object.keys(tomb).forEach(id => {
-    if (Number(tomb[id]) && Number(tomb[id]) < cut) delete tomb[id];
-  });
-  return {
-    tasks: mergeLists(local.tasks ?? [], remote.tasks ?? [], tomb),
-    notes: mergeLists(local.notes ?? [], remote.notes ?? [], tomb),
-    projects: mergeLists(local.projects ?? [], remote.projects ?? [], tomb),
-    tomb,
-  };
-}
-
-export function mergeDiary(localD: Record<string, string>, localTs: Record<string, number>,
-                           remoteD: Record<string, string>, remoteTs: Record<string, number>) {
-  const out: Record<string, string> = {};
-  const ts: Record<string, number> = { ...(localTs || {}), ...(remoteTs || {}) };
-  const dates = new Set([...Object.keys(localD || {}), ...Object.keys(remoteD || {})]);
-  dates.forEach(d => {
-    const l = localD[d], r = remoteD[d];
-    if (l === undefined) { out[d] = r; return; }
-    if (r === undefined) { out[d] = l; return; }
-    const lt = Number(localTs?.[d]) || 0, rt = Number(remoteTs?.[d]) || 0;
-    if (lt >= rt) { out[d] = l; ts[d] = lt; } else { out[d] = r; ts[d] = rt; }
-  });
-  return { diary: out, diaryTs: ts };
-}
-
-export function mergeMeta(local: { meta?: Record<string, unknown> }, remote: { meta?: Record<string, unknown> }) {
-  const lm = local.meta || {}, rm = remote.meta || {};
-  const pomoLog: Record<string, number> = { ...(lm.pomoLog as Record<string, number> || {}) };
-  Object.entries(rm.pomoLog as Record<string, number> || {}).forEach(([d, c]) => {
-    pomoLog[d] = Math.max(Number(pomoLog[d]) || 0, Number(c) || 0);
-  });
-  return { ...lm, pomoLog, sample: !!(lm.sample && rm.sample) };
-}
-
-// ═══════════════════════════════════════════════════════════
-// 日期工具
-// ═══════════════════════════════════════════════════════════
-
-function fmtDate(d: Date): string {
-  const p = (n: number) => String(n).padStart(2, '0');
-  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
-}
-function todayStr(): string { return fmtDate(new Date()); }
-
-function shift(base: string, n: number): string {
-  const d = new Date(base + 'T00:00:00');
-  d.setDate(d.getDate() + n);
-  return fmtDate(d);
-}
-
-function nextDue(due: string, rpt: string): string {
-  const base = due || todayStr();
-  if (rpt === 'daily') return shift(base, 1);
-  if (rpt === 'weekly') return shift(base, 7);
-  if (rpt === 'weekdays') {
-    let n = shift(base, 1);
-    while ([0, 6].includes(new Date(n + 'T00:00:00').getDay())) n = shift(n, 1);
-    return n;
-  }
-  if (rpt === 'monthly') {
-    const d = new Date(base + 'T00:00:00'), day = d.getDate();
-    d.setMonth(d.getMonth() + 1);
-    if (d.getDate() !== day) d.setDate(0);   // 月末钳位（1/31 → 2/28）
-    return fmtDate(d);
-  }
-  return base;
-}
-
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const now = () => Date.now();
 
@@ -229,7 +120,7 @@ export default {
     const bridgeDir = process.env.WORKBENCH_BRIDGE_DIR || join(ctx.paths.data, 'workbench-bridge');
     const bridgeFile = join(bridgeDir, 'workbench-data.json');
     const legacyFile = join(ctx.paths.data, 'workbench.json');
-    const appHtmlPath = join(ctx.paths.root, 'plugins', 'workbench', 'app.html');
+    const appHtmlPath = join(ctx.paths.root, 'ui', 'dist', 'workbench.html');
 
     mkdirSync(bridgeDir, { recursive: true });
 

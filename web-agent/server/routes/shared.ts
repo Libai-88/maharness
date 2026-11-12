@@ -13,6 +13,7 @@ import type { ProviderConfig } from '../../core/chat/provider';
 import type { CompactOptions, CompactResult } from '../../core/chat/compact';
 import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
+import type { Scheduler } from '../scheduler';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Response } from 'express';
@@ -30,6 +31,15 @@ export interface RouteDeps {
   sseLimiter?: SseConnectionLimiter;
   /** 活跃 chat run 计数（M3 自动停止机制的事实源；句柄审计对外暴露用） */
   activeRunCount?: () => number;
+  scheduler?: Scheduler;
+}
+
+export const DEFAULT_TENANT = 'default';
+
+/** 租户作用域来自上游中间件；缺省走 default，保持单用户模式兼容。 */
+export function tenantIdOf(req: unknown): string {
+  const value = (req as { tenantId?: unknown } | undefined)?.tenantId;
+  return typeof value === 'string' && value ? value : DEFAULT_TENANT;
 }
 
 /** 进程级 SSE 句柄配额，供全局事件流与聊天流共享。 */

@@ -12,8 +12,9 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { bigramSet } from '../../kernel/cache';
+import { cosineSimilarity } from '../../kernel/vectors';
 import type { AgentHookCtx } from '../chat/agent';
-import type { Plugin } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/types';
 import { buildFact, isFactActive, normalizeFact, type MemoryFact, type MemoryFactInput } from './schema';
 import { inspectMemoryText } from './privacy';
 
@@ -30,30 +31,57 @@ type Fact = MemoryFact;
  *  core = 高频、必须始终在场（用户偏好/项目约束/工作纪律）；archive = 大容量、按需检索。 */
 interface MemoryBlock { content: string; ts: number }
 
-interface MemoryData { facts: Fact[]; blocks: Record<string, MemoryBlock> }
+interface EmbeddingService { model: string; embed(text: string): Promise<number[]> }
 
-/** 记忆与任务相关性：字符 bigram 重叠数（与 L1 语义缓存同源思想） */
-function relatedToTask(task: string, factText: string): boolean {
+interface MemoryData { facts: Fact[]; blocks: Record<string, MemoryBlock>; vectors?: Record<string, number[]> }
+
+export { cosineSimilarity } from '../../kernel/vectors';
+
+export function memoryScore(task: string, fact: Fact, queryVector?: number[], factVector?: number[]): number {
+  const ageDays = Math.max(0, Date.now() - fact.ts) / 86_400_000;
+  const recency = 1 / (1 + ageDays / 30);
+  if (queryVector?.length && factVector?.length === queryVector.length) {
+    return Math.max(0, cosineSimilarity(queryVector, factVector)) + fact.confidence * 0.1 + recency * 0.1;
+  }
   const tb = bigramSet(task);
-  const fb = bigramSet(factText);
+  const fb = bigramSet(fact.text);
   let inter = 0;
   for (const x of tb) if (fb.has(x)) inter++;
-  return inter >= RELATED_BIGRAM_MIN;
+  if (inter < RELATED_BIGRAM_MIN) return 0;
+  const similarity = inter / Math.max(1, Math.sqrt(tb.size * fb.size));
+  return similarity + fact.confidence * 0.1 + recency * 0.1;
 }
 
 /** 加载/保存记忆（同步、容错；向后兼容旧版仅 facts 的文件）。
  *  文件路径由 onLoad 从 ctx.paths.data 解析（跟随 Kernel dataDir 覆盖，不写死源码树） */
 function loadMemory(memoryFile: string): MemoryData {
   try {
-    if (!existsSync(memoryFile)) return { facts: [], blocks: {} };
+    if (!existsSync(memoryFile)) return { facts: [], blocks: {}, vectors: {} };
     const raw = JSON.parse(readFileSync(memoryFile, 'utf-8')) as Partial<MemoryData>;
+    const rawVectors = raw.vectors && typeof raw.vectors === 'object' ? raw.vectors : {};
+    const vectors: Record<string, number[]> = {};
+    for (const [id, vector] of Object.entries(rawVectors)) {
+      if (Array.isArray(vector) && vector.length > 0 && vector.every((n) => typeof n === 'number' && Number.isFinite(n))) {
+        vectors[id] = vector;
+      }
+    }
+    const blocks: Record<string, MemoryBlock> = {};
+    if (raw.blocks && typeof raw.blocks === 'object') {
+      for (const [key, value] of Object.entries(raw.blocks)) {
+        if (!value || typeof value !== 'object') continue;
+        const block = value as MemoryBlock;
+        if (typeof block.content !== 'string' || !Number.isFinite(block.ts)) continue;
+        blocks[key.includes('\0') ? key : `default\0${key}`] = block;
+      }
+    }
     return {
       facts: Array.isArray(raw.facts) ? raw.facts
         .filter((fact): fact is Fact => !!fact && typeof fact === 'object' && typeof fact.id === 'string' && typeof fact.text === 'string' && typeof fact.ts === 'number')
         .map((fact) => normalizeFact(fact)) : [],
-      blocks: raw.blocks && typeof raw.blocks === 'object' ? raw.blocks : {},
+      blocks,
+      vectors,
     };
-  } catch { return { facts: [], blocks: {} }; }
+  } catch { return { facts: [], blocks: {}, vectors: {} }; }
 }
 
 function saveMemory(memoryFile: string, data: MemoryData): void {
@@ -72,29 +100,44 @@ export default {
   version: '0.1.0',
   onLoad(ctx) {
     const memoryFile = join(ctx.paths.data, 'memory.json');
-    const { facts, blocks } = loadMemory(memoryFile);
+    const { facts, blocks, vectors: initialVectors } = loadMemory(memoryFile);
+    const vectors = initialVectors ?? {};
+    let embedding: EmbeddingService | undefined;
+    ctx.inject('service:embedding', (value) => {
+      embedding = value as EmbeddingService | undefined;
+    });
 
-    const persist = () => saveMemory(memoryFile, { facts, blocks });
-    const setBlock = (name: string, content: string): MemoryBlock => {
-      blocks[name] = { content, ts: Date.now() };
+    const persist = () => saveMemory(memoryFile, { facts, blocks, vectors });
+    const blockKey = (tenantId: string, name: string): string => `${tenantId}\0${name}`;
+    const setBlock = (tenantId: string, name: string, content: string): MemoryBlock => {
+      blocks[blockKey(tenantId, name)] = { content, ts: Date.now() };
       persist();
-      return blocks[name];
+      return blocks[blockKey(tenantId, name)]!;
     };
-    const deleteBlock = (name: string): boolean => {
-      if (!(name in blocks)) return false;
-      delete blocks[name];
+    const deleteBlock = (tenantId: string, name: string): boolean => {
+      const key = blockKey(tenantId, name);
+      if (!(key in blocks)) return false;
+      delete blocks[key];
       persist();
       return true;
     };
-    const remember = (text: string, input: MemoryFactInput = {}): Fact | undefined => {
+    const remember = async (text: string, input: MemoryFactInput = {}): Promise<Fact | undefined> => {
       if (inspectMemoryText(text).sensitive) return undefined;
       const f = buildFact(randomUUID().slice(0, 8), text, Date.now(), input);
       for (const conflictId of f.conflictsWith) {
-        const conflict = facts.find((item) => item.id === conflictId);
+        const conflict = facts.find((item) => item.id === conflictId && item.tenantId === f.tenantId);
         if (conflict && !conflict.conflictsWith.includes(f.id)) conflict.conflictsWith.push(f.id);
       }
       facts.push(f);
-      if (facts.length > MAX_FACTS) facts.splice(0, facts.length - MAX_FACTS);
+      if (facts.length > MAX_FACTS) {
+        for (const removed of facts.splice(0, facts.length - MAX_FACTS)) delete vectors[removed.id];
+      }
+      if (embedding) {
+        try {
+          const vector = await embedding.embed(text.slice(0, 500));
+          if (vector.length) vectors[f.id] = vector;
+        } catch { /* embedding 不可用 → 保留 bigram 路径 */ }
+      }
       persist();
       return f;
     };
@@ -109,15 +152,32 @@ export default {
     ctx.on('agent.before_llm', (e) => {
       const h = e.data as AgentHookCtx;
       if (!h || !Array.isArray(h.history) || h.scratchpad.memoryInjected) return;
+      const tenantId = h.tenantId ?? 'default';
       const hasLesson = h.history.some((m) => m.role === 'user' && String(m.content ?? '').startsWith('【失败教训】'));
       if (hasLesson) return;
-      const lessons = facts.filter((f) => isFactActive(f) && f.text.startsWith('【自动】')).slice(-LESSON_COUNT).reverse();
+      const lessons = facts.filter((f) => f.tenantId === tenantId && isFactActive(f) && f.text.startsWith('【自动】')).slice(-LESSON_COUNT).reverse();
       if (lessons.length === 0) return;
       h.history.push({
         role: 'user',
         content: `【失败教训】（来自之前会话，避免重复犯错）\n${lessons.map((f) => `- ${f.text}`).join('\n')}`,
       });
       h.scratchpad.memoryInjected = true;
+    });
+
+    // 查询向量：同一任务文本只计算一次；供 context provider 做向量召回。
+    ctx.on('agent.before_llm', async (e) => {
+      const h = e.data as AgentHookCtx;
+      if (!embedding || !Array.isArray(h.history)) return;
+      const lastUser = [...h.history].reverse()
+        .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【'));
+      if (!lastUser?.content) return;
+      const task = String(lastUser.content).slice(0, 500);
+      const previous = h.scratchpad.memoryQuery as { text: string; vector: number[] } | undefined;
+      if (previous?.text === task) return;
+      try {
+        const vector = await embedding.embed(task);
+        if (vector.length) h.scratchpad.memoryQuery = { text: task, vector };
+      } catch { /* embedding 失败 → content provider 自动回退 bigram */ }
     });
 
     // ---- Context Provider：分层记忆按需/常驻注入（上下文工程） ----
@@ -129,14 +189,18 @@ export default {
       kind: 'context',
       context: {
         id: 'memory-recall',
-        description: '注入核心记忆块（常驻）+ 按任务检索相关长期记忆（字符 bigram 相关匹配）',
+        description: '注入核心记忆块（常驻）+ 按任务检索相关长期记忆（embeddings 优先，bigram 回退）',
         weight: 10,
-        contentFn({ history }) {
+        maxTokens: 1_500,
+        contentFn({ history, scratchpad, tenantId }) {
+          const scope = tenantId ?? 'default';
           const hasMemory = history.some((m) => String(m.content ?? '').startsWith('【长期记忆】'));
           const hasBlocks = history.some((m) => String(m.content ?? '').startsWith('【核心记忆块】'));
           if (hasMemory || hasBlocks) return null;
           const parts: string[] = [];
-          const blockEntries = Object.entries(blocks);
+          const blockEntries = Object.entries(blocks)
+            .filter(([key]) => key.startsWith(`${scope}\0`))
+            .map(([key, block]) => [key.slice(scope.length + 1), block] as const);
           if (blockEntries.length > 0) {
             parts.push(`【核心记忆块】（常驻记忆，始终生效）\n${blockEntries.map(([name, b]) => `- ${name}: ${b.content}`).join('\n')}`);
           }
@@ -144,15 +208,19 @@ export default {
             .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
           if (lastUser?.content) {
             const task = lastUser.content.slice(0, 80);
+            const queryVector = (scratchpad.memoryQuery as { vector?: number[] } | undefined)?.vector;
             const hits = facts
-              .filter((f) => isFactActive(f) && !f.text.startsWith('【自动】') && relatedToTask(task, f.text)) // 教训由钩子注入，这里不重复
-              .slice(-5)
-              .reverse();
+              .filter((f) => f.tenantId === scope && isFactActive(f) && !f.text.startsWith('【自动】')) // 教训由钩子注入，这里不重复
+              .map((fact) => ({ fact, score: memoryScore(task, fact, queryVector, vectors[fact.id]) }))
+              .filter((item) => item.score > 0)
+              .sort((a, b) => b.score - a.score)
+              .slice(0, 5)
+              .map((item) => item.fact);
             if (hits.length > 0) {
               parts.push(`【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- ${f.text}`).join('\n')}`);
             }
           }
-          return parts.length ? parts.join('\n\n') : null;
+          return parts.length ? { content: parts.join('\n\n'), source: 'memory' } : null;
         },
       },
     });
@@ -170,7 +238,7 @@ export default {
       const dedupKey = `【自动】工具失败教训: ${d.tool?.name ?? '?'}`;
       const now = Date.now();
       if (facts.some((f) => f.text.startsWith(dedupKey) && now - f.ts < 3600_000)) return; // 1 小时内去重
-      remember(`${dedupKey} ${err}`);
+      void remember(`${dedupKey} ${err}`);
     });
 
     // ---- L2 人设：记忆使用规则 ----
@@ -216,12 +284,13 @@ export default {
           },
           required: ['text'],
         },
-        async handler(args: { text?: string; source?: MemoryFactInput['source']; confidence?: number; expiresAt?: number; conflictsWith?: string[] }) {
+        async handler(args: { text?: string; source?: MemoryFactInput['source']; confidence?: number; expiresAt?: number; conflictsWith?: string[] }, tctx: ToolContext) {
           const text = String(args.text ?? '').trim();
           if (!text) return { ok: false, error: '缺少 text' };
-          const f = remember(text, { source: args.source, confidence: args.confidence, expiresAt: args.expiresAt, conflictsWith: args.conflictsWith });
+          const tenantId = tctx?.tenantId ?? 'default';
+          const f = await remember(text, { source: args.source, confidence: args.confidence, expiresAt: args.expiresAt, conflictsWith: args.conflictsWith, tenantId });
           if (!f) return { ok: false, error: '内容疑似包含凭据、私钥或敏感凭据路径，拒绝写入长期记忆' };
-          return { ok: true, data: { id: f.id, count: facts.length, source: f.source, confidence: f.confidence, conflictsWith: f.conflictsWith } };
+          return { ok: true, data: { id: f.id, count: facts.filter((item) => item.tenantId === tenantId).length, source: f.source, confidence: f.confidence, conflictsWith: f.conflictsWith } };
         },
       },
     });
@@ -232,17 +301,19 @@ export default {
         name: 'recall_facts',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{count, facts: [{id, text, ts, source, confidence, expiresAt, conflictsWith}]}',
         description: '查询长期记忆（按关键词过滤，返回最近 20 条；不传关键词返回全部最近记忆）。',
         parameters: {
           type: 'object',
           properties: { query: { type: 'string', description: '可选：关键词（大小写不敏感）' } },
         },
-        async handler(args: { query?: string }) {
+        async handler(args: { query?: string }, tctx: ToolContext) {
           const q = String(args.query ?? '').trim().toLowerCase();
+          const tenantId = tctx?.tenantId ?? 'default';
           const list = [...facts]
             .reverse()
-            .filter((f) => isFactActive(f) && (!q || f.text.toLowerCase().includes(q)))
+            .filter((f) => f.tenantId === tenantId && isFactActive(f) && (!q || f.text.toLowerCase().includes(q)))
             .slice(0, 20)
             .map((f) => ({ id: f.id, text: f.text, ts: f.ts, source: f.source, confidence: f.confidence, expiresAt: f.expiresAt, conflictsWith: f.conflictsWith }));
           return { ok: true, data: { count: list.length, facts: list } };
@@ -262,11 +333,13 @@ export default {
           properties: { id: { type: 'string', description: '记忆 id' } },
           required: ['id'],
         },
-        async handler(args: { id?: string }) {
+        async handler(args: { id?: string }, tctx: ToolContext) {
           const id = String(args.id ?? '');
-          const i = facts.findIndex((f) => f.id === id);
+          const tenantId = tctx?.tenantId ?? 'default';
+          const i = facts.findIndex((f) => f.id === id && f.tenantId === tenantId);
           if (i < 0) return { ok: false, error: `记忆不存在: ${id}` };
           facts.splice(i, 1);
+          delete vectors[id];
           persist();
           return { ok: true, data: { removed: id, count: facts.length } };
         },
@@ -281,9 +354,10 @@ export default {
         costHint: 'low',
         description: '撤回一条长期记忆（保留审计记录，但不再召回）；按 recall_facts 返回的 id。',
         parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
-        async handler(args: { id?: string }) {
+        async handler(args: { id?: string }, tctx: ToolContext) {
           const id = String(args.id ?? '');
-          const fact = facts.find((item) => item.id === id);
+          const tenantId = tctx?.tenantId ?? 'default';
+          const fact = facts.find((item) => item.id === id && item.tenantId === tenantId);
           if (!fact) return { ok: false, error: `记忆不存在: ${id}` };
           if (fact.revokedAt === undefined) { fact.revokedAt = Date.now(); persist(); }
           return { ok: true, data: { revoked: id, revokedAt: fact.revokedAt } };
@@ -309,15 +383,16 @@ export default {
           },
           required: ['name', 'content'],
         },
-        async handler(args: { name?: string; content?: string }) {
+        async handler(args: { name?: string; content?: string }, tctx: ToolContext) {
           const name = String(args.name ?? '').trim();
           const content = String(args.content ?? '').trim();
           if (!name) return { ok: false, error: '缺少 name' };
           if (name.length > BLOCK_NAME_MAX) return { ok: false, error: `块名过长（≤${BLOCK_NAME_MAX} 字符）` };
           if (!content) return { ok: false, error: '缺少 content' };
           if (content.length > BLOCK_CONTENT_MAX) return { ok: false, error: `块内容过长（≤${BLOCK_CONTENT_MAX} 字符），请拆分` };
-          const b = setBlock(name, content);
-          return { ok: true, data: { name, ts: b.ts, blockCount: Object.keys(blocks).length } };
+          const tenantId = tctx?.tenantId ?? 'default';
+          const b = setBlock(tenantId, name, content);
+          return { ok: true, data: { name, ts: b.ts, blockCount: Object.keys(blocks).filter((key) => key.startsWith(`${tenantId}\0`)).length } };
         },
       },
     });
@@ -328,12 +403,15 @@ export default {
         name: 'list_memory_blocks',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{blocks: [{name, content, ts}]}',
         description: '列出全部核心记忆块（常驻记忆，每轮自动注入）。',
         parameters: { type: 'object', properties: {} },
-        async handler() {
+        async handler(_args: Record<string, unknown>, tctx: ToolContext) {
+          const tenantId = tctx?.tenantId ?? 'default';
           const list = Object.entries(blocks)
-            .map(([name, b]) => ({ name, content: b.content, ts: b.ts }))
+            .filter(([key]) => key.startsWith(`${tenantId}\0`))
+            .map(([key, b]) => ({ name: key.slice(tenantId.length + 1), content: b.content, ts: b.ts }))
             .sort((a, b) => b.ts - a.ts);
           return { ok: true, data: { blocks: list } };
         },
@@ -352,11 +430,12 @@ export default {
           properties: { name: { type: 'string', description: '块名' } },
           required: ['name'],
         },
-        async handler(args: { name?: string }) {
+        async handler(args: { name?: string }, tctx: ToolContext) {
           const name = String(args.name ?? '').trim();
           if (!name) return { ok: false, error: '缺少 name' };
-          if (!deleteBlock(name)) return { ok: false, error: `记忆块不存在: ${name}（list_memory_blocks 查看）` };
-          return { ok: true, data: { removed: name, blockCount: Object.keys(blocks).length } };
+          const tenantId = tctx?.tenantId ?? 'default';
+          if (!deleteBlock(tenantId, name)) return { ok: false, error: `记忆块不存在: ${name}（list_memory_blocks 查看）` };
+          return { ok: true, data: { removed: name, blockCount: Object.keys(blocks).filter((key) => key.startsWith(`${tenantId}\0`)).length } };
         },
       },
     });

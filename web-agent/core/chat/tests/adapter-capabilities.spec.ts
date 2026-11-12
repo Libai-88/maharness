@@ -1,11 +1,11 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { adapterCapabilities, createProvider } from '../provider';
+import { adapterCapabilities, createProvider, openAIResponseFormat } from '../provider';
 
 describe('Provider adapter capability contract', () => {
   test('OpenAI-compatible adapter declares supported request lifecycle and modality', () => {
     assert.deepEqual(adapterCapabilities('openai'), {
-      streaming: true, toolCalls: true, structuredOutput: false, vision: true, cancellation: true,
+      streaming: true, toolCalls: true, structuredOutput: true, vision: true, cancellation: true,
     });
   });
 
@@ -24,5 +24,15 @@ describe('Provider adapter capability contract', () => {
   test('created Provider exposes the same protocol capability contract', () => {
     const provider = createProvider({ id: 'anth', baseUrl: 'https://api.example', apiKey: 'secret', model: 'm', protocol: 'anthropic' });
     assert.deepEqual(provider.capabilities, adapterCapabilities('anthropic'));
+  });
+
+  test('OpenAI response_format 映射支持 JSON object 与 JSON schema', () => {
+    assert.deepEqual(openAIResponseFormat({ type: 'json_object' }), { type: 'json_object' });
+    assert.deepEqual(openAIResponseFormat({
+      type: 'json_schema', name: 'review', schema: { type: 'object' }, strict: false,
+    }), {
+      type: 'json_schema',
+      json_schema: { name: 'review', schema: { type: 'object' }, strict: false },
+    });
   });
 });

@@ -25,9 +25,11 @@ type EmbeddingFn = (text: string) => Promise<number[]>;
 
 interface L2Entry {
   value: unknown;
+  createdAt: number;
   expiresAt: number;
   hits: number;
   lastAccess: number;   // LRU：淘汰最久未访问
+  tenantId?: string;    // 租户标记：按租户清理时无需反解哈希键
 }
 
 interface L1Entry {
@@ -36,9 +38,11 @@ interface L1Entry {
   actions: string[];    // 动作类别（query/write/delete/execute）：方向不一致不串答案
   answer: string;
   hits: number;
+  createdAt: number;
   promptKey: string;    // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
   scope?: string;       // 会话级隔离：undefined=全局（纯问答产物，所有会话可见）；
                         // 有值=会话自产（答案依赖本会话工具观察，仅本会话可见，防跨会话串陈旧答案）
+  tenantId?: string;    // 非 default 租户的条目只对同租户可见
   expiresAt: number;    // TTL：时效性内容（天气/新闻/用户数据）不永久缓存
 }
 
@@ -90,6 +94,18 @@ function isAnswerCacheable(answer: string, question: string): boolean {
   if (trimmed.length < question.length * 0.3) return false;
 
   return true;
+}
+
+/** 租户可见性：显式租户只能读同租户条目；default 额外兼容旧的无租户全局条目。 */
+function tenantEntryVisible(entryTenant: string | undefined, tenantId: string | undefined): boolean {
+  if (!tenantId) return true;
+  if (entryTenant === tenantId) return true;
+  return tenantId === 'default' && entryTenant === undefined;
+}
+
+/** 租户条目独立键：同一问题在不同租户下并存，不互相覆盖。 */
+function l1EntryKey(promptKey: string, norm: string, tenantId?: string): string {
+  return tenantId ? `${promptKey}|tenant:${tenantId}|${norm}` : `${promptKey}|${norm}`;
 }
 
 /**
@@ -177,6 +193,21 @@ export interface CacheConfig {
   maxL2?: number;
 }
 
+export interface CacheHitMeta {
+  key: string;
+  namespace: string;
+  createdAt: number;
+  ageMs: number;
+  ttlRemainingMs: number;
+  hits: number;
+}
+
+export interface L1HitMeta extends CacheHitMeta {
+  promptKey: string;
+  scope?: string;
+  match: 'exact' | 'vector' | 'dice';
+}
+
 export class Cache {
   private l2 = new Map<string, L2Entry>();
   private l1 = new Map<string, L1Entry>(); // key = 归一化文本
@@ -229,10 +260,10 @@ export class Cache {
         v: 2, // 版本号：升级时可做迁移
         l1: [...this.l1.entries()].map(([k, e]) => ({
           k, answer: e.answer, hits: e.hits, promptKey: e.promptKey,
-          scope: e.scope, expiresAt: e.expiresAt,
+          scope: e.scope, createdAt: e.createdAt, expiresAt: e.expiresAt,
           bigrams: [...e.bigrams], actions: e.actions, vector: e.vector ? [...e.vector] : undefined,
         })),
-        l2: [...this.l2.entries()].map(([k, e]) => ({ k, value: e.value, expiresAt: e.expiresAt, hits: e.hits })),
+        l2: [...this.l2.entries()].map(([k, e]) => ({ k, value: e.value, createdAt: e.createdAt, expiresAt: e.expiresAt, hits: e.hits })),
       });
       // 写入临时文件再原子替换，防止写入中途崩溃导致文件损坏
       const tmp = this.persistFile + '.tmp';
@@ -250,7 +281,7 @@ export class Cache {
     try {
       if (!existsSync(this.persistFile)) return;
       const raw = readFileSync(this.persistFile, 'utf8');
-      let data: { v?: number; l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; expiresAt: number; hits: number }[] };
+      let data: { v?: number; l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; createdAt?: number; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; createdAt?: number; expiresAt: number; hits: number }[] };
       try {
         data = JSON.parse(raw) as typeof data;
       } catch {
@@ -278,7 +309,7 @@ export class Cache {
           if (!item.k || !item.answer || !item.bigrams) { l1Skipped++; continue; } // 必填字段缺失
           this.l1.set(item.k, {
             answer: item.answer, hits: item.hits ?? 0, promptKey: item.promptKey ?? '',
-            scope: item.scope, expiresAt: item.expiresAt,
+            scope: item.scope, createdAt: item.createdAt ?? now, expiresAt: item.expiresAt,
             bigrams: new Set(item.bigrams), actions: item.actions ?? [], vector: item.vector,
           });
           l1Restored++;
@@ -288,7 +319,7 @@ export class Cache {
         try {
           if (item.expiresAt < now) { l2Skipped++; continue; }
           if (!item.k) { l2Skipped++; continue; }
-          this.l2.set(item.k, { value: item.value, expiresAt: item.expiresAt, hits: item.hits ?? 0, lastAccess: now });
+          this.l2.set(item.k, { value: item.value, createdAt: item.createdAt ?? now, expiresAt: item.expiresAt, hits: item.hits ?? 0, lastAccess: now });
           l2Restored++;
         } catch { l2Skipped++; }
       }
@@ -324,14 +355,15 @@ export class Cache {
    *  序列化用 JSON.stringify 而非 '|' 连接：part 内含分隔符（文件名/参数串）时
    *  不会再碰撞出同键（["a|b","c"] 与 ["a","b|c"] 旧实现同键——静默串答案）。
    */
-  makeKey(parts: string[]): string {
+  makeKey(parts: string[], scope?: { tenantId?: string }): string {
     const ns = parts[0] ?? '';
-    return `${ns}:${createHash('sha256').update(JSON.stringify(parts)).digest('hex').slice(0, 32)}`;
+    const scoped = scope?.tenantId ? [ns, `tenant:${scope.tenantId}`, ...parts.slice(1)] : parts;
+    return `${ns}:${createHash('sha256').update(JSON.stringify(scoped)).digest('hex').slice(0, 32)}`;
   }
 
   // ---------- L2 工具结果缓存 ----------
 
-  l2Get(key: string): { hit: boolean; value?: unknown } {
+  l2Get(key: string): { hit: boolean; value?: unknown; meta?: CacheHitMeta } {
     const e = this.l2.get(key);
     if (!e) { this.counter.l2Misses++; return { hit: false }; }
     if (e.expiresAt < Date.now()) {
@@ -345,13 +377,29 @@ export class Cache {
     // 淘汰时 keys().next() 取队首 = 最久未访问
     this.l2.delete(key);
     this.l2.set(key, e);
-    return { hit: true, value: e.value };
+    const now = Date.now();
+    return {
+      hit: true,
+      value: e.value,
+      meta: {
+        key,
+        namespace: key.split(':', 1)[0] ?? '',
+        createdAt: e.createdAt,
+        ageMs: Math.max(0, now - e.createdAt),
+        ttlRemainingMs: Math.max(0, e.expiresAt - now),
+        hits: e.hits,
+      },
+    };
   }
 
-  l2Set(key: string, value: unknown, ttlMs = this.l2TtlMs): void {
+  l2Set(key: string, value: unknown, ttlMs = this.l2TtlMs, tenantId?: string): void {
+    const now = Date.now();
     // LRU O(1)：已有 key 先 delete 再 set（移到尾部）；新 key 直接 set
     if (this.l2.has(key)) this.l2.delete(key);
-    this.l2.set(key, { value, expiresAt: Date.now() + ttlMs, hits: 0, lastAccess: Date.now() });
+    this.l2.set(key, {
+      value, createdAt: now, expiresAt: now + ttlMs, hits: 0, lastAccess: now,
+      ...(tenantId ? { tenantId } : {}),
+    });
     // LRU 淘汰：超容量时删除队首（最久未访问）
     if (this.l2.size > this.maxL2) {
       const oldest = this.l2.keys().next().value;
@@ -379,7 +427,37 @@ export class Cache {
     if (changed) this.scheduleSave();
   }
 
+  /** 按租户清理 L2；旧条目无 tenantId 时只随全量清理移除。 */
+  l2DeleteTenant(tenantId: string): number {
+    if (!tenantId) return 0;
+    let removed = 0;
+    for (const [key, entry] of this.l2) {
+      if (entry.tenantId === tenantId) {
+        this.l2.delete(key);
+        removed++;
+      }
+    }
+    if (removed) this.scheduleSave();
+    return removed;
+  }
+
   // ---------- L1 语义缓存 ----------
+
+  private l1Meta(key: string, entry: L1Entry, match: L1HitMeta['match']): L1HitMeta {
+    const now = Date.now();
+    const separator = key.lastIndexOf('|');
+    return {
+      key,
+      namespace: 'l1',
+      createdAt: entry.createdAt,
+      ageMs: Math.max(0, now - entry.createdAt),
+      ttlRemainingMs: Math.max(0, entry.expiresAt - now),
+      hits: entry.hits,
+      promptKey: entry.promptKey || (separator > 0 ? key.slice(0, separator) : ''),
+      ...(entry.scope ? { scope: entry.scope } : {}),
+      match,
+    };
+  }
 
   /**
    * 查询语义缓存：相同/近似问题命中直接返回缓存答案（跳过 LLM 调用）
@@ -389,7 +467,7 @@ export class Cache {
    *  会话可见（纯问答产物，不依赖工具观察）；会话条目只对本会话可见（答案依赖本会话
    *  工具结果，跨会话复用会串「看过的东西」，即陈旧事实）。
    *  返回 hitScope：命中条目的作用域，供命中学习回填时沿用（保持同域扩展）。 */
-  async l1Get(question: string, promptKey = '', scope?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string }> {
+  async l1Get(question: string, promptKey = '', scope?: string, tenantId?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string; meta?: L1HitMeta }> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8) {
       // 短问题（"继续/你好"等）不参与语义匹配，避免跨上下文误命中
@@ -412,6 +490,7 @@ export class Cache {
         let best: { key: string; score: number; scope?: string } | null = null;
         for (const [key, entry] of this.l1) {
           if (entry.promptKey !== promptKey) continue;
+          if (!tenantEntryVisible(entry.tenantId, tenantId)) continue;
           if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
           if (entry.expiresAt < Date.now()) {
             this.l1.delete(key);
@@ -441,7 +520,7 @@ export class Cache {
           }
           entry.hits++;
           this.counter.l1Hits++;
-          return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
+          return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope, meta: this.l1Meta(best.key, entry, 'vector') };
         }
         this.counter.l1Misses++;
         return { hit: false };
@@ -449,25 +528,27 @@ export class Cache {
     }
     // 自研文本相似度：内容词 bigram Dice（轻量语义归一化——忽略表面措辞，保留内容词）
     // 精确匹配优先：归一化后全等（同句重复提问）直接命中，不走相似度
-    if (this.l1.has(`${promptKey}|${norm}`)) {
-      const entry = this.l1.get(`${promptKey}|${norm}`)!;
+    const exactKey = l1EntryKey(promptKey, norm, tenantId);
+    if (this.l1.has(exactKey)) {
+      const entry = this.l1.get(exactKey)!;
       if (entry.scope && entry.scope !== scope) {
         // 精确键存在但作用域不匹配：会话自产答案不串用，继续相似度扫描
-      } else if (entry.expiresAt >= Date.now()) {
+      } else if (tenantEntryVisible(entry.tenantId, tenantId) && entry.expiresAt >= Date.now()) {
         entry.hits++;
         // LRU：命中重插到尾部
-        this.l1.delete(`${promptKey}|${norm}`);
-        this.l1.set(`${promptKey}|${norm}`, entry);
+        this.l1.delete(exactKey);
+        this.l1.set(exactKey, entry);
         this.counter.l1Hits++;
-        return { hit: true, answer: entry.answer, key: `${promptKey}|${norm}`, hitScope: entry.scope };
+        return { hit: true, answer: entry.answer, key: exactKey, hitScope: entry.scope, meta: this.l1Meta(exactKey, entry, 'exact') };
       } else {
-        this.l1.delete(`${promptKey}|${norm}`);
+        this.l1.delete(exactKey);
       }
     }
     const qBigrams = bigramSet(contentWords(norm));
     let best: { key: string; score: number; scope?: string } | null = null;
     for (const [key, entry] of this.l1) {
       if (entry.promptKey !== promptKey) continue;
+      if (!tenantEntryVisible(entry.tenantId, tenantId)) continue;
       if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
       if (entry.expiresAt < Date.now()) { // TTL 过期：删除并按未命中处理
         this.l1.delete(key);
@@ -490,7 +571,7 @@ export class Cache {
       this.l1.delete(best.key);
       this.l1.set(best.key, entry);
       this.counter.l1Hits++;
-      return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope };
+      return { hit: true, answer: entry.answer, key: best.key, hitScope: best.scope, meta: this.l1Meta(best.key, entry, 'dice') };
     }
     this.counter.l1Misses++;
     return { hit: false };
@@ -502,15 +583,16 @@ export class Cache {
    *  - 传 scope：答案依赖本会话的工具结果/观察，仅本会话可命中（防止跨会话复用
    *    陈旧的工具观察——同一问题在文件变更后应重新观察，而不是复用旧答案）。
    */
-  async l1Set(question: string, answer: string, promptKey = '', scope?: string): Promise<void> {
+  async l1Set(question: string, answer: string, promptKey = '', scope?: string, tenantId?: string): Promise<void> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8) return;
     // 质量门槛：低质量/不确定/无信息量的答案不入队
     if (!isAnswerCacheable(answer, norm)) return;
-    const entryKey = `${promptKey}|${norm}`;
+    const entryKey = l1EntryKey(promptKey, norm, tenantId);
+    const createdAt = Date.now();
     const entry: L1Entry = {
       bigrams: bigramSet(contentWords(norm)), actions: [...actionGroups(norm)], answer, hits: 0, promptKey,
-      scope: scope || undefined, expiresAt: Date.now() + L1_TTL,
+      scope: scope || undefined, tenantId: tenantId || undefined, createdAt, expiresAt: createdAt + L1_TTL,
     };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
     // LRU 修复：已有 key 必须先 delete 再 set，否则 Map 保留原位置（频繁写入的条目
@@ -539,10 +621,40 @@ export class Cache {
     if (changed) this.scheduleSave();
   }
 
+  /** 按租户清理 L1；无 tenantId 的旧全局条目只随全量清理移除。 */
+  l1InvalidateTenant(tenantId: string): number {
+    if (!tenantId) return 0;
+    let removed = 0;
+    for (const [key, entry] of this.l1) {
+      if (entry.tenantId === tenantId) {
+        this.l1.delete(key);
+        removed++;
+      }
+    }
+    if (removed) this.scheduleSave();
+    return removed;
+  }
+
+  /** 按租户 + 层清理；不传 tenantId 时保持历史全量清理行为。 */
+  clearScope(opts: { tenantId?: string; l1?: boolean; l2?: boolean } = {}): { l1: number; l2: number } {
+    const includeL1 = opts.l1 !== false;
+    const includeL2 = opts.l2 !== false;
+    if (opts.tenantId) {
+      return {
+        l1: includeL1 ? this.l1InvalidateTenant(opts.tenantId) : 0,
+        l2: includeL2 ? this.l2DeleteTenant(opts.tenantId) : 0,
+      };
+    }
+    const l1 = this.l1.size;
+    const l2 = this.l2.size;
+    if (includeL1) this.l1.clear();
+    if (includeL2) this.l2.clear();
+    this.scheduleSave();
+    return { l1: includeL1 ? l1 : 0, l2: includeL2 ? l2 : 0 };
+  }
+
   clear(): void {
-    this.l2.clear();
-    this.l1.clear();
-    this.scheduleSave(); // 清空也落盘：否则进程退出时 save() 会把旧内容写回
+    this.clearScope();
   }
 
   /** L3 prompt 前缀复用统计（估算口径）：由 Agent 循环在每次 LLM 调用前记录与上一轮公共前缀的 token 数。

@@ -5,7 +5,7 @@ import { buildFact, isFactActive, normalizeFact } from '../schema';
 describe('长期记忆 schema', () => {
   it('旧 facts 懒迁移为带来源与置信度的活动记录', () => {
     const fact = normalizeFact({ id: 'old', text: '项目约束', ts: 10 });
-    assert.deepEqual(fact, { id: 'old', text: '项目约束', ts: 10, source: 'agent', confidence: 0.8, conflictsWith: [] });
+    assert.deepEqual(fact, { id: 'old', text: '项目约束', ts: 10, source: 'agent', confidence: 0.8, conflictsWith: [], tenantId: 'default' });
     assert.equal(isFactActive(fact, 10), true);
   });
 

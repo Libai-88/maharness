@@ -12,10 +12,12 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { createHash } from 'node:crypto';
+import { createHash, generateKeyPairSync } from 'node:crypto';
+import { signLockFile } from '../lock-signature';
 import {
-  installFromSourceTree, installSkill, normalizeManifest, readLockFile, sha256File,
-  verifyStagedSkill, type LockSkillEntry,
+  installFromSourceTree, installSkill, listSkillBackups, normalizeManifest, readLockFile, rollbackSkill, sha256File,
+  verifyStagedSkill, validateLockFile, satisfiesVersionRange, isValidVersionRange,
+  type LockFile, type LockSkillEntry,
 } from '../skillsSync';
 
 let root = '';
@@ -239,6 +241,32 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     assert.deepEqual(leftoverTemps(dataDir), [], '让位目录也要清理');
   });
 
+  test('覆盖安装保留旧版本快照并可回滚', () => {
+    writeSkillFile('SKILL.md', SKILL_MD);
+    writeSkillFile('scripts/run.py', SCRIPT_V1);
+    const v1: LockSkillEntry = {
+      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: hashOf('SKILL.md'),
+      files: { 'SKILL.md': hashOf('SKILL.md'), 'scripts/run.py': hashOf('scripts/run.py') },
+    };
+    assert.equal(installFromSourceTree('demo-rollback', v1, join(srcRoot, 'skills', 'demo'), skillsDir).ok, true);
+
+    writeSkillFile('scripts/run.py', SCRIPT_V2);
+    const v2: LockSkillEntry = {
+      ...v1,
+      computedHash: hashOf('SKILL.md'),
+      files: { 'SKILL.md': hashOf('SKILL.md'), 'scripts/run.py': hashOf('scripts/run.py') },
+    };
+    const replaced = installFromSourceTree('demo-rollback', v2, join(srcRoot, 'skills', 'demo'), skillsDir, { force: true });
+    assert.equal(replaced.ok, true, replaced.error);
+    assert.ok(replaced.backup);
+    assert.equal(readFileSync(join(skillsDir, 'demo-rollback', 'scripts', 'run.py'), 'utf-8'), SCRIPT_V2);
+    assert.equal(listSkillBackups('demo-rollback', skillsDir).length, 1);
+
+    const rolled = rollbackSkill('demo-rollback', skillsDir);
+    assert.equal(rolled.ok, true, rolled.error);
+    assert.equal(readFileSync(join(skillsDir, 'demo-rollback', 'scripts', 'run.py'), 'utf-8'), SCRIPT_V1);
+  });
+
   test('唯一的放行口是显式环境开关（并在结果里说明）', () => {
     writeSkillFile('SKILL.md', SKILL_MD);
     writeSkillFile('scripts/run.py', SCRIPT_V1);
@@ -298,5 +326,65 @@ describe('A9-1 校验对象是即将发布的字节 + 锁文件读取兼容', ()
     const badSource = await installSkill('demo-src', { source: 'not-a-repo', skillPath: 'skills/demo/SKILL.md' }, skillsDir);
     assert.equal(badSource.ok, false);
     assert.match(String(badSource.error), /owner\/repo/);
+  });
+});
+
+describe('技能锁文件依赖图', () => {
+  const base = (skills: LockFile['skills']): LockFile => ({ version: 2, skills });
+
+  test('版本范围满足时通过，数组与对象两种依赖写法都支持', () => {
+    const result = validateLockFile(base({
+      base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '1.4.2' },
+      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '2.0.0', requires: { base: '^1.2.0' } },
+      cli: { source: 'o/r', skillPath: 'skills/cli/SKILL.md', version: '2.1.0', requires: ['base@~1.4.0'] },
+    }));
+    assert.equal(result.ok, true, result.errors.join('; '));
+  });
+
+  test('缺失依赖、范围不满足与循环依赖均拒绝', () => {
+    const missing = validateLockFile(base({
+      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { absent: '^1.0.0' } },
+    }));
+    assert.equal(missing.ok, false);
+    assert.match(missing.errors.join('; '), /依赖不存在/);
+
+    const mismatch = validateLockFile(base({
+      base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '2.0.0' },
+      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { base: '^1.0.0' } },
+    }));
+    assert.equal(mismatch.ok, false);
+    assert.match(mismatch.errors.join('; '), /不满足/);
+
+    const cycle = validateLockFile(base({
+      a: { source: 'o/r', skillPath: 'skills/a/SKILL.md', version: '1.0.0', requires: ['b'] },
+      b: { source: 'o/r', skillPath: 'skills/b/SKILL.md', version: '1.0.0', requires: ['a'] },
+    }));
+    assert.equal(cycle.ok, false);
+    assert.match(cycle.errors.join('; '), /环/);
+  });
+
+  test('版本范围解析拒绝非法写法并支持通配', () => {
+    assert.equal(isValidVersionRange('*'), true);
+    assert.equal(isValidVersionRange('>=1.2.0 <2.0.0'), true);
+    assert.equal(isValidVersionRange('not-a-range'), false);
+    assert.equal(satisfiesVersionRange('1.5.0', '>=1.2.0 <2.0.0'), true);
+    assert.equal(satisfiesVersionRange('2.0.0', '>=1.2.0 <2.0.0'), false);
+  });
+
+  test('签名锁可验签，篡改后拒绝', () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519');
+    const privatePem = privateKey.export({ type: 'pkcs8', format: 'pem' }).toString();
+    const publicPem = publicKey.export({ type: 'spki', format: 'pem' }).toString();
+    const lock = base({ app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0' } });
+    const signed = signLockFile(lock as unknown as Record<string, unknown>, privatePem, { keyId: 'k1' }) as unknown as LockFile;
+    assert.deepEqual(validateLockFile(signed, { publicKey: publicPem }).errors, []);
+    const tampered: LockFile = {
+      ...signed,
+      skills: { ...signed.skills, app: { ...signed.skills.app, version: '2.0.0' } },
+    };
+    const result = validateLockFile(tampered, { publicKey: publicPem });
+    assert.equal(result.ok, false);
+    assert.match(result.errors.join('; '), /签名校验失败/);
+    assert.equal(validateLockFile(signed, { publicKey: '' }).ok, false, '已签名但无公钥必须 fail-closed');
   });
 });

@@ -25,7 +25,7 @@
  */
 import type { Express, Request } from 'express';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
-import { getChatService, getRunner, type RouteDeps } from './shared';
+import { getChatService, getRunner, tenantIdOf, type RouteDeps } from './shared';
 import { auditAuthorizationDenial, auditAuthorizationGrant, decideCredentialAuthorization } from '../security-policy';
 
 /** 一次性审批凭据的请求头名（也可以放 body 的 approvalToken 字段） */
@@ -116,8 +116,9 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
     const chat = getChatService(kernel);
     if (!chat) return res.json({ pending: [] });
     const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+    const tenantSessions = new Set(deps.store.listSessions(tenantIdOf(req)).map((session) => session.id));
     const now = Date.now();
-    const list = chat.listApprovals(sessionId);
+    const list = chat.listApprovals(sessionId).filter((approval) => !approval.sessionId || tenantSessions.has(approval.sessionId));
     const pending = list.map((a) => ({
       id: a.id,
       name: a.name,
@@ -136,9 +137,22 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
     res.json({ pending });
   });
 
+  app.get('/api/approvals/history', (req, res) => {
+    const sessionId = typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined;
+    if (sessionId && !deps.store.getSession(sessionId, tenantIdOf(req))) {
+      return res.status(404).json({ error: '会话不存在' });
+    }
+    res.json(deps.store.listApprovalRequests(tenantIdOf(req), sessionId));
+  });
+
   app.post('/api/approvals/:id', (req, res) => {
     const approved = req.body?.approved === true;
     const id = req.params.id;
+    const tenantSessions = new Set(deps.store.listSessions(tenantIdOf(req)).map((session) => session.id));
+    const target = getChatService(kernel)?.listApprovals().find((approval) => approval.id === id);
+    if (target?.sessionId && !tenantSessions.has(target.sessionId)) {
+      return res.status(404).json({ error: '这个请求已经过期了' });
+    }
     const provided = providedApprovalToken(req);
     // TODO(A6-1 闭环，需要 ui/ 与 SSE 侧配合，交由维护者拍板)：
     //   现在凭据只经 GET /api/approvals 下发。要让它成为「只有页面上那个人拿得到」的通道，

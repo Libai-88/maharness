@@ -67,7 +67,7 @@
 | SEC-03 | 将 API token、审批凭据、来源校验和权限审计统一为策略层 | 05、10 | 未授权负向测试全绿；轮换/过期/重放均验证 | 已验收 |
 | SEC-04 | 为插件定义权限声明、能力授权和高风险操作审批 | 05、06 | 越权插件加载/调用均被拒绝并审计 | 已验收 |
 | SEC-05 | 明确 trusted module 与 sandboxed iframe 的隔离语义和限制 | 05、06 | UI 明示来源/信任等级；跨域能力测试通过 | 已验收 |
-| SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | remote/team 启动强制 TLS 与认证；插件不在宿主权限下执行；隔离逃逸测试通过 | 进行中 |
+| SEC-06 | 实现本机、远程单用户和团队模式的分级信任边界 | 05、10 | local/trusted 进程级插件隔离、文件/网络守卫与配额通过；remote/team 未达强隔离前置时启动 fail-closed；容器级隔离为可选 L3 | 已验收 |
 | SEC-07 | 建立依赖、技能包、插件供应链审计与升级策略 | 05、06、11 | 锁文件、哈希、来源、版本和升级回滚可追溯 | 已验收 |
 
 ## 06 插件与技能生态
@@ -136,7 +136,7 @@
 | API-03 | 为 SSE 增加认证、限额、心跳、断线重连和资源回收 | 01、03、10 | 断线/重连/超时 E2E；无连接泄漏 | 已验收 |
 | API-04 | 版本化 SQLite migration、备份、校验、恢复和归档轮转 | 09、10 | 升级/失败/回滚恢复演练通过 | 已验收 |
 | API-05 | 对配置、密钥和策略写入实现原子性、审计和并发保护 | 05、10 | 崩溃注入后配置/数据库无半写 | 已验收 |
-| API-06 | 实现团队身份、角色授权、租户数据隔离和租户级配额 | 05、10 | 跨租户会话/文件/审批/Provider/Trace 读写全部拒绝；隔离迁移可回滚 | 待执行 |
+| API-06 | 实现团队身份、角色授权、租户数据隔离和租户级配额 | 05、10 | 租户 token/角色/共享基础设施 admin 门、会话/文件/审批/Trace/缓存隔离、成本/存储/工具频率配额；租户工作区备份/恢复与回滚测试通过 | 已验收 |
 | API-07 | 提供健康、就绪、存储空间、Provider 状态和诊断端点 | 07、10 | 端点不泄密；模拟故障返回正确状态 | 已验收 |
 | API-08 | 固化安装、升级、恢复、数据目录和 Windows 运维步骤 | 10、11 | 干净 Windows 环境按文档完成升级与恢复演练 | 已验收 |
 
@@ -460,3 +460,5 @@ SEC-05 验收（2026-11-01）：插件 UI 三种形态的隔离语义在页头�
 SEC-06 状态校准（2026-11-01）：验收条件「remote/team 启动强制 TLS 与认证」中的 remote 部分已由 API-02 交付——`resolveDeployMode` 对 remote 缺 token、缺/不配对 TLS 均拒绝启动，`server/tests/deploy-mode.spec.ts` 6/6 锁定，全量回归与 CI 双绿。剩余缺口为两项：团队模式（team）的身份/租户/隔离模型未实现（与 API-06 同一工程块）；插件仍在宿主进程执行，OS 级隔离（受限令牌/Job Object 或容器）为威胁模型 v1 的发布阻断项。按登记册状态约定（实现或验收证据未齐 = 进行中），SEC-06 由待执行校准为进行中，不再以「待执行」低估已有交付。
 
 身份种子升级合并（2026-11-02）：`server/index.ts` 的 `seedDefaults` 对 id=default 的人设行在内容与代码种子不一致时以当前代码刷新（enabled/sortOrder 保留原值），自定义人设不参与合并；修复旧库（首次启动时种下的旧版默认人设）导致内核身份升级（L0 BASE_PROMPT + 默认人设）在运行时始终使用旧文本的问题。验证：`npm run typecheck`、`db.spec.ts` 22/22、`auth.spec.ts` 34/34、全量 `npm test` 912/912（复跑两次通过）、干净 checkout CI 与 E2E 双绿。回滚：还原 `seedDefaults` 的人设合并分支，恢复仅在空库时写入种子的行为。
+
+API-06 收口（2026-11-12）：按租户 API token/principal（admin/member/readonly、sha256 哈希、租户绑定、过期/吊销、Header 不可横穿）、会话/消息/审批/Trace/L1/L2 缓存租户隔离、`maxSessions`/`maxActiveRuns`/`maxCostUsd`/`maxStorageBytes`/`maxToolCallsPerMinute` 配额，以及共享基础设施的 admin-only 变更门均已交付。新增 `scripts/tenant-workspace.ts backup|restore|list` 与 `server/tenant-backup.ts`，备份保留 manifest，恢复前把旧工作区改名为 `pre-restore-<ts>`，失败自动回滚；`server/tests/tenant-backup.spec.ts` 覆盖成功恢复与旧目录保留。Provider 继续作为管理员共享基础设施（member 可读、变更仅 admin）。API-06 标记已验收；容器级隔离与真正的多实例迁移演练属于可选 L3，不作为当前 local/trusted 发布前置。

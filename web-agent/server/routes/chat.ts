@@ -12,13 +12,15 @@ import type { LLMMessage, LLMRole } from '../../kernel/types';
 import type { Message, Session } from '../../kernel/types';
 import { truncateHistory } from '../context';
 import { beginRun, endRun } from '../index';
-import { getChatService, getRunner, sse, SseConnectionLimiter, type RouteDeps } from './shared';
+import { getChatService, getRunner, sse, tenantIdOf, SseConnectionLimiter, type RouteDeps } from './shared';
+import { tenantSandboxRoot } from '../tenant-workspace';
 import { scheduleWarmup } from './warmup';
 import { deriveTaskContract } from '../../kernel/task-contract';
 
 // ---- H3 同会话互斥：同一会话同时只允许一个 run ----
 // 并发 chat 会交叉写历史（onHistorySync 顺序不可控）、双份计费、断点互相覆盖。
 const inFlightSessions = new Map<string, true>();
+const activeTenantRuns = new Map<string, number>();
 
 // ---- H13 成本预警的前缀标记：历史已含同款预警则不重复追加 ----
 const COST_WARNING_MARK = '【成本预警】';
@@ -29,7 +31,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
 
   // ---------- 断点状态查询（前端可据此显示「继续任务」入口） ----------
   app.get('/api/sessions/:id/checkpoint', (req, res) => {
-    const session = store.getSession(req.params.id);
+    const session = store.getSession(req.params.id, tenantIdOf(req));
     if (!session) return res.status(404).json({ error: '会话不存在' });
     const cp = store.loadCheckpoint(session.id);
     res.json({
@@ -42,15 +44,35 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
   });
   // ---------- 对话（SSE 流式；body.resume=true 时从断点历史继续） ----------
   app.post('/api/sessions/:id/chat', async (req, res) => {
-    const session = store.getSession(req.params.id);
+    const session = store.getSession(req.params.id, tenantIdOf(req));
     if (!session) return res.status(404).json({ error: '会话不存在' });
     if (inFlightSessions.has(session.id)) return res.status(409).json({ error: '该会话有任务进行中' });
+    const tenantId = session.tenantId ?? tenantIdOf(req);
+    const tenant = store.getTenant(tenantId);
+    const active = activeTenantRuns.get(tenantId) ?? 0;
+    if (tenant && tenant.maxActiveRuns > 0 && active >= tenant.maxActiveRuns) {
+      return res.status(429).json({
+        error: `租户 ${tenantId} 的并发任务配额已用尽（${tenant.maxActiveRuns}）。请等待现有任务结束或由管理员调整 maxActiveRuns。`,
+      });
+    }
+    if (tenant && tenant.maxCostUsd > 0) {
+      const spent = store.aggregateSessions(tenantId).reduce((sum, item) => sum + item.cost, 0);
+      if (spent >= tenant.maxCostUsd) {
+        return res.status(429).json({
+          error: `租户 ${tenantId} 的成本配额已用尽（$${spent.toFixed(5)} / $${tenant.maxCostUsd.toFixed(5)}）。请联系管理员调整 maxCostUsd。`,
+        });
+      }
+    }
+    activeTenantRuns.set(tenantId, active + 1);
     inFlightSessions.set(session.id, true);
     beginRun();
     try {
       await runChat(req, res, session);
     } finally {
       inFlightSessions.delete(session.id);
+      const left = (activeTenantRuns.get(tenantId) ?? 1) - 1;
+      if (left > 0) activeTenantRuns.set(tenantId, left);
+      else activeTenantRuns.delete(tenantId);
       endRun();
     }
   });
@@ -58,6 +80,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
   // runChat 内部的提前返回直接返回 Express 响应对象（void | Response）
   const runChat = async (req: Request, res: Response, session: Session): Promise<void | Response> => {
     const { message, model, provider: providerId, systemPrompt: systemPromptParam, resume } = req.body ?? {};
+    const tenantId = session.tenantId ?? tenantIdOf(req);
     // 断点续跑：resume=true 时不需要新消息，从断点历史继续（中断的任务不白跑）
     if (!resume && !message?.trim()) return res.status(400).json({ error: '消息不能为空' });
     // 编码防御：拒绝含替换符/孤立代理项的消息（防外部工具写入乱码）
@@ -92,7 +115,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 经济性（harness 管理认知资源）：会话累计成本超预算 → 注入成本警告
     // （不是"请 LLM 自觉节约"，而是 harness 直接告诉它预算边界）
     // M1：成本汇总走 SQL 聚合（不再全量 listMessages 拉消息正文）
-    const sessionCost = store.aggregateSessions().find((a) => a.sessionId === session.id)?.cost ?? 0;
+    const sessionCost = store.aggregateSessions(session.tenantId ?? tenantIdOf(req)).find((a) => a.sessionId === session.id)?.cost ?? 0;
     const costBudget = kernel.config.get<number>('budget.maxSessionCost', 0);
     // 会话级成本硬上限（实时熔断）：总预算 - 会话历史累计 = 本任务剩余预算。
     // 剩余 ≤ 0 时不传（runner 不熔断——历史已超预算时由下方警告提示收敛，避免卡死续跑）。
@@ -115,7 +138,8 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 世界状态（context）：LLM 需要知道自己身处的世界——工作区、模式、可用工具、模型。
     // 内容只含会话内稳定事实（不含时间戳等易变项），同一会话内字节级稳定，
     // 不破坏 L3 前缀缓存；工作区/模式变更时内容随之更新（前缀失效一次，符合"世界变了"）。
-    const sandboxNow = kernel.config.get<string>('sandboxRoot', kernel.rootDir);
+    const tenantSandbox = tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantId);
+    const sandboxNow = tenantSandbox;
     const worldState = [
       '【世界状态】',
       `- 沙箱根目录（工作区，文件工具路径相对此）: ${sandboxNow}`,
@@ -143,7 +167,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // 计划模式状态机：1=待出计划（不注入工具，强制先出计划）→ 2=已出计划待确认（放行工具）→ 0
     const planPending = session.planPending ?? 0;
     const roleToolsOverride = roleDef?.tools === 'readonly'
-      ? kernel.plugins.capabilities('tool').map((c) => c.tool).filter((t) => chat.ROLE_READONLY_TOOLS.has(t.name))
+      ? kernel.plugins.tools().filter((t) => chat.ROLE_READONLY_TOOLS.has(t.name))
       : undefined;
     const toolsOverride = session.mode === 'plan' && planPending === 1 ? [] : roleToolsOverride;
 
@@ -180,7 +204,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     let history: LLMMessage[];
     let executionId: string = randomUUID();
     let turnOffset = 0;
-    let restoredToolResults: { name: string; ok: boolean }[] | undefined;
+    let restoredToolResults: { name: string; ok: boolean; evidence?: import('../../kernel/types').ToolEvidence[] }[] | undefined;
     let restoredCostUsd = 0;
     if (resume) {
       // 断点续跑：用 checkpoint 的完整历史（含工具回填），末尾加恢复提示——
@@ -198,15 +222,21 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
       if (cp.runId && store.hasPendingToolEffects(cp.runId)) {
         return res.status(409).json({ error: '断点包含结果未知的工具副作用，已阻止自动重放；请人工核对外部状态后发起新任务' });
       }
+      const pendingStep = cp.step?.phase === 'tool_pending' ? cp.step.pendingTool : undefined;
       history = [
         ...cp.history as LLMMessage[],
-        { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' },
+        pendingStep
+          ? {
+            role: 'system',
+            content: `【步骤恢复】上次中断发生在工具 ${pendingStep.name}（副作用:${pendingStep.sideEffect ?? 'external'}，参数:${pendingStep.argsPreview ?? '略'}）执行期间，该调用结果未知。请重新核对当前状态后决定是否重试；写入/外部副作用若账本未完成会被执行器阻止。`,
+          }
+          : { role: 'system', content: '【任务恢复】任务曾被中断，请从断点继续完成未竟的目标；已有观察（工具结果）在上下文中可直接使用。' },
       ];
       executionId = cp.runId ?? executionId;
       taskContract = cp.task;
       restoredToolResults = cp.toolResults;
       restoredCostUsd = cp.costUsd ?? 0;
-      turnOffset = cp.turn + 1;
+      turnOffset = pendingStep ? cp.turn : cp.turn + 1;
       // H13：断点续跑同样注入成本预警（超预算的续跑更应收敛）
       history = appendCostWarning(history);
     } else {
@@ -365,6 +395,8 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         scope: session.id,
         // 工具上下文会话 ID：todo 等插件把状态挂到具体会话
         sessionId: session.id,
+        tenantId,
+        sandboxRoot: tenantSandbox,
         signal: ac.signal, systemPrompt, tools: toolsOverride,
         // P 契约：注入 server 侧压缩能力（封装 compact.ts）——agent 每轮预算检查
         // 超限时调用 compactFn 就地压缩历史（长任务不被上下文窗口卡死）。
@@ -391,11 +423,11 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         },
         // 断点续跑：每轮工具执行完自动持久化完整历史（中断不白跑；resume 从断点继续）。
         // 必须存完整字段（tool_calls/tool_call_id 配对），否则恢复时 provider 校验失败。
-        onCheckpoint: (turn, hist, evidence) => {
+        onCheckpoint: (turn, hist, evidence, step) => {
           store.saveCheckpoint(session.id, turn, hist.map((m) => ({
             role: m.role, content: m.content ?? null,
             tool_calls: m.tool_calls, tool_call_id: m.tool_call_id,
-          })), executionId, taskContract, evidence?.toolResults, evidence?.costUsd);
+          })), executionId, taskContract, evidence?.toolResults, evidence?.costUsd, step);
         },
         // 发送序列快照同步（assistant 含 tool_calls / tool 含 tool_call_id / 注入消息）：
         // DB = 发送序列的忠实镜像 → 跨 run 组装与上 run 序列构成纯追加 → L3 前缀逐字节延续。

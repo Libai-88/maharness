@@ -38,10 +38,11 @@ npm run start:all  # 生产模式：构建前端后单端口启动 → http://lo
 - **对话**：输入消息，Enter 发送。Agent 会自动调用工具（读文件/写文件/列目录）并展示执行过程。
 - **模型切换**：右上角下拉切换已配置的 Provider 模型（DeepSeek/OpenAI/通义…）。
 - **会话模式**：右上角切换 普通 / 计划 / 目标。计划模式先出计划、确认后执行；目标模式自动建计划推进。
+- **计划状态机**：步骤只允许 pending → in_progress/done/blocked、blocked → in_progress、done → 重新打开等合法迁移；`complete_goal` 在仍有未完成步骤时拒绝收尾；重新打开步骤会清除计划完成位。
 - **斜杠命令**：输入框输入 `/` **弹出命令面板**——方向键选择、Enter 执行、Tab 补全、Esc 关闭；命令直接执行（不消耗 LLM）——`/help` 全部命令、`/new` 新会话、`/clear` 清空、`/plan` `/goal` `/normal` 切模式、`/model <名称>` 切模型。
 - **上下文管理**：会话历史超出预算（默认 60000 tokens，`context.maxTokens` 可调）时自动截断较早消息并注入说明，全程在轨迹面板可见。
 - **文件 Tab（工作区）**：左侧「文件」Tab —— 添加/切换工作区（Agent 文件工具的沙箱边界，切换立即生效），浏览文件树、点击文件预览内容。
-- **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 技能包 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` / `get_skill_file` 按需读取技能指南与技能包内多文件资源（agents/references/templates/shared/scripts），实现自我设计。
+- **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 技能包 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` / `get_skill_file` 按需读取技能指南与技能包内多文件资源（agents/references/templates/shared/scripts），实现自我设计；frontmatter 支持 `version`、`requires`、`allowed-tools`，缺失依赖会进入契约告警并按会话执行工具白名单；覆盖安装前自动保留 5 份历史快照，可用 `rollback_skill` 回滚。
 
 ## 学术智能体（ARS 融合）
 
@@ -53,8 +54,8 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
 - **academic-pipeline**：10 阶段全流程编排——研究→写作→完整性核查→评审→修改→定稿（强制人机确认检查点）
 
 直接用自然语言触发（如"帮我做 XX 的文献综述""写一篇关于 XX 的论文""审这篇稿子"），学术 persona（`core/academic`）自动路由到对应技能并按其工作流执行：技能正文与子代理角色定义经 `get_skill`/`get_skill_file` 读取，研究席位经 `run_subagent`/`run_parallel` 派发，产物写入当前工作区。完整设计与适配清单见 [docs/ARS-学术智能体融合.md](docs/ARS-学术智能体融合.md)。
-- **插件面板**：左侧「插件」Tab —— 查看所有插件状态，一键启用/停用/重载。
-- **统计面板**：左侧「统计」Tab —— 全局概览（会话/消息/tokens/成本/截断次数）、本次运行明细、每会话上下文用量（估算 token 与预算对比、截断状态）、三层缓存命中率（L1 语义问答 / L2 工具结果 / L3 prompt 前缀复用）与综合命中率。
+- **插件面板**：左侧「插件」Tab —— 查看所有插件状态，一键启用/停用/重载。工作台已提供任务、灵感、项目、复盘与数据备份。
+- **统计面板**：左侧「统计」Tab —— 全局概览（会话/消息/tokens/成本/截断次数）、本次运行明细、每会话上下文用量（估算 token 与预算对比、截断状态）、三层缓存命中率（L1 语义问答 / L2 工具结果 / L3 prompt 前缀复用）与综合命中率；「生态健康」聚合插件运行/错误、MCP server 状态/熔断/OAuth 与当前租户会话数。
 - **运行轨迹**：右上角「运行轨迹」—— 实时显示每次 LLM 调用与工具执行的耗时、token、成本、缓存命中（黑箱解药）。
 
 ## 安全模型（机器强制，不依赖提示词）
@@ -69,6 +70,7 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
   （`approval` 声明或 `assessApproval` 按参数动态判定，判定函数抛错按"需要审批"处理）；
   高危工具的 handler 另做二次校验（`approved` / 用户策略放行 `policyApproved` 之外一律拒绝）。
   审批全程入 Trace；用户拒绝不会被记成"失败教训"。
+- **审批审计可追溯**：请求与决策持久化到 `approval_requests`（租户、会话、工具、摘要、参数、创建/过期时间、approved/rejected/expired/withdrawn），`GET /api/approvals/history` 可按租户/会话查询；审计写入失败不影响审批本身。
 - **PowerShell 默认需审批**：白名单是"每段首词是只读 cmdlet"**且**"参数位不含可执行构造"——
   脚本块只允许 `$_` 属性 + 比较/逻辑运算符的安全子集，出现类型字面量 / `::` 静态成员 /
   `$()` 子表达式 / 赋值 / 调用运算符即回到审批（否则 `Get-ChildItem | Where-Object { [IO.File]::Delete('x') }`
@@ -100,11 +102,15 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
     `MAHARNESS_TLS_CERT`/`MAHARNESS_TLS_KEY`（成对），服务以 HTTPS 监听 `MAHARNESS_BIND`；
     Host/Origin 白名单按实际域名经 `MAHARNESS_ALLOWED_HOSTS/ORIGINS` 显式扩展。
     插件仍在宿主进程执行，remote 只解决传输与凭据层，不等价于多租户隔离。
+    当前验收基线为 local/trusted 的进程级隔离（静态审查、独立子进程、文件/网络守卫、配额）；
+    容器级强隔离是可选 L3 provider，未具备时 remote/team 保持 fail-closed。
 - **密钥存储**：Provider 的 api_key 以 AES-256-GCM 落库，API 只回掩码；主密钥文件在 Windows 上
   用 `icacls` 收 DACL；解密失败标 `keyBroken` 并显示出来，不再静默当空串用；
   已有密文时拒绝静默重建主密钥（重建须显式 `MAHARNESS_ALLOW_SECRET_KEY_RESET=1` 且先备份原文件）。
 - **技能供应链**：技能包同步先落临时目录、按锁文件清单逐文件校验，再原子换入——
   不留半成品、不残留上一版；`force` 不等于放弃校验。
+- **技能依赖图**：`skills-lock.json` 支持 semver `version` 与 `requires`（数组 `name@range` 或对象 `{ name: range }`）；缺失依赖、版本不满足和循环依赖在同步前拒绝。
+- **技能路由评测**：技能索引打分统一使用 `triggers` / `applies-when` / `reject-when`；`npm run skill:eval` 对固定 prompt 做 top-K 路由回归，防止技能索引静默选错。
 
 ### 已知边界（诚实版）
 
@@ -112,7 +118,7 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
    `data/`，也能读服务端进程的环境变量；浏览器相对本机其它进程**没有任何额外特权**。
    所以上面的凭据门挡的是"无意图的本机调用"（其它工具/脚本/端口扫描/被注入的插件），
    不是也不是想要成为隔离边界——真正的隔离要靠单独的 OS 用户或容器。
-2. 无多用户/多租户模型，没有会话鉴权，不适合暴露到公网或局域网共享。
+2. 租户是文件级逻辑分区，不是进程级隔离：default 使用全局工作区，其他租户的文件根位于 `<工作区>/.tenants/<tenantId>`；Agent 工具、子代理、文件 API 与 Git API 都按租户根解析。Provider、人设、技能与插件配置仍是全实例共享，变更仅 admin。迁移前可用 `npm run tenant:backup -- --tenant <id>` 快照，失败时用 `tenant:restore` 回滚。不要把不同信任级别的用户放进同一个实例；remote/team 在强隔离缺失时 fail-closed。
 3. 审批凭据目前同时经 `GET /api/approvals` 下发，因此它只把"代批"的门槛从
    "知道 id"抬到"必须先列举且凭据单次有效"；要彻底关闭请启用 `MAHARNESS_API_TOKEN`。
 4. `MAHARNESS_API_TOKEN` 一旦启用，页面需在设置→高级→安全 录入同一个值，
@@ -129,6 +135,8 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
 | L1 语义问答 | 自研字符 bigram Dice 相似度（免 embedding API，始终可用）；相同/近似问题命中直接返回缓存答案 | 完全跳过 LLM 调用，成本 0（回答带 ⚡缓存命中 标记） |
 | L2 工具结果 | hash(工具+参数)+文件 mtime/size 校验，TTL 30 分钟 | 重复工具调用不重算（读文件/列目录/搜索） |
 | L3 前缀复用 | 消息"只追加不重写"吃 provider KV cache，Agent 循环统计公共前缀 token | 多轮对话输入成本按 provider 缓存折扣计费 |
+
+每次 L1/L2 命中都在 Trace 中记录可解释来源：匹配方式、命名空间、作用域、剩余 TTL 与命中次数；命中不再只是一个布尔值。
 
 ## 现场写插件（核心能力）
 
@@ -175,13 +183,39 @@ export default {
 
 工作闭环：**Agent 想要新能力 → create_plugin（或 write_file）写插件 → 保存即热加载 → plugin_status 验证 → 失败则读错误修复 → 下一轮对话即可使用新工具**。内核与 core/ 目录保持不变，扩展永远发生在外部插件空间。
 
+插件源码只允许相对导入与安全 Node 内置模块；需要第三方 npm 包时，由管理员把包名写入 `config.json` 的 `plugins.allowedDependencies`。静态审查与隔离试运行通过后，依赖清单会写入插件 manifest。
+
 ## 2026 迭代能力
 
 - **Agent 回归评测**（`npm run eval`）：确定性回放 golden 场景（`evals/cases/`），断言工具序列/最终答案/L1 缓存命中——agent 循环（决策-行动-观测/钩子/缓存）的回归保护，零 API 成本。可用 `npm run eval -- --record <name> <task>` 在真实 provider 下录制新场景。
+- **真实模型 live 评测**（`npm run eval:live`）：从 `EVAL_*` 或 `NEWAPI_*` 读取模型配置，按 `evals/live-cases.json` 采样回答，再用 LLM-as-judge 按 rubric 打分；无 key 时明确跳过。它测模型行为，补偿确定回放测不到的泛化与指令遵循。
 - **任务复杂度模型路由**：`config.json` 配置 `agent.modelRouting`（任务类型 → provider，如 `{ "问答": "deepseek", "代码": "deepseek@deepseek-reasoner" }`）——按 `classifyTask` 让简单任务走便宜模型、复杂任务走强模型；命中 `model-route` 入 Trace 可观测。
+- **Provider Gateway**：`service:provider-gateway` 统一暴露 Provider、模型能力、任务/能力路由、健康与 embedding；`GET /api/providers/gateway` 提供不含地址和密钥的只读快照。
 - **对抗审查子代理**：`run_review` 工具用全新上下文的独立审查者审查产出（生成/评估分离），输出 `{verdict, issues, confidence}`；也可 `handoff_to('reviewer')` 把会话交给审查者角色。
-- **分层记忆**：核心记忆块（`set/list/delete_memory_block`，每轮常驻注入）+ 档案记忆（`remember/recall/forget_fact`，按需检索）——agent 用工具自管理的两级记忆。
-- **MCP 客户端**：`config.json` 配置 `mcp.servers`（stdio 或 http 传输），把 MCP 生态工具（filesystem/github/memory 等）拉进能力注册表（`mcp_*` 前缀）；`mcp_status` 查看连接状态。
+- **分层记忆**：核心记忆块（`set/list/delete_memory_block`，每轮常驻注入）+ 档案记忆（`remember/recall/forget_fact`，按需检索）——agent 用工具自管理的两级记忆；事实与核心块都按租户隔离，事实带来源、置信度、TTL、撤回与冲突关系。
+- **MCP 客户端**：`config.json` 配置 `mcp.servers`（stdio 或 http 传输），把 MCP 生态工具（filesystem/github/memory 等）拉进能力注册表（`mcp_*` 前缀）；`mcp_status` 查看连接状态、熔断健康与 OAuth 状态，`mcp_reconnect` 在 server 重启或令牌轮换后重连并刷新工具。HTTP server 支持 `headers`、`auth: { type: "bearer", tokenEnv: "MCP_TOKEN" }`、401 后的 `auth.refresh` 换新，以及 OAuth 2.1 授权码 + PKCE（`mcp_oauth_login` 生成授权链接，`mcp_oauth_complete` 用回调 code 换 token，token 存插件私有存储并自动 refresh）。`tools` / `resources` / `prompts` 都是显式 allowlist；`mcp_registry_search` / `mcp_registry_install` 可搜索并安装 registry 条目，但只接受 npm stdio（固定 `npx -y` 包）或 https remote，registry 提供的 env/命令模板不直接落地。可用 `maxCallsPerMinute` / `maxConcurrentCalls` 限制资源；`circuitBreaker.failureThreshold` / `cooldownMs` 控制连续失败后的快速失败与半开探测。
+- **MCP server**：`config.json` 的 `mcp.server.enabled=true` 时，在 `/api/plugins/mcp/rpc` 暴露 JSON-RPC 端点；只有 `mcp.server.tools` allowlist 内的工具可被外部 MCP 客户端调用。
+- **依赖 DAG 多代理**：`run_parallel` 支持 `id` / `dependsOn` / `publish`；无依赖任务同批并发，下游只接收上游结构化结论，成功结果可写入会话共享黑板。
+- **工具副作用契约**：工具声明 `sideEffect`（none/read/write/external/irreversible）；只读工具恢复时重新观察，写类工具进入副作用账本，并可回传文件、URL、命令等结构化 evidence；任务验收可用 `tool_evidence` 检查具体证据。
+- **研究链**：搜索链支持 SearXNG / Tavily / DuckDuckGo，本地去重与重排；`web_fetch` 读取单页，`web_crawl` 并发收集最多 5 页并返回引用清单。
+- **代码诊断**：`repo_map` / `find_symbol` 对 TS/JS 使用 TypeScript AST，对 Python/Go/Rust/Java/C#/C/C++ 等使用 Tree-sitter WASM 提取顶层符号；`project_diagnostics` 运行编译器并返回沙箱内文件的类型错误；配置 `codeIntel.lsp` 后，`lsp_definition` / `lsp_hover` / `lsp_diagnostics` 通过 stdio language server 提供精确跳转、悬停与诊断。
+- **文档结构化**：`read_document` 支持 PDF 页码、PDF 表格检测、DOCX 正文与表格，输出统一为正文加表格行；配置 `document.ocr.command` 后，`ocr_image` 对沙箱内图片执行外部 OCR；再配置 `document.ocr.pdfCommand` 后，`ocr_pdf` 先渲染扫描版 PDF 页面再逐页 OCR。未配置时明确报错而不返回空文本。
+- **浏览器自动化**：可选 Playwright 插件支持打开、快照、点击、输入、按键、网络响应观测、下载与截图；`browser.persistent` 控制持久化/临时 profile，交互与下载默认审批。
+- **插件供应链**：现场插件的外部导入必须命中 `plugins.allowedDependencies`；未列入白名单的 npm 包或危险 Node 内置模块在写入与隔离试运行前拒绝。
+- **插件资源配额**：manifest 的 `limits` 可在工具 handler 前限制频率/并发，并在 `ctx.storage.write` 前限制私有存储字节数与文件数；超限返回可读错误并发布配额事件。
+- **插件运行时声明**：manifest 的 `permissions.runtime` 声明文件/网络/进程能力；声明后加载前审查入口源码，越界直接拒绝，未声明的旧插件保持兼容。
+- **插件进程边界**：manifest 的 `execution: { mode: "process" }` 把只提供 tool 能力的插件放入独立子进程：V8 堆上限、单次调用硬超时、最小环境透传，崩溃不带崩宿主；`stop/unload` 同时终止子进程。`permissions.runtime.network=allowlist` + `networkAllowlist` 在子进程内包住 fetch/http/https/net/tls/dgram，按主机与端口阻断未授权出口；`permissions.runtime.filesystem=none|storage|sandbox` 在子进程内包住 `node:fs` 与 `fs.promises`，按插件存储目录、工作区根和只读资产根做路径判定，非 `full` 声明必须使用 `execution.mode=process`。该边界解决崩溃、资源与声明式出口/路径策略，不替代 OS 账户/容器级安全隔离。
+- **插件锁文件**：`npm run plugin:lock` 生成 `plugins-lock.json`，记录版本、10 位源码聚合哈希、兼容范围与权限；`plugins.enforceLock=true` 时用户插件加载前逐项校验，任一漂移即拒绝。`npm run plugin:lock:verify` 供发布门禁使用。
+
+## 团队与租户（逻辑隔离）
+
+设置 → 安全 可切换当前租户；API 通过 `x-maharness-tenant` 选择租户。admin token 可读写，`MAHARNESS_READONLY_TOKEN` 只能读取且绑定 `MAHARNESS_READONLY_TENANT`。`/api/tokens` 可创建绑定租户的 admin/member/readonly token：数据库只存 sha256 哈希，token 仅在创建响应展示一次，支持过期与吊销；member/readonly 的 Header 不能横穿绑定租户。
+
+会话、消息、统计、Trace 查询与审批按租户过滤：不属于当前租户的会话统一返回 404，跨租户审批不可见。`/api/tenants` 提供租户注册表，`maxSessions` 控制单租户会话配额，`maxActiveRuns` 控制并发任务配额，`maxCostUsd` 控制累计成本配额，`maxStorageBytes` 控制工作区存储配额（`0` 为不限制）；成本/会话超限返回 429，存储超限返回 413。
+
+长任务可通过 `POST /api/sessions/:id/resume-at`（`dueAt` 或 `delayMs`）安排到点续跑；`GET /api/schedules` 查看当前租户计划，`DELETE /api/schedules/:id` 取消。调度器只恢复已有 checkpoint 的会话，不注入新提示词；`409`/网络错误最多重试 3 次。
+
+工作区、Provider、人设、技能与插件配置属于管理员维护的共享基础设施。default 租户的文件根是全局工作区；其他租户自动落到 `<工作区>/.tenants/<tenantId>`，Agent 工具、子代理、文件 API 与 Git API 使用同一租户根。切换工作区会改变全局基座，租户根随之迁移。租户仍是**文件级逻辑分区**，不是进程或信任边界；不可信用户不应共享同一个实例。
 
 ```json
 { "agent": { "modelRouting": { "问答": "deepseek", "代码": "deepseek@deepseek-reasoner" } },
@@ -197,8 +231,9 @@ Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外�
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
 | `<NAME>_PRICE_IN` / `_PRICE_OUT` | — | 覆盖价格（USD/百万 token，用于成本核算） |
-| `EMBEDDING_BASE_URL/API_KEY/MODEL` | 未设 | 三者齐备才激活 L1 向量召回；否则走自研 bigram Dice（始终可用） |
+| `EMBEDDING_BASE_URL/API_KEY/MODEL` | 未设 | 三者齐备才激活 L1 语义缓存、长期记忆向量召回和技能语义路由；否则走自研 bigram + 置信度/时效评分（始终可用） |
 | `TAVILY_API_KEY` | 未设 | 联网搜索用 Tavily；未配置自动降级 DuckDuckGo |
+| `SEARXNG_BASE_URL` | 未设 | 自托管 SearXNG 地址（如 `http://127.0.0.1:8080`）；配置后优先于 Tavily / DuckDuckGo |
 | `SEARCH_PROXY` | 未设 | DuckDuckGo/Tavily 搜索服务请求走无凭据 HTTP(S) 代理（如 `http://127.0.0.1:7897`）；拒绝其他协议、凭据、查询参数和片段；用户提供的网页抓取 URL 直连并固定到已校验 IP |
 | `SANDBOX_ROOT` | 启动目录 | 文件工具与文件 API 的沙箱根（防穿越 + realpath） |
 | `PORT` | `3000` | 服务端口 |
@@ -212,6 +247,10 @@ Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外�
 | `AGENT_ALLOW_PRIVATE_URLS` | 未设 | 放行内网/回环地址（连本机 Ollama 等）；**会同时关闭 SSRF 防护**，仅在明确需要时开 |
 | `AGENT_ALLOW_CORE_EDIT` | 未设 | 放开 `kernel/`、`core/chat/` 写保护（开发 agent 自身时用；进程内首次判定后固化，改完需重启） |
 | `MAHARNESS_API_TOKEN` | 未设（关闭） | 变更类端点需带 `x-maharness-token`；启用后页面需在 设置→高级→安全 录入同值 |
+| `MAHARNESS_READONLY_TOKEN` | 未设（关闭） | trusted/remote 模式下的只读角色 token：可读 API，变更类请求仍必须使用 admin token |
+| `MAHARNESS_READONLY_TENANT` | `default` | 只读 token 绑定的租户；不匹配的 `x-maharness-tenant` 一律 403 |
+| `MAHARNESS_DEFAULT_TENANT` | `default` | 无 `x-maharness-tenant` 头时使用的默认租户；会话列表/消息/删除/统计已按租户隔离 |
+| `MAHARNESS_INTERNAL_BASE_URL` | 空 | remote TLS 模式下调度器回环调用地址（如 `https://127.0.0.1:3000`）；local/trusted 自动使用 `http://127.0.0.1:<PORT>` |
 | `MAHARNESS_APPROVAL_TOKEN` | 未设（不强制） | 强制回答审批回带一次性凭据；前端已自动回带，设 `1` 即生效 |
 | `MAHARNESS_ALLOW_BLANKET_ALLOW` | 未设 | 允许经 HTTP 写入"对全部工具放行"的策略规则（默认需 `confirm:true` 显式确认） |
 | `MAHARNESS_ALLOW_SECRET_KEY_RESET` | 未设 | 允许在主密钥文件异常且库中已有密文时重建密钥（默认拒绝并备份原文件） |
@@ -228,15 +267,20 @@ web-agent/
 ├─ core/          # 核心插件（同样走插件机制；从内容快照目录加载，非用户插件目录）
 │  ├─ chat/       #   Agent 执行器（service:runner 默认实现）+ OpenAI/Anthropic/Ollama 三协议客户端
 │  ├─ tools-fs/   #   文件工具（沙箱 + 编码识别 + L2 缓存 + 敏感写审批）
+│  ├─ code-intel/ #   代码导航（repo map + 符号查找）
 │  ├─ search/     #   联网搜索（Tavily / DuckDuckGo 降级 + 可选代理 + SSRF 防护）
 │  ├─ memory/     #   长期记忆（分层：核心块 + 档案事实；失败教训自动记忆）
+│  ├─ blackboard/ #   会话级共享黑板（多代理结构化中间结果）
 │  ├─ goal-plan/  #   多步目标计划模式（+ planner 角色）
 │  ├─ powershell/ #   PowerShell 执行器（只读白名单 + 参数位代码检测 + 危险命令审批）
 │  ├─ subagent/   #   子代理与对抗审查（run_subagent / run_review，只读白名单）
 │  ├─ parallel/   #   并行小队（run_parallel：独立轨迹 + 预算均分）
 │  ├─ todo/       #   会话级待办 + 看板面板（api 能力 + nav 声明）
-│  ├─ mcp/        #   MCP 客户端（stdio / HTTP；env 白名单透传 + 默认需审批）
+│  ├─ mcp/        #   MCP 客户端 + 可选 server 端点（stdio / HTTP；env 白名单透传 + 默认需审批）
 │  ├─ vision/     #   图像：登记 + 借道多模态模型分析（图片不进主上下文）
+│  ├─ document/   #   文档读取（PDF / DOCX 文本抽取；预留 OCR/表格）
+│  ├─ browser/    #   浏览器自动化（Playwright；默认关闭）
+│  ├─ otel/       #   可选 OTLP/HTTP trace 导出
 │  ├─ rules/      #   用户规则（提示规则 → persona；策略规则 → allow/deny/审批）
 │  ├─ skills/     #   技能系统（内置 + 技能包 + 项目 + 用户；相关性索引）
 │  ├─ evolve/     #   自进化（run 结束自动提案，人工采纳后入技能库）
@@ -245,7 +289,7 @@ web-agent/
 ├─ plugins/       # ★ 现场插件目录（热加载；Agent 自我扩展的落点）
 ├─ vendor/        # ★ ARS 学术技能包（上游零修改：deep-research / academic-paper / reviewer / pipeline）
 ├─ server/        # Express + SSE API（routes/ 按资源拆分；模式/角色策略在 core/chat/policy.ts）
-├─ ui/            # React + Vite 前端
+├─ ui/            # React + Vite + Tailwind CSS v4 + shadcn/ui 前端
 ├─ data/          # SQLite 会话存储 + traces/ JSONL 审计日志
 └─ docs/          # 架构设计文档（含 ARS 融合设计）
 ```

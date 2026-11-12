@@ -16,11 +16,11 @@
  *    前端能显示「当前审批门已被策略整体放行」而不是靠 401/无审批反推。
  */
 import type { Express } from 'express';
-import { existsSync, readFileSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { RouteDeps } from './shared';
-import { loadPolicyRules } from '../../kernel/rules';
+import { dryRunPolicy, isBlanketAllow, isWildcardTool, loadPolicyRules, validatePolicyRules } from '../../kernel/rules';
 import type { PolicyRule } from '../../kernel/rules';
 import { atomicWriteFileSync, ConcurrentWriteError, fileRevisionSync } from '../../kernel/atomic-file';
 
@@ -34,16 +34,10 @@ interface RulesService {
 }
 
 const SAFE_NAME = /^[\w.\u4e00-\u9fa5-]{1,64}\.md$/;
+const POLICY_HISTORY_LIMIT = 20;
+const SAFE_HISTORY_NAME = /^[a-z]+-[\w.-]+\.json$/;
 
-/** 纯通配工具名（`*`、`**`、`?*`……）：不含任何具体字符 → 覆盖所有工具 */
-export function isWildcardTool(tool: string): boolean {
-  return /^[*?]+$/.test(String(tool ?? '').trim());
-}
-
-/** 一条策略规则是否等于「整体关掉审批」 */
-export function isBlanketAllow(r: PolicyRule): boolean {
-  return !!r && r.effect === 'allow' && isWildcardTool(r.tool);
-}
+export { isBlanketAllow, isWildcardTool };
 
 /** 已生效策略里的通配 allow 明细（/api/security 用；文件不存在/解析失败都按空处理） */
 export function blanketAllowIn(files: string[]): { file: string; tool: string; id: string }[] {
@@ -88,6 +82,53 @@ function concurrentRuleWrite(res: { status: (code: number) => { json: (body: unk
   if (!(error instanceof ConcurrentWriteError)) return false;
   res.status(409).json({ error: '规则文件已被其他写入者修改，请重新读取后再保存' });
   return true;
+}
+
+function policyHistoryDir(dataDir: string): string {
+  return join(dataDir, 'rules-policy-history');
+}
+
+/** 写入前保存上一版策略；只保留最近 N 份，失败不阻断正式写入（回滚是增强，不是写入前置条件）。 */
+function snapshotPolicy(file: string, scope: 'global' | 'project', dataDir: string): string | null {
+  try {
+    if (!existsSync(file)) return null;
+    const dir = policyHistoryDir(dataDir);
+    mkdirSync(dir, { recursive: true });
+    const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+    const name = `${scope}-${stamp}-${randomUUID().slice(0, 8)}.json`;
+    writeFileSync(join(dir, name), readFileSync(file, 'utf-8'), 'utf-8');
+    const entries = readdirSync(dir)
+      .filter((item) => item.startsWith(`${scope}-`) && item.endsWith('.json'))
+      .sort()
+      .reverse();
+    for (const stale of entries.slice(POLICY_HISTORY_LIMIT)) {
+      try { unlinkSync(join(dir, stale)); } catch { /* 历史清理失败不影响主写入 */ }
+    }
+    return name;
+  } catch {
+    return null;
+  }
+}
+
+function listPolicyHistory(dataDir: string, scope?: 'global' | 'project'): {
+  name: string; scope: 'global' | 'project'; createdAt: number; bytes: number;
+}[] {
+  const dir = policyHistoryDir(dataDir);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((name) => SAFE_HISTORY_NAME.test(name) && (!scope || name.startsWith(`${scope}-`)))
+    .map((name) => {
+      const full = join(dir, name);
+      const stat = statSync(full);
+      return {
+        name,
+        scope: name.split('-')[0] as 'global' | 'project',
+        createdAt: stat.mtimeMs,
+        bytes: stat.size,
+      };
+    })
+    .sort((a, b) => b.createdAt - a.createdAt)
+    .slice(0, POLICY_HISTORY_LIMIT);
 }
 
 export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
@@ -176,6 +217,71 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
   });
 
   // 策略规则：整表写入（scope=global → data/rules.json；project → <workspace>/.maharness/rules.json）
+  app.post('/api/rules/policy/dry-run', (req, res) => {
+    const s = svc();
+    if (!s) return res.status(503).json({ error: 'rules 插件未加载' });
+    const candidate = Array.isArray(req.body?.rules) ? req.body.rules as PolicyRule[] : null;
+    if (!candidate) return res.status(400).json({ error: 'rules 须为数组' });
+    const probes = Array.isArray(req.body?.probes) ? req.body.probes as { tool?: unknown; args?: unknown }[] : [];
+    if (probes.length > 50) return res.status(400).json({ error: 'probes 最多 50 条' });
+    const cleaned: PolicyRule[] = [];
+    for (const rule of candidate) {
+      if (!rule || typeof rule !== 'object') return res.status(400).json({ error: '每条规则须为对象' });
+      cleaned.push({ ...rule, id: rule.id || randomUUID().slice(0, 8) });
+    }
+    const issues = validatePolicyRules(cleaned);
+    const fatal = issues.filter((issue) => issue.level === 'error');
+    if (fatal.length) return res.status(400).json({ error: '候选策略存在错误', issues });
+    const probeList = probes
+      .filter((probe) => typeof probe?.tool === 'string' && probe.tool.trim())
+      .map((probe) => ({ tool: String(probe.tool).trim(), args: probe.args ?? {} }));
+    const result = dryRunPolicy(s.policy(), cleaned, probeList);
+    res.json({
+      ok: true,
+      changed: result.changed,
+      diff: result.diff,
+      probes: result.probes,
+      issues,
+      blanketAllow: cleaned.filter(isBlanketAllow).map((rule) => ({ id: rule.id, tool: rule.tool })),
+    });
+  });
+
+  app.get('/api/rules/policy/history', (req, res) => {
+    const scope = req.query.scope === 'project' ? 'project' : req.query.scope === 'global' ? 'global' : undefined;
+    res.json(listPolicyHistory(kernel.paths.data, scope));
+  });
+
+  app.post('/api/rules/policy/rollback', (req, res) => {
+    const s = svc();
+    if (!s) return res.status(503).json({ error: 'rules 插件未加载' });
+    const scope = req.body?.scope === 'project' ? 'project' : 'global';
+    const snapshot = String(req.body?.snapshot ?? '');
+    if (!SAFE_HISTORY_NAME.test(snapshot) || !snapshot.startsWith(`${scope}-`)) {
+      return res.status(400).json({ error: '快照名非法' });
+    }
+    const dir = policyHistoryDir(kernel.paths.data);
+    const source = join(dir, snapshot);
+    if (!within(source, dir) || !existsSync(source)) return res.status(404).json({ error: '快照不存在' });
+    const p = s.paths();
+    const file = scope === 'project' ? join(p.projectRoot, '.maharness', 'rules.json') : p.globalPolicy;
+    if (scope === 'project' && !within(file, p.projectRoot)) return res.status(400).json({ error: '路径越界' });
+    const expectedRevision = typeof req.body?.revision === 'string' ? req.body.revision : undefined;
+    if (!expectedRevision) return res.status(428).json({ error: '回滚前须携带当前策略文件版本' });
+    if (expectedRevision !== fileRevisionSync(file)) return res.status(409).json({ error: '策略文件已被其他写入者修改，请重新读取后再回滚' });
+    const parsed = loadPolicyRules([source]);
+    if (parsed.errors.length) return res.status(400).json({ error: `快照校验失败: ${parsed.errors.join('; ')}` });
+    const parsedFatal = validatePolicyRules(parsed.rules).filter((issue) => issue.level === 'error');
+    if (parsedFatal.length) return res.status(400).json({ error: '快照包含非法规则', issues: parsedFatal });
+    const currentSnapshot = snapshotPolicy(file, scope, kernel.paths.data);
+    try { atomicWrite(file, JSON.stringify({ rules: parsed.rules }, null, 2), expectedRevision); }
+    catch (error) { if (concurrentRuleWrite(res, error)) return; throw error; }
+    s.reload();
+    res.json({
+      ok: true, file, snapshot: currentSnapshot,
+      revision: fileRevisionSync(file), count: parsed.rules.length,
+    });
+  });
+
   app.put('/api/rules/policy', (req, res) => {
     const s = svc();
     if (!s) return res.status(503).json({ error: 'rules 插件未加载' });
@@ -188,6 +294,8 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
       if (!['allow', 'deny', 'require-approval'].includes(r.effect)) return res.status(400).json({ error: `effect 非法: ${r.effect}` });
       cleaned.push({ ...r, id: r.id || randomUUID().slice(0, 8) });
     }
+    const fatal = validatePolicyRules(cleaned).filter((issue) => issue.level === 'error');
+    if (fatal.length) return res.status(400).json({ error: '策略规则非法', issues: fatal });
     // A6-3 内容门：通配 allow（tool 纯通配 + effect=allow）一次写入就把全部工具的审批门
     // 整体关掉，所以经 HTTP 写必须显式确认；具体工具名/glob 不受影响。
     const blanket = cleaned.filter(isBlanketAllow);
@@ -206,6 +314,7 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     if (!expectedRevision) return res.status(428).json({ error: '保存策略前须携带读取到的文件版本' });
     if (expectedRevision !== fileRevisionSync(file)) return res.status(409).json({ error: '策略文件已被其他写入者修改，请重新读取后再保存' });
     const check = loadPolicyRules([file]);
+    const previousSnapshot = snapshotPolicy(file, scope === 'project' ? 'project' : 'global', kernel.paths.data);
     try { atomicWrite(file, JSON.stringify({ rules: cleaned }, null, 2), expectedRevision); }
     catch (error) { if (concurrentRuleWrite(res, error)) return; throw error; }
     const after = loadPolicyRules([file]);
@@ -220,6 +329,7 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
     }
     res.json({
       ok: true, file, count: cleaned.length, revision: fileRevisionSync(file),
+      previousSnapshot: previousSnapshot ?? undefined,
       // 前端据此出横幅：策略已把审批门整体放行（不写进响应就没人知道）
       blanketAllow: blanket.length ? blanket.map((r) => ({ id: r.id, tool: r.tool })) : undefined,
     });

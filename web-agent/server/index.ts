@@ -14,12 +14,17 @@ import express from 'express';
 import { Kernel } from '../kernel';
 import { Store, DEFAULT_PERSONA, hasEncryptedProviderKeys } from './db';
 import { resolveSecretKey } from './secrets';
+import { createSecretBox } from '../kernel/secret-box';
+import { assertTenantStorage, invalidateTenantStorage } from './tenant-quota';
+import { assertTenantToolCall } from './tenant-limits';
 import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './routes';
 import { isSafeWorkspaceRoot } from './routes/workspaces';
 import { policyPosture } from './routes/rules';
 import { approvalTokenRequired } from './routes/approvals';
 import { discoverProviders } from '../core/chat/provider';
+import { globalApprovalBoard } from '../core/chat/approvals';
 import { ClientTracker } from './client-tracker';
+import { Scheduler } from './scheduler';
 import { auditAuthorizationDenial, auditAuthorizationGrant, CredentialFailureLimiter, decideCredentialAuthorization } from './security-policy';
 import { apiContractFor, setApiSchemaHeaders } from './api-contract';
 import { validateAgainstSchema } from '../kernel/validate';
@@ -64,6 +69,29 @@ export function requiredApiToken(): string {
   return String(process.env.MAHARNESS_API_TOKEN ?? '').trim();
 }
 
+/** 只读角色 token：仅在 trusted/remote 的读请求中可用；变更类请求仍必须使用 admin token。 */
+export function readonlyApiToken(): string {
+  return String(process.env.MAHARNESS_READONLY_TOKEN ?? '').trim();
+}
+
+/** 只读 token 绑定的租户；未配置时只能访问 default，防止换 header 横穿租户。 */
+export function readonlyTenant(): string {
+  const raw = String(process.env.MAHARNESS_READONLY_TENANT ?? '').trim();
+  return TENANT_ID_RE.test(raw) ? raw : 'default';
+}
+
+export const TENANT_HEADER = 'x-maharness-tenant';
+const TENANT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+export function tenantFromRequest(req: { headers?: Record<string, unknown> }): string {
+  const raw = req.headers?.[TENANT_HEADER];
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  const candidate = typeof value === 'string' ? value.trim() : '';
+  if (TENANT_ID_RE.test(candidate)) return candidate;
+  const fallback = String(process.env.MAHARNESS_DEFAULT_TENANT ?? '').trim();
+  return TENANT_ID_RE.test(fallback) ? fallback : 'default';
+}
+
 /** 常量时间比较（长度不等直接 false，避免逐字节早退把 token 长度/前缀做成侧信道） */
 function tokenMatches(provided: string, expected: string): boolean {
   if (!provided || !expected) return false;
@@ -97,22 +125,25 @@ export function createApiTokenGuard(
 ): express.RequestHandler {
   return (req, res, next) => {
     const expected = requiredApiToken();
+    const readonly = readonlyApiToken();
     const method = String(req.method ?? '').toUpperCase();
     // local：仅变更类方法受门；trusted/remote（authRequired）：全部 /api 方法（含 GET/SSE）受门
     const LOCAL_DEFAULT = { mode: 'local', bindHost: '127.0.0.1', authRequired: false, approvalEnforced: false } as const;
     const config = deployConfig ?? LOCAL_DEFAULT;
-    if (!MUTATING_METHODS.has(method) && !methodRequiresAuth(config)) return next();
+    const mutating = MUTATING_METHODS.has(method);
+    if (!mutating && !methodRequiresAuth(config)) return next();
+    const accepted = (mutating ? [expected] : [expected, readonly]).filter(Boolean);
     const auditObject = auditRouteObject(req);
     // trusted/remote 下「服务端没配 token」也要拒绝（防御性兜底）；local 门关闭 = 完全放行（既有语义）
-    if (!expected && !config.authRequired) {
+    if (accepted.length === 0 && !config.authRequired) {
       if (kernel) auditAuthorizationGrant(kernel, {
         subject: 'local-client', capability: `http:${method.toLowerCase()}`, object: auditObject,
       }, store);
       return next(); // 本机免 token 模式仍记录通过来源校验的变更
     }
-    if (!expected) {
+    if (accepted.length === 0) {
       // trusted/remote 配置要求鉴权但 token 缺失（理论上启动自检已拦，防御性兜底）
-      return res.status(401).json({ error: '未授权：当前部署模式要求 MAHARNESS_API_TOKEN，但服务端未配置' });
+      return res.status(401).json({ error: '未授权：当前部署模式要求 API token，但服务端未配置' });
     }
     const forwardedFor = req.headers['x-forwarded-for'];
     const clientKey = req.socket?.remoteAddress
@@ -128,15 +159,58 @@ export function createApiTokenGuard(
     const one = Array.isArray(raw) ? raw[0] : raw;
     const bearer = typeof one === 'string' ? /^Bearer\s+(.+)$/i.exec(one.trim()) : null;
     const provided = bearer ? bearer[1].trim() : (typeof one === 'string' ? one.trim() : '');
+    const registered = provided && store ? store.findApiToken(provided) : undefined;
+    if (registered) {
+      if (mutating && registered.role === 'readonly') {
+        if (kernel) auditAuthorizationDenial(kernel, {
+          subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
+          object: auditObject, reason: 'tenant-scope-denied',
+        }, store);
+        return res.status(403).json({ error: 'Forbidden: 只读 token 不能执行变更请求' });
+      }
+      const rawTenant = req.headers[TENANT_HEADER];
+      const headerTenant = Array.isArray(rawTenant) ? rawTenant[0] : rawTenant;
+      const requested = typeof headerTenant === 'string' && TENANT_ID_RE.test(headerTenant.trim())
+        ? headerTenant.trim()
+        : '';
+      if (registered.role !== 'admin' && requested && requested !== registered.tenantId) {
+        if (kernel) auditAuthorizationDenial(kernel, {
+          subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
+          object: auditObject, reason: 'tenant-scope-denied',
+        }, store);
+        return res.status(403).json({ error: 'Forbidden: token 无权访问该租户' });
+      }
+      (req as express.Request & { tenantId?: string }).tenantId = registered.role === 'admin' && requested
+        ? requested
+        : registered.tenantId;
+      (req as express.Request & { apiRole?: string }).apiRole = registered.role;
+      limiter.recordSuccess(clientKey);
+      if (kernel) auditAuthorizationGrant(kernel, {
+        subject: 'api-token', capability: `http:${method.toLowerCase()}`, object: auditObject,
+      }, store);
+      return next();
+    }
+    const matched = accepted.find((candidate) => tokenMatches(provided, candidate));
     const decision = decideCredentialAuthorization({
       enabled: true,
       supplied: !!provided,
-      valid: tokenMatches(provided, expected),
+      valid: !!matched,
     });
     if (decision.allowed) {
+      if (matched === readonly && matched !== expected) {
+        const requested = (req as express.Request & { tenantId?: string }).tenantId ?? 'default';
+        if (requested !== readonlyTenant()) {
+          if (kernel) auditAuthorizationDenial(kernel, {
+            subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
+            object: auditObject, reason: 'tenant-scope-denied',
+          }, store);
+          return res.status(403).json({ error: 'Forbidden: 只读 token 无权访问该租户' });
+        }
+      }
       limiter.recordSuccess(clientKey);
       if (expected && provided && kernel) auditAuthorizationGrant(kernel, {
-        subject: 'api-token', capability: `http:${method.toLowerCase()}`,
+        subject: matched === readonly && readonly !== expected ? 'api-token:viewer' : 'api-token',
+        capability: `http:${method.toLowerCase()}`,
         object: auditObject,
       }, store);
       return next();
@@ -196,11 +270,12 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   const deployConfig: DeployConfig = deploy.config;
   // 数据目录/用户插件目录可经环境变量覆盖（AGENT_DATA_DIR / AGENT_USER_PLUGINS_DIR）：
   // selftest 等嵌入场景用临时目录隔离，不污染生产 DB；不设置时与默认行为完全一致。
+  const secretBox = createSecretBox();
   const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir }, {
     dataDir: process.env.AGENT_DATA_DIR || undefined,
     userPluginsDir: process.env.AGENT_USER_PLUGINS_DIR || undefined,
+    secrets: secretBox,
   });
-  await kernel.start();
 
   // 凭据加密：data/secret.key 主密钥；api_key 加密落库，读取时解密。
   // A7-3：主密钥缺失/异常时不再静默重建——先问「库里是否已有 v1: 密文」（只在异常分支才查，
@@ -209,18 +284,55 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   const keyInfo = resolveSecretKey(kernel.paths.data, {
     hasExistingCiphertext: () => hasEncryptedProviderKeys(kernel.paths.dbFile),
   });
+  secretBox.configure(keyInfo.key);
   if (keyInfo.state !== 'ok') {
     // created（首启）用 log；其余状态都是「用户必须知道」的故障，用 error 级
     const line = `[secret] ${keyInfo.path}：${keyInfo.message}`;
     if (keyInfo.state === 'created') console.log(line);
     else console.error(`[secret] 主密钥异常（${keyInfo.state}）—— ${line}`);
   }
+  await kernel.start();
   Store.autoMaintain(kernel.paths.dbFile);
   const store = new Store(kernel.paths.dbFile, {
     secretKey: keyInfo.key,
     masterKey: keyInfo,
     checkpointRetentionMs: kernel.config.get<number>('checkpoint.retentionDays', 30) * 24 * 60 * 60 * 1000,
   });
+  globalApprovalBoard.onRegister = (approval) => {
+    const session = approval.sessionId ? store.getSession(approval.sessionId) : undefined;
+    store.saveApprovalRequest({
+      id: approval.id,
+      ...(approval.sessionId ? { sessionId: approval.sessionId } : {}),
+      tenantId: session?.tenantId ?? 'default',
+      name: approval.name,
+      summary: approval.summary,
+      args: approval.args,
+      createdAt: approval.createdAt,
+      expiresAt: approval.expiresAt,
+    });
+  };
+  globalApprovalBoard.onResolve = (id, approved, reason) => {
+    store.decideApprovalRequest(id, approved ? 'approved' : 'rejected', reason);
+  };
+  globalApprovalBoard.onWithdraw = (id) => {
+    store.decideApprovalRequest(id, 'withdrawn', 'withdrawn');
+  };
+  kernel.tenantQuota = {
+    assertWritable(tenantId: string, additionalBytes: number): void {
+      assertTenantStorage({
+        base: kernel.config.get<string>('sandboxRoot', kernel.rootDir),
+        tenantId,
+        limitBytes: store.getTenant(tenantId)?.maxStorageBytes ?? 0,
+        additionalBytes,
+      });
+    },
+    assertToolCall(tenantId: string): void {
+      assertTenantToolCall(tenantId, store.getTenant(tenantId)?.maxToolCallsPerMinute ?? 0);
+    },
+    invalidate(tenantId: string): void {
+      invalidateTenantStorage(tenantId);
+    },
+  };
   seedDefaults(store);
   // A7-2：把「密钥不可解」的既成事实打出来（Store 读一遍即完成记账），
   // 否则用户只在真实请求 401 时才发现，归因会指向供应商而不是本机密钥文件。
@@ -329,11 +441,43 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     next();
   });
 
+  // ---- OPS-01：租户作用域（先于鉴权与业务路由；缺省 default 保持兼容）----
+  app.use('/api', (req, _res, next) => {
+    (req as express.Request & { tenantId?: string }).tenantId = tenantFromRequest(req);
+    next();
+  });
+  app.use('/api', (req, res, next) => {
+    const tenantId = (req as express.Request & { tenantId?: string }).tenantId ?? 'default';
+    if (!store.hasTenant(tenantId)) {
+      return res.status(404).json({ error: `租户不存在: ${tenantId}` });
+    }
+    next();
+  });
+
   // ---- A6-b 变更类端点的可选 token 门（紧跟 Host/Origin 之后、业务路由之前）----
   // 覆盖 /api/*（含下方插件 API 挂载点 /api/plugins/*），GET/HEAD 只读不受影响。
   // 未设 MAHARNESS_API_TOKEN 时逐请求透传 = 现有本机免鉴权行为不变。
   // 威胁模型与边界见 createApiTokenGuard 注释：这是「显式授权」门槛，不是进程隔离边界。
   app.use('/api', createApiTokenGuard(kernel, store, new CredentialFailureLimiter(), deployConfig));
+
+  // 团队模式：共享基础设施（Provider/配置/插件/技能/工作区/人设/规则）只允许 admin 变更；
+  // member 可在自己的租户内读写会话、文件、审批与 Trace。local 免 token 模式无 apiRole，保持放行。
+  const ADMIN_ONLY_PREFIXES = [
+    '/providers', '/config', '/plugins', '/skills', '/workspaces', '/personas', '/rules', '/evolve',
+  ];
+  app.use('/api', (req, res, next) => {
+    const role = (req as express.Request & { apiRole?: string }).apiRole;
+    if (!role || role === 'admin') return next();
+    const path = req.path;
+    if (path === '/tenants' || path.startsWith('/tenants/') || path === '/tokens' || path.startsWith('/tokens/')) {
+      return res.status(403).json({ error: 'Forbidden: 需要 admin token' });
+    }
+    if (MUTATING_METHODS.has(String(req.method ?? '').toUpperCase())
+      && ADMIN_ONLY_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+      return res.status(403).json({ error: 'Forbidden: 共享基础设施的变更需要 admin token' });
+    }
+    next();
+  });
 
   // ---- A6/A7 安全姿态只读端点：把「当前哪些门是开着的、密钥是否可用」说清楚 ----
   // 只读、无副作用、不含任何密钥材料（token / api_key / secret.key 一律不外泄）。
@@ -392,7 +536,20 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
 
   const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）
-  registerRoutes(app, kernel, store, tracker);
+  const internalBaseUrl = deployConfig.tls
+    ? String(process.env.MAHARNESS_INTERNAL_BASE_URL ?? '').trim() || undefined
+    : `http://127.0.0.1:${port}`;
+  if (deployConfig.tls && !internalBaseUrl) {
+    console.warn('[scheduler] remote TLS 模式未配置 MAHARNESS_INTERNAL_BASE_URL，到点续跑调度器停用');
+  }
+  const scheduler = internalBaseUrl
+    ? new Scheduler(store, {
+      file: join(kernel.paths.data, 'schedules.json'),
+      baseUrl: internalBaseUrl,
+      token: requiredApiToken() || undefined,
+    })
+    : undefined;
+  registerRoutes(app, kernel, store, tracker, scheduler);
 
   // ---- 插件 API 能力：前端是插件的一部分的数据通道 ----
   // 动态分发（每次请求取当前插件实例）——插件热重载后新路由立即生效，无需重启。
@@ -528,6 +685,8 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
   // 监听成功后的运行期错误：记录不退出（进程存活状态由入口直跑场景的退出码体现）
   server.on('error', (err) => console.error('[server] 运行期错误:', err.message));
+  scheduler?.start();
+  server.on('close', () => scheduler?.stop());
   return { kernel, app, server, tracker, store, closeEnvWatcher };
 }
 

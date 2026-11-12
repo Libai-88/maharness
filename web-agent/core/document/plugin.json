@@ -1,0 +1,7 @@
+{
+  "id": "document",
+  "name": "文档读取",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true
+}

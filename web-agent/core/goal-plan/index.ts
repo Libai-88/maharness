@@ -6,20 +6,18 @@
  * H14 会话隔离：计划按 sessionId 存取（Map + LRU，上限 50），多会话互不串扰。
  */
 import type { Plugin, ToolContext } from '../../kernel/types';
+import { join } from 'node:path';
+import { canTransition, loadPlans, savePlans, MAX_PLANS, type PlanState, type StepStatus } from './store';
 
-export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
-
-export interface PlanState {
-  objective: string;
-  steps: { title: string; status: StepStatus; note?: string }[];
-  current: number;
-  completed: boolean;
-  createdAt: number;
-}
+export type { PlanState, StepStatus } from './store';
 
 // H14 会话隔离：sessionId → 计划（Map 插入序即 LRU 序；上限 50，最旧淘汰）
-const MAX_SESSIONS = 50;
 const plans = new Map<string, PlanState>();
+let plansFile: string | null = null;
+
+function persistPlans(): void {
+  if (plansFile) savePlans(plansFile, plans);
+}
 
 /** 无 sessionId 时的兜底键（单会话/旧执行器兼容） */
 function sessionKey(tctx: ToolContext): string {
@@ -39,10 +37,11 @@ function getPlan(key: string): PlanState | undefined {
 function putPlan(key: string, p: PlanState): void {
   plans.delete(key);
   plans.set(key, p);
-  if (plans.size > MAX_SESSIONS) {
+  if (plans.size > MAX_PLANS) {
     const oldest = plans.keys().next().value; // Map 首键 = 最久未触
     if (oldest !== undefined) plans.delete(oldest);
   }
+  persistPlans();
 }
 
 export default {
@@ -50,6 +49,10 @@ export default {
   name: '目标计划模式',
   version: '0.1.0',
   onLoad(ctx) {
+    plans.clear();
+    plansFile = join(ctx.paths.data, 'plans.json');
+    for (const [key, plan] of loadPlans(plansFile)) plans.set(key, plan);
+
     const notify = (key: string) => {
       const p = plans.get(key);
       if (!p) return;
@@ -129,6 +132,7 @@ export default {
             current: 0,
             completed: false,
             createdAt: Date.now(),
+            updatedAt: Date.now(),
           });
           notify(key);
           return {
@@ -168,12 +172,24 @@ export default {
           const st = p.steps[idx];
           if (!st) return { ok: false, error: `步骤不存在: ${idx}` };
           const status = ['pending', 'in_progress', 'done', 'blocked'].includes(String(args.status)) ? String(args.status) as StepStatus : 'pending';
+          if (!canTransition(st.status, status)) {
+            return { ok: false, error: `非法步骤状态迁移: ${st.status} → ${status}（步骤 ${idx + 1}）` };
+          }
           st.status = status;
           if (args.note) st.note = String(args.note);
+          if (status === 'blocked' && args.note) st.blockedReason = String(args.note);
+          else if (status !== 'blocked') delete st.blockedReason;
+          st.updatedAt = Date.now();
+          p.completed = false;
           if (status === 'in_progress') p.current = idx;
+          else if (status === 'done') {
+            const next = p.steps.findIndex((step) => step.status !== 'done');
+            p.current = next >= 0 ? next : p.steps.length - 1;
+          }
+          p.updatedAt = Date.now();
           putPlan(key, p); // 就地变更后刷新 LRU 近期性
           notify(key);
-          return { ok: true, data: { step: idx + 1, title: st.title, status } };
+          return { ok: true, data: { step: idx + 1, title: st.title, status, current: p.current } };
         },
       },
     });
@@ -195,7 +211,15 @@ export default {
           const key = sessionKey(tctx);
           const p = getPlan(key);
           if (!p) return { ok: false, error: '还没有计划' };
+          const unfinished = p.steps.map((step, index) => ({ step, index })).filter(({ step }) => step.status !== 'done');
+          if (unfinished.length) {
+            return {
+              ok: false,
+              error: `还有 ${unfinished.length} 个步骤未完成：${unfinished.slice(0, 6).map(({ step, index }) => `${index + 1}. ${step.title} (${step.status})`).join('；')}${unfinished.length > 6 ? '；…' : ''}`,
+            };
+          }
           p.completed = true;
+          p.updatedAt = Date.now();
           if (args.summary) p.steps[p.steps.length - 1]!.note = String(args.summary);
           putPlan(key, p);
           notify(key);

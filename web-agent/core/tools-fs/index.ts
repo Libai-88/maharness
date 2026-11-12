@@ -9,11 +9,12 @@
 import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync, openSync, readSync, closeSync, renameSync } from 'node:fs';
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
-import type { CacheLike, Plugin, ToolContext, TraceLike } from '../../kernel/types';
+import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/types';
 import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
 import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/fssearch';
 import type { EditOp } from '../../kernel/fssearch';
+import { reviewPluginWrite } from '../../kernel/plugin-review';
 
 export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
 export type { ReadResult };
@@ -31,14 +32,16 @@ function invalidateFileCaches(tctx: ToolContext): void {
   (tctx.cache as { l1InvalidateSession?: (s?: string) => void }).l1InvalidateSession?.(tctx.sessionId);
 }
 
-function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown): unknown {
+function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown, tenantId?: string): unknown {
   const hit = cache.l2Get(key);
   if (hit.hit) {
-    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key }).finish({ outputSummary: '工具结果缓存命中' });
+    const meta = hit.meta;
+    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+      .finish({ outputSummary: meta ? `L2 ${meta.namespace} 缓存命中（剩余 ${Math.ceil(meta.ttlRemainingMs / 60_000)} 分钟，第 ${meta.hits} 次）` : '工具结果缓存命中' });
     return hit.value;
   }
   const value = load();
-  cache.l2Set(key, value);
+  cache.l2Set(key, value, undefined, tenantId);
   return value;
 }
 
@@ -147,6 +150,9 @@ export default {
   version: '0.2.0',
   onLoad(ctx) {
     const writeNeedsApproval = () => ctx.config.get<boolean>('tools.writeRequiresApproval', false);
+    const pluginReviewOptions = () => ({
+      allowedDependencies: ctx.config.get<string[]>('plugins.allowedDependencies', []),
+    });
     // A2：判定基座 = 沙箱根 ∪ 项目根。二者可以不同（SANDBOX_ROOT 指到别处时，
     // 只按沙箱根算相对路径会让 .env / data/ 的保护整体失效，连 kernel/ 写保护也能绕过）。
     const bases = (sandboxRoot: string) => ({ sandboxRoot, projectRoot: ctx.paths.root });
@@ -202,6 +208,7 @@ export default {
         name: 'list_dir',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         description: '列出单层目录内容（名称、类型、大小、修改时间）。递归找文件请用 glob。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -213,7 +220,7 @@ export default {
           if (!existsSync(dir)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, dir) || '.'}` };
           const st = statSync(dir);
           if (!st.isDirectory()) return { ok: false, error: '目标不是目录' };
-          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)]);
+          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)], { tenantId: tctx.tenantId });
           const result = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
             return readdirSync(dir, { withFileTypes: true }).map((e) => {
               const full = resolve(dir, e.name);
@@ -226,7 +233,7 @@ export default {
               }
               return { name: e.name, ...info };
             }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
-          });
+          }, tctx.tenantId);
           return { ok: true, data: { path: relative(tctx.sandboxRoot, dir) || '.', entries: result } };
         },
       },
@@ -238,6 +245,7 @@ export default {
         name: 'read_file',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         limits: '仅文本文件；单次最多 2000 行 / 100k 字符，超出用 offset 续读',
         output: '{text, encoding, size, path, totalLines, startLine, endLine, nextOffset?}；nextOffset 表示还有后续行',
         description: '读取文本文件（自动识别 UTF-8/UTF-16/GBK）。支持 offset（1 起始行号）/limit（行数）分段读，lineNumbers=true 可给每行加行号前缀。路径相对沙箱根目录。',
@@ -251,7 +259,7 @@ export default {
           },
           required: ['path'],
         },
-        async handler(args: { path?: string; offset?: number; limit?: number; lineNumbers?: boolean }, tctx: ToolContext): Promise<{ ok: boolean; data?: ReadResult; error?: string }> {
+        async handler(args: { path?: string; offset?: number; limit?: number; lineNumbers?: boolean }, tctx: ToolContext): Promise<ToolResult> {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
           if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝读取: ${relative(tctx.sandboxRoot, file)}（密钥与环境配置 .env、内部数据 data/ 不可读）` };
@@ -264,12 +272,13 @@ export default {
           const lineNumbers = args.lineNumbers === true;
           const fingerprint = fileFingerprint(file, 2_000_000);
           const key = fingerprint === undefined ? ''
-            : tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), fingerprint, String(offset), String(limit), lineNumbers ? 'n' : '']);
+            : tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), fingerprint, String(offset), String(limit), lineNumbers ? 'n' : ''], { tenantId: tctx.tenantId });
           const hit = key ? tctx.cache.l2Get(key) : { hit: false };
           if (hit.hit) {
             tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '文件读取缓存命中' });
-            return { ok: true, data: hit.value as ReadResult };
+            const cached = hit.value as ReadResult;
+            return { ok: true, data: cached, evidence: [{ kind: 'file', label: `已读取 ${cached.path}`, ref: cached.path }] };
           }
           const r = readTextSmart(file);
           if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），read_file 不支持；图片/文档类请如实告知用户当前无法读取` };
@@ -281,8 +290,8 @@ export default {
             truncated: s.nextOffset ? true : undefined,
             totalLines: s.totalLines, startLine: s.startLine, endLine: s.endLine, nextOffset: s.nextOffset,
           };
-          if (key) tctx.cache.l2Set(key, result);
-          return { ok: true, data: result };
+          if (key) tctx.cache.l2Set(key, result, undefined, tctx.tenantId);
+          return { ok: true, data: result, evidence: [{ kind: 'file', label: `已读取 ${result.path}`, ref: result.path }] };
         },
       },
     });
@@ -293,6 +302,7 @@ export default {
         name: 'glob',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         limits: '不跟随符号链接；默认忽略 node_modules/.git/dist/build 等；上限 500 条',
         output: '{matches: [{path,size,mtime}], total, truncated, root}',
         description: '按 glob 模式递归查找文件（如 **/*.ts、src/**/*.spec.ts、*.md）。不含 / 的模式按文件名匹配。路径参数相对沙箱根目录。',
@@ -313,7 +323,7 @@ export default {
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.limit) || 200)));
           const snapshot = treeFingerprint(rootAbs, { accept: rel => matchesGlob(rel, pattern), maxFiles: 20_000, maxMs: 8_000 });
           const key = snapshot.complete
-            ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint])
+            ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint], { tenantId: tctx.tenantId })
             : '';
           const data = key ? cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
             const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
@@ -323,7 +333,7 @@ export default {
               truncated: sorted.length >= 20_000 || sorted.length > limit,
               root: relative(tctx.sandboxRoot, rootAbs) || '.',
             };
-          }) : (() => {
+          }, tctx.tenantId) : (() => {
             const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
             return {
               matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size })),
@@ -343,6 +353,7 @@ export default {
         name: 'grep',
         risk: 'low',
         costHint: 'medium',
+        sideEffect: 'read',
         limits: '单文件默认跳过 >2MB；ripgrep 可用时走 rg，回落纯 JS；上限 200 条',
         output: '{matches: [{file,line,text,before?,after?}], files, scannedFiles, truncated}',
         description: '在工作区内按正则（或 literal=true 原文）搜索文件内容，返回 文件:行号:内容。可用 glob 限定文件类型、path 限定目录、contextLines 带上下文行。',
@@ -375,7 +386,7 @@ export default {
             maxTotalContentBytes: 8_000_000,
           });
           const key = snapshot.complete && snapshot.contentComplete
-            ? tctx.cache.makeKey(['grep', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, args.glob ?? '', args.ignoreCase ? 'i' : '', args.literal ? 'F' : '', String(ctxLines), String(limit), snapshot.fingerprint])
+            ? tctx.cache.makeKey(['grep', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, args.glob ?? '', args.ignoreCase ? 'i' : '', args.literal ? 'F' : '', String(ctxLines), String(limit), snapshot.fingerprint], { tenantId: tctx.tenantId })
             : '';
           const cached = key ? tctx.cache.l2Get(key) : { hit: false };
           if (cached.hit) {
@@ -396,7 +407,7 @@ export default {
             if (r.error) return { ok: false, error: r.error };
             data = { ...r, engine: 'js' };
           }
-          if (key) tctx.cache.l2Set(key, data);
+          if (key) tctx.cache.l2Set(key, data, undefined, tctx.tenantId);
           return { ok: true, data };
         },
       },
@@ -409,6 +420,7 @@ export default {
         risk: 'medium',
         costHint: 'low',
         approval: true,
+        sideEffect: 'write',
         limits: '整文件覆写；kernel/、core/chat/ 硬拒，.env 与 data/ 需用户批准',
         description: '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。普通工作区文件写默认免审批（可经 tools.writeRequiresApproval 恢复审批）；但 .env 与 data/ 下的任何写入都必须用户批准，不受该开关影响。',
         parameters: {
@@ -428,10 +440,28 @@ export default {
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
           const gate = sensitiveBypass(file, tctx);
           if (gate) return gate;
+          const review = reviewPluginWrite(tctx.sandboxRoot, file, args.content, pluginReviewOptions());
+          if (review && !review.ok) {
+            return {
+              ok: false,
+              error: `插件源码未通过静态安全审查：${review.issues.map((issue) => issue.message).join('；')}`,
+              data: { path: relative(tctx.sandboxRoot, file), issues: review.issues },
+            };
+          }
+          const nextBytes = Buffer.byteLength(args.content, 'utf8');
+          const previousBytes = existsSync(file) ? statSync(file).size : 0;
+          try { tctx.quota?.assertWritable(Math.max(0, nextBytes - previousBytes)); }
+          catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
           mkdirSync(resolve(file, '..'), { recursive: true });
           atomicWrite(file, args.content);
+          tctx.quota?.invalidate?.();
           invalidateFileCaches(tctx);
-          return { ok: true, data: { path: relative(tctx.sandboxRoot, file), bytes: Buffer.byteLength(args.content, 'utf8') } };
+          const relPath = relative(tctx.sandboxRoot, file);
+          return {
+            ok: true,
+            data: { path: relPath, bytes: Buffer.byteLength(args.content, 'utf8') },
+            evidence: [{ kind: 'file', label: `已写入 ${relPath}`, ref: relPath }],
+          };
         },
       },
     });
@@ -443,6 +473,7 @@ export default {
         risk: 'medium',
         costHint: 'low',
         approval: true,
+        sideEffect: 'write',
         limits: '目标须为已存在的文本文件且 <2MB；oldText 必须与文件内容逐字符一致（含缩进），不唯一时报错',
         output: '{path, edits: [{index, replaced}], bytesBefore, bytesAfter}',
         description: '对已存在文件做精确字符串替换（一次可传多处 edits，全部命中才写盘；任一处未命中或匹配不唯一则整体放弃并逐条报错）。保留原换行风格（CRLF/LF）与 BOM。局部改动的首选工具。',
@@ -492,7 +523,19 @@ export default {
           }));
           const outcome = applyEdits(r.text, normalized);
           if (!outcome.ok) return { ok: false, error: `${outcome.error}（文件未改动）` };
+          const review = reviewPluginWrite(tctx.sandboxRoot, file, outcome.text, pluginReviewOptions());
+          if (review && !review.ok) {
+            return {
+              ok: false,
+              error: `插件源码未通过静态安全审查：${review.issues.map((issue) => issue.message).join('；')}（文件未改动）`,
+              data: { path: relative(tctx.sandboxRoot, file), issues: review.issues },
+            };
+          }
+          const bytesAfter = Buffer.byteLength((bom ? '\ufeff' : '') + outcome.text, 'utf8');
+          try { tctx.quota?.assertWritable(Math.max(0, bytesAfter - st.size)); }
+          catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
           atomicWrite(file, (bom ? '\ufeff' : '') + outcome.text);
+          tctx.quota?.invalidate?.();
           invalidateFileCaches(tctx);
           return {
             ok: true,
@@ -500,8 +543,9 @@ export default {
               path: relative(tctx.sandboxRoot, file),
               edits: outcome.applied,
               bytesBefore: st.size,
-              bytesAfter: Buffer.byteLength(outcome.text, 'utf8'),
+              bytesAfter,
             },
+            evidence: [{ kind: 'file', label: `已编辑 ${relative(tctx.sandboxRoot, file)}`, ref: relative(tctx.sandboxRoot, file) }],
           };
         },
       },
@@ -514,6 +558,7 @@ export default {
         risk: 'high',
         costHint: 'low',
         approval: true,
+        sideEffect: 'irreversible',
         description: '删除沙箱内的文件或空目录。破坏性操作：始终需要用户审批；非空目录会失败（不能递归删除）。',
         parameters: {
           type: 'object',
@@ -540,7 +585,11 @@ export default {
             return { ok: false, error: `删除失败（非空目录不允许递归删除）: ${err instanceof Error ? err.message : String(err)}` };
           }
           invalidateFileCaches(tctx);
-          return { ok: true, data: { removed: rel, type: st.isDirectory() ? 'dir' : 'file' } };
+          return {
+            ok: true,
+            data: { removed: rel, type: st.isDirectory() ? 'dir' : 'file' },
+            evidence: [{ kind: 'file', label: `已删除 ${rel}`, ref: rel }],
+          };
         },
       },
     });
