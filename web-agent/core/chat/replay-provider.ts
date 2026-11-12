@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import type { LLMChunk, LLMMessage, ProviderDef, ChatOptions } from '../../kernel/types';
 
 export interface RecordedRequest {
-  /** 实际发送给 LLM 的消息序列（文本化形态，见 agent.ts textualizeHistory） */
+  /** 实际发送给 LLM 的消息序列 */
   messages: LLMMessage[];
   model?: string;
   /** 响应的完整 chunk 流（delta/reasoning/tool_call/usage/done 全量） */

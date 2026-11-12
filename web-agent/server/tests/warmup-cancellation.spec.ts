@@ -33,7 +33,6 @@ describe('LR-05 warmup cancellation', () => {
     const kernel = {
       plugins: {
         resolveService: () => ({
-          textualizeHistory: (messages: LLMMessage[]) => messages,
           annotateToolDef: (tool: ToolDef) => tool,
         }),
         tools: () => [],

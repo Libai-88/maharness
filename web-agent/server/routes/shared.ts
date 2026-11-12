@@ -65,7 +65,6 @@ export interface ChatService {
   listApprovals: (sessionId?: string) => { id: string; name: string; summary: string; args?: unknown; sessionId?: string; createdAt: number; expiresAt: number }[];
   // 对话能力层共享方法（server 经服务接口访问，不直接 import core/chat 实现——
   // 接口与 core/chat/index.ts 导出的 service 对象保持一致）
-  textualizeHistory: (history: LLMMessage[]) => LLMMessage[];
   compactHistory: (history: LLMMessage[], maxTokens: number, opts?: CompactOptions) => Promise<CompactResult>;
   annotateToolDef: (t: ToolDef) => ToolDef;
   routeForTask: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) =>
@@ -457,7 +456,11 @@ export function openInExplorer(target: string): void {
   const args = process.platform === 'win32' ? [`/select,${target}`] : [target];
   const cmd = process.platform === 'win32' ? 'explorer' : process.platform === 'darwin' ? 'open' : 'xdg-open';
   execFile(cmd, args, { windowsHide: true }, (err) => {
-    if (err) console.warn(`[open] ${target} 失败:`, err.message);
+    // explorer.exe 即使成功打开窗口也常以 exit code 1 结束；把 1 当失败会制造
+    // “命令失败但目录其实已经打开”的假报错。只有真正的启动错误才记录。
+    const benignWindowsExit = process.platform === 'win32'
+      && !!err && (err as NodeJS.ErrnoException & { code?: number }).code === 1;
+    if (err && !benignWindowsExit) console.warn(`[open] ${target} 失败:`, err.message);
   });
 }
 

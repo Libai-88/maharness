@@ -10,7 +10,7 @@
  */
 import type { PersonaDef, Plugin } from '../../kernel/types';
 import { SERVICE_KEYS } from '../../kernel/types';
-import { AgentRunner, defaultRunnerFactory, textualizeHistory, annotateToolDef, redactTraceValue } from './agent';
+import { AgentRunner, defaultRunnerFactory, annotateToolDef, redactTraceValue } from './agent';
 import { compactHistory } from './compact';
 import { routeForCapability, routeForTask, type CapabilityNeed } from './routing';
 import { getProviderHealth } from './provider-health';
@@ -64,7 +64,7 @@ function makeBasePrompt(thinkInEnglish: boolean): string {
     '3. 闭环验证：每个工具调用后核对返回是否符合预期——写操作（写入/删除/执行）尤其要验证结果；',
     '4. 失败哲学：以工具返回为准分析原因，给出替代方案；同一失败不重复超过 2 次，必要时把任务拆小或委派子代理；',
     '5. 结论以观察（工具返回/执行输出）为准；没有新的事实依据，不要自我推翻已正确的结果；',
-    '6. 工具调用的唯一方式是原生 tool_call：严禁在回复正文中书写【工具调用 …】格式的文本来代替真实调用（历史记录里的该格式只是日志回放，模仿它不会产生任何执行）。',
+    '6. 工具调用的唯一方式是原生 tool_call：严禁在回复正文中书写【工具调用 …】格式的文本来代替真实调用；历史里的 tool 消息就是已执行工具的真实返回，直接使用，不要当作日志回放或重复执行。',
     '',
     '【表达】',
     '- 默认中文；像亲近的家人那样说话——简短、软和、有温度，多数时候一两句话就够；',
@@ -115,7 +115,6 @@ export default {
       /** 挂起审批清单（可按会话过滤）：前端刷新后据此恢复审批卡 */
       listApprovals: (sessionId?: string) => PendingApproval[];
       // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
-      textualizeHistory: typeof textualizeHistory;
       compactHistory: typeof compactHistory;
       annotateToolDef: typeof annotateToolDef;
       routeForTask: typeof routeForTask;
@@ -167,7 +166,6 @@ export default {
       listApprovals: (sessionId?: string): PendingApproval[] =>
         globalApprovalBoard.listPending(sessionId).map((a) => ({ ...a, args: redactTraceValue(a.args) })),
       // 供 server 层使用的服务方法（避免直接 import core/chat 子模块）
-      textualizeHistory,
       compactHistory,
       annotateToolDef,
       routeForTask,

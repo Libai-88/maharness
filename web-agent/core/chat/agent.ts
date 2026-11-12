@@ -66,7 +66,7 @@ const EN_THINK_REMINDER = 'Reason in ENGLISH, start with "We need ...". Example:
  *  （跨 run 首轮全 miss 的根因），而对「以 user 结尾」的请求缓存正常。
  *  工具轮后追加此提示使每次 LLM 请求恒以 user 结尾 → 前缀跨 run 逐字节延续。
  *  带【继续】标记：L1 语义缓存查询/任务画像据此排除，不当作真实用户问题。 */
-const CONTINUE_HINT = '【继续】请根据工具结果继续处理任务；如任务已完成，直接给出最终回答。';
+const CONTINUE_HINT = '【继续】上一条 tool 消息是刚执行完成的真实结果，请基于它继续处理任务；如任务已完成，直接给出最终回答，不要重复调用已完成的工具。';
 
 /** 工具结果摘要（固定截断：同一内容 → 同一文本，保证前缀逐字节稳定） */
 export function summarizeToolResult(text: string): string {
@@ -88,45 +88,10 @@ export function redactTraceValue(value: unknown): unknown {
 }
 
 /** 叙述化工具调用检测：模型把工具调用写成正文文本（【工具调用 X】参数/结果 …）而非原生
- *  tool_calls。历史文本化（textualizeHistory）是 L3 前缀缓存的刻意取舍，但其示范会被弱模型
- *  模仿——此检测供执行器纠偏重提示（harness 强制自修正，不依赖模型自觉）。导出供 selftest。 */
+ *  tool_calls——文本不会被执行。此检测供执行器纠偏重提示。导出供 selftest。 */
 export function detectNarratedToolCall(text: string): boolean {
   if (!text) return false;
   return /【工具调用\s*[a-zA-Z0-9_-]+\s*】/.test(text) && /(参数|结果)\s*[:：]/.test(text);
-}
-
-/**
- * 工具轮文本化（L3 前缀缓存的关键形态，run 内与跨 run 共用）：
- * 把历史中的 assistant{tc} + tool 消息对合并为一条 assistant 纯文本消息
- * （工具名 + 结果摘要）——发送序列不含 tool_calls 结构、恒以 user 结尾，
- * 网关（opencode.ai/zen/go）对纯文本序列的前缀缓存稳定，对含 tc 结构不稳定。
- * 文本化产物字节级确定（同一消息 → 同一文本），run 内每轮与跨 run 组装
- * 生成的序列完全一致 → 前缀逐字节延续。tool 消息不单独输出（合并进 assistant）。
- */
-export function textualizeHistory(history: LLMMessage[]): LLMMessage[] {
-  const out: LLMMessage[] = [];
-  const toolById = new Map<string, string>();
-  for (const m of history) {
-    if (m.role === 'tool' && m.tool_call_id) toolById.set(m.tool_call_id, String(m.content ?? ''));
-  }
-  for (const m of history) {
-    if (m.role === 'tool') continue; // 工具消息合并进对应的 assistant 消息
-    if (m.role === 'assistant' && m.tool_calls?.length) {
-      const parts = [m.content ?? ''];
-      for (const c of m.tool_calls) {
-        // L3 参数摘要：保留调用实参的前 200 字符（确定性截断，字节级稳定）——
-        // 模型可回顾自己之前的调用实参，不至于只见结果不见输入
-        const rawArgs = String(c.function?.arguments ?? '').replace(/\s+/g, ' ').trim();
-        const argBrief = rawArgs.length > 200 ? rawArgs.slice(0, 200) + '…' : rawArgs;
-        const res = toolById.get(c.id);
-        parts.push(`\n【工具调用 ${String(c.function?.name ?? '')}】参数: ${argBrief || '(空)'}\n结果: ${res ? summarizeToolResult(res) : '(结果已省略)'}`);
-      }
-      out.push({ role: 'assistant', content: parts.join('\n') });
-      continue;
-    }
-    out.push({ ...m });
-  }
-  return out;
 }
 
 /** 能力发现：给 LLM 看的工具描述自动附加风险/成本/限制/输出格式标签（registry 元数据 → 提示词）
@@ -576,10 +541,9 @@ export class AgentRunner {
         return pendingStream;
       };
       try {
-        // 发送序列 = 文本化形态（L3 前缀缓存关键）：工具轮合并为 assistant 文本、
-        // 恒以 user 结尾——与跨 run 组装（routes buildHistory）完全一致，
-        // 消除 tool_calls 结构导致的网关缓存不稳定（run 内与跨 run 前缀逐字节延续）。
-        const sendHistory = textualizeHistory(llmCtx.history);
+        // 发送序列保留 OpenAI 工具协议：assistant.tool_calls 与 tool.tool_call_id 原样传递，
+        // 让模型能看见真实工具结果；跨 run 组装侧同样不做二次转换。
+        const sendHistory = llmCtx.history;
         // L3 前缀复用统计：与上一轮调用共享的公共前缀 token（provider KV cache 直接命中）
         if (lastHistory) {
           const shared = sharedPrefixTokens(lastHistory, sendHistory);
@@ -760,9 +724,8 @@ export class AgentRunner {
           yield { type: 'error', error, kind: 'deadline' };
           return;
         }
-        // H8 叙述化纠偏：弱模型会模仿历史文本化（textualizeHistory）的示范格式，把工具调用写成
-        // 正文文本而非原生 tool_calls——文本不会被执行，任务假性完成。harness 检测到即注入一次
-        // 纠偏提示重开一轮（限 2 次；retry 事件让前端清掉已流出的叙述化残段）。
+        // 叙述化纠偏：模型把工具调用写成正文文本不会被执行。harness 检测到即
+        // 注入纠偏提示重开一轮（限 2 次；retry 事件让前端清掉已流出的叙述化残段）。
         if (detectNarratedToolCall(text) && narrationFixes < 2) {
           narrationFixes++;
           this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'narration-fix', parentId: opts.parentStepId })

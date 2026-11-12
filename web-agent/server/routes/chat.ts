@@ -90,8 +90,6 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
 
     const chat = getChatService(kernel);
     if (!chat) return res.status(500).json({ error: '对话服务未加载' });
-    // 捕获非空引用供嵌套函数（buildHistory）使用：TS 对函数声明内的捕获变量不做收窄
-    const chatSvc = chat;
     // provider 解析优先级：请求显式指定 > 会话保存的 provider > 第一个可用 provider
     const provider = (providerId && chat.providers.find((p) => p.id === providerId))
       ?? chat.providers.find((p) => p.id === session.provider)
@@ -178,8 +176,8 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
     // （onHistoryMessage 在工具执行前已入库）——未配对的 tool_calls 剥离，
     // 否则 provider 校验失败（OpenAI 兼容要求 tool_calls 后有对应 tool 消息）。
     function buildHistory(rows: Message[]): LLMMessage[] {
-      // 组装原始序列（system 保留、assistant 保留 tool_calls 配对、tool 保留 tool_call_id），
-      // 然后统一走共享 textualizeHistory——与 run 内发送形态完全一致（纯文本 + user 结尾）
+      // 组装原始序列：system 保留、assistant 保留 tool_calls 配对、tool 保留 tool_call_id，
+      // 与 run 内发送的 OpenAI 工具协议形态一致。
       const raw: LLMMessage[] = [];
       for (const m of rows) {
         if (m.role === 'system') {
@@ -199,7 +197,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         }
         raw.push(base);
       }
-      return chatSvc.textualizeHistory(raw);
+      return raw;
     }
     let history: LLMMessage[];
     let executionId: string = randomUUID();

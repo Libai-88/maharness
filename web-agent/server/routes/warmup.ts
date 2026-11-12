@@ -23,7 +23,7 @@ interface WarmupEntry {
 }
 
 const warmups = new Map<string, WarmupEntry>();
-const CONTINUE_HINT = '【继续】请根据工具结果继续处理任务；如任务已完成，直接给出最终回答。';
+const CONTINUE_HINT = '【继续】上一条 tool 消息是刚执行完成的真实结果，请基于它继续处理任务；如任务已完成，直接给出最终回答，不要重复调用已完成的工具。';
 const WARMUP_DELAY_MS = 12_000;       // 首次预热延迟（网关缓存写入窗口）
 const WARMUP_INTERVAL_MS = 90_000;  // 保活间隔（缓存 TTL 刷新）
 const WARMUP_MAX_ROUNDS = 20;       // 最长保活 30 分钟（会话无新活动则停止）
@@ -92,8 +92,7 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
     return;
   }
   entry.rounds++;
-  // 预热序列 = 与真实发送完全同形态：原始 sync 消息 → 共享文本化（与 run 内/跨 run 一致）
-  // → 恒以 user（CONTINUE_HINT）结尾。网关只对纯文本 + user 结尾的请求稳定缓存。
+  // 预热序列 = 与真实发送完全同形态：原生工具协议消息，必要时以 user（CONTINUE_HINT）结尾。
   const rawSeq: LLMMessage[] = [
     { role: 'system', content: entry.systemPrompt },
     ...entry.seq.map((m) => ({
@@ -104,7 +103,7 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
     })),
     ...entry.contextMessages,
   ];
-  const msgs = chat.textualizeHistory(rawSeq);
+  const msgs = rawSeq;
   if (msgs[msgs.length - 1]?.role !== 'user') {
     msgs.push({ role: 'user', content: CONTINUE_HINT });
   }

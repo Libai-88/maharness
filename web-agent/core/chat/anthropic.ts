@@ -6,8 +6,8 @@
  *  3. max_tokens 必填；工具声明字段名是 input_schema；
  *  4. 流没有 [DONE] 哨兵，靠 message_stop 收尾；token 用量分两处报（message_start 输入、
  *     message_delta 输出），且 cache_read_input_tokens 不计入 input_tokens。
- * 说明：maharness 的执行器会把工具轮文本化（agent.textualizeHistory），因此常态下这里
- * 只会收到 system/user/assistant 的纯文本 + images；tool/tool_result 映射按防御性保留。
+ * 说明：工具轮保留 OpenAI 兼容的 tool/tool_result 消息形态，由这里统一映射成
+ * Anthropic 的 tool_use / tool_result 块。
  */
 import type { LLMChunk, LLMMessage, ToolCall, ToolDef } from '../../kernel/types';
 
