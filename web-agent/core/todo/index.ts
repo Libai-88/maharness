@@ -25,6 +25,7 @@ export interface TodoCard {
   priority: TodoPriority;      // 优先级：low / medium / high / urgent
   source: 'agent' | 'human';   // 谁创建的：模型（to do list）还是人类（看板）
   sessionId?: string;          // 关联会话：模型建的卡片挂到当前会话
+  tenantId?: string;           // 租户归属：缺省按 default 兼容旧数据
   order: number;               // 列内排序（拖拽重排）
   createdAt: number;
   updatedAt: number;
@@ -33,6 +34,9 @@ export interface TodoCard {
 const STATUSES: TodoStatus[] = ['todo', 'doing', 'done', 'blocked'];
 const PRIORITIES: TodoPriority[] = ['low', 'medium', 'high', 'urgent'];
 const MAX_CARDS = 500;
+const MAX_CARDS_PER_TENANT = 200;
+
+const tenantOf = (card: TodoCard): string => card.tenantId ?? 'default';
 
 export default {
   id: 'todo',
@@ -68,8 +72,12 @@ export default {
         console.warn('[todo] 持久化失败（不影响运行）:', err instanceof Error ? err.message : String(err));
       }
     };
-    const notify = (reason: string) => {
-      ctx.bus.emit({ type: 'todo.updated', data: { cards, reason, ts: Date.now() }, ts: Date.now() });
+    const notify = (reason: string, tenantId = 'default') => {
+      ctx.bus.emit({
+        type: 'todo.updated',
+        data: { cards: cards.filter((card) => tenantOf(card) === tenantId), reason, tenantId, ts: Date.now() },
+        ts: Date.now(),
+      });
     };
 
     // ---- L2 人设：引导 LLM 执行多步任务时维护 to do list ----
@@ -98,7 +106,12 @@ export default {
         name: 'todo_add',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
         output: '{id, title, status}',
+        outputSchema: {
+          type: 'object', required: ['id', 'title', 'status'],
+          properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string' }, sessionId: { type: 'string' } },
+        },
         description: '向当前会话的 to do list 添加一项任务卡片（状态默认为 todo）。多步任务先逐项添加，执行中逐项更新。',
         parameters: {
           type: 'object',
@@ -113,24 +126,28 @@ export default {
           const title = String(args.title ?? '').trim();
           if (!title) return { ok: false, error: '缺少 title' };
           if (title.length > 200) return { ok: false, error: 'title 过长（≤200 字符）' };
-          if (cards.length >= MAX_CARDS) return { ok: false, error: `卡片已达上限（${MAX_CARDS}），请先清理已完成项` };
-          const maxOrder = cards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
+          const tenantId = tctx.tenantId ?? 'default';
+          const tenantCards = cards.filter((card) => tenantOf(card) === tenantId);
+          if (cards.length >= MAX_CARDS) return { ok: false, error: `全局卡片已达上限（${MAX_CARDS}），请先清理已完成项` };
+          if (tenantCards.length >= MAX_CARDS_PER_TENANT) return { ok: false, error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}），请先清理已完成项` };
+          const maxOrder = tenantCards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
           const priority = PRIORITIES.includes(args.priority as TodoPriority) ? args.priority as TodoPriority : 'medium';
           const card: TodoCard = {
-            id: `td-${randomUUID().slice(0, 8)}`,
+            id: `td-${randomUUID()}`,
             title,
             desc: args.desc ? String(args.desc).slice(0, 500) : undefined,
             status: 'todo',
             priority,
             source: 'agent',
             sessionId: tctx.sessionId,
+            tenantId,
             order: maxOrder + 1,
             createdAt: Date.now(),
             updatedAt: Date.now(),
           };
           cards.push(card);
           save();
-          notify('agent-add');
+          notify('agent-add', tenantId);
           return { ok: true, data: { id: card.id, title: card.title, status: card.status, sessionId: card.sessionId } };
         },
       },
@@ -142,6 +159,12 @@ export default {
         name: 'todo_update',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
+        output: '{id, title, status}',
+        outputSchema: {
+          type: 'object', required: ['id', 'title', 'status'],
+          properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string' } },
+        },
         description: '更新 to do list 中一项任务的状态：doing（进行中）/ done（完成）/ blocked（受阻）/ todo（回到待办）。可附进度说明。',
         parameters: {
           type: 'object',
@@ -152,15 +175,16 @@ export default {
           },
           required: ['id', 'status'],
         },
-        async handler(args: { id?: string; status?: string; note?: string }) {
-          const card = cards.find((c) => c.id === args.id);
+        async handler(args: { id?: string; status?: string; note?: string }, tctx: ToolContext) {
+          const tenantId = tctx.tenantId ?? 'default';
+          const card = cards.find((c) => c.id === args.id && tenantOf(c) === tenantId);
           if (!card) return { ok: false, error: `任务不存在: ${args.id}（todo_list 查看当前清单）` };
           const status = STATUSES.includes(args.status as TodoStatus) ? args.status as TodoStatus : 'todo';
           card.status = status;
           card.updatedAt = Date.now();
           if (args.note) card.desc = String(args.note).slice(0, 500);
           save();
-          notify('agent-update');
+          notify('agent-update', tenantId);
           return { ok: true, data: { id: card.id, title: card.title, status: card.status } };
         },
       },
@@ -174,6 +198,10 @@ export default {
         costHint: 'low',
         sideEffect: 'read',
         output: '{cards: [{id, title, status, desc?, source}]}',
+        outputSchema: {
+          type: 'object', required: ['cards', 'summary'],
+          properties: { cards: { type: 'array' }, summary: { type: 'string' } },
+        },
         description: '查看 to do list 当前清单（本会话的卡片；传 all=true 查看跨会话全部）。执行多步任务前先查看，避免漏步。',
         parameters: {
           type: 'object',
@@ -182,7 +210,11 @@ export default {
           },
         },
         async handler(args: { all?: boolean }, tctx: ToolContext) {
-          const list = args.all === true ? cards : cards.filter((c) => !c.sessionId || c.sessionId === tctx.sessionId);
+          const tenantId = tctx.tenantId ?? 'default';
+          const tenantCards = cards.filter((card) => tenantOf(card) === tenantId);
+          const list = args.all === true
+            ? tenantCards
+            : tenantCards.filter((c) => !c.sessionId || c.sessionId === tctx.sessionId);
           const sorted = [...list].sort((a, b) => a.createdAt - b.createdAt);
           return {
             ok: true,
@@ -200,7 +232,16 @@ export default {
       kind: 'api',
       api: {
         mount: 'board',
-        router: (async (req: { method?: string; path?: string; body?: unknown }, res: {
+        responses: {
+          'GET /panel': { type: 'object', required: ['title', 'html'], properties: { title: { type: 'string' }, html: { type: 'string' } } },
+          'GET /cards': { type: 'object', required: ['cards'], properties: { cards: { type: 'array' } } },
+          'POST /cards': { type: 'object', required: ['ok', 'card'], properties: { ok: { type: 'boolean' }, card: { type: 'object' } } },
+          'PATCH /cards/:id': { type: 'object', required: ['ok', 'card'], properties: { ok: { type: 'boolean' }, card: { type: 'object' } } },
+          'DELETE /cards/:id': { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
+          'PATCH /cards/reorder': { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
+          'POST /clear-done': { type: 'object', required: ['ok', 'removed'], properties: { ok: { type: 'boolean' }, removed: { type: 'integer' } } },
+        },
+        router: (async (req: { method?: string; path?: string; body?: unknown; tenantId?: string }, res: {
           json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void };
         }) => {
           // 挂载前缀剥离：请求 /api/plugins/todo/board/cards → req.path=/board/cards → p=/cards
@@ -210,12 +251,14 @@ export default {
           else if (p.startsWith('/board/')) p = p.slice('/board'.length);
           const body = (req.body ?? {}) as Record<string, unknown>;
           const send = (v: unknown) => res.json(v);
+          const tenantId = req.tenantId ?? 'default';
+          const tenantCards = cards.filter((card) => tenantOf(card) === tenantId);
 
           // ---- 面板（前端插件详情页渲染） ----
           if (p === '/' || p === '/panel') {
             send({
               title: '待办看板',
-              html: boardHtml(cards),
+              html: boardHtml(tenantCards),
             });
             return;
           }
@@ -233,36 +276,56 @@ export default {
 
           // ---- REST：看板数据 ----
           if (req.method === 'GET' && p === '/cards') {
-            send({ cards: [...cards].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) });
+            send({ cards: [...tenantCards].sort((a, b) => (a.order ?? 0) - (b.order ?? 0)) });
             return;
           }
           if (req.method === 'POST' && p === '/cards') {
             const title = String(body.title ?? '').trim();
             if (!title) return res.status(400).json({ error: '缺少 title' });
-            if (cards.length >= MAX_CARDS) return res.status(400).json({ error: '卡片已达上限' });
-            const maxOrder = cards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
+            if (title.length > 200) return res.status(400).json({ error: 'title 过长（≤200 字符）' });
+            if (cards.length >= MAX_CARDS) return res.status(400).json({ error: `全局卡片已达上限（${MAX_CARDS}）` });
+            if (tenantCards.length >= MAX_CARDS_PER_TENANT) return res.status(400).json({ error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}）` });
+            const maxOrder = tenantCards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
             const priority = PRIORITIES.includes(body.priority as TodoPriority) ? body.priority as TodoPriority : 'medium';
             const card: TodoCard = {
-              id: `td-${randomUUID().slice(0, 8)}`,
+              id: `td-${randomUUID()}`,
               title,
               desc: body.desc ? String(body.desc).slice(0, 500) : undefined,
               status: (STATUSES.includes(body.status as TodoStatus) ? body.status : 'todo') as TodoStatus,
               priority,
               source: 'human',
+              tenantId,
               order: maxOrder + 1,
               createdAt: Date.now(),
               updatedAt: Date.now(),
             };
             cards.push(card);
             save();
-            notify('human-add');
+            notify('human-add', tenantId);
             send({ ok: true, card });
+            return;
+          }
+          // ---- 批量重排（拖拽后一次性提交）----
+          // 必须先于 /cards/:id 匹配：否则 "reorder" 会被当成卡片 id 而 404。
+          if (req.method === 'PATCH' && p === '/cards/reorder') {
+            const updates = body.cards as { id: string; status?: string; order?: number }[] | undefined;
+            if (!Array.isArray(updates)) return res.status(400).json({ error: '缺少 cards 数组' });
+            for (const u of updates) {
+              const card = cards.find((c) => c.id === u.id && tenantOf(c) === tenantId);
+              if (!card) continue;
+              if (u.status && STATUSES.includes(u.status as TodoStatus)) card.status = u.status as TodoStatus;
+              if (typeof u.order === 'number' && Number.isFinite(u.order)) card.order = u.order;
+              card.updatedAt = Date.now();
+            }
+            save();
+            notify('human-reorder', tenantId);
+            send({ ok: true });
             return;
           }
           const m = p.match(/^\/cards\/([^/]+)$/);
           if (m) {
             const id = m[1];
-            const card = cards.find((c) => c.id === id);
+            const card = cards.find((c) => c.id === id && tenantOf(c) === tenantId);
             if (!card) return res.status(404).json({ error: '卡片不存在' });
             if (req.method === 'PATCH') {
               if (body.status && STATUSES.includes(body.status as TodoStatus)) card.status = body.status as TodoStatus;
@@ -272,39 +335,24 @@ export default {
               if (typeof body.order === 'number') card.order = body.order;
               card.updatedAt = Date.now();
               save();
-              notify('human-update');
+              notify('human-update', tenantId);
               send({ ok: true, card });
               return;
             }
             if (req.method === 'DELETE') {
               cards = cards.filter((c) => c.id !== id);
               save();
-              notify('human-delete');
+              notify('human-delete', tenantId);
               send({ ok: true });
               return;
             }
           }
-          // ---- 批量重排（拖拽后一次性提交） ----
-          if (req.method === 'PATCH' && p === '/cards/reorder') {
-            const updates = body.cards as { id: string; status?: string; order?: number }[] | undefined;
-            if (!Array.isArray(updates)) return res.status(400).json({ error: '缺少 cards 数组' });
-            for (const u of updates) {
-              const card = cards.find((c) => c.id === u.id);
-              if (!card) continue;
-              if (u.status && STATUSES.includes(u.status as TodoStatus)) card.status = u.status as TodoStatus;
-              if (typeof u.order === 'number') card.order = u.order;
-              card.updatedAt = Date.now();
-            }
-            save();
-            notify('human-reorder');
-            send({ ok: true });
-            return;
-          }
           if (req.method === 'POST' && p === '/clear-done') {
-            cards = cards.filter((c) => c.status !== 'done');
+            const before = tenantCards.filter((c) => c.status === 'done').length;
+            cards = cards.filter((c) => !(tenantOf(c) === tenantId && c.status === 'done'));
             save();
-            notify('human-clear-done');
-            send({ ok: true, removed: cards.length });
+            notify('human-clear-done', tenantId);
+            send({ ok: true, removed: before });
             return;
           }
           res.status(404).json({ error: '未知端点' });

@@ -9,6 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import type { Plugin, ToolContext } from '../../kernel/types';
+import { adminToolDenied } from '../../kernel/tool-privilege';
 
 /** 只读可执行程序 / cmdlet 别名（首 token 命中且**参数不含可执行构造**才免审批）。
  *
@@ -91,6 +92,27 @@ function stripQuoted(command: string): string {
   return out;
 }
 
+/** 只移除单引号字面量，保留双引号内容：PowerShell 会在双引号内执行 `$(…)`/`@(…)`，
+ *  这些构造不能因为“在引号里”就被当作普通文本放行。单引号才是纯字面量。 */
+export function stripSingleQuoted(command: string): string {
+  let out = '';
+  let inSingle = false;
+  for (let i = 0; i < command.length; i++) {
+    const c = command[i];
+    if (inSingle) {
+      if (c === "'") {
+        if (command[i + 1] === "'") { i++; continue; } // 单引号内的 '' 是转义
+        inSingle = false;
+        out += ' ';
+      }
+      continue;
+    }
+    if (c === "'") { inSingle = true; out += ' '; continue; }
+    out += c;
+  }
+  return out;
+}
+
 /** 可执行构造（语法层面）：出现在「参数位」即说明这条命令不只是在读东西。
  *  与 DANGEROUS_PATTERNS 的分工：这里是**语法**（不看 cmdlet 名），那里是**词**。 */
 const EXECUTABLE_CONSTRUCTS: { pattern: RegExp; reason: string }[] = [
@@ -156,11 +178,15 @@ export function scriptBlockIsSafe(body: string): boolean {
 /** 段内是否存在「参数位即代码」的构造（语法构造 + 不安全脚本块）。 */
 export function hasExecutableConstruct(seg: string): { hit: boolean; reason: string } {
   const scanned = stripQuoted(seg);
+  const doubleQuoted = stripSingleQuoted(seg);
   // 花括号不配对：无法判定 → 按含代码处理
   const bodies = scriptBodies(scanned) ?? scriptBodies(seg);
   if (bodies === null) return { hit: true, reason: '脚本块花括号不配对，无法判定其内容' };
   for (const c of EXECUTABLE_CONSTRUCTS) {
     if (c.pattern.test(scanned)) return { hit: true, reason: c.reason };
+  }
+  if (/\$\(|@\(/.test(doubleQuoted)) {
+    return { hit: true, reason: '双引号内的子表达式会执行命令' };
   }
   for (const b of bodies) {
     if (!scriptBlockIsSafe(b)) return { hit: true, reason: '脚本块内含可执行构造（筛选之外的代码）' };
@@ -288,6 +314,8 @@ export function assessCommand(command: string): { needsApproval: boolean; reason
 }
 
 const MAX_OUTPUT = 8000;
+/** 流式阶段的内存上限：输出截断发生在返回前，但不能让无限流先把进程内存吃满。 */
+const STREAM_CAP = 128_000;
 
 /** env_probe 内置探测清单：覆盖编程与办公文档链路常用工具 */
 const PROBE_DEFAULTS = [
@@ -339,8 +367,8 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
       killTree();
     }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
-    ps.stdout.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
-    ps.stderr.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
+    ps.stdout.on('data', (d: Buffer) => { if (stdout.length < STREAM_CAP) stdout += d.toString('utf8').slice(0, STREAM_CAP - stdout.length); });
+    ps.stderr.on('data', (d: Buffer) => { if (stderr.length < STREAM_CAP) stderr += d.toString('utf8').slice(0, STREAM_CAP - stderr.length); });
     ps.on('error', (err) => {
       terminalError ??= err;
     });
@@ -385,9 +413,14 @@ export default {
         name: 'powershell_execute',
         risk: 'high',
         costHint: 'medium',
+        sideEffect: 'irreversible',
         approval: true,
         limits: '命令超时 60s；只读命令免审批，写入/安装/删除类需用户审批',
         output: '{stdout, stderr, exitCode}；exitCode=0 表示成功',
+        outputSchema: {
+          type: 'object', required: ['exitCode', 'output', 'truncated'],
+          properties: { exitCode: { type: 'integer' }, output: { type: 'string' }, truncated: { type: 'boolean' } },
+        },
         description: '在 Windows 上执行 PowerShell 命令并返回输出（工作目录锚定沙箱根）。审批语义（按参数动态判定，默认需审批）：'
           + '只读调用免审批直接执行——包括 cmdlet 白名单（Get-ChildItem/Get-Content/Select-String/Get-Command 等，管道每段都只读）、'
           + '`git status|diff|log|show|ls-files|rev-parse|blame|grep` 等只读子命令、`npm run test|typecheck|lint`、`rg`、`node --version`；'
@@ -407,6 +440,8 @@ export default {
           return assessCommand(command);
         },
         async handler(args: { command?: string; timeoutSec?: number }, tctx: ToolContext) {
+          const denied = adminToolDenied(tctx, '在宿主 Windows 上执行 PowerShell');
+          if (denied) return { ok: false, error: denied };
           const command = String(args.command ?? '').trim();
           if (!command) return { ok: false, error: '命令不能为空' };
           const timeoutSec = Math.min(Math.max(Number(args.timeoutSec) || 15, 1), 60);
@@ -450,8 +485,13 @@ export default {
         name: 'env_probe',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         limits: '默认只做 Get-Command 探测（不执行程序）；withVersion=true 会执行 --version，需用户审批',
         output: '{platform, node, tools: [{name, found, path?, version?}]}',
+        outputSchema: {
+          type: 'object', required: ['platform', 'node', 'tools'],
+          properties: { platform: { type: 'string' }, node: { type: 'string' }, tools: { type: 'array' } },
+        },
         description: '探测本机可用工具链（git/node/npm/python/pandoc/libreoffice/rg 等）。用于判断能否用本机程序完成 docx/xlsx/pdf 转换、是否装了 ripgrep/git 等；结果按 L2 缓存。',
         parameters: {
           type: 'object',
@@ -469,6 +509,9 @@ export default {
           const wanted = (args.commands ?? []).map(c => String(c).trim()).filter(c => /^[A-Za-z0-9_.+-]{1,32}$/.test(c));
           const cmds = wanted.length ? wanted : PROBE_DEFAULTS;
           const withVersion = !!args.withVersion;
+          if (withVersion && !tctx.approved && !tctx.policyApproved) {
+            return { ok: false, needsApproval: true, approvalSummary: 'env_probe 将执行本机程序的 --version 命令' };
+          }
           const key = tctx.cache.makeKey(['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : ''], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {

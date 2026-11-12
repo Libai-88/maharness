@@ -215,6 +215,8 @@ export default {
 
 长任务可通过 `POST /api/sessions/:id/resume-at`（`dueAt` 或 `delayMs`）安排到点续跑；`GET /api/schedules` 查看当前租户计划，`DELETE /api/schedules/:id` 取消。调度器只恢复已有 checkpoint 的会话，不注入新提示词；`409`/网络错误最多重试 3 次。
 
+办公工作台（workbench）当前是单用户单桥文件模型，只允许 `default` 租户使用；其他租户的 API 与 Agent 工具访问一律 fail-closed，避免任务/日记跨租户共享。
+
 工作区、Provider、人设、技能与插件配置属于管理员维护的共享基础设施。default 租户的文件根是全局工作区；其他租户自动落到 `<工作区>/.tenants/<tenantId>`，Agent 工具、子代理、文件 API 与 Git API 使用同一租户根。切换工作区会改变全局基座，租户根随之迁移。租户仍是**文件级逻辑分区**，不是进程或信任边界；不可信用户不应共享同一个实例。
 
 ```json

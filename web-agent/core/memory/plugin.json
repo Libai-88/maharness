@@ -3,5 +3,12 @@
   "name": "长期记忆",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
+  "limits": { "lifecycleTimeoutMs": 30000 },
+  "permissions": { "capabilities": {
+    "tool": ["remember_fact", "recall_facts", "forget_fact", "revoke_fact", "set_memory_block", "list_memory_blocks", "delete_memory_block"],
+    "persona": ["memory-rules"],
+    "context": ["memory-recall"]
+  } }
 }

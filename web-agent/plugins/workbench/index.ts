@@ -15,6 +15,11 @@ import { mergeData, mergeDiary, mergeMeta, nextDue, shift } from './model';
 
 const todayStr = () => new Date().toISOString().slice(0, 10);
 
+/** 工作台是单桥文件应用；团队租户未分区前只允许 default 使用。 */
+export function workbenchTenantAllowed(tenantId?: string): boolean {
+  return (tenantId ?? 'default') === 'default';
+}
+
 // ═══════════════════════════════════════════════════════════
 // 桥文件数据模型（workbench-data.json 的完整形状）
 // ═══════════════════════════════════════════════════════════
@@ -122,6 +127,18 @@ export default {
     const legacyFile = join(ctx.paths.data, 'workbench.json');
     const appHtmlPath = join(ctx.paths.root, 'ui', 'dist', 'workbench.html');
 
+    // 工作台当前是单用户单桥文件模型；团队租户未分区前一律拒绝，避免跨租户共享任务/日记。
+    ctx.on('agent.before_tool', (event) => {
+      const data = event.data as {
+        tenantId?: string; tool?: { name?: string }; blocked?: boolean; blockReason?: string;
+      } | undefined;
+      if (!data?.tool?.name?.startsWith('workbench_')) return;
+      if (!workbenchTenantAllowed(data.tenantId)) {
+        data.blocked = true;
+        data.blockReason = '办公工作台当前仅支持 default 租户（团队租户尚未分区）';
+      }
+    });
+
     mkdirSync(bridgeDir, { recursive: true });
 
     // ---- 桥状态 ----
@@ -169,7 +186,7 @@ export default {
 
     // ---- 事件广播 ----
     const notify = (reason: string) => {
-      ctx.bus.emit({ type: 'workbench.updated', data: { reason, ts: now() }, ts: now() });
+      ctx.bus.emit({ type: 'workbench.updated', data: { reason, tenantId: 'default', ts: now() }, ts: now() });
     };
 
     // ---- 桥状态端点数据 ----
@@ -611,8 +628,17 @@ export default {
       kind: 'api',
       api: {
         mount: 'wb',
-        router: ((req: { method?: string; path?: string }, res: any) => {
+        responses: {
+          'GET /status': { type: 'object', required: ['connected', 'text'], properties: { connected: { type: 'boolean' }, text: { type: 'string' } } },
+          'GET /panel': { type: 'object', required: ['title', 'html'], properties: { title: { type: 'string' }, html: { type: 'string' } } },
+          'GET /bridge': { type: 'object' },
+        },
+        router: ((req: { method?: string; path?: string; tenantId?: string }, res: any) => {
           try {
+            if (!workbenchTenantAllowed(req.tenantId)) {
+              res.status(403).json({ error: '办公工作台当前仅支持 default 租户（团队租户尚未分区）' });
+              return;
+            }
             const raw = (req.path ?? '/').replace(/\/+$/, '') || '/';
             let p = raw;
             if (p === '/wb') p = '/';

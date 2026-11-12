@@ -4,7 +4,7 @@
 import type { Express } from 'express';
 import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
 import { approvalTokens } from './approvals';
-import { getChatService, SseConnectionLimiter, type RouteDeps } from './shared';
+import { getChatService, SseConnectionLimiter, tenantIdOf, type RouteDeps } from './shared';
 import { auditSseLifecycle } from '../security-policy';
 
 // ---- M2 /api/events 事件类型白名单 ----
@@ -21,6 +21,25 @@ const SSE_EVENT_TYPES = new Set([
 /** SSE 单连接待发缓冲上限：write 返回 false（内核缓冲满）且超过该值 → 销毁连接（慢客户端背压保护） */
 const SSE_BACKPRESSURE_BYTES = 1_048_576;
 
+/** SSE 事件的租户可见性；sessionTenant 返回该会话所属租户（不存在返回 undefined）。 */
+export function sseEventVisible(
+  type: string,
+  data: unknown,
+  tenantId: string,
+  sessionTenant: (sessionId: string) => string | undefined,
+): boolean {
+  const d = (data ?? {}) as { tenantId?: unknown; sessionId?: unknown };
+  const eventTenant = typeof d.tenantId === 'string' ? d.tenantId : undefined;
+  if (eventTenant) return eventTenant === tenantId;
+  const sessionId = typeof d.sessionId === 'string' ? d.sessionId : undefined;
+  if (sessionId) return sessionTenant(sessionId) === tenantId;
+  if (type === 'trace.step' || type === 'plan.updated' || type === 'todo.updated'
+    || type === 'workbench.updated' || type === 'approval.requested') {
+    return tenantId === 'default';
+  }
+  return true;
+}
+
 export function registerEventRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, tracker } = deps;
   const connectionLimiter = deps.sseLimiter ?? new SseConnectionLimiter(
@@ -29,6 +48,8 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
 
   // ---------- 全局事件流（前端实时面板） ----------
   app.get('/api/events', (req, res) => {
+    const tenantId = tenantIdOf(req);
+    const sessionTenant = (sessionId: string) => deps.store.getSession(sessionId)?.tenantId;
     if (!connectionLimiter.tryAcquire(res)) {
       res.setHeader('Retry-After', '15');
       return res.status(429).json({ error: '实时事件连接数已达上限，请稍后重试' });
@@ -64,6 +85,7 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     // 新连接必须立刻知道有哪些卡在等它点头。
     try {
       for (const a of getChatService(kernel)?.listApprovals() ?? []) {
+        if (!a.sessionId || !deps.store.getSession(a.sessionId, tenantId)) continue;
         writeEvent('approval.requested', { approvalId: a.id, name: a.name, summary: a.summary, sessionId: a.sessionId, createdAt: a.createdAt, expiresAt: a.expiresAt, approvalToken: approvalTokens.issue(a.id, a.sessionId, a.expiresAt) });
       }
     } catch { /* 服务未就绪时静默：事件流本身仍可用 */ }
@@ -72,6 +94,7 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     const off = kernel.bus.on('*', (e) => {
       // M2 事件类型白名单：只转发前端实际消费的事件（见 SSE_EVENT_TYPES 注释）
       if (!SSE_EVENT_TYPES.has(e.type)) return;
+      if (!sseEventVisible(e.type, e.data, tenantId, sessionTenant)) return;
       // A6-c：子代理/并行的审批经全局总线到达（父执行器阻塞在子任务 handler 内，
       // 其 approval_required 无法从会话 SSE 流出）——转发时铸发一次性凭据，
       // 与本文件连接回放、chat.ts 会话内审批三处口径一致，前端只需回带同一个字段。

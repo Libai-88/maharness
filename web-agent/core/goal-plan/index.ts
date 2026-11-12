@@ -19,9 +19,16 @@ function persistPlans(): void {
   if (plansFile) savePlans(plansFile, plans);
 }
 
-/** 无 sessionId 时的兜底键（单会话/旧执行器兼容） */
-function sessionKey(tctx: ToolContext): string {
-  return tctx.sessionId ?? '_default';
+/** 租户 + 会话键；无 sessionId 时使用 _default 兜底（旧执行器兼容）。 */
+function sessionKey(tctx: { tenantId?: string; sessionId?: string }): string {
+  return `${tctx.tenantId ?? 'default'}\u0000${tctx.sessionId ?? '_default'}`;
+}
+
+function splitKey(key: string): { tenantId: string; sessionId: string } {
+  const index = key.indexOf('\u0000');
+  return index < 0
+    ? { tenantId: 'default', sessionId: key }
+    : { tenantId: key.slice(0, index), sessionId: key.slice(index + 1) };
 }
 
 /** 读取并刷新 LRU 近期性 */
@@ -51,13 +58,17 @@ export default {
   onLoad(ctx) {
     plans.clear();
     plansFile = join(ctx.paths.data, 'plans.json');
-    for (const [key, plan] of loadPlans(plansFile)) plans.set(key, plan);
+    for (const [key, plan] of loadPlans(plansFile)) {
+      const normalized = key.includes('\u0000') ? key : `default\u0000${key}`;
+      plans.set(normalized, plan);
+    }
 
     const notify = (key: string) => {
       const p = plans.get(key);
       if (!p) return;
-      // 事件 data 保持 PlanState 形状（前端契约不变），附加 sessionId 供多会话区分
-      const data = key === '_default' ? { ...p } : { ...p, sessionId: key };
+      const { tenantId, sessionId } = splitKey(key);
+      // 事件 data 保持 PlanState 形状（前端契约不变），附加会话与租户标识
+      const data = { ...p, sessionId, tenantId };
       ctx.bus.emit({ type: 'plan.updated', data, ts: Date.now() });
     };
 
@@ -110,6 +121,11 @@ export default {
         name: 'create_plan',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['objective', 'total', 'steps'],
+          properties: { objective: { type: 'string' }, total: { type: 'integer' }, steps: { type: 'string' }, hint: { type: 'string' } },
+        },
         description: '为多步目标创建执行计划。参数 steps 为拆解后的步骤标题列表（由你根据目标拆解）。返回计划摘要。',
         parameters: {
           type: 'object',
@@ -154,6 +170,11 @@ export default {
         name: 'update_plan_progress',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['step', 'title', 'status', 'current'],
+          properties: { step: { type: 'integer' }, title: { type: 'string' }, status: { type: 'string' }, current: { type: 'integer' } },
+        },
         description: '更新计划的步骤状态：done（完成）/ in_progress（进行中）/ blocked（受阻）。可附说明。',
         parameters: {
           type: 'object',
@@ -200,6 +221,11 @@ export default {
         name: 'complete_goal',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['completed', 'objective'],
+          properties: { completed: { type: 'boolean' }, objective: { type: 'string' } },
+        },
         description: '标记目标计划完成，附最终总结。',
         parameters: {
           type: 'object',
@@ -236,7 +262,10 @@ export default {
       kind: 'api',
       api: {
         mount: 'plan',
-        router: (async (req: { method?: string; path?: string; query?: Record<string, unknown> }, res: {
+        responses: {
+          'GET /plan': { type: 'object', required: ['plan'], properties: { plan: { type: ['object', 'null'] } } },
+        },
+        router: (async (req: { method?: string; path?: string; query?: Record<string, unknown>; tenantId?: string }, res: {
           json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void };
         }) => {
           const raw = (req.path ?? '/').replace(/\/+$/, '') || '/';
@@ -244,7 +273,8 @@ export default {
           if (raw !== '/' && raw !== '/plan') return res.status(404).json({ error: '未知路径' });
           const sessionId = String(req.query?.sessionId ?? '').trim();
           if (!sessionId) return res.json({ plan: null });
-          res.json({ plan: getPlan(sessionId) ?? null });
+          const key = `${req.tenantId ?? 'default'}\u0000${sessionId}`;
+          res.json({ plan: getPlan(key) ?? null });
         }) as never,
       },
     });

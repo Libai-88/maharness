@@ -17,6 +17,8 @@ const READ_ONLY_TOOLS = new Set([
   'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
   'plugin_status', 'mcp_status', 'todo_list',
 ]);
+/** 委派类工具永远不交给并行子代理，避免 tools:"all" 打开递归委派。 */
+const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review']);
 
 /** 单次并行任务的最大子任务数（认知资源配额：并行不等于无限） */
 const MAX_PARALLEL = 4;
@@ -201,8 +203,17 @@ export default {
         name: 'run_parallel',
         risk: 'low',
         costHint: 'high',
+        sideEffect: 'external',
         limits: `一次最多 ${MAX_PARALLEL} 个并行子任务；受子代理配额约束；成本 ≈ 多次 LLM 调用，简单问题不要使用`,
         output: '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?, cancelled?}], completed, failed, cancelled, status}',
+        outputSchema: {
+          type: 'object', required: ['results', 'completed', 'failed', 'cancelled', 'status'],
+          properties: {
+            results: { type: 'array' }, completed: { type: 'integer' }, failed: { type: 'integer' },
+            cancelled: { type: 'integer' }, status: { type: 'string' }, summary: { type: 'string' },
+            batchId: { type: 'string' }, blackboardPrefix: { type: 'string' },
+          },
+        },
         timeoutMs: 240_000, // 并行子代理内部多轮，独立超时 4 分钟
         description: '将任务拆分为多个子任务，按依赖关系分批并发委派子代理执行（互不污染上下文，独立产出后统一汇总）。' +
           '无 dependsOn 的任务同批并行；有 dependsOn 的任务等待上游完成后启动，并只接收上游的结构化结论。' +
@@ -260,13 +271,15 @@ export default {
           if (!quota.allowed) {
             return { ok: false, error: `子代理配额不足（10 分钟窗口内限额，剩余 ${quota.remaining}）。请减少委派频率或稍后再试。` };
           }
-          const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
+          const allTools = ctx.kernel.plugins.capabilities('tool')
+            .map((c) => c.tool)
+            .filter((tool) => !DELEGATION_TOOLS.has(tool.name));
           const toolsFor = (t: { tools?: string }): ToolDef[] => t.tools === 'all'
             ? allTools
             : allTools.filter((x) => READ_ONLY_TOOLS.has(x.name));
 
           let blackboard: {
-            put(sessionId: string, key: string, value: unknown, tags?: string[]): unknown;
+            put(sessionId: string, key: string, value: unknown, tags?: string[], tenantId?: string): unknown;
           } | undefined;
           const blackboardDep = ctx.inject('service:blackboard', (value) => {
             blackboard = value as typeof blackboard;
@@ -300,7 +313,7 @@ export default {
                 answer: String(result.answer ?? '').slice(0, 12_000),
                 traceId: result.traceId,
                 dependsOn: task.dependsOn,
-              }, ['parallel', batchId, ...task.dependsOn]);
+              }, ['parallel', batchId, ...task.dependsOn], tctx.tenantId);
             } catch { /* 黑板不可写不影响任务结果 */ }
           };
 
@@ -353,6 +366,7 @@ export default {
                 signal: tctx.signal,
                 sessionId: tctx.sessionId,
                 tenantId: tctx.tenantId,
+                principalRole: tctx.principal?.role,
                 sandboxRoot: tctx.sandboxRoot,
                 costBudget: budgetShares[task.index],
               })) {

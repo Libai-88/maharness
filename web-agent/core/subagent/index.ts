@@ -18,6 +18,8 @@ const READ_ONLY_TOOLS = new Set([
   'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
   'plugin_status', 'mcp_status', 'todo_list',
 ]);
+/** 委派类工具永远不交给子代理，避免 tools:"all" 打开递归委派的成本放大器。 */
+const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review']);
 
 const SUB_SYSTEM_PROMPT = [
   '你是 maharness 的子代理（subagent），由主代理委派完成一个明确目标。',
@@ -115,6 +117,7 @@ export default {
         name: 'run_subagent',
         risk: 'low',
         costHint: 'high',
+        sideEffect: 'external',
         limits: '子代理默认 6 轮（maxTurns 可放宽至 12）；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
         output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
         // 输出结构的机器校验（JSONSchema 子集）：声明后执行器对结果做运行时校验，
@@ -161,7 +164,9 @@ export default {
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派子代理' };
           const model = route?.model ?? provider.defaultModel;
 
-          const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
+          const allTools = ctx.kernel.plugins.capabilities('tool')
+            .map((c) => c.tool)
+            .filter((tool) => !DELEGATION_TOOLS.has(tool.name));
           const tools: ToolDef[] = args.tools === 'all'
             ? allTools
             : allTools.filter((t) => READ_ONLY_TOOLS.has(t.name));
@@ -209,6 +214,7 @@ export default {
               // 会话归属透传：子代理的审批也要能归到具体会话（刷新后卡片才回得到原位）
               sessionId: tctx.sessionId,
               tenantId: tctx.tenantId,
+              principalRole: tctx.principal?.role,
               sandboxRoot: tctx.sandboxRoot,
               costBudget: remainingBudget,
             })) {
@@ -271,6 +277,7 @@ export default {
         name: 'run_review',
         risk: 'low',
         costHint: 'medium',
+        sideEffect: 'external',
         limits: '审查子代理最多 5 轮；成本 ≈ 多次 LLM 调用，重要产出才审查',
         output: '{verdict, summary, issues: [{severity, point, evidence}], confidence, traceId}',
         outputSchema: {
@@ -347,6 +354,7 @@ export default {
               signal: tctx.signal,
               sessionId: tctx.sessionId,
               tenantId: tctx.tenantId,
+              principalRole: tctx.principal?.role,
               sandboxRoot: tctx.sandboxRoot,
               costBudget: remainingBudget,
               ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
@@ -387,6 +395,7 @@ export default {
                 signal: tctx.signal,
                 sessionId: tctx.sessionId,
                 tenantId: tctx.tenantId,
+                principalRole: tctx.principal?.role,
                 sandboxRoot: tctx.sandboxRoot,
                 costBudget: remainingBudget === undefined ? undefined : Math.max(remainingBudget - cost, 0),
                 ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),

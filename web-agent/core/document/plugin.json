@@ -3,5 +3,11 @@
   "name": "文档读取",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
+  "limits": { "lifecycleTimeoutMs": 30000 },
+  "permissions": { "capabilities": {
+    "tool": ["read_document", "ocr_image", "ocr_pdf"],
+    "persona": ["document-rules"]
+  } }
 }

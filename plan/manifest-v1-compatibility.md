@@ -38,7 +38,7 @@
 }
 ```
 
-Once `permissions.capabilities` is declared, every registered capability type and name must be listed. Omitting `permissions` preserves legacy trusted loading for existing local plugins.
+Once `permissions.capabilities` is declared, every registered capability type and name must be listed. `*` explicitly allows dynamic names within a capability type (used by MCP for runtime-discovered tools); prefer exact names for static plugins. Omitting `permissions` preserves legacy trusted loading for existing local plugins.
 
 ### Configuration schema
 

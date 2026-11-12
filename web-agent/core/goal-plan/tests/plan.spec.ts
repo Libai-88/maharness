@@ -11,7 +11,10 @@ type Tool = { name: string; handler: (args: Record<string, unknown>, ctx: unknow
 function loadTools(root: string): Map<string, Tool> {
   const tools = new Map<string, Tool>();
   (goalPlan as unknown as { onLoad: (ctx: unknown) => void }).onLoad({
-    register(value: { kind: string; tool?: Tool }) { if (value.kind === 'tool' && value.tool) tools.set(value.tool.name, value.tool); },
+    register(value: { kind: string; tool?: Tool; api?: { router: unknown } }) {
+      if (value.kind === 'tool' && value.tool) tools.set(value.tool.name, value.tool);
+      if (value.kind === 'api' && value.api) (tools as unknown as { router?: unknown }).router = value.api.router;
+    },
     paths: { data: root },
     bus: { emit() {} },
     logger: { info() {} },
@@ -22,6 +25,23 @@ function loadTools(root: string): Map<string, Tool> {
 const tctx = { sessionId: 's', turn: 0, sandboxRoot: '.', cache: {}, trace: {} };
 
 describe('计划步骤状态机', () => {
+  test('计划查询端点按租户隔离会话', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-plan-tenant-'));
+    try {
+      const tools = loadTools(root);
+      const router = (tools as unknown as { router: (req: unknown, res: unknown) => Promise<void> }).router;
+      const tenantA = { ...tctx, tenantId: 'tenant-a' };
+      await tools.get('create_plan')!.handler({ objective: 'A plan', steps: ['one'] }, tenantA);
+      const query = (tenantId: string) => new Promise<{ plan: unknown }>((resolve) => {
+        void router({ method: 'GET', path: '/plan', query: { sessionId: 's' }, tenantId }, { json: resolve, status: () => ({ json: resolve }) });
+      });
+      assert.equal((await query('tenant-a')).plan !== null, true);
+      assert.equal((await query('tenant-b')).plan, null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   test('允许的迁移与非法迁移', () => {
     assert.equal(canTransition('pending', 'in_progress'), true);
     assert.equal(canTransition('pending', 'done'), true);

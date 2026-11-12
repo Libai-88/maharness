@@ -18,11 +18,13 @@ import type { Plugin, ToolContext } from '../../kernel/types';
 import { buildFact, isFactActive, normalizeFact, type MemoryFact, type MemoryFactInput } from './schema';
 import { inspectMemoryText } from './privacy';
 
-const MAX_FACTS = 200;
+const MAX_FACTS = 500;                 // 进程级总上限（多租户共享）
+const MAX_FACTS_PER_TENANT = 200;      // 单租户上限，防止一个租户挤掉其他租户的记忆
 const LESSON_COUNT = 3;       // 失败教训固定注入条数（不重复犯错优先）
 const RELATED_BIGRAM_MIN = 3; // 记忆与当前任务共享 ≥3 个字符 bigram 视为相关
 const BLOCK_NAME_MAX = 32;    // 核心记忆块名长度上限
 const BLOCK_CONTENT_MAX = 1000; // 单个核心记忆块内容上限
+const MAX_BLOCKS_PER_TENANT = 32; // 常驻块会每轮注入，必须有数量上限
 
 type Fact = MemoryFact;
 
@@ -123,14 +125,27 @@ export default {
     };
     const remember = async (text: string, input: MemoryFactInput = {}): Promise<Fact | undefined> => {
       if (inspectMemoryText(text).sensitive) return undefined;
-      const f = buildFact(randomUUID().slice(0, 8), text, Date.now(), input);
+      const f = buildFact(randomUUID(), text, Date.now(), input);
       for (const conflictId of f.conflictsWith) {
         const conflict = facts.find((item) => item.id === conflictId && item.tenantId === f.tenantId);
         if (conflict && !conflict.conflictsWith.includes(f.id)) conflict.conflictsWith.push(f.id);
       }
       facts.push(f);
+      const tenantId = f.tenantId;
+      const tenantFacts = facts.filter((fact) => fact.tenantId === tenantId);
+      if (tenantFacts.length > MAX_FACTS_PER_TENANT) {
+        for (const removed of [...tenantFacts].sort((a, b) => a.ts - b.ts).slice(0, tenantFacts.length - MAX_FACTS_PER_TENANT)) {
+          const index = facts.indexOf(removed);
+          if (index >= 0) facts.splice(index, 1);
+          delete vectors[removed.id];
+        }
+      }
       if (facts.length > MAX_FACTS) {
-        for (const removed of facts.splice(0, facts.length - MAX_FACTS)) delete vectors[removed.id];
+        for (const removed of [...facts].sort((a, b) => a.ts - b.ts).slice(0, facts.length - MAX_FACTS)) {
+          const index = facts.indexOf(removed);
+          if (index >= 0) facts.splice(index, 1);
+          delete vectors[removed.id];
+        }
       }
       if (embedding) {
         try {
@@ -271,6 +286,11 @@ export default {
         name: 'remember_fact',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['id', 'count'],
+          properties: { id: { type: 'string' }, count: { type: 'integer' }, source: { type: 'string' }, confidence: { type: 'number' } },
+        },
         output: '{id, count, source, confidence, conflictsWith}',
         description: '记住一条长期事实（跨会话有效，持久化到 data/memory.json）。用于用户偏好、重要信息、任务结论。',
         parameters: {
@@ -302,6 +322,11 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
+        contentTrust: 'untrusted',
+        outputSchema: {
+          type: 'object', required: ['count', 'facts'],
+          properties: { count: { type: 'integer' }, facts: { type: 'array' } },
+        },
         output: '{count, facts: [{id, text, ts, source, confidence, expiresAt, conflictsWith}]}',
         description: '查询长期记忆（按关键词过滤，返回最近 20 条；不传关键词返回全部最近记忆）。',
         parameters: {
@@ -327,6 +352,11 @@ export default {
         name: 'forget_fact',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['removed', 'count'],
+          properties: { removed: { type: 'string' }, count: { type: 'integer' } },
+        },
         description: '删除一条长期记忆（按 recall_facts 返回的 id）。',
         parameters: {
           type: 'object',
@@ -341,7 +371,7 @@ export default {
           facts.splice(i, 1);
           delete vectors[id];
           persist();
-          return { ok: true, data: { removed: id, count: facts.length } };
+          return { ok: true, data: { removed: id, count: facts.filter((f) => f.tenantId === tenantId).length } };
         },
       },
     });
@@ -352,6 +382,11 @@ export default {
         name: 'revoke_fact',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['revoked', 'revokedAt'],
+          properties: { revoked: { type: 'string' }, revokedAt: { type: 'integer' } },
+        },
         description: '撤回一条长期记忆（保留审计记录，但不再召回）；按 recall_facts 返回的 id。',
         parameters: { type: 'object', properties: { id: { type: 'string' } }, required: ['id'] },
         async handler(args: { id?: string }, tctx: ToolContext) {
@@ -371,6 +406,11 @@ export default {
         name: 'set_memory_block',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['name', 'ts', 'blockCount'],
+          properties: { name: { type: 'string' }, ts: { type: 'integer' }, blockCount: { type: 'integer' } },
+        },
         output: '{name, ts}',
         description: '写入/更新一个核心记忆块（分层记忆 core 层）：常驻记忆，每轮对话自动注入。' +
           '用于高频且必须始终在场的记忆（用户偏好、项目约束、工作纪律、关键路径约定）。' +
@@ -391,6 +431,15 @@ export default {
           if (!content) return { ok: false, error: '缺少 content' };
           if (content.length > BLOCK_CONTENT_MAX) return { ok: false, error: `块内容过长（≤${BLOCK_CONTENT_MAX} 字符），请拆分` };
           const tenantId = tctx?.tenantId ?? 'default';
+          const privacy = inspectMemoryText(content);
+          if (privacy.sensitive) {
+            return { ok: false, error: '核心记忆块疑似包含凭据、私钥或敏感凭据路径，拒绝写入' };
+          }
+          const key = blockKey(tenantId, name);
+          const tenantBlockCount = Object.keys(blocks).filter((item) => item.startsWith(`${tenantId}\0`)).length;
+          if (!(key in blocks) && tenantBlockCount >= MAX_BLOCKS_PER_TENANT) {
+            return { ok: false, error: `核心记忆块已达上限（${MAX_BLOCKS_PER_TENANT} 个），请先删除过时块` };
+          }
           const b = setBlock(tenantId, name, content);
           return { ok: true, data: { name, ts: b.ts, blockCount: Object.keys(blocks).filter((key) => key.startsWith(`${tenantId}\0`)).length } };
         },
@@ -404,6 +453,11 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
+        contentTrust: 'untrusted',
+        outputSchema: {
+          type: 'object', required: ['blocks'],
+          properties: { blocks: { type: 'array' } },
+        },
         output: '{blocks: [{name, content, ts}]}',
         description: '列出全部核心记忆块（常驻记忆，每轮自动注入）。',
         parameters: { type: 'object', properties: {} },
@@ -424,6 +478,11 @@ export default {
         name: 'delete_memory_block',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['removed', 'blockCount'],
+          properties: { removed: { type: 'string' }, blockCount: { type: 'integer' } },
+        },
         description: '删除一个核心记忆块（按 list_memory_blocks 返回的 name）。',
         parameters: {
           type: 'object',

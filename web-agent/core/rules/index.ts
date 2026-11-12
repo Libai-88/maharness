@@ -18,6 +18,8 @@ interface BeforeToolCtx {
   blocked?: boolean;
   blockReason?: string;
   policyApproved?: boolean;
+  forceApproval?: boolean;
+  forceApprovalReason?: string;
 }
 
 const PREAMBLE = '用户规则（优先级高于插件自述，低于 harness 硬性安全边界；与规则冲突时说明无法执行的部分，不要静默忽略）：';
@@ -90,6 +92,10 @@ export default {
         return;
       }
       if (hit.effect === 'allow') data.policyApproved = true;
+      if (hit.effect === 'require-approval') {
+        data.forceApproval = true;
+        data.forceApprovalReason = `用户策略规则要求审批（${hit.id}${hit.reason ? `：${hit.reason}` : ''}）`;
+      }
     });
 
     ctx.register({
@@ -118,7 +124,12 @@ export default {
         name: 'list_rules',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{sources, promptChars, policy, errors}',
+        outputSchema: {
+          type: 'object', required: ['sources', 'promptChars', 'policy', 'errors'],
+          properties: { sources: { type: 'array' }, promptChars: { type: 'integer' }, policy: { type: 'array' }, errors: { type: 'array' } },
+        },
         description: '查看当前生效的用户规则来源（全局/项目文件）与策略规则。用户问「你遵守哪些规则/项目有什么约定」时调一次即可。',
         parameters: { type: 'object', properties: {} },
         async handler() {
@@ -134,7 +145,12 @@ export default {
         name: 'check_policy',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{tool, decision, ruleId?, reason?, matched, candidate?}',
+        outputSchema: {
+          type: 'object', required: ['tool', 'decision', 'matched'],
+          properties: { tool: { type: 'string' }, decision: { type: 'string' }, matched: { type: 'boolean' }, ruleId: { type: 'string' }, reason: { type: 'string' }, changed: { type: 'boolean' }, candidate: { type: 'object' }, diff: { type: 'array' }, issues: { type: 'array' } },
+        },
         description: '模拟一次工具调用的策略判定：返回 allow / deny / require-approval / default 与命中的规则。传入 candidate 时只读对比候选策略，不落盘、不执行工具。',
         parameters: {
           type: 'object',

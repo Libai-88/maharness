@@ -5,6 +5,7 @@ import type { Express } from 'express';
 import { existsSync, readFileSync } from 'node:fs';
 import { basename, join, sep } from 'node:path';
 import { openInExplorer, type RouteDeps } from './shared';
+import { toolDomain } from '../../kernel/tool-domain';
 
 /** 常见插件错误 → 修复建议（面向用户的技术指引） */
 function suggestFix(errorMsg: string): string | undefined {
@@ -60,6 +61,7 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/tools', (_req, res) => {
     res.json(kernel.plugins.toolCatalog().map((entry) => ({
       name: entry.tool.name,
+      domain: toolDomain(entry.tool.name),
       pluginId: entry.pluginId,
       shadowedBy: entry.shadowedBy ?? null,
       risk: entry.tool.risk ?? 'low',

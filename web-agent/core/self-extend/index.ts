@@ -10,6 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin, ToolContext } from '../../kernel/types';
+import { adminToolDenied } from '../../kernel/tool-privilege';
 import { reviewPluginSource } from '../../kernel/plugin-review';
 import { runPluginTrial } from '../../kernel/plugin-trial';
 import { SNAPSHOT_SUFFIX } from '../../kernel/plugin-snapshot';
@@ -34,6 +35,7 @@ const CORE_IDS = new Set<string>(
 );
 
 const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+const MAX_SOURCE_CHARS = 200_000;
 
 /** 默认骨架源码（Agent 不传 source 时生成；通常 Agent 会传入完整实现） */
 function defaultSource(id: string, name: string): string {
@@ -52,9 +54,11 @@ export default {
       tool: {
         name: '${id}_hello',
         description: '示例工具：返回问候语（可改成你的真实能力）',
+        sideEffect: 'none',
         parameters: { type: 'object', properties: {} },
+        outputSchema: { type: 'object', required: ['message'], properties: { message: { type: 'string' } } },
         async handler() {
-          return { ok: true, data: 'hello from ${id}' };
+          return { ok: true, data: { message: 'hello from ${id}' } };
         },
       },
     });
@@ -143,6 +147,9 @@ export default {
       kind: 'api',
       api: {
         mount: 'panel',
+        responses: {
+          'GET /panel': { type: 'object', required: ['title', 'html'], properties: { title: { type: 'string' }, html: { type: 'string' } } },
+        },
         router: ((req: { path?: string }, res: { json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void } }) => {
           if (!req.path || req.path === '/' || req.path === '/panel') {
             res.json({
@@ -171,6 +178,11 @@ export default {
         name: 'create_plugin',
         risk: 'high',
         costHint: 'medium',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['id', 'name', 'written', 'state'],
+          properties: { id: { type: 'string' }, name: { type: 'string' }, written: { type: 'array' }, state: { type: 'string' }, caps: { type: 'array' }, error: { type: 'string' }, note: { type: 'string' } },
+        },
         approval: true,
         limits: '写入 plugins/ 并热加载代码',
         description: '创建自我扩展插件：生成 plugin.json 与 index.ts 写入 plugins/ 现场目录，等待热加载后回传状态；失败时回传错误信息供修复。',
@@ -184,6 +196,8 @@ export default {
           required: ['id'],
         },
         async handler(args: { id?: string; name?: string; source?: string }, tctx: ToolContext) {
+          const denied = adminToolDenied(tctx, '创建或更新全局插件');
+          if (denied) return { ok: false, error: denied };
           const id = String(args.id ?? '').trim();
           const name = String(args.name ?? '').trim() || id;
           if (!id) return { ok: false, error: '缺少插件 id' };
@@ -203,6 +217,9 @@ export default {
           if (existsSync(dir)) return { ok: false, error: `插件已存在: plugins/${id}（直接编辑其文件即可修改，勿重复创建）` };
 
           const source = typeof args.source === 'string' && args.source.trim() ? args.source : defaultSource(id, name);
+          if (source.length > MAX_SOURCE_CHARS) {
+            return { ok: false, error: `插件源码过大（${source.length} > ${MAX_SOURCE_CHARS} 字符），请拆分到多个文件或在插件目录内维护` };
+          }
 
           // 静态契约校验：先拒绝明显越权实现，再交给 loader 做完整 manifest/权限校验。
           const contractHints = ['onLoad', 'ctx.register', 'handler'];
@@ -297,6 +314,11 @@ export default {
         name: 'plugin_status',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
+        outputSchema: {
+          type: 'object', required: ['dir', 'count', 'plugins'],
+          properties: { dir: { type: 'string' }, count: { type: 'integer' }, plugins: { type: 'array' } },
+        },
         output: '{plugins: [{id, name, version, state, active, caps, error}]}；active=true 表示能力已在上下文可用',
         description: '查看 plugins/ 现场插件的状态。state 为机器态（started=运行中/loaded=已注册未激活/lazy=惰性声明/stopped=已停用/error=失败），' +
           'active 为语义判断（是否已进入上下文）：active=false 的插件需要 enable_plugin 激活后才能使用其能力。',
@@ -339,6 +361,11 @@ export default {
         name: 'enable_plugin',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['id', 'state'],
+          properties: { id: { type: 'string' }, state: { type: 'string' } },
+        },
         approval: true,
         description: '激活一个插件（加载其能力进入上下文）。用于 lazy 声明或已停用的插件——' +
           '插件状态用 plugin_status 查看；激活后其工具/规则立即对后续对话生效。',
@@ -347,7 +374,9 @@ export default {
           properties: { id: { type: 'string', description: '插件 id（plugin_status 可查）' } },
           required: ['id'],
         },
-        async handler(args: { id?: string }) {
+        async handler(args: { id?: string }, tctx: ToolContext) {
+          const denied = adminToolDenied(tctx, '启用插件');
+          if (denied) return { ok: false, error: denied };
           const id = String(args.id ?? '').trim();
           if (!id) return { ok: false, error: '缺少插件 id' };
           const inst = ctx.kernel.plugins.list().find((p) => p.manifest.id === id);
@@ -368,6 +397,11 @@ export default {
         name: 'disable_plugin',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
+        outputSchema: {
+          type: 'object', required: ['id', 'state'],
+          properties: { id: { type: 'string' }, state: { type: 'string' } },
+        },
         approval: true,
         description: '停用一个插件（卸载其能力与规则，能力从上下文消失）。用于不再需要的插件——' +
           '停用后其工具不再可用；可随时 enable_plugin 重新激活。',
@@ -376,7 +410,9 @@ export default {
           properties: { id: { type: 'string', description: '插件 id（plugin_status 可查）' } },
           required: ['id'],
         },
-        async handler(args: { id?: string }) {
+        async handler(args: { id?: string }, tctx: ToolContext) {
+          const denied = adminToolDenied(tctx, '停用插件');
+          if (denied) return { ok: false, error: denied };
           const id = String(args.id ?? '').trim();
           if (!id) return { ok: false, error: '缺少插件 id' };
           const inst = ctx.kernel.plugins.list().find((p) => p.manifest.id === id);

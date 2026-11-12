@@ -209,6 +209,11 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
+        output: '{path, entries: [{name, type, size?, mtime?}]}',
+        outputSchema: {
+          type: 'object', required: ['path', 'entries'],
+          properties: { path: { type: 'string' }, entries: { type: 'array' } },
+        },
         description: '列出单层目录内容（名称、类型、大小、修改时间）。递归找文件请用 glob。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -248,6 +253,15 @@ export default {
         sideEffect: 'read',
         limits: '仅文本文件；单次最多 2000 行 / 100k 字符，超出用 offset 续读',
         output: '{text, encoding, size, path, totalLines, startLine, endLine, nextOffset?}；nextOffset 表示还有后续行',
+        outputSchema: {
+          type: 'object', required: ['text', 'path', 'size', 'totalLines', 'startLine', 'endLine'],
+          properties: {
+            text: { type: 'string' }, path: { type: 'string' }, size: { type: 'integer' },
+            encoding: { type: 'string' }, isBinary: { type: 'boolean' },
+            totalLines: { type: 'integer' }, startLine: { type: 'integer' }, endLine: { type: 'integer' },
+            nextOffset: { type: 'integer' }, truncated: { type: 'boolean' },
+          },
+        },
         description: '读取文本文件（自动识别 UTF-8/UTF-16/GBK）。支持 offset（1 起始行号）/limit（行数）分段读，lineNumbers=true 可给每行加行号前缀。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -305,6 +319,10 @@ export default {
         sideEffect: 'read',
         limits: '不跟随符号链接；默认忽略 node_modules/.git/dist/build 等；上限 500 条',
         output: '{matches: [{path,size,mtime}], total, truncated, root}',
+        outputSchema: {
+          type: 'object', required: ['matches', 'total', 'truncated'],
+          properties: { matches: { type: 'array' }, total: { type: 'integer' }, truncated: { type: 'boolean' }, root: { type: 'string' } },
+        },
         description: '按 glob 模式递归查找文件（如 **/*.ts、src/**/*.spec.ts、*.md）。不含 / 的模式按文件名匹配。路径参数相对沙箱根目录。',
         parameters: {
           type: 'object',
@@ -328,7 +346,7 @@ export default {
           const data = key ? cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
             const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
             return {
-              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size })),
+              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
               total: sorted.length,
               truncated: sorted.length >= 20_000 || sorted.length > limit,
               root: relative(tctx.sandboxRoot, rootAbs) || '.',
@@ -336,7 +354,7 @@ export default {
           }, tctx.tenantId) : (() => {
             const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
             return {
-              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size })),
+              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
               total: sorted.length,
               truncated: !snapshot.complete || sorted.length > limit,
               root: relative(tctx.sandboxRoot, rootAbs) || '.',
@@ -356,6 +374,10 @@ export default {
         sideEffect: 'read',
         limits: '单文件默认跳过 >2MB；ripgrep 可用时走 rg，回落纯 JS；上限 200 条',
         output: '{matches: [{file,line,text,before?,after?}], files, scannedFiles, truncated}',
+        outputSchema: {
+          type: 'object', required: ['matches'],
+          properties: { matches: { type: 'array' }, files: { type: 'array' }, scannedFiles: { type: 'integer' }, truncated: { type: 'boolean' } },
+        },
         description: '在工作区内按正则（或 literal=true 原文）搜索文件内容，返回 文件:行号:内容。可用 glob 限定文件类型、path 限定目录、contextLines 带上下文行。',
         parameters: {
           type: 'object',
@@ -422,6 +444,11 @@ export default {
         approval: true,
         sideEffect: 'write',
         limits: '整文件覆写；kernel/、core/chat/ 硬拒，.env 与 data/ 需用户批准',
+        output: '{path, bytes}',
+        outputSchema: {
+          type: 'object', required: ['path', 'bytes'],
+          properties: { path: { type: 'string' }, bytes: { type: 'integer' } },
+        },
         description: '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。普通工作区文件写默认免审批（可经 tools.writeRequiresApproval 恢复审批）；但 .env 与 data/ 下的任何写入都必须用户批准，不受该开关影响。',
         parameters: {
           type: 'object',
@@ -476,6 +503,10 @@ export default {
         sideEffect: 'write',
         limits: '目标须为已存在的文本文件且 <2MB；oldText 必须与文件内容逐字符一致（含缩进），不唯一时报错',
         output: '{path, edits: [{index, replaced}], bytesBefore, bytesAfter}',
+        outputSchema: {
+          type: 'object', required: ['path', 'edits', 'bytesBefore', 'bytesAfter'],
+          properties: { path: { type: 'string' }, edits: { type: 'array' }, bytesBefore: { type: 'integer' }, bytesAfter: { type: 'integer' } },
+        },
         description: '对已存在文件做精确字符串替换（一次可传多处 edits，全部命中才写盘；任一处未命中或匹配不唯一则整体放弃并逐条报错）。保留原换行风格（CRLF/LF）与 BOM。局部改动的首选工具。',
         parameters: {
           type: 'object',
@@ -559,6 +590,11 @@ export default {
         costHint: 'low',
         approval: true,
         sideEffect: 'irreversible',
+        output: '{removed, type}',
+        outputSchema: {
+          type: 'object', required: ['removed', 'type'],
+          properties: { removed: { type: 'string' }, type: { type: 'string', enum: ['file', 'dir'] } },
+        },
         description: '删除沙箱内的文件或空目录。破坏性操作：始终需要用户审批；非空目录会失败（不能递归删除）。',
         parameters: {
           type: 'object',

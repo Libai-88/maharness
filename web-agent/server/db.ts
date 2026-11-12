@@ -905,6 +905,22 @@ export class Store {
       .run(Date.now(), decision, reason ?? null, id);
   }
 
+  /** 进程启动时调用：审批板是内存态，重启后所有未决审批都不再有等待者。
+   *  标记为 expired:restart 并返回会话归属，供上层自动 resume，避免幽灵审批卡。 */
+  expireOrphanedApprovalRequests(now = Date.now()): { id: string; sessionId: string; tenantId: string }[] {
+    const rows = this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId
+      FROM approval_requests WHERE decided_at IS NULL AND session_id IS NOT NULL`).all() as {
+      id: string; sessionId: string; tenantId: string;
+    }[];
+    if (!rows.length) return [];
+    const update = this.db.prepare('UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ? AND decided_at IS NULL');
+    const tx = this.db.transaction((items: typeof rows) => {
+      for (const item of items) update.run(now, 'expired', 'restart', item.id);
+    });
+    tx(rows);
+    return rows;
+  }
+
   listApprovalRequests(tenantId: string, sessionId?: string): {
     id: string; sessionId?: string | null; tenantId: string; name: string; summary: string;
     createdAt: number; expiresAt: number; decidedAt?: number | null; decision?: string | null; reason?: string | null;

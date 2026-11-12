@@ -218,6 +218,23 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     } finally { cleanup(); }
   });
 
+  test('重启清理：未决审批标记 expired:restart 并返回会话归属', () => {
+    const { store, cleanup } = newStore();
+    try {
+      const s = store.createSession('m', '', 'tenant-a');
+      store.saveApprovalRequest({
+        id: 'ap-orphan', sessionId: s.id, tenantId: 'tenant-a', name: 'delete_file',
+        summary: '删除文件', createdAt: 100, expiresAt: 100_000,
+      });
+      const rows = store.expireOrphanedApprovalRequests(500);
+      assert.deepEqual(rows, [{ id: 'ap-orphan', sessionId: s.id, tenantId: 'tenant-a' }]);
+      const decided = store.listApprovalRequests('tenant-a', s.id);
+      assert.equal(decided[0]?.decision, 'expired');
+      assert.equal(decided[0]?.reason, 'restart');
+      assert.deepEqual(store.expireOrphanedApprovalRequests(600), []);
+    } finally { cleanup(); }
+  });
+
   test('deleteSessions 批量删除同步清理全部断点', () => {
     const { store, cleanup } = newStore();
     try {

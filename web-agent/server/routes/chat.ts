@@ -396,6 +396,7 @@ export function registerChatRoutes(app: Express, deps: RouteDeps): void {
         // 工具上下文会话 ID：todo 等插件把状态挂到具体会话
         sessionId: session.id,
         tenantId,
+        principalRole: (req as Request & { apiRole?: 'admin' | 'member' | 'readonly' }).apiRole,
         sandboxRoot: tenantSandbox,
         signal: ac.signal, systemPrompt, tools: toolsOverride,
         // P 契约：注入 server 侧压缩能力（封装 compact.ts）——agent 每轮预算检查

@@ -14,8 +14,10 @@ describe('check_policy', () => {
       writeFileSync(join(data, 'rules.json'), JSON.stringify([
         { id: 'allow-docs', effect: 'allow', tool: 'read_file', pathPattern: 'docs/**' },
         { id: 'deny-kill', effect: 'deny', tool: 'powershell_execute', argPattern: 'taskkill' },
+        { id: 'require-review', effect: 'require-approval', tool: 'write_file' },
       ]), 'utf8');
       const tools = new Map<string, any>();
+      let beforeTool: ((event: { data: any }) => void) | undefined;
       const ctx = {
         config: {
           get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root
@@ -25,7 +27,10 @@ describe('check_policy', () => {
         paths: { data, root },
         register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); return () => undefined; },
         watchConfig() { return () => undefined; },
-        on() { return () => undefined; },
+        on(event: string, listener: (event: { data: any }) => void) {
+          if (event === 'agent.before_tool') beforeTool = listener;
+          return () => undefined;
+        },
         logger: { info() {} },
       };
       rulesPlugin.onLoad(ctx as never);
@@ -37,7 +42,7 @@ describe('check_policy', () => {
       const denied = await check.handler({ tool: 'powershell_execute', args: { command: 'taskkill /PID 1' } });
       assert.equal(denied.data.decision, 'deny');
       assert.equal(denied.data.ruleId, 'deny-kill');
-      const fallback = await check.handler({ tool: 'write_file', args: { path: 'a.txt' } });
+      const fallback = await check.handler({ tool: 'glob', args: { pattern: '*.ts' } });
       assert.equal(fallback.data.decision, 'default');
       assert.equal(fallback.data.matched, false);
       const candidate = await check.handler({
@@ -49,6 +54,12 @@ describe('check_policy', () => {
       assert.equal(candidate.data.candidate.decision, 'deny');
       assert.equal(candidate.data.changed, true);
       assert.equal(candidate.data.diff[0].change, 'changed');
+
+      const forced = { tool: { name: 'write_file', args: { path: 'a.txt' } } };
+      assert.ok(beforeTool);
+      beforeTool!({ data: forced });
+      assert.equal((forced as any).forceApproval, true);
+      assert.match((forced as any).forceApprovalReason, /require-review/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

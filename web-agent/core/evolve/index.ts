@@ -25,6 +25,7 @@ const STOPWORDS_SKILL = /^(好的|谢谢|继续|然后呢|嗯)+[。！!？?]*$/;
 
 export interface ProposalMeta {
   id: string;
+  tenantId?: string;
   name: string;
   description: string;
   reason: string;
@@ -67,8 +68,13 @@ export default {
     const slug = (s: string): string => s.toLowerCase()
       .replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'skill';
     const newId = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+    /** 提案 id 同时是文件名：只允许字母数字，杜绝 ../ 目录穿越。 */
+    const proposalFile = (id: string): string | null => {
+      const safe = String(id ?? '').trim();
+      return /^[a-z0-9]{1,64}$/.test(safe) ? join(dir, `${safe}.md`) : null;
+    };
 
-    function loadProposals(): ProposalMeta[] {
+    function loadProposals(tenantId?: string): ProposalMeta[] {
       if (!existsSync(dir)) return [];
       const out: ProposalMeta[] = [];
       for (const f of readdirSync(dir)) {
@@ -77,8 +83,11 @@ export default {
           const fm = parseFrontMatter(readFileSync(join(dir, f), 'utf-8'));
           const name = fmString(fm.data, 'name');
           if (!name) continue;
+          const owner = fmString(fm.data, 'tenant-id') || 'default';
+          if (tenantId && owner !== tenantId) continue;
           out.push({
             id: f.replace(/\.md$/, ''),
+            tenantId: owner,
             name,
             description: fmString(fm.data, 'description'),
             reason: fmString(fm.data, 'reason'),
@@ -97,16 +106,18 @@ export default {
 
     function writeProposal(p: ProposalMeta, body: string): void {
       const file = join(dir, `${p.id}.md`);
+      const scalar = (value: string): string => `"${value.replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
       const md = ['---',
-        `name: ${p.name}`,
-        `description: ${p.description}`,
-        `reason: ${p.reason}`,
+        `name: ${scalar(p.name)}`,
+        `tenant-id: ${scalar(p.tenantId ?? 'default')}`,
+        `description: ${scalar(p.description)}`,
+        `reason: ${scalar(p.reason)}`,
         `signals: ${p.signals.join(', ')}`,
         `status: ${p.status}`,
         `created-at: ${p.createdAt}`,
         `updated-at: ${p.updatedAt}`,
         `seen: ${p.seen}`,
-        `question: ${(p.question ?? '').replace(/\r?\n/g, ' ').slice(0, 200)}`,
+        `question: ${scalar((p.question ?? '').slice(0, 200))}`,
         '---', '', body].join('\n');
       writeFileSync(file, md, 'utf-8');
     }
@@ -116,29 +127,30 @@ export default {
 
     /** 读回提案正文（frontmatter 之后的部分） */
     function proposalBody(id: string): string | null {
-      const file = join(dir, `${id}.md`);
+      const file = proposalFile(id);
+      if (!file) return null;
       if (!existsSync(file)) return null;
       try { return parseFrontMatter(readFileSync(file, 'utf-8')).body; } catch { return null; }
     }
 
     /** 命中同名待确认提案则累加次数，否则新建 */
-    function upsert(signals: string[], name: string, description: string, reason: string, body: string, question: string, evidence?: string): ProposalMeta | null {
-      const pending = loadProposals().filter(p => p.status === 'pending');
+    function upsert(signals: string[], name: string, description: string, reason: string, body: string, question: string, evidence?: string, tenantId = 'default'): ProposalMeta | null {
+      const pending = loadProposals(tenantId).filter(p => p.status === 'pending');
       if (pending.length >= 12) return null;                 // 待确认积压过多时不再打扰
       const dup = pending.find(p => p.name === name || (p.signals.length > 0 && p.signals.join() === signals.join()));
       if (dup) {
         dup.seen++;
         dup.updatedAt = Date.now();
         writeProposal(dup, proposalBody(dup.id) ?? body);
-        ctx.bus.emit({ type: 'evolve.proposal', data: { id: dup.id, name: dup.name, seen: dup.seen, updated: true }, ts: Date.now() });
+        ctx.bus.emit({ type: 'evolve.proposal', data: { id: dup.id, name: dup.name, seen: dup.seen, updated: true, tenantId }, ts: Date.now() });
         return dup;
       }
       const p: ProposalMeta = {
-        id: newId(), name, description, reason, signals,
+        id: newId(), tenantId, name, description, reason, signals,
         status: 'pending', createdAt: Date.now(), updatedAt: Date.now(), seen: 1, question: question.slice(0, 300), evidence,
       };
       writeProposal(p, body);
-      ctx.bus.emit({ type: 'evolve.proposal', data: { id: p.id, name: p.name, seen: 1, updated: false }, ts: Date.now() });
+      ctx.bus.emit({ type: 'evolve.proposal', data: { id: p.id, name: p.name, seen: 1, updated: false, tenantId }, ts: Date.now() });
       return p;
     }
 
@@ -162,6 +174,7 @@ export default {
 
     function onRunFinished(summary: AgentRunSummary): void {
       if (!enabled || !auto) return;
+      const tenantId = summary.tenantId ?? 'default';
       for (const [tool, n] of Object.entries(summary.failedTools)) {
         const row = state.toolStats[tool] ??= { calls: 0, fails: 0, lastFailTs: 0 };
         row.fails += n;
@@ -199,7 +212,7 @@ export default {
       for (const t of Object.keys(summary.failedTools)) if (calls[t]?.fails >= minFailures * 2 && !signals.includes('历史高失败')) signals.push('历史高失败');
       const body = draftBody({ name, description, reason }, q);
       upsert(signals, name, description, reason, body, q,
-        Object.keys(summary.failedTools).length ? `失败统计: ${JSON.stringify(summary.failedTools)}` : undefined);
+        Object.keys(summary.failedTools).length ? `失败统计: ${JSON.stringify(summary.failedTools)}` : undefined, tenantId);
     }
 
     // 自动退订：卸载/停用时随 EffectScope 回收（无需手工持有 off 句柄）
@@ -230,8 +243,13 @@ export default {
         name: 'propose_skill',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'write',
         limits: '只写 data/skill-proposals/，采纳由用户在界面确认',
         output: '{id, name, status}',
+        outputSchema: {
+          type: 'object', required: ['id', 'name', 'status'],
+          properties: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'string' } },
+        },
         description: '产出一份「可复用技能」提案草稿（等用户采纳）。当用户表示"以后都这样做/把这个流程固化"时使用；正文按「何时使用 / 步骤 / 禁止事项」组织。',
         parameters: {
           type: 'object',
@@ -243,11 +261,12 @@ export default {
           },
           required: ['name', 'description', 'body'],
         },
-        async handler(args: { name?: string; description?: string; body?: string; reason?: string }) {
+        async handler(args: { name?: string; description?: string; body?: string; reason?: string }, tctx: { tenantId?: string }) {
           const name = String(args.name ?? '').trim().replace(/[^\w.\u4e00-\u9fa5-]/g, '').slice(0, 60);
           if (!name) return { ok: false, error: 'name 不合法（用小写短横线或中文）' };
           const p = upsert(['模型主动提议'], name, String(args.description ?? '').slice(0, 300),
-            String(args.reason ?? '模型判断值得复用').slice(0, 300), String(args.body ?? ''), String(args.reason ?? ''));
+            String(args.reason ?? '模型判断值得复用').slice(0, 300), String(args.body ?? ''), String(args.reason ?? ''),
+            undefined, tctx?.tenantId ?? 'default');
           return p ? { ok: true, data: { id: p.id, name: p.name, status: p.status } }
             : { ok: false, error: '待确认提案已达上限（12 条），请先到技能页处理' };
         },
@@ -259,35 +278,44 @@ export default {
       service: {
         id: 'evolve',
         instance: {
-          list: loadProposals,
+          list: (tenantId?: string) => loadProposals(tenantId),
           toolStats: () => state.toolStats,
           /** 采纳：写入 data/skills/<name>/SKILL.md 并标记 accepted（skills 插件 user 源生效） */
-          accept(id: string): { ok: boolean; error?: string; name?: string } {
-            const file = join(dir, `${id}.md`);
+          accept(id: string, tenantId = 'default'): { ok: boolean; error?: string; name?: string } {
+            const file = proposalFile(id);
+            if (!file) return { ok: false, error: '提案 id 非法' };
             if (!existsSync(file)) return { ok: false, error: '提案不存在' };
             const md = readFileSync(file, 'utf-8');
             const fm = parseFrontMatter(md);
+            if ((fmString(fm.data, 'tenant-id') || 'default') !== tenantId) return { ok: false, error: '提案不属于当前租户' };
             const name = fmString(fm.data, 'name').replace(/[^\w.\u4e00-\u9fa5-]/g, '');
             if (!name) return { ok: false, error: '提案缺少 name' };
             const userDir = join(ctx.paths.data, 'skills', name);
             if (existsSync(join(userDir, 'SKILL.md'))) return { ok: false, error: `同名技能已存在: ${name}` };
             mkdirSync(userDir, { recursive: true });
-            writeFileSync(join(userDir, 'SKILL.md'), `---\nname: ${name}\ndescription: ${fmString(fm.data, 'description')}\n---\n\n${fm.body}`, 'utf-8');
-            const meta = loadProposals().find(p => p.id === id);
+            const description = fmString(fm.data, 'description')
+              .replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            writeFileSync(join(userDir, 'SKILL.md'), `---\nname: "${name}"\ndescription: "${description}"\n---\n\n${fm.body}`, 'utf-8');
+            const meta = loadProposals(tenantId).find(p => p.id === id);
             if (meta) { meta.status = 'accepted'; meta.updatedAt = Date.now(); writeProposal(meta, fm.body); }
             skillsSvc()?.invalidateCache?.();
-            ctx.bus.emit({ type: 'evolve.accepted', data: { id, name }, ts: Date.now() });
+            ctx.bus.emit({ type: 'evolve.accepted', data: { id, name, tenantId }, ts: Date.now() });
             return { ok: true, name };
           },
-          reject(id: string): { ok: boolean; error?: string } {
-            const file = join(dir, `${id}.md`);
+          reject(id: string, tenantId = 'default'): { ok: boolean; error?: string } {
+            const file = proposalFile(id);
+            if (!file) return { ok: false, error: '提案 id 非法' };
             if (!existsSync(file)) return { ok: false, error: '提案不存在' };
-            const meta = loadProposals().find(p => p.id === id);
+            const meta = loadProposals(tenantId).find(p => p.id === id);
+            if (!meta) return { ok: false, error: '提案不属于当前租户' };
             if (meta) { meta.status = 'rejected'; meta.updatedAt = Date.now(); writeProposal(meta, parseFrontMatter(readFileSync(file, 'utf-8')).body); }
             return { ok: true };
           },
-          remove(id: string): { ok: boolean } {
-            rmSync(join(dir, `${id}.md`), { force: true });
+          remove(id: string, tenantId = 'default'): { ok: boolean } {
+            const file = proposalFile(id);
+            if (!file) return { ok: false };
+            if (!loadProposals(tenantId).some(p => p.id === id)) return { ok: false };
+            rmSync(file, { force: true });
             return { ok: true };
           },
         },

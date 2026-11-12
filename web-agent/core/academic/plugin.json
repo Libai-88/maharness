@@ -3,5 +3,9 @@
   "name": "学术智能体（ARS 融合）",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "requires": ["skills"],
+  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
+  "limits": { "lifecycleTimeoutMs": 30000 },
+  "permissions": { "capabilities": { "persona": ["ars-routing"] } }
 }

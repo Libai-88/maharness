@@ -205,7 +205,12 @@ export default {
         name: 'handoff_to',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'none',
         output: '{handedOff, role, name}',
+        outputSchema: {
+          type: 'object', required: ['handedOff', 'role', 'name'],
+          properties: { handedOff: { type: 'boolean' }, role: { type: 'string' }, name: { type: 'string' } },
+        },
         description: '把当前任务移交给指定角色（专业化分工）：移交后本代理立即停止，后续对话由目标角色接管（其提示词与工具集热切换，无需重启）。' +
           '适用：任务类型超出本角色定位（如深度编码/审查/规划）；移交时说明任务目标、已完成与未完成的部分、对新角色的要求。' +
           '角色不存在时错误信息会列出当前全部可用角色。交回主代理：role=main。',
@@ -265,6 +270,8 @@ export default {
         name: 'recall_tool_result',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
+        contentTrust: 'untrusted',
         output: '{id, length, content}',
         description: '重读本会话中已存储的工具完整结果（工具结果过大时回填只含摘要与 id，用此工具按 id 重读原文——零副作用、不重算工具）。id 从工具回填的【工具结果已存入结果存储】标注中获取。',
         parameters: {

@@ -19,6 +19,7 @@ import { parseFrontMatter, fmString, fmList, fmMap } from '../../kernel/frontmat
 import { estimateTokens } from '../../kernel/tokens';
 import { listSkillBackups, rollbackSkill } from '../../kernel/skillsSync';
 import { scoreSkillEntries } from './router';
+import { adminToolDenied } from '../../kernel/tool-privilege';
 
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
 const builtinDir = join(rootDir, 'core', 'skills', 'builtin');
@@ -157,11 +158,14 @@ export default {
     const usageFile = join(ctx.paths.data, 'skill-usage.json');
     const userSkillsDir = join(ctx.paths.data, 'skills');
     const activeSkills = new Map<string, { name: string; at: number }>();
+    const activeKey = (tenantId: string | undefined, sessionId: string | undefined): string =>
+      `${tenantId ?? 'default'}\u0000${sessionId ?? '_default'}`;
     let embedding: { embed(text: string): Promise<number[]> } | undefined;
     ctx.inject?.('service:embedding', (value) => {
       embedding = value as typeof embedding;
     });
     const skillVectors = new Map<string, number[]>();
+    const skillVectorSigs = new Map<string, string>();
 
     let scanCache: { at: number; entries: SkillEntry[]; index: Map<string, { entry: SkillEntry; shadows: SkillSource[] }> } | null = null;
 
@@ -249,11 +253,21 @@ export default {
       if (!embedding) return;
       const {index} = scan();
       for (const {entry} of index.values()) {
-        if (skillVectors.has(entry.name)) continue;
+        const signature = `${entry.name}: ${entry.description}`.slice(0, 500);
+        if (skillVectors.has(entry.name) && skillVectorSigs.get(entry.name) === signature) continue;
         try {
-          const vector = await embedding.embed(`${entry.name}: ${entry.description}`.slice(0, 500));
-          if (vector.length) skillVectors.set(entry.name, vector);
+          const vector = await embedding.embed(signature);
+          if (vector.length) {
+            skillVectors.set(entry.name, vector);
+            skillVectorSigs.set(entry.name, signature);
+          }
         } catch { /* embedding 不可用 → bigram 回退 */ }
+      }
+      for (const name of skillVectors.keys()) {
+        if (!index.has(name)) {
+          skillVectors.delete(name);
+          skillVectorSigs.delete(name);
+        }
       }
     }
 
@@ -311,12 +325,12 @@ export default {
     });
 
     ctx.on?.('agent.before_tool', (e) => {
-      const h = e.data as { sessionId?: string; tool?: { name?: string }; blocked?: boolean; blockReason?: string };
-      const sessionId = h.sessionId ?? '_default';
-      const active = activeSkills.get(sessionId);
+      const h = e.data as { sessionId?: string; tenantId?: string; tool?: { name?: string }; blocked?: boolean; blockReason?: string };
+      const key = activeKey(h.tenantId, h.sessionId);
+      const active = activeSkills.get(key);
       if (!active) return;
       if (Date.now() - active.at > 10 * 60_000) {
-        activeSkills.delete(sessionId);
+        activeSkills.delete(key);
         return;
       }
       const allowed = entryOf(active.name)?.allowedTools;
@@ -359,7 +373,7 @@ export default {
             try { return readFileSync(join(e.dir, 'SKILL.md'), 'utf-8'); } catch { return null; }
           },
           usage: () => usage,
-          invalidateCache: () => { scanCache = null; },
+          invalidateCache: () => { scanCache = null; skillVectors.clear(); skillVectorSigs.clear(); },
         },
       },
     });
@@ -390,6 +404,10 @@ export default {
         costHint: 'low',
         sideEffect: 'read',
         output: '{count, skills: [{name, description, source, shadowed?, allowedTools?, bodyChars?}]}',
+        outputSchema: {
+          type: 'object', required: ['count', 'skills'],
+          properties: { count: { type: 'integer' }, skills: { type: 'array' } },
+        },
         description: '列出全部可用技能（项目级 / 已安装 / 技能包 / 内置）：名称、描述、来源。同名技能按 project>user>pack>builtin 生效，被覆盖者标 shadowed。',
         parameters: { type: 'object', properties: {} },
         async handler() {
@@ -407,6 +425,10 @@ export default {
         costHint: 'low',
         sideEffect: 'read',
         output: '{name, source, version?, requires?, allowedTools?, content}；content 为 SKILL.md 全文',
+        outputSchema: {
+          type: 'object', required: ['name', 'content'],
+          properties: { name: { type: 'string' }, source: { type: 'string' }, content: { type: 'string' }, version: { type: 'string' }, allowedTools: { type: 'array' } },
+        },
         description: '读取指定技能全文（SKILL.md，含 frontmatter 与正文）。任务与某技能相关时先读它再执行；正文较长时优先看其中的流程与清单。',
         parameters: {
           type: 'object',
@@ -420,7 +442,7 @@ export default {
           const row = usageRow(String(args.name));
           row.reads++; row.bodyTokens += estimateTokens(r.content ?? ''); row.lastReadAt = Date.now();
           usageDirty = true;
-          activeSkills.set(tctx.sessionId ?? '_default', { name: String(args.name ?? ''), at: Date.now() });
+          activeSkills.set(activeKey(tctx.tenantId, tctx.sessionId), { name: String(args.name ?? ''), at: Date.now() });
           return { ok: true, data: { name: e?.name ?? args.name, source: e?.source, version: e?.version, requires: e?.requires, allowedTools: e?.allowedTools, content: r.content } };
         },
       },
@@ -434,6 +456,11 @@ export default {
         costHint: 'low',
         sideEffect: 'read',
         limits: `仅限技能目录/技能包根内；单文件 ${FILE_CHAR_LIMIT} 字符上限`,
+        output: '{skill, path, content, truncated, matches?}',
+        outputSchema: {
+          type: 'object', required: ['skill', 'path', 'content'],
+          properties: { skill: { type: 'string' }, path: { type: 'string' }, content: { type: 'string' }, truncated: { type: 'boolean' }, matches: { type: 'integer' } },
+        },
         description: '读取技能内资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能包的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）。大文档先用 grep 参数定位章节再读，避免整文塞满上下文。',
         parameters: {
           type: 'object',
@@ -447,7 +474,7 @@ export default {
         async handler(args: { skill?: string; path?: string; grep?: string }, tctx: ToolContext) {
           const entry = entryOf(String(args.skill ?? ''));
           if (!entry) return { ok: false, error: `技能不存在: ${args.skill}（用 list_skills 查看）` };
-          activeSkills.set(tctx.sessionId ?? '_default', { name: entry.name, at: Date.now() });
+          activeSkills.set(activeKey(tctx.tenantId, tctx.sessionId), { name: entry.name, at: Date.now() });
           const rel = String(args.path ?? '');
           const candidates = [safeResolve(entry.dir, rel)];
           if (entry.packRoot) candidates.push(safeResolve(entry.packRoot, rel));
@@ -509,7 +536,12 @@ export default {
         name: 'list_skill_backups',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         output: '{name, count, backups}',
+        outputSchema: {
+          type: 'object', required: ['name', 'count', 'backups'],
+          properties: { name: { type: 'string' }, count: { type: 'integer' }, backups: { type: 'array' } },
+        },
         description: '列出某个已安装技能保留的历史版本备份（覆盖安装前自动生成，最多 5 份）。',
         parameters: { type: 'object', properties: { name: { type: 'string' } }, required: ['name'] },
         async handler(args: { name?: string }) {
@@ -527,8 +559,13 @@ export default {
         name: 'rollback_skill',
         risk: 'medium',
         costHint: 'low',
+        sideEffect: 'write',
         approval: true,
         output: '{name, installed, files, backup}',
+        outputSchema: {
+          type: 'object', required: ['name', 'installed', 'files', 'backup'],
+          properties: { name: { type: 'string' }, installed: { type: 'boolean' }, files: { type: 'integer' }, backup: { type: 'string' } },
+        },
         description: '把已安装技能回滚到最近一次（或指定）备份；回滚走原子换入，失败时当前版本保持不变。',
         parameters: {
           type: 'object',
@@ -538,7 +575,9 @@ export default {
           },
           required: ['name'],
         },
-        async handler(args: { name?: string; backup?: string }) {
+        async handler(args: { name?: string; backup?: string }, tctx: ToolContext) {
+          const denied = adminToolDenied(tctx, '回滚全局技能');
+          if (denied) return { ok: false, error: denied };
           const name = String(args.name ?? '').trim();
           if (!name) return { ok: false, error: '缺少 name' };
           const result = rollbackSkill(name, userSkillsDir, args.backup ? String(args.backup) : undefined);

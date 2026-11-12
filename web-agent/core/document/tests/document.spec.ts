@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import documentPlugin from '../index';
@@ -75,6 +75,18 @@ describe('文档读取', () => {
       const result = await tools.get('read_document')!.handler({ path: 'note.txt' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, false);
       assert.match(String(result.error), /仅支持 PDF \/ DOCX/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('拒绝读取 data/ 下的文档', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-document-'));
+    try {
+      mkdirSync(join(root, 'data'), { recursive: true });
+      writeFileSync(join(root, 'data', 'secret.pdf'), makePdf('secret'));
+      const tools = loadTools();
+      const result = await tools.get('read_document')!.handler({ path: 'data/secret.pdf' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /拒绝读取/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 

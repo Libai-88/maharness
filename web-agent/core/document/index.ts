@@ -19,6 +19,7 @@ const MAX_CHARS = 40_000;
 const MAX_TABLES = 20;
 const MAX_TABLE_ROWS = 200;
 const MAX_TABLE_CELLS = 2_000;
+const MAX_PAGE_SELECTION = 200;
 const OCR_EXTS = new Set(['.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff', '.webp']);
 
 export interface OcrConfig {
@@ -47,7 +48,15 @@ async function runCommand(
     });
     let stdout = '';
     let stderr = '';
-    const timer = setTimeout(() => { try { child.kill(); } catch { /* 忽略 */ } reject(new Error(`外部命令超时（${timeoutMs}ms）`)); }, timeoutMs);
+    const killTree = () => {
+      if (process.platform === 'win32' && child.pid) {
+        try { spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); }
+        catch { try { child.kill(); } catch { /* 忽略 */ } }
+      } else {
+        try { child.kill('SIGKILL'); } catch { /* 忽略 */ }
+      }
+    };
+    const timer = setTimeout(() => { killTree(); reject(new Error(`外部命令超时（${timeoutMs}ms）`)); }, timeoutMs);
     child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 1_000_000) stdout += chunk.toString(); });
     child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 4_000) stderr += chunk.toString(); });
     child.on('error', (err) => { clearTimeout(timer); reject(err); });
@@ -139,10 +148,19 @@ export default {
         name: 'read_document',
         risk: 'low',
         costHint: 'medium',
+        timeoutMs: 120_000,
         sideEffect: 'read',
         contentTrust: 'untrusted',
         limits: `PDF/DOCX ≤ ${MAX_BYTES / 1024 / 1024}MB；正文 ≤ ${MAX_CHARS} 字符；表格 ≤ ${MAX_TABLES} 个 / ${MAX_TABLE_ROWS} 行 / ${MAX_TABLE_CELLS} 单元格`,
         output: '{path, format, pages?, totalChars, truncated, text, tables: [{page?, rows}], tableCount}',
+        outputSchema: {
+          type: 'object', required: ['path', 'format', 'totalChars', 'truncated', 'text', 'tables', 'tableCount'],
+          properties: {
+            path: { type: 'string' }, format: { type: 'string' }, pages: { type: 'array' },
+            totalChars: { type: 'integer' }, truncated: { type: 'boolean' }, text: { type: 'string' },
+            tables: { type: 'array' }, tableCount: { type: 'integer' }, tableWarning: { type: 'string' },
+          },
+        },
         description: '读取 PDF / DOCX 文档正文与表格（PDF 支持指定页范围）。用于论文、报告、合同等二进制文档；read_file 无法读取二进制文档。',
         parameters: {
           type: 'object',
@@ -166,13 +184,16 @@ export default {
             return { ok: false, error: '当前文档插件仅支持 PDF / DOCX；文本文件请用 read_file' };
           }
           const file = resolveInSandbox(tctx.sandboxRoot, raw);
+          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths?.root ?? tctx.sandboxRoot)) {
+            return { ok: false, error: `拒绝读取: ${raw}（密钥与环境配置 .env、内部数据 data/ 不可读）` };
+          }
           const info = await stat(file).catch(() => null);
           if (!info?.isFile()) return { ok: false, error: `文件不存在: ${raw}` };
           if (info.size > MAX_BYTES) return { ok: false, error: `文档过大（${info.size} > ${MAX_BYTES} 字节）` };
 
           const maxChars = Math.min(MAX_CHARS, Math.max(500, Math.floor(Number(args.maxChars) || MAX_CHARS)));
           const pages = Array.isArray(args.pages)
-            ? [...new Set(args.pages.map((page) => Math.trunc(Number(page))).filter((page) => page >= 1))]
+            ? [...new Set(args.pages.map((page) => Math.trunc(Number(page))).filter((page) => page >= 1))].slice(0, MAX_PAGE_SELECTION)
             : undefined;
           const includeTables = args.tables !== false;
           if (format === '.docx') {
@@ -251,9 +272,14 @@ export default {
         name: 'ocr_image',
         risk: 'low',
         costHint: 'medium',
+        timeoutMs: 120_000,
         sideEffect: 'read',
         contentTrust: 'untrusted',
         output: '{path, text, chars, truncated, command}',
+        outputSchema: {
+          type: 'object', required: ['path', 'text', 'chars', 'truncated', 'command'],
+          properties: { path: { type: 'string' }, text: { type: 'string' }, chars: { type: 'integer' }, truncated: { type: 'boolean' }, command: { type: 'string' } },
+        },
         description: '对沙箱内图片执行 OCR（需管理员配置 document.ocr.command）。适合截图、扫描图与图片中的文字。',
         parameters: {
           type: 'object',
@@ -309,9 +335,14 @@ export default {
         name: 'ocr_pdf',
         risk: 'low',
         costHint: 'medium',
+        timeoutMs: 600_000,
         sideEffect: 'read',
         contentTrust: 'untrusted',
         output: '{path, pages: [{page, text}], text, rendered, truncated}',
+        outputSchema: {
+          type: 'object', required: ['path', 'pages', 'text', 'rendered', 'truncated'],
+          properties: { path: { type: 'string' }, pages: { type: 'array' }, text: { type: 'string' }, rendered: { type: 'integer' }, truncated: { type: 'boolean' } },
+        },
         description: '扫描版 PDF 的 OCR 流水线：先用 document.ocr.pdfCommand 渲染页面，再对每页执行 document.ocr.command。两者均需管理员配置。',
         parameters: {
           type: 'object',

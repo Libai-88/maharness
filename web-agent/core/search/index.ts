@@ -606,6 +606,10 @@ export default {
         contentTrust: 'untrusted',
         limits: '外部搜索服务；结果可能不完整',
         output: '{source, count, results: [{title, url, snippet}]}',
+        outputSchema: {
+          type: 'object', required: ['query', 'source', 'count', 'results'],
+          properties: { query: { type: 'string' }, source: { type: 'string' }, count: { type: 'integer' }, results: { type: 'array' } },
+        },
         description: '联网搜索（SearXNG / Tavily / DuckDuckGo）：返回结果列表（标题、URL、摘要）。适合查询时事、外部信息、文档资料等。',
         parameters: {
           type: 'object',
@@ -655,10 +659,19 @@ export default {
         name: 'web_fetch',
         risk: 'medium',
         costHint: 'medium',
+        timeoutMs: 60_000,
         sideEffect: 'read',
         contentTrust: 'untrusted',
         limits: '仅 http/https；单页 ≤5MB；正文默认截断 8000 字符；拒绝内网地址（SSRF）',
         output: '{url, title, contentType, text, totalChars, truncated}',
+        outputSchema: {
+          type: 'object', required: ['url', 'contentType', 'text', 'totalChars', 'truncated'],
+          properties: {
+            url: { type: 'string' }, finalUrl: { type: 'string' }, contentType: { type: 'string' },
+            title: { type: 'string' }, text: { type: 'string' }, totalChars: { type: 'integer' },
+            truncated: { type: 'boolean' }, redirected: { type: 'integer' },
+          },
+        },
         description: '抓取指定 URL 的正文（HTML 自动转纯文本或轻量 Markdown，保留标题/链接/列表/代码块）。用于读文档、issue、博客正文——web_search 只给摘要，需要全文时用本工具。',
         parameters: {
           type: 'object',
@@ -710,10 +723,18 @@ export default {
         name: 'web_crawl',
         risk: 'medium',
         costHint: 'medium',
+        timeoutMs: 120_000,
         sideEffect: 'read',
         contentTrust: 'untrusted',
         limits: '1-5 个 http/https URL；每页 ≤5MB；单次总正文 ≤32000 字符；默认 3 并发；拒绝内网地址',
         output: '{count, failed, totalChars, pages: [{url, finalUrl, title, text, totalChars, truncated, error?}], citations: [{index, title, url}]}',
+        outputSchema: {
+          type: 'object', required: ['count', 'failed', 'totalChars', 'pages', 'citations'],
+          properties: {
+            count: { type: 'integer' }, failed: { type: 'integer' }, totalChars: { type: 'integer' },
+            pages: { type: 'array' }, citations: { type: 'array' },
+          },
+        },
         description: '并发抓取多个网页并统一清洗为正文，用于一次收集多篇资料、对比来源和建立引用。单页精读仍用 web_fetch。',
         parameters: {
           type: 'object',

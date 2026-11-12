@@ -385,6 +385,16 @@ describe('PluginLoader capability 权限白名单', () => {
     assert.deepEqual(f.kernel.plugins.capabilities('tool').map((c) => c.tool.name).filter((name) => name === 'safe_read'), ['safe_read']);
   });
 
+  test('显式 * 允许动态能力名（用于 MCP 这类运行时发现工具的插件）', async (t) => {
+    const f = setup({
+      dynamic: `ctx.register({ kind: 'tool', tool: { name: 'mcp_runtime_tool', description: 'dynamic', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });`,
+    }, { dynamic: { permissions: { capabilities: { tool: ['*'] } } } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(f.kernel.plugins.get('dynamic')?.state, 'started');
+    assert.ok(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'mcp_runtime_tool'));
+  });
+
   test('未声明的 capability/name 拒绝注册、发审计事件并回收插件效应', async (t) => {
     const f = setup({
       denied: `ctx.on('probe', () => {}); ctx.register({ kind: 'tool', tool: { name: 'delete_data', description: 'delete', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });`,

@@ -88,4 +88,17 @@ describe('长期记忆插件运行时契约', () => {
       assert.equal((await listBlocks.handler({}, b)).data.blocks.length, 1);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+
+  it('核心记忆块拒绝凭据内容', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-memory-'));
+    try {
+      const tools = loadTools(root);
+      const result = await tools.get('set_memory_block')!.handler({
+        name: 'credentials',
+        content: 'api_key=sk-live-secret',
+      }, { tenantId: 'tenant-a' });
+      assert.equal(result.ok, false);
+      assert.match(String(result.error), /凭据/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 });

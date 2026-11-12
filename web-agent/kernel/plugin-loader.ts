@@ -216,7 +216,8 @@ export function validateRuntimePermissions(manifest: PluginManifest): void {
 function assertCapabilityPermission(manifest: PluginManifest, cap: Capability): void {
   if (manifest.permissions === undefined) return;
   const name = capabilityName(cap);
-  if (!manifest.permissions.capabilities[cap.kind]?.includes(name)) {
+  const allowed = manifest.permissions.capabilities[cap.kind];
+  if (!allowed?.includes(name) && !allowed?.includes('*')) {
     throw new Error(`插件 ${manifest.id} 未获准注册 capability ${cap.kind}:${name}`);
   }
 }

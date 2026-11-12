@@ -24,7 +24,8 @@ export default {
   version: '0.1.0',
   onLoad(ctx) {
     if (!existsSync(join(packDir, 'deep-research', 'SKILL.md'))) {
-      ctx.logger.warn('ARS 技能包缺失（vendor/academic-research-skills），学术 persona 降级为仅路由声明');
+      ctx.logger.warn('ARS 技能包缺失（vendor/academic-research-skills），学术路由 persona 未启用');
+      return;
     }
 
     ctx.register({

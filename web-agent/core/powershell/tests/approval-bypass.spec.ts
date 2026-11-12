@@ -95,3 +95,24 @@ describe('脚本块安全子集（单元级）', () => {
     assert.equal(hasExecutableConstruct('Get-ChildItem | Where-Object { $_.Name -eq ').hit, true);
   });
 });
+
+describe('双引号内的子表达式必须审批', () => {
+  for (const cmd of [
+    'Write-Output "$(Get-Content .env)"',
+    'Get-ChildItem "$(Remove-Item x)"',
+    'Write-Host "@(Get-Process)"',
+  ]) {
+    it(`需审批: ${cmd}`, () => {
+      assert.equal(isReadOnlyCommand(cmd), false);
+      assert.equal(assessCommand(cmd).needsApproval, true);
+    });
+  }
+
+  it('单引号内的 $() 是字面量，不误拦', () => {
+    assert.equal(assessCommand("Write-Output '$(Get-Content a.txt)'").needsApproval, false);
+  });
+
+  it('双引号内的普通 & 文本不误拦', () => {
+    assert.equal(assessCommand('Get-Content "a & b"').needsApproval, false);
+  });
+});

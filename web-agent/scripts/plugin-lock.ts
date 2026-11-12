@@ -15,7 +15,7 @@ const command = process.argv[2] ?? 'generate';
 function manifests(): { dir: string; manifest: PluginManifest }[] {
   if (!existsSync(pluginsDir)) return [];
   return readdirSync(pluginsDir, { withFileTypes: true })
-    .filter((entry) => entry.isDirectory())
+    .filter((entry) => entry.isDirectory() && !/@[0-9a-f]{10}$/.test(entry.name))
     .flatMap((entry) => {
       const dir = join(pluginsDir, entry.name);
       const file = join(dir, 'plugin.json');

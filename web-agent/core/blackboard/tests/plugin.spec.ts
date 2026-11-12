@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import blackboard from '../index';
 
-type Tool = { name: string; handler: (args: Record<string, unknown>, ctx: { sessionId?: string }) => Promise<{ ok: boolean; data?: any; error?: string }> };
+type Tool = { name: string; handler: (args: Record<string, unknown>, ctx: { sessionId?: string; tenantId?: string }) => Promise<{ ok: boolean; data?: any; error?: string }> };
 
 function loadTools(root: string): Map<string, Tool> {
   const tools = new Map<string, Tool>();
@@ -56,6 +56,21 @@ describe('共享黑板', () => {
       const result = await tools.get('blackboard_put')!.handler({ key: 'big', value: 'x'.repeat(20_001) }, { sessionId: 's' });
       assert.equal(result.ok, false);
       assert.match(String(result.error), /过长/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  it('同会话名的不同租户互不可见', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-blackboard-'));
+    try {
+      const tools = loadTools(root);
+      const put = tools.get('blackboard_put')!;
+      const get = tools.get('blackboard_get')!;
+      const a = { sessionId: 'shared-session', tenantId: 'tenant-a' };
+      const b = { sessionId: 'shared-session', tenantId: 'tenant-b' };
+      assert.equal((await put.handler({ key: 'result', value: 'A' }, a)).ok, true);
+      assert.equal((await put.handler({ key: 'result', value: 'B' }, b)).ok, true);
+      assert.equal((await get.handler({ key: 'result' }, a)).data.value, 'A');
+      assert.equal((await get.handler({ key: 'result' }, b)).data.value, 'B');
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 });

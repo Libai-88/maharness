@@ -1,11 +1,12 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
+import { connect as netConnect } from 'node:net';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import browserPlugin, { assertBrowserUrl } from '../index';
+import browserPlugin, { assertBrowserUrl, startBrowserProxy } from '../index';
 
 const FULL_CHROME = 'D:\\DEEPSEEK\\pw-browsers\\chromium-1248\\chrome-win64\\chrome.exe';
 const CHROME = process.env.MAHARNESS_TEST_BROWSER
@@ -17,6 +18,61 @@ describe('浏览器 URL 边界', () => {
     await assert.rejects(() => assertBrowserUrl('http://127.0.0.1:3000', false), /私网|本机/);
     assert.equal((await assertBrowserUrl('http://127.0.0.1:3000', true)).hostname, '127.0.0.1');
     assert.equal((await assertBrowserUrl('https://example.com', false)).hostname, 'example.com');
+  });
+
+  it('出口代理对私网 CONNECT 直接拒绝（DNS 结果与 socket 同源）', async () => {
+    const target = createServer((_req, res) => res.end('should-not-reach'));
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', resolve));
+    const port = (target.address() as AddressInfo).port;
+    const proxy = await startBrowserProxy();
+    try {
+      const response = await new Promise<string>((resolve, reject) => {
+        const socket = netConnect(proxy.port, '127.0.0.1', () => {
+          socket.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`);
+        });
+        let data = '';
+        socket.on('data', (chunk) => { data += chunk.toString(); });
+        socket.on('end', () => resolve(data));
+        socket.on('error', reject);
+        setTimeout(() => { socket.destroy(); resolve(data); }, 2_000).unref?.();
+      });
+      assert.match(response, /403 Forbidden/);
+    } finally {
+      await proxy.close();
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+    }
+  });
+
+  it('出口代理把 CONNECT 固定到已校验的地址（注入解析器验证隧道）', async () => {
+    const target = createServer((_req, res) => res.end('proxy-ok'));
+    await new Promise<void>((resolve) => target.listen(0, '127.0.0.1', resolve));
+    const port = (target.address() as AddressInfo).port;
+    const proxy = await startBrowserProxy(async (url) => ({
+      url: new URL(url),
+      addresses: [{ address: '127.0.0.1', family: 4 }],
+    }));
+    try {
+      const response = await new Promise<string>((resolve, reject) => {
+        const socket = netConnect(proxy.port, '127.0.0.1', () => {
+          socket.write(`CONNECT example.test:${port} HTTP/1.1\r\nHost: example.test:${port}\r\n\r\n`);
+        });
+        let data = '';
+        socket.on('data', (chunk) => {
+          data += chunk.toString();
+          if (data.includes('HTTP/1.1 200')) {
+            socket.write(`GET / HTTP/1.1\r\nHost: example.test:${port}\r\nConnection: close\r\n\r\n`);
+          }
+        });
+        socket.on('end', () => resolve(data));
+        socket.on('error', reject);
+        setTimeout(() => { socket.destroy(); resolve(data); }, 2_000).unref?.();
+      });
+      assert.match(response, /200 Connection Established/);
+      assert.match(response, /proxy-ok/);
+    } finally {
+      await proxy.close();
+      await new Promise<void>((resolve) => target.close(() => resolve()));
+    }
   });
 });
 

@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { resolveToolConflicts, type ToolCatalogEntry } from '../plugin-loader';
+import { toolDomain } from '../tool-domain';
 import type { ToolDef } from '../types';
 
 function tool(name: string): ToolDef {
@@ -8,6 +9,15 @@ function tool(name: string): ToolDef {
 }
 
 describe('tool catalog conflict resolution', () => {
+  it('工具能力域映射稳定', () => {
+    assert.equal(toolDomain('read_file'), 'Files');
+    assert.equal(toolDomain('web_fetch'), 'Research');
+    assert.equal(toolDomain('mcp_demo_search'), 'MCP');
+    assert.equal(toolDomain('todo_add'), 'Tasks');
+    assert.equal(toolDomain('run_parallel'), 'Agents');
+    assert.equal(toolDomain('unknown_tool'), 'General');
+  });
+
   it('同名工具保留内置、遮蔽 MCP', () => {
     const entries: ToolCatalogEntry[] = [
       { pluginId: 'core-search', tool: tool('search') },

@@ -1,11 +1,18 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeData, mergeDiary, mergeMeta, type Note, type Project, type Task } from '../model';
+import { workbenchTenantAllowed } from '../index';
 
 const t = (id: string, updatedAt: number, extra: Partial<Task> = {}): Task =>
   ({ id, title: id, prio: 3, due: '', start: '', done: false, pid: '', createdAt: updatedAt, doneAt: null, rolls: 0, repeat: '', pomo: 0, subs: [], tags: [], link: '', note: '', status: 'todo', est: 0, updatedAt, ...extra });
 
 describe('workbench 桥合并', () => {
+  it('工作台租户门只允许 default', () => {
+    assert.equal(workbenchTenantAllowed(undefined), true);
+    assert.equal(workbenchTenantAllowed('default'), true);
+    assert.equal(workbenchTenantAllowed('team-a'), false);
+  });
+
   it('LWW：updatedAt 大者胜出', () => {
     const local = { tasks: [t('a', 100, { title: '旧' })], notes: [], projects: [], tomb: {} };
     const remote = { tasks: [t('a', 200, { title: '新' })], notes: [], projects: [], tomb: {} };

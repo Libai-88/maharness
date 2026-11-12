@@ -45,7 +45,13 @@ export default {
       tool: {
         name: '${toolName}',
         description: 'Return a health response for the ${id} plugin.',
+        sideEffect: 'none',
         parameters: { type: 'object', properties: {} },
+        outputSchema: {
+          type: 'object',
+          required: ['plugin', 'status'],
+          properties: { plugin: { type: 'string' }, status: { type: 'string' } },
+        },
         async handler() {
           return { ok: true, data: { plugin: '${id}', status: 'ok' } };
         },

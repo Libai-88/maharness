@@ -20,25 +20,48 @@ const MIME: Record<string, string> = {
 };
 /** 单图 base64 上限（字节，原图）：base64 后约 ×1.37 */
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
-/** 内存里保留的最近图片数 */
-const STORE_MAX = 12;
+/** 内存里保留的最近图片数（全局 + 单会话） */
+const STORE_MAX = 64;
+const SESSION_STORE_MAX = 12;
+/** base64 常驻内存上限；单图上限 8MB，不设总预算时 64 张图可能占数百 MB。 */
+const STORE_BYTES_MAX = 48 * 1024 * 1024;
 
-interface ImageRef { id: string; path: string; mime: string; bytes: number; dataUrl: string; at: number }
+interface ImageRef {
+  id: string; path: string; mime: string; bytes: number; dataUrl: string; at: number;
+  tenantId: string; sessionId: string;
+}
 
 let store: ImageRef[] = [];
 let seq = 0;
 
 function remember(ref: ImageRef): void {
   store.push(ref);
-  if (store.length > STORE_MAX) store.shift();
+  let perSession = store.filter((item) => item.tenantId === ref.tenantId && item.sessionId === ref.sessionId);
+  while (perSession.length > SESSION_STORE_MAX) {
+    const oldest = perSession.shift()!;
+    store = store.filter((item) => item !== oldest);
+  }
+  let totalBytes = store.reduce((sum, item) => sum + item.dataUrl.length, 0);
+  while (store.length > STORE_MAX || totalBytes > STORE_BYTES_MAX) {
+    const removed = store.shift();
+    if (!removed) break;
+    totalBytes -= removed.dataUrl.length;
+  }
 }
-const findImage = (id: string): ImageRef | undefined => store.find(r => r.id === id);
+const ownerOf = (tctx: { tenantId?: string; sessionId?: string }): { tenantId: string; sessionId: string } => ({
+  tenantId: tctx.tenantId ?? 'default',
+  sessionId: tctx.sessionId ?? '_default',
+});
+const findImage = (id: string, owner: { tenantId: string; sessionId: string }): ImageRef | undefined =>
+  store.find((ref) => ref.id === id && ref.tenantId === owner.tenantId && ref.sessionId === owner.sessionId);
 
 export default {
   id: 'vision',
   name: '图像能力',
   version: '0.1.0',
   onLoad(ctx) {
+    store = [];
+    seq = 0;
     const enabled = ctx.config.get<boolean>('vision.enabled', true);
     const maxBytes = Math.max(64 * 1024, ctx.config.get<number>('vision.maxBytes', MAX_IMAGE_BYTES));
     const defaultPrompt = ctx.config.get<string>('vision.defaultPrompt', '');
@@ -54,6 +77,7 @@ export default {
       target: { provider: ProviderDef; model: string },
       dataUrl: string,
       question: string,
+      signal?: AbortSignal,
     ): Promise<{ ok: boolean; text?: string; error?: string; tokensIn: number; tokensOut: number }> {
       const messages: LLMMessage[] = [{
         role: 'user',
@@ -64,7 +88,7 @@ export default {
       let tokensIn = 0;
       let tokensOut = 0;
       try {
-        for await (const chunk of target.provider.chat(messages, { model: target.model, maxTokens: 1500 })) {
+        for await (const chunk of target.provider.chat(messages, { model: target.model, maxTokens: 1500, ...(signal ? { signal } : {}) })) {
           if (chunk.type === 'delta') text += chunk.text;
           else if (chunk.type === 'usage') { tokensIn = chunk.input; tokensOut = chunk.output; }
         }
@@ -97,8 +121,13 @@ export default {
         name: 'read_image',
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'read',
         limits: `仅图片（png/jpg/gif/webp/bmp）；单图 ≤${Math.round(maxBytes / 1024 / 1024)}MB；路径须在沙箱内`,
         output: '{imageId, path, mime, bytes, note}',
+        outputSchema: {
+          type: 'object', required: ['imageId', 'path', 'mime', 'bytes'],
+          properties: { imageId: { type: 'string' }, path: { type: 'string' }, mime: { type: 'string' }, bytes: { type: 'integer' }, note: { type: 'string' } },
+        },
         description: '登记一张图片供后续分析（不读取像素、不塞进上下文）。返回 imageId，配合 analyze_image 使用。',
         parameters: {
           type: 'object',
@@ -119,7 +148,7 @@ export default {
             id: `img-${Date.now().toString(36)}-${++seq}`,
             path: args.path ?? '', mime, bytes: st.size,
             dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`,
-            at: Date.now(),
+            at: Date.now(), ...ownerOf(tctx),
           };
           remember(ref);
           const canSee = tctx.providerId ? capabilitySatisfied({ vision: true }, providers().find(p => p.id === tctx.providerId) ?? ({} as ProviderDef), tctx.model ?? '') : false;
@@ -143,8 +172,14 @@ export default {
         risk: 'low',
         costHint: 'medium',
         timeoutMs: 90_000,
+        sideEffect: 'external',
+        contentTrust: 'untrusted',
         limits: '一次一张；结果按文本返回，原图不进入对话历史',
         output: '{answer, model, provider, routed, tokensIn, tokensOut}',
+        outputSchema: {
+          type: 'object', required: ['answer', 'model', 'provider', 'routed'],
+          properties: { answer: { type: 'string' }, model: { type: 'string' }, provider: { type: 'string' }, routed: { type: 'boolean' }, tokensIn: { type: 'integer' }, tokensOut: { type: 'integer' } },
+        },
         description: '把已登记的图片交给具备视觉能力的模型分析并返回文本结论。当前模型不支持视觉时自动路由到可用的多模态模型（同 provider 优先、其次价格低），分析结束即回到原模型继续任务。',
         parameters: {
           type: 'object',
@@ -160,9 +195,11 @@ export default {
         },
         async handler(args: { imageId?: string; path?: string; question?: string; maxLatencyMs?: number; privacyTier?: 'local' | 'trusted' | 'external'; maxRiskLevel?: 'low' | 'medium' | 'high' }, tctx) {
           if (!enabled) return { ok: false, error: '视觉能力已由配置关闭' };
-          let ref = args.imageId ? findImage(String(args.imageId)) : undefined;
+          const owner = ownerOf(tctx);
+          let ref = args.imageId ? findImage(String(args.imageId), owner) : undefined;
           if (!ref && args.path) {
             const file = resolveInSandbox(tctx.sandboxRoot, String(args.path));
+            if (isDeniedReadPath(file, tctx.sandboxRoot)) return { ok: false, error: '拒绝读取该路径（.env / data/ 内部数据）' };
             const mime = MIME[extname(file).toLowerCase()];
             if (!mime) return { ok: false, error: `不支持的图片类型: ${args.path}` };
             if (!existsSync(file)) return { ok: false, error: `文件不存在: ${args.path}` };
@@ -170,7 +207,7 @@ export default {
             if (st.size > maxBytes) return { ok: false, error: `图片过大（${st.size} 字节）` };
             ref = {
               id: `img-${Date.now().toString(36)}-${++seq}`, path: String(args.path), mime, bytes: st.size,
-              dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`, at: Date.now(),
+              dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`, at: Date.now(), ...owner,
             };
             remember(ref);
           }
@@ -208,7 +245,7 @@ export default {
             traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: routed ? 'vision-route' : 'vision-local',
             inputSummary: `${currentProvider.id}@${currentModel} ← ${ref.path || ref.id}`,
           });
-          const r = await analyze(target, ref.dataUrl, question);
+          const r = await analyze(target, ref.dataUrl, question, tctx.signal);
           if (!r.ok) {
             step.fail(`视觉分析失败：${r.error ?? ''}`, { outputSummary: `${target.provider.id}@${target.model}` });
             return { ok: false, error: `视觉模型 ${target.provider.id}@${target.model} 调用失败：${r.error}` };

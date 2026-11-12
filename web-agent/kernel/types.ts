@@ -547,6 +547,8 @@ export interface ToolContext {
   sessionId?: string;
   /** 当前租户：L2 缓存键必须纳入租户，避免跨租户复用工具观察。缺省视为 default。 */
   tenantId?: string;
+  /** 当前 principal 角色：缺省按本机管理员处理；member/readonly 受全局能力门限制。 */
+  principal?: { role: 'admin' | 'member' | 'readonly' };
   /** 当前工具调用的 Trace 步骤 id：子任务（子代理/并行）用它挂 parentId，形成 span 树 */
   stepId?: string;
   sandboxRoot: string;      // 文件类工具的安全边界
@@ -745,6 +747,7 @@ export interface TraceStats {
 export interface AgentRunSummary {
   traceId: string;
   sessionId?: string;
+  tenantId?: string;
   model: string;
   outcome: 'answered' | 'cached' | 'handoff' | 'budget-hit' | 'max-turns' | 'failed';
   /** 触发本次 run 的用户原话 */

@@ -25,6 +25,7 @@ import { discoverProviders } from '../core/chat/provider';
 import { globalApprovalBoard } from '../core/chat/approvals';
 import { ClientTracker } from './client-tracker';
 import { Scheduler } from './scheduler';
+import { recoverOrphanedApprovals } from './approval-recovery';
 import { auditAuthorizationDenial, auditAuthorizationGrant, CredentialFailureLimiter, decideCredentialAuthorization } from './security-policy';
 import { apiContractFor, setApiSchemaHeaders } from './api-contract';
 import { validateAgainstSchema } from '../kernel/validate';
@@ -549,6 +550,17 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
       token: requiredApiToken() || undefined,
     })
     : undefined;
+
+  // 审批板是内存态：重启后未决审批没有等待者。先审计为 expired:restart，
+  // 再对仍有 checkpoint 的会话排一次立即 resume——重新进入执行链并重新发审批卡，
+  // 用户不需要手工再点一次“续跑”。
+  const recovered = recoverOrphanedApprovals(store, scheduler);
+  if (recovered.orphaned) {
+    const resumeNote = recovered.resumed
+      ? `，已排队自动续跑 ${recovered.resumed} 个会话`
+      : scheduler ? '，无可续跑 checkpoint' : '，调度器不可用，需手动续跑';
+    console.log(`[approvals] 重启清理 ${recovered.orphaned} 条未决审批（expired:restart）${resumeNote}`);
+  }
   registerRoutes(app, kernel, store, tracker, scheduler);
 
   // ---- 插件 API 能力：前端是插件的一部分的数据通道 ----

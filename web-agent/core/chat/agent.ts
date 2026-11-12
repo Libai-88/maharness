@@ -20,6 +20,7 @@ import { verifyTaskContract } from '../../kernel/task-verifier';
 import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
+import { rankToolsForTask, toolDomain } from '../../kernel/tool-domain';
 
 // 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
 export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
@@ -138,6 +139,7 @@ export function annotateToolDef(t: ToolDef): ToolDef {
   const base = { ...t, ...inferred };
   if (!t.risk && !t.costHint && !t.approval && !t.limits && !t.output && !t.sideEffect) return base;
   const tags: string[] = [];
+  tags.push(`域:${toolDomain(t.name)}`);
   if (t.risk) tags.push(`风险:${t.risk}`);
   if (t.costHint) tags.push(`成本:${t.costHint}`);
   if (t.sideEffect) tags.push(`副作用:${toolSideEffectLabel(t)}`);
@@ -255,7 +257,12 @@ export class AgentRunner {
     const tools = typeof this.kernel.plugins.tools === 'function'
       ? this.kernel.plugins.tools()
       : this.kernel.plugins.capabilities('tool').map((c) => c.tool);
-    const toolDefs = (opts.tools ?? tools).map(annotateToolDef);
+    const latestUser = [...history].reverse()
+      .find((message) => message.role === 'user' && message.content && !String(message.content).startsWith('【'));
+    const toolDefs = rankToolsForTask(
+      (opts.tools ?? tools).map(annotateToolDef),
+      latestUser ? String(latestUser.content) : '',
+    );
     const sandboxRoot = opts.sandboxRoot ?? this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const hookMeta = {
       ...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
@@ -283,6 +290,7 @@ export class AgentRunner {
       this.emitRunEnd({
         traceId,
         sessionId: opts.sessionId,
+        tenantId: opts.tenantId,
         model,
         outcome,
         question: question.slice(0, 2000),
@@ -947,6 +955,7 @@ export class AgentRunner {
           turn,
           sessionId: opts.sessionId,
           tenantId: opts.tenantId,
+          ...(opts.principalRole ? { principal: { role: opts.principalRole } } : {}),
           stepId: tStep.id, // span 树：子任务（子代理/并行）挂到本工具步骤下
           sandboxRoot,
           quota: tenantQuota
@@ -1000,6 +1009,10 @@ export class AgentRunner {
           return { ok: false, error: '工具重试耗尽' };
         };
         const gate = assessToolApproval(tool, toolArgs, tctx);
+        if (toolCtx.forceApproval && !tctx.approved) {
+          gate.needsApproval = true;
+          gate.reason = toolCtx.forceApprovalReason || gate.reason || `工具 ${tool.name} 需要用户审批`;
+        }
         if (gate.needsApproval && toolCtx.policyApproved && !tctx.approved) {
           // 用户策略规则放行了一次本应审批的调用：必须留痕（权限被绕过要可审计）
           this.kernel.trace.startStep({ traceId, turn, type: 'system', name: 'policy-allow', parentId: opts.parentStepId })

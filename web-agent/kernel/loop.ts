@@ -35,6 +35,9 @@ export interface AgentHookCtx {
   blockReason?: string;
   /** agent.before_tool：用户策略规则显式放行本次调用（免审批），执行器据此跳过审批门并留痕 */
   policyApproved?: boolean;
+  /** agent.before_tool：用户策略规则显式要求审批；即使工具本身声明免审批也必须挂起 */
+  forceApproval?: boolean;
+  forceApprovalReason?: string;
   tool?: { name: string; args: unknown };
   content?: string;                     // after_llm：模型输出（观测）
   reasoning?: string;
@@ -86,6 +89,8 @@ export interface RunOptions {
   sessionId?: string;
   /** 当前租户：透传给工具，用于缓存与数据作用域。缺省按 default 处理。 */
   tenantId?: string;
+  /** 当前 principal 角色：DB token 的 admin/member/readonly；缺省视为本机管理员。 */
+  principalRole?: 'admin' | 'member' | 'readonly';
   signal?: AbortSignal;
   maxTurns?: number;
   /** 备用 provider（失败恢复）：主 provider 重试后仍失败时依次尝试，LLM 不必面对 error 500 */

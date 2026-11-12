@@ -3,5 +3,11 @@
   "name": "MCP 客户端",
   "version": "0.1.0",
   "entry": "index.ts",
-  "enabled": true
+  "enabled": true,
+  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
+  "permissions": { "capabilities": {
+    "tool": ["*", "mcp_status", "mcp_resources_list", "mcp_resource_read", "mcp_prompts_list", "mcp_prompt_get", "mcp_reconnect", "mcp_oauth_login", "mcp_oauth_complete", "mcp_oauth_status", "mcp_oauth_logout", "mcp_registry_search", "mcp_registry_install"],
+    "persona": ["mcp-rules"]
+  } },
+  "limits": { "lifecycleTimeoutMs": 60000 }
 }

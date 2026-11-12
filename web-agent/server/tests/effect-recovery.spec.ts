@@ -68,6 +68,25 @@ const tool: ToolDef = {
 };
 
 describe('AgentRunner 副作用恢复账本', () => {
+  test('principalRole 透传到工具上下文', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-principal-ctx-'));
+    try {
+      const runner = new AgentRunner(kernelStub(root), bus);
+      let seen: string | undefined;
+      const probe: ToolDef = {
+        name: 'principal_probe', description: 'probe', parameters: { type: 'object', properties: {} },
+        sideEffect: 'read',
+        async handler(_args, tctx) { seen = tctx.principal?.role; return { ok: true, data: { role: seen } }; },
+      };
+      for await (const _event of runner.run({
+        provider: replayToolProvider('principal-call', 'principal_probe', {}),
+        model: 'm', messages: [{ role: 'user', content: 'probe' }],
+        tools: [probe], traceId: 'trace-principal', principalRole: 'member', maxTurns: 2,
+      })) { /* consume */ }
+      assert.equal(seen, 'member');
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
   test('工具执行前写入 tool_pending 步骤断点，轮末写入 turn_end', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-step-checkpoint-'));
     try {

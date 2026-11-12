@@ -266,9 +266,14 @@ export default {
         name: 'repo_map',
         risk: 'low',
         costHint: 'low',
+        timeoutMs: 60_000,
         sideEffect: 'read',
         limits: `最多 ${MAX_FILES} 个代码文件 / ${MAX_SYMBOLS} 个符号 / ${MAX_OUTPUT_CHARS} 字符`,
         output: '{root, files, symbols, truncated, text}',
+        outputSchema: {
+          type: 'object', required: ['root', 'files', 'symbols', 'truncated', 'text'],
+          properties: { root: { type: 'string' }, files: { type: 'integer' }, symbols: { type: 'integer' }, truncated: { type: 'boolean' }, text: { type: 'string' } },
+        },
         description: '生成代码仓库地图：列出代码文件与顶层符号（函数/类/接口/类型/常量）。用于重构、导航和多文件任务。',
         parameters: {
           type: 'object',
@@ -315,6 +320,10 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
+        outputSchema: {
+          type: 'object', required: ['count', 'matches'],
+          properties: { count: { type: 'integer' }, matches: { type: 'array' } },
+        },
         description: '按名称查找代码符号定义（子串匹配，返回文件、行号和类型）。',
         parameters: {
           type: 'object',
@@ -350,9 +359,17 @@ export default {
         name: 'project_diagnostics',
         risk: 'low',
         costHint: 'medium',
+        timeoutMs: 120_000,
         sideEffect: 'read',
         limits: `默认读取 tsconfig.json；最多 ${MAX_FILES} 个根文件、返回 200 条诊断`,
         output: '{config?, files, total, truncated, counts: {error, warning, info}, diagnostics: [{file, line, column, severity, code, message}]}',
+        outputSchema: {
+          type: 'object', required: ['files', 'total', 'truncated', 'counts', 'diagnostics'],
+          properties: {
+            config: { type: 'string' }, files: { type: 'integer' }, total: { type: 'integer' }, truncated: { type: 'boolean' },
+            counts: { type: 'object' }, diagnostics: { type: 'array' },
+          },
+        },
         description: '运行 TypeScript 编译器获取项目级类型诊断。用于修改代码后的验证；只返回沙箱内文件，未找到 tsconfig.json 时扫描项目中的 TS/JS 文件。',
         parameters: {
           type: 'object',
@@ -391,8 +408,13 @@ export default {
         name: 'lsp_definition',
         risk: 'low',
         costHint: 'low',
+        timeoutMs: 60_000,
         sideEffect: 'read',
         output: '{definitions: [{file, line, character}], count}',
+        outputSchema: {
+          type: 'object', required: ['count', 'definitions'],
+          properties: { count: { type: 'integer' }, definitions: { type: 'array' } },
+        },
         description: '通过已配置的 language server 查找符号定义（精确跳转，优于文本搜索）。',
         parameters: {
           type: 'object',
@@ -428,8 +450,13 @@ export default {
         name: 'lsp_hover',
         risk: 'low',
         costHint: 'low',
+        timeoutMs: 60_000,
         sideEffect: 'read',
         output: '{text, truncated}',
+        outputSchema: {
+          type: 'object', required: ['text', 'truncated'],
+          properties: { text: { type: 'string' }, truncated: { type: 'boolean' } },
+        },
         description: '通过 language server 获取光标位置的类型/文档悬停信息。',
         parameters: {
           type: 'object',
@@ -460,8 +487,13 @@ export default {
         name: 'lsp_diagnostics',
         risk: 'low',
         costHint: 'medium',
+        timeoutMs: 60_000,
         sideEffect: 'read',
         output: '{file, diagnostics: [{line, character, severity, message}], count}',
+        outputSchema: {
+          type: 'object', required: ['file', 'count', 'diagnostics'],
+          properties: { file: { type: 'string' }, count: { type: 'integer' }, diagnostics: { type: 'array' } },
+        },
         description: '读取 language server 对单个文件发布的诊断（需要 server 支持 publishDiagnostics）。',
         parameters: {
           type: 'object',

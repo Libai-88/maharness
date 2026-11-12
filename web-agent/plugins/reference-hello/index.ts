@@ -12,8 +12,13 @@ const plugin: Plugin = {
         description: 'Return a deterministic health response from the reference plugin.',
         parameters: { type: 'object', properties: {}, additionalProperties: false },
         output: '{ ok: true, plugin: "reference-hello" }',
+        outputSchema: {
+          type: 'object', required: ['ok', 'plugin'],
+          properties: { ok: { type: 'boolean' }, plugin: { type: 'string' } },
+        },
         risk: 'low',
         costHint: 'low',
+        sideEffect: 'none',
         async handler() {
           return { ok: true, data: { ok: true, plugin: 'reference-hello' } };
         },

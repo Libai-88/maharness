@@ -20,6 +20,7 @@ import {
   assessApprovalGate,
   taskkillArgs,
   assertSafeMcpUrl,
+  resolveSafeMcpTarget,
   isPrivateHostAddress,
   filterMcpToolsByAllowlist,
   mcpToolMetadata,
@@ -212,6 +213,11 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
     });
     assert.equal(u.hostname, 'mcp.example.com');
     assert.deepEqual(seen, ['mcp.example.com'], '应调用注入的解析器而非真实 DNS');
+    const target = await resolveSafeMcpTarget('https://mcp.example.com/mcp', {
+      allowPrivate: false,
+      resolve: async () => ['93.184.216.34'],
+    });
+    assert.deepEqual(target.addresses, [{ address: '93.184.216.34', family: 4 }], '地址应随校验结果返回给 socket 钉死');
 
     await assert.rejects(
       () => assertSafeMcpUrl('https://evil.example.com/mcp', { allowPrivate: false, resolve: async () => ['10.0.0.5'] }),
