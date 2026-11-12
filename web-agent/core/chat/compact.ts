@@ -19,6 +19,7 @@
  */
 import type { LLMMessage, ProviderDef, TraceLike } from '../../kernel/types';
 import { allocateTokenBudget, countMessageTokens, estimateTokens } from '../../kernel/tokens';
+import { sanitizeToolHistory } from './policy';
 
 /** 压缩摘要的前缀标记：检测到它即认为历史已压缩（跳过，不重复总结） */
 export const SUMMARY_MARK = '【历史摘要】';
@@ -94,6 +95,18 @@ const SUMMARIZE_PROMPT = [
   '- 输出：以「【历史摘要】」开头的一段中文（≤300 字），不要输出其他任何内容。',
 ].join('\n');
 
+/** 压缩产物统一过一遍工具协议净化，避免旧孤儿回执进入 provider 请求。 */
+function sanitizeCompactResult(result: CompactResult): CompactResult {
+  const messages = sanitizeToolHistory(result.messages);
+  if (messages === result.messages) return result;
+  return {
+    ...result,
+    messages,
+    droppedMessages: result.droppedMessages + (result.mode === 'none' ? result.messages.length - messages.length : 0),
+    compactedMessages: result.mode === 'compact' ? result.compactedMessages + (result.messages.length - messages.length) : result.compactedMessages,
+  };
+}
+
 /**
  * 压缩/截断历史（system 消息不参与压缩——它由 AgentRunner 组装，此处只处理对话轮）。
  * 返回处理后的消息序列；mode 标识走了哪条路径（可观测：Trace 记录）。
@@ -104,7 +117,7 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
   const count = (messages: LLMMessage[]) => countMessageTokens(messages, opts.provider?.tokenizer);
   const total = count(history);
   if (total <= contextBudget || history.length <= 1) {
-    return { messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total };
+    return sanitizeCompactResult({ messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total });
   }
 
   // M1 二次摘要锚定：定位既有摘要消息的位置（不局限于 history[0]）。已有摘要时
@@ -165,7 +178,7 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
           tokensIn: compactedTokens, tokensOut: summaryTokens,
         });
       return {
-        messages, mode: 'compact',
+        messages: sanitizeToolHistory(messages), mode: 'compact',
         droppedMessages: 0, compactedMessages: compressible.length,
         estimatedTokens: summaryTokens + count(kept),
       };
@@ -173,7 +186,7 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
     // 摘要失败（调用异常/输出不符）→ 降级截断
   }
 
-  return truncate(history, contextBudget, total, opts.provider?.tokenizer);
+  return sanitizeCompactResult(truncate(history, contextBudget, total, opts.provider?.tokenizer));
 }
 
 /** 调 LLM 压缩一段历史为摘要；失败或输出不符标记时返回 null（调用方降级） */
@@ -226,7 +239,7 @@ function truncate(history: LLMMessage[], maxTokens: number, total: number, token
     acc += t;
   }
   const dropped = rest.length - kept.length;
-  if (dropped === 0) return { messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total };
+  if (dropped === 0) return sanitizeCompactResult({ messages: history, mode: 'none', droppedMessages: 0, compactedMessages: 0, estimatedTokens: total });
 
   const messages: LLMMessage[] = [
     ...head,
@@ -240,5 +253,6 @@ function truncate(history: LLMMessage[], maxTokens: number, total: number, token
 export function truncateHistory(history: LLMMessage[], maxTokens: number): { messages: LLMMessage[]; truncated: boolean; droppedMessages: number; estimatedTokens: number } {
   const contextBudget = Math.max(0, maxTokens - allocateTokenBudget(maxTokens).output);
   const r = truncate(history, contextBudget, countMessageTokens(history));
-  return { messages: r.messages, truncated: r.mode === 'truncate', droppedMessages: r.droppedMessages, estimatedTokens: r.estimatedTokens };
+  const messages = sanitizeToolHistory(r.messages);
+  return { messages, truncated: r.mode === 'truncate', droppedMessages: r.droppedMessages + (r.messages === messages ? 0 : r.messages.length - messages.length), estimatedTokens: r.estimatedTokens };
 }

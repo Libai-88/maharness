@@ -40,3 +40,42 @@ export function validateCheckpointHistory(history: { role: string; content: stri
   if (pending.size > 0) return `断点存在 ${pending.size} 个未配对的工具调用（${[...pending].slice(0, 3).join(', ')}${pending.size > 3 ? '…' : ''}）`;
   return null;
 }
+
+/**
+ * 工具协议净化：清除无主 tool 回执，并移除始终没有得到回执的 tool_call。
+ * 断点校验负责拒绝不完整历史；普通组装路径必须把旧会话、压缩或截断产物
+ * 转换为 provider 可接受的原生协议。
+ */
+export function sanitizeToolHistory<T extends { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>(history: T[]): T[] {
+  const pending = new Set<string>();
+  const answered = new Set<string>();
+  const validToolIndexes = new Set<number>();
+  let validToolCount = 0;
+  let toolCallCount = 0;
+
+  history.forEach((message, index) => {
+    if (message.role === 'assistant' && Array.isArray(message.tool_calls)) {
+      for (const call of message.tool_calls as { id?: unknown }[]) {
+        if (typeof call?.id === 'string') pending.add(call.id);
+      }
+    } else if (message.role === 'tool') {
+      toolCallCount++;
+      if (typeof message.tool_call_id === 'string' && pending.has(message.tool_call_id)) {
+        pending.delete(message.tool_call_id);
+        answered.add(message.tool_call_id);
+        validToolIndexes.add(index);
+        validToolCount++;
+      }
+    }
+  });
+
+  if (validToolCount === toolCallCount && pending.size === 0) return history;
+  return history.flatMap((message, index) => {
+    if (message.role === 'tool') return validToolIndexes.has(index) ? [message] : [];
+    if (message.role !== 'assistant' || !Array.isArray(message.tool_calls)) return [message];
+    const calls = (message.tool_calls as { id?: unknown }[]).filter((call) => typeof call?.id === 'string' && answered.has(call.id));
+    if (calls.length === message.tool_calls.length) return [message];
+    if (calls.length === 0 && message.content == null) return [];
+    return [{ ...message, tool_calls: calls }];
+  });
+}

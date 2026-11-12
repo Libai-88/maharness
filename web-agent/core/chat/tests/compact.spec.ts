@@ -1,6 +1,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { compactHistory, contextBoundaryPreservesTools, contextIntegrityPreservesConstraints, truncateHistory, SUMMARY_MARK } from '../compact';
+import { sanitizeToolHistory } from '../policy';
 import type { LLMMessage, ProviderDef } from '../../../kernel/types';
 
 /** 摘要器替身：返回固定文本（默认以摘要标记开头，模拟"模型配合"） */
@@ -81,7 +82,7 @@ describe('compactHistory：头部 system（L0 系统提示词）必须原样保�
     assert.ok(String(r.messages[0].content).startsWith(SUMMARY_MARK));
   });
 
-  it('未超预算时原样返回（mode=none，保持同一引用）', async () => {
+  it('未超预算时原样返回（mode=none，无工具消息时保持同一引用）', async () => {
     const history: LLMMessage[] = [{ role: 'system', content: L0 }, { role: 'user', content: '你好' }];
     const r = await compactHistory(history, 100_000, { provider: stubProvider('x'), model: 'stub-model' });
     assert.equal(r.mode, 'none');
@@ -130,6 +131,39 @@ describe('compactHistory：工具调用完整性', () => {
     const ids = result.messages.filter((message) => message.role === 'tool').map((message) => message.tool_call_id);
     const calls = result.messages.flatMap((message) => Array.isArray(message.tool_calls) ? message.tool_calls.map((call) => (call as { id: string }).id) : []);
     assert.deepEqual(ids, calls.filter((id) => ids.includes(id)));
+  });
+});
+
+describe('历史工具协议净化', () => {
+  it('截断产物清除无主工具回执并保留完整配对', () => {
+    const history: LLMMessage[] = [
+      { role: 'user', content: '继续处理旧任务' },
+      { role: 'tool', content: '旧回执', tool_call_id: 'orphan-tool' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'list_dir', arguments: '{}' } }] },
+      { role: 'tool', content: '目录内容', tool_call_id: 'call-1' },
+      ...longDialog(10),
+    ];
+    const result = truncateHistory(history, 1_000);
+
+    assert.deepEqual(result.messages.filter((message) => message.role === 'tool').map((message) => message.tool_call_id), ['call-1']);
+    assert.equal(result.messages.some((message) => message.tool_call_id === 'orphan-tool'), false);
+  });
+
+  it('无工具消息且未超预算时保持原引用', () => {
+    const history: LLMMessage[] = [{ role: 'system', content: L0 }, { role: 'user', content: '你好' }];
+    const r = sanitizeToolHistory(history);
+    assert.equal(r, history);
+  });
+
+  it('截断产物清除无主工具回执并移除未回填调用', async () => {
+    const history: LLMMessage[] = [
+      { role: 'system', content: L0 },
+      { role: 'tool', content: '旧回执', tool_call_id: 'orphan-tool' },
+      ...longDialog(20),
+    ];
+    const result = truncateHistory(history, 100);
+
+    assert.equal(result.messages.some((message) => message.role === 'tool'), false);
   });
 });
 

@@ -21,6 +21,7 @@ import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { rankToolsForTask, toolDomain } from '../../kernel/tool-domain';
+import { sanitizeToolHistory } from './policy';
 
 // 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
 export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
@@ -68,10 +69,9 @@ const EN_THINK_REMINDER = 'Reason in ENGLISH, start with "We need ...". Example:
  *  带【继续】标记：L1 语义缓存查询/任务画像据此排除，不当作真实用户问题。 */
 const CONTINUE_HINT = '【继续】上一条 tool 消息是刚执行完成的真实结果，请基于它继续处理任务；如任务已完成，直接给出最终回答，不要重复调用已完成的工具。';
 
-/** 工具结果摘要（固定截断：同一内容 → 同一文本，保证前缀逐字节稳定） */
-export function summarizeToolResult(text: string): string {
-  const t = text.replace(/\s+/g, ' ').trim();
-  return t.length > 400 ? t.slice(0, 400) + '…' : t;
+/** 工具协议净化；导出供 selftest 与路由侧复用。 */
+export function normalizeToolHistory(history: LLMMessage[]): LLMMessage[] {
+  return sanitizeToolHistory(history);
 }
 
 /** Trace 参数只保留结构，不把凭据写入实时事件或 JSONL 归档。 */
@@ -214,11 +214,11 @@ export class AgentRunner {
     // 轮数上限：调用方按模式传值（目标模式长任务更高），缺省用配置 agent.maxTurns
     const maxTurns = opts.maxTurns ?? this.kernel.config.get<number>('agent.maxTurns', 12);
     const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
-    const history: LLMMessage[] = [
+    const history: LLMMessage[] = sanitizeToolHistory([
       { role: 'system', content: systemPrompt },
       ...messages,
       ...(opts.contextMessages ?? []),
-    ];
+    ]);
     const tools = typeof this.kernel.plugins.tools === 'function'
       ? this.kernel.plugins.tools()
       : this.kernel.plugins.capabilities('tool').map((c) => c.tool);

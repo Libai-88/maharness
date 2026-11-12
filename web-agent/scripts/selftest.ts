@@ -1392,6 +1392,26 @@ export default {
     `(事件=${evs2.join(',')} LLM 调用=${llmCalls} 纠偏步骤=${fixSteps.length})`);
 }
 
+// ---- 工具协议净化：孤儿回执与未回填调用不能进入 Provider 请求 ----
+{
+  const { normalizeToolHistory } = await import('../core/chat/agent');
+  const history: LLMMessage[] = [
+    { role: 'system', content: 'system' },
+    { role: 'user', content: '继续旧任务' },
+    { role: 'tool', content: '旧回执', tool_call_id: 'orphan-result' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call-1', type: 'function', function: { name: 'list_dir', arguments: '{}' } }] },
+    { role: 'tool', content: '目录内容', tool_call_id: 'call-1' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'pending-call', type: 'function', function: { name: 'read_file', arguments: '{}' } }] },
+  ];
+  const normalized = normalizeToolHistory(history);
+  const orphanResultRemoved = normalized.every((message) => message.tool_call_id !== 'orphan-result');
+  const pendingCallRemoved = normalized.every((message) => !message.tool_calls?.some((call) => call.id === 'pending-call'));
+  const pairedCallKept = normalized.some((message) => message.tool_calls?.some((call) => call.id === 'call-1'))
+    && normalized.some((message) => message.role === 'tool' && message.tool_call_id === 'call-1');
+  check('[tool-protocol] 历史组装净化孤儿回执与未回填调用', orphanResultRemoved && pendingCallRemoved && pairedCallKept,
+    `消息数=${normalized.length} 回执=${normalized.filter((message) => message.role === 'tool').map((message) => message.tool_call_id).join(',')}`);
+}
+
 await kernel.stop();
 
 // ---- 汇总（非 LLM 用例全绿 = exit 0；web_search 等外网依赖用例不计入） ----
