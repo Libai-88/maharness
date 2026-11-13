@@ -1,3 +1,5 @@
+import { activeRun, runsApi, type RunInfo } from './run-api';
+import { subscribeRun } from './api';
 // ui/src/App.tsx —— 应用状态协调器
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
@@ -125,6 +127,9 @@ export default function App() {
   const providerToastAtRef = useRef(new Map<string, number>());
 
   const abortRef = useRef<AbortController | null>(null);
+  const [currentRun, setCurrentRun] = useState<RunInfo | null>(null);
+  const currentRunRef = useRef<RunInfo | null>(null);
+  currentRunRef.current = currentRun;
   // 消息镜像 ref：retry 时刻同步读取（state 提交前也能拿到当前值）
   const messagesRef = useRef(messages);
   messagesRef.current = messages;
@@ -137,7 +142,7 @@ export default function App() {
   // 审批状态机（挂起集合的三个来源 + 超时撤卡 + 回答）：见 hooks/useApprovals.ts
   const pushSystemMessage = useCallback((id: string, text: string) => {
     setMessages((m) => [...m, { id, role: 'system', content: text, ts: Date.now() }]);
-  }, []);
+  }, [clearTraceSteps]);
   const { approvals, onApprovalRequired: onApprovalFromStream, onGlobalApproval: onApprovalFromBus, respond: respondApproval } =
     useApprovals({ activeId, pushSystemMessage });
 
@@ -178,8 +183,8 @@ export default function App() {
     document.documentElement.classList.toggle('dark', theme === 'dark');
     document.documentElement.setAttribute('data-sonner-theme', theme);
     // 浏览器窗口 chrome（标题栏/状态栏）跟随明暗主题
-    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#f5eee0');
-    applyFavicon(theme);
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#fff8ed');
+    applyFavicon();
     try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
   }, [theme]);
 
@@ -187,7 +192,7 @@ export default function App() {
   useEffect(() => {
     document.documentElement.dataset.brand = brand;
     try { localStorage.setItem('maharness-brand', brand); } catch { /* 忽略 */ }
-    applyFavicon(theme);
+    applyFavicon();
   }, [brand, theme]);
 
   // 供应商被删除后清理当前选择（防止已删除的 provider 残留在模型下拉/会话里）
@@ -315,16 +320,7 @@ export default function App() {
       } else {
         initialId = ss[0].id;
       }
-      // 初始会话：同步加载历史消息，避免首屏空白
       setActiveId(initialId);
-      if (initialId) {
-        try {
-          const [msgs, pl] = await Promise.all([sessionApi.messages(initialId), planApi.get(initialId).catch(() => null)]);
-          setMessages(replayMessages(msgs));
-          setPlan(pl?.plan ?? null);
-          setSessionCost(msgs.reduce((s, m) => s + (m.cost ?? 0), 0));
-        } catch { /* 忽略 */ }
-      }
     } catch (err) {
       console.error('[maharness] 初始加载失败:', err);
       toast.error(`初始加载失败：${err instanceof Error ? err.message : String(err)}`);
@@ -332,6 +328,8 @@ export default function App() {
   }
 
   const selectSession = useCallback(async (id: string) => {
+    abortRef.current?.abort();
+    setStreaming(false); setCurrentRun(null);
     setActiveId(id);
     setMessages([]);
     clearTraceSteps();
@@ -341,20 +339,7 @@ export default function App() {
     setCheckpoint(null);
     setBudgetHit(null);
     setSessionCost(0);
-    try {
-      const [msgs, cp, pl] = await Promise.all([
-        sessionApi.messages(id),
-        sessionApi.checkpoint(id).catch(() => null),
-        // 计划活在插件内存里、只经事件推送：刷新/切会话时主动拉一次，卡片立刻回来
-        planApi.get(id).catch(() => null),
-      ]);
-      setMessages(replayMessages(msgs));
-      setCheckpoint(cp);
-      setPlan(pl?.plan ?? null);
-      setSessionCost(msgs.reduce((s, m) => s + (m.cost ?? 0), 0));
-    } catch (err) {
-      toast.error(`这段聊天没能打开：${err instanceof Error ? err.message : String(err)}`);
-    }
+
   }, []);
 
   const createSession = useCallback(async () => {
@@ -373,7 +358,7 @@ export default function App() {
     } catch (err) {
       toast.error(`新建会话失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [sel]);
+  }, [sel, clearTraceSteps]);
 
   const deleteSession = useCallback(async (id: string) => {
     try {
@@ -391,7 +376,7 @@ export default function App() {
       }
       return next;
     });
-  }, [activeId, selectSession]);
+  }, [activeId, selectSession, clearTraceSteps]);
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     try {
@@ -428,7 +413,7 @@ export default function App() {
     } catch (err) {
       toast.error(`批量删除失败：${err instanceof Error ? err.message : String(err)}`);
     }
-  }, [activeId, sessions, selectSession]);
+  }, [activeId, sessions, selectSession, clearTraceSteps]);
 
   /** 批量归档（未归档的标记归档） */
   const batchArchive = useCallback(async (ids: string[]) => {
@@ -511,8 +496,10 @@ export default function App() {
    *  narration（旁白）、工具卡带 tool_call_id、「加入了群聊」交给渲染期派生——
    *  于是「刷新一次还是这场对话」，而不是换副面孔（旧的空气泡就是这么来的）。 */
   const makeStreamHandlers = useCallback((assistantId: string) => ({
+    onRun: (run: RunInfo) => { if (run.sessionId === activeIdRef.current) setCurrentRun(run); },
     onStart: (traceId: string) => {
-      if (traceId) traceIdsRef.current.add(traceId);
+      traceIdsRef.current = traceId ? new Set([traceId]) : new Set();
+      clearTraceSteps();
       // 新一轮开始：清掉上一轮的小队进度（否则"2/4"会挂在新对话上）
       const sid = activeIdRef.current ?? '';
       setSquad((prev) => ({ ...prev, [sid]: { total: 0, done: 0, failed: 0, running: {} } }));
@@ -572,11 +559,10 @@ export default function App() {
     onTaskInference: (objective: string, inference: { confidence: number; basis: 'explicit' | 'inferred' | 'ambiguous'; needsConfirmation: boolean; rationale: string }) => {
       if (!inference.needsConfirmation) return;
       flushStreamBuffer();
-      setPendingInference({ objective, rationale: inference.rationale, confidence: inference.confidence });
       setMessages((prev) => [...prev, {
         id: `task-inference-${Date.now()}`,
         role: 'system',
-        content: `目标“${objective}”目前缺少可验证的完成标准（置信度 ${Math.round(inference.confidence * 100)}%）：${inference.rationale}。请补充产物、必须包含的内容或其他验收条件。`,
+        content: `目标“${objective}”缺少明确验收标准（置信度 ${Math.round(inference.confidence * 100)}%）：${inference.rationale}。可继续执行，补充验收条件后可自动校验结果。`,
         ts: Date.now(),
       }]);
     },
@@ -618,7 +604,7 @@ export default function App() {
       // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
       // 不复位则输入区与停止按钮锁死在 streaming 状态
       setStreaming(false);
-      if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+      if (activeId) void Promise.resolve(null).then(setCheckpoint).catch(() => undefined);
     },
     onEnd: () => {
       flushStreamBuffer();
@@ -628,9 +614,9 @@ export default function App() {
       setCheckpoint(null);
       setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
     },
-  }), [activeId, queueStreamText, flushStreamBuffer]);
+  }), [activeId, queueStreamText, flushStreamBuffer, clearTraceSteps]);
 
-  const send = useCallback(async (text: string) => {
+  const send = useCallback(async (text: string, frameworkChangeId?: string) => {
     if (!activeId || !text.trim() || streaming) return;
     setPendingInference(null);
 
@@ -669,7 +655,7 @@ export default function App() {
     abortRef.current = ac;
 
     // provider 一并上送：两个 provider 有同名模型时，服务端按 provider 优先解析才不会答错人
-    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '' }, makeStreamHandlers(assistantMsg.id), ac.signal);
+    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '', frameworkChangeId }, makeStreamHandlers(assistantMsg.id), ac.signal);
 
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession, makeStreamHandlers]);
@@ -680,47 +666,60 @@ export default function App() {
     void send(`${objective}\n验收条件：${condition}`);
   }, [send]);
 
-  /** 断点续跑（checkpoint）：从上次中断的轮次继续，复用完整对话流程 */
   const resumeTask = useCallback(async () => {
-    if (!activeId || streaming || resuming) return;
-    const cp = checkpoint;
-    if (!cp?.exists) return;
-    setResuming(true);
-    // 恢复期间置全局 streaming：输入区防重入（可再点发送会撞服务端 409）与
-    // 停止按钮可用——恢复任务同样可被用户中断
-    setStreaming(true);
+    if (!currentRun || streaming || currentRun.status !== 'interrupted') return;
+    setResuming(true); setStreaming(true);
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
-    setMessages((prev) => [...prev, { id: `cp-${Date.now()}`, role: 'system', content: sys.resumed, ts: Date.now() }, assistantMsg]);
-    setCheckpoint(null);
-    const ac = new AbortController();
-    abortRef.current = ac;
-    await streamChat(activeId, { resume: true, model: sel?.model ?? '', provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
-    setResuming(false);
-    try {
-      const cp2 = await sessionApi.checkpoint(activeId).catch(() => null);
-      setCheckpoint(cp2); // 恢复后若再次中断（如熔断），断点仍可继续
-      setSessions(await sessionApi.list());
-    } catch { /* 忽略 */ }
-  }, [activeId, streaming, resuming, checkpoint, sel, makeStreamHandlers]);
+    setMessages(previous => [...previous, assistantMsg]);
+    const ac = new AbortController(); abortRef.current = ac;
+    try { const run = await runsApi.resume(currentRun.id); setCurrentRun(run); await subscribeRun(run.id, makeStreamHandlers(assistantMsg.id), ac.signal, run.eventCursor ?? 0); }
+    catch (error) { toast.error(String(error)); setStreaming(false); }
+    finally { setResuming(false); }
+  }, [currentRun, streaming, makeStreamHandlers]);
 
   const stop = useCallback(() => {
-    abortRef.current?.abort();
-    // 立刻就地留话：不等服务端的 error 事件（连接已断，事件多半到不了）。
-    // 旧行为是留下一个空白气泡 + 一句红字「连接中断」——明明是自己按的停止。
-    setMessages((prev) => prev.map((m) => m.streaming
-      ? {
-        ...m,
-        streaming: false,
-        stopped: true,
-        error: undefined,
-        narration: (m.content.trim() ? [...(m.narration ?? []), m.content.trim()] : m.narration),
-        content: '',
-      }
-      : m));
-    setStreamStatus(null);
-    setStreaming(false);
-    // 中断后同步断点状态：任务未完成 → 立即显示「继续任务」横幅（无需刷新页面）
-    if (activeId) void sessionApi.checkpoint(activeId).then(setCheckpoint).catch(() => undefined);
+    const run = currentRunRef.current;
+    if (run && activeRun(run)) void runsApi.cancel(run.id).then(setCurrentRun).catch(error => toast.error(String(error)));
+  }, []);
+
+  const newTask = useCallback(async (message: string) => {
+    const run = currentRunRef.current;
+    if (!run) return;
+    await runsApi.cancel(run.id);
+    let next = await runsApi.get(run.id);
+    for (let attempt = 0; activeRun(next) && attempt < 60; attempt++) {
+      await new Promise(resolve => setTimeout(resolve, 500)); next = await runsApi.get(run.id);
+    }
+    if (activeRun(next)) throw new Error('任务仍在停止，请等待后重试');
+    abortRef.current?.abort(); setStreaming(true);
+    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
+    setMessages(previous => [...previous.map(m => ({ ...m, streaming: false })), { id: `u-${Date.now()}`, role: 'user', content: message, ts: Date.now() }, assistantMsg]);
+    const ac = new AbortController(); abortRef.current = ac;
+    await streamChat(run.sessionId, { message, model: sel?.model, provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
+  }, [sel, makeStreamHandlers]);
+
+  const handlerRef = useRef(makeStreamHandlers);
+  handlerRef.current = makeStreamHandlers;
+  useEffect(() => {
+    if (!activeId) return;
+    setCurrentRun(null); setStreaming(false);
+    const ac = new AbortController();
+    setStreaming(true);
+    void Promise.all([runsApi.list(activeId), sessionApi.messages(activeId), planApi.get(activeId).catch(() => null)]).then(async ([rows, msgs, pl]) => {
+      if (ac.signal.aborted || activeIdRef.current !== activeId) return;
+      setMessages(replayMessages(msgs));
+      setPlan(pl?.plan ?? null);
+      setSessionCost(msgs.reduce((total, message) => total + (message.cost ?? 0), 0));
+      const run = rows.find(run => !run.parentId);
+      setCurrentRun(run ?? null);
+      if (run && activeRun(run)) {
+        abortRef.current?.abort(); abortRef.current = ac;
+        const assistantId = `run-${run.id}`;
+        setMessages(previous => [...previous, { id: assistantId, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: run.createdAt }]);
+        await subscribeRun(run.id, handlerRef.current(assistantId), ac.signal);
+      } else setStreaming(false);
+    }).catch(error => { if (!ac.signal.aborted) { setStreaming(false); toast.error(String(error)); } });
+    return () => { ac.abort(); abortRef.current?.abort(); };
   }, [activeId]);
 
   // 稳定引用回调：配合 memo 化的 Sidebar/TracePanel，流式渲染期间跳过无关子树 reconcile
@@ -859,6 +858,10 @@ export default function App() {
       theme={theme}
       brand={brand}
       checkpoint={checkpoint}
+      currentRun={currentRun}
+      onNewTask={newTask}
+      onFrameworkTask={(id, message) => { setActiveTab('chat'); void send(message, id); }}
+      onRunChanged={() => { if (currentRun) void runsApi.get(currentRun.id).then(setCurrentRun); }}
       resuming={resuming}
       budgetHit={budgetHit}
       sessionCost={sessionCost}

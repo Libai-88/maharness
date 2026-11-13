@@ -15,6 +15,7 @@ import {
 } from '../../voice';
 import type { ChatPart, ChatRun } from '../../chat/model';
 import Markdown from '../Markdown';
+import BrandMark, { BRAND_MARK_SRC } from '@/brand/BrandMark';
 import {
   Zap as IconBolt,
   Brain as IconBrain,
@@ -31,7 +32,7 @@ import {
   TriangleAlert as IconWarn,
 } from 'lucide-react';
 import { Alert, AlertAction, AlertTitle } from '@/components/ui/alert';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Bubble, BubbleContent } from '@/components/ui/bubble';
 import { CodeBlock, CodeBlockContent } from '@/components/ui/code-block';
@@ -314,18 +315,17 @@ function ReasoningTrace({
 }: {
   part: Extract<ChatPart, { kind: 'reasoning' }>;
 }) {
-  const [userOpen, setUserOpen] = useState<boolean | null>(null);
-  const open = userOpen ?? part.streaming;
+  const [open, setOpen] = useState(false);
 
   return (
-    <TraceCollapsible open={open} onOpenChange={setUserOpen}>
+    <TraceCollapsible open={open} onOpenChange={setOpen}>
       <TraceCollapsibleTrigger>
         <TraceLine status={part.streaming ? 'running' : undefined}>
           <TraceIcon>
             {part.streaming ? <Spinner className="size-3.5" /> : <IconBrain />}
           </TraceIcon>
           <TraceTitle>{part.streaming ? '正在思考' : '思考过程'}</TraceTitle>
-          {!part.streaming && <TraceDescription>{open ? '收起' : '展开'}</TraceDescription>}
+          <TraceDescription>{open ? '收起' : '展开'}</TraceDescription>
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent>
@@ -528,7 +528,8 @@ export const AssistantRun = memo(function AssistantRun({
           title="双击拍一拍"
         >
           <Avatar size="sm">
-            <AvatarFallback><IconRobot size={14} /></AvatarFallback>
+            <AvatarImage src={BRAND_MARK_SRC} alt="" className="bg-[#fff8ed] p-0.5" />
+            <AvatarFallback><BrandMark size={14} /></AvatarFallback>
           </Avatar>
         </MessageAvatar>
         <MessageContent className="min-w-0">

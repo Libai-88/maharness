@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, Bot, ChartNoAxesCombined, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Puzzle, Settings, Trash2, X } from 'lucide-react';
+import { Archive, ChartNoAxesCombined, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Puzzle, Settings, Trash2, X } from 'lucide-react';
+import BrandMark from '@/brand/BrandMark';
 import type { Session } from '../types';
 import { AGENT_NAME, APP_VERSION, chatTime, displayTitle, previewOf } from '../voice';
 import { Button } from '@/components/ui/button';
@@ -43,6 +44,7 @@ export interface TabDef {
 
 export const BUILTIN_TABS: TabDef[] = [
   { key: 'chat', label: '会话', icon: <MessageCircle /> },
+  { key: 'runs', label: '任务', icon: <ListChecks /> },
   { key: 'files', label: '文件', icon: <Folder /> },
   { key: 'plugins', label: '插件', icon: <Puzzle /> },
   { key: 'stats', label: '统计', icon: <ChartNoAxesCombined /> },
@@ -199,7 +201,7 @@ export default memo(function Sidebar({
         <SidebarMenuItem key={s.id}>
           <div className="flex min-h-14 items-center gap-2.5 rounded-md px-2 py-2">
             <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
-              <Bot size={15} />
+              <BrandMark size={18} />
             </span>
             <Input
               className="min-w-0 flex-1"
@@ -253,7 +255,7 @@ export default memo(function Sidebar({
         >
           {!managing && (
             <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
-              <Bot size={15} />
+              <BrandMark size={18} />
               {unread && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border-2 border-sidebar bg-primary" />}
             </span>
           )}
@@ -264,7 +266,7 @@ export default memo(function Sidebar({
             </span>
             <span className="min-h-4 truncate text-[11px] leading-4 text-foreground/70">
               {typing ? (
-                <span className="text-primary">{AGENT_NAME}正在输入…</span>
+                <span className="text-sidebar-foreground">{AGENT_NAME}正在输入…</span>
               ) : preview ? (
                 <span className={cn(s.lastRole === 'user' && 'text-foreground/65')}>{preview}</span>
               ) : s.role ? (
@@ -311,8 +313,8 @@ export default memo(function Sidebar({
   return (
     <SidebarRoot collapsible="offcanvas" className="border-r border-sidebar-border">
       <SidebarHeader className="h-16 flex-row items-center gap-2.5 px-3">
-        <div className="flex size-9 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm">
-          <Bot size={17} />
+        <div className="flex size-9 items-center justify-center overflow-hidden rounded-xl bg-[#fff8ed] shadow-sm ring-1 ring-black/5">
+          <BrandMark size={30} />
         </div>
         <div className="min-w-0">
           <div className="truncate text-[15px] font-semibold tracking-[-0.02em]">maharness</div>

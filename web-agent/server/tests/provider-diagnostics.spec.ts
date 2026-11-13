@@ -37,6 +37,30 @@ const { refreshChatProviders } = await import('../routes/shared');
 const base = `http://127.0.0.1:${port}`;
 let started: Awaited<ReturnType<typeof startServer>> | undefined;
 
+async function executeV2(sessionId: string, input: Record<string, unknown>) {
+  const created = await fetch(`${base}/api/v2/sessions/${sessionId}/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+  assert.equal(created.status, 202);
+  const { runId } = await created.json() as { runId: string };
+  return fetch(`${base}/api/v2/runs/${runId}/events`);
+}
+
+function enableForMock(provider: ProviderDef, nextNames: () => string[]) {
+  const original = provider.chat.bind(provider);
+  const state = { calls: 0 };
+  provider.chat = async function* (messages, options) {
+    const missing = nextNames().filter(name => !options.tools?.some(tool => tool.name === name));
+    if (missing.length) {
+      assert.ok(options.tools?.some(tool => tool.name === 'enable_tools'));
+      state.calls++;
+      yield { type: 'tool_call', toolCall: { id: `enable-${state.calls}`, type: 'function', function: { name: 'enable_tools', arguments: JSON.stringify({ names: missing }) } } };
+      yield { type: 'usage', input: 0, output: 0 }; yield { type: 'done' };
+      return;
+    }
+    yield* original(messages, options);
+  };
+  return state;
+}
+
 before(async () => {
   started = await startServer();
   started.store.upsertProvider({
@@ -69,6 +93,7 @@ before(async () => {
 after(async () => {
   started?.server.close();
   started?.closeEnvWatcher();
+  await started?.runs.shutdown();
   started?.store.close();
   try { await started?.kernel.stop(); } catch { /* 测试清理不影响断言结果 */ }
   rmSync(tmp, { recursive: true, force: true });
@@ -210,7 +235,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     const models = await selectable.json() as Array<{ schemaVersion: number; id: string; provider: string; model: string; modelKey: string; pricingId: string }>;
     const selected = models.find((model) => model.model === 'gpt-diagnostic');
     assert.deepEqual(selected, {
-      schemaVersion: 1,
+      schemaVersion: 1, toolCheck: { status: 'unknown' },
       providerId: 'diagnostic-provider', modelId: 'gpt-diagnostic',
       modelKey: 'diagnostic-provider@gpt-diagnostic', pricingId: 'diagnostic-provider@gpt-diagnostic',
       id: 'diagnostic-provider@gpt-diagnostic', provider: 'diagnostic-provider',
@@ -250,7 +275,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(body.id, '保存成功应返回 provider id');
   });
 
-  test('真实聊天请求按配置路由并在 Trace 中保留完整候选证据', async () => {
+  test('配置的旧关键词路由不会覆盖用户所选模型', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     const calls: string[] = [];
@@ -262,7 +287,7 @@ describe('GET /api/providers/:id/diagnose', () => {
         enabled: true, source: 'test', latencyMs: 120, privacyTier: 'local', riskLevel: 'low',
       }],
       async *chat(messages, options) {
-        calls.push(`${options.model}:${messages.at(-1)?.content ?? ''}`);
+        calls.push(`${options.model}:${messages.find(message => message.context?.source === 'user')?.content ?? ''}`);
         yield { type: 'delta', text: ' routed' };
         yield { type: 'done' };
       },
@@ -275,29 +300,19 @@ describe('GET /api/providers/:id/diagnose', () => {
     });
     assert.equal(response.status, 200);
     const sse = await response.text();
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse)?.[1];
+    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
     assert.ok(traceId);
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls.length, 1);
-    assert.match(calls[0] ?? '', /^gpt-diagnostic:【继续】/);
+    assert.equal(calls[0], 'gpt-diagnostic:你好，请简短回答');
 
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=model-route`);
     assert.equal(traceResponse.status, 200);
     const trace = await traceResponse.json() as { steps: Array<{ outputSummary?: string; status: string }> };
-    assert.equal(trace.steps.length, 1);
-    assert.equal(trace.steps[0]?.status, 'done');
-    const decision = JSON.parse(trace.steps[0]?.outputSummary ?? '{}') as {
-      reason?: string;
-      candidates?: Array<{ providerId: string; model: string; accepted: boolean; reasons: string[] }>;
-    };
-    assert.match(decision.reason ?? '', /任务复杂度路由/);
-    assert.deepEqual(decision.candidates, [{
-      providerId: 'diagnostic-provider', model: 'gpt-diagnostic', score: 0, accepted: true,
-      reasons: ['命中任务类型「其他」的配置'],
-    }]);
+    assert.equal(trace.steps.length, 0);
   });
 
-  test('开放式目标先返回推断确认，不调用 Provider 或写入 checkpoint', async () => {
+  test('开放式目标直接执行且不生成强制推断', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
@@ -320,14 +335,12 @@ describe('GET /api/providers/:id/diagnose', () => {
     });
     assert.equal(response.status, 200);
     const sse = await response.text();
-    assert.match(sse, /event: task_inference\ndata:/);
-    assert.match(sse, /event: end\ndata: \{\}/);
-    assert.doesNotMatch(sse, /event: done\ndata:/);
-    assert.equal(calls, 0);
-    assert.equal(started.store.loadCheckpoint(session.id), undefined);
+    assert.doesNotMatch(sse, /event: task_inference\ndata:/);
+    assert.match(sse, /event: done\ndata:/);
+    assert.equal(calls, 1);
   });
 
-  test('确认验收条件后消费原目标并进入执行链', async () => {
+  test('开放目标直接执行，补充验收条件后继续执行并验证', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
@@ -348,17 +361,14 @@ describe('GET /api/providers/:id/diagnose', () => {
       body: JSON.stringify({ message: '请整理项目结构' }),
     });
     assert.equal(first.status, 200);
-    assert.match(await first.text(), /event: task_inference/);
-    assert.equal(calls, 0);
-    const second = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '请整理项目结构\n验收条件：必须包含“README.md”' }),
-    });
+    assert.doesNotMatch(await first.text(), /event: task_inference/);
+    assert.equal(calls, 1);
+    const second = await executeV2(session.id, { message: '请整理项目结构\n验收条件：必须包含“README.md”', acceptance: [{ type: 'output_contains', value: 'README.md' }] });
     assert.equal(second.status, 200);
     const sse = await second.text();
     assert.match(sse, /event: done\ndata:/);
     assert.match(sse, /event: task_verified\ndata:/);
-    assert.equal(calls, 1);
+    assert.equal(calls, 2, '两次用户请求各执行一次模型调用');
     assert.ok(started.store.listMessages(session.id).some((message) => message.role === 'user' && message.content === '请整理项目结构\n验收条件：必须包含“README.md”'));
   });
 
@@ -455,7 +465,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: retry\ndata: .*"reason":"attempt"/);
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls, 2);
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=retry-policy`);
     assert.equal(traceResponse.status, 200);
@@ -511,6 +521,7 @@ describe('GET /api/providers/:id/diagnose', () => {
       },
     ];
     started.kernel.config.set('agent.modelRouting', {});
+    started.kernel.config.set('agent.fallbackProviders', ['trace-fallback-provider']);
     const session = started.store.createSession('primary-model', 'trace-primary-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -522,7 +533,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: done\ndata:/);
     assert.equal(primaryCalls, 1, '认证错误不得在主线路重复重试');
     assert.equal(fallbackCalls, 1);
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse)?.[1];
+    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
     assert.ok(traceId);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=llm_call`);
     assert.equal(llmResponse.status, 200);
@@ -576,6 +587,7 @@ describe('GET /api/providers/:id/diagnose', () => {
         yield { type: 'done' };
       },
     }];
+    const enabled = enableForMock(chat.providers[0], () => calls === 0 ? ['run_parallel'] : []);
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     const parallelEvents: { phase?: string; detail?: { cost?: number; tokensIn?: number; tokensOut?: number } }[] = [];
@@ -594,24 +606,24 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.equal(calls, 6, '应包含主线路首轮、四个并行子任务和最终汇总轮');
     assert.equal(active, 0, 'Provider 负载结束后无活动请求');
     assert.equal(peakActive, 4, '四个并行子任务应同时运行但不超过批次上限');
-    assert.equal(parallelEvents.filter((event) => event.phase === 'start').length, 4);
-    const childDoneEvents = parallelEvents.filter((event) => event.phase === 'done');
-    assert.equal(childDoneEvents.length, 4);
-    const childCost = childDoneEvents.reduce((sum, event) => sum + (event.detail?.cost ?? 0), 0);
+    const parentRun = started.store.runs.list('default', session.id).find(run => !run.parentId)!;
+    const children = started.store.runs.children(parentRun.id, 'default');
+    assert.equal(children.length, 4); assert.ok(children.every(run => run.status === 'completed'));
+    const childCost = children.reduce((sum, run) => sum + run.cost, 0);
     assert.ok(childCost > 0);
     const finalEvent = /event: done\ndata: (\{[^\n]+\})/.exec(sse)?.[1];
     assert.ok(finalEvent);
     const final = JSON.parse(finalEvent!) as { usage?: { input: number; output: number }; cost: number };
     assert.deepEqual(final.usage, { input: 50, output: 25 }, '父结果应累计四个子任务和最终汇总轮用量');
     assert.ok(Math.abs(final.cost - (childCost + 0.00002)) < 1e-12, '父成本应累计子任务实际成本与最终汇总调用');
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse)?.[1];
+    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
     assert.ok(traceId);
     const traceResponse = await fetch(`${base}/api/trace?session_id=${encodeURIComponent(session.id)}&type=llm_call&limit=50`);
     assert.equal(traceResponse.status, 200);
     const trace = await traceResponse.json() as { steps: Array<{ traceId: string; status: string; parentId?: string; name?: string }> };
-    assert.equal(trace.steps.length, 6);
+    assert.equal(trace.steps.length, 6 + enabled.calls);
     assert.ok(trace.steps.every((step) => step.status === 'done'));
-    assert.equal(trace.steps.filter((step) => step.traceId === traceId).length, 2, '主 run 应有首轮和汇总轮');
+    assert.equal(trace.steps.filter((step) => step.traceId === traceId).length, 2 + enabled.calls, '主 run 应有工具启用、首轮和汇总轮');
     assert.equal(trace.steps.filter((step) => step.traceId !== traceId && step.parentId).length, 4, '四个子 run 的 Provider 步骤均应挂到并行工具父步骤');
     const toolResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=tool_call&name=run_parallel`);
     const toolTrace = await toolResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
@@ -639,7 +651,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     const sse = await response.text();
     assert.match(sse, /event: error\ndata:/);
     assert.equal(calls, 1, '参数错误不得在同一 Provider 重试');
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=llm_call`);
     const llmTrace = await llmResponse.json() as { steps: Array<{ status: string; errorCategory?: string; errorCode?: string; error?: string; durationMs?: number }> };
@@ -687,6 +699,7 @@ describe('GET /api/providers/:id/diagnose', () => {
       },
     ];
     started.kernel.config.set('agent.modelRouting', {});
+    started.kernel.config.set('agent.fallbackProviders', ['mixed-distribution-fallback']);
     const session = started.store.createSession('mixed-distribution-model', 'mixed-distribution-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
@@ -704,7 +717,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     const fallbackGap = fallbackCalls[1]! - fallbackCalls[0]!;
     assert.ok(primaryGap >= 1100, `503 后应等待默认退避（实测 ${primaryGap}ms）`);
     assert.ok(fallbackGap >= 1100, `超时后应等待默认退避（实测 ${fallbackGap}ms）`);
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const retryResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=retry-policy`);
     assert.equal(retryResponse.status, 200);
@@ -750,23 +763,20 @@ describe('GET /api/providers/:id/diagnose', () => {
     started.kernel.config.set('agent.modelRouting', {});
     const session = started.store.createSession('goal-model', 'goal-provider');
     started.store.updateSession(session.id, { mode: 'goal' });
-    const first = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '记录一次成本并结束，预算 0.42 美元' }),
-    });
+    const first = await executeV2(session.id, { message: '记录一次成本并结束，预算 0.42 美元', budgetUsd: 0.42 });
     assert.equal(first.status, 200);
-    assert.match(await first.text(), /event: task_inference\ndata:/);
-    const second = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '记录一次成本并结束，预算 0.42 美元\n验收条件：必须包含“已记录”' }),
-    });
+    const firstEvents = await first.text();
+    assert.doesNotMatch(firstEvents, /event: task_inference/);
+    assert.match(firstEvents, /event: budget_hit/);
+    assert.equal(calls, 1, '首个请求预算耗尽后不得继续调用模型');
+    const second = await executeV2(session.id, { message: '记录一次成本并结束', budgetUsd: 0.42, acceptance: [{ type: 'output_contains', value: '已记录' }] });
     assert.equal(second.status, 200);
     const sse = await second.text();
     assert.match(sse, /event: budget_hit\ndata: .*"budget":0\.42/);
     assert.match(sse, /event: error\ndata: .*"kind":"budget"/);
     assert.doesNotMatch(sse, /event: done\ndata:/);
-    assert.equal(calls, 1, '预算熔断后不得再发起 LLM 调用');
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse)?.[1];
+    assert.equal(calls, 2, '两次请求各调用一次，预算熔断后不得追加模型调用');
+    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
     assert.ok(traceId);
     const breakerResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=cost-breaker`);
     assert.equal(breakerResponse.status, 200);
@@ -808,7 +818,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: tool_result\ndata: .*"name":"read_file"/);
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls, 3);
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
@@ -863,6 +873,7 @@ describe('GET /api/providers/:id/diagnose', () => {
         yield { type: 'done' };
       },
     }];
+    enableForMock(chat.providers[0], () => calls === 0 ? ['write_file'] : calls === 1 ? ['read_file'] : []);
     started.kernel.config.set('agent.modelRouting', {});
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
     writeFileSync(join(process.env.SANDBOX_ROOT!, 'redact-fixture.txt'), `token=${secretPayload}`);
@@ -901,7 +912,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.equal(calls, 3);
     assert.match(sse, /event: tool_result\ndata: .*"name":"read_file"/);
     assert.equal(sse.includes(secretPayload), false, 'SSE 事件帧不得携带凭据内容');
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse)?.[1];
+    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
     assert.ok(traceId);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
@@ -936,6 +947,7 @@ describe('GET /api/providers/:id/diagnose', () => {
         yield { type: 'done' };
       },
     }];
+    enableForMock(chat.providers[0], () => calls === 0 ? ['run_subagent'] : calls === 1 ? ['read_file'] : []);
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
@@ -952,7 +964,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls, 4, '主代理委派、子代理工具调用与两个 run 的最终答复均已执行');
 
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const parentResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(parentResponse.status, 200);
@@ -1051,7 +1063,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls, 2);
     assert.equal(existsSync(join(process.env.SANDBOX_ROOT!, 'approval-fixture.txt')), false);
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
@@ -1124,7 +1136,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls, 2);
     assert.equal(existsSync(join(process.env.SANDBOX_ROOT!, 'reject-fixture.txt')), true);
-    const start = /event: start\ndata: \{"traceId":"([^"]+)"\}/.exec(sse);
+    const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);

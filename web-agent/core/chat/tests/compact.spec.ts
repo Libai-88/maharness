@@ -13,7 +13,7 @@ const stubProvider = (reply: string): ProviderDef => ({
   },
 });
 
-const L0 = '【L0 哨兵】你是小鲸：以工具为感官，以行动完成使命，以诚实回报信任。';
+const RUNTIME_PROMPT = '【运行时哨兵】以工具返回为事实来源，不编造结果。';
 
 /** 造一段必然超预算的对话（CJK ≈ 1 token/字） */
 const longDialog = (n: number): LLMMessage[] => Array.from({ length: n }, (_, i) => ({
@@ -21,55 +21,55 @@ const longDialog = (n: number): LLMMessage[] => Array.from({ length: n }, (_, i)
   content: `第 ${i} 条历史消息：这是一段用于把上下文推过预算的长文本，内容本身无意义。`,
 }));
 
-describe('compactHistory：头部 system（L0 系统提示词）必须原样保留', () => {
-  it('循环内压缩（history[0] 为 L0）后，L0 逐字节保留且压缩确实发生', async () => {
-    const history: LLMMessage[] = [{ role: 'system', content: L0 }, ...longDialog(10)];
+describe('compactHistory：头部 system（运行时提示词）必须原样保留', () => {
+  it('循环内压缩后，头部运行时提示词逐字节保留且压缩确实发生', async () => {
+    const history: LLMMessage[] = [{ role: 'system', content: RUNTIME_PROMPT }, ...longDialog(10)];
     const r = await compactHistory(history, 100, { provider: stubProvider(`${SUMMARY_MARK}用户在做一件事。`), model: 'stub-model' });
 
     assert.equal(r.mode, 'compact', '应走 LLM 摘要压缩路径');
     assert.equal(r.messages[0].role, 'system');
-    assert.equal(r.messages[0].content, L0, 'L0 必须逐字节保留（修复前会被摘要顶掉）');
+    assert.equal(r.messages[0].content, RUNTIME_PROMPT, '运行时提示词必须逐字节保留，避免被摘要顶掉');
     // 摘要与保留段都在
     assert.ok(r.messages.some((m) => String(m.content ?? '').startsWith(SUMMARY_MARK)), '应有摘要消息');
     assert.ok(r.messages.length < history.length, '压缩应减少消息条数');
-    // 头部只有一个 system：原 L0 + 新摘要（不能把 L0 变成摘要）
+    // 头部只有一个 system：原运行时提示词 + 新摘要
     const systems = r.messages.filter((m) => m.role === 'system');
-    assert.equal(systems.length, 2);
-    assert.equal(systems[0].content, L0);
-    assert.ok(String(systems[1].content).startsWith(SUMMARY_MARK));
+    assert.equal(systems.length, 1);
+    assert.equal(systems[0].content, RUNTIME_PROMPT);
+    assert.equal(r.messages.find(message => message.context?.source === 'history-summary')?.context?.trust, 'reference');
   });
 
-  it('摘要失败降级为截断时，L0 同样保留', async () => {
-    const history: LLMMessage[] = [{ role: 'system', content: L0 }, ...longDialog(10)];
+  it('摘要失败降级为截断时，运行时提示词同样保留', async () => {
+    const history: LLMMessage[] = [{ role: 'system', content: RUNTIME_PROMPT }, ...longDialog(10)];
     // 模型不配合（输出不以标记开头）→ summarizeSegment 返回 null → 降级 truncate
     const r = await compactHistory(history, 100, { provider: stubProvider('我直接总结一下：巴拉巴拉'), model: 'stub-model' });
 
     assert.equal(r.mode, 'truncate');
-    assert.equal(r.messages[0].content, L0);
+    assert.equal(r.messages[0].content, RUNTIME_PROMPT);
   });
 
-  it('已有摘要锚点且锚点在头部：锚点参与合并，不产生重复 L0', async () => {
+  it('已有摘要锚点且锚点在头部：锚点参与合并，不重复运行时提示词', async () => {
     const anchor: LLMMessage = { role: 'system', content: `${SUMMARY_MARK}旧摘要事实。` };
     const history: LLMMessage[] = [anchor, ...longDialog(10)];
     const r = await compactHistory(history, 100, { provider: stubProvider(`${SUMMARY_MARK}合并后的新摘要。`), model: 'stub-model' });
 
     assert.equal(r.mode, 'compact');
-    assert.equal(r.messages[0].role, 'system');
+    assert.equal(r.messages[0].role, 'user');
     assert.ok(String(r.messages[0].content).startsWith(SUMMARY_MARK));
     assert.match(String(r.messages[0].content), /合并后的新摘要/);
-    assert.equal(r.messages.filter((m) => m.role === 'system').length, 1, '旧锚点被合并，不应出现第二条 system');
+    assert.equal(r.messages.filter((m) => m.role === 'system').length, 0, '摘要保持参考材料的信任等级');
   });
 
   it('锚点之前还有头部 system（非常规）时，头部 system 仍保留', async () => {
     const history: LLMMessage[] = [
-      { role: 'system', content: L0 },
+      { role: 'system', content: RUNTIME_PROMPT },
       { role: 'system', content: `${SUMMARY_MARK}旧摘要。` },
       ...longDialog(10),
     ];
     const r = await compactHistory(history, 100, { provider: stubProvider(`${SUMMARY_MARK}合并后的新摘要。`), model: 'stub-model' });
 
     assert.equal(r.mode, 'compact');
-    assert.equal(r.messages[0].content, L0, '锚点之前的头部 system 属于 prefix，必须保留');
+    assert.equal(r.messages[0].content, RUNTIME_PROMPT, '锚点之前的头部 system 属于 prefix，必须保留');
     assert.match(String(r.messages[1].content), /合并后的新摘要/);
   });
 
@@ -78,12 +78,12 @@ describe('compactHistory：头部 system（L0 系统提示词）必须原样保�
     const r = await compactHistory(history, 100, { provider: stubProvider(`${SUMMARY_MARK}摘要。`), model: 'stub-model' });
 
     assert.equal(r.mode, 'compact');
-    assert.equal(r.messages[0].role, 'system');
+    assert.equal(r.messages[0].role, 'user');
     assert.ok(String(r.messages[0].content).startsWith(SUMMARY_MARK));
   });
 
   it('未超预算时原样返回（mode=none，无工具消息时保持同一引用）', async () => {
-    const history: LLMMessage[] = [{ role: 'system', content: L0 }, { role: 'user', content: '你好' }];
+    const history: LLMMessage[] = [{ role: 'system', content: RUNTIME_PROMPT }, { role: 'user', content: '你好' }];
     const r = await compactHistory(history, 100_000, { provider: stubProvider('x'), model: 'stub-model' });
     assert.equal(r.mode, 'none');
     assert.equal(r.messages, history);
@@ -91,11 +91,11 @@ describe('compactHistory：头部 system（L0 系统提示词）必须原样保�
 });
 
 describe('truncateHistory：兼容导出仍保留头部 system', () => {
-  it('截断兜底不丢 L0', () => {
-    const history: LLMMessage[] = [{ role: 'system', content: L0 }, ...longDialog(10)];
+  it('截断兜底不丢运行时提示词', () => {
+    const history: LLMMessage[] = [{ role: 'system', content: RUNTIME_PROMPT }, ...longDialog(10)];
     const r = truncateHistory(history, 100);
     assert.equal(r.truncated, true);
-    assert.equal(r.messages[0].content, L0);
+    assert.equal(r.messages[0].content, RUNTIME_PROMPT);
     assert.ok(r.droppedMessages > 0);
   });
 });
@@ -150,14 +150,14 @@ describe('历史工具协议净化', () => {
   });
 
   it('无工具消息且未超预算时保持原引用', () => {
-    const history: LLMMessage[] = [{ role: 'system', content: L0 }, { role: 'user', content: '你好' }];
+    const history: LLMMessage[] = [{ role: 'system', content: RUNTIME_PROMPT }, { role: 'user', content: '你好' }];
     const r = sanitizeToolHistory(history);
     assert.equal(r, history);
   });
 
   it('截断产物清除无主工具回执并移除未回填调用', async () => {
     const history: LLMMessage[] = [
-      { role: 'system', content: L0 },
+      { role: 'system', content: RUNTIME_PROMPT },
       { role: 'tool', content: '旧回执', tool_call_id: 'orphan-tool' },
       ...longDialog(20),
     ];
@@ -168,6 +168,19 @@ describe('历史工具协议净化', () => {
 });
 
 describe('compactHistory：任务与记忆约束完整性', () => {
+  it('结构化必需约束在历史中段仍保留，中文前缀不提高参考材料保留级别', () => {
+    const required: LLMMessage = { role: 'user', content: 'Never edit release credentials', context: { id: 'constraint', source: 'user', scope: 'run', trust: 'user', retention: 'required' } };
+    const reference: LLMMessage = { role: 'user', content: '【任务约束】' + '非可信材料'.repeat(200), context: { id: 'external', source: 'web', scope: 'history', trust: 'untrusted', retention: 'summarize' } };
+    const result = truncateHistory([...longDialog(10), required, reference, ...longDialog(10)], 200);
+    assert.ok(result.messages.some(message => message.context?.id === 'constraint'));
+    assert.equal(result.messages.some(message => message.context?.id === 'external'), false);
+    assert.ok(result.estimatedTokens <= 200);
+  });
+  it('必需上下文超过容量时明确失败，不丢弃约束', async () => {
+    const message: LLMMessage = { role: 'user', content: 'constraint '.repeat(100), context: { id: 'required', source: 'user', scope: 'run', trust: 'user', retention: 'required' } };
+    await assert.rejects(compactHistory([message], 10), /必需上下文/);
+    assert.throws(() => truncateHistory([message, { role: 'assistant', content: 'later' }], 10), /必需上下文/);
+  });
   it('压缩切点跳过任务/验收/记忆约束消息并逐字保留', async () => {
     const constraints: LLMMessage[] = [
       { role: 'system', content: '【任务约束】必须在工作区完成任务。' },
@@ -202,7 +215,7 @@ describe('compactHistory：可解释来源', () => {
         cancel: () => undefined,
       }),
     } as never;
-    const result = await compactHistory([{ role: 'system', content: L0 }, ...longDialog(10)], 100, {
+    const result = await compactHistory([{ role: 'system', content: RUNTIME_PROMPT }, ...longDialog(10)], 100, {
       provider: stubProvider(`${SUMMARY_MARK}可追溯摘要。`), model: 'stub-model', trace,
     });
     assert.equal(result.mode, 'compact');

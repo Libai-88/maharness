@@ -145,6 +145,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'read_document',
         risk: 'low',
         costHint: 'medium',
@@ -269,6 +271,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'ocr_image',
         risk: 'low',
         costHint: 'medium',
@@ -332,6 +336,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'ocr_pdf',
         risk: 'low',
         costHint: 'medium',

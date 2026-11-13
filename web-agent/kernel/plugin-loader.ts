@@ -75,7 +75,7 @@ export function resolveToolConflicts(entries: ToolCatalogEntry[]): ToolCatalogEn
 let serviceTraceSeq = 0;
 const serviceTracePrefix = `service-${process.pid}-${Math.random().toString(16).slice(2, 8)}`;
 /** 插件清单兼容的宿主 API 版本；与产品版本解耦，避免补丁发布意外拒绝插件。 */
-export const PLUGIN_API_VERSION = '1.0.0';
+export const PLUGIN_API_VERSION = '2.0.0';
 
 function semver(value: unknown): [number, number, number] | undefined {
   if (typeof value !== 'string') return undefined;
@@ -89,6 +89,7 @@ function compareVersion(a: [number, number, number], b: [number, number, number]
 }
 
 function validateManifestCompatibility(manifest: PluginManifest): void {
+  if (manifest.apiVersion !== 2) throw new Error(`插件 ${manifest.id} 需要迁移到 apiVersion: 2；旧插件已停用，不能推测其权限`);
   const range = manifest.compatibility?.api;
   if (range === undefined) return;
   if (!range || typeof range !== 'object' || Array.isArray(range)) {
@@ -123,7 +124,7 @@ function capabilityName(cap: Capability): string {
 }
 
 function validatePermissions(manifest: PluginManifest): void {
-  if (manifest.permissions === undefined) return;
+  if (manifest.permissions === undefined) throw new Error(`插件 ${manifest.id} 必须声明 permissions.capabilities`);
   const caps = manifest.permissions?.capabilities;
   if (!caps || typeof caps !== 'object' || Array.isArray(caps)) throw new Error(`插件 ${manifest.id} permissions.capabilities 必须是对象`);
   for (const [kind, names] of Object.entries(caps)) {
@@ -214,6 +215,10 @@ export function validateRuntimePermissions(manifest: PluginManifest): void {
 }
 
 function assertCapabilityPermission(manifest: PluginManifest, cap: Capability): void {
+  if (cap.kind === 'tool') {
+    const tool = cap.tool;
+    if (!semver(tool.version) || !tool.description || !tool.parameters || !tool.outputSchema || !['none', 'read', 'write', 'external', 'irreversible'].includes(tool.sideEffect ?? '') || !Array.isArray(tool.permissions) || tool.permissions.some(p => !['workspace.read', 'workspace.write', 'network', 'process', 'delegate', 'admin'].includes(p))) throw new Error(`工具 ${tool.name} 缺少有效的 v2 版本、schema、副作用或权限声明`);
+  }
   if (manifest.permissions === undefined) return;
   const name = capabilityName(cap);
   const allowed = manifest.permissions.capabilities[cap.kind];
@@ -528,6 +533,7 @@ export class PluginLoader {
     let inst: PluginInstance | undefined;
     try {
       const manifest = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf-8')) as PluginManifest;
+      id = manifest.id;
       validateManifestCompatibility(manifest);
       validatePermissions(manifest);
       validateManifestLimits(manifest);
@@ -624,6 +630,7 @@ export class PluginLoader {
       }
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[plugin] 加载失败 ${basename(dir)}: ${msg}`);
+      this.diagnosticLog.push({ id: id || basename(dir), kind: 'load', message: msg, suggestion: '更新插件 v2 清单与工具契约后重新加载。' });
       this.bus.emit(EventBus.event('plugin.error', { dir: basename(dir), error: msg }));
       return undefined;
     }
@@ -1493,6 +1500,17 @@ export class PluginLoader {
       if (fresh.manifest.id !== registryId) {
         throw new Error(`新版本 plugin.json 的 id "${fresh.manifest.id}" 与已注册 id "${registryId}" 不一致（热重载不支持变更插件 id）`);
       }
+      validateManifestCompatibility(fresh.manifest);
+      validatePermissions(fresh.manifest);
+      validateManifestLimits(fresh.manifest);
+      validateManifestExecution(fresh.manifest);
+      validateRuntimePermissions(fresh.manifest);
+      const oldPermissions = oldManifest.permissions!;
+      for (const [kind, names] of Object.entries(fresh.manifest.permissions!.capabilities)) {
+        const allowed = oldPermissions.capabilities[kind as Capability['kind']] ?? [];
+        if (!allowed.includes('*') && names?.some(name => !allowed.includes(name))) throw new Error('热加载不能扩大插件权限，请由用户重新安装并授权');
+      }
+      if (JSON.stringify(fresh.manifest.permissions!.runtime ?? {}) !== JSON.stringify(oldPermissions.runtime ?? {}) || JSON.stringify(fresh.manifest.permissions!.dependencies ?? []) !== JSON.stringify(oldPermissions.dependencies ?? [])) throw new Error('热加载不能更改插件运行时权限或依赖，请由用户重新安装并授权');
       const mod = await import(this.entryUrl(fresh.loadDir, fresh.manifest.entry, fresh.loadHash, forceFresh));
       fresh.plugin = (mod.default ?? mod) as Plugin;
       await this.runLoad(fresh);

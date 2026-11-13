@@ -9,6 +9,7 @@ import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthErro
 import type { ProviderHealth } from '../../core/chat/provider-health';
 import type { ProviderGateway } from '../../kernel/provider-gateway';
 import { ConcurrentStoreWriteError } from '../db';
+import { buildModelToolCheck, modelCheckFingerprint } from '../model-tool-check';
 
 /** 支持的协议族（本地/内网地址需 AGENT_ALLOW_PRIVATE_URLS=1） */
 type ProviderProtocol = 'openai' | 'anthropic' | 'ollama';
@@ -155,6 +156,36 @@ async function fetchProviderModels(base: string, protocol: ProviderProtocol, key
 
 export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, store } = deps;
+  const toolCheck = (provider: import('../db').ProviderRow, model: string) => {
+    const check = store.runs.modelToolCheck(provider.id, model);
+    return check?.fingerprint === modelCheckFingerprint(provider) ? { status: check.status, checkedAt: check.checkedAt, reason: check.reason } : { status: 'unknown' as const };
+  };
+  app.post('/api/providers/:id/tool-check', async (req, res) => {
+    const provider = store.getProvider(req.params.id);
+    if (!provider) return res.status(404).json({ error: '供应商不存在' });
+    const model = req.body?.model ?? provider.model;
+    if (typeof model !== 'string' || !model.trim() || model.length > 500) return res.status(400).json({ error: '模型名称无效' });
+    try {
+      await assertProviderBaseUrl(provider.baseUrl);
+      const probe = buildModelToolCheck(provider.baseUrl, provider.protocol, provider.apiKey, model);
+      const response = await fetchWithPublicRedirects(probe.url, probe.init);
+      let confirmed = false;
+      if (response.ok) {
+        const reader = response.body?.getReader();
+        const chunks: Uint8Array[] = []; let size = 0;
+        try {
+          while (reader) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > 1_000_000) throw new Error('检测响应超过容量'); chunks.push(chunk.value); }
+          confirmed = probe.confirm(JSON.parse(Buffer.concat(chunks).toString('utf8')));
+        } finally { await reader?.cancel().catch(() => undefined); }
+      } else await response.body?.cancel().catch(() => undefined);
+      const check = { status: confirmed ? 'confirmed' as const : 'not_confirmed' as const, checkedAt: Date.now(), fingerprint: modelCheckFingerprint(provider), ...(confirmed ? {} : { reason: response.ok ? '此次检测未返回有效原生工具调用；可核对模型与协议后重试' : `HTTP ${response.status}` }) };
+      store.runs.saveModelToolCheck(provider.id, model, check);
+      res.json(toolCheck(provider, model));
+    } catch {
+      // Transport failure cannot establish or revoke model capability.
+      res.status(502).json({ error: '工具调用检测失败，请检查连接后重试', status: 'unknown' });
+    }
+  });
 
   app.get('/api/providers/gateway', (_req, res) => {
     const gateway = kernel.plugins.resolveService('service:provider-gateway') as ProviderGateway | undefined;
@@ -169,6 +200,8 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       priceIn: r.priceIn, priceOut: r.priceOut, enabled: !!r.enabled,
       apiKeyMasked: maskKey(r.apiKey), hasKey: !!r.apiKey,
       createdAt: r.createdAt, updatedAt: r.updatedAt,
+      toolCheck: toolCheck(r, r.model),
+      protocolToolCalls: ['openai', 'anthropic', 'ollama'].includes(r.protocol),
       models: models.filter(m => m.providerId === r.id).map((m) => ({ ...m, ...stableModelIdentity(r.id, m.modelId) })),
       // 健康状态（failover 链上的真实调用回报）：401/403 → authFailed，设置页红标 + 会话横幅
       health: getProviderHealth(r.id),
@@ -430,6 +463,7 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
       const list = p.models?.length ? p.models : [{ modelId: p.defaultModel, enabled: true, contextWindow: 0, maxOutput: 0, vision: false, tools: false, reasoning: false, priceIn: 0, priceOut: 0, source: 'inferred' }];
       return list.filter((m) => m.enabled).map((m) => ({
         ...stableModelIdentity(p.id, m.modelId),
+        toolCheck: (() => { const row = store.getProvider(p.id); return row ? toolCheck(row, m.modelId) : { status: 'unknown' }; })(),
         schemaVersion: MODEL_SCHEMA_VERSION,
         id: `${p.id}@${m.modelId}`,
         provider: p.id,

@@ -4,6 +4,7 @@ import { buildChatTimeline } from '../chat/model';
 import { useChatComposer } from '../hooks/useChatComposer';
 import { AGENT_NAME, approvalHead, money, sys, tidySentence } from '../voice';
 import ChatThread from './chat/ChatThread';
+import LegacyCheckpoint from './LegacyCheckpoint';
 import ChatComposer from './chat/ChatComposer';
 import {
   Ban as IconBlock,
@@ -34,6 +35,7 @@ import {
 } from '@/components/ui/trace';
 
 interface Props {
+  runControls?: import('react').ReactNode;
   messages: ChatMessage[];
   streaming: boolean;
   onSend: (text: string) => void;
@@ -67,6 +69,7 @@ interface Props {
 }
 
 export default function ChatView({
+  runControls,
   messages,
   streaming,
   onSend,
@@ -160,7 +163,7 @@ export default function ChatView({
               <IconLock />
               <AlertTitle>线路凭据失效</AlertTitle>
               <AlertDescription>
-                {AGENT_NAME}的一条线路钥匙过期了（{providerAuthFailed.label}），已经换线路继续。
+                {AGENT_NAME}的一条线路钥匙过期了（{providerAuthFailed.label}），请在模型设置中检查。
               </AlertDescription>
               <AlertAction>
                 <Button variant="outline" size="xs" onClick={onOpenSettings}>去换钥匙</Button>
@@ -236,6 +239,8 @@ export default function ChatView({
         pendingInference={pendingInference}
         onConfirmInference={onConfirmInference}
       >
+      <LegacyCheckpoint sessionId={sessionKey} disabled={streaming} onSend={onSend} />
+      {runControls}
       {approvals.length > 0 && (
         <ItemGroup className="gap-2">
           {approvals.map((approval) => (

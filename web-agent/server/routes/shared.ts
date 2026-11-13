@@ -61,6 +61,8 @@ export interface ChatService {
   setProviders: (cfgs: ProviderConfig[]) => void;
   setPersonas: (list: { name: string; content: string }[]) => void;
   getSystemPrompt: () => string;
+  getRuntimePrompt?: () => string;
+  getUserContext?: () => LLMMessage[];
   /** 挂起审批清单（可按会话过滤）：刷新页面后审批卡原位复原 */
   listApprovals: (sessionId?: string) => { id: string; name: string; summary: string; args?: unknown; sessionId?: string; createdAt: number; expiresAt: number }[];
   // 对话能力层共享方法（server 经服务接口访问，不直接 import core/chat 实现——

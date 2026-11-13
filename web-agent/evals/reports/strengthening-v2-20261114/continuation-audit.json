@@ -1,0 +1,7 @@
+{
+  "previousSamples": 32,
+  "previousLedgerSha256": "f4474aa57b1ff440d51e67fc9351775edfa25f5e6f99b9ee226e90bfec00aba9",
+  "interruptedWorkers": 2,
+  "reservedUnknownTokens": 100000,
+  "reason": "Deliberate checkpoint interruption escaped the evaluation adapter; completed and admitted samples are retained without reruns."
+}

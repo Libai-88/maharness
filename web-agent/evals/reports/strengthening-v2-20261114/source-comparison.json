@@ -1,0 +1,11 @@
+{
+  "runtimeCurrent": true,
+  "procedureConsistent": false,
+  "changedFiles": [
+    "server/tests/parallel-subagent-cancellation.spec.ts",
+    "server/tests/run-strengthening.spec.ts",
+    "evals/strengthening.spec.ts",
+    "evals/strengthening.ts",
+    "scripts/strengthening-live.ts"
+  ]
+}

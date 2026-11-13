@@ -208,6 +208,7 @@ export interface GrepOptions {
   glob?: string;
   maxFileBytes?: number;
   contextLines?: number;
+  accept?: (relativePath: string) => boolean;
 }
 
 export interface GrepMatch {
@@ -249,7 +250,7 @@ export function grepFiles(root: string, opts: GrepOptions & { limit?: number }):
   const ctxN = Math.max(0, Math.min(5, opts.contextLines ?? 0));
   const { hits, truncated: walkTruncated } = walkFiles(rootAbs, {
     maxFiles: 30_000, maxMs: 15_000,
-    accept: rel => (opts.glob ? matchesGlob(rel, opts.glob) : true),
+    accept: rel => (!opts.accept || opts.accept(rel)) && (opts.glob ? matchesGlob(rel, opts.glob) : true),
   });
   const matches: GrepMatch[] = [];
   const files: string[] = [];

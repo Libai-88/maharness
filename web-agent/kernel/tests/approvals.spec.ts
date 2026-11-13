@@ -135,7 +135,7 @@ describe('ApprovalBoard 共享注册表', () => {
 describe('AgentRunner 审批（共享 board）', () => {
   test('risk=high 但漏写 approval 的工具仍被审批门拦截', async () => {
     let handledWithApproval: boolean | null = null;
-    const tool: ToolDef = {
+    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: 'high_risk_no_approval',
       description: '高风险但漏写 approval 的工具',
       parameters: { type: 'object', properties: {} },
@@ -176,7 +176,7 @@ describe('AgentRunner 审批（共享 board）', () => {
 
   test('未批准前 handler 被执行器拦截；审批超时自动拒绝后任务继续', async () => {
     let handledWithApproval: boolean | null = null;
-    const tool: ToolDef = {
+    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: 'need_ok',
       description: '需审批工具',
       parameters: { type: 'object', properties: {} },
@@ -222,7 +222,7 @@ describe('AgentRunner 审批（共享 board）', () => {
   test('子 runner 审批经主 runner 入口批准后继续执行（修复前：主入口 404、子 runner 只能等超时）', async () => {
     let handledWithApproval: boolean | null = null;
     let approvalId: string | null = null;
-    const tool: ToolDef = {
+    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: 'need_ok2',
       description: '需审批工具',
       parameters: { type: 'object', properties: {} },
@@ -277,8 +277,8 @@ describe('AgentRunner 审批（共享 board）', () => {
   test('审批通过后，幂等工具的瞬时失败按工具契约重试', async () => {
     let handlerCalls = 0;
     let approvalId: string | null = null;
-    const tool: ToolDef = {
-      name: 'retry_after_approval', description: '需审批且幂等', parameters: { type: 'object', properties: {} },
+    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
+      name: 'retry_after_approval', description: '需审批且幂等', parameters: { type: 'object', properties: {} }, sideEffect: 'read',
       approval: true, idempotent: true, retry: { maxAttempts: 2, backoffMs: 1 },
       async handler(_args, tctx) {
         assert.equal(tctx.approved, true);
@@ -323,8 +323,9 @@ describe('AgentRunner 审批（共享 board）', () => {
 describe('AgentRunner 工具超时取消', () => {
   test('超时触发 AbortController：等待 signal 的 handler 真正中断', async () => {
     let sawAbort = false;
-    const tool: ToolDef = {
+    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
       name: 'slow_tool',
+      sideEffect: 'read',
       description: '挂起工具',
       parameters: { type: 'object', properties: {} },
       timeoutMs: 80,
@@ -364,7 +365,7 @@ describe('AgentRunner 工具超时取消', () => {
     const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
     process.on('unhandledRejection', onUnhandled);
     try {
-      const tool: ToolDef = {
+      const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
         name: 'late_reject',
         description: '超时后迟到拒绝',
         parameters: { type: 'object', properties: {} },

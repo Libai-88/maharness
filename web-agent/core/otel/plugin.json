@@ -4,16 +4,34 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "permissions": { "capabilities": {} },
-  "limits": { "lifecycleTimeoutMs": 30000 },
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "permissions": {
+    "capabilities": {}
+  },
+  "limits": {
+    "lifecycleTimeoutMs": 30000
+  },
   "config": {
     "type": "object",
     "properties": {
-      "enabled": { "type": "boolean" },
-      "endpoint": { "type": "string" },
-      "serviceName": { "type": "string" },
-      "headers": { "type": "object" }
+      "enabled": {
+        "type": "boolean"
+      },
+      "endpoint": {
+        "type": "string"
+      },
+      "serviceName": {
+        "type": "string"
+      },
+      "headers": {
+        "type": "object"
+      }
     }
-  }
+  },
+  "apiVersion": 2
 }

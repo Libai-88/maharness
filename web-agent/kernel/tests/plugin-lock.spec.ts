@@ -8,7 +8,7 @@ import {
 } from '../plugin-lock';
 import type { PluginManifest } from '../types';
 
-const manifest: PluginManifest = {
+const manifest: PluginManifest = { apiVersion: 2,
   id: 'demo', name: 'Demo', version: '1.0.0', entry: 'index.ts',
   compatibility: { api: { min: '1.0.0', max: '1.0.0' } },
   permissions: { capabilities: { tool: ['demo'] } },

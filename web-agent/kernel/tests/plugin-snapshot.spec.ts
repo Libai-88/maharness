@@ -107,7 +107,7 @@ function setup(): Fixture {
   mkdirSync(coreDir, { recursive: true });
   mkdirSync(join(rootDir, 'shared'), { recursive: true });
   writeFileSync(join(rootDir, 'shared', 'kernel.ts'), 'export const SHARED_ID = Math.random().toString(36).slice(2);\n');
-  writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ id: 'tmp-a', name: '快照探针', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id: 'tmp-a', name: '快照探针', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(pluginDir, 'dep.ts'), 'export const tool = () => "probe";\n');
   writeFileSync(join(pluginDir, 'index.ts'), pluginSource());
   const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir: pluginsDir, corePluginsDir: coreDir });
@@ -116,17 +116,7 @@ function setup(): Fixture {
 
 /** 入口：依赖 dep.ts 提供工具名，跨目录依赖 shared/kernel.ts 提供实例标识 */
 function pluginSource(): string {
-  return `
-import { tool } from './dep.ts';
-import { SHARED_ID } from '../../shared/kernel.ts';
-export default {
-  id: 'tmp-a', name: '快照探针', version: '0.1.0',
-  onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: { name: tool(), description: SHARED_ID,
-      parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } } });
-  },
-};
-`;
+  return "\nimport { tool } from './dep.ts';\nimport { SHARED_ID } from '../../shared/kernel.ts';\nexport default {\n  id: 'tmp-a', name: '快照探针', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: tool(), description: SHARED_ID,\n      parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } } });\n  },\n};\n";
 }
 
 const hasTool = (k: Kernel, name: string): boolean =>

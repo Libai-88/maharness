@@ -8,6 +8,7 @@
  *  4. 超时自动杀进程树（默认 15s，上限 60s）；输出截断 8KB，UTF-8，Trace 全程审计
  */
 import { spawn } from 'node:child_process';
+import { CommandProcesses, isolatedProcessEnvironment } from './processes';
 import type { Plugin, ToolContext } from '../../kernel/types';
 import { adminToolDenied } from '../../kernel/tool-privilege';
 
@@ -327,7 +328,7 @@ const PROBE_VER = 'v1';
 interface PsResult { code: number; stdout: string; stderr: string }
 
 /** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根） */
-export function runPowershell(command: string, timeoutMs: number, cwd: string, signal?: AbortSignal): Promise<PsResult> {
+export function runPowershell(command: string, timeoutMs: number, cwd: string, signal?: AbortSignal, isolated = false): Promise<PsResult> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {
       reject(signal.reason instanceof Error ? signal.reason : new Error('命令已取消'));
@@ -337,6 +338,7 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
     const full = `[Console]::OutputEncoding=[System.Text.Encoding]::UTF8; $ErrorActionPreference='Continue'; ${command}`;
     const ps = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', full], {
       windowsHide: true,
+      ...(isolated ? { env: isolatedProcessEnvironment() } : {}),
       cwd, // 工作目录锚定沙箱根：相对路径命令不再全盘游走
     });
     let stdout = '';
@@ -398,11 +400,8 @@ export default {
         priority: 10,
         content: [
           'PowerShell 工具使用规则：',
-          '1. 执行命令前先说明意图；输出过长会自动截断；',
-          '2. 只读调用（cmdlet 白名单、git 只读子命令、npm run test/typecheck/lint、rg）免审批直接执行；其余命令（写入/删除/安装/下载等）都会弹出审批卡片，等待用户批准后自动执行；',
-          '3. 被拦截时向用户说明原因，等待用户在界面批准；不要自行绕过、不要诱导用户批准；',
-          '4. 需要管理员权限的操作会失败，提示用户以管理员身份运行；',
-          '5. 不要用 PowerShell 读取 .env、密钥等敏感文件内容，除非用户明确要求。',
+          '只读命令直接执行；写入、删除、安装、下载等命令由 harness 审批边界拦截。',
+          '不要读取 .env、密钥等敏感文件，除非用户明确要求。',
         ].join('\n'),
       },
     });
@@ -410,6 +409,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["process"],
         name: 'powershell_execute',
         risk: 'high',
         costHint: 'medium',
@@ -465,7 +466,7 @@ export default {
           }
 
           try {
-            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, tctx.signal);
+            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, tctx.signal, !!tctx.authorization?.frameworkChangeId);
             const combined = (r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '')).slice(0, MAX_OUTPUT);
             const truncated = combined.length >= MAX_OUTPUT;
             if (r.code === 0) {
@@ -482,6 +483,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["process"],
         name: 'env_probe',
         risk: 'low',
         costHint: 'low',
@@ -524,7 +527,7 @@ export default {
             ? `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { $v = ''; try { $v = ((& $c --version) 2>&1 | Select-Object -First 1) } catch {}; "$($i.Name)|$($i.Source)|$v" } else { "$c||" } }; $out -join "\`n"`
             : `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { "$($i.Name)|$($i.Source)|" } else { "$c||" } }; $out -join "\`n"`;
           try {
-            const r = await runPowershell(script, (withVersion ? 45 : 20) * 1000, tctx.sandboxRoot, tctx.signal);
+            const r = await runPowershell(script, (withVersion ? 45 : 20) * 1000, tctx.sandboxRoot, tctx.signal, !!tctx.authorization?.frameworkChangeId);
             const tools = r.stdout.split(/\r?\n/).filter(l => l.includes('|')).map(l => {
               const [name, path, version] = l.split('|');
               return { name: (name || '').trim(), found: !!(path || '').trim(), path: (path || '').trim() || undefined, version: (version || '').trim() || undefined };
@@ -538,6 +541,32 @@ export default {
         },
       },
     });
+
+    const processes = new CommandProcesses((id, state) => ctx.storage.write(`commands/${id}.json`, JSON.stringify(state)), id => {
+      const raw = ctx.storage.read(`commands/${id}.json`); return raw ? JSON.parse(String(raw)) : undefined;
+    });
+    ctx.effect(() => undefined, () => () => processes.stopAll());
+    for (const action of ['start', 'output', 'wait', 'cancel'] as const) ctx.register({ kind: 'tool', tool: {
+      name: `command_${action}`, version: '2.0.0', permissions: action === 'start' || action === 'cancel' ? ['process'] : [],
+      sideEffect: action === 'start' || action === 'cancel' ? 'external' : 'read',
+      description: { start: '启动后台 PowerShell 命令，返回稳定命令 ID；任务取消时终止进程树。', output: '按字符范围读取后台命令完整输出与实际进程状态。', wait: '等待命令最多 10 秒；超时返回 running，不终止进程。', cancel: '取消当前任务的后台命令及进程树。' }[action],
+      parameters: { type: 'object', properties: { command: { type: 'string' }, id: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 16000 }, timeoutMs: { type: 'integer', minimum: 0, maximum: 10000 } }, required: action === 'start' ? ['command'] : ['id'] },
+      outputSchema: { type: 'object', required: ['id', 'status'], properties: { id: { type: 'string' }, status: { type: 'string' } } },
+      ...(action === 'start' ? { assessApproval: (args: unknown) => assessCommand(String((args as { command?: string }).command ?? '')) } : {}),
+      async handler(args: { command?: string; id?: string; offset?: number; limit?: number; timeoutMs?: number }, tctx: ToolContext) {
+        try {
+          if (action === 'start') {
+            const command = String(args.command ?? '').trim();
+            if (!command) return { ok: false, error: '命令不能为空', failure: { code: 'INVALID_COMMAND', retryable: false, outcome: 'not_started' } };
+            if (assessCommand(command).needsApproval && !tctx.approved && !tctx.policyApproved) return { ok: false, needsApproval: true, approvalSummary: command };
+            return { ok: true, data: processes.start(command, tctx) };
+          }
+          if (action === 'cancel') return { ok: true, data: processes.cancel(String(args.id), tctx) };
+          if (action === 'wait') return { ok: true, data: await processes.wait(String(args.id), tctx, args.timeoutMs ?? 1000) };
+          return { ok: true, data: processes.read(String(args.id), tctx, args.offset, args.limit) };
+        } catch (error) { return { ok: false, error: String(error), failure: { code: 'COMMAND_EXECUTION', retryable: false, outcome: action === 'start' ? 'unknown' : 'not_started' } }; }
+      },
+    } });
 
     ctx.logger.info(`工具就绪: powershell_execute（只读 ${READONLY_EXE.size} 个 cmdlet + git/npm 子命令级细分，黑名单 ${DANGEROUS_PATTERNS.length} 类兜底）+ env_probe`);
   },

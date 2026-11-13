@@ -218,6 +218,8 @@ function makeContext(opts: {
       if (tool.assessApproval) throw new Error('process 插件不支持动态 assessApproval，请在 manifest/ToolDef 上使用静态 approval');
       if (!childCtx) throw new Error('process 插件上下文尚未初始化');
       const descriptor: ProcessToolDescriptor = {
+        version: tool.version,
+        permissions: tool.permissions,
         name: tool.name, description: tool.description, parameters: tool.parameters,
         ...(tool.risk ? { risk: tool.risk } : {}),
         ...(tool.costHint ? { costHint: tool.costHint } : {}),
@@ -226,9 +228,9 @@ function makeContext(opts: {
         ...(tool.output ? { output: tool.output } : {}),
         ...(tool.timeoutMs !== undefined ? { timeoutMs: tool.timeoutMs } : {}),
         ...(tool.idempotent !== undefined ? { idempotent: tool.idempotent } : {}),
-        ...(tool.sideEffect ? { sideEffect: tool.sideEffect } : {}),
+        sideEffect: tool.sideEffect,
         ...(tool.retry ? { retry: tool.retry } : {}),
-        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {}),
+        outputSchema: tool.outputSchema,
       };
       childCtx.handlers.set(tool.name, tool.handler);
       childCtx.descriptors.set(tool.name, descriptor);

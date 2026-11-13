@@ -4,12 +4,34 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "limits": { "lifecycleTimeoutMs": 30000 },
-  "permissions": { "capabilities": {
-    "tool": ["list_skills", "get_skill", "get_skill_file", "list_skill_backups", "rollback_skill"],
-    "persona": ["skills-rules"],
-    "context": ["skills-index"],
-    "service": ["skills"]
-  } }
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "limits": {
+    "lifecycleTimeoutMs": 30000
+  },
+  "permissions": {
+    "capabilities": {
+      "tool": [
+        "list_skills",
+        "get_skill",
+        "get_skill_file",
+        "list_skill_backups",
+        "rollback_skill"
+      ],
+      "persona": [
+        "skills-rules"
+      ],
+      "context": [
+        "skills-index"
+      ],
+      "service": [
+        "skills"
+      ]
+    }
+  },
+  "apiVersion": 2
 }

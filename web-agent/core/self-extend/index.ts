@@ -52,6 +52,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: [],
         name: '${id}_hello',
         description: '示例工具：返回问候语（可改成你的真实能力）',
         sideEffect: 'none',
@@ -175,6 +177,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'create_plugin',
         risk: 'high',
         costHint: 'medium',
@@ -246,7 +250,7 @@ export default {
             id,
             manifest: {
               id, name, version: '0.1.0', entry: 'index.ts',
-              permissions: { capabilities: permissions, dependencies: review.dependencies },
+              apiVersion: 2, permissions: { capabilities: permissions, dependencies: review.dependencies },
             },
             source,
           });
@@ -261,7 +265,7 @@ export default {
           mkdirSync(dir, { recursive: true });
           writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
             id, name, version: '0.1.0', entry: 'index.ts', enabled: false,
-            permissions: { capabilities: permissions, dependencies: review.dependencies },
+            apiVersion: 2, permissions: { capabilities: permissions, dependencies: review.dependencies },
           }, null, 2), 'utf8');
           writeFileSync(join(dir, 'index.ts'), source, 'utf8');
 
@@ -311,6 +315,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'plugin_status',
         risk: 'low',
         costHint: 'low',
@@ -358,6 +364,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'enable_plugin',
         risk: 'medium',
         costHint: 'low',
@@ -394,6 +402,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'disable_plugin',
         risk: 'medium',
         costHint: 'low',

@@ -70,33 +70,33 @@ describe('AgentRunner 任务完成验收', () => {
     const expired = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() - 1 });
     assert.ok(expired.events.some((event) => event.type === 'error' && event.kind === 'deadline'));
     const unverified = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() + 60_000 });
-    assert.equal(unverified.events.some((event) => event.type === 'task_verified' || event.type === 'assistant_done'), false);
-    assert.ok(unverified.events.some((event) => event.type === 'error' && /缺少可检查的验收条件/.test(event.error)));
+    assert.equal(unverified.events.some((event) => event.type === 'task_verified'), false);
+    assert.ok(unverified.events.some((event) => event.type === 'assistant_done'));
+    assert.ok(unverified.events.some((event) => event.type === 'task_failed'));
     assert.equal(unverified.cacheWrites(), 0);
-    assert.deepEqual(unverified.recorded, [{ failed: true }]);
+    assert.deepEqual(unverified.recorded, [{ failed: false }]);
   });
   const task: TaskContract = { objective: 'Return the expected marker', acceptance: [{ type: 'output_contains', value: 'verified marker' }] };
 
-  test('验收失败时不发 assistant_done、不缓存答案并记录失败', async () => {
+  test('验收失败独立展示，模型回答仍结束执行且默认不缓存', async () => {
     const result = await run('unsupported claim', task);
     assert.ok(result.events.some((event) => event.type === 'task_failed'));
-    assert.ok(result.events.some((event) => event.type === 'error'));
-    assert.equal(result.events.some((event) => event.type === 'assistant_done'), false);
+    assert.equal(result.events.some((event) => event.type === 'error'), false);
+    assert.equal(result.events.some((event) => event.type === 'assistant_done'), true);
     assert.equal(result.cacheWrites(), 0);
-    assert.deepEqual(result.recorded, [{ failed: true }]);
+    assert.deepEqual(result.recorded, [{ failed: false }]);
   });
 
-  test('验收成功后按 task_verified → assistant_done 顺序完成并缓存', async () => {
+  test('验收成功独立记录证据并保留模型原始回答', async () => {
     const result = await run('verified marker', task);
     const verified = result.events.find((event) => event.type === 'task_verified') as { evidence?: { traceStepId?: string }[] } | undefined;
     assert.ok(verified);
     assert.ok(verified.evidence?.length);
     assert.ok(verified.evidence?.every((e) => e.traceStepId === 'step'));
     const done = result.events.find((event) => event.type === 'assistant_done') as { content?: string } | undefined;
-    assert.match(done?.content ?? '', /【验证证据】/);
-    assert.match(done?.content ?? '', /Trace step/);
+    assert.equal(done?.content, 'verified marker');
     assert.equal(result.events.findIndex((event) => event.type === 'task_verified') < result.events.findIndex((event) => event.type === 'assistant_done'), true);
-    assert.equal(result.cacheWrites(), 1);
+    assert.equal(result.cacheWrites(), 0);
     assert.deepEqual(result.recorded, [{ failed: false }]);
   });
 
@@ -109,14 +109,14 @@ describe('AgentRunner 任务完成验收', () => {
     assert.deepEqual(result.recorded, [{ failed: true }]);
   });
 
-  test('部分满足验收条件时发 task_partial，不发 assistant_done', async () => {
+  test('部分满足验收条件时发 task_partial 和 assistant_done', async () => {
     const result = await run('verified marker', { objective: 'Two conditions', acceptance: [
       { type: 'output_contains', value: 'verified marker' },
       { type: 'output_contains', value: 'missing marker' },
     ] });
     assert.ok(result.events.some((event) => event.type === 'task_partial'));
-    assert.equal(result.events.some((event) => event.type === 'assistant_done'), false);
-    assert.deepEqual(result.recorded, [{ failed: true }]);
+    assert.equal(result.events.some((event) => event.type === 'assistant_done'), true);
+    assert.deepEqual(result.recorded, [{ failed: false }]);
   });
 
   test('长上下文压缩后仍保留任务、验收和长期记忆约束', async () => {

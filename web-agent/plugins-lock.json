@@ -3,11 +3,11 @@
   "plugins": {
     "reference-hello": {
       "version": "0.1.0",
-      "integrity": "53578505d2",
+      "integrity": "2ed8947802",
       "compatibility": {
         "api": {
-          "min": "1.0.0",
-          "max": "1.0.0"
+          "min": "2.0.0",
+          "max": "2.0.0"
         }
       },
       "permissions": {
@@ -17,12 +17,29 @@
           ]
         }
       },
-      "updatedAt": 1794472621841
+      "updatedAt": 1794558949661
     },
     "workbench": {
       "version": "0.2.0",
-      "integrity": "018890eded",
-      "updatedAt": 1794472621842
+      "integrity": "2231c9a5ad",
+      "permissions": {
+        "capabilities": {
+          "persona": [
+            "workbench-rules"
+          ],
+          "tool": [
+            "workbench_today",
+            "workbench_add_task",
+            "workbench_update_task",
+            "workbench_add_note",
+            "workbench_diary"
+          ],
+          "api": [
+            "wb"
+          ]
+        }
+      },
+      "updatedAt": 1794558949662
     }
   }
 }

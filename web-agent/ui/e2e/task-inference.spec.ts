@@ -1,8 +1,9 @@
+import { installRunMocks, mockTaskEvents } from './run-fixture';
 import { expect, test } from '@playwright/test';
 
-const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟 maharness 说点什么…（按 / 看命令）';
 
-test('开放式目标先确认验收条件，再消费原目标执行', async ({ page }) => {
+test('开放式目标直接执行，不强制推断验收或额外确认', async ({ page }) => {
   const session = {
     id: 'e2e-goal-session',
     title: '目标任务',
@@ -12,7 +13,7 @@ test('开放式目标先确认验收条件，再消费原目标执行', async ({
     updatedAt: 0,
     createdAt: 0,
   };
-  let chatCalls = 0;
+  const fixture = await installRunMocks(page);
   const requestBodies: string[] = [];
 
   await page.route('**/api/sessions', (route) => route.fulfill({ json: [session] }));
@@ -24,69 +25,20 @@ test('开放式目标先确认验收条件，再消费原目标执行', async ({
     enabled: true, apiKeyMasked: 'sk-***', hasKey: true, createdAt: 0, updatedAt: 0,
   }] }));
   await page.route('**/api/nav', (route) => route.fulfill({ json: { items: [] } }));
-  await page.route('**/api/sessions/e2e-goal-session/chat', async (route) => {
+  await mockTaskEvents(page, async route => {
     requestBodies.push(String(route.request().postData() ?? ''));
-    chatCalls += 1;
-    const body = chatCalls === 1
-      ? [
-        'event: start',
-        'data: {"traceId":"e2e-inference"}',
-        '',
-        'event: task_inference',
-        'data: {"objective":"请整理项目报告","inference":{"confidence":0.45,"basis":"inferred","needsConfirmation":true,"rationale":"识别到行动意图，但未识别到可验证的完成标准"}}',
-        '',
-        'event: end',
-        'data: {}',
-        '',
-      ].join('\n')
-      : [
-        'event: start',
-        'data: {"traceId":"e2e-confirmed"}',
-        '',
-        'event: delta',
-        'data: {"text":"报告已完成"}',
-        '',
-        'event: task_verified',
-        'data: {"objective":"请整理项目报告","checks":[{"ok":true,"reason":"文件存在：reports/final.md"}],"evidence":[{"source":"filesystem","detail":"文件存在：reports/final.md","traceStepId":"verify-step"}]}',
-        '',
-        'event: done',
-        'data: {"content":"报告已完成","usage":{"input":10,"output":5},"cost":0}',
-        '',
-        'event: end',
-        'data: {}',
-        '',
-      ].join('\n');
-    await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    await route.fulfill({ body: [
+      'event: start', 'data: {"traceId":"goal-native"}', '',
+      'event: done', 'data: {"content":"报告已完成","usage":{"input":10,"output":5},"cost":0}', '', '',
+    ].join('\n') });
   });
-
   await page.goto('/');
   const input = page.getByPlaceholder(INPUT_PLACEHOLDER);
-  await expect(input).toBeVisible();
-  await input.fill('请整理项目报告');
-  await input.press('Enter');
-
-  const card = page.getByTestId('task-confirm-card');
-  await expect(card).toBeVisible();
-  await expect(card).toContainText('请整理项目报告');
-  await expect(page.getByTestId('msg-bubble-assistant')).toHaveCount(0);
-
-  await card.getByRole('button', { name: '补充验收条件' }).click();
-  const sheet = page.getByRole('dialog', { name: '补充任务验收条件' });
-  await expect(sheet).toContainText('未识别到可验证的完成标准');
-  await sheet.getByRole('textbox', { name: '验收条件' }).fill('生成 reports/final.md，并确保文件存在');
-  await page.keyboard.press('Escape');
-  await expect(sheet).toHaveCount(0);
-  await expect(card.getByRole('button', { name: '补充验收条件' })).toBeFocused();
-  await card.getByRole('button', { name: '补充验收条件' }).click();
-  await expect(sheet.getByRole('textbox', { name: '验收条件' })).toHaveValue('生成 reports/final.md，并确保文件存在');
-  await page.getByTestId('task-confirm-submit').click();
-
-  await expect(card).toHaveCount(0);
-  await expect(sheet).toHaveCount(0);
+  await expect(input).toBeEnabled();
+  await input.fill('请整理项目报告'); await input.press('Enter');
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('报告已完成');
-  await expect(page.getByText('验收通过')).toBeVisible();
-  expect(chatCalls).toBe(2);
-  expect(requestBodies[0]).toContain('请整理项目报告');
-  expect(requestBodies[1]).toContain('验收条件');
-  expect(requestBodies[1]).toContain('reports/final.md');
+  await expect(page.getByTestId('task-confirm-card')).toHaveCount(0);
+  await expect(page.getByTestId('run-controls')).toContainText('结果尚未验证');
+  expect(fixture.creates).toBe(1);
+  expect(JSON.parse(requestBodies[0])).not.toHaveProperty('acceptance');
 });

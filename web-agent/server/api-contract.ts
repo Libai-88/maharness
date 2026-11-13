@@ -32,6 +32,7 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'PATCH', path: '/api/providers/:id', response: 'object', description: '更新 Provider' },
   { method: 'DELETE', path: '/api/providers/:id', response: 'object', description: '删除 Provider' },
   { method: 'POST', path: '/api/providers/test', response: 'object', description: '测试 Provider 连接' },
+  { method: 'POST', path: '/api/providers/:id/tool-check', response: 'object', description: '检测模型原生工具调用能力' },
   { method: 'POST', path: '/api/providers/models', response: 'object', description: '拉取 Provider 模型' },
   { method: 'GET', path: '/api/providers/:id/models', response: 'array', description: '可选模型' },
   { method: 'PATCH', path: '/api/providers/:id/models', response: 'object', description: '更新模型画像' },

@@ -5,15 +5,32 @@
   "entry": "index.ts",
   "enabled": true,
   "essential": true,
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "permissions": { "capabilities": {
-    "tool": ["handoff_to", "recall_tool_result"],
-    "role": ["main"],
-    "service": ["chat", "provider-gateway", "embedding"]
-  } },
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "permissions": {
+    "capabilities": {
+      "tool": [
+        "handoff_to",
+        "recall_tool_result"
+      ],
+      "role": [
+        "main"
+      ],
+      "service": [
+        "chat",
+        "provider-gateway",
+        "embedding"
+      ]
+    }
+  },
   "limits": {
     "lifecycleTimeoutMs": 60000,
     "circuitBreakerThreshold": 5,
     "circuitBreakerResetMs": 120000
-  }
+  },
+  "apiVersion": 2
 }

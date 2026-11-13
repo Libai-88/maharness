@@ -5,7 +5,7 @@
  * maharness 最优解：**结果存起来、历史只放摘要与引用**——
  *  - 回填：超过阈值的结果存入结果存储（按会话隔离），history 只保留摘要 + 引用 id；
  *  - 重读：recall_tool_result 按 id 取回完整内容（零副作用——不重算、不重查）；
- *  - 生命周期：进程内（会话是进程内的，页面关了任务即止）；每会话 LRU 容量兜底。
+ *  - 生命周期：进程内 LRU；托管任务的完整结果另由持久化工具日志保存。
  *
  * 与 L2 缓存的分工：L2 = 「同参数同状态的重算不花钱」（跨请求复用）；
  * 结果存储 = 「本会话已观察过的事实不占上下文」（本会话内可重读）。
@@ -81,6 +81,6 @@ export class ResultStore {
 export const resultStore = sharedSingleton('chat.resultStore', () => new ResultStore());
 
 /** 会话隔离键：优先会话 ID；无会话（子代理/独立循环）用 traceId 天然隔离 */
-export function sessionKeyOf(ctx: Pick<ToolContext, 'sessionId' | 'traceId'>): string {
-  return ctx.sessionId ?? ctx.traceId ?? 'global';
+export function sessionKeyOf(ctx: Pick<ToolContext, 'sessionId' | 'traceId' | 'tenantId'>): string {
+  return `${ctx.tenantId ?? 'default'}:${ctx.sessionId ?? ctx.traceId ?? 'global'}`;
 }

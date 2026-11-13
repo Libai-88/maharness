@@ -79,9 +79,8 @@ describe('真实服务进程强杀恢复', () => {
 
       verify = runFixture('verify', { ...baseEnv, RECOVERY_SESSION_ID: sessionId });
       const result = await waitForLine(verify);
-      assert.equal(result.status, 200);
+      assert.equal(result.status, 202);
       assert.equal(result.completed, true);
-      assert.equal(result.checkpointCleared, true);
       assert.deepEqual(result.effectBefore, { state: 'done', result: { ok: true, data: { written: true } } });
       await new Promise<void>((resolve, reject) => verify?.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`verify exited ${code}`))));
       verify = undefined;

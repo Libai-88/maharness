@@ -44,7 +44,7 @@ export function setTenantId(tenantId: string): void {
  *  GET 401 时会触发 401 分支的重试逻辑（补带头重放一次）。 */
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 const TOKEN_HEADER = 'x-maharness-token';
-function authHeaders(method?: string): Record<string, string> {
+export function authHeaders(method?: string): Record<string, string> {
   const t = getMutationToken();
   const headers: Record<string, string> = {};
   const tenant = getTenantId();
@@ -83,6 +83,7 @@ export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
 // ---------- SSE 流式对话 ----------
 
 export interface ChatHandlers {
+  onRun?(run: import('./run-api').RunInfo): void;
   onStart(traceId: string): void;
   onDelta(text: string): void;
   onReasoning(text: string): void;
@@ -107,9 +108,9 @@ export interface ChatHandlers {
   onRetry?(reason: 'attempt' | 'failover' | 'narration', detail?: string): void;
   /** 前置重活播报（如历史压缩）：让"开口前的十几秒"有话说 */
   onStatus?(text: string): void;
-  /** kind=aborted：是用户自己按的停止，不是故障，调用方不得画成红色报错 */
+  /** kind=aborted：用户主动停止；kind=max-turns：任务转入可恢复的断点状态 */
   onError(e: string, kind?: ErrorKind): void;
-  onEnd(): void;
+  onEnd?(): void;
 }
 
 export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy' | 'auth' | 'parameter' | 'business' | 'transient';
@@ -117,122 +118,7 @@ export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'polic
 /** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
  *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
 
-/** POST 流式聊天：fetch + ReadableStream 逐块解析 SSE（EventSource 不支持 POST，故自研）
- *  body.resume=true 时从断点历史继续（checkpoint 断点续跑，不需要 message） */
-export async function streamChat(
-  sessionId: string,
-  body: { message?: string; model?: string; provider?: string; resume?: boolean },
-  h: ChatHandlers,
-  signal?: AbortSignal,
-): Promise<void> {
-  /** 用户主动停止（abort）→ 温和收尾，不报"连接中断" */
-  const stopped = () => signal?.aborted === true;
-  const fail = (msg: string, kind: ErrorKind = 'upstream') => h.onError(msg, stopped() ? 'aborted' : kind);
-
-  let res: Response;
-  try {
-    res = await fetch(`/api/sessions/${sessionId}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...authHeaders('POST') },
-      body: JSON.stringify(body),
-      signal,
-    });
-  } catch (err) {
-    if (stopped() || isAbortLike(err)) { h.onError('已停止', 'aborted'); return; }
-    fail('网络没接上', 'network');
-    return;
-  }
-  if (res.status === 409) { h.onError('该会话有任务进行中', 'busy'); return; }
-  if (!res.ok) {
-    let msg = `请求失败 ${res.status}`;
-    try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
-    fail(msg);
-    return;
-  }
-  if (!res.body) { fail('响应无内容'); return; }
-
-  const reader = res.body.getReader();
-  const decoder = new TextDecoder();
-  let buf = '';
-  // 服务端结束标记（'end' 事件）；流中途断开时据此兜底触发 onError——
-  // 否则全局 streaming 状态永远不复位（输入区卡死）
-  let endSeen = false;
-  let transportBroke = false;
-  let errSeen = false;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const blocks = buf.split('\n\n');
-      buf = blocks.pop() ?? '';
-      for (const block of blocks) {
-        let event = 'message';
-        const dataLines: string[] = [];
-        for (const line of block.split('\n')) {
-          if (line.startsWith('event:')) event = line.slice(6).trim();
-          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-        }
-        if (!dataLines.length) continue;
-        let data: unknown;
-        try { data = JSON.parse(dataLines.join('\n')); } catch { continue; }
-        const d = data as Record<string, unknown>;
-        switch (event) {
-          case 'start': h.onStart(String(d.traceId ?? '')); break;
-          case 'status': h.onStatus?.(String(d.text ?? '')); break;
-          case 'delta': h.onDelta(String(d.text ?? '')); break;
-          case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
-          case 'tool_start': h.onToolStart(d.id ? String(d.id) : undefined, String(d.name ?? ''), d.args); break;
-          case 'approval_required': h.onApprovalRequired(String(d.approvalId ?? ''), String(d.name ?? ''), String(d.summary ?? ''), d.approvalToken ? String(d.approvalToken) : undefined); break;
-          case 'tool_result': h.onToolResult(
-            d.id ? String(d.id) : undefined,
-            String(d.name ?? ''),
-            String(d.summary ?? ''),
-            Boolean(d.ok),
-            Boolean(d.stored),
-            Array.isArray(d.evidence) ? d.evidence as ToolEvidence[] : undefined,
-            Array.isArray(d.warnings) ? d.warnings as ToolWarning[] : undefined,
-          ); break;
-          case 'done': h.onDone(d as { content: string; usage: { input: number; output: number }; cost: number; cached?: boolean }); break;
-          case 'handoff': h.onHandoff?.(String(d.role ?? ''), String(d.objective ?? '')); break;
-          case 'budget_hit': h.onBudgetHit?.(Number(d.cost ?? 0), Number(d.budget ?? 0)); break;
-          case 'task_verified': h.onTaskVerified?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
-          case 'task_partial': h.onTaskPartial?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
-          case 'task_failed': h.onTaskFailed?.(String(d.objective ?? ''), Array.isArray(d.checks) ? d.checks as { ok: boolean; reason?: string }[] : [], d.evidence as { source: string; detail: string; traceStepId?: string }[] | undefined); break;
-          case 'task_inference':
-            if (d.inference && typeof d.inference === 'object') h.onTaskInference?.(String(d.objective ?? ''), d.inference as { confidence: number; basis: string; needsConfirmation: boolean; rationale: string });
-            break;
-          case 'retry':
-            // provider 重试：透传给 handler（App 记录截断边界，展示层从该边界重新累积）
-            h.onRetry?.((d.reason as 'attempt' | 'failover' | 'narration') ?? 'attempt', d.detail ? String(d.detail) : undefined);
-            break;
-          case 'error':
-            errSeen = true;
-            h.onError(String(d.error ?? '未知错误'), (d.kind as ErrorKind | undefined) ?? 'upstream');
-            break;
-          case 'end': endSeen = true; h.onEnd(); break;
-        }
-      }
-    }
-  } catch (err) {
-    // 传输层中断：区分「用户按了停止」与「真的断线」——两者都该复位 streaming，
-    // 但只有后者才是错误（旧版一律报"连接中断"，等于把用户的取消说成系统故障）
-    transportBroke = true;
-    if (stopped() || isAbortLike(err)) h.onError('已停止', 'aborted');
-    else h.onError('连接中断', 'network');
-  } finally {
-    reader.releaseLock();
-  }
-  // 流读完但服务端未发 end（进程崩溃/连接被掐断）：同样兜底，streaming 不复位会锁死输入区
-  if (!endSeen && !transportBroke && !errSeen) fail('话说到一半断了', 'network');
-}
-
-/** AbortError 判定：不同浏览器/实现下 name 与 message 都可能是取消信号 */
-function isAbortLike(err: unknown): boolean {
-  const name = err instanceof Error ? err.name : '';
-  const msg = err instanceof Error ? err.message : String(err ?? '');
-  return name === 'AbortError' || /abort(ed)?/i.test(msg);
-}
+export { streamChat, subscribeRun } from './run-api';
 
 // ---------- 全局事件订阅（Trace 实时面板） ----------
 
@@ -472,8 +358,8 @@ export interface RoutingTarget {
 export interface RuntimeConfig {
   revision?: string;
   context: { maxTokens: number; truncateInject: boolean };
-  cache: { l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
-  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean; modelRouting: Record<string, string> };
+  cache: { l1Enabled?: boolean; l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
+  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean; fallbackProviders?: string[]; modelRouting: Record<string, string> };
   provider: { circuitBreakerThreshold: number; circuitBreakerResetMs: number };
   routingTargets?: RoutingTarget[];
   taskTypes?: string[];
@@ -538,6 +424,7 @@ export const modelsApi = {  list: () => api<ModelInfo[]>('/api/models'),
 
 export const providersApi = {
   list: () => api<ProviderInfo[]>('/api/providers'),
+  checkTools: (id: string, model?: string) => api<{ status: 'confirmed' | 'not_confirmed' | 'unknown'; checkedAt?: number; reason?: string }>(`/api/providers/${encodeURIComponent(id)}/tool-check`, { method: 'POST', body: JSON.stringify({ model }) }),
   diagnose: (id: string) => api<ProviderDiagnostic>(`/api/providers/${encodeURIComponent(id)}/diagnose`),
   create: (form: ProviderForm) => api<ProviderInfo>('/api/providers', { method: 'POST', body: JSON.stringify(form) }),
   update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean; expectedUpdatedAt?: number }) =>

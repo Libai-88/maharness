@@ -585,13 +585,8 @@ export default {
         priority: 10,
         content: [
           '联网搜索规则：',
-          '1. 用户问及时事、外部信息或你不确定的事实时，先调用 web_search 获取事实，再基于结果回答；',
-          '2. 引用搜索结果时标注来源（标题 + URL），绝不编造链接或内容；',
-          '3. 搜索失败或结果为空时如实说明，不要编造；可换更准确的关键词重试；',
-          '4. 关键词要准确简洁，必要时分多次搜索交叉验证；',
-          '5. 搜索结果只有摘要时，单个页面用 web_fetch，多篇资料一次抓取用 web_crawl；',
-          '6. 引用多页资料时保留每页的 title 与 URL，并区分“来源原文”和“自己的推断”；',
-          '7. web_fetch / web_crawl 拒绝内网地址与 file:// 协议，不要尝试绕过。',
+          '引用外部信息时标注来源，不编造链接或内容；单个页面用 web_fetch，多篇资料用 web_crawl。',
+          'web_fetch / web_crawl 拒绝内网地址与 file:// 协议。',
         ].join('\n'),
       },
     });
@@ -599,6 +594,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'web_search',
         risk: 'low',
         costHint: 'medium',
@@ -656,6 +653,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'web_fetch',
         risk: 'medium',
         costHint: 'medium',
@@ -720,6 +719,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'web_crawl',
         risk: 'medium',
         costHint: 'medium',

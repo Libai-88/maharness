@@ -1,3 +1,4 @@
+import { installRunMocks, mockTaskEvents, mockLiveTaskEvents } from './run-fixture';
 import { expect, test, type Page, type Route } from '@playwright/test';
 import type { Message, Session } from '../src/types';
 
@@ -14,6 +15,7 @@ function history(count = 1): Message[] {
 }
 
 async function setup(page: Page, messages = history(), events?: (route: Route) => Promise<void>) {
+  await installRunMocks(page);
   await page.route('**/api/sessions', (route) => route.fulfill({ json: sessions }));
   await page.route('**/api/sessions/*/messages', (route) => route.fulfill({ json: route.request().url().includes(sessions[0].id) ? messages : history(1) }));
   await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({ json: { exists: false } }));
@@ -43,7 +45,7 @@ async function setup(page: Page, messages = history(), events?: (route: Route) =
 
 async function mockReply(page: Page) {
   const requests: unknown[] = [];
-  await page.route('**/api/sessions/*/chat', (route) => {
+  await mockTaskEvents(page, (route) => {
     requests.push(route.request().postDataJSON());
     return route.fulfill({ contentType: 'text/event-stream', body: 'event: start\ndata: {"traceId":"layout"}\n\nevent: done\ndata: {"content":"已完成。","usage":{"input":1,"output":1},"cost":0}\n\nevent: end\ndata: {}\n\n' });
   });
@@ -113,14 +115,16 @@ test('斜杠命令支持方向键和 Tab，选择后焦点保留在消息框', a
 
 test('流式活动共用 Trace，滚动阅读历史后可回到最新', async ({ page }) => {
   await setup(page, history(12));
+  await mockLiveTaskEvents(page);
   await page.evaluate(() => {
     const originalFetch = window.fetch;
     const encoder = new TextEncoder();
     const state = window as unknown as { emitChat: (event: string, data: unknown) => void; endChat: () => void };
     window.fetch = (...args) => {
-      if (String(args[0]).endsWith('/chat')) {
+      if (/\/api\/v2\/runs\/[^/]+\/events/.test(String(args[0]))) {
+        let seq = 0;
         return Promise.resolve(new Response(new ReadableStream({ start(controller) {
-          state.emitChat = (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          state.emitChat = (event, data) => { if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true; controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); };
           state.endChat = () => controller.close();
           state.emitChat('start', { traceId: 'live-layout' });
           state.emitChat('reasoning', { text: '检查消息布局与工具输出。' });
@@ -132,6 +136,7 @@ test('流式活动共用 Trace，滚动阅读历史后可回到最新', async ({
   const input = page.getByRole('textbox', { name: '消息', exact: true });
   await input.fill('检查布局');
   await input.press('Enter');
+  await page.waitForFunction(() => typeof (window as unknown as { emitChat?: unknown }).emitChat === 'function');
   const lastMessage = page.locator('[data-slot="message"][data-align="start"]').last();
   await expect(lastMessage).toContainText('正在思考');
   await expect(lastMessage.locator('[data-slot="trace"]')).toHaveCount(1);
@@ -228,19 +233,20 @@ for (const theme of ['light', 'dark']) {
 
 test('首页贴纸换图持久化并可恢复默认照片', async ({ page }) => {
   await setup(page, []);
-  const original = await page.getByAltText('首页贴纸照片').getAttribute('src');
+  const sticker = page.getByTestId('hero-sticker').locator('img');
+  const original = await sticker.getAttribute('src');
   await page.locator('input[type="file"]').setInputFiles({ name: 'photo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>') });
-  await expect(page.getByAltText('首页贴纸照片')).toHaveAttribute('src', /^data:image\/jpeg/);
-  const custom = await page.getByAltText('首页贴纸照片').getAttribute('src');
+  await expect(sticker).toHaveAttribute('src', /^data:image\/jpeg/);
+  const custom = await sticker.getAttribute('src');
   await page.reload();
-  await expect(page.getByAltText('首页贴纸照片')).toHaveAttribute('src', custom!);
+  await expect(sticker).toHaveAttribute('src', custom!);
   await page.getByRole('button', { name: '恢复默认贴纸' }).click();
-  await expect(page.getByAltText('首页贴纸照片')).toHaveAttribute('src', original!);
+  await expect(sticker).toHaveAttribute('src', original!);
   expect(await page.evaluate(() => localStorage.getItem('maharness-sticker'))).toBeNull();
 });
 
 for (const viewport of [{ width: 390, height: 640 }, { width: 900, height: 720 }, { width: 1440, height: 900 }]) {
-  test(`${viewport.width}px 多项审批、目标与验收并存时保留阅读和输入空间`, async ({ page }, testInfo) => {
+  test(`${viewport.width}px 多项审批、目标与任务状态并存时保留阅读和输入空间`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     let releaseEvents!: () => void;
     const gate = new Promise<void>((resolve) => { releaseEvents = resolve; });
@@ -251,16 +257,15 @@ for (const viewport of [{ width: 390, height: 640 }, { width: 900, height: 720 }
         steps: Array.from({ length: 30 }, (_, index) => ({ title: `报告步骤 ${index + 1}`, status: index === 0 ? 'done' : index === 1 ? 'in_progress' : 'pending' })),
       } })}\n\n` });
     });
-    await page.route('**/api/sessions/*/chat', (route) => route.fulfill({ contentType: 'text/event-stream', body: [
+    await mockTaskEvents(page, (route) => route.fulfill({ contentType: 'text/event-stream', body: [
       `event: start\ndata: ${JSON.stringify({ traceId: 'context-layout' })}\n\n`,
       ...Array.from({ length: 8 }, (_, index) => `event: approval_required\ndata: ${JSON.stringify({ approvalId: `context-${index}`, name: 'write_file', summary: `写入 reports/quarter-${index}.md` })}\n\n`),
-      `event: task_inference\ndata: ${JSON.stringify({ objective: '整理季度报告', inference: { confidence: 0.5, basis: 'inferred', needsConfirmation: true, rationale: '请补充交付标准' } })}\n\n`,
       'event: end\ndata: {}\n\n',
     ].join('') }));
     const input = page.getByRole('textbox', { name: '消息', exact: true });
     await input.fill('整理季度报告');
     await input.press('Enter');
-    await expect(page.getByTestId('task-confirm-card')).toBeVisible();
+    await expect(page.getByTestId('run-controls')).toBeVisible();
     releaseEvents();
     const goal = page.getByTestId('goal-plan');
     await expect(goal).toContainText('整理季度报告');
@@ -295,12 +300,6 @@ for (const viewport of [{ width: 390, height: 640 }, { width: 900, height: 720 }
     expect(measurements.contextOverflow).toBe(true);
     expect(measurements.columnOffset).toBeLessThanOrEqual(8);
     expect(measurements.overflow).toBe(false);
-    await page.getByRole('button', { name: '补充验收条件', exact: true }).click();
-    const sheet = page.getByRole('dialog', { name: '补充任务验收条件' });
-    await expect(sheet.getByRole('textbox', { name: '验收条件' })).toBeInViewport();
-    await expect(sheet.getByRole('button', { name: '确认并执行' })).toBeInViewport();
-    await page.keyboard.press('Escape');
-    await expect(sheet).toHaveCount(0);
     await expect(input).toHaveValue('报告内容\n'.repeat(60));
     await context.evaluate((element) => { element.scrollTop = 0; });
     await page.screenshot({ path: testInfo.outputPath('context-layout.png') });
@@ -376,14 +375,16 @@ test('输入框原生随草稿增长、限制高度并在清空后恢复', async
 
 test('长思考限制详情高度，运行中与完成后都尊重手动展开状态', async ({ page }) => {
   await setup(page);
+  await mockLiveTaskEvents(page);
   await page.evaluate(() => {
     const originalFetch = window.fetch;
     const encoder = new TextEncoder();
     const state = window as unknown as { emitChat: (event: string, data: unknown) => void; endChat: () => void };
     window.fetch = (...args) => {
-      if (String(args[0]).endsWith('/chat')) {
+      if (/\/api\/v2\/runs\/[^/]+\/events/.test(String(args[0]))) {
+        let seq = 0;
         return Promise.resolve(new Response(new ReadableStream({ start(controller) {
-          state.emitChat = (event, data) => controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+          state.emitChat = (event, data) => { if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true; controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); };
           state.endChat = () => controller.close();
           state.emitChat('start', { traceId: 'long-reasoning' });
           state.emitChat('reasoning', { text: '核对任务的输入与输出。\n'.repeat(100) });
@@ -397,8 +398,11 @@ test('长思考限制详情高度，运行中与完成后都尊重手动展开�
   const message = page.locator('[data-slot="message"][data-align="start"]').last();
   const thinking = message.locator('[data-slot="trace-collapsible"]').filter({ has: page.locator('[data-slot="trace-title"]', { hasText: /正在思考|思考过程/ }) });
   const trigger = thinking.getByRole('button').first();
-  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
+  await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   const scroll = thinking.getByRole('region', { name: '思考详情' }).locator('[data-slot="scroll-area-viewport"]');
+  await expect(scroll).toHaveCount(0);
+  await trigger.click();
+  await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   await expect.poll(() => scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   expect(await scroll.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(192);
   await trigger.click();

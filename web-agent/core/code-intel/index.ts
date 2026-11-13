@@ -251,11 +251,7 @@ export default {
         priority: 4,
         content: [
           '代码导航规则：',
-          '1. 涉及多文件修改/重构时，先用 repo_map 看目录与顶层符号，再定点读取；',
-          '2. 找定义用 find_symbol，找调用/文本用 grep；不要无目的遍历大目录；',
-          '3. repo map 只给符号索引，不等于完整实现；修改前仍要 read_file 核对；',
-          '4. TypeScript 项目修改后用 project_diagnostics 检查类型错误，再报告完成；',
-          '5. 配置了 language server 时，精确跳转/悬停用 lsp_definition / lsp_hover，类型诊断可用 lsp_diagnostics。',
+          '多文件代码任务可用 repo_map 建立符号索引；修改前仍要 read_file 核对；TypeScript 项目可用 project_diagnostics 验证类型。',
         ].join('\n'),
       },
     });
@@ -263,6 +259,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'repo_map',
         risk: 'low',
         costHint: 'low',
@@ -316,6 +314,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'find_symbol',
         risk: 'low',
         costHint: 'low',
@@ -356,6 +356,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'project_diagnostics',
         risk: 'low',
         costHint: 'medium',
@@ -405,6 +407,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'lsp_definition',
         risk: 'low',
         costHint: 'low',
@@ -447,6 +451,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'lsp_hover',
         risk: 'low',
         costHint: 'low',
@@ -484,6 +490,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'lsp_diagnostics',
         risk: 'low',
         costHint: 'medium',

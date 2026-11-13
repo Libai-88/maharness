@@ -13,17 +13,18 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    baseURL: 'http://localhost:3000',
+    baseURL: 'http://localhost:3137',
     viewport: { width: 1440, height: 900 },
   },
   webServer: {
     command: 'npm start --prefix ..',
-    url: 'http://localhost:3000',
-    reuseExistingServer: !process.env.CI,
+    url: 'http://localhost:3137',
+    reuseExistingServer: false,
     timeout: 60_000,
     env: {
       ...process.env,
-      AGENT_DATA_DIR: path.join(os.tmpdir(), 'maharness-e2e-data'),
+      PORT: '3137',
+      AGENT_DATA_DIR: path.join(os.tmpdir(), `maharness-e2e-${process.pid}`),
     },
   },
 });

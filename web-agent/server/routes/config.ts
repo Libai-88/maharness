@@ -36,6 +36,7 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         compact: kernel.config.get<boolean>('context.compact', true),
       },
       cache: {
+        l1Enabled: kernel.config.get<boolean>('cache.l1Enabled', false),
         l1Threshold: kernel.config.get<number>('cache.l1Threshold', 0.58),
         l2TtlMin: kernel.config.get<number>('cache.l2TtlMin', 30),
         l3Enabled: kernel.config.get<boolean>('cache.l3Enabled', true),
@@ -44,8 +45,9 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
       agent: {
         reasoningBudget: kernel.config.get<number>('agent.reasoningBudget', 800),
         reasoningTotalBudget: kernel.config.get<number>('agent.reasoningTotalBudget', 3000),
-        thinkInEnglish: kernel.config.get<boolean>('agent.thinkInEnglish', true),
+        thinkInEnglish: kernel.config.get<boolean>('agent.thinkInEnglish', false),
         modelRouting: kernel.config.get<Record<string, string>>('agent.modelRouting', {}),
+        fallbackProviders: kernel.config.get<string[]>('agent.fallbackProviders', []),
       },
       checkpoint: {
         retentionDays: kernel.config.get<number>('checkpoint.retentionDays', 30),
@@ -104,6 +106,11 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         const warmup = String(cache.warmup);
         persist('cache.warmup', warmup);
         warmupOff = warmup === 'off';
+      }
+      if (agent?.fallbackProviders !== undefined) {
+        const ids = agent.fallbackProviders;
+        if (!Array.isArray(ids) || ids.length > 16 || ids.some(id => typeof id !== 'string' || !deps.store.getProvider(id)?.enabled) || new Set(ids).size !== ids.length) throw new Error('备用线路必须为已启用 Provider 的不重复标识');
+        persist('agent.fallbackProviders', ids);
       }
       if (agent?.reasoningBudget !== undefined) {
         persist('agent.reasoningBudget', Math.max(100, Math.min(16000, Number(agent.reasoningBudget))));

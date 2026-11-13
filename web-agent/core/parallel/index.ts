@@ -21,7 +21,7 @@ const READ_ONLY_TOOLS = new Set([
 const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review']);
 
 /** 单次并行任务的最大子任务数（认知资源配额：并行不等于无限） */
-const MAX_PARALLEL = 4;
+const MAX_PARALLEL = 8;
 const MAX_PARALLEL_ACTIVE = MAX_PARALLEL * 2;
 
 export interface ParallelTaskResult {
@@ -200,11 +200,14 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network","delegate"],
         name: 'run_parallel',
+        delegates: true,
         risk: 'low',
         costHint: 'high',
         sideEffect: 'external',
-        limits: `一次最多 ${MAX_PARALLEL} 个并行子任务；受子代理配额约束；成本 ≈ 多次 LLM 调用，简单问题不要使用`,
+        limits: `一次最多 ${MAX_PARALLEL} 个并行子任务；成本 ≈ 多次 LLM 调用`,
         output: '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?, cancelled?}], completed, failed, cancelled, status}',
         outputSchema: {
           type: 'object', required: ['results', 'completed', 'failed', 'cancelled', 'status'],
@@ -223,7 +226,7 @@ export default {
           properties: {
             tasks: {
               type: 'array',
-              description: '并行子任务列表（2-4 个，各自独立、互不依赖）',
+              description: '并行子任务列表（2-8 个）',
               items: {
                 type: 'object',
                 properties: {
@@ -249,6 +252,23 @@ export default {
           const tasks = normalized.tasks;
           const waves = planParallelWaves(tasks);
           if (!waves) return { ok: false, error: '任务依赖存在环，无法调度' };
+          if (tctx.delegate) {
+            const byId = new Map<string, ParallelTaskResult>();
+            const shares = splitBudget(tctx.remainingBudget, tasks.length);
+            for (const wave of waves) {
+              const results = await Promise.all(wave.map(async id => {
+                const task = tasks.find(candidate => candidate.id === id)!;
+                if (task.dependsOn.some(dependency => !byId.get(dependency)?.ok)) return { taskId: id, objective: task.objective, ok: false, error: '依赖任务未成功', cost: 0 };
+                try {
+                  const result = await tctx.delegate!({ objective: composeDependencyContext(task, byId), tools: task.tools === 'all' ? 'all' : 'read', instructions: PARALLEL_SYSTEM_PROMPT, maxTurns: 12, budgetUsd: shares[task.index] });
+                  return { ...result, taskId: id, objective: task.objective, ok: !result.error };
+                } catch (error) { return { taskId: id, objective: task.objective, ok: false, error: error instanceof Error ? error.message : String(error), cost: 0 }; }
+              }));
+              results.forEach(result => byId.set(result.taskId, result));
+            }
+            const aggregate = aggregateParallelResults(tasks.map(task => byId.get(task.id)!));
+            return { ok: parallelToolSucceeded(aggregate), data: aggregate };
+          }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const fallbackProvider = chatSvc?.providers?.[0];
@@ -261,12 +281,7 @@ export default {
             return { ok: false, error: '执行循环服务（service:runner）不可用——对话引擎插件未加载，无法并行委派' };
           }
 
-          // 认知资源管理（B2 修复）：一次 run_parallel = **一次委派**，只扣 1 次配额。
-          // 旧实现按子任务逐个扣，而会话窗口上限是 3、MAX_PARALLEL 是 4 ——
-          // 于是任何 4 任务的并行调用**必然**在第 4 次申请时被拒，同时白烧掉前面
-          // 3 次配额（正好占满整个会话窗口）：功能必然失败 + 额度被清零。
-          // 成本仍然受控：下方 splitBudget 把剩余预算按任务数均分给各子循环，
-          // 每个子循环另有 maxTurns 上限，配额只管"召唤次数"不管"召唤体量"。
+          // 一次 run_parallel 只扣一次配额；成本仍由预算均分与子循环轮数上限约束。
           const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
           if (!quota.allowed) {
             return { ok: false, error: `子代理配额不足（10 分钟窗口内限额，剩余 ${quota.remaining}）。请减少委派频率或稍后再试。` };
@@ -361,7 +376,7 @@ export default {
                 systemPrompt: withUserRules(PARALLEL_SYSTEM_PROMPT),
                 tools: toolsFor(task),
                 traceId,
-                maxTurns: 6, // M4：与子代理轮数上限统一（最多 6 轮）
+                maxTurns: 12,
                 parentStepId: tctx.stepId, // span 树：并行子任务全部步骤挂到 run_parallel 工具步骤下
                 signal: tctx.signal,
                 sessionId: tctx.sessionId,
@@ -466,10 +481,8 @@ export default {
         priority: 6,
         content: [
           '并行执行规则：',
-          '1. 任务包含多个相互独立的部分（如分别调研多个主题/分别分析多个文件/多路独立验证）时，优先用 run_parallel 一次并发委派，而不是逐个 run_subagent 排队；',
-          '2. 并行子任务之间必须互不依赖（依赖关系请串行）；',
-          '3. 一次并行 2-4 个，受配额限制；全部返回后统一汇总、交叉审查；',
-          '4. 结果包含各自 traceId，需要核对时用 read_file 验证其引用的内容再采信。',
+          '多个相互独立的子任务优先用 run_parallel；有依赖的任务用 dependsOn 表达。',
+          '结果包含各自 traceId 与结论，采信前可核对引用内容。',
         ].join('\n'),
       },
     });

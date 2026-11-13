@@ -1,14 +1,15 @@
+import { installRunMocks, mockTaskEvents } from './run-fixture';
 // ui/e2e/bubble-menu.spec.ts —— 消息菜单 / 引用回复 / 表情面板 E2E
 // 触发路径覆盖触摸长按、右键、键盘（Shift+F10 / Enter）
 // 数据自给自足：models/providers/chat 全部 route-mock——CI 空库（data/ 被忽略）与本地有历史两种状态行为一致
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
 
-const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟 maharness 说点什么…（按 / 看命令）';
 
 /** mock 流式接口：绕开真实 LLM（断言 UI 组合与渲染，不落库、不耗 token） */
 function mockChatStream(page: Page) {
-  return page.route('**/api/sessions/*/chat', async (route) => {
+  return mockTaskEvents(page, async (route) => {
     const body = [
       'event: start',
       'data: {"traceId":"e2e-t"}',
@@ -40,6 +41,7 @@ async function mockModelApis(page: Page) {
 
 /** 统一前置：mock 模型接口 + 首屏就绪 + 保证至少有一轮对话气泡（空库时自动种子一条 mock 对话） */
 async function setup(page: Page) {
+  await installRunMocks(page);
   await mockModelApis(page);
   await mockChatStream(page);
   await page.goto('/');
@@ -51,6 +53,7 @@ async function setup(page: Page) {
     })
     .toBeGreaterThan(0);
   await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('e2e 种子消息');
+  await expect(page.getByTestId('send-btn')).toBeEnabled();
   await page.keyboard.press('Enter');
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('收到，这是一条 mock 回复。');
 }
@@ -97,7 +100,7 @@ test.describe('消息菜单', () => {
     await page.getByTestId('menu-quote').click();
     const bar = page.getByTestId('quote-bar');
     await expect(bar).toBeVisible();
-    await expect(bar).toContainText('引用 小鲸');
+    await expect(bar).toContainText('引用 maharness');
     await page.getByTestId('quote-cancel').click();
     await expect(bar).toHaveCount(0);
   });
@@ -156,7 +159,7 @@ test.describe('引用回复上送（mock 流式）', () => {
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('引用测试正文');
     await page.keyboard.press('Enter');
     // 用户气泡 = 引用块 + 正文
-    await expect(page.getByTestId('msg-bubble-user').last()).toContainText('【引用 小鲸】');
+    await expect(page.getByTestId('msg-bubble-user').last()).toContainText('【引用 maharness】');
     await expect(page.getByTestId('msg-bubble-user').last()).toContainText('引用测试正文');
     // 引用条随发送清理；mock 回复到达
     await expect(page.getByTestId('quote-bar')).toHaveCount(0);
@@ -167,7 +170,7 @@ test.describe('引用回复上送（mock 流式）', () => {
 test.describe('任务验收证据', () => {
   test('完成答复关联逐项验收结果与 Trace 步骤', async ({ page }) => {
     await setup(page);
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = [
         'event: start',
         'data: {"traceId":"e2e-task-trace"}',
@@ -211,7 +214,7 @@ test.describe('工具审批', () => {
     test(`用户${decision.label}后提交一次性凭据并撤下审批卡`, async ({ page }) => {
       await setup(page);
       const responses: { approved: boolean; approvalToken?: string }[] = [];
-      await page.route('**/api/sessions/*/chat', async (route) => {
+      await mockTaskEvents(page, async (route) => {
         const body = [
           'event: start',
           'data: {"traceId":"e2e-approval-trace"}',
@@ -245,7 +248,7 @@ test.describe('子代理与并行任务', () => {
   test('子代理成功时展示成员目标和结果摘要', async ({ page }) => {
     await setup(page);
     await page.unroute('**/api/sessions/*/chat');
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = [
         'event: start',
         'data: {"traceId":"e2e-subagent-trace"}',
@@ -278,7 +281,7 @@ test.describe('子代理与并行任务', () => {
   test('并行任务失败时展示小队失败状态', async ({ page }) => {
     await setup(page);
     await page.unroute('**/api/sessions/*/chat');
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = [
         'event: start',
         'data: {"traceId":"e2e-parallel-trace"}',
@@ -337,7 +340,7 @@ test.describe('运行轨迹', () => {
       json: { trace: { steps: 3, llmCalls: 1, toolCalls: 2 }, cache: {}, l1Enabled: false },
     }));
     await setup(page);
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = [
         'event: start',
         'data: {"traceId":"e2e-span-run"}',
@@ -396,7 +399,7 @@ test.describe('运行轨迹', () => {
       json: { trace: { steps: 200, llmCalls: 200, toolCalls: 0 }, cache: {}, l1Enabled: false },
     }));
     await setup(page);
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = ['event: start', 'data: {"traceId":"e2e-bulk-run"}', '', 'event: done', 'data: {"content":"批量完成。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
       setTimeout(releaseTrace, 200);
@@ -454,7 +457,7 @@ test.describe('运行轨迹', () => {
       json: { trace: { steps: 2, llmCalls: 1, toolCalls: 1 }, cache: {}, l1Enabled: false },
     }));
     await setup(page);
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = [
         'event: start',
         'data: {"traceId":"e2e-trace-run"}',
@@ -516,7 +519,7 @@ test.describe('运行轨迹', () => {
       status: 200, json: { trace: { steps: 1, llmCalls: 1, toolCalls: 0 }, cache: {}, l1Enabled: false },
     }));
     await setup(page);
-    await page.route('**/api/sessions/*/chat', async (route) => {
+    await mockTaskEvents(page, async (route) => {
       const body = ['event: start', 'data: {"traceId":"e2e-context-run"}', '', 'event: done', 'data: {"content":"已压缩上下文。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
     });
@@ -530,40 +533,11 @@ test.describe('运行轨迹', () => {
   });
 });
 
-test.describe('断点恢复', () => {
-  test('从可恢复检查点继续时发送 resume 请求并渲染恢复答复', async ({ page }) => {
-    await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({
-      status: 200,
-      json: { exists: true, turn: 2, historyMessages: 6, createdAt: Date.now() },
-    }));
-    await setup(page);
-    await expect(page.getByText('上次做到第 3 轮停下了，之前做完的都还在')).toBeVisible();
-
-    const requests: Record<string, unknown>[] = [];
-    await page.route('**/api/sessions/*/chat', async (route) => {
-      requests.push(route.request().postDataJSON() as Record<string, unknown>);
-      const body = [
-        'event: start',
-        'data: {"traceId":"e2e-resume-trace"}',
-        '',
-        'event: delta',
-        'data: {"text":"恢复后的答复。"}',
-        '',
-        'event: done',
-        'data: {"content":"恢复后的答复。","usage":{"input":12,"output":6},"cost":0}',
-        '',
-        'event: end',
-        'data: {}',
-        '',
-      ].join('\n');
-      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
-    });
-    await page.getByRole('button', { name: '接着说' }).click();
-    await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('恢复后的答复。');
-    await expect.poll(() => requests.length).toBe(1);
-    expect(requests[0]).toMatchObject({ resume: true });
-    expect(requests[0]).not.toHaveProperty('message');
-  });
+test('旧断点不会自动恢复或显示可执行恢复入口', async ({ page }) => {
+  await page.route('**/api/sessions/*/checkpoint', route => route.fulfill({ json: { exists: true, legacy: true, resumable: false, turn: 2 } }));
+  await setup(page);
+  await expect(page.getByTestId('resume-banner')).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '恢复任务', exact: true })).toHaveCount(0);
 });
 
 test.describe('输入区活感', () => {

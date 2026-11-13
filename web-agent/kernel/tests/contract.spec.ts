@@ -48,7 +48,7 @@ describe('契约：可逆性旁路', () => {
     const dir = join(pluginsDir, 'tmp-facade');
     mkdirSync(dir, { recursive: true });
     mkdirSync(coreDir, { recursive: true });
-    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-facade', name: '门面探针', version: '0.1.0', entry: 'index.ts' }));
+    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id: 'tmp-facade', name: '门面探针', version: '0.1.0', entry: 'index.ts' }));
     writeFileSync(join(dir, 'index.ts'), `
 export default {
   id: 'tmp-facade', name: '门面探针', version: '0.1.0',

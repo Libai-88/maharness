@@ -32,7 +32,7 @@ describe('Anthropic 请求组装', () => {
   it('max_tokens 必填并带默认值；tools 转 input_schema', () => {
     const b = buildBody('m', [user('x')], {
       maxTokens: 900,
-      tools: [{ name: 'read_file', description: '读文件', parameters: { type: 'object', properties: { path: { type: 'string' } } }, handler: async () => ({ ok: true }) }],
+      tools: [{version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},  name: 'read_file', description: '读文件', parameters: { type: 'object', properties: { path: { type: 'string' } } }, handler: async () => ({ ok: true }) }],
     });
     assert.equal(b.max_tokens, 900);
     assert.equal((b.tools ?? [])[0].name, 'read_file');

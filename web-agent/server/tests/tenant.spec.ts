@@ -44,6 +44,7 @@ before(async () => {
 after(async () => {
   started?.server.close();
   started?.closeEnvWatcher();
+  await started?.runs.shutdown();
   started?.store.close();
   try { await started?.kernel.stop(); } catch { /* 清理不影响断言 */ }
   rmSync(tmp, { recursive: true, force: true });
@@ -180,10 +181,12 @@ describe('租户作用域 HTTP 契约', () => {
 
   test('到点续跑计划按租户隔离并可取消', async () => {
     const session = started!.store.createSession('m', '', 'tenant-a');
-    started!.store.saveCheckpoint(session.id, 1, [{ role: 'user', content: 'continue' }], 'run-schedule');
+    const runId = 'run-schedule';
+    started!.store.runs.create({ id: runId, rootId: runId, sessionId: session.id, tenantId: 'tenant-a', depth: 0, objective: 'continue', providerId: 'm', model: 'm', status: 'interrupted', authorization: { workspace: tmp, profile: 'standard', revision: 0, readOnly: false }, cost: 0, tokensIn: 0, tokensOut: 0, createdAt: Date.now(), updatedAt: Date.now() });
+    started!.store.runs.saveCheckpoint(runId, { turn: 0, history: [{ role: 'user', content: 'continue' }], costUsd: 0, toolResults: [] });
     const headers = { 'Content-Type': 'application/json', [TENANT_HEADER]: 'tenant-a' };
     const created = await fetch(`${base}/api/sessions/${session.id}/resume-at`, {
-      method: 'POST', headers, body: JSON.stringify({ delayMs: 3_600_000 }),
+      method: 'POST', headers, body: JSON.stringify({ runId, delayMs: 3_600_000 }),
     });
     assert.equal(created.status, 200);
     const job = await created.json() as { id: string; state: string };
@@ -231,6 +234,6 @@ describe('租户作用域 HTTP 契约', () => {
       method: 'POST', headers, body: JSON.stringify({ message: '继续' }),
     });
     assert.equal(res.status, 429);
-    assert.match(String((await res.json() as { error: string }).error), /成本配额/);
+    assert.match(String((await res.json() as { error: string }).error), /费用配额/);
   });
 });

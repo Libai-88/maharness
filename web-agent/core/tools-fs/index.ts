@@ -6,7 +6,8 @@
  *      写类工具审批由执行器侧 assessApproval 动态判定（默认沙箱内免审批，tools.writeRequiresApproval=true 可恢复强制审批）。
  * 缓存：读类工具按「路径 + mtime + size + 参数」做 L2；写/编辑/删除成功后清空文件类读缓存并失效会话 L1。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, existsSync, rmSync, openSync, readSync, closeSync, renameSync } from 'node:fs';
+import { statSync, readdirSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, openSync, readSync, closeSync, renameSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/types';
@@ -19,7 +20,14 @@ import { reviewPluginWrite } from '../../kernel/plugin-review';
 export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
 export type { ReadResult };
 
-const TOOLS_FS_CACHE_VER = 'v3';
+const TOOLS_FS_CACHE_VER = 'v5';
+
+function fileVersion(file: string): string | null { return existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : null; }
+function versionConflict(file: string, expected: string | null | undefined): ToolResult | undefined {
+  if (expected === undefined) return;
+  const actual = fileVersion(file);
+  if (actual !== expected) return { ok: false, error: '文件版本已变化，请重新读取后编辑', failure: { code: 'FILE_VERSION_CONFLICT', retryable: false, outcome: 'not_started' }, data: { expectedVersion: expected, actualVersion: actual } };
+}
 const MAX_READ_CHARS = 100_000;
 const DEFAULT_READ_LINES = 2000;
 const MAX_EDIT_BYTES = 2_000_000;
@@ -57,14 +65,13 @@ function startsWithBom(file: string): boolean {
 
 /** 原子写：tmp + rename（Windows 上 rename 目标已存在会 EEXIST，先移除） */
 function atomicWrite(file: string, content: string): void {
-  const tmp = `${file}.maharness.tmp`;
+  const tmp = `${file}.maharness.${randomUUID()}.tmp`;
   writeFileSync(tmp, content, 'utf8');
-  try { if (existsSync(file)) rmSync(file, { force: true }); } catch { /* 交给 rename 报错 */ }
   try {
     renameSync(tmp, file);
   } catch (err) {
-    try { writeFileSync(file, content, 'utf8'); rmSync(tmp, { force: true }); }
-    catch { throw err; }
+    try { rmSync(tmp, { force: true }); } catch { /* Preserve the original write error. */ }
+    throw err;
   }
 }
 
@@ -87,7 +94,7 @@ function hasRipgrep(): Promise<boolean> {
 
 interface RgOut { matches: { file: string; line: number; text: string }[]; files: string[]; truncated: boolean }
 
-export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean; ignoreCase?: boolean; glob?: string; path?: string; limit: number }, signal?: AbortSignal): Promise<RgOut | null> {
+export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean; ignoreCase?: boolean; glob?: string; path?: string; limit: number; accept?: (relativePath: string) => boolean }, signal?: AbortSignal): Promise<RgOut | null> {
   return new Promise((resolveP, rejectP) => {
     if (signal?.aborted) {
       rejectP(signal.reason instanceof Error ? signal.reason : new Error('搜索已取消'));
@@ -120,6 +127,7 @@ export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: b
           const j = JSON.parse(line);
           if (j.type !== 'match') continue;
           const rel = String(j.data.path.text).split(/[\\/]/g).join('/');
+          if (opts.accept && !opts.accept(rel)) continue;
           if (!out.files.includes(rel)) out.files.push(rel);
           out.matches.push({ file: rel, line: Number(j.data.line_number) || 0, text: String(j.data.lines?.text ?? '').replace(/\r?\n$/, '').slice(0, 500) });
           if (out.matches.length >= opts.limit) { out.truncated = true; try { child.kill(); } catch { /* 忽略 */ } }
@@ -191,13 +199,8 @@ export default {
         priority: 10,
         content: [
           '文件与检索工具使用规则：',
-          '1. 所有路径相对沙箱根目录（当前工作区），不要使用绝对路径；',
-          '2. 找文件用 glob（如 **/*.ts、src/*.tsx），找代码用 grep（正则或 literal），不要 list_dir 逐层翻目录；',
-          '3. 读文件先给路径，需要定位时传 offset/limit 分段读，行号从 1 开始，用返回的 nextOffset 续读；',
-          '4. 局部修改一律用 edit_file（精确字符串替换，oldText 要带足够上下文以唯一定位；多处同改用 replaceAll 或一次传多个 edits）；整份重写只在新建文件或小文件时用 write_file；',
-          '5. 编辑前先 read_file 拿到准确文本（含缩进），不要凭记忆写 oldText；',
-          '6. 不要读取 .env、密钥文件等敏感内容，除非用户明确要求；二进制文件（图片/文档）read_file 会拒绝，应说明而非反复尝试；',
-          '7. 查看代码优先读关键文件（入口/类型定义/配置），避免无差别全量扫描。',
+          '路径相对沙箱根目录；找文件用 glob，找代码用 grep；编辑前先 read_file 获取准确文本，局部修改优先 edit_file。',
+          '不要读取 .env、密钥等敏感内容，除非用户明确要求。',
         ].join('\n'),
       },
     });
@@ -205,6 +208,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'list_dir',
         risk: 'low',
         costHint: 'low',
@@ -222,12 +227,13 @@ export default {
         },
         async handler(args: { path?: string }, tctx: ToolContext) {
           const dir = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
+          if (isDeniedReadPath(dir, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
           if (!existsSync(dir)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, dir) || '.'}` };
           const st = statSync(dir);
           if (!st.isDirectory()) return { ok: false, error: '目标不是目录' };
           const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)], { tenantId: tctx.tenantId });
           const result = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
-            return readdirSync(dir, { withFileTypes: true }).map((e) => {
+            return readdirSync(dir, { withFileTypes: true }).filter(e => !isDeniedReadPath(resolve(dir, e.name), tctx.sandboxRoot, ctx.paths.root)).map((e) => {
               const full = resolve(dir, e.name);
               let info: { type: string; size?: number; mtime?: number };
               try {
@@ -247,6 +253,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'read_file',
         risk: 'low',
         costHint: 'low',
@@ -298,6 +306,7 @@ export default {
           if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），read_file 不支持；图片/文档类请如实告知用户当前无法读取` };
           const s = sliceLines(r.text, offset, limit, MAX_READ_CHARS);
           const result: ReadResult = {
+            version: fileVersion(file)!,
             text: lineNumbers ? s.text.split('\n').map((ln, i) => `${s.startLine + i}: ${ln}`).join('\n') : s.text,
             encoding: r.encoding, isBinary: false,
             size: st.size, path: relative(tctx.sandboxRoot, file),
@@ -313,6 +322,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'glob',
         risk: 'low',
         costHint: 'low',
@@ -337,9 +348,10 @@ export default {
           const pattern = String(args.pattern ?? '').trim();
           if (!pattern) return { ok: false, error: 'pattern 不能为空' };
           const rootAbs = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
+          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.limit) || 200)));
-          const snapshot = treeFingerprint(rootAbs, { accept: rel => matchesGlob(rel, pattern), maxFiles: 20_000, maxMs: 8_000 });
+          const snapshot = treeFingerprint(rootAbs, { accept: rel => !isDeniedReadPath(resolve(rootAbs, rel), tctx.sandboxRoot, ctx.paths.root) && matchesGlob(rel, pattern), maxFiles: 20_000, maxMs: 8_000 });
           const key = snapshot.complete
             ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint], { tenantId: tctx.tenantId })
             : '';
@@ -368,6 +380,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'grep',
         risk: 'low',
         costHint: 'medium',
@@ -396,11 +410,13 @@ export default {
           const pattern = String(args.pattern ?? '');
           if (!pattern) return { ok: false, error: 'pattern 不能为空' };
           const rootAbs = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
+          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
+          const accept = (rel: string) => !isDeniedReadPath(resolve(rootAbs, rel), tctx.sandboxRoot, ctx.paths.root);
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.maxResults) || 200)));
           const ctxLines = Math.max(0, Math.min(5, Math.floor(Number(args.contextLines) || 0)));
           const snapshot = treeFingerprint(rootAbs, {
-            accept: rel => !args.glob || matchesGlob(rel, args.glob),
+            accept: rel => accept(rel) && (!args.glob || matchesGlob(rel, args.glob)),
             maxFiles: 30_000,
             maxMs: 15_000,
             includeContent: true,
@@ -418,13 +434,13 @@ export default {
           const opts = { pattern, glob: args.glob, ignoreCase: args.ignoreCase, literal: args.literal };
           let data: unknown = null;
           if (ctxLines === 0 && await hasRipgrep()) {
-            const rg = await runRipgrep(rootAbs, { ...opts, limit }, tctx.signal);
+            const rg = await runRipgrep(rootAbs, { ...opts, limit, accept }, tctx.signal);
             if (rg) data = { ...rg, scannedFiles: rg.files.length, engine: 'ripgrep' };
           }
           if (!data) {
             const r = grepFiles(rootAbs, {
               pattern, literal: args.literal, ignoreCase: args.ignoreCase, path: '.', glob: args.glob,
-              contextLines: ctxLines, limit,
+              contextLines: ctxLines, limit, accept,
             });
             if (r.error) return { ok: false, error: r.error };
             data = { ...r, engine: 'js' };
@@ -438,6 +454,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'write_file',
         risk: 'medium',
         costHint: 'low',
@@ -455,16 +473,18 @@ export default {
           properties: {
             path: { type: 'string', description: '文件路径，相对沙箱根目录' },
             content: { type: 'string', description: '完整文件内容' },
+            expectedVersion: { type: ['string', 'null'], description: 'read_file 返回的版本；null 表示仅允许创建新文件' },
           },
           required: ['path', 'content'],
         },
         assessApproval: writeGate,
-        async handler(args: { path?: string; content?: string }, tctx: ToolContext) {
+        async handler(args: { path?: string; content?: string; expectedVersion?: string | null }, tctx: ToolContext) {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if (isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root)) {
-            return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
+          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
+            return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。` };
           }
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
+          const conflict = versionConflict(file, args.expectedVersion); if (conflict) return conflict;
           const gate = sensitiveBypass(file, tctx);
           if (gate) return gate;
           const review = reviewPluginWrite(tctx.sandboxRoot, file, args.content, pluginReviewOptions());
@@ -486,8 +506,8 @@ export default {
           const relPath = relative(tctx.sandboxRoot, file);
           return {
             ok: true,
-            data: { path: relPath, bytes: Buffer.byteLength(args.content, 'utf8') },
-            evidence: [{ kind: 'file', label: `已写入 ${relPath}`, ref: relPath }],
+            data: { path: relPath, bytes: Buffer.byteLength(args.content, 'utf8'), version: fileVersion(file) },
+            evidence: [{ kind: 'file', artifact: true, label: `已写入 ${relPath}`, ref: relPath }],
           };
         },
       },
@@ -496,6 +516,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'edit_file',
         risk: 'medium',
         costHint: 'low',
@@ -525,16 +547,18 @@ export default {
                 required: ['oldText', 'newText'],
               },
             },
+            expectedVersion: { type: 'string', description: 'read_file 返回的文件版本；不匹配时拒绝编辑' },
           },
           required: ['path', 'edits'],
         },
         assessApproval: writeGate,
-        async handler(args: { path?: string; edits?: EditOp[] }, tctx: ToolContext) {
+        async handler(args: { path?: string; edits?: EditOp[]; expectedVersion?: string }, tctx: ToolContext) {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if (isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root)) {
+          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
             return { ok: false, error: `拒绝编辑内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}` };
           }
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}——新建请用 write_file` };
+          const conflict = versionConflict(file, args.expectedVersion); if (conflict) return conflict;
           const gate = sensitiveBypass(file, tctx);
           if (gate) return gate;
           const st = statSync(file);
@@ -573,10 +597,11 @@ export default {
             data: {
               path: relative(tctx.sandboxRoot, file),
               edits: outcome.applied,
+              version: fileVersion(file),
               bytesBefore: st.size,
               bytesAfter,
             },
-            evidence: [{ kind: 'file', label: `已编辑 ${relative(tctx.sandboxRoot, file)}`, ref: relative(tctx.sandboxRoot, file) }],
+            evidence: [{ kind: 'file', artifact: true, label: `已编辑 ${relative(tctx.sandboxRoot, file)}`, ref: relative(tctx.sandboxRoot, file) }],
           };
         },
       },
@@ -585,6 +610,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'delete_file',
         risk: 'high',
         costHint: 'low',
@@ -606,8 +633,8 @@ export default {
           if (!existsSync(target)) return { ok: false, error: `目标不存在: ${relative(tctx.sandboxRoot, target) || '.'}` };
           const rel = relative(tctx.sandboxRoot, target) || '.';
           if (rel === '.') return { ok: false, error: '不能删除沙箱根目录' };
-          if (isProtectedWritePath(target, tctx.sandboxRoot, ctx.paths.root)) {
-            return { ok: false, error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，设置环境变量 AGENT_ALLOW_CORE_EDIT=1 后重启放行。` };
+          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(target, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
+            return { ok: false, error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。` };
           }
           // A8：删除的 handler 侧二次校验保留，但必须承认用户策略规则的放行
           //（policyApproved 此前未透传，规则 allow 会被这里误拦）

@@ -32,6 +32,7 @@ describe('真实模型 live 评测', () => {
       baseUrl: `http://127.0.0.1:${port}/v1`,
       apiKey: 'test',
       model: 'answer-model',
+      budgetUsd: 1, prices: { 'answer-model': { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
       cases: [
         { name: 'a', prompt: '问题 A', rubric: ['标准 1'] },
         { name: 'b', prompt: '问题 B', rubric: ['标准 2'] },
@@ -59,9 +60,27 @@ describe('真实模型 live 评测', () => {
     const port = (server.address() as { port: number }).port;
     const report = await runLiveEval({
       baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'test', model: 'm',
+      budgetUsd: 1, prices: { m: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
       cases: [{ name: 'bad-judge', prompt: '问题', rubric: ['标准'] }],
     });
     assert.equal(report.cases[0]?.pass, false);
     assert.equal(report.cases[0]?.error, 'judge_parse');
+  });
+  test('预算与价格缺失时禁止发请求，未知 usage 保守扣费并停止后续请求', async () => {
+    let requests = 0;
+    const options = {
+      baseUrl: 'https://test.invalid/v1', apiKey: 'test', model: 'm',
+      cases: [{ name: 'a', prompt: '问题', rubric: ['标准'] }],
+      prices: { m: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
+      fetchImpl: (async () => { requests++; return new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }] })); }) as typeof fetch,
+    };
+    await assert.rejects(runLiveEval({ ...options, budgetUsd: 0 }), /费用上限/);
+    await assert.rejects(runLiveEval({ ...options, budgetUsd: 1, prices: {} }), /测试价格/);
+    assert.equal(requests, 0);
+    const report = await runLiveEval({ ...options, budgetUsd: 0.006 });
+    assert.equal(requests, 1);
+    assert.match(report.cases[0].error!, /EVAL_BUDGET_EXHAUSTED/);
+    assert.ok(report.costUsd > 0 && report.costUsd <= report.budgetUsd);
+    assert.equal(report.kind, 'text-smoke');
   });
 });

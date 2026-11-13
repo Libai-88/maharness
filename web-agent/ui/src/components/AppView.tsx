@@ -1,10 +1,13 @@
+import type { RunInfo } from '../run-api';
+import RunControls from './RunControls';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TodoCard, TraceStep } from '../types';
 import type { Theme, Brand } from '../App';
 import type { MainTab } from './Sidebar';
 import { AGENT_ID, AGENT_NAME, APP_VERSION, sys } from '../voice';
 import { Toaster } from '@/components/ui/sonner';
-import { Bot, MessageCircle, PanelRight, X } from 'lucide-react';
+import { MessageCircle, PanelRight, X } from 'lucide-react';
+import BrandMark from '@/brand/BrandMark';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -19,12 +22,17 @@ import ChatView from './ChatView';
 import TracePanel from './TracePanel';
 import PluginTabView from './PluginTabView';
 
+const RunsView = lazy(() => import('./RunsView'));
 const FilesView = lazy(() => import('./FilesView'));
 const PluginsView = lazy(() => import('./PluginsView'));
 const StatsView = lazy(() => import('./StatsView'));
 const SettingsView = lazy(() => import('./SettingsView'));
 
 interface Props {
+  currentRun: RunInfo | null;
+  onFrameworkTask: (id: string, message: string) => void;
+  onNewTask: (message: string) => Promise<void>;
+  onRunChanged: () => void;
   sessions: Session[];
   activeId: string | null;
   messages: ChatMessage[];
@@ -167,8 +175,8 @@ export default function AppView(props: Props) {
           ) : activeTab === 'chat' ? (
             <div className="flex min-w-0 items-center gap-3">
               <SidebarTrigger className="size-8 shrink-0" />
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                <Bot size={16} />
+              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#fff8ed] ring-1 ring-black/5">
+                <BrandMark size={26} />
               </div>
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
@@ -199,7 +207,7 @@ export default function AppView(props: Props) {
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>
-                      {activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
+                      {activeTab === 'runs' ? '任务' : activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
                     </BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
@@ -264,6 +272,7 @@ export default function AppView(props: Props) {
             >
               {settingsOpen ? (
                 <SettingsView
+                  onStartTask={() => { props.onSettingsOpenChange(false); props.onActiveTabChange('chat'); }}
                   providers={providers}
                   onChanged={props.onRefreshProviders}
                   theme={theme}
@@ -275,6 +284,7 @@ export default function AppView(props: Props) {
                 <div className="flex min-h-0 flex-1">
                   <div className="flex min-w-0 flex-1 flex-col">
                     <ChatView
+                      runControls={props.currentRun && <RunControls key={props.currentRun.id} run={props.currentRun} onChanged={props.onRunChanged} onResume={props.onResume} onNew={props.onNewTask} />}
                       messages={messages}
                       streaming={streaming}
                       onSend={props.onSend}
@@ -313,6 +323,7 @@ export default function AppView(props: Props) {
                   {!narrow && traceOpen && (
                     <aside id="chat-trace-panel" data-testid="trace-panel" aria-label="运行轨迹" className="flex w-80 shrink-0 flex-col border-l bg-card xl:w-[22rem]">
                       <TracePanel
+                        run={props.currentRun}
                         steps={traceSteps}
                         stats={traceStats}
                         onRefresh={props.onRefreshTrace}
@@ -327,14 +338,16 @@ export default function AppView(props: Props) {
                           <SheetDescription>模型调用、工具执行与缓存使用。</SheetDescription>
                         </SheetHeader>
                         <div data-testid="trace-panel" className="flex min-h-0 flex-1 flex-col">
-                          <TracePanel steps={traceSteps} stats={traceStats} onRefresh={props.onRefreshTrace} />
+                          <TracePanel run={props.currentRun} steps={traceSteps} stats={traceStats} onRefresh={props.onRefreshTrace} />
                         </div>
                       </SheetContent>
                     </Sheet>
                   )}
                 </div>
+              ) : activeTab === 'runs' ? (
+                <RunsView onSession={id => { props.onSelectSession(id); props.onActiveTabChange('chat'); }} />
               ) : activeTab === 'files' ? (
-                <FilesView />
+                <FilesView onFrameworkTask={props.onFrameworkTask} />
               ) : activeTab === 'plugins' ? (
                 <PluginsView plugins={plugins} diagnostics={pluginDiagnostics} onAction={props.onPluginAction} />
               ) : activePluginNav ? (

@@ -92,7 +92,7 @@ export class Kernel {
       }
     });
     this.builtinBudget = new Budget(
-      this.config.get<number>('budget.subagentMaxTotal', 8),
+      this.config.get<number>('budget.subagentMaxTotal', 24),
       join(this.paths.data, 'task-profile.json'),
     );
     this.builtin.set('service:cache', this.builtinCache);

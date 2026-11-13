@@ -97,6 +97,7 @@ before(async () => {
 after(async () => {
   started?.server.close();
   started?.closeEnvWatcher();
+  await started?.runs.shutdown();
   started?.store.close();
   try { await started?.kernel.stop(); } catch { /* 停插件失败不影响清理 */ }
   delete process.env.MAHARNESS_API_TOKEN;

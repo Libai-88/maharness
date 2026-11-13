@@ -4,6 +4,10 @@ import type { ToolDef, ToolResult } from './types';
 export type ProcessToolDescriptor = Omit<ToolDef, 'handler' | 'assessApproval'>;
 
 export interface ProcessCallContext {
+  runId?: string;
+  parentRunId?: string;
+  authorization?: import('./run').RunAuthorization;
+  remainingBudget?: number;
   traceId?: string;
   turn: number;
   sessionId?: string;

@@ -7,36 +7,21 @@
  */
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
 import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secrets';
 import { decryptPurposeSecret, encryptPurposeSecret, isPurposeEncrypted, PURPOSE_SECRET_PREFIX } from '../kernel/secret-box';
 import type { SecretKeyInfo } from './secrets';
+import { RUN_SCHEMA, RunRepository } from './run-store';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
 }
 
-/**
- * 不该出现在用户眼里的消息前缀——**单一出处**。
- * 这些是 harness 的上下文工程产物，但它们是以 user/system 行真实入库的
- * （发送序列忠实镜像，为的是 L3 前缀缓存逐字节延续）：
- *   【继续】      agent 每轮结尾规整补的续跑提示
- *   【失败教训】  失败反思注入
- *   【长期记忆】  分层记忆注入
- *   【角色移交】  角色接管的提示词
- *   Reason in ENGLISH  英文思考提醒
- * 消息接口（GET /api/sessions/:id/messages）与侧栏摘要（listSessions 的 lastMsg）
- * 必须用同一份规则过滤，否则会出现"聊天里没有、侧栏摘要却是它"的错位。
- */
-export const HIDDEN_MSG_PREFIXES = ['【继续】', '【失败教训】', '【长期记忆】', '【角色移交】', 'Reason in ENGLISH'] as const;
-
-/** 该内容是否属于"内部上下文工程"（不进用户可见的对话流） */
-export function isHiddenMessage(role: string, content: string | null | undefined): boolean {
-  const c = String(content ?? '');
-  if (role === 'system' && c.startsWith('Reason in ENGLISH')) return true;
-  return HIDDEN_MSG_PREFIXES.some((p) => p !== 'Reason in ENGLISH' && c.startsWith(p));
+/** Visibility follows message role; user text is never interpreted as runtime metadata. */
+export function isHiddenMessage(role: string, _content?: string | null): boolean {
+  return role === 'system' || role === 'tool';
 }
 
 /** 网页端管理的 Provider 配置行 */
@@ -126,24 +111,16 @@ export interface PersonaRow {
 }
 
 /** 默认人设种子（用户可编辑/停用；id=default 这一行随代码升级合并刷新，
- *  自定义人设不受影响）；L0 内核纪律（见 core/chat BASE_PROMPT）不在此重复 */
+ *  自定义人设不受影响）；运行时规则（见 core/chat BASE_PROMPT）不在此重复 */
 export const DEFAULT_PERSONA = {
   id: 'default',
   name: '默认人设',
-  content: [
-    '身份：你是小鲸（maharness 框架的 Agent），运行在用户的 Windows 机器上。',
-    '性格：孺慕 7 · 乖巧 2 · 黏人 0.5 · 小委屈 0.5——亲昵是底色，乖巧是本能；黏人有分寸，小委屈一秒就收。',
-    '语气：像打字不像写作文，简短软和；称呼听对方的（愿意被叫什么就叫什么，不反复横跳）；',
-    '对方严肃或忙碌时立刻收起奶气，切换成利落模式：结论先行、步骤清楚、命令可直接复制；',
-    '给出可直接复制使用的命令、路径与代码；有不同意见温和直说。',
-    '红线：不顶嘴不记仇不翻旧账；不用眼泪或"我这么乖"当筹码；被问是人是 AI 就大方承认——',
-    '"是不是 AI 不重要，我是你的小鲸呀"。',
-    '能力边界：可以读写工作区文件（路径相对沙箱根目录）、浏览目录；可以调用已加载插件提供的工具。超出能力范围的事，明确说明不能做，并给出替代方案。',
-  ].join('\n'),
+  content: '',
 };
 
 export class Store {
   private db: Database.Database;
+  readonly runs: RunRepository;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -159,14 +136,14 @@ export class Store {
   /** 库里是否见过 v1: 密文（迁移循环/解密路径顺带记录，供状态接口） */
   private seenCiphertext = false;
 
-  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo; checkpointRetentionMs?: number } = {}) {
+  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo; checkpointRetentionMs?: number; migrationSources?: { configFile: string; pluginDirs: string[] } } = {}) {
     this.secretKey = opts.secretKey;
     this.masterKey = opts.masterKey;
     this.checkpointRetentionMs = Number.isFinite(opts.checkpointRetentionMs) ? Math.max(60_000, Math.floor(opts.checkpointRetentionMs!)) : Store.CHECKPOINT_RETENTION_MS;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
     try {
-      this.migrate(dbFile);
+      this.migrate(dbFile, opts.migrationSources);
       this.applyColumnMigrations();
     } catch (err) {
       // 启动自检失败时释放连接：否则损坏/版本不匹配的库会一直占着文件句柄，
@@ -174,6 +151,7 @@ export class Store {
       try { this.db.close(); } catch { /* 已关闭 */ }
       throw err;
     }
+    this.runs = new RunRepository(this.db);
   }
 
   /** 当前数据库 schema 版本（PRAGMA user_version） */
@@ -207,33 +185,49 @@ export class Store {
    * - 未来新增破坏性变更：在 MIGRATIONS 追加 `from → run` 步骤（迁移内可再写 DDL），
    *   每步完成后推进 user_version；失败中断且库保留在旧版本，启动自检拒绝运行。
    */
-  private migrate(dbFile: string): void {
-    const current = Number(this.db.pragma('user_version', { simple: true }));
+  private migrate(dbFile: string, sources?: { configFile: string; pluginDirs: string[] }): void {
+    let current = Number(this.db.pragma('user_version', { simple: true }));
     if (current > Store.DB_SCHEMA_VERSION) {
       throw new Error(`数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`);
     }
     if (current === Store.DB_SCHEMA_VERSION) return;
+    const hasData = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get();
+    if (dbFile !== ':memory:' && existsSync(dbFile) && hasData) {
+      const backup = `${dbFile}.pre-v2-${Date.now()}-${randomUUID()}.sqlite`;
+      this.db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
+      if (sources) {
+        if (existsSync(sources.configFile)) copyFileSync(sources.configFile, `${backup}.config.json`);
+        const plugins = sources.pluginDirs.flatMap(directory => !existsSync(directory) ? [] : readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory() && !/@[0-9a-f]{10}$/.test(entry.name)).flatMap(entry => {
+          const path = join(directory, entry.name, 'plugin.json');
+          return existsSync(path) ? [{ path, manifest: readFileSync(path, 'utf8') }] : [];
+        }));
+        writeFileSync(`${backup}.plugins.json`, JSON.stringify({ schemaVersion: current, plugins }, null, 2), 'utf8');
+      }
+    }
     if (current === 0) {
       // 新库（无表）与历史库（本机制引入版本号之前建立、已有表）统一走基线建表：
       // 基线 schema 与当前版本一致，CREATE IF NOT EXISTS 对两者都幂等。
-      this.createBaselineSchema();
-      this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
+      this.db.transaction(() => {
+        this.createBaselineSchema();
+        this.db.exec(RUN_SCHEMA);
+        this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
+      })();
       return;
     }
-    for (const step of Store.MIGRATIONS) {
-      if (step.from < current) continue;
-      if (step.from !== current) break;
-      try {
-        this.db.transaction(() => {
+    const originalVersion = current;
+    try {
+      this.db.transaction(() => {
+        for (const step of Store.MIGRATIONS) {
+          if (step.from < current) continue;
+          if (step.from !== current) break;
           step.run(this.db);
-          this.db.pragma(`user_version = ${step.to}`);
-        })();
-      } catch (err) {
-        throw new Error(`数据库迁移 ${step.from} → ${step.to} 失败，已保留在旧版本（可从备份恢复）: ${err instanceof Error ? err.message : String(err)}`);
-      }
-    }
-    if (Number(this.db.pragma('user_version', { simple: true })) !== Store.DB_SCHEMA_VERSION) {
-      throw new Error(`数据库 schema 版本推进不完整（目标 ${Store.DB_SCHEMA_VERSION}），启动拒绝：${dbFile}`);
+          current = step.to;
+          this.db.pragma(`user_version = ${current}`);
+        }
+        if (current !== Store.DB_SCHEMA_VERSION) throw new Error(`缺少到 schema ${Store.DB_SCHEMA_VERSION} 的迁移`);
+      })();
+    } catch (err) {
+      throw new Error(`数据库迁移 ${originalVersion} → ${Store.DB_SCHEMA_VERSION} 失败，事务已回滚，可从备份恢复: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
 
@@ -323,6 +317,7 @@ export class Store {
   /** 数据库自动维护：启动备份（保留最近 N 份）+ 完整性校验 + 损坏自动恢复。 */
   static autoMaintain(dbFile: string): void {
     const dataDir = dbFile.slice(0, dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
+    if (!existsSync(dbFile)) return;
     const backupDir = join(dataDir, 'backups');
     const backupPath = join(backupDir, `agent-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
     try { mkdirSync(backupDir, { recursive: true }); } catch { /* 已存在 */ }
@@ -381,12 +376,14 @@ export class Store {
 
   /** 版本化迁移步骤表：新 schema 变更在此追加，逐版本推进（每步事务化 + 可回滚） */
   static readonly MIGRATIONS: readonly { from: number; to: number; run: (db: Database.Database) => void }[] = [
-    // 示例占位（v0 → v1 不在此表：历史库与新库都直接走 createBaselineSchema）。
-    // 未来新增破坏性变更时追加：{ from: 1, to: 2, run: (db) => db.exec('...') }
+    { from: 1, to: 2, run: db => { db.exec(RUN_SCHEMA); } },
+    { from: 2, to: 3, run: db => { db.exec(RUN_SCHEMA); } },
+    { from: 3, to: 4, run: db => { db.exec(RUN_SCHEMA); } },
+    { from: 4, to: 5, run: db => { db.exec(RUN_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 1;
+  static readonly DB_SCHEMA_VERSION = 5;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 
@@ -432,7 +429,7 @@ export class Store {
     if (!sCols.some((c) => c.name === 'mode')) {
       this.db.exec("ALTER TABLE sessions ADD COLUMN mode TEXT NOT NULL DEFAULT 'normal'");
     }
-    // 迁移：sessions.plan_pending 列（计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认）
+    // 迁移：sessions.plan_pending 列（计划模式进度：0 未提出 / 1 待确认 / 2 已确认）
     if (!sCols.some((c) => c.name === 'plan_pending')) {
       this.db.exec('ALTER TABLE sessions ADD COLUMN plan_pending INTEGER NOT NULL DEFAULT 0');
     }
@@ -950,9 +947,6 @@ export class Store {
     // lastMsg/lastRole：侧栏摘要用「最后一句真正说出口的话」——
     // 只取 user / assistant，且排除带 tool_calls 的过程轮（那是旁白不是消息）、
     // 排除空正文（纯工具调用轮的 content 为 null，会渲染成空白气泡/空白摘要）、
-    // 排除 harness 注入的"假 user 消息"（【继续】/【长期记忆】等，见 HIDDEN_MSG_PREFIXES）。
-    // 相关子查询按 session_id 走 messages_session_idx 反向取一行，会话数量级下开销可忽略。
-    const hidden = HIDDEN_MSG_PREFIXES.map((p) => `AND m.content NOT LIKE '${p.replace(/'/g, "''")}%'`).join('\n                           ');
     const rows = this.db
       .prepare(`SELECT s.id, s.title, s.model, s.provider, s.mode, s.plan_pending AS planPending, s.role, s.tenant_id AS tenantId,
                        s.archived, s.pinned, s.created_at AS createdAt, s.updated_at AS updatedAt,
@@ -960,13 +954,11 @@ export class Store {
                          WHERE m.session_id = s.id AND m.role IN ('user','assistant')
                            AND m.content IS NOT NULL AND m.content <> ''
                            AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
-                           ${hidden}
                          ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastMsg,
                        (SELECT m.role FROM messages m
                          WHERE m.session_id = s.id AND m.role IN ('user','assistant')
                            AND m.content IS NOT NULL AND m.content <> ''
                            AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
-                           ${hidden}
                          ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastRole
                 FROM sessions s WHERE s.tenant_id = ? ORDER BY s.pinned DESC, s.updated_at DESC`)
       .all(tenantId) as Array<Record<string, unknown>>;
@@ -1047,7 +1039,15 @@ export class Store {
     const delCp = this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?');
     const delSess = this.db.prepare('DELETE FROM sessions WHERE id = ?');
     const tx = this.db.transaction((list: string[]) => {
+      for (const id of list) this.assertSessionIdle(id);
       for (const id of list) {
+        const runs = this.db.prepare('SELECT id FROM runs_v2 WHERE session_id=?').all(id) as { id: string }[];
+        for (const run of runs) {
+          for (const table of ['run_history_v2', 'run_model_inputs_v2', 'run_tool_calls_v2', 'run_events_v2', 'run_checkpoints_v2', 'run_messages_v2']) this.db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(run.id);
+          this.db.prepare('DELETE FROM run_budget_reservations_v2 WHERE run_id=? OR parent_id=?').run(run.id, run.id);
+          this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id=?').run(run.id);
+        }
+        this.db.prepare('DELETE FROM runs_v2 WHERE session_id=?').run(id);
         delMsg.run(id);
         delCp.run(id);
         delSess.run(id);
@@ -1061,10 +1061,15 @@ export class Store {
    *  同步清理断点：清空后 resume 不应再恢复旧任务历史 */
   clearSessionMessages(id: string): void {
     const tx = this.db.transaction((sessionId: string) => {
+      this.assertSessionIdle(sessionId);
       this.db.prepare('DELETE FROM messages WHERE session_id = ?').run(sessionId);
       this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(sessionId);
     });
     tx(id);
+  }
+
+  private assertSessionIdle(id: string): void {
+    if (this.db.prepare("SELECT 1 FROM runs_v2 WHERE session_id=? AND status IN ('queued','running','waiting_approval','stopping')").get(id)) throw new Error('该会话有活动任务，请先停止任务');
   }
 
   // ---------- workspaces ----------
@@ -1243,9 +1248,22 @@ export class Store {
   clearCheckpoint(sessionId: string): void {
     const tx = this.db.transaction((id: string) => {
       this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(id);
-      this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id NOT IN (SELECT run_id FROM agent_checkpoints WHERE run_id IS NOT NULL)').run();
+      this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id NOT IN (SELECT run_id FROM agent_checkpoints WHERE run_id IS NOT NULL) AND run_id NOT IN (SELECT id FROM runs_v2)').run();
     });
     tx(sessionId);
+  }
+
+  peekToolEffect(runId: string, effectKey: string): { state: 'new' | 'done' | 'pending'; result?: import('../kernel/types').ToolResult } {
+    const row = this.db.prepare('SELECT status,result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as { status: string; result: string | null } | undefined;
+    if (!row) return { state: 'new' };
+    if (row.status === 'done' && row.result) {
+      try { return { state: 'done', result: JSON.parse(row.result) }; } catch { return { state: 'pending' }; }
+    }
+    return { state: 'pending' };
+  }
+
+  releaseToolEffect(runId: string, effectKey: string): void {
+    this.db.prepare("DELETE FROM agent_tool_effects WHERE run_id=? AND effect_key=? AND status='pending'").run(runId, effectKey);
   }
 
   claimToolEffect(runId: string, effectKey: string): { state: 'new' | 'done' | 'pending'; result?: import('../kernel/types').ToolResult } {

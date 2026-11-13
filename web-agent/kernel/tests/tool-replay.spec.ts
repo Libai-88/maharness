@@ -15,7 +15,7 @@ const bus: EventBusLike = {
 
 /** 真实副作用工具：写文件 + 计数。回放阶段若 handler 被执行，此处立刻暴露。 */
 function makeRealTool(sandboxDir: string, counter: { n: number }): ToolDef {
-  return {
+  return {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'mutate_fixture',
     description: 'writes a fixture file (real side effect)',
     parameters: { type: 'object', properties: { path: { type: 'string' }, content: { type: 'string' } } },

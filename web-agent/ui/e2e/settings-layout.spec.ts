@@ -6,8 +6,8 @@ const require = createRequire(import.meta.url);
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 const provider = { id: 'design', label: '设计模型', baseUrl: 'https://example.test/v1', model: 'design-model', protocol: 'openai', enabled: true, hasKey: true, apiKeyMasked: 'sk-***', createdAt: 1, updatedAt: 8 };
 const initialConfig = {
-  revision: 'config-1', context: { maxTokens: 60000, truncateInject: true }, cache: { l1Threshold: 0.58, l2TtlMin: 30, l3Enabled: true },
-  agent: { modelRouting: {}, reasoningBudget: 1000, reasoningTotalBudget: 4000, thinkInEnglish: true }, provider: {},
+  revision: 'config-1', context: { maxTokens: 60000, truncateInject: true }, cache: { l1Enabled: false, l2TtlMin: 30, l3Enabled: true },
+  agent: { fallbackProviders: [], thinkInEnglish: false }, provider: {},
   taskTypes: ['默认', '代码'], routingTargets: [{ value: 'design@design-model', label: '设计模型', vision: true, contextWindow: 64000 }],
 };
 const stats = {
@@ -41,6 +41,9 @@ async function setup(page: Page) {
     else if (path === '/api/providers') data = method === 'GET' ? [provider] : { ...provider, ...body };
     else if (path === '/api/providers/models') data = { models: [{ id: 'vision-model', vision: true, tools: true, reasoning: false, contextWindow: 128000, priceIn: 0.2, priceOut: 0.8 }] };
     else if (path === '/api/providers/test') data = { ok: true, latencyMs: 28 };
+    else if (path === '/api/providers/design/tool-check') data = { status: 'confirmed', checkedAt: Date.now() };
+    else if (path === '/api/v2/workspace/permissions') data = { profile: 'standard', revision: 0, workspace: 'D:/workspace' };
+    else if (path === '/api/v2/runs') data = [];
     else if (path === '/api/providers/design') data = { ...provider, ...body };
     else if (path === '/api/config') {
       if (method === 'PATCH') {
@@ -90,6 +93,34 @@ async function checkAccessibility(page: Page) {
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 }
 
+for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复来源，兼容历史记录 ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 });
+  await setup(page);
+  const run = { id: 'diagnostic-run', sessionId: 'design-0', objective: '核对恢复后的材料', model: 'design-model', providerId: 'design', status: 'interrupted', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, usageStatus: 'unknown', error: '操作结果未知，禁止自动重放', authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+  await page.route('**/api/v2/**', route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
+    if (path.endsWith('/inputs')) return route.fulfill({ json: [
+      { id: 'new-input', turn: 1, providerId: 'design', model: 'design-model', createdAt: 0, messages: [{ role: 'user', content: '核对材料' }], tools: [{ name: 'read_file' }], diagnostics: { messageTokens: 12, toolTokens: 5, sources: [{ source: 'user', tokens: 12 }], fingerprint: 'f'.repeat(64), attemptId: 'attempt-2', resumedFromTurn: 0 } },
+      { id: 'old-input', turn: 0, providerId: 'design', model: 'design-model', createdAt: 0, messages: [], tools: [] },
+    ] });
+    return route.fulfill({ json: [] });
+  });
+  if (!await page.getByRole('button', { name: '任务', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await page.getByRole('button', { name: '任务', exact: true }).click();
+  await page.getByRole('button', { name: '诊断与子任务' }).click();
+  const panel = page.getByTestId('run-diagnostics');
+  await expect(panel).toContainText('用量不完整');
+  await expect(panel).toContainText('操作结果未知');
+  await panel.locator('summary').filter({ hasText: '第 2 轮' }).click();
+  await expect(panel.getByText(/本地估算：消息 12 tokens/)).toBeVisible();
+  await expect(panel.getByText(/执行尝试：attempt-2/)).toContainText('恢复断点：第 1 轮');
+  await panel.locator('summary').filter({ hasText: '第 1 轮' }).click();
+  await expect(panel.getByText('输入分项：未记录')).toBeVisible();
+  await checkAccessibility(page);
+  await page.screenshot({ path: `test-results/strengthening-diagnostics-${width}.png`, fullPage: true });
+});
+
 test('设置主题与品牌选择即时生效并保留偏好', async ({ page }) => {
   await setup(page);
   await openSettings(page);
@@ -101,6 +132,33 @@ test('设置主题与品牌选择即时生效并保留偏好', async ({ page }) 
   await page.reload();
   await expect(page.locator('html')).toHaveAttribute('data-brand', 'moss');
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+});
+
+test('首次配置流程只在用户检测后请求模型，再选择工作区并开始任务', async ({ page }) => {
+  const mutations = await setup(page);
+  await openSettings(page);
+  const guide = page.getByTestId('getting-started');
+  await expect(guide).toContainText('1 · 配置模型');
+  expect(mutations.some(item => item.path.endsWith('/tool-check'))).toBe(false);
+  await guide.getByRole('button', { name: '下一步' }).click();
+  await expect(guide.getByRole('button', { name: '下一步' })).toBeDisabled();
+  await guide.getByRole('button', { name: '检测连接与工具调用（模型请求可能计费）' }).click();
+  await expect(guide).toContainText('连接成功');
+  await guide.getByRole('button', { name: '下一步' }).click();
+  await expect(guide).toContainText('3 · 选择工作区');
+  await guide.getByRole('button', { name: '下一步' }).click();
+  await expect(guide).toContainText('常规权限');
+  await guide.getByRole('button', { name: '开始任务' }).click();
+  await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeVisible();
+  expect(mutations.filter(item => item.path.endsWith('/tool-check')).length).toBe(1);
+});
+
+test('备用线路由用户显式开启并保存顺序', async ({ page }) => {
+  const mutations = await setup(page);
+  await openSettings(page, '备用线路');
+  await page.getByRole('switch', { name: '设计模型', exact: true }).click();
+  await expect.poll(() => (mutations.find(item => item.path === '/api/config')?.body.agent as { fallbackProviders?: string[] })?.fallbackProviders).toEqual(['design']);
+  await expect(page.getByText('备用顺序 1')).toBeVisible();
 });
 
 test('Provider 表单有标签、可搜索拉取模型并保留并发版本', async ({ page }) => {
@@ -119,15 +177,15 @@ test('Provider 表单有标签、可搜索拉取模型并保留并发版本', as
   await expect.poll(() => mutations.find((item) => item.path === '/api/providers/design')?.body.expectedUpdatedAt).toBe(8);
 });
 
-test('上下文滑杆提交一次设置并保持键盘可用', async ({ page }) => {
+test('上下文容量提交设置且相似答案缓存默认关闭', async ({ page }) => {
   const mutations = await setup(page);
   await openSettings(page, '上下文管理');
-  const slider = page.getByRole('slider');
-  await expect(slider).toHaveAttribute('aria-valuenow', '0.58');
-  await slider.focus();
-  await slider.press('ArrowRight');
+  const capacity = page.getByLabel('context.maxTokens', { exact: true });
+  await capacity.fill('48000');
+  await capacity.press('Tab');
   await expect.poll(() => mutations.filter((item) => item.path === '/api/config').length).toBe(1);
-  await expect(slider).toHaveAttribute('aria-valuenow', '0.59');
+  await expect(capacity).toHaveValue('48000');
+  await expect(page.getByText('默认关闭。每次任务均交由当前模型处理。')).toBeVisible();
   await checkAccessibility(page);
 });
 
@@ -173,7 +231,7 @@ for (const width of [390, 900, 1440]) {
     await openSettings(page);
     await checkAccessibility(page);
     await page.screenshot({ path: testInfo.outputPath('settings.png') });
-    for (const name of ['模型与 Provider', '模型路由', '人设与提示词', '技能系统', '高级']) {
+    for (const name of ['模型与 Provider', '备用线路', '人设与提示词', '技能系统', '高级']) {
       const tab = page.getByRole('tab', { name, exact: true });
       await tab.scrollIntoViewIfNeeded();
       await tab.click();

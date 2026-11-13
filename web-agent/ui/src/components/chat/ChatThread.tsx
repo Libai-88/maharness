@@ -1,7 +1,9 @@
 import type { ChatMessage } from '../../types';
 import type { ChatTimelineItem } from '../../chat/model';
+import { AGENT_NAME } from '../../voice';
 import HeroSticker from '../HeroSticker';
-import { Bot, UsersRound as IconParallel } from 'lucide-react';
+import { UsersRound as IconParallel } from 'lucide-react';
+import BrandMark from '@/brand/BrandMark';
 import { Button } from '@/components/ui/button';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
@@ -59,8 +61,8 @@ export default function ChatThread({
                 <div data-testid="chat-welcome" className="flex min-h-[min(54dvh,30rem)] flex-col items-center justify-center gap-6 py-4 sm:flex-row sm:gap-8 sm:py-8">
                   <Empty className="min-w-0 flex-1 px-0">
                     <EmptyHeader>
-                      <EmptyMedia variant="icon"><Bot /></EmptyMedia>
-                      <EmptyTitle>{greet}，我是小鲸</EmptyTitle>
+                      <EmptyMedia variant="icon"><BrandMark size={52} /></EmptyMedia>
+                      <EmptyTitle>{greet}，我是 {AGENT_NAME}</EmptyTitle>
                       <EmptyDescription>
                         想聊什么、想让我做什么，直接说就行。
                         <br />

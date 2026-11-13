@@ -240,7 +240,7 @@ if (rf && recall && forget) {
     data: { traceId: 't', turn: 0, model: 'm', history: history2, systemPrompt: 's', tools: [], scratchpad: {} },
     ts: Date.now(),
   });
-  check('[memory] 失败教训钩子注入', history2.length === 3 && String(history2[2].content).includes('失败教训'));
+  check('[memory] 工具失败不追加运行方式指令', history2.length === 2);
   await cleanSelftest();
   const q3 = await recall.handler({ query: 'selftest' }, tctx());
   check('[memory] 清理完成', (q3.data as { count: number }).count === 0);
@@ -258,7 +258,7 @@ if (rf && recall && forget) {
   }); // 第二次同样失败：应去重
   const autoRecall = await recall.handler({ query: '工具失败教训' }, tctx());
   const autoCount = (autoRecall.data as { count: number }).count;
-  check('[memory] 失败教训自动记忆+去重', autoCount >= 1, `记 ${autoCount} 条`);
+  check('[memory] 工具失败不生成长期记忆', autoCount === 0, `记 ${autoCount} 条`);
   const autoFacts = (autoRecall.data as { facts: { id: string }[] }).facts;
   for (const f of autoFacts) await forget.handler({ id: f.id }, tctx());
 }
@@ -272,7 +272,7 @@ if (ls && gs) {
   const builtin = list.filter((s) => s.source === 'builtin').length;
   check('[skills] list_skills 内置指南可枚举', builtin >= 4, `共 ${list.length} 个（内置 ${builtin}）`);
   const g = await gs.handler({ name: 'agent-self-design' }, tctx());
-  check('[skills] get_skill 读取全文', g.ok === true && String((g.data as { content: string }).content).includes('自我设计'));
+  check('[skills] get_skill 读取全文', g.ok === true && String((g.data as { content: string }).content).includes('agent-self-design'));
   const missing = await gs.handler({ name: '../etc/passwd' }, tctx());
   check('[skills] 非法技能名被拦截', missing.ok === false);
 }
@@ -310,11 +310,10 @@ const hasMeta = wf?.risk === 'medium' && wf?.approval === true && wf?.assessAppr
   && wf?.costHint === 'low' && lf?.risk === 'low' && dfMeta?.risk === 'high';
 check('[capabilities] 工具元数据（risk/approval/动态审批）', hasMeta === true,
   `write_file=${wf?.risk}/${wf?.approval}/assess=${!!wf?.assessApproval} list_dir=${lf?.risk} delete_file=${dfMeta?.risk}`);
-// annotateToolDef：LLM 收到的描述自动带【风险/成本】标签（能力发现 + 经济性提示）
+// annotateToolDef：LLM 收到的描述保留安全边界，不叠加成本/域标签
 const { annotateToolDef } = await import('../core/chat/agent');
 const tagged = dfMeta ? annotateToolDef(dfMeta).description.includes('风险:high') : false;
-const costTag = sub ? annotateToolDef(sub).description.includes('成本:high') : false;
-check('[capabilities] 描述自动打标签（风险/成本）', tagged && costTag, `delete_file=${tagged} run_subagent=${costTag}`);
+check('[capabilities] 描述保留风险边界', tagged, `delete_file=${tagged}`);
 // 输出格式显式化（output 字段 → 描述尾部）：LLM 拿到结果即知结构，减少试错型幻觉
 const outputTag = sub ? annotateToolDef(sub).description.includes('输出格式: {answer') : false;
 const rf2 = tools.find((t) => t.name === 'read_file');
@@ -327,13 +326,13 @@ check('[capabilities] 输出格式显式化', outputTag && rfOutput, `run_subage
   const { mkdirSync: mk, writeFileSync: wfSync, rmSync: rm } = await import('node:fs');
   const dir = join(userPluginsDir, 'tmp-lazy');
   mk(dir, { recursive: true });
-  wfSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-lazy', name: '惰性测试', version: '0.1.0', entry: 'index.ts', lazy: true }));
+  wfSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['lazy_probe'] } }, id: 'tmp-lazy', name: '惰性测试', version: '0.1.0', entry: 'index.ts', lazy: true }));
   wfSync(join(dir, 'index.ts'), `
 import type { Plugin } from '../../kernel/types';
 export default {
   id: 'tmp-lazy', name: '惰性测试', version: '0.1.0',
   onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: { name: 'lazy_probe', risk: 'low', costHint: 'low', description: '惰性插件探针',
+    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: { type: 'object' }, name: 'lazy_probe', risk: 'low', costHint: 'low', description: '惰性插件探针',
       parameters: { type: 'object', properties: {} },
       async handler() { return { ok: true, data: { lazy: true } }; } } });
   },
@@ -374,18 +373,10 @@ export default {
     missing.length ? `缺失: ${missing.map((m) => m[0]).join(',')}` : '(核心能力名称+语义不变，实现可替换)');
 }
 
-// ---- 经济性：harness 管理认知资源（原子配额：per-session 3 次/10 分钟 + 进程级总上限 8） ----
+// ---- 委派容量与任务统计 ----
 {
-  const sid = 'selftest-sess-A';
-  const r1 = kernel.budget.consumeSubagentQuota(sid);
-  const r2 = kernel.budget.consumeSubagentQuota(sid);
-  const r3 = kernel.budget.consumeSubagentQuota(sid);
-  const r4 = kernel.budget.consumeSubagentQuota(sid); // 同会话第 4 次 → 拒绝
-  check('[budget] 原子配额：同会话连续消耗 3 次后第 4 次 allowed=false',
-    r1.allowed && r2.allowed && r3.allowed && r4.allowed === false,
-    `(${r1.allowed}/${r2.allowed}/${r3.allowed}/${r4.allowed})`);
-  const other = kernel.budget.consumeSubagentQuota('selftest-sess-B'); // 另一会话不受影响
-  check('[budget] 会话隔离：另一 sessionId 不受影响', other.allowed === true, `allowed=${other.allowed}`);
+  const calls = Array.from({ length: 32 }, () => kernel.budget.consumeSubagentQuota('selftest-sess-A'));
+  check('[budget] 连续委派不受固定窗口次数限制', calls.every(result => result.allowed));
   kernel.budget.recordTask({ type: '代码', turns: 5, cost: 0.01, failed: false, ts: Date.now() });
   kernel.budget.recordTask({ type: '代码', turns: 8, cost: 0.02, failed: true, ts: Date.now() });
   const profile = kernel.budget.taskProfile();
@@ -684,6 +675,7 @@ export default {
     // 于是 fs.watch 句柄一直 ref 着事件循环：断言全部跑完、汇总也打印了，进程却不退出
     // （表现为「npm run selftest 卡死」，Windows 上尤其明显）。
     started?.closeEnvWatcher?.();
+    await started?.runs.shutdown();
     started?.store.close();
     await started?.kernel.stop();
   }
@@ -708,7 +700,7 @@ export default {
       yield { type: 'done' as const };
     },
   };
-  const hangTool = {
+  const hangTool: ToolDef = { version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'hang_test',
     description: '挂起测试',
     parameters: { type: 'object', properties: {} },
@@ -718,8 +710,8 @@ export default {
   for await (const ev of runner.run({ provider: mockProvider, model: 'm', messages: [{ role: 'user', content: 'hi' }], traceId: `t-${Date.now()}`, tools: [hangTool] })) {
     evs.push(ev.type);
   }
-  const timedOut = evs.filter((t) => t === 'tool_result').length >= 1 && evs.includes('assistant_done');
-  check('[timeout] 挂起工具被超时拦截并继续循环', timedOut, `事件: ${evs.join(',')}`);
+  const timedOut = evs.filter((t) => t === 'tool_result').length === 1 && evs.includes('error') && !evs.includes('assistant_done') && calls === 1;
+  check('[timeout] 副作用超时后停止且不重放', timedOut, `事件: ${evs.join(',')}`);
   kernel.config.set('agent.toolTimeoutMs', 30_000); // 恢复默认
 }
 
@@ -783,7 +775,7 @@ export default {
   const { mkdirSync, writeFileSync } = await import('node:fs');
   const dir = join(userPluginsDir, 'tmp-compose');
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ id: 'tmp-compose', name: '可组合性测试', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['compose_probe', 'compose_probe_v2', 'compose_dep_v1', 'compose_dep_v2'], service: ['compose-svc'] } }, id: 'tmp-compose', name: '可组合性测试', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(dir, 'index.ts'), `
 import type { Plugin } from '../../kernel/types';
 export default {
@@ -801,6 +793,7 @@ export default {
       kind: 'tool',
       tool: {
         name: 'compose_probe',
+        version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: { type: 'object' },
         description: '可组合性探针',
         parameters: { type: 'object', properties: {} },
         async handler() { return { ok: true, data: { hello: 'world' } }; },
@@ -881,7 +874,7 @@ import type { Plugin } from '../../kernel/types';
 export default {
   id: 'tmp-compose', name: '可组合性测试', version: '0.2.0',
   onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: { name: 'compose_probe_v2', description: '探针 v2',
+    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: { type: 'object' }, name: 'compose_probe_v2', description: '探针 v2',
       parameters: { type: 'object', properties: {} },
       async handler() { return { ok: true, data: { v: 2 } }; } } });
   },
@@ -899,7 +892,7 @@ import { depTag } from './dep.ts';
 export default {
   id: 'tmp-compose', name: '可组合性测试', version: '0.3.0',
   onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: { name: depTag(), description: '依赖探针',
+    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: { type: 'object' }, name: depTag(), description: '依赖探针',
       parameters: { type: 'object', properties: {} },
       async handler() { return { ok: true, data: { v: 1 } }; } } });
   },
@@ -933,7 +926,7 @@ export default {
   const { mkdirSync, writeFileSync, rmSync } = await import('node:fs');
   const pdir = join(userPluginsDir, 'tmp-provider');
   mkdirSync(pdir, { recursive: true });
-  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ id: 'tmp-provider', name: '提供者', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { service: ['coeffect-svc'] } }, id: 'tmp-provider', name: '提供者', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(pdir, 'index.ts'), `
 import type { Plugin } from '../../kernel/types';
 export default {
@@ -943,7 +936,7 @@ export default {
 `);
   const cdir = join(userPluginsDir, 'tmp-consumer');
   mkdirSync(cdir, { recursive: true });
-  writeFileSync(join(cdir, 'plugin.json'), JSON.stringify({ id: 'tmp-consumer', name: '消费者', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(join(cdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['consumer_probe'] } }, id: 'tmp-consumer', name: '消费者', version: '0.1.0', entry: 'index.ts' }));
   writeFileSync(join(cdir, 'index.ts'), `
 import type { Plugin } from '../../kernel/types';
 export default {
@@ -956,6 +949,7 @@ export default {
       kind: 'tool',
       tool: {
         name: 'consumer_probe',
+        version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: { type: 'object' },
         description: '消费者探针',
         parameters: { type: 'object', properties: {} },
         async handler() { return { ok: true, data: { provided: svc?.ready === true } }; },
@@ -1060,7 +1054,7 @@ export default {
       },
     };
   };
-  const subTool: ToolDef = {
+  const subTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'mock_sub', description: '模拟子代理', parameters: { type: 'object', properties: {} },
     async handler(_a, tctx) {
       // 子任务：带 parentStepId 再开一个 Agent 循环（span 树下钻）
@@ -1121,7 +1115,7 @@ export default {
       yield { type: 'done' as const };
     },
   });
-  const badShapeTool: ToolDef = {
+  const badShapeTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external',
     name: 'bad_shape', description: '坏结构工具',
     parameters: { type: 'object', properties: {} },
     outputSchema: { type: 'object', required: ['id'], properties: { id: { type: 'string' } } },
@@ -1134,9 +1128,9 @@ export default {
   })) {
     if (ev.type === 'tool_result') sawToolResult = true;
   }
-  const ovSteps = kernel.trace.query(undefined, { name: 'output-validate' });
+  const ovSteps = kernel.trace.query(undefined, { type: 'tool_call', name: 'bad_shape' });
   const annotated = sawToolResult && ovSteps.length > 0 && ovSteps[ovSteps.length - 1].status === 'error';
-  check('[validate] 坏结构回填标注 + output-validate 步骤入 Trace', annotated,
+  check('[validate] 坏结构返回失败并保存工具错误轨迹', annotated,
     `(步骤=${ovSteps.length} 状态=${ovSteps[ovSteps.length - 1]?.status})`);
 }
 
@@ -1161,7 +1155,7 @@ export default {
       },
     };
   };
-  const bigTool: ToolDef = {
+  const bigTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'big_result', description: '大结果工具', parameters: { type: 'object', properties: {} },
     async handler() { return { ok: true, data: { content: big } }; },
   };
@@ -1173,7 +1167,7 @@ export default {
     onCheckpoint: (_t, h) => { cap.history = h; },
   })) { /* 消费 */ }
   const toolMsg = cap.history?.find((m) => m.role === 'tool');
-  const storedRef = toolMsg && String(toolMsg.content).includes('结果存储') && String(toolMsg.content).includes('rs1');
+  const storedRef = toolMsg && JSON.parse(String(toolMsg.content)).resultRef === 'rs1' && JSON.parse(String(toolMsg.content)).truncated === true;
   const noFullText = toolMsg && !String(toolMsg.content).includes(big);
   // recall_tool_result 重读（chat 插件注册的真实工具）
   const recall = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'recall_tool_result')?.tool;
@@ -1185,7 +1179,7 @@ export default {
   check('[result-store] recall_tool_result 零副作用重读 + 缺失报错', recallOk && missOk,
     `(重读=${recallOk} 缺失=${missOk})`);
   // 小结果（≤2000）全文回填，不折腾存储
-  const smallTool: ToolDef = {
+  const smallTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'small_result', description: '小结果工具', parameters: { type: 'object', properties: {} },
     async handler() { return { ok: true, data: { v: '小' } }; },
   };
@@ -1230,7 +1224,7 @@ export default {
       yield { type: 'done' as const };
     },
   };
-  const noopTool: ToolDef = {
+  const noopTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'noop', description: '无操作', parameters: { type: 'object', properties: {} },
     async handler() { return { ok: true, data: { done: true } }; },
   };
@@ -1268,7 +1262,7 @@ export default {
       },
     };
   };
-  const cpTool: ToolDef = {
+  const cpTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'cp_probe', description: '断点探针', parameters: { type: 'object', properties: {} },
     async handler() { return { ok: true, data: { observed: '文件内容' } }; },
   };
@@ -1345,51 +1339,17 @@ export default {
   check('[handoff] 移交终止循环 + 事件上报', handed, `(事件=${evs.map((e) => e.type).join(',')} LLM 调用=${llmCalls})`);
 }
 
-// ---- H8 叙述化纠偏：模型把工具调用写成正文文本 → harness 检测 + 纠偏重提示 + 原生重试 ----
+// ---- 模型文本回答不触发行为重提示 ----
 {
-  const { AgentRunner, detectNarratedToolCall } = await import('../core/chat/agent');
-  const runner2 = new AgentRunner(kernel, kernel.bus);
-  // 检测器单测：命中叙述化格式 / 不误伤普通正文
-  check('[narration-fix] 检测器命中叙述化格式',
-    detectNarratedToolCall('好的。\n【工具调用 list_dir】参数: {"path":"x"}\n结果: ...')
-    && detectNarratedToolCall('【工具调用 get_skill】参数: (空) 结果: 已读取')
-    && !detectNarratedToolCall('工具调用是 agent 改变世界的唯一途径。')
-    && !detectNarratedToolCall('【工具结果已存入结果存储（id=xxx）】'),
-    '');
-  // 执行器集成：第 1 轮叙述化（无原生 tool_calls）→ 纠偏 → 第 2 轮原生 tool_call → 第 3 轮最终答案
-  let llmCalls = 0;
-  const mk = {
-    id: 'mock-nf', label: 'NF', defaultModel: 'm', prices: { in: 0, out: 0 },
-    async *chat() {
-      llmCalls++;
-      if (llmCalls === 1) {
-        // 叙述化：写成正文文本，不发起原生 tool_calls
-        yield { type: 'delta' as const, text: '我来列出目录。\n【工具调用 list_dir】参数: {"path":"x"}\n结果: (假装的结果)' };
-      } else if (llmCalls === 2) {
-        yield { type: 'tool_call' as const, toolCall: { id: 'nf1', type: 'function' as const, function: { name: 'nf_probe', arguments: '{}' } } };
-      } else {
-        yield { type: 'delta' as const, text: '目录列出完成，最终答案。' };
-      }
-      yield { type: 'usage' as const, input: 10, output: 10 };
-      yield { type: 'done' as const };
-    },
+  const { AgentRunner } = await import('../core/chat/agent');
+  let calls = 0;
+  const provider = {
+    id: 'mock-text', label: 'Text', defaultModel: 'm', prices: { in: 0, out: 0 },
+    async *chat() { calls++; yield { type: 'delta' as const, text: '【工具调用 list_dir】参数: {}' }; yield { type: 'done' as const }; },
   };
-  const nfTool: ToolDef = {
-    name: 'nf_probe', description: '叙述化纠偏探针', parameters: { type: 'object', properties: {} },
-    async handler() { return { ok: true, data: { entries: ['a.md'] } }; },
-  };
-  const evs2: string[] = [];
-  for await (const ev of runner2.run({
-    provider: mk, model: 'm', messages: [{ role: 'user', content: '列出目录' }],
-    traceId: `nf-${Date.now()}`, tools: [nfTool],
-  })) {
-    evs2.push(ev.type);
-  }
-  const fixSteps = kernel.trace.query(undefined, { name: 'narration-fix' });
-  const fixed = evs2.includes('retry') && evs2.includes('tool_result') && evs2.includes('assistant_done')
-    && llmCalls === 3 && fixSteps.length > 0;
-  check('[narration-fix] 叙述化被检测并纠偏（重提示后原生调用）', fixed,
-    `(事件=${evs2.join(',')} LLM 调用=${llmCalls} 纠偏步骤=${fixSteps.length})`);
+  const events: string[] = [];
+  for await (const event of new AgentRunner(kernel, kernel.bus).run({ provider, model: 'm', messages: [{ role: 'user', content: 'hi' }], traceId: `text-${Date.now()}` })) events.push(event.type);
+  check('[loop] 文本回答正常结束且不自动重试', calls === 1 && events.includes('assistant_done') && !events.includes('retry'));
 }
 
 // ---- 工具协议净化：孤儿回执与未回填调用不能进入 Provider 请求 ----

@@ -999,7 +999,7 @@ export function mcpToolMetadata(mt: McpToolDef): Pick<ToolDef, 'risk' | 'sideEff
     risk,
     sideEffect,
     ...(idempotent ? { idempotent: true, retry: { maxAttempts: 2, backoffMs: 500 } } : {}),
-    ...(mt.outputSchema ? { outputSchema: mt.outputSchema } : {}),
+    outputSchema: mt.outputSchema ?? { type: 'object', required: ['text', 'server', 'tool'], properties: { text: { type: 'string' }, server: { type: 'string' }, tool: { type: 'string' } } },
     output: mt.outputSchema ? '{structuredContent}' : '{text, server, tool}',
   };
 }
@@ -1016,6 +1016,7 @@ export function wrapMcpTool(
   const gate = assessApprovalGate(cfg, `${serverName}/${mt.name}`);
   const metadata = mcpToolMetadata(mt);
   const base: ToolDef = {
+    version: '2.0.0', permissions: ['network'],
     name: toolName,
     description: `${mt.annotations?.title ? `${mt.annotations.title}：` : ''}${mt.description ?? `调用 MCP server ${serverName} 的 ${mt.name} 工具`}（来源: MCP server「${serverName}」）`,
     parameters: mt.inputSchema ?? { type: 'object', properties: {} },
@@ -1260,6 +1261,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_status',
         risk: 'low',
         costHint: 'low',
@@ -1288,6 +1291,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_resources_list',
         risk: 'medium',
         costHint: 'low',
@@ -1334,6 +1339,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_resource_read',
         risk: 'medium',
         costHint: 'medium',
@@ -1378,6 +1385,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_prompts_list',
         risk: 'medium',
         costHint: 'low',
@@ -1424,6 +1433,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_prompt_get',
         risk: 'medium',
         costHint: 'medium',
@@ -1469,6 +1480,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'mcp_reconnect',
         risk: 'medium',
         costHint: 'low',
@@ -1539,6 +1552,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'mcp_oauth_login',
         risk: 'medium',
         costHint: 'low',
@@ -1584,6 +1599,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'mcp_oauth_complete',
         risk: 'medium',
         costHint: 'low',
@@ -1631,6 +1648,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_oauth_status',
         risk: 'low',
         costHint: 'low',
@@ -1655,6 +1674,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'mcp_oauth_logout',
         risk: 'medium',
         costHint: 'low',
@@ -1701,6 +1722,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'mcp_registry_search',
         risk: 'medium',
         costHint: 'low',
@@ -1757,6 +1780,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'mcp_registry_install',
         risk: 'high',
         costHint: 'medium',

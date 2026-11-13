@@ -74,6 +74,8 @@ export interface ModelCapabilityInfo {
 }
 
 export interface ProviderInfo {
+  protocolToolCalls?: boolean;
+  toolCheck?: { status: 'confirmed' | 'not_confirmed' | 'unknown'; checkedAt?: number; reason?: string };
   id: string;
   label: string;
   baseUrl: string;

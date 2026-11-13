@@ -21,6 +21,7 @@ export type EventListener = (e: Event) => unknown | Promise<unknown>;
 // ============ 插件 ============
 
 export interface PluginManifest {
+  apiVersion: 2;
   id: string;
   name: string;
   version: string;
@@ -32,7 +33,7 @@ export interface PluginManifest {
   enabled?: boolean;        // 默认 true；false = 声明停用（不自动启动）
   requires?: string[];      // 依赖的插件 id（先加载）
   /** 显式 capability 注册许可；一旦声明，未列出的类型或名称均拒绝。缺省表示本机 trusted 兼容模式。 */
-  permissions?: {
+  permissions: {
     capabilities: Partial<Record<Capability['kind'], string[]>>;
     /** 插件外部依赖清单（仅记录已通过 plugins.allowedDependencies 的包）。 */
     dependencies?: string[];
@@ -445,6 +446,9 @@ export interface PersonaDef {
 // ---------- 工具 ----------
 
 export interface ToolDef {
+  version: string;
+  permissions: ToolPermission[];
+  delegates?: boolean;
   name: string;
   description: string;      // 给 LLM 看的能力说明
   parameters: Record<string, unknown>; // JSONSchema
@@ -467,16 +471,19 @@ export interface ToolDef {
   /** 工具副作用契约：仅幂等工具允许执行器对瞬时失败自动重试。默认不重试。 */
   idempotent?: boolean;
   /** 副作用分类：read/none 不进入恢复账本（恢复时重新观察）；write/external/irreversible 进入账本。 */
-  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  sideEffect: 'none' | 'read' | 'write' | 'external' | 'irreversible';
   /** 内容信任来源：untrusted（网页/文档/MCP/浏览器）会在执行后做提示注入与敏感信息扫描。 */
   contentTrust?: 'trusted' | 'untrusted';
   retry?: { maxAttempts?: number; backoffMs?: number };
   /** 输出格式的机器校验（JSONSchema 子集）：工具执行后对 result.data 做结构校验。
    *  校验失败不阻断（LLM 可拿到原始结果自我修正），但回填内容会附【输出校验】标注，
    *  且校验事件入 Trace——"成败机器可判"从工具返回值延伸到输出结构。 */
-  outputSchema?: Record<string, unknown>;
+  outputSchema: Record<string, unknown>;
   handler(args: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
+
+export type ToolPermission = 'workspace.read' | 'workspace.write' | 'network' | 'process' | 'delegate' | 'admin';
+export type ToolDefV2 = ToolDef & Required<Pick<ToolDef, 'version' | 'permissions' | 'sideEffect' | 'outputSchema'>>;
 
 /** Context Provider：插件不只是 tool provider，也可以是 context provider。
  *  按需向 LLM 注入上下文（区别于无脑塞进 system prompt）：
@@ -507,6 +514,9 @@ export interface ContextContribution {
 }
 
 export interface ToolResult {
+  failure?: import('./run').ToolFailure;
+  truncated?: boolean;
+  resultRef?: string;
   ok: boolean;
   data?: unknown;           // 成功时返回给 LLM 的结构化结果
   error?: string;           // 失败原因（会原样回给 LLM）
@@ -526,6 +536,7 @@ export interface ToolResult {
 }
 
 export interface ToolEvidence {
+  artifact?: boolean;
   kind: 'file' | 'url' | 'command' | 'state' | 'content' | 'custom';
   label: string;
   ref?: string;
@@ -541,6 +552,13 @@ export interface ToolWarning {
 }
 
 export interface ToolContext {
+  runSignal?: AbortSignal;
+  delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
+  results?: Pick<import('./tool-journal').ToolExecutionJournal, 'read'>;
+  runId?: string;
+  parentRunId?: string;
+  authorization?: import('./run').RunAuthorization;
+  remainingBudget?: number;
   traceId?: string;
   turn: number;
   /** 当前会话 ID（server 层透传）：工具可据此把状态挂到具体会话（如 todo 插件的会话级 to do list） */
@@ -639,6 +657,7 @@ export interface ToolCall {
 }
 
 export interface LLMMessage {
+  context?: import('./context').ContextItem;
   role: LLMRole;
   content: string | null;
   /** 多模态：data URL 图片列表（如 data:image/png;base64,…）。
@@ -654,6 +673,7 @@ export type LLMChunk =
   | { type: 'tool_call'; toolCall: ToolCall }
   | {
       type: 'usage';
+      estimated?: boolean;
       input: number;           // 总输入 token（含缓存命中部分）
       output: number;
       /** 本次请求中 provider 前缀缓存真实命中的输入 token（归一化各厂商字段）：
@@ -839,7 +859,7 @@ export interface Session {
   model: string;
   provider: string;
   mode: string;             // normal / plan / goal：会话级 Agent 模式
-  planPending: number;      // 计划模式状态机：0 无限制 / 1 待出计划 / 2 已出计划待确认
+  planPending: number;      // 计划模式进度：0 未提出 / 1 待确认 / 2 已确认
   /** 当前接管角色（handoff）：空 = 主代理（默认）；有值 = 该角色接管会话 */
   role?: string;
   archived: number;         // 0/1 归档（会话管理）

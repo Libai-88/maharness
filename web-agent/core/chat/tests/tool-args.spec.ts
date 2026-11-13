@@ -50,7 +50,7 @@ function providerFor(argumentsText: string): { provider: ProviderDef; calls: { c
 }
 
 function demoTool(handlerCalls: { count: number }): ToolDef {
-  return {
+  return {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'demo',
     description: 'demo tool',
     parameters: {

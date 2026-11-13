@@ -241,6 +241,8 @@ export class ProcessPluginHost {
     const descriptor = this.tools.get(name);
     const timeoutMs = Math.max(1_000, descriptor?.timeoutMs ?? this.opts.timeoutMs);
     const context: ProcessCallContext = {
+      runId: tctx.runId, parentRunId: tctx.parentRunId,
+      authorization: tctx.authorization, remainingBudget: tctx.remainingBudget,
       traceId: tctx.traceId,
       turn: tctx.turn,
       sessionId: tctx.sessionId,

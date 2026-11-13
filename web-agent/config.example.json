@@ -8,7 +8,7 @@
   },
 
   "cache": {
-    "l1Threshold": 0.58,
+    "l1Enabled": false,
     "l2TtlMin": 30,
     "l3Enabled": true,
     "warmup": "auto"
@@ -19,18 +19,12 @@
     "maxTurnsPlan": 24,
     "maxTurnsGoal": 48,
     "toolTimeoutMs": 30000,
-    "reasoningBudget": 800,
-    "reasoningTotalBudget": 3000,
-    "thinkInEnglish": true,
-    "modelRouting": {
-      "默认": "deepseek",
-      "代码": "deepseek@deepseek-reasoner"
-    }
+    "thinkInEnglish": false,
+    "fallbackProviders": []
   },
 
   "budget": {
-    "maxSessionCost": 0,
-    "subagentMaxTotal": 8
+    "maxSessionCost": 0
   },
 
   "provider": {

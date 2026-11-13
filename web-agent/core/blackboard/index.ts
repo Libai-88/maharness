@@ -157,10 +157,7 @@ export default {
         priority: 7,
         content: [
           '共享黑板使用规则：',
-          '1. 并行/子代理的中间结果需要被其他代理复用时，用 blackboard_put 写入（key 用稳定短标识）；',
-          '2. 读取共享结果前先 blackboard_list 看 key，再用 blackboard_get；不要凭猜测覆盖别人的 key；',
-          '3. 黑板只放结构化结论/证据/路径，不放完整对话、密钥或大段原文；',
-          '4. 过时结果用 blackboard_delete 删除；同一 key 覆盖时保留最新结论。',
+          '需要复用的中间结果用 blackboard_put / blackboard_get 共享；只放结构化结论、证据或路径，不放密钥或大段原文。',
         ].join('\n'),
       },
     });
@@ -168,6 +165,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'blackboard_put',
         risk: 'low',
         costHint: 'low',
@@ -202,6 +201,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'blackboard_get',
         risk: 'low',
         costHint: 'low',
@@ -225,6 +226,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'blackboard_list',
         risk: 'low',
         costHint: 'low',
@@ -249,6 +252,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'blackboard_delete',
         risk: 'low',
         costHint: 'low',

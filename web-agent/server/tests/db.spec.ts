@@ -6,7 +6,7 @@
  */
 import { describe, test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -30,6 +30,42 @@ after(() => {
 });
 
 describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
+  test('迁移 DDL 失败不推进版本；备份可恢复原会话与未知配置', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-failed-migration-'));
+    const path = join(root, 'agent.db');
+    try {
+      const initial = new Store(path); const session = initial.createSession('preserved'); initial.close();
+      const raw = new Database(path);
+      raw.pragma('user_version = 4');
+      raw.exec('DROP INDEX runs_v2_session_active; DROP TABLE runs_v2; CREATE VIEW runs_v2 AS SELECT 1 AS incompatible');
+      raw.close();
+      const configFile = join(root, 'config.json'); writeFileSync(configFile, '{"custom":{"unknown":42}}');
+      assert.throws(() => new Store(path, { migrationSources: { configFile, pluginDirs: [] } }), /迁移.*失败/);
+      const failed = new Database(path); assert.equal(failed.pragma('user_version', { simple: true }), 4); failed.close();
+      const snapshot = readdirSync(root).find(name => name.includes('.pre-v2-') && name.endsWith('.sqlite'))!;
+      const backup = new Database(join(root, snapshot), { readonly: true });
+      assert.equal((backup.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
+      assert.equal(backup.pragma('integrity_check', { simple: true }), 'ok'); backup.close();
+      assert.equal(JSON.parse(readFileSync(join(root, `${snapshot}.config.json`), 'utf8')).custom.unknown, 42);
+      copyFileSync(join(root, snapshot), path);
+      const restored = new Database(path); assert.equal(restored.pragma('user_version', { simple: true }), 4); restored.close();
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  test('v2 迁移备份配置与插件清单，并能连续推进 schema 版本', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-v2-backup-'));
+    const dbFile = join(root, 'agent.db');
+    try {
+      const initial = new Store(dbFile); const session = initial.createSession('model'); initial.close();
+      const raw = new Database(dbFile); raw.pragma('user_version = 1'); raw.close();
+      const configFile = join(root, 'config.json'); writeFileSync(configFile, JSON.stringify({ customRule: 'preserve' }));
+      const plugins = join(root, 'plugins'); mkdirSync(join(plugins, 'custom'), { recursive: true });
+      writeFileSync(join(plugins, 'custom', 'plugin.json'), JSON.stringify({ id: 'custom', customField: 42 }));
+      const migrated = new Store(dbFile, { migrationSources: { configFile, pluginDirs: [plugins] } });
+      assert.equal(migrated.schemaVersion, Store.DB_SCHEMA_VERSION); assert.equal(migrated.listSessions()[0].id, session.id); migrated.close();
+      assert.ok(readdirSync(root).some(file => file.endsWith('.config.json')));
+      assert.ok(readdirSync(root).some(file => file.endsWith('.plugins.json')));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
   test('新库与历史库都推进到当前 schema 版本，数据在重开后保留', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-db-mig-'));
     try {

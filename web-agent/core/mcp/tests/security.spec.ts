@@ -313,12 +313,15 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
     conn.close();
   });
 
-  it('HTTP MCP 调用取消后关闭底层请求连接', async () => {
+  it('HTTP MCP 调用取消后关闭底层请求连接', { timeout: 10_000 }, async () => {
     let closed = false;
+    let observeRequest!: () => void;
+    const requestObserved = new Promise<void>(resolve => { observeRequest = resolve; });
     const server = createServer((_req, res) => {
       res.on('close', () => { closed = true; });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.write('{"jsonrpc":"2.0","id":3,"result":{"content":[');
+      observeRequest();
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
@@ -328,9 +331,10 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
     const controller = new AbortController();
     try {
       const pending = conn.toolsCall('slow', {}, controller.signal);
-      await new Promise((resolve) => setTimeout(resolve, 30));
+      const rejected = assert.rejects(pending, /abort|取消|停止/i);
+      await requestObserved;
       controller.abort();
-      await assert.rejects(pending, /abort|取消|停止/i);
+      await rejected;
       const deadline = Date.now() + 2_000;
       while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 20));
       assert.equal(closed, true, '取消后服务端应观察到 HTTP 请求关闭');

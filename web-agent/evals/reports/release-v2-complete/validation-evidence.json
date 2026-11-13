@@ -1,0 +1,52 @@
+[
+  {
+    "evidence": ".build-v2-closure.log: backend and UI typechecks passed on final search-boundary repair",
+    "passed": true,
+    "id": "typecheck"
+  },
+  {
+    "evidence": ".test-v2-closure.log: 1200 tests, 1199 passed, 1 skipped, 0 failed; .release-report-closure.log: 8/8 report checks passed",
+    "passed": true,
+    "id": "unit"
+  },
+  {
+    "evidence": ".security-v2-closure.log: 382/382 passed, includes native/JS search read boundary",
+    "passed": true,
+    "id": "security"
+  },
+  {
+    "evidence": ".build-v2-closure.log: production build and both typechecks passed",
+    "passed": true,
+    "id": "build"
+  },
+  {
+    "evidence": ".e2e-v2-closure.log: 84/84 browser tests, desktop main flows",
+    "passed": true,
+    "id": "desktop"
+  },
+  {
+    "evidence": ".e2e-v2-closure.log: 390px and 900px layout checks passed",
+    "passed": true,
+    "id": "narrow-screen"
+  },
+  {
+    "evidence": ".e2e-v2-closure.log: axe serious/critical, keyboard, forms and dialog checks passed; automated coverage only",
+    "passed": true,
+    "id": "accessibility"
+  },
+  {
+    "evidence": ".e2e-v2-closure.log: reconnect/resume passed; .test-v2-closure.log: process recovery, SSE cursor and subscriber disconnect passed",
+    "passed": true,
+    "id": "reconnect"
+  },
+  {
+    "evidence": ".migration-plugin-v2-final.log: 69/69 passed, including failed DDL, backup integrity, rollback and preserved data/config; DB tests also passed in final unit suite",
+    "passed": true,
+    "id": "migration-rollback"
+  },
+  {
+    "evidence": ".plugin-lock-v2-closure.log: external locks verified; .test-v2-closure.log: v2 loader and tool contracts passed; .selftest-v2-closure.log: 90/90 passed",
+    "passed": true,
+    "id": "plugin-contract"
+  }
+]

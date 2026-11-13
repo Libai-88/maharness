@@ -2,6 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
+import { createResultTool } from '../../core/chat/result-tool';
 
 const root = join(process.cwd(), 'core');
 
@@ -44,7 +45,7 @@ describe('内置工具副作用契约', () => {
   it('外部内容通道声明 contentTrust=untrusted', () => {
     const required = [
       'web_search', 'web_fetch', 'web_crawl', 'read_document', 'ocr_image', 'ocr_pdf',
-      'browser_snapshot', 'browser_network', 'recall_tool_result', 'recall_facts',
+      'browser_snapshot', 'browser_network', 'recall_facts',
       'list_memory_blocks', 'blackboard_get',
     ];
     const blocks = new Map<string, string>();
@@ -57,6 +58,8 @@ describe('内置工具副作用契约', () => {
     const missing = required.filter((name) => !new RegExp(`name:\\s*'${name}'`).test(blocks.get(name) ?? '')
       || !/contentTrust:\s*'untrusted'/.test(blocks.get(name) ?? ''));
     assert.deepEqual(missing, []);
+    assert.equal(createResultTool().contentTrust, 'untrusted');
+    assert.equal(createResultTool().sideEffect, 'read');
   });
 
   it('长耗时工具声明独立 timeoutMs', () => {

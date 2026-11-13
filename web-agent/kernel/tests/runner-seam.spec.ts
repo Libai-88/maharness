@@ -39,7 +39,7 @@ function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup:
   // 每次 run 发一条 bus 事件作为「替身确实被调用」的证据。
   const pdir = join(userPluginsDir, 'runner-stub');
   mkdirSync(pdir, { recursive: true });
-  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({
+  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
     id: 'runner-stub', name: 'runner-stub', version: '0.1.0', entry: 'index.ts',
   }));
   writeFileSync(join(pdir, 'index.ts'), `
@@ -243,7 +243,7 @@ describe('执行循环可替换（service:runner）', () => {
     assert.equal(f.calls.length - before, 4);
   });
 
-  test('并行资源上限：重叠批次的活动子任务不超过 8，超限批次不启动', async (t) => {
+  test('并行资源上限：重叠批次的活动子任务不超过 16，超限批次不启动', async (t) => {
     const f = setup();
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
@@ -259,7 +259,7 @@ describe('执行循环可替换（service:runner）', () => {
       peak = Math.max(peak, active);
     });
     const tool = toolOf(f.kernel, 'run_parallel');
-    const batch = (name: string) => tool.handler({ tasks: Array.from({ length: 4 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) }, toolCtx(f.rootDir, f.kernel));
+      const batch = (name: string) => tool.handler({ tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) }, toolCtx(f.rootDir, f.kernel));
     const p1 = batch('one');
     const p2 = batch('two');
     const p3 = batch('three');
@@ -268,7 +268,7 @@ describe('执行循环可替换（service:runner）', () => {
     assert.equal(r2.ok, true);
     assert.equal(r3.ok, false);
     assert.match(String(r3.error), /资源繁忙/);
-    assert.equal(peak, 8);
+    assert.equal(peak, 16);
     assert.equal(active, 0);
   });
 
@@ -290,7 +290,7 @@ describe('执行循环可替换（service:runner）', () => {
     await started;
     const parallel = toolOf(f.kernel, 'run_parallel');
     const batch = (name: string) => parallel.handler(
-      { tasks: Array.from({ length: 4 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
+      { tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
       toolCtx(f.rootDir, f.kernel),
     );
     const [accepted, rejected] = await Promise.all([batch('accepted'), batch('rejected')]);

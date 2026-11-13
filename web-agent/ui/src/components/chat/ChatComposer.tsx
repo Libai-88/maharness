@@ -150,7 +150,7 @@ export default function ChatComposer({
           <InputGroupTextarea
             ref={composer.inputRef}
             value={composer.input}
-            placeholder={hasModels ? '跟小鲸说点什么…（按 / 看命令）' : '先去左下角「设置」里配一个模型吧'}
+            placeholder={hasModels ? '跟 maharness 说点什么…（按 / 看命令）' : '先去左下角「设置」里配一个模型吧'}
             rows={2}
             aria-label="消息"
             aria-controls={commandsVisible ? commandListId : undefined}
@@ -252,7 +252,7 @@ export default function ChatComposer({
                   variant="default"
                   data-testid="send-btn"
                   size="icon-sm"
-                  disabled={!composer.input.trim() || !hasModels}
+                  disabled={!composer.canSubmit || !hasModels}
                   aria-label="发送"
                 >
                   <IconSend />

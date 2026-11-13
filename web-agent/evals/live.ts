@@ -24,6 +24,9 @@ export interface LiveEvalCaseResult {
 }
 
 export interface LiveEvalReport {
+  kind: 'text-smoke';
+  costUsd: number;
+  budgetUsd: number;
   model: string;
   cases: LiveEvalCaseResult[];
   passRate: number;
@@ -33,6 +36,8 @@ export interface LiveEvalReport {
 }
 
 export interface LiveEvalOptions {
+  budgetUsd: number;
+  prices: Record<string, { inputUsdPerMillion: number; outputUsdPerMillion: number }>;
   baseUrl: string;
   apiKey: string;
   model: string;
@@ -80,12 +85,26 @@ const JUDGE_SYSTEM = [
 ].join('\n');
 
 export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport> {
+  if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0) throw new Error('必须显式设置正数评测总费用上限');
+  for (const model of new Set([opts.model, opts.judgeModel ?? opts.model])) {
+    const price = opts.prices[model];
+    if (!price || !Number.isFinite(price.inputUsdPerMillion) || price.inputUsdPerMillion < 0 || !Number.isFinite(price.outputUsdPerMillion) || price.outputUsdPerMillion < 0)
+      throw new Error(`缺少模型 ${model} 的有效测试价格`);
+  }
+  let costUsd = 0;
   const fetchImpl = opts.fetchImpl ?? fetch;
   const url = endpoint(opts.baseUrl);
   const timeoutMs = Math.max(1_000, opts.timeoutMs ?? 60_000);
   const temperature = opts.temperature ?? 0.2;
 
   const chat = async (messages: { role: string; content: string }[], maxTokens: number, model = opts.model): Promise<ChatReply> => {
+    const price = opts.prices[model];
+    // UTF-8 bytes bound text token count conservatively; reserve framing overhead separately.
+    const inputBound = Buffer.byteLength(JSON.stringify(messages), 'utf8') + 4096;
+    const reservation = (inputBound * price.inputUsdPerMillion + maxTokens * price.outputUsdPerMillion) / 1_000_000;
+    if (costUsd + reservation > opts.budgetUsd) throw new Error('EVAL_BUDGET_EXHAUSTED');
+    costUsd += reservation;
+    // A failed/ambiguous request retains its full reservation and is never replayed.
     const res = await fetchImpl(url, {
       method: 'POST',
       headers: {
@@ -109,6 +128,12 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const text = data.choices?.[0]?.message?.content;
+    const validUsage = Number.isSafeInteger(data.usage?.prompt_tokens) && Number(data.usage?.prompt_tokens) >= 0
+      && Number.isSafeInteger(data.usage?.completion_tokens) && Number(data.usage?.completion_tokens) >= 0;
+    if (validUsage) {
+      const actual = (Number(data.usage!.prompt_tokens) * price.inputUsdPerMillion + Number(data.usage!.completion_tokens) * price.outputUsdPerMillion) / 1_000_000;
+      costUsd += actual - reservation;
+    }
     if (typeof text !== 'string' || !text.trim()) throw new Error('模型响应没有 content');
     return {
       text: text.trim(),
@@ -174,6 +199,7 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
 
   const passed = results.filter((item) => item.pass).length;
   return {
+    kind: 'text-smoke', costUsd, budgetUsd: opts.budgetUsd,
     model: opts.model,
     cases: results,
     passRate: results.length ? passed / results.length : 0,

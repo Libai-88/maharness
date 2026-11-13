@@ -4,7 +4,8 @@ import { annotateToolDef } from '../../core/chat/agent';
 import { shouldJournalToolEffect, toolSideEffectLabel } from '../tool-contract';
 import type { ToolDef } from '../types';
 
-const tool = (sideEffect?: ToolDef['sideEffect']): ToolDef => ({
+const tool = (sideEffect: ToolDef['sideEffect'] = 'external'): ToolDef => ({
+  version: '2.0.0', permissions: [], outputSchema: {},
   name: 'demo',
   description: 'demo',
   parameters: { type: 'object', properties: {} },
@@ -23,7 +24,7 @@ describe('工具副作用契约', () => {
     assert.equal(toolSideEffectLabel(tool()), 'external');
   });
 
-  test('工具描述向模型暴露副作用标签', () => {
+  test('工具描述保留副作用边界', () => {
     const annotated = annotateToolDef(tool('read'));
     assert.match(annotated.description, /副作用:read/);
     assert.match(annotated.description, /demo/);

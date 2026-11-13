@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { handleMcpRpc } from '../server';
 import type { ToolDef } from '../../../kernel/types';
 
-const tools: ToolDef[] = [{
+const tools: ToolDef[] = [{version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
   name: 'echo',
   description: 'echo input',
   parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'] },

@@ -49,7 +49,7 @@ describe('plugin filesystem guard', () => {
   });
 
   it('非 full 文件系统权限必须使用 process 执行模式', () => {
-    const base = {
+    const base = { apiVersion: 2,
       id: 'demo',
       name: 'Demo',
       version: '1.0.0',

@@ -25,9 +25,9 @@ output: plugin.json、入口文件、验证命令和测试结果
 node scripts/plugin-scaffold.mjs create my-plugin
 node scripts/plugin-scaffold.mjs validate plugins/my-plugin
 ```
-脚手架会生成 `compatibility.api` 与 `permissions.capabilities`，目标目录已存在时拒绝覆盖。
+脚手架会生成 `apiVersion: 2`、`compatibility.api` 与 `permissions.capabilities`，目标目录已存在时拒绝覆盖。
 plugins/<id>/
-├── plugin.json   # { id, name, version, entry: "index.ts", enabled: true }
+├── plugin.json   # { apiVersion: 2, id, name, version, permissions, entry: "index.ts", enabled: true }
 └── index.ts      # 默认导出 Plugin 对象
 ```
 
@@ -116,11 +116,12 @@ export default {
     ctx.register({
       kind: 'tool',          // tool | persona | listener | command | service
       tool: {
-        name: 'my_tool',
+        name: 'my_tool', version: '2.0.0',
+        permissions: [], sideEffect: 'read', outputSchema: { type: 'object' },
         description: '给 LLM 看的能力说明（说清何时用、参数含义）',
         parameters: { type: 'object', properties: { ... }, required: [...] }, // JSONSchema
         async handler(args, tctx) {
-          return { ok: true, data: { ... } };   // 或 { ok: false, error: '原因' }
+          return { ok: true, data: { ... } };   // 失败声明 failure: { code, retryable, outcome }
         },
       },
     });
@@ -142,10 +143,10 @@ export default {
 
 ## 关键要点
 - **工具名**：小写字母/数字/下划线，语义清晰；
-- **结果**：成功 `{ ok: true, data }`；失败 `{ ok: false, error }`（error 会原样回给 LLM 供修复）；
+- **结果**：成功 `{ ok: true, data, evidence? }`；失败 `{ ok: false, error, failure: { code, retryable, outcome } }`；outcome 为 not_started / applied / unknown；
 - **审批**：破坏性操作返回 `{ ok: false, needsApproval: true, approvalSummary: '说明' }`，批准后带 `tctx.approved=true` 重试；
 - **缓存**：结果稳定可缓存（如读文件）用 `tctx.cache`（makeKey/l2Get/l2Set）；易变数据（如当前时间）不要缓存；
-- **persona**：`kind:'persona'` 注册行为规则（priority 越大越靠前），随插件启停自动增减；
+- **persona**：`kind:'persona'` 声明可发现的行为材料；是否采用由用户明确选择或模型按需读取；
 - **listener**：用 `ctx.on(event, cb)` 订阅（卸载自动退订）；`ctx.bus` 只提供发射与派发（emit/serial/waterfall 等），**不提供订阅**——裸监听会绕过 EffectScope，卸载后残留；
 - **钩子**：`agent.before_llm`（改写 history 注入上下文）、`agent.before_tool`（参数改写/拦截）等，见 ARCHITECTURE 4.3。
 

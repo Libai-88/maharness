@@ -295,10 +295,8 @@ export default {
         priority: 6,
         content: [
           '浏览器使用规则：',
-          '1. 需要登录/点击/填表/读取网页渲染结果时用 browser_open + browser_snapshot，不要用 web_fetch 假装交互；',
-          '2. 点击/输入/按键会触发审批；执行前确认 selector 唯一，优先用可见文本或稳定的 data-testid；',
-          '3. 每次动作后重新 snapshot 核对页面状态，不要凭猜测连续操作；',
-          '4. 默认禁止私网地址；任务结束用 browser_close 释放会话。',
+          '需要交互或读取渲染结果时用 browser_open + browser_snapshot；交互动作由审批边界拦截。',
+          '默认禁止私网地址；任务结束用 browser_close 释放会话。',
         ].join('\n'),
       },
     });
@@ -306,6 +304,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'browser_open',
         risk: 'medium',
         costHint: 'medium',
@@ -340,6 +340,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'browser_snapshot',
         risk: 'low',
         costHint: 'low',
@@ -380,6 +382,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'browser_network',
         risk: 'low',
         costHint: 'low',
@@ -417,6 +421,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'browser_download',
         risk: 'medium',
         costHint: 'medium',
@@ -469,6 +475,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'browser_click',
         risk: 'medium',
         costHint: 'low',
@@ -502,6 +510,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'browser_type',
         risk: 'medium',
         costHint: 'low',
@@ -538,6 +548,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network"],
         name: 'browser_press',
         risk: 'medium',
         costHint: 'low',
@@ -571,6 +583,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: [],
         name: 'browser_close',
         risk: 'low',
         costHint: 'low',
@@ -595,6 +609,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'browser_screenshot',
         risk: 'low',
         costHint: 'low',

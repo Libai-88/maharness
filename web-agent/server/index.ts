@@ -249,7 +249,7 @@ function seedDefaults(store: Store): void {
     console.log('[seed] 已写入默认人设（可在网页端「设置」编辑）');
   } else if (defaultPersona && defaultPersona.content !== DEFAULT_PERSONA.content) {
     // 库是旧版本启动时种下的：默认人设内容与代码种子不一致 → 以当前代码为准刷新，
-    // 否则内核身份升级（如「小鲸」人格）永远追不上已存在的旧库。自定义人设不参与合并。
+    // 否则默认人设升级永远追不上已存在的旧库。自定义人设不参与合并。
     store.upsertPersona({
       id: defaultPersona.id,
       name: DEFAULT_PERSONA.name,
@@ -261,7 +261,7 @@ function seedDefaults(store: Store): void {
   }
 }
 
-export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store; closeEnvWatcher: () => void }> {
+export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store; closeEnvWatcher: () => void; runs: import('./run-service').RunService }> {
   // API-02：部署模式解析与启动自检——local/trusted/remote；安全前置不满足时 fail-closed 拒绝启动。
   const deploy = resolveDeployMode();
   if (!deploy.ok) {
@@ -292,13 +292,14 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     if (keyInfo.state === 'created') console.log(line);
     else console.error(`[secret] 主密钥异常（${keyInfo.state}）—— ${line}`);
   }
-  await kernel.start();
   Store.autoMaintain(kernel.paths.dbFile);
   const store = new Store(kernel.paths.dbFile, {
     secretKey: keyInfo.key,
     masterKey: keyInfo,
+    migrationSources: { configFile: kernel.paths.configFile, pluginDirs: [join(kernel.paths.root, 'core'), process.env.AGENT_USER_PLUGINS_DIR || join(kernel.paths.root, 'plugins')] },
     checkpointRetentionMs: kernel.config.get<number>('checkpoint.retentionDays', 30) * 24 * 60 * 60 * 1000,
   });
+  try { await kernel.start(); } catch (error) { store.close(); throw error; }
   globalApprovalBoard.onRegister = (approval) => {
     const session = approval.sessionId ? store.getSession(approval.sessionId) : undefined;
     store.saveApprovalRequest({
@@ -537,31 +538,13 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   });
 
   const tracker = new ClientTracker(); // 前端页面存活跟踪（/api/events 连接登记）
-  const internalBaseUrl = deployConfig.tls
-    ? String(process.env.MAHARNESS_INTERNAL_BASE_URL ?? '').trim() || undefined
-    : `http://127.0.0.1:${port}`;
-  if (deployConfig.tls && !internalBaseUrl) {
-    console.warn('[scheduler] remote TLS 模式未配置 MAHARNESS_INTERNAL_BASE_URL，到点续跑调度器停用');
-  }
-  const scheduler = internalBaseUrl
-    ? new Scheduler(store, {
-      file: join(kernel.paths.data, 'schedules.json'),
-      baseUrl: internalBaseUrl,
-      token: requiredApiToken() || undefined,
-    })
-    : undefined;
+  const scheduler = new Scheduler(store, { file: join(kernel.paths.data, 'schedules.json') });
 
-  // 审批板是内存态：重启后未决审批没有等待者。先审计为 expired:restart，
-  // 再对仍有 checkpoint 的会话排一次立即 resume——重新进入执行链并重新发审批卡，
-  // 用户不需要手工再点一次“续跑”。
-  const recovered = recoverOrphanedApprovals(store, scheduler);
+  const recovered = recoverOrphanedApprovals(store, undefined);
   if (recovered.orphaned) {
-    const resumeNote = recovered.resumed
-      ? `，已排队自动续跑 ${recovered.resumed} 个会话`
-      : scheduler ? '，无可续跑 checkpoint' : '，调度器不可用，需手动续跑';
-    console.log(`[approvals] 重启清理 ${recovered.orphaned} 条未决审批（expired:restart）${resumeNote}`);
+    console.log(`[approvals] 重启清理 ${recovered.orphaned} 条未决审批；任务由用户手动恢复`);
   }
-  registerRoutes(app, kernel, store, tracker, scheduler);
+  const runs = registerRoutes(app, kernel, store, tracker, scheduler);
 
   // ---- 插件 API 能力：前端是插件的一部分的数据通道 ----
   // 动态分发（每次请求取当前插件实例）——插件热重载后新路由立即生效，无需重启。
@@ -699,7 +682,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   server.on('error', (err) => console.error('[server] 运行期错误:', err.message));
   scheduler?.start();
   server.on('close', () => scheduler?.stop());
-  return { kernel, app, server, tracker, store, closeEnvWatcher };
+  return { kernel, app, server, tracker, store, closeEnvWatcher, runs };
 }
 
 // 直接运行（tsx server/index.ts）
@@ -707,7 +690,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
 // 如通过另一个文件 import 本模块且其路径包含 argv[1] 片段时）
 if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
   try {
-    const { server, kernel, tracker, closeEnvWatcher, store } = await startServer();
+    const { server, kernel, tracker, closeEnvWatcher, store, runs } = await startServer();
     let shuttingDown = false;
     const shutdown = async () => {
       if (shuttingDown) return;
@@ -715,6 +698,7 @@ if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.m
       console.log('\n 正在关闭…');
       server.close();
       closeEnvWatcher();
+      await runs.shutdown();
       await kernel.stop();
       store.close(); // SQLite/WAL 句柄释放（Windows 下不关会阻止文件清理/重启）
       process.exit(0);

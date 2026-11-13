@@ -27,6 +27,8 @@ export interface AgentHookCtx {
   model: string;
   sessionId?: string;
   tenantId?: string;
+  sandboxRoot?: string;
+  runId?: string;
   history: LLMMessage[];
   systemPrompt: string;                 // 信息展示；改 history[0].content 才真正生效
   tools: ToolDef[];
@@ -68,10 +70,24 @@ export type AgentEvent =
 
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
+  runId?: string;
+  toolJournal?: import('./tool-journal').ToolExecutionJournal;
+  delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
+  acquireExecution?: (signal?: AbortSignal) => Promise<() => void>;
+  availableBudget?: () => number | undefined;
+  historyArchive?: { save?(messages: LLMMessage[]): void; search(query: string, offset?: number, limit?: number): unknown[]; read(id: string, offset?: number, limit?: number): import('./tool-journal').ToolResultPage | undefined };
+  onModelInput?: (input: { diagnostics?: import('./input-diagnostics').InputDiagnostics; usage?: { inputTokens: number; window: number; outputReserve: number }; turn: number; providerId: string; model: string; messages: LLMMessage[]; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }) => void;
+  parentRunId?: string;
+  authorization?: import('./run').RunAuthorization;
+  /** Called only at model-call boundaries; returned messages are already durable. */
+  takeMessages?: (history: LLMMessage[], turn: number) => LLMMessage[];
+  onUsage?: (usage: { input: number; output: number; cost: number }) => void;
+  onUsageStatus?: (status: 'reported' | 'estimated' | 'unknown') => void;
   /** 已完成轮次的工具验收证据，跨恢复保留且不从模型文本推断。 */
   restoredToolResults?: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[];
   /** 本逻辑任务在已完成 checkpoint 轮次的累计费用；不计入本次 run 账单。 */
   restoredCostUsd?: number;
+  restoredEnabledTools?: string[];
   provider: ProviderDef;
   model: string;
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
@@ -101,7 +117,7 @@ export interface RunOptions {
   /** 本任务成本硬上限（美元）：累计成本 ≥ 该值时熔断——不再发起新 LLM 调用，保留已完成结果。
    *  harness 管理认知资源的硬边界（软边界是 server 侧的成本警告注入）。 */
   costBudget?: number;
-  /** 可选任务契约；提供后，最终答复必须通过 acceptance 才能进入 assistant_done。 */
+  /** 显式验收结果独立于模型回答完成状态；预算和期限仍为执行边界。 */
   task?: TaskContract;
   /** 同一逻辑任务跨 checkpoint 恢复时保持不变，用于副作用执行账本。 */
   executionId?: string;
@@ -111,22 +127,25 @@ export interface RunOptions {
   turnOffset?: number;
   /** 持久化副作用账本；pending 表示执行结果未知，必须拒绝自动重放。 */
   effectJournal?: {
+    peek?(key: string): { state: 'new' | 'done' | 'pending'; result?: ToolResult };
     claim(key: string): { state: 'new' | 'done' | 'pending'; result?: ToolResult };
+    release?(key: string): void;
     complete(key: string, result: ToolResult): void;
   };
   /** 上下文压缩回调（M1 循环内预算检查）：每轮 before_llm 后估算 history，
    *  超 context.maxTokens 时调用，返回压缩后的消息序列（由 server 注入 compactHistory
    *  等实现）；缺失时维持现状（不在 run 内压缩，由 server 组装侧兜底）。 */
-  compactFn?: (history: LLMMessage[]) => Promise<LLMMessage[]>;
+  contextWindow?: number;
+  compactFn?: (history: LLMMessage[], maxTokens?: number, signal?: AbortSignal, onUsage?: (usage: { input: number; output: number; cost: number }) => void) => Promise<LLMMessage[]>;
   /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
    *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
   onCheckpoint?: (
     turn: number,
     history: LLMMessage[],
-    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number },
+    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[] },
     step?: {
       phase: 'turn_end' | 'tool_pending';
-      pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string };
+      pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string; effectKey?: string; resultId?: string };
     },
   ) => void;
   /** 发送序列快照同步（L3 前缀缓存逼近 100% 的关键）：每次 LLM 调用前，把

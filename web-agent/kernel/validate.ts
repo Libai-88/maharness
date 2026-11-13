@@ -69,20 +69,22 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
     const obj = value as Record<string, unknown>;
     const required = Array.isArray(schema.required) ? (schema.required as string[]) : [];
     for (const key of required) {
-      if (!(key in obj)) issues.push(`${path}.${key}: 缺少必填字段`);
+      if (!Object.hasOwn(obj, key) || obj[key] === undefined) issues.push(`${path}.${key}: 缺少必填字段`);
     }
-    if (typeof schema.minProperties === 'number' && Object.keys(obj).length < schema.minProperties) {
-      issues.push(`${path}: 属性数 ${Object.keys(obj).length} < minProperties ${schema.minProperties}`);
+    const propertyCount = Object.values(obj).filter(value => value !== undefined).length;
+    if (typeof schema.minProperties === 'number' && propertyCount < schema.minProperties) {
+      issues.push(`${path}: 属性数 ${propertyCount} < minProperties ${schema.minProperties}`);
     }
-    if (typeof schema.maxProperties === 'number' && Object.keys(obj).length > schema.maxProperties) {
-      issues.push(`${path}: 属性数 ${Object.keys(obj).length} > maxProperties ${schema.maxProperties}`);
+    if (typeof schema.maxProperties === 'number' && propertyCount > schema.maxProperties) {
+      issues.push(`${path}: 属性数 ${propertyCount} > maxProperties ${schema.maxProperties}`);
     }
     const props = (schema.properties ?? {}) as Record<string, Record<string, unknown>>;
     for (const [key, propSchema] of Object.entries(props)) {
-      if (key in obj) issues.push(...check(obj[key], propSchema, `${path}.${key}`));
+      if (Object.hasOwn(obj, key) && obj[key] !== undefined) issues.push(...check(obj[key], propSchema, `${path}.${key}`));
     }
     const patterns = (schema.patternProperties ?? {}) as Record<string, Record<string, unknown>>;
     for (const [key, valueOfKey] of Object.entries(obj)) {
+      if (valueOfKey === undefined) continue;
       if (key in props) continue;
       let matchedPattern = false;
       for (const [pattern, patternSchema] of Object.entries(patterns)) {

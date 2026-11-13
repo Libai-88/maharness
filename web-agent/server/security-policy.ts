@@ -103,8 +103,8 @@ export function auditAuthorizationGrant(kernel: Kernel, grant: AuthorizationGran
   });
 }
 
-export function auditSseLifecycle(kernel: Kernel, store: Store | undefined, state: 'connected' | 'disconnected'): void {
+export function auditSseLifecycle(kernel: Kernel, store: Store | undefined, state: 'connected' | 'disconnected', connectionId?: string): void {
   const data = { subject: 'local-client' as const, capability: 'sse:events', object: '/api/events' };
-  persistAudit(store, { ...data, outcome: state, reason: null });
+  persistAudit(store, { ...data, outcome: state, reason: connectionId ?? null });
   kernel.bus.emit({ type: `security.sse.${state}`, ts: Date.now(), data });
 }

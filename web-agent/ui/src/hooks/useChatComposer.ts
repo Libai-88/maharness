@@ -56,7 +56,7 @@ export function useChatComposer({
 
   const submit = useCallback((textOverride?: string) => {
     const text = (textOverride ?? input).trim();
-    if (!text || streaming) return;
+    if (!text || streaming || !sessionKey) return;
     const full = quote ? `【引用 ${quote.author}】\n${quote.text}\n\n${text}` : text;
     if (textOverride === undefined && text) {
       setInputHist((previous) => [text, ...previous].slice(0, 30));
@@ -67,7 +67,7 @@ export function useChatComposer({
     setCmdOpen(false);
     setEmojiOpen(false);
     onSend(full);
-  }, [input, onSend, quote, streaming]);
+  }, [input, onSend, quote, streaming, sessionKey]);
 
   const quoteMessage = useCallback((message: ChatMessage) => {
     setQuote({
@@ -149,6 +149,7 @@ export function useChatComposer({
   }, [applyCommand, cmdIdx, cmdOpen, emojiOpen, input, inputHist, matched, onStop, streaming, submit]);
 
   return {
+    canSubmit: !!sessionKey && !!input.trim() && !streaming,
     input,
     setInput,
     inferenceAcceptance,

@@ -4,7 +4,7 @@
  * 复杂任务可以由父代理拆分为多个子代理并行/分工执行，互不污染上下文，
  * 子代理独立产出结果后由父代理汇总审查——分担压力、互相审查。
  * 实现：复用 AgentRunner 开独立循环（独立 traceId/history/scratchpad），
- *       默认只读工具白名单（子代理不改世界，只侦查与计算），成本上限 maxTurns=6。
+ *       默认只读工具白名单（子代理不改世界，只侦查与计算），轮数由委派参数控制。
  */
 import { randomUUID } from 'node:crypto';
 import { makeRunner } from '../../kernel/types';
@@ -23,12 +23,7 @@ const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review'])
 
 const SUB_SYSTEM_PROMPT = [
   '你是 maharness 的子代理（subagent），由主代理委派完成一个明确目标。',
-  '工作纪律：',
-  '1. 只做委派的目标，不扩散、不越权；完成后立即总结；',
-  '2. 需要事实时先调用工具获取，绝不编造；',
-  '3. 自查（互相审查机制）：总结前核对——目标是否达成？证据是否充分？输出是否完整？',
-  '   发现不足就继续调用工具补足，直到可交付；',
-  '4. 输出精炼：直接给出结论与关键证据，不要寒暄。',
+  '只处理委派目标；依据工具返回推进，不编造；完成后直接给出结论与关键证据。',
 ].join('\n');
 
 /** 对抗审查（Writer/Reviewer 分离）：审查者在全新上下文中评估，不承袭写作者的自我偏好。
@@ -37,13 +32,8 @@ const SUB_SYSTEM_PROMPT = [
  *  结论必须以证据（工具观察）为准；输出固定 JSON 结构。 */
 const REVIEWER_SYSTEM_PROMPT = [
   '你是 maharness 的独立审查者（reviewer），由主代理委派在全新上下文中审查其产出。',
-  '审查纪律：',
-  '1. 只审查【正确性】与【需求符合度】两类缺陷，不追逐风格、表达或"可以更好"的建议——',
-  '   过度要求会导致不必要的过度工程化；',
-  '2. 结论必须以证据为准：需要核实时先调用只读工具（读文件/查记忆/搜索）取证，绝不臆测；',
-  '3. 无缺陷就明确判 pass，不要为了"显得有用"而凑问题；',
-  '4. 每条 issue 必须给出：严重度（critical/major/minor）、具体问题、证据或依据；',
-  '5. 最后以 JSON 输出（不要输出 JSON 之外的任何内容）：',
+  '只审查正确性与需求符合度；结论以只读工具取证为准，不追逐风格建议，无缺陷明确判 pass。每条 issue 给出严重度、问题与证据。',
+  '最后以 JSON 输出（不要输出 JSON 之外的任何内容）：',
   '   {"verdict":"pass|concern|fail","summary":"一句话结论","issues":[{"severity":"critical|major|minor","point":"问题描述","evidence":"证据或依据"}],"confidence":0-1}',
 ].join('\n');
 
@@ -114,11 +104,14 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network","delegate"],
         name: 'run_subagent',
+        delegates: true,
         risk: 'low',
         costHint: 'high',
         sideEffect: 'external',
-        limits: '子代理默认 6 轮（maxTurns 可放宽至 12）；成本 ≈ 多次 LLM 调用，简单问题不要召唤',
+        limits: '子代理默认 12 轮（maxTurns 可放宽至 24）；成本 ≈ 多次 LLM 调用',
         output: '{answer, toolCalls, tokensIn, tokensOut, cost, traceId}',
         // 输出结构的机器校验（JSONSchema 子集）：声明后执行器对结果做运行时校验，
         // 不符即标注回填 + 入 Trace（structured output 的机器侧）
@@ -143,7 +136,7 @@ export default {
           properties: {
             objective: { type: 'string', description: '子代理目标（一句话，明确可交付）' },
             tools: { type: 'string', enum: ['read', 'all'], description: '工具白名单：read=只读（默认），all=全部工具' },
-            maxTurns: { type: 'integer', minimum: 1, maximum: 12, description: '最大轮数（默认 6；多步研究/评审类子任务可放宽到 8-12）' },
+            maxTurns: { type: 'integer', minimum: 1, maximum: 24, description: '最大轮数（默认 12）' },
           },
           required: ['objective'],
         },
@@ -151,8 +144,11 @@ export default {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
-          // maxTurns：默认 6；学术技能的子代理（检索席位/评审席位）常需更多轮，钳制 1-12 防失控
-          const maxTurns = Math.max(1, Math.min(12, Math.floor(Number(args.maxTurns) || 6)));
+          const maxTurns = Math.max(1, Math.min(24, Math.floor(Number(args.maxTurns) || 12)));
+          if (tctx.delegate) {
+            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT });
+            return { ok: !result.error, ...(result.error ? { error: result.error } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
+          }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
           const route = chatSvc?.routeForTask?.(
@@ -182,7 +178,7 @@ export default {
           // 调用也白白吃掉会话窗口额度（无退还路径），用户随后真要委派时被拒。
           const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
           if (!quota.allowed) {
-            return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：简单任务请直接执行；确需委派请稍后再试。` };
+            return { ok: false, error: `子代理配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。确需委派请稍后再试。` };
           }
           const releaseSlot = ctx.kernel.budget.reserveSubagentSlots(1);
           if (!releaseSlot) {
@@ -208,7 +204,7 @@ export default {
               systemPrompt: withUserRules(SUB_SYSTEM_PROMPT),
               tools,
               traceId,
-              maxTurns, // M4：默认 6 轮，maxTurns 参数可放宽（钳制 1-12）
+              maxTurns,
               parentStepId: tctx.stepId, // span 树：子代理全部步骤挂到 run_subagent 工具步骤下
               signal: tctx.signal,
               // 会话归属透传：子代理的审批也要能归到具体会话（刷新后卡片才回得到原位）
@@ -274,11 +270,14 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["network","delegate"],
         name: 'run_review',
+        delegates: true,
         risk: 'low',
         costHint: 'medium',
         sideEffect: 'external',
-        limits: '审查子代理最多 5 轮；成本 ≈ 多次 LLM 调用，重要产出才审查',
+        limits: '审查子代理最多 8 轮；成本 ≈ 多次 LLM 调用',
         output: '{verdict, summary, issues: [{severity, point, evidence}], confidence, traceId}',
         outputSchema: {
           type: 'object',
@@ -306,6 +305,11 @@ export default {
           const target = String(args.target ?? '').trim();
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
+          if (tctx.delegate) {
+            const result = await tctx.delegate({ objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`, tools: 'read', maxTurns: 8, instructions: REVIEWER_SYSTEM_PROMPT });
+            const { parsed, ...review } = parseReview(result.answer);
+            return { ok: !result.error && parsed, error: result.error ?? (parsed ? undefined : '审查输出不符合 JSON 契约'), data: { ...review, ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
+          }
           if (!chatSvc?.providers?.[0]) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
@@ -317,7 +321,7 @@ export default {
           // B2：配额在全部前置校验之后才扣（理由同 run_subagent）
           const quota = ctx.kernel.budget.consumeSubagentQuota(tctx.sessionId ?? '');
           if (!quota.allowed) {
-            return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。harness 在管理认知资源：请控制审查频率。` };
+            return { ok: false, error: `审查配额已用尽（10 分钟窗口内限额，剩余 ${quota.remaining}）。请稍后再试。` };
           }
           const releaseSlot = ctx.kernel.budget.reserveSubagentSlots(1);
           if (!releaseSlot) {
@@ -349,7 +353,7 @@ export default {
               systemPrompt: withUserRules(REVIEWER_SYSTEM_PROMPT),
               tools,
               traceId,
-              maxTurns: 5,
+              maxTurns: 8,
               parentStepId: tctx.stepId, // span 树：审查子任务挂到 run_review 工具步骤下
               signal: tctx.signal,
               sessionId: tctx.sessionId,
@@ -448,14 +452,8 @@ export default {
         priority: 6,
         content: [
           '子代理使用规则：',
-          '1. 任务包含多个相互独立的部分时，可委派 run_subagent 并行分工（一次一个，逐步委派）；',
-          '2. 对重要结论可用子代理独立复核（新视角交叉审查）；',
-          '3. 子代理只读世界（默认），需要写操作时自行完成或明确传 tools="all"；',
-          '4. 子代理结果需要核对时，用 read_file 验证其引用的内容再采信。',
-          '对抗审查（run_review）：',
-          '5. 重要交付物在提交/告知用户前，用 run_review 让独立审查者自查（生成/评估分离）——',
-          '   审查者只标记正确性与需求符合度缺陷，输出 pass/concern/fail 与 issue 清单；',
-          '6. 审查结果为 fail 或含 critical 时，先修订再交付；concern 可说明取舍后交付。',
+          '独立子任务可用 run_subagent；默认只读，tools="all" 可放开写操作。',
+          'run_review 适合对重要交付物做独立正确性审查；fail 或 critical issue 先修订。',
         ].join('\n'),
       },
     });

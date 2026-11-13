@@ -162,14 +162,12 @@ export function capabilityFor(provider: ProviderDef, model?: string): ModelCapab
   return { modelId: id, ...c, enabled: true, source: 'inferred' };
 }
 
-/** 请求体序列化：无图片时原样透传（零行为变化）；有图片时按 OpenAI content parts 组装。
- *  images 是"仅本次请求"字段，序列化后必须剥离，不能泄漏成未知字段被严格网关拒绝。 */
+/** Only protocol fields cross the provider boundary; context metadata stays local. */
 export function serializeMessages(messages: LLMMessage[]): unknown[] {
   return messages.map((m) => {
-    if (!m.images?.length) return m;
     const out: Record<string, unknown> = {
       role: m.role,
-      content: [
+      content: !m.images?.length ? m.content : [
         ...(m.content ? [{ type: 'text', text: m.content }] : []),
         ...m.images.map(url => ({ type: 'image_url', image_url: { url } })),
       ],
@@ -334,10 +332,10 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       // M7 usage 缺失：按 token 估算计费 + console.warn（成本记 0 会让成本熔断失效——
       // 免费错觉是最危险的错觉；估算仅用于成本核算口径，非精确值）
       if (!usageSeen) {
-        const estIn = estimateTokens(messages.map((m) => m.content ?? '').join('\n'));
+      const estIn = messages.reduce((total, m) => total + estimateTokens(m.content ?? ''), 0);
         const estOut = estimateTokens(outText);
         console.warn(`[provider:${cfg.id}] 流结束但 usage 缺失，按估算计费（in≈${estIn}, out≈${estOut} tokens）`);
-        yield { type: 'usage', input: estIn, output: estOut };
+        yield { type: 'usage', input: estIn, output: estOut, estimated: true };
       }
       yield { type: 'done' };
     },
@@ -404,9 +402,9 @@ async function* anthropicStream(
   if (!st.finished) throw new Error(`LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);
   const usage = usageChunks(st);
   if (usage.input === 0 && usage.output === 0) {
-    const estIn = estimateTokens(messages.map(m => m.content ?? '').join('\n'));
+    const estIn = messages.reduce((total, m) => total + estimateTokens(m.content ?? ''), 0);
     console.warn(`[provider:${providerId}] Anthropic 流未回报 usage，按估算计费（in≈${estIn}）`);
-    yield { type: 'usage', input: estIn, output: 0 };
+    yield { type: 'usage', input: estIn, output: 0, estimated: true };
   } else {
     yield usage;
   }

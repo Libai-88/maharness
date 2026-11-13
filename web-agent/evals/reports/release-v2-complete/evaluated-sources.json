@@ -1,0 +1,8 @@
+{
+  "kernel/fssearch.ts": "a1d24c13716ff313d5d2ee082d476dbc2eb2df9085a7f1b4cbdce1433fcdd3c2",
+  "evals/release-cases.ts": "6d01ce25c57a99061680790dbb515c137cdbf3a72d4182faabcec654855bc722",
+  "evals/reference-loop.ts": "35237e555c53c0bd9ea9e8a4f67c3462bdab6b1b7f1213c1fd97c4ebbaeb9180",
+  "kernel/tool-discovery.ts": "e84bc4171a503226ca91c30245a7f1c8659ca547415bac4a95e7698e2ede878f",
+  "core/tools-fs/index.ts": "ed21edb98586a3c08353c70ad57a162e2e6a84706a6b99b2700d24d29f547f5e",
+  "core/chat/agent.ts": "8f1a28143a9c0548394072999dbebcbbf4b44aa15a4c82a1adcf76be404f3646"
+}

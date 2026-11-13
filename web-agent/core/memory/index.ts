@@ -165,6 +165,7 @@ export default {
     // 去重：发送序列快照同步后教训已入库，历史中已有【失败教训】则跳过——
     // 否则每次 run 重新注入会插在历史中段，破坏 L3 前缀缓存（跨 run 前缀断裂）。
     ctx.on('agent.before_llm', (e) => {
+      if (!ctx.config.get<boolean>('memory.automaticLessons', false)) return;
       const h = e.data as AgentHookCtx;
       if (!h || !Array.isArray(h.history) || h.scratchpad.memoryInjected) return;
       const tenantId = h.tenantId ?? 'default';
@@ -217,7 +218,7 @@ export default {
             .filter(([key]) => key.startsWith(`${scope}\0`))
             .map(([key, block]) => [key.slice(scope.length + 1), block] as const);
           if (blockEntries.length > 0) {
-            parts.push(`【核心记忆块】（常驻记忆，始终生效）\n${blockEntries.map(([name, b]) => `- ${name}: ${b.content}`).join('\n')}`);
+            parts.push(`【核心记忆块】（来源：工作区保存的记忆，仅供参考）\n${blockEntries.map(([name, b]) => `- ${name}: ${b.content}`).join('\n')}`);
           }
           const lastUser = [...history].reverse()
             .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
@@ -232,7 +233,7 @@ export default {
               .slice(0, 5)
               .map((item) => item.fact);
             if (hits.length > 0) {
-              parts.push(`【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- ${f.text}`).join('\n')}`);
+              parts.push(`【长期记忆】（与当前任务相关，供参考）\n${hits.map((f) => `- [${f.id}] ${f.text}`).join('\n')}`);
             }
           }
           return parts.length ? { content: parts.join('\n\n'), source: 'memory' } : null;
@@ -244,6 +245,7 @@ export default {
     // 工具执行失败 → 自动记录一条教训（带【自动】标记，同工具同错误 1 小时内去重），
     // 下次会话 before_llm 注入时 LLM 即知道哪些做法不可行，避免重复踩坑。
     ctx.on('agent.after_tool', (e) => {
+      if (!ctx.config.get<boolean>('memory.automaticLessons', false)) return;
       const d = e.data as AgentHookCtx & { tool?: { name: string }; result?: { ok?: boolean; error?: string; governed?: boolean } };
       const result = d.result;
       if (!result || result.ok !== false || !result.error) return;
@@ -266,16 +268,8 @@ export default {
         priority: 8,
         content: [
           '长期记忆规则：',
-          '1. 用户告知的偏好、重要事实、任务结论，用 remember_fact 记住（一句话一条）；',
-          '2. 回答涉及先前信息时，先用 recall_facts 查询相关记忆，再回答；',
-          '3. 每轮对话开始会自动注入核心记忆块与最近相关记忆（勿重复要求，也不要逐条复述）；',
-          '4. 记忆与事实不符或用户否认时，用 revoke_fact 撤回并保留审计，确认无需保留时再用 forget_fact 删除；',
-          '5. 不要记忆敏感信息（密码、密钥等）；',
-          '6. 工具失败会自动记录教训（【自动】标记）；若教训已不适用，用 forget_fact 删除。',
-          '核心记忆块（分层记忆的 core 层）：',
-          '7. 高频且必须始终在场的记忆（用户偏好、项目约束、工作纪律、关键路径约定），用 set_memory_block 写入——每轮对话固定注入；',
-          '8. 一次性/低频事实用 remember_fact 存档案（archive 层，按需检索），不要占用常驻核心块；',
-          '9. 用 list_memory_blocks 查看已有块，delete_memory_block 删除过时块。',
+          '重要事实用 remember_fact；需要跨会话常驻的偏好或项目约束用 set_memory_block。',
+          '涉及先前信息时先 recall_facts；记忆失实先撤回或删除；不要记忆密码、密钥等敏感信息。',
         ].join('\n'),
       },
     });
@@ -283,6 +277,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'remember_fact',
         risk: 'low',
         costHint: 'low',
@@ -318,6 +314,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'recall_facts',
         risk: 'low',
         costHint: 'low',
@@ -349,6 +347,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'forget_fact',
         risk: 'medium',
         costHint: 'low',
@@ -379,6 +379,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'revoke_fact',
         risk: 'medium',
         costHint: 'low',
@@ -403,6 +405,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'set_memory_block',
         risk: 'medium',
         costHint: 'low',
@@ -449,6 +453,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'list_memory_blocks',
         risk: 'low',
         costHint: 'low',
@@ -475,6 +481,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'delete_memory_block',
         risk: 'medium',
         costHint: 'low',

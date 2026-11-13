@@ -1,3 +1,4 @@
+import { installRunMocks, mockTaskEvents } from './run-fixture';
 // ui/e2e/a11y.spec.ts —— 自动可访问性检查（UX-05）
 // axe-core 扫描核心页面（会话首屏 / 审批挂起 / 错误终态 / 表情面板 / 确认对话框），
 // 严重与中度违规必须为零；同时锁定 1280x720 与 390x844 两个常用视口的核心布局不遮挡。
@@ -9,9 +10,10 @@ const require = createRequire(import.meta.url);
 const axePath = require.resolve('axe-core/axe.min.js');
 const axeSource = readFileSync(axePath, 'utf8');
 
-const INPUT_PLACEHOLDER = '跟小鲸说点什么…（按 / 看命令）';
+const INPUT_PLACEHOLDER = '跟 maharness 说点什么…（按 / 看命令）';
 
 async function setup(page: Page) {
+  await installRunMocks(page);
   await page.route('**/api/providers', (route) => route.fulfill({ json: [{
     id: 'e2e-provider', label: 'E2E Provider', baseUrl: 'http://e2e.local', model: 'e2e-model',
     enabled: true, apiKeyMasked: 'sk-***', hasKey: true, createdAt: 0, updatedAt: 0,
@@ -52,7 +54,7 @@ test.describe('可访问性（UX-05）', () => {
 
   test('错误终态：失败状态可被读屏识别（aria-live 区域内文案 + 原始错误 title）', async ({ page }) => {
     await setup(page);
-    await page.route('**/api/sessions/*/chat', (route) => route.fulfill({
+    await mockTaskEvents(page, (route) => route.fulfill({
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
       body: [
@@ -81,7 +83,7 @@ test.describe('可访问性（UX-05）', () => {
 
   test('审批卡与表情面板：键盘可达且 axe 无严重/中度违规', async ({ page }) => {
     await setup(page);
-    await page.route('**/api/sessions/*/chat', (route) => route.fulfill({
+    await mockTaskEvents(page, (route) => route.fulfill({
       status: 200,
       headers: { 'Content-Type': 'text/event-stream' },
       body: [

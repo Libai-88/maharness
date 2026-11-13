@@ -1,6 +1,8 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentRunner } from '../agent';
+import { ExecutionPool } from '../../../kernel/execution-pool';
+import { acquireWriteLock } from '../../../kernel/write-lock';
 import { isProviderCircuitOpen, LLMHttpError, noteProviderFailure, PROVIDER_CIRCUIT_RESET_MS, PROVIDER_CIRCUIT_THRESHOLD } from '../provider-health';
 import type { EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, TraceStepInit, ToolDef } from '../../../kernel/types';
 
@@ -9,6 +11,47 @@ const bus: EventBusLike = {
   bail: () => undefined, parallel: async () => {}, waterfall: async () => undefined as never,
   onPhase: () => () => {},
 };
+
+test('timed-out handlers retain their execution slot and workspace lock until physical completion', async () => {
+  let finish!: () => void;
+  const held = new Promise<void>(resolve => { finish = resolve; });
+  const pool = new ExecutionPool(1);
+  let calls = 0;
+  const provider: ProviderDef = { id: 'timeout-lock', label: 'test', defaultModel: 'm', async *chat() {
+    if (++calls === 1) yield { type: 'tool_call', toolCall: { id: 'call', type: 'function', function: { name: 'write_file', arguments: '{}' } } };
+    else yield { type: 'delta', text: 'finished' };
+  } };
+  const workspace = `${process.cwd()}/test-timeout-${Date.now()}`;
+  let lockAcquired = false;
+  try {
+    for await (const _event of new AgentRunner(kernel(), bus).run({
+      runId: 'run-lock', provider, model: 'm', traceId: 'lock', messages: [{ role: 'user', content: 'write' }], sandboxRoot: workspace,
+      acquireExecution: signal => pool.acquire('root', signal),
+      tools: [{version: '2.0.0', permissions: [], outputSchema: {},  name: 'write_file', description: 'write', parameters: { type: 'object' }, sideEffect: 'write', timeoutMs: 10, async handler() { await held; return { ok: true }; } }],
+    })) {
+      if (_event.type === 'tool_result') break;
+    }
+    assert.equal(pool.occupied, 1);
+    const next = acquireWriteLock(workspace, 'other').then(release => { lockAcquired = true; return release; });
+    await new Promise(resolve => setTimeout(resolve, 20));
+    assert.equal(lockAcquired, false);
+    finish(); const release = await next; release();
+    assert.equal(pool.occupied, 0);
+  } finally { finish(); }
+});
+
+test('readonly principal cannot obtain write authority through approval', async () => {
+  let invoked = false; let calls = 0; let approval = false;
+  const provider: ProviderDef = { id: 'readonly-principal', label: 'test', defaultModel: 'm', async *chat() {
+    if (++calls === 1) yield { type: 'tool_call', toolCall: { id: 'call', type: 'function', function: { name: 'write_test', arguments: '{}' } } };
+    else yield { type: 'delta', text: 'finished' };
+  } };
+  for await (const event of new AgentRunner(kernel(), bus).run({
+    provider, model: 'm', traceId: 'readonly', principalRole: 'readonly', messages: [{ role: 'user', content: 'write' }],
+    tools: [{version: '2.0.0', permissions: [], outputSchema: {},  name: 'write_test', description: 'write', parameters: { type: 'object' }, sideEffect: 'write', async handler() { invoked = true; return { ok: true }; } }],
+  })) { if (event.type === 'approval_required') approval = true; }
+  assert.equal(invoked, false); assert.equal(approval, false);
+});
 
 function kernel(): KernelLike {
   const config = new Map<string, unknown>([
@@ -141,8 +184,8 @@ describe('AgentRunner Provider 重试策略', () => {
         }
       },
     };
-    const tool: ToolDef = {
-      name: 'read_remote', description: 'read', parameters: { type: 'object', properties: {} },
+    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
+      name: 'read_remote', description: 'read', parameters: { type: 'object', properties: {} }, sideEffect: 'read',
       idempotent: true, retry: { maxAttempts: 2, backoffMs: 1 },
       async handler() { calls++; if (calls === 1) throw new Error('ETIMEDOUT'); return { ok: true, data: { value: 1 } }; },
     };
@@ -186,8 +229,8 @@ describe('AgentRunner Provider 重试策略', () => {
         yield { type: 'tool_call', toolCall: { id: 'tool-1', type: 'function', function: { name: 'read_remote', arguments: '{}' } } };
       },
     };
-    const tool: ToolDef = {
-      name: 'read_remote', description: 'read', parameters: { type: 'object', properties: {} },
+    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
+      name: 'read_remote', description: 'read', parameters: { type: 'object', properties: {} }, sideEffect: 'read',
       idempotent: true, retry: { maxAttempts: 2, backoffMs: 5_000 },
       async handler() { toolCalls++; signalFirstAttempt(); return { ok: false, error: 'ETIMEDOUT' }; },
     };

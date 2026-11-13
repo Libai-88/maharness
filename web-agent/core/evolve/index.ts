@@ -240,6 +240,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'propose_skill',
         risk: 'low',
         costHint: 'low',

@@ -4,10 +4,29 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "limits": { "lifecycleTimeoutMs": 30000 },
-  "permissions": { "capabilities": {
-    "tool": ["powershell_execute", "env_probe"],
-    "persona": ["powershell-rules"]
-  } }
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "limits": {
+    "lifecycleTimeoutMs": 30000
+  },
+  "permissions": {
+    "capabilities": {
+      "tool": [
+        "powershell_execute",
+        "env_probe",
+        "command_start",
+        "command_output",
+        "command_wait",
+        "command_cancel"
+      ],
+      "persona": [
+        "powershell-rules"
+      ]
+    }
+  },
+  "apiVersion": 2
 }

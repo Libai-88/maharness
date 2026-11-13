@@ -42,6 +42,7 @@ before(async () => {
 after(async () => {
   started?.server.close();
   started?.closeEnvWatcher();
+  await started?.runs.shutdown();
   started?.store.close();
   try { await started?.kernel.stop(); } catch { /* 清理不影响断言 */ }
   rmSync(tmp, { recursive: true, force: true });

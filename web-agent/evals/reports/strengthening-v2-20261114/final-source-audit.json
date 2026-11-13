@@ -1,0 +1,23 @@
+{
+  "checkedAt": "2026-11-13T16:33:04.279Z",
+  "originalSamplesUnchanged": true,
+  "originalLedgerSha256": "f4474aa57b1ff440d51e67fc9351775edfa25f5e6f99b9ee226e90bfec00aba9",
+  "uniqueSlots": 60,
+  "invalidSamples": 10,
+  "knownRequests": 264,
+  "knownUsageTokens": 852611,
+  "runtimeMatchedAtEvaluationEnd": true,
+  "performanceRevisionCurrent": false,
+  "runtimeChanges": [
+    {
+      "file": "core/chat/agent.ts",
+      "evaluatedSha256": "ae3bb9d7cb206c402aeda07e902806f02fc4639a8aa98421b9579075a1f20841",
+      "currentSha256": "370be6da5a9971481bf4aa6f7e747e8a5a8aadd9f9acb99de98a97beee62bd98"
+    },
+    {
+      "file": "server/run-service.ts",
+      "evaluatedSha256": "35616830863180891b5a0adf87b9f94999195379047db7392c143ea196b463c9",
+      "currentSha256": "ba7942f36732d60675f6b4e7d87c14ec0f6058a277f0e2e4435f0d1b5c82b183"
+    }
+  ]
+}

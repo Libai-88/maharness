@@ -1,6 +1,7 @@
 /**
  * server/routes/events.ts —— 全局事件流（前端实时面板，SSE）
  */
+import { randomUUID } from 'node:crypto';
 import type { Express } from 'express';
 import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
 import { approvalTokens } from './approvals';
@@ -54,6 +55,8 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
       res.setHeader('Retry-After', '15');
       return res.status(429).json({ error: '实时事件连接数已达上限，请稍后重试' });
     }
+    const connectionId = randomUUID();
+    res.setHeader('X-Connection-ID', connectionId);
     res.writeHead(200, {
       'Content-Type': 'text/event-stream',
       'Cache-Control': 'no-cache',
@@ -65,7 +68,8 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     res.write('retry: 15000\n\n');
     // 页面存活跟踪：SSE 常驻连接 = 前端页面开着的证据（关闭页面/刷新 → 连接断开）
     tracker?.onConnect(res);
-    auditSseLifecycle(kernel, deps.store, 'connected');
+    res.write(`: connection ${connectionId}\n\n`);
+    auditSseLifecycle(kernel, deps.store, 'connected', connectionId);
     /** 与事件总线同一帧格式写出去（回放也用同一个出口，格式不会漂移） */
     const writeEvent = (type: string, data: unknown, traceId?: string): void => {
       let frame: string;
@@ -128,7 +132,7 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
       clearInterval(heartbeat);
       connectionLimiter.release(res);
       tracker?.onDisconnect(res);
-      auditSseLifecycle(kernel, deps.store, 'disconnected');
+      auditSseLifecycle(kernel, deps.store, 'disconnected', connectionId);
     };
     req.on('aborted', cleanup);
     res.on('close', cleanup);

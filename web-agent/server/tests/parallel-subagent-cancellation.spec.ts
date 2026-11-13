@@ -1,4 +1,4 @@
-/** LR-05：父任务停止（客户端断开）后，子代理与并行子任务必须全部中止并回收。 */
+/** LR-05：父任务显式停止后，子代理与并行子任务必须全部中止并回收。 */
 import { describe, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -43,11 +43,19 @@ interface CancelFixture {
 function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', childCount: number): CancelFixture {
   let calls = 0;
   let active = 0;
+  let enables = 0;
   let peakActive = 0;
   const childSignals: AbortSignal[] = [];
   const provider: ProviderDef = {
     id: `cancel-${toolName}-provider`, label: 'Cancel Fixture', defaultModel: 'cancel-model',
     async *chat(_messages: LLMMessage[], opts: ChatOptions) {
+      if (calls === 0 && !opts.tools?.some(tool => tool.name === toolName)) {
+        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
+        enables++;
+        yield { type: 'tool_call', toolCall: { id: `enable-${enables}`, type: 'function', function: { name: 'enable_tools', arguments: JSON.stringify({ names: [toolName] }) } } };
+        yield { type: 'usage', input: 0, output: 0 }; yield { type: 'done' };
+        return;
+      }
       const call = ++calls;
       if (call === 1) {
         const childArgs = toolName === 'run_subagent'
@@ -94,6 +102,7 @@ before(async () => {
 after(async () => {
   started?.server.close();
   started?.closeEnvWatcher();
+  await started?.runs.shutdown();
   started?.store.close();
   try { await started?.kernel.stop(); } catch { /* 测试清理不影响断言结果 */ }
   rmSync(tmp, { recursive: true, force: true });
@@ -120,13 +129,15 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     const bus = started.kernel.bus as unknown as { on(type: string, listener: (event: { data: unknown }) => void): () => void };
     const off = bus.on('parallel.progress', (event) => progress.push(event.data as typeof progress[number]));
     const session = started.store.createSession('cancel-model', 'cancel-run_parallel-provider');
-    const ac = new AbortController();
     const response = await startChat(session.id, '执行四项并行子任务');
     const reader = response.body!.getReader();
     // 等到 4 个子任务都已发起 LLM 调用再停止
-    while (fixture.childSignals.length < 4) await new Promise((r) => setTimeout(r, 10));
+    const enteredAt = Date.now();
+    while (fixture.childSignals.length < 4) { assert.ok(Date.now() - enteredAt < 5000, '并行子任务应在 5 秒内启动'); await new Promise((r) => setTimeout(r, 10)); }
     const abortTs = Date.now();
-    ac.abort();
+    const run = started.store.runs.active('default', session.id).find(run => !run.parentId)!;
+    const cancelled = await fetch(`${base}/api/v2/runs/${run.id}/cancel`, { method: 'POST' });
+    assert.equal(cancelled.status, 200);
     reader.cancel().catch(() => { /* 客户端断开本身即测试目标 */ });
     while (fixture.stats().active > 0 || !fixture.childSignals.every((s) => s.aborted)) {
       assert.ok(Date.now() - abortTs < 5000, '取消后 5 秒内子任务流必须全部回收');
@@ -135,9 +146,7 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     off();
     assert.equal(fixture.stats().peakActive, 4);
     assert.equal(fixture.stats().calls, 5, '取消后父循环不得再发起新一轮模型调用');
-    const fails = progress.filter((event) => event.phase === 'fail');
-    assert.equal(fails.length, 4, '四个子任务都应以取消收尾');
-    for (const event of fails) assert.equal(event.detail?.cancelled, true);
+    for (const child of started.store.runs.children(run.id, 'default')) assert.equal(child.status, 'cancelled');
   });
 
   test('停止后单个子代理中止且不再消耗新一轮调用', async () => {
@@ -145,12 +154,14 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     const fixture = makeCancellableProvider('run_subagent', 1);
     (started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] }).providers = [fixture.provider];
     const session = started.store.createSession('cancel-model', 'cancel-run_subagent-provider');
-    const ac = new AbortController();
     const response = await startChat(session.id, '委派子代理侦查');
     const reader = response.body!.getReader();
-    while (fixture.childSignals.length < 1) await new Promise((r) => setTimeout(r, 10));
+    const enteredAt = Date.now();
+    while (fixture.childSignals.length < 1) { assert.ok(Date.now() - enteredAt < 5000, '子代理应在 5 秒内启动'); await new Promise((r) => setTimeout(r, 10)); }
     const abortTs = Date.now();
-    ac.abort();
+    const run = started.store.runs.active('default', session.id).find(run => !run.parentId)!;
+    const cancelled = await fetch(`${base}/api/v2/runs/${run.id}/cancel`, { method: 'POST' });
+    assert.equal(cancelled.status, 200);
     reader.cancel().catch(() => { /* 同上 */ });
     while (fixture.stats().active > 0 || !fixture.childSignals[0]?.aborted) {
       assert.ok(Date.now() - abortTs < 5000, '取消后 5 秒内子代理流必须回收');

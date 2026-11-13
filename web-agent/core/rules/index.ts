@@ -14,6 +14,9 @@ import type { PolicyRule, RuleSource } from '../../kernel/rules';
 
 /** agent.before_tool 钩子负载中本插件用到的字段（与 core/chat/agent.ts 的 AgentHookCtx 对齐） */
 interface BeforeToolCtx {
+  sandboxRoot?: string;
+  tenantId?: string;
+  runId?: string;
   tool?: { name: string; args: unknown };
   blocked?: boolean;
   blockReason?: string;
@@ -83,8 +86,9 @@ export default {
 
     ctx.on('agent.before_tool', (e) => {
       const data = e.data as BeforeToolCtx | undefined;
-      if (!policyEnabled || !data?.tool || policy.length === 0) return;
-      const hit = matchPolicy(policy, data.tool.name, data.tool.args);
+      if (!policyEnabled || !data?.tool) return;
+      const effectivePolicy = data.runId && data.sandboxRoot ? loadPolicyRules([join(dataDir, 'rules.json'), join(data.sandboxRoot, '.maharness', 'rules.json')]).rules : policy;
+      const hit = matchPolicy(effectivePolicy, data.tool.name, data.tool.args);
       if (!hit) return;
       if (hit.effect === 'deny') {
         data.blocked = true;
@@ -121,6 +125,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'list_rules',
         risk: 'low',
         costHint: 'low',
@@ -142,6 +148,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'check_policy',
         risk: 'low',
         costHint: 'low',

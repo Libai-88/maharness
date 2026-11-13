@@ -90,9 +90,9 @@ let allowCoreEditCache: boolean | null = null;
 
 /** kernel/ 与 core/chat/ 为 agent 运行时核心：写/删一律拒绝（自我接管防护）。
  *  双基座判定见 `SandboxBases` 注释。 */
-export function isProtectedWritePath(absPath: string, sandboxRoot: string, projectRoot?: string): boolean {
+export function isProtectedWritePath(absPath: string, sandboxRoot: string, projectRoot?: string, allowEnvironmentOverride = true): boolean {
   if (allowCoreEditCache === null) allowCoreEditCache = process.env.AGENT_ALLOW_CORE_EDIT === '1';
-  if (allowCoreEditCache) return false;
+  if (allowEnvironmentOverride && allowCoreEditCache) return false;
   for (const base of projectRoot ? [sandboxRoot, projectRoot] : [sandboxRoot]) {
     const norm = relUnder(absPath, base)?.toLowerCase();
     if (!norm) continue;
@@ -139,6 +139,7 @@ export function isDeniedReadPath(absPath: string, sandboxRoot: string, projectRo
 // ============ 智能读取（编码识别） ============
 
 export interface ReadResult {
+  version?: string;
   text: string;
   encoding: string;
   isBinary: boolean;

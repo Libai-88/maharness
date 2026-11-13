@@ -18,7 +18,7 @@ function setup(plugins: Record<string, {
   for (const [id, plugin] of Object.entries(plugins)) {
     const dir = join(userPluginsDir, id);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
+    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
       id, name: id, version: '0.1.0', entry: 'index.ts', ...plugin.manifest,
     }));
     writeFileSync(join(dir, 'index.ts'), plugin.entry);
@@ -51,32 +51,7 @@ describe('插件进程执行边界', () => {
           execution: { mode: 'process', timeoutMs: 5_000, memoryMb: 64 },
           permissions: { capabilities: { tool: ['proc_fs_probe'] }, runtime: { filesystem: 'storage' } },
         },
-        entry: `
-export default {
-  id: 'fsprobe', name: 'fsprobe', version: '0.1.0',
-  onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: {
-      name: 'proc_fs_probe',
-      description: 'read a path under the plugin filesystem policy',
-      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },
-      sideEffect: 'read',
-      async handler(args) {
-        try {
-          const fs = await import('node:' + 'fs');
-          const handle = await fs.promises.open(args.path, 'r');
-          const buffer = Buffer.alloc(64);
-          const { bytesRead } = await handle.read(buffer, 0, 64, 0);
-          await handle.close();
-          ctx.storage.write('owned.txt', 'storage-ok');
-          return { ok: true, data: { text: buffer.subarray(0, bytesRead).toString('utf8'), storage: ctx.storage.read('owned.txt') } };
-        } catch (error) {
-          return { ok: false, error: error instanceof Error ? error.message : String(error) };
-        }
-      },
-    } });
-  },
-};
-`,
+        entry: "\nexport default {\n  id: 'fsprobe', name: 'fsprobe', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_fs_probe',\n      description: 'read a path under the plugin filesystem policy',\n      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },\n      sideEffect: 'read',\n      async handler(args) {\n        try {\n          const fs = await import('node:' + 'fs');\n          const handle = await fs.promises.open(args.path, 'r');\n          const buffer = Buffer.alloc(64);\n          const { bytesRead } = await handle.read(buffer, 0, 64, 0);\n          await handle.close();\n          ctx.storage.write('owned.txt', 'storage-ok');\n          return { ok: true, data: { text: buffer.subarray(0, bytesRead).toString('utf8'), storage: ctx.storage.read('owned.txt') } };\n        } catch (error) {\n          return { ok: false, error: error instanceof Error ? error.message : String(error) };\n        }\n      },\n    } });\n  },\n};\n",
       },
     });
     t.after(async () => { await f.cleanup(); });
@@ -99,30 +74,7 @@ export default {
     const f = setup({
       proc: {
         manifest: execution,
-        entry: `
-export default {
-  id: 'proc', name: 'proc', version: '0.1.0',
-  onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: {
-      name: 'proc_pid',
-      description: 'return process identity',
-      parameters: { type: 'object', properties: {} },
-      sideEffect: 'none',
-      async handler(_args, tctx) {
-        return {
-          ok: true,
-          data: {
-            pid: process.pid,
-            cwd: process.cwd(),
-            secret: process.env.MAHARNESS_PROCESS_SECRET ?? null,
-            sessionId: tctx.sessionId ?? null,
-          },
-        };
-      },
-    } });
-  },
-};
-`,
+        entry: "\nexport default {\n  id: 'proc', name: 'proc', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_pid',\n      description: 'return process identity',\n      parameters: { type: 'object', properties: {} },\n      sideEffect: 'none',\n      async handler(_args, tctx) {\n        return {\n          ok: true,\n          data: {\n            pid: process.pid,\n            cwd: process.cwd(),\n            secret: process.env.MAHARNESS_PROCESS_SECRET ?? null,\n            sessionId: tctx.sessionId ?? null,\n          },\n        };\n      },\n    } });\n  },\n};\n",
       },
     });
     t.after(async () => {
@@ -157,17 +109,7 @@ export default {
           execution: { mode: 'process', timeoutMs: 1_000, memoryMb: 64 },
           permissions: { capabilities: { tool: ['proc_slow'] } },
         },
-        entry: `
-export default {
-  id: 'slow', name: 'slow', version: '0.1.0',
-  onLoad(ctx) {
-    ctx.register({ kind: 'tool', tool: {
-      name: 'proc_slow', description: 'sleep', parameters: { type: 'object', properties: {} },
-      async handler() { await new Promise((r) => setTimeout(r, 10_000)); return { ok: true }; },
-    } });
-  },
-};
-`,
+        entry: "\nexport default {\n  id: 'slow', name: 'slow', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {},\n      name: 'proc_slow', description: 'sleep', parameters: { type: 'object', properties: {} },\n      async handler() { await new Promise((r) => setTimeout(r, 10_000)); return { ok: true }; },\n    } });\n  },\n};\n",
       },
     });
     t.after(f.cleanup);
@@ -210,7 +152,7 @@ export default {
   id: 'net', name: 'net', version: '0.1.0',
   onLoad(ctx) {
     ctx.register({ kind: 'tool', tool: {
-      name: 'net_probe', description: 'probe network', parameters: { type: 'object', properties: {} },
+      version: '2.0.0', permissions: ['network'], sideEffect: 'read', outputSchema: { type: 'object' }, name: 'net_probe', description: 'probe network', parameters: { type: 'object', properties: {} },
       async handler() {
         const allowed = await fetch('http://127.0.0.1:${allowedPort}/').then((r) => r.text());
         let blockedError = '';

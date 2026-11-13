@@ -4,11 +4,13 @@
 import { useRef, useState } from 'react';
 import { Camera, RotateCcw } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
+import { BRAND_LOGO_SRC } from '@/brand/BrandMark';
 import { Attachment, AttachmentAction, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle, AttachmentTrigger } from '@/components/ui/attachment';
 import { Spinner } from '@/components/ui/spinner';
+import { cn } from '@/lib/utils';
 
 const STORAGE_KEY = 'maharness-sticker';
-const DEFAULT_SRC = '/hero-char.webp';
+const DEFAULT_SRC = BRAND_LOGO_SRC;
 const MAX_EDGE = 640;
 
 function readStored(): string | null {
@@ -61,8 +63,12 @@ export default function HeroSticker() {
   return (
     <figure data-testid="hero-sticker" className="relative w-36 shrink-0 rotate-2 transition-transform hover:rotate-0 motion-reduce:transition-none motion-reduce:hover:rotate-2">
       <Attachment orientation="vertical" className="w-full bg-card shadow-sm">
-        <AttachmentMedia variant="image" className="w-full">
-          <img src={src ?? DEFAULT_SRC} alt="首页贴纸照片" />
+        <AttachmentMedia variant="icon" className="aspect-square w-full">
+          <img
+            src={src ?? DEFAULT_SRC}
+            alt="maharness 品牌贴纸"
+            className={cn('size-full', custom ? 'object-cover' : 'bg-[#fff8ed] object-contain p-3')}
+          />
           <AttachmentTrigger onClick={pick} disabled={busy} title="点击换一张图片" aria-label="更换首页贴纸照片" />
           <span className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-center gap-1 bg-primary/90 p-1 text-[11px] text-primary-foreground opacity-0 transition-opacity group-hover/attachment:opacity-100">
             {busy ? <><Spinner className="size-3" />处理中…</> : <>换一张 <Camera size={12} /></>}

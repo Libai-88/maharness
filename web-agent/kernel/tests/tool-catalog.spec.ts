@@ -5,7 +5,7 @@ import { toolDomain } from '../tool-domain';
 import type { ToolDef } from '../types';
 
 function tool(name: string): ToolDef {
-  return { name, description: name, parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } };
+  return {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},  name, description: name, parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } };
 }
 
 describe('tool catalog conflict resolution', () => {

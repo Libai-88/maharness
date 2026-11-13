@@ -19,61 +19,47 @@ function setup(): { root: string; store: Store; file: string; sessionId: string 
 }
 
 describe('到点续跑调度器', () => {
-  test('到点调用 resume HTTP 并标记完成', async () => {
+  test('显式定时恢复使用同一 RunService 并保留用户角色', async () => {
     const { store, file, sessionId } = setup();
-    let calls = 0;
-    let body: unknown;
-    const scheduler = new Scheduler(store, {
-      file, baseUrl: 'http://internal', token: 't', now: () => 1_000,
-      fetchImpl: (async (_url, init) => {
-        calls++;
-        body = JSON.parse(String(init?.body));
-        return new Response('', { status: 200 });
-      }) as typeof fetch,
-    });
-    const job = scheduler.schedule({ sessionId, tenantId: 'default', dueAt: 1_000 });
-    await scheduler.tick();
-    assert.equal(calls, 1);
-    assert.deepEqual(body, { resume: true });
-    assert.equal(scheduler.list()[0]?.state, 'done');
-    assert.equal(scheduler.list()[0]?.id, job.id);
+    const calls: unknown[] = [];
+    const scheduler = new Scheduler(store, { file, now: () => 1_000 });
+    scheduler.attach({ get: () => ({ id: 'run', sessionId }) as never, resume: (...args) => { calls.push(args); return {} as never; } });
+    const job = scheduler.schedule({ sessionId, runId: 'run', tenantId: 'default', principalRole: 'readonly', dueAt: 1_000 });
+    await scheduler.tick(); await scheduler.tick();
+    assert.deepEqual(calls, [['run', 'default', 'readonly']]);
+    assert.equal(scheduler.list()[0]?.state, 'done'); assert.equal(scheduler.list()[0]?.id, job.id);
     store.close();
   });
 
-  test('409 有限重试后保持 pending，缺 checkpoint 直接失败', async () => {
+  test('恢复失败不自动重放，旧 checkpoint 不能执行', async () => {
     const { store, file, sessionId } = setup();
-    const scheduler = new Scheduler(store, {
-      file, baseUrl: 'http://internal', now: () => 1_000,
-      fetchImpl: (async () => new Response('', { status: 409 })) as typeof fetch,
-    });
+    let calls = 0;
+    const scheduler = new Scheduler(store, { file, now: () => 1_000 });
+    scheduler.attach({ get: () => ({ id: 'run', sessionId }) as never, resume: () => { calls++; throw new Error('outcome unknown'); } });
+    scheduler.schedule({ sessionId, runId: 'run', tenantId: 'default', dueAt: 1_000 });
+    await scheduler.tick(); await scheduler.tick();
+    assert.equal(calls, 1); assert.equal(scheduler.list()[0]?.state, 'failed');
     scheduler.schedule({ sessionId, tenantId: 'default', dueAt: 1_000 });
     await scheduler.tick();
-    const retry = scheduler.list()[0];
-    assert.equal(retry?.state, 'pending');
-    assert.equal(retry?.attempts, 1);
-    assert.ok((retry?.dueAt ?? 0) > 1_000);
+    assert.match(scheduler.list()[0]?.lastError ?? '', /checkpoint/);
+    assert.equal(calls, 1); store.close();
+  });
 
-    const missing = store.createSession('m');
-    scheduler.schedule({ sessionId: missing.id, tenantId: 'default', dueAt: 1_000 });
-    await scheduler.tick();
-    const failed = scheduler.list().find((job) => job.sessionId === missing.id);
-    assert.equal(failed?.state, 'failed');
-    assert.match(String(failed?.lastError), /checkpoint/);
+  test('服务重启后的定时任务需要用户手动恢复', async () => {
+    const { store, file, sessionId } = setup();
+    const first = new Scheduler(store, { file, now: () => 1_000 });
+    first.schedule({ sessionId, runId: 'run', tenantId: 'default', dueAt: 2_000 });
+    const restored = new Scheduler(store, { file, now: () => 3_000 });
+    await restored.tick();
+    assert.equal(restored.list()[0]?.state, 'failed'); assert.match(restored.list()[0]?.lastError ?? '', /手动恢复/);
     store.close();
   });
 
   test('取消后不再执行', async () => {
     const { store, file, sessionId } = setup();
-    let calls = 0;
-    const scheduler = new Scheduler(store, {
-      file, baseUrl: 'http://internal', now: () => 1_000,
-      fetchImpl: (async () => { calls++; return new Response('', { status: 200 }); }) as typeof fetch,
-    });
+    const scheduler = new Scheduler(store, { file, now: () => 1_000 });
     const job = scheduler.schedule({ sessionId, tenantId: 'default', dueAt: 1_000 });
-    assert.equal(scheduler.cancel(job.id), true);
-    await scheduler.tick();
-    assert.equal(calls, 0);
-    assert.equal(scheduler.list()[0]?.state, 'failed');
-    store.close();
+    assert.equal(scheduler.cancel(job.id), true); await scheduler.tick();
+    assert.equal(scheduler.list()[0]?.state, 'failed'); store.close();
   });
 });

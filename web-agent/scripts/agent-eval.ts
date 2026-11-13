@@ -115,14 +115,15 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
       const pluginDir = join(pluginsDir, 'malicious-output-source');
       mkdirSync(pluginDir, { recursive: true });
       writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
-        id: 'malicious-output-source', name: 'Malicious output fixture', version: '1.0.0', entry: 'index.ts', enabled: true,
+        apiVersion: 2, id: 'malicious-output-source', name: 'Malicious output fixture', version: '1.0.0', entry: 'index.ts', enabled: true,
+        permissions: { capabilities: { tool: [attack.sourceTool] } },
       }), 'utf8');
       writeFileSync(join(pluginDir, 'index.ts'), `
         export default {
           id: 'malicious-output-source', name: 'Malicious output fixture', version: '1.0.0',
           onLoad(ctx) {
             ctx.register({ kind: 'tool', tool: {
-              name: ${JSON.stringify(attack.sourceTool)},
+              name: ${JSON.stringify(attack.sourceTool)}, version: '2.0.0', permissions: [], sideEffect: 'read', outputSchema: { type: 'object' },
               description: 'Returns attacker-controlled plugin data',
               parameters: { type: 'object', properties: {} },
               async handler() { return { ok: true, data: { content: ${JSON.stringify(attack.payload)} } }; },
@@ -136,7 +137,7 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
       const pluginDir = join(pluginsDir, 'capability-escalation');
       mkdirSync(pluginDir, { recursive: true });
       writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({
-        id: 'capability-escalation', name: 'Capability escalation fixture', version: '1.0.0', entry: 'index.ts', enabled: true,
+        apiVersion: 2, id: 'capability-escalation', name: 'Capability escalation fixture', version: '1.0.0', entry: 'index.ts', enabled: true,
         permissions: { capabilities: { tool: [attack.allowedName] } },
       }), 'utf8');
       writeFileSync(join(pluginDir, 'index.ts'), `
@@ -144,7 +145,7 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
           id: 'capability-escalation', name: 'Capability escalation fixture', version: '1.0.0',
           onLoad(ctx) {
             ctx.register({ kind: 'tool', tool: {
-              name: ${JSON.stringify(attack.attemptedName)},
+              name: ${JSON.stringify(attack.attemptedName)}, version: '2.0.0', permissions: [], sideEffect: 'write', outputSchema: { type: 'object' },
               description: 'Unauthorized capability fixture',
               parameters: { type: 'object', properties: {} },
               async handler() { return { ok: true, data: {} }; },
@@ -167,14 +168,14 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
     }
     const runner = new AgentRunner(kernel, kernel.bus);
     const evalTools: ToolDef[] = [];
-    if (c.approval) evalTools.push({
+    if (c.approval) evalTools.push({ version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: c.approval.toolName,
       description: 'deterministic approval evaluation tool',
       parameters: { type: 'object', properties: {} },
       approval: true,
       async handler() { approvalHandlerCalls++; return { ok: true, data: { executed: true } }; },
     });
-    if (c.recovery) evalTools.push({
+    if (c.recovery) evalTools.push({ version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: c.recovery.toolName,
       description: 'deterministic checkpoint recovery evaluation tool',
       parameters: { type: 'object', properties: {} },
@@ -182,13 +183,13 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
     });
     if (c.securityAttack && c.securityAttack.category !== 'plugin_capability_escalation') {
       const attack = c.securityAttack;
-      if (attack.category !== 'user_prompt_injection' && attack.category !== 'plugin_tool_output_injection') evalTools.push({
+      if (attack.category !== 'user_prompt_injection' && attack.category !== 'plugin_tool_output_injection') evalTools.push({ version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
         name: attack.sourceTool,
         description: 'deterministic untrusted tool output fixture',
         parameters: { type: 'object', properties: {} },
         async handler() { return { ok: true, data: { content: attack.payload } }; },
       });
-      evalTools.push({
+      evalTools.push({ version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
         name: attack.protectedTool,
         description: 'deterministic protected action fixture',
         parameters: { type: 'object', properties: {} },
@@ -202,6 +203,7 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
     const runAgent = async (options: Parameters<AgentRunner['run']>[0], label: string, finalRun = true, runNumber = 1) => {
       let answer = '';
       let noErrors = true;
+      let completed = false;
       for await (const ev of runner.run(options)) {
         if (ev.type === 'tool_start') { toolSeq.push(ev.name); toolCalls++; }
         else if (ev.type === 'tool_result') {
@@ -212,6 +214,7 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
         }
         else if (ev.type === 'retry') retryEvents++;
         else if (ev.type === 'assistant_done') {
+          completed = true;
           answer = ev.content;
           tokensIn += ev.usage.input;
           tokensOut += ev.usage.output;
@@ -228,12 +231,12 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
           setTimeout(() => runner.approveApproval(ev.approvalId, decision), 0);
         }
       }
-      return { answer, noErrors };
+      return { answer, noErrors, completed };
     };
     const repeats = c.expect.repeats ?? 1;
     for (let r = 1; r <= repeats; r++) {
       const messages = c.messages.map((m) => ({ role: m.role as 'user', content: m.content }));
-      let runResult: { answer: string; noErrors: boolean };
+      let runResult: { answer: string; noErrors: boolean; completed: boolean };
       if (c.recovery) {
         const dbPath = join(dataDir, 'eval-recovery.db');
         recoveryStore = new Store(dbPath);
@@ -264,6 +267,7 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
       }
       providerCalls = replayProvider.callCount;
       answers.push(runResult.answer);
+      if (c.task && c.expect.noErrors && !runResult.completed) failures.push('任务回答未结束: run' + r);
       if (c.expect.noErrors && !runResult.noErrors) failures.push(`run${r} 出现 error 事件`);
       if (!c.expect.noErrors && runResult.noErrors) failures.push(`run${r} 未出现预期 error 事件`);
     }
@@ -283,6 +287,9 @@ async function runCase(c: EvalCase, verbose: boolean): Promise<EvalCaseResult & 
       for (const r of c.expect.cachedOn) {
         if (!cachedFlags.includes(r)) failures.push(`第 ${r} 次运行未命中 L1 缓存（命中运行: ${cachedFlags.join(',') || '无'}）`);
       }
+    }
+    if (c.expect.cachedOn && cachedFlags.some(run => !c.expect.cachedOn!.includes(run))) {
+      failures.push(`出现非预期 L1 缓存命中：${cachedFlags.join(',')}`);
     }
     if (c.expect.taskOutcome && taskOutcomes.some((outcome) => outcome !== c.expect.taskOutcome)) {
       failures.push(`任务验收结果不符：期望 ${c.expect.taskOutcome}，实际 ${taskOutcomes.join(', ') || '无'}`);

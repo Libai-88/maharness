@@ -1,3 +1,4 @@
+import FrameworkChangesPanel from './FrameworkChangesPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, ChevronsUpDown, FileText, Folder, FolderOpen, GitBranch, Maximize2, Plus, RefreshCw, Upload, X } from 'lucide-react';
 import { toast } from 'sonner';
@@ -117,7 +118,7 @@ function GitPanel({ onOpen }: { onOpen: (path: string) => void }) {
   );
 }
 
-export default function FilesView() {
+export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: string, message: string) => void }) {
   const [current, setCurrent] = useState('');
   const [workspaces, setWorkspaces] = useState<{ id: string; path: string }[]>([]);
   const [wsOpen, setWsOpen] = useState(false);
@@ -217,6 +218,7 @@ export default function FilesView() {
   );
   return (
     <div className="flex min-h-0 flex-1 flex-col">
+      <div className="flex shrink-0 justify-end px-4 py-2"><FrameworkChangesPanel onTask={onFrameworkTask} /></div>
       {error && <Alert variant="destructive" className="mx-4 mt-4 w-auto"><AlertTitle>文件操作失败</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
       <div className="flex min-h-0 flex-1">
         {!mobile && <aside className="w-64 shrink-0 border-r">{explorer}</aside>}

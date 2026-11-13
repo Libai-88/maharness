@@ -408,6 +408,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0', permissions: ['workspace.read'],
+        sideEffect: 'read', outputSchema: { type: 'object' },
         name: 'workbench_today',
         risk: 'low',
         costHint: 'low',
@@ -458,6 +460,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0', permissions: ['workspace.write'],
+        sideEffect: 'write', outputSchema: { type: 'object' },
         name: 'workbench_add_task',
         risk: 'low',
         costHint: 'low',
@@ -504,6 +508,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0', permissions: ['workspace.write'],
+        sideEffect: 'write', outputSchema: { type: 'object' },
         name: 'workbench_update_task',
         risk: 'low',
         costHint: 'low',
@@ -558,6 +564,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0', permissions: ['workspace.write'],
+        sideEffect: 'write', outputSchema: { type: 'object' },
         name: 'workbench_add_note',
         risk: 'low',
         costHint: 'low',
@@ -592,6 +600,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0', permissions: ['workspace.write'],
+        sideEffect: 'write', outputSchema: { type: 'object' },
         name: 'workbench_diary',
         risk: 'low',
         costHint: 'low',

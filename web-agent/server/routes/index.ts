@@ -34,6 +34,12 @@ import type { Scheduler } from '../scheduler';
 import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
+import { RunService } from '../run-service';
+import { registerRunRoutes } from './runs';
+import { getRunner } from './shared';
+import { tenantSandboxRoot } from '../tenant-workspace';
+import { beginRun, endRun } from '../index';
+import { loadPromptRules } from '../../kernel/rules';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -79,7 +85,7 @@ export function readStorageSnapshot(dataDir: string): StorageSnapshot {
   } catch { return { schemaVersion: 1, ok: false, status: 'unknown', totalBytes: null, freeBytes: null, freePercent: null, thresholds: STORAGE_CAPACITY_THRESHOLDS }; }
 }
 
-export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): void {
+export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): RunService {
   app.use(express.json({ limit: '5mb' }));
 
   const deps = {
@@ -88,6 +94,40 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
     activeRunCount: () => activeRunCount(),
   };
+  const runs = new RunService({
+    store, runner: () => getRunner(kernel),
+    tools: () => kernel.plugins.capabilities('tool').map(capability => capability.tool),
+    maxDepth: kernel.config.get<number>('agent.maxDelegationDepth', 4),
+    executionSlots: kernel.config.get<number>('agent.executionSlots', 16),
+    workspace: tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
+    provider: (session, selected) => {
+      const providers = getChatService(kernel)?.providers ?? [];
+      const provider = selected ? providers.find(p => p.id === selected) : providers.find(p => p.id === session.provider) ?? providers[0];
+      return provider ? { id: provider.id, model: provider.defaultModel } : undefined;
+    },
+    prepare: record => {
+      const chat = getChatService(kernel);
+      const provider = chat?.providers.find(p => p.id === record.providerId);
+      if (!chat || !provider) throw new Error('任务模型供应商不可用，请恢复配置后重试');
+      const rules = loadPromptRules({ dataDir: kernel.paths.data, projectRoot: record.authorization.workspace, maxChars: Number.MAX_SAFE_INTEGER });
+      return {
+        provider, model: record.model, messages: [], traceId: record.id,
+        contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
+        systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
+        contextMessages: [
+          ...(chat.getUserContext?.() ?? []),
+          ...(rules.text ? [{ role: 'user' as const, content: rules.text, context: { id: 'workspace-rules', source: rules.sources.filter(source => source.exists).map(source => source.file).join(';'), scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } }] : []),
+          { role: 'system', content: `工作区: ${record.authorization.workspace}\n授权: ${record.authorization.profile}${record.authorization.readOnly ? '；变更需要审批' : ''}`, context: { id: 'authorization', source: 'runtime-authorization', scope: 'runtime', trust: 'core', retention: 'required' } },
+        ],
+        maxTurns: kernel.config.get<number>('agent.maxTurns', 30),
+        fallbackProviders: kernel.config.get<string[]>('agent.fallbackProviders', []).flatMap(id => chat.providers.filter(p => p.id === id && p.id !== provider.id)),
+        compactFn: (history, maxTokens, signal, onUsage) => chat.compactHistory(history, maxTokens ?? kernel.config.get<number>('context.maxTokens', 60_000), { provider, model: record.model, traceId: record.id, trace: kernel.trace, signal, onUsage }).then(result => result.messages),
+      };
+    },
+    activity: active => active ? beginRun() : endRun(),
+  });
+  registerRunRoutes(app, deps, runs);
+  scheduler?.attach(runs);
 
   // ---------- 健康检查（M4 前置：bin 脚本据此校验进程身份/版本；无鉴权阻碍，只读无害） ----------
   app.get('/api/health', (_req, res) => {
@@ -121,7 +161,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerSessionRoutes(app, deps);    // 会话 CRUD / 消息 / 批量删除
   registerTenantRoutes(app, deps);     // OPS-01 租户注册表
   registerScheduleRoutes(app, deps);   // 长任务到点续跑
-  registerChatRoutes(app, deps);       // 对话（SSE）+ 断点
+  registerChatRoutes(app, deps, runs);
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）
   registerGitRoutes(app, deps);        // Git
@@ -132,4 +172,5 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerApprovalRoutes(app, deps);   // 审批
   registerEventRoutes(app, deps);      // 全局事件流（SSE）
   registerCommandRoutes(app, deps);    // 斜杠命令
+  return runs;
 }

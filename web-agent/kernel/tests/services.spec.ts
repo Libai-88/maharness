@@ -38,7 +38,7 @@ function setup(pluginDefs: Record<string, string>): Fixture {
   for (const [id, onLoadBody] of Object.entries(pluginDefs)) {
     const pdir = join(userPluginsDir, id);
     mkdirSync(pdir, { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ id, name: id, version: '0.1.0', entry: 'index.ts' }));
+    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id, name: id, version: '0.1.0', entry: 'index.ts' }));
     writeFileSync(join(pdir, 'index.ts'), `export default {\n  id: '${id}',\n  name: '${id}',\n  version: '0.1.0',\n  onLoad: async (ctx) => { ${onLoadBody} },\n}`);
   }
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
@@ -210,7 +210,7 @@ describe('服务绑定仲裁（可接管语义）', () => {
   test('注册期（lazy/未启动）的 provide 不生效——「绑定只在提供者 ACTIVE 时可见」', async (t) => {
     const f = setup({ lazyHigh: `ctx.provide('svc', 'lazy', 99);` });
     t.after(f.cleanup);
-    writeFileSync(join(f.userPluginsDir, 'lazyHigh', 'plugin.json'), JSON.stringify({
+    writeFileSync(join(f.userPluginsDir, 'lazyHigh', 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
       id: 'lazyHigh', name: 'lazyHigh', version: '0.1.0', entry: 'index.ts', lazy: true,
     }));
     await f.kernel.plugins.loadAll();
@@ -234,7 +234,7 @@ describe('服务绑定仲裁（可接管语义）', () => {
     });
     t.after(f.cleanup);
     // high 延迟启动：先让 base 生效，再观察「活动提供者被接管」的事件语义
-    writeFileSync(join(f.userPluginsDir, 'high', 'plugin.json'), JSON.stringify({
+    writeFileSync(join(f.userPluginsDir, 'high', 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
       id: 'high', name: 'high', version: '0.1.0', entry: 'index.ts', lazy: true,
     }));
 

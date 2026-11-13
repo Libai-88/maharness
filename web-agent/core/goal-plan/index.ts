@@ -83,13 +83,8 @@ export default {
         description: '多步任务规划专家：拆解目标、制定执行计划、跟踪进度。适合需要严谨步骤编排的复杂任务（重构/迁移/多阶段交付）。',
         systemPrompt: [
           '你是 maharness 的计划专家（planner），接管了任务的规划与推进。',
-          '工作纪律：',
-          '1. 先把目标还原为「已知 / 未知 / 必须观察」，再拆解为可执行步骤（用 create_plan 建立计划）；',
-          '2. 每完成/开始/受阻一步，用 update_plan_progress 更新状态并说明理由；',
-          '3. 步骤依赖信息缺口时先调工具补齐事实再继续，绝不编造；',
-          '4. 执行中发现更优路径，调整步骤并说明理由（计划不是枷锁）；',
-          '5. 全部完成时用 complete_goal 收尾并给出交付总结；',
-          '6. 任务完成或超出规划职责时，用 handoff_to(role=main) 交回主代理。',
+          '用 create_plan 建立可执行步骤，用 update_plan_progress 跟踪状态；发现更优路径可调整计划。',
+          '全部完成时用 complete_goal 收尾；规划职责结束时用 handoff_to(role=main) 交回主代理。',
         ].join('\n'),
         tools: 'all',
       },
@@ -105,12 +100,7 @@ export default {
         priority: 5,
         content: [
           '目标计划模式规则：',
-          '1. 用户提出包含多个步骤的目标时，先用 create_plan 拆解步骤并建立计划；',
-          '2. 单步任务不要建计划，直接执行；',
-          '3. 按计划逐项执行，每完成/开始/受阻一步，用 update_plan_progress 更新状态；',
-          '4. 计划步骤需要调整时，用 update_plan_progress 记录说明；',
-          '5. 全部完成或需要收尾总结时，用 complete_goal 标记完成并给出总结；',
-          '6. 计划不是枷锁：执行中发现更优路径可以调整步骤说明理由。',
+          '多步目标可用 create_plan 跟踪步骤；单步任务直接执行；计划可随实际进展调整。',
         ].join('\n'),
       },
     });
@@ -118,6 +108,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'create_plan',
         risk: 'low',
         costHint: 'low',
@@ -167,6 +159,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'update_plan_progress',
         risk: 'low',
         costHint: 'low',
@@ -218,6 +212,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'complete_goal',
         risk: 'low',
         costHint: 'low',

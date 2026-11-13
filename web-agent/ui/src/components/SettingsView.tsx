@@ -1,3 +1,5 @@
+import WorkspacePermissions from './WorkspacePermissions';
+import GettingStarted from './GettingStarted';
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useCallback, useEffect, useState } from 'react';
 import { configApi, getMutationToken, getTenantId, metaApi, providersApi, rulesApi, securityApi, setMutationToken, setTenantId, statsApi, type SecurityPosture } from '../api';
@@ -24,12 +26,12 @@ import { Field, FieldContent, FieldDescription, FieldGroup, FieldLabel, FieldTit
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
-import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
 import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 import { useIsMobile } from '@/hooks/use-mobile';
 
 interface Props {
+  onStartTask?: () => void;
   providers: ProviderInfo[];
   onChanged: () => void;
   theme: Theme;
@@ -58,6 +60,13 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [testResult, setTestResult] = useState<Record<string, { ok: boolean; ms: number; pending?: boolean }>>({});
   const [diagnostics, setDiagnostics] = useState<Record<string, ProviderDiagnostic | null>>({});
+  const [checkingId, setCheckingId] = useState<string | null>(null);
+  const checkTools = async (p: ProviderInfo) => {
+    setCheckingId(p.id);
+    try { const result = await providersApi.checkTools(p.id); if (result.status === 'confirmed') toast.success('已确认原生工具调用能力'); else toast.error(result.reason ?? '本次检测未确认工具调用能力'); onChanged(); }
+    catch (error) { toast.error(String(error)); }
+    finally { setCheckingId(null); }
+  };
   const [togglingId, setTogglingId] = useState<string | null>(null);
   // 拉取到的模型列表（datalist 供「模型」输入框下拉选择；切换新建/编辑时重置）
   const [models, setModels] = useState<PulledModel[]>([]);
@@ -303,12 +312,13 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
                 />
               </div></CardAction>
             </CardHeader>
-            <CardContent className="flex flex-col gap-4"><div className="flex flex-wrap gap-2"><Badge variant={connected ? 'secondary' : 'outline'}>{connected ? (providers[0]?.id === p.id ? '已配置 · 默认' : '已配置') : !p.enabled ? '已停用' : '未配置密钥'}</Badge><Badge variant="outline">{p.protocol ?? 'openai'}</Badge>{(p.models?.length ?? 0) > 0 && <Badge variant="outline">{p.models!.length} 模型</Badge>}{(p.models ?? []).some((m) => !!m.vision) && <Badge variant="outline">视觉</Badge>}</div>
+            <CardContent className="flex flex-col gap-4"><div className="flex flex-wrap gap-2"><Badge variant={connected ? 'secondary' : 'outline'}>{connected ? (providers[0]?.id === p.id ? '已配置 · 默认' : '已配置') : !p.enabled ? '已停用' : '未配置密钥'}</Badge><Badge variant="outline">{p.protocol ?? 'openai'}</Badge>{(p.models?.length ?? 0) > 0 && <Badge variant="outline">{p.models!.length} 模型</Badge>}{(p.models ?? []).some((m) => !!m.vision) && <Badge variant="outline">视觉资料</Badge>}<Badge variant="outline">协议支持工具调用</Badge><Badge variant={p.toolCheck?.status === 'confirmed' ? 'secondary' : 'outline'}>模型工具能力：{p.toolCheck?.status === 'confirmed' ? '已确认' : p.toolCheck?.status === 'not_confirmed' ? '检测未确认' : '未知'}</Badge></div>
+              {p.toolCheck?.reason && <p className="text-sm text-muted-foreground">{p.toolCheck.reason}</p>}
               <dl className="grid grid-cols-1 gap-4 text-sm sm:grid-cols-2">{[['API Key', p.apiKeyMasked || '—'], ['模型', p.model], ['输入价格 / 1M tokens', `$${p.priceIn ?? '?'}`], ['输出价格 / 1M tokens', `$${p.priceOut ?? '?'}`]].map(([label, value]) => <div key={label} className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 break-all font-mono">{value}</dd></div>)}</dl>
             {diagnostic && (
               <Notice ok={diagnostic.issues.length === 0}>配置：{diagnostic.configured.baseUrl && diagnostic.configured.apiKey && diagnostic.configured.defaultModel ? '完整' : '不完整'} · 模型 {diagnostic.models.length} 个 · {diagnostic.issues.length ? diagnostic.issues.join('；') : '未发现问题'}</Notice>
             )}
-            </CardContent><CardFooter className="flex-wrap gap-2"><Button variant="outline" size="sm" disabled={tr?.pending} onClick={() => void runTest(p)}>{tr?.pending && <Spinner data-icon="inline-start" />}验证密钥</Button><Button variant="ghost" size="sm" onClick={() => void runDiagnostic(p)}>诊断</Button>{tr && !tr.pending && <Badge variant={tr.ok ? 'secondary' : 'destructive'}>{tr.ok ? <Check /> : <X />}{tr.ms ? `${tr.ms}ms` : tr.ok ? '成功' : '失败'}</Badge>}<div className="ml-auto flex gap-2"><Button variant="outline" size="sm" onClick={() => startEdit(p)}>编辑</Button><Button variant="destructive" size="icon-sm" aria-label={`删除 Provider ${p.label}`} onClick={() => void remove(p)}><Trash2 /></Button></div></CardFooter>
+            </CardContent><CardFooter className="flex-wrap gap-2"><Button variant="outline" size="sm" disabled={tr?.pending} onClick={() => void runTest(p)}>{tr?.pending && <Spinner data-icon="inline-start" />}验证密钥</Button><Button variant="outline" size="sm" disabled={checkingId === p.id} onClick={() => void checkTools(p)}>{checkingId === p.id && <Spinner data-icon="inline-start" />}检测工具调用（一次模型请求）</Button><Button variant="ghost" size="sm" onClick={() => void runDiagnostic(p)}>诊断</Button>{tr && !tr.pending && <Badge variant={tr.ok ? 'secondary' : 'destructive'}>{tr.ok ? <Check /> : <X />}{tr.ms ? `${tr.ms}ms` : tr.ok ? '成功' : '失败'}</Badge>}<div className="ml-auto flex gap-2"><Button variant="outline" size="sm" onClick={() => startEdit(p)}>编辑</Button><Button variant="destructive" size="icon-sm" aria-label={`删除 Provider ${p.label}`} onClick={() => void remove(p)}><Trash2 /></Button></div></CardFooter>
           </Card>
         );
       })}
@@ -333,7 +343,6 @@ function ContextSection() {
   const [stats, setStats] = useState<StatsInfo | null>(null);
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
   const [savedTip, setSavedTip] = useState<string | null>(null);
-  const [l1Draft, setL1Draft] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -357,7 +366,7 @@ function ContextSection() {
       setTimeout(() => setSavedTip(null), 2500);
     } catch (err) {
       toast.error(`这项设置没保存上：${err instanceof Error ? err.message : String(err)}`);
-    } finally { setSaving(false); setL1Draft(null); }
+    } finally { setSaving(false); }
   };
 
   // E3：后端各消费点的默认值统一是 60000（agent.ts / chat.ts / config.ts / stats.ts），
@@ -366,21 +375,20 @@ function ContextSection() {
   const truncations = stats?.overview.truncations ?? 0;
   // E1：兜底优先用后端真实生效阈值（statsApi 已带出），其次 0.58（代码默认）——
   // 此前兜底 0.85 恰是缓存体系设计文档实测否决的值（中文同义改写 0.85 永不命中）。
-  const l1Threshold = l1Draft ?? cfg?.cache.l1Threshold ?? stats?.cache.l1Threshold ?? 0.58;
   const l2TtlMin = cfg?.cache.l2TtlMin ?? stats?.cache.l2TtlMin ?? 30;
   const l3Enabled = cfg?.cache.l3Enabled ?? true;
 
   return (
     <>
-      <SettingsHeading title="上下文管理" description="会话历史预算、自动截断与三层缓存，即时生效。" />
+      <SettingsHeading title="上下文管理" description="管理模型输入容量、历史压缩和缓存。" />
       {savedTip && <Notice>{savedTip}</Notice>}
       {error && <Notice ok={false}>{error}</Notice>}
       {!cfg && !error && <Skeleton className="h-32" />}
       <Card>
-        <CardHeader><CardTitle>预算与截断</CardTitle><CardDescription>控制每轮对话可使用的历史消息量。</CardDescription></CardHeader>
+        <CardHeader><CardTitle>输入容量</CardTitle><CardDescription>控制每轮对话可使用的历史消息量。</CardDescription></CardHeader>
         <CardContent><FieldGroup>
         <Field orientation="responsive">
-          <FieldContent><FieldLabel htmlFor="context-max-tokens">context.maxTokens</FieldLabel><FieldDescription>超出预算时自动截断较早消息。</FieldDescription></FieldContent>
+          <FieldContent><FieldLabel htmlFor="context-max-tokens">context.maxTokens</FieldLabel><FieldDescription>按模型窗口与输出预留计算可用容量；压缩保留明确约束，原始材料仍可检索。</FieldDescription></FieldContent>
           <Input
             id="context-max-tokens" className="@md/field-group:w-36" type="number" min={1} key={maxTokens} defaultValue={maxTokens} disabled={!cfg || saving}
             onBlur={(e) => { const v = Number(e.target.value); if (v && v !== maxTokens) void patch({ context: { maxTokens: v } }, `maxTokens → ${v}`); }}
@@ -397,14 +405,8 @@ function ContextSection() {
         </Field>
         <Field orientation="horizontal"><FieldContent><FieldTitle>累计截断次数</FieldTitle><FieldDescription>所有会话因超限被截断的总次数。</FieldDescription></FieldContent><Badge variant="secondary">{truncations}</Badge></Field>
       </FieldGroup></CardContent></Card>
-      <Card><CardHeader><CardTitle>三层缓存</CardTitle><CardDescription>平衡相似度、结果有效期与前缀复用。</CardDescription></CardHeader><CardContent><FieldGroup>
-        <Field orientation="responsive">
-          <FieldContent><FieldLabel htmlFor="l1-threshold">L1 · 语义缓存阈值</FieldLabel><FieldDescription>bigram Dice 相似度达到阈值即命中，默认 0.58。较低阈值可能产生误命中。</FieldDescription></FieldContent>
-          <div className="flex items-center gap-4 @md/field-group:w-48">
-            <Slider id="l1-threshold" aria-label="L1 语义缓存阈值" min={0.5} max={1} step={0.01} value={[l1Threshold]} disabled={!cfg || saving} onValueChange={([value]) => setL1Draft(value)} onValueCommit={([value]) => void patch({ cache: { l1Threshold: value } }, `L1 阈值已保存为 ${value.toFixed(2)}`)} />
-            <output className="text-sm tabular-nums" htmlFor="l1-threshold">{l1Threshold.toFixed(2)}</output>
-          </div>
-        </Field>
+      <Card><CardHeader><CardTitle>三层缓存</CardTitle><CardDescription>工具缓存保留状态范围；Provider 可复用稳定前缀。</CardDescription></CardHeader><CardContent><FieldGroup>
+        <Field orientation="horizontal"><FieldContent><FieldTitle>L1 · 相似答案缓存</FieldTitle><FieldDescription>默认关闭。每次任务均交由当前模型处理。</FieldDescription></FieldContent><Badge variant="outline">{cfg?.cache.l1Enabled ? '已显式开启' : '关闭'}</Badge></Field>
         <Field orientation="responsive">
           <FieldContent><FieldLabel htmlFor="l2-ttl">L2 · 工具结果 TTL</FieldLabel><FieldDescription>缓存有效期（分钟），文件变更立即失效。</FieldDescription></FieldContent>
           <Input
@@ -416,7 +418,7 @@ function ContextSection() {
           />
         </Field>
         <Field orientation="horizontal">
-          <FieldContent><FieldLabel htmlFor="l3-enabled">L3 · prompt 前缀复用</FieldLabel><FieldDescription>消息只追加不重写，复用 provider KV cache。</FieldDescription></FieldContent>
+          <FieldContent><FieldLabel htmlFor="l3-enabled">L3 · prompt 前缀复用</FieldLabel><FieldDescription>复用稳定前缀，由 Provider 报告命中；临时上下文按当前任务重新组装。</FieldDescription></FieldContent>
           <Switch
             id="l3-enabled" disabled={!cfg || saving}
             checked={l3Enabled}
@@ -429,83 +431,28 @@ function ContextSection() {
   );
 }
 
-/** 模型路由：任务类型 → provider@model（下拉选目标，含能力标注，不再手改 config.json） */
-function RoutingSection() {
+function RoutingSection({ providers }: { providers: ProviderInfo[] }) {
   const [cfg, setCfg] = useState<RuntimeConfig | null>(null);
-  const [tip, setTip] = useState<string | null>(null);
-
-  const load = async () => { try { setCfg(await configApi.get()); } catch { /* 忽略 */ } };
-  useEffect(() => { void load(); }, []);
-
-  const commit = async (routing: Record<string, string>) => {
-    try {
-      await configApi.patch({ agent: { modelRouting: routing } });
-      await load();
-      setTip('路由规则已保存并热生效');
-      setTimeout(() => setTip(null), 2500);
-    } catch (err) {
-      toast.error(`路由规则没保存上：${err instanceof Error ? err.message : String(err)}`);
-    }
+  const [busy, setBusy] = useState(false);
+  useEffect(() => { void configApi.get().then(setCfg).catch(error => toast.error(String(error))); }, []);
+  const selected = cfg?.agent.fallbackProviders ?? [];
+  const save = async (ids: string[]) => {
+    if (!cfg) return;
+    setBusy(true);
+    try { await configApi.patch({ agent: { fallbackProviders: ids } }); setCfg(await configApi.get()); }
+    catch (error) { toast.error(String(error)); }
+    finally { setBusy(false); }
   };
-
-  const routing = cfg?.agent.modelRouting ?? {};
-  const types = cfg?.taskTypes ?? ['默认', '代码', '文件操作', '检索', '写作', '问答', '其他'];
-  const targets = cfg?.routingTargets ?? [];
-  const used = Object.keys(routing).filter(k => !types.includes(k));
-
-  return (
-    <>
-      <SettingsHeading title="模型路由" description="按任务类型指定模型；需要视觉等能力时自动选择适合的模型。" />
-      {tip && <Notice>{tip}</Notice>}
-      {targets.length === 0 && <Empty><EmptyHeader><EmptyTitle>暂无可用路由模型</EmptyTitle><EmptyDescription>在「模型与 Provider」中添加 Provider 并拉取模型列表。</EmptyDescription></EmptyHeader></Empty>}
-      <Card><CardHeader><CardTitle>任务类型</CardTitle><CardDescription>未指定路由时，使用对话中当前选择的模型。</CardDescription></CardHeader><CardContent><FieldGroup>
-        {types.map((t) => {
-          const value = routing[t] ?? '';
-          const target = targets.find(x => x.value === value);
-          return (
-            <Field orientation="responsive" key={t}>
-              <FieldContent>
-                <FieldLabel htmlFor={`route-${t}`}>{t}</FieldLabel>
-                <FieldDescription>
-                  {value ? (target ? `${target.contextWindow ? `${Math.round(target.contextWindow / 1000)}k · ` : ''}${target.vision ? '支持视觉' : '不支持视觉'}` : `已配置 ${value}（该模型未在 Provider 中登记）`) : '未配置，使用右上角当前模型'}
-                </FieldDescription>
-              </FieldContent>
-              <Select
-                value={value || '__none__'}
-                onValueChange={(nextValue) => {
-                  const next = { ...routing };
-                  const selected = nextValue === '__none__' ? '' : nextValue;
-                  if (!selected) delete next[t];
-                  else next[t] = selected;
-                  void commit(next);
-                }}
-              >
-                <SelectTrigger id={`route-${t}`} className="min-w-0 @md/field-group:w-56" aria-label={`${t} 路由目标`}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectItem value="__none__">（不路由）</SelectItem>
-                    {targets.map((target) => (
-                      <SelectItem key={target.value} value={target.value}>
-                        {target.vision ? '◉ ' : ''}{target.label}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </Field>
-          );
-        })}
-        {used.map((t) => (
-          <Field orientation="horizontal" key={t}><FieldContent><FieldTitle>{t}</FieldTitle><FieldDescription>自定义类目，按 classifyTask 结果匹配。</FieldDescription></FieldContent><Button variant="ghost" size="sm" onClick={() => { const next = { ...routing }; delete next[t]; void commit(next); }}>移除</Button></Field>
-        ))}
-      </FieldGroup></CardContent></Card>
-    </>
-  );
+  const ids = [...new Set([...providers.filter(provider => provider.enabled).map(provider => provider.id), ...selected])];
+  return <>
+    <SettingsHeading title="备用线路" description="任务使用当前所选模型；只有明确列出的备用 Provider 才能在主线路不可用时接替。" />
+    <Card><CardHeader><CardTitle>调用顺序</CardTitle><CardDescription>按开启顺序尝试备用线路。关闭后重新开启可调整顺序；备用线路使用各自的默认模型，费用计入当前任务。</CardDescription></CardHeader><CardContent><FieldGroup>
+      {!ids.length && <p className="text-sm text-muted-foreground">配置 Provider 后可在此选择备用线路。</p>}
+      {ids.map(id => <Field orientation="horizontal" key={id}><FieldContent><FieldLabel htmlFor={`fallback-${id}`}>{providers.find(provider => provider.id === id)?.label ?? id}</FieldLabel><FieldDescription>{selected.includes(id) ? `备用顺序 ${selected.indexOf(id) + 1}` : '未启用备用'}</FieldDescription></FieldContent><Switch id={`fallback-${id}`} checked={selected.includes(id)} disabled={!cfg || busy || !providers.find(provider => provider.id === id)?.enabled && !selected.includes(id)} onCheckedChange={checked => void save(checked ? [...selected, id] : selected.filter(value => value !== id))} /></Field>)}
+    </FieldGroup></CardContent></Card>
+  </>;
 }
 
-/** 用户规则：全局/项目提示规则编辑 + 策略规则（免审批/禁止）表 */
 function RulesSection() {
   const [view, setView] = useState<RulesView | null>(null);
   const [scope, setScope] = useState<'global' | 'project'>('project');
@@ -914,14 +861,14 @@ function SecuritySection() {
   );
 }
 
-export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange }: Props) {
+export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange, onStartTask }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
   const mobile = useIsMobile();
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
     { key: 'general', label: '通用' },
     { key: 'providers', label: '模型与 Provider' },
     { key: 'context', label: '上下文管理' },
-    { key: 'routing', label: '模型路由' },
+    { key: 'routing', label: '备用线路' },
     { key: 'personas', label: '人设与提示词' },
     { key: 'rules', label: '用户规则' },
     { key: 'skills', label: '技能系统' },
@@ -951,6 +898,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
       </nav>
       <ScrollArea className="min-h-0 min-w-0 flex-1"><div className="mx-auto w-full max-w-4xl p-4 md:p-6">
         <TabsContent value="general" className="flex flex-col gap-3">
+          <GettingStarted providers={providers} onModels={() => setTab('providers')} onChanged={onChanged} onStart={onStartTask} />
           <GeneralSection theme={theme} onThemeChange={onThemeChange} brand={brand} onBrandChange={onBrandChange} />
         </TabsContent>
         <TabsContent value="providers" className="flex flex-col gap-3">
@@ -960,7 +908,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
           <ContextSection />
         </TabsContent>
         <TabsContent value="routing" className="flex flex-col gap-3">
-          <RoutingSection />
+          <RoutingSection providers={providers} />
         </TabsContent>
         <TabsContent value="personas" className="flex flex-col gap-3">
           <PersonaPanel />
@@ -977,6 +925,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
             <Card><CardHeader><CardTitle>审计与存储</CardTitle><CardDescription>打开本地数据、配置及工作区。</CardDescription></CardHeader><CardContent><FieldGroup>
               {[['traces', 'JSONL 审计日志', 'data/traces'], ['db', '数据存储', 'data/agent.db'], ['sandbox', '沙箱根目录', '文件工具与文件 API 的可访问范围'], ['config', '用户配置', 'config.json']].map(([kind, label, description]) => <Field key={kind} orientation="horizontal"><FieldContent><FieldTitle>{label}</FieldTitle><FieldDescription>{description}</FieldDescription></FieldContent><Button variant="outline" size="sm" aria-label={`打开${label}`} onClick={() => { void metaApi.open(kind).catch((error) => toast.error(String(error))); }}>打开</Button></Field>)}
             </FieldGroup></CardContent></Card>
+            <WorkspacePermissions />
             <SecuritySection />
           </>
         </TabsContent>

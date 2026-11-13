@@ -1,4 +1,6 @@
 import { memo, useEffect, useMemo, useState } from 'react';
+import RunDiagnostics from './RunDiagnostics';
+import type { RunInfo } from '../run-api';
 import type { TraceStep } from '../types';
 import { toolDisplayName } from '../voice';
 import { Badge } from '@/components/ui/badge';
@@ -20,6 +22,7 @@ import {
 import { Check as IconCheck, Download as IconDownload, RefreshCw as IconRefresh } from 'lucide-react';
 
 interface Props {
+  run?: RunInfo | null;
   steps: TraceStep[];
   stats: { trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null;
   onRefresh: () => void;
@@ -138,7 +141,8 @@ function StepRow({
   );
 }
 
-export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
+export default memo(function TracePanel({ steps, stats, onRefresh, run }: Props) {
+  const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
   const [typeFilter, setTypeFilter] = useState('');
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const runningCount = useMemo(() => steps.filter((step) => step.status === 'running').length, [steps]);
@@ -281,6 +285,7 @@ export default memo(function TracePanel({ steps, stats, onRefresh }: Props) {
       </div>
       <ScrollArea data-testid="trace-scroll" className="min-h-0 flex-1">
         <div className="flex flex-col gap-4 px-3 pb-4">
+        {run && <details onToggle={event => setDiagnosticsOpen(event.currentTarget.open)}><summary className="cursor-pointer text-sm font-medium">任务输入、权限与执行结果</summary>{diagnosticsOpen && <div className="py-3"><RunDiagnostics run={run} /></div>}</details>}
         {steps.length === 0 && (
           <Empty className="py-10">
             <EmptyHeader>

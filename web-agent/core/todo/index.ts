@@ -90,11 +90,7 @@ export default {
         priority: 5,
         content: [
           'to do list 使用规则：',
-          '1. 用户请求包含多个步骤（>=3 步）时，先用 todo_add 逐项建立任务清单（一项一条）；',
-          '2. 执行过程中每开始/完成/受阻一步，用 todo_update 更新状态（doing/done/blocked），保持清单与真实进度一致；',
-          '3. 清单是给用户看的实时进度，也是你自己的执行索引——开始前看一眼，避免漏步；',
-          '4. 单步任务（1-2 步）不要建清单，直接执行；',
-          '5. 用户可在「待办看板」面板手动调整卡片，执行时以看板最新状态为准。',
+          '多步任务可用 todo_add 建立可见清单，用 todo_update 保持真实进度；单步任务直接执行。用户手动调整后以看板最新状态为准。',
         ].join('\n'),
       },
     });
@@ -103,6 +99,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'todo_add',
         risk: 'low',
         costHint: 'low',
@@ -156,6 +154,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'todo_update',
         risk: 'low',
         costHint: 'low',
@@ -193,6 +193,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'todo_list',
         risk: 'low',
         costHint: 'low',

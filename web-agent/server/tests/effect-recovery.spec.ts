@@ -62,18 +62,38 @@ function replayToolProvider(callId: string, name: string, args: unknown): Provid
   };
 }
 
-const tool: ToolDef = {
+const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
   name: 'record_effect', description: 'record', parameters: { type: 'object', properties: { value: { type: 'number' } } },
   async handler(args) { return { ok: true, data: { accepted: (args as { value: number }).value } }; },
 };
 
 describe('AgentRunner 副作用恢复账本', () => {
+  test('审批等待中没有副作用登记，取消后仍可以安全恢复', async () => {
+    const store = new Store(':memory:');
+    const abort = new AbortController();
+    let executions = 0;
+    const executionId = 'approval-not-started';
+    try {
+      for await (const event of new AgentRunner(kernelStub(process.cwd()), bus).run({
+        provider: replayToolProvider('approval-call', 'write_probe', {}), model: 'm',
+        messages: [{ role: 'user', content: 'write' }], traceId: executionId, executionId, signal: abort.signal,
+        tools: [{version: '2.0.0', permissions: [], outputSchema: {},  name: 'write_probe', description: 'write', parameters: { type: 'object' }, sideEffect: 'write', approval: true, handler: async () => { executions++; return { ok: true }; } }],
+        effectJournal: { peek: key => store.peekToolEffect(executionId, key), claim: key => store.claimToolEffect(executionId, key), complete: (key, result) => store.completeToolEffect(executionId, key, result) },
+      })) {
+        if (event.type === 'approval_required') {
+          assert.equal(store.hasPendingToolEffects(executionId), false);
+          abort.abort();
+        }
+      }
+    } catch (error) { assert.ok(abort.signal.aborted); }
+    finally { assert.equal(executions, 0); assert.equal(store.hasPendingToolEffects(executionId), false); store.close(); }
+  });
   test('principalRole 透传到工具上下文', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-principal-ctx-'));
     try {
       const runner = new AgentRunner(kernelStub(root), bus);
       let seen: string | undefined;
-      const probe: ToolDef = {
+      const probe: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
         name: 'principal_probe', description: 'probe', parameters: { type: 'object', properties: {} },
         sideEffect: 'read',
         async handler(_args, tctx) { seen = tctx.principal?.role; return { ok: true, data: { role: seen } }; },
@@ -244,7 +264,7 @@ describe('AgentRunner 副作用恢复账本', () => {
       };
       const failed = await execute(cp.task);
       assert.ok(failed.includes('task_failed'));
-      assert.equal(failed.includes('assistant_done'), false);
+      assert.equal(failed.includes('assistant_done'), true);
       const expired = await execute({ ...cp.task!, deadlineAt: Date.now() - 1 });
       assert.deepEqual(expired, ['task_failed', 'error:deadline']);
     } finally { restarted.close(); rmSync(root, { recursive: true, force: true }); }
@@ -324,7 +344,7 @@ describe('AgentRunner 副作用恢复账本', () => {
     const specs: { name: string; args: unknown; tool: ToolDef; expected: () => void }[] = [
       {
         name: 'write_file_effect', args: { value: 'file\n' },
-        tool: { name: 'write_file_effect', description: 'file', parameters: { type: 'object' }, async handler(args) {
+        tool: { version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {}, name: 'write_file_effect', description: 'file', parameters: { type: 'object' }, async handler(args) {
           appendFileSync(filePath, (args as { value: string }).value);
           return { ok: true };
         } },
@@ -332,7 +352,7 @@ describe('AgentRunner 副作用恢复账本', () => {
       },
       {
         name: 'http_effect', args: { value: 'http' },
-        tool: { name: 'http_effect', description: 'http', parameters: { type: 'object' }, async handler() {
+        tool: { version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {}, name: 'http_effect', description: 'http', parameters: { type: 'object' }, async handler() {
           await fetch(httpUrl, { method: 'POST', body: 'effect' });
           return { ok: true };
         } },
@@ -340,7 +360,7 @@ describe('AgentRunner 副作用恢复账本', () => {
       },
       {
         name: 'process_effect', args: { value: 'process' },
-        tool: { name: 'process_effect', description: 'process', parameters: { type: 'object' }, async handler() {
+        tool: { version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {}, name: 'process_effect', description: 'process', parameters: { type: 'object' }, async handler() {
           await new Promise<void>((resolve, reject) => {
             const child = spawn(process.execPath, ['-e', `require('node:fs').appendFileSync(${JSON.stringify(processPath)}, 'process\\n')`], { stdio: 'ignore' });
             child.once('error', reject);
@@ -384,7 +404,7 @@ describe('AgentRunner 副作用恢复账本', () => {
     }
   });
 
-  test('文件、HTTP、子进程副作用部分完成后失败，恢复时回放失败结果而不重放副作用', async () => {
+  test('文件、HTTP、子进程部分完成后抛异常，保留未知结果并阻止重放', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-effect-partial-'));
     const dbPath = join(root, 'agent.db');
     const filePath = join(root, 'partial-file.txt');
@@ -427,7 +447,7 @@ describe('AgentRunner 副作用恢复账本', () => {
       for (const [index, spec] of specs.entries()) {
         const executionId = `partial-effect-${index}`;
         let handlerCalls = 0;
-        const sideEffectTool: ToolDef = {
+        const sideEffectTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
           name: spec.name, description: 'partial side effect', parameters: { type: 'object' },
           async handler() { handlerCalls++; await spec.handler(); return { ok: true }; },
         };
@@ -450,7 +470,9 @@ describe('AgentRunner 副作用恢复账本', () => {
         store.close();
         store = new Store(dbPath);
         const resumed = await execute(store, 'recovered');
-        assert.ok(resumed.some((event) => event.type === 'tool_result' && event.ok === false && event.summary?.includes('恢复账本回放')));
+        assert.ok(resumed.some((event) => event.type === 'error'));
+        assert.equal(resumed.some((event) => event.type === 'assistant_done'), false);
+        assert.equal(store.hasPendingToolEffects(executionId), true);
         spec.verify();
         assert.equal(handlerCalls, 1);
       }

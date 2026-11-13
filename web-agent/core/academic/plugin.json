@@ -4,8 +4,24 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "requires": ["skills"],
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "limits": { "lifecycleTimeoutMs": 30000 },
-  "permissions": { "capabilities": { "persona": ["ars-routing"] } }
+  "requires": [
+    "skills"
+  ],
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "limits": {
+    "lifecycleTimeoutMs": 30000
+  },
+  "permissions": {
+    "capabilities": {
+      "persona": [
+        "ars-routing"
+      ]
+    }
+  },
+  "apiVersion": 2
 }

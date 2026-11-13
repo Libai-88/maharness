@@ -4,10 +4,24 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "compatibility": { "api": { "min": "1.0.0", "max": "1.0.0" } },
-  "limits": { "lifecycleTimeoutMs": 30000 },
-  "permissions": { "capabilities": {
-    "tool": ["run_parallel"],
-    "persona": ["parallel-rules"]
-  } }
+  "compatibility": {
+    "api": {
+      "min": "2.0.0",
+      "max": "2.0.0"
+    }
+  },
+  "limits": {
+    "lifecycleTimeoutMs": 30000
+  },
+  "permissions": {
+    "capabilities": {
+      "tool": [
+        "run_parallel"
+      ],
+      "persona": [
+        "parallel-rules"
+      ]
+    }
+  },
+  "apiVersion": 2
 }

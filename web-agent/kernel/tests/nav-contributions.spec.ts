@@ -28,7 +28,7 @@ function setup(plugins: Record<string, { nav?: Record<string, unknown>; withApi?
   for (const [id, def] of Object.entries(plugins)) {
     const pdir = join(userPluginsDir, id);
     mkdirSync(pdir, { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({
+    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
       id, name: `插件${id}`, version: '0.1.0', entry: 'index.ts',
       ...(def.nav ? { nav: def.nav } : {}),
     }));
@@ -121,7 +121,7 @@ describe('插件声明式前端导航（nav 贡献）', () => {
     const userPluginsDir = join(rootDir, 'plugins');
     const pdir = join(userPluginsDir, 'mod');
     mkdirSync(join(pdir, 'ui'), { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({
+    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
       id: 'mod', name: '模块插件', version: '0.1.0', entry: 'index.ts',
       nav: { label: '模块', mode: 'module', module: 'index.js' },
     }));

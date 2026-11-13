@@ -12,5 +12,23 @@
     "page": "/app",
     "status": "/status",
     "statusIntervalMs": 6000
+  },
+  "apiVersion": 2,
+  "permissions": {
+    "capabilities": {
+      "persona": [
+        "workbench-rules"
+      ],
+      "tool": [
+        "workbench_today",
+        "workbench_add_task",
+        "workbench_update_task",
+        "workbench_add_note",
+        "workbench_diary"
+      ],
+      "api": [
+        "wb"
+      ]
+    }
   }
 }

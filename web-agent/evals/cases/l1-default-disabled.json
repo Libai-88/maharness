@@ -1,0 +1,54 @@
+{
+  "name": "l1-default-disabled",
+  "description": "默认关闭相似答案缓存：相同问题重复两次，两次均调用当前模型。",
+  "messages": [
+    {
+      "role": "user",
+      "content": "maharness 的核心设计理念是什么"
+    }
+  ],
+  "requests": [
+    {
+      "chunks": [
+        {
+          "type": "delta",
+          "text": "maharness 的核心设计理念是薄内核、全插件化、全程可观测，agent 可以自己定义自己。"
+        },
+        {
+          "type": "usage",
+          "input": 150,
+          "output": 40
+        },
+        {
+          "type": "done"
+        }
+      ]
+    },
+    {
+      "chunks": [
+        {
+          "type": "delta",
+          "text": "maharness 的核心设计理念是薄内核、全插件化、全程可观测，agent 可以自己定义自己。"
+        },
+        {
+          "type": "usage",
+          "input": 150,
+          "output": 40
+        },
+        {
+          "type": "done"
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "repeats": 2,
+    "answerContains": [
+      "薄内核"
+    ],
+    "llmCalls": 2,
+    "cachedOn": [],
+    "noErrors": true
+  },
+  "schemaVersion": 1
+}

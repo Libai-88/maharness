@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const HOST_PLUGIN_API = '1.0.0';
+export const HOST_PLUGIN_API = '2.0.0';
 const ID_RE = /^[a-z][a-z0-9-]{1,63}$/;
 const SEMVER_RE = /^\d+\.\d+\.\d+$/;
 
@@ -23,6 +23,7 @@ function manifestTemplate(id) {
   const toolName = `${id}_hello`;
   return {
     id,
+    apiVersion: 2,
     name: id,
     version: '0.1.0',
     entry: 'index.ts',
@@ -43,6 +44,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: [],
         name: '${toolName}',
         description: 'Return a health response for the ${id} plugin.',
         sideEffect: 'none',
@@ -90,6 +93,7 @@ export function validatePlugin(pluginDir) {
       if (typeof api.max === 'string' && compareVersion(HOST_PLUGIN_API, api.max) > 0) errors.push(`不兼容宿主插件 API ${HOST_PLUGIN_API}`);
     }
   }
+  if (manifest.apiVersion !== 2) errors.push('需要 apiVersion: 2');
   const caps = manifest.permissions?.capabilities;
   if (manifest.permissions !== undefined && (!caps || typeof caps !== 'object' || Array.isArray(caps))) errors.push('permissions.capabilities 必须是对象');
   if (caps && typeof caps === 'object' && !Array.isArray(caps)) {

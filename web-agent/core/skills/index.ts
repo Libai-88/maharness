@@ -399,6 +399,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'list_skills',
         risk: 'low',
         costHint: 'low',
@@ -420,6 +422,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'get_skill',
         risk: 'low',
         costHint: 'low',
@@ -451,6 +455,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'get_skill_file',
         risk: 'low',
         costHint: 'low',
@@ -533,6 +539,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read"],
         name: 'list_skill_backups',
         risk: 'low',
         costHint: 'low',
@@ -556,6 +564,8 @@ export default {
     ctx.register({
       kind: 'tool',
       tool: {
+        version: '2.0.0',
+        permissions: ["workspace.read","workspace.write"],
         name: 'rollback_skill',
         risk: 'medium',
         costHint: 'low',

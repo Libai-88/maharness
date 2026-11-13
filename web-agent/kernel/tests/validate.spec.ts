@@ -4,6 +4,12 @@ import { validateAgainstSchema, validateToolArguments } from '../validate';
 import type { ToolDef } from '../types';
 
 describe('JSONSchema 子集校验', () => {
+  it('对象中的 undefined 与 JSON 序列化后的缺省字段具有相同语义', () => {
+    const schema = { type: 'object', required: ['name'], maxProperties: 1, additionalProperties: false, properties: { name: { type: 'string' }, limit: { type: 'integer' } } };
+    assert.deepEqual(validateAgainstSchema({ name: 'ok', limit: undefined, extra: undefined }, schema), []);
+    assert.ok(validateAgainstSchema({ name: undefined }, schema).some(issue => issue.includes('缺少必填字段')));
+    assert.ok(validateAgainstSchema(Object.create({ name: 'inherited' }), schema).some(issue => issue.includes('缺少必填字段')));
+  });
   it('校验 required、类型、枚举和数值边界', () => {
     const schema = {
       type: 'object',
@@ -67,7 +73,7 @@ describe('JSONSchema 子集校验', () => {
   });
 
   it('工具参数直接复用同一校验器', () => {
-    const tool: ToolDef = {
+    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
       name: 'demo',
       description: 'demo',
       parameters: {
