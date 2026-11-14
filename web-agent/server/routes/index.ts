@@ -1,3 +1,4 @@
+import { setMaintenanceModelScope } from '../../kernel/model-call';
 /**
  * server/routes/index.ts —— 路由装配入口
  * 与插件解耦：对话服务通过能力注册表获取（kind=service, id=chat），不认识插件内部实现。
@@ -126,6 +127,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     },
     activity: active => active ? beginRun() : endRun(),
   });
+  runs.attachMaintenance(setMaintenanceModelScope(runs.maintenanceScope()));
   registerRunRoutes(app, deps, runs);
   scheduler?.attach(runs);
 

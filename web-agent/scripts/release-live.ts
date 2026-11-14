@@ -1,4 +1,6 @@
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createResultTool } from '../core/chat/result-tool';
+import { TokenBudget } from '../evals/strengthening';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -26,7 +28,33 @@ if (process.env.EVAL_FREE_CONFIRMED !== 'true') throw new Error('This runner req
 const output = resolve(process.env.EVAL_REPORT_DIR ?? 'evals/reports/release-v2');
 mkdirSync(output, { recursive: true });
 const samplesPath = join(output, 'samples.jsonl');
-if (existsSync(samplesPath)) throw new Error('Report directory already contains samples; use a new directory');
+const continuing = process.env.EVAL_CONTINUE_UNSTARTED === 'true';
+if (existsSync(samplesPath) && !continuing) throw new Error('Report directory already contains samples; use a new directory');
+const previous = existsSync(samplesPath) ? readFileSync(samplesPath, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line)) : [];
+const tokenBudget = new TokenBudget(Number(process.env.EVAL_TOKEN_LIMIT ?? 20_000_000));
+const budgetPath = join(output, 'budget.jsonl');
+if (continuing && existsSync(budgetPath)) {
+  const entries = readFileSync(budgetPath, 'utf8').trim().split(/\r?\n/).filter(Boolean).map(line => JSON.parse(line));
+  const calls = new Map<string, number>();
+  for (const row of entries) calls.set(row.id, row.accounted);
+  tokenBudget.spent = [...calls.values()].reduce((sum, value) => sum + value, 0);
+}
+function sourceHashes() {
+  const hashes: Record<string, string> = {};
+  function visit(directory: string) {
+    for (const entry of readdirSync(join(root, directory), { withFileTypes: true })) {
+      const path = `${directory}/${entry.name}`;
+      if (entry.isDirectory() && !['reports', 'node_modules'].includes(entry.name) && !/@[0-9a-f]{10}$/.test(entry.name)) visit(path);
+      else if (entry.isFile() && /\.(tsx?|mjs)$/.test(entry.name)) hashes[path] = createHash('sha256').update(readFileSync(join(root, path))).digest('hex');
+    }
+  }
+  for (const directory of ['core', 'kernel', 'server', 'scripts', 'evals', 'ui/src']) visit(directory);
+  return hashes;
+}
+const evaluatedSources = sourceHashes();
+const sourcePath = join(output, 'evaluated-sources.json');
+if (continuing && JSON.stringify(JSON.parse(readFileSync(sourcePath, 'utf8'))) !== JSON.stringify(evaluatedSources)) throw new Error('Evaluation source revision changed; cannot combine batches');
+if (!continuing) writeFileSync(sourcePath, JSON.stringify(evaluatedSources, null, 2));
 const oldKernelModule = await import(pathToFileURL(join(baselineRoot, 'kernel/index.ts')).href);
 const oldRunnerModule = await import(pathToFileURL(join(baselineRoot, 'core/chat/agent.ts')).href);
 const variants = (process.env.EVAL_VARIANTS?.split(',') ?? ['baseline', 'reference', 'v2']) as ReleaseVariant[];
@@ -34,10 +62,10 @@ if (!variants.length || new Set(variants).size !== variants.length || variants.s
 const tasks = releaseTasks();
 const catalogSha256 = createHash('sha256').update(readFileSync(join(root, 'kernel/tool-discovery.ts'))).digest('hex');
 writeFileSync(join(output, 'runtime-fingerprints.json'), JSON.stringify({ catalogSha256, variants }, null, 2));
-const manifest: ReleaseManifest = { cases: tasks.map(({ id, category }) => ({ id, category })), models: modelNames.map((model, i) => ({ tier: 'tier-' + (i + 1), requestedModel: model, identity: 'route' })) };
-writeFileSync(join(output, 'manifest.json'), JSON.stringify({ ...manifest, repetitions: 3, baselineRoot, baselineAgentSha256: createHash('sha256').update(readFileSync(join(baselineRoot, 'core/chat/agent.ts'))).digest('hex'), v2AgentSha256: createHash('sha256').update(readFileSync(join(root, 'core/chat/agent.ts'))).digest('hex'), referenceLoopSha256: createHash('sha256').update(readFileSync(join(root, 'evals/reference-loop.ts'))).digest('hex'), taskSetSha256: createHash('sha256').update(readFileSync(join(root, 'evals/release-cases.ts'))).digest('hex'), maxCallsPerSample: 32, maxTurns: 30, maxOutputTokens: 2048, budgetUsd: 0, contextWindow: 60000, pricing: 'explicitly confirmed free; percentage cost overhead is unmeasurable' }, null, 2));
+const manifest: ReleaseManifest = { cases: tasks.map(({ id, category }) => ({ id, category })), models: modelNames.map((model, i) => ({ tier: 'route-' + (i + 1), requestedModel: model, identity: 'route' })) };
+writeFileSync(join(output, 'manifest.json'), JSON.stringify({ ...manifest, repetitions: 3, baselineRoot, baselineAgentSha256: createHash('sha256').update(readFileSync(join(baselineRoot, 'core/chat/agent.ts'))).digest('hex'), v2AgentSha256: createHash('sha256').update(readFileSync(join(root, 'core/chat/agent.ts'))).digest('hex'), referenceLoopSha256: createHash('sha256').update(readFileSync(join(root, 'evals/reference-loop.ts'))).digest('hex'), taskSetSha256: createHash('sha256').update(readFileSync(join(root, 'evals/release-cases.ts'))).digest('hex'), tokenLimit: tokenBudget.limit, sourceRevision: createHash('sha256').update(JSON.stringify(evaluatedSources)).digest('hex'), shuffleSeed: 20261114, maxCallsPerSample: 32, maxTurns: 30, maxOutputTokens: 2048, budgetUsd: 0, contextWindow: 60000, pricing: 'explicitly confirmed free; percentage cost overhead is unmeasurable' }, null, 2));
 
-interface Call { models: string[]; input?: number; output?: number; status?: number; error?: string }
+interface Call { id: string; models: string[]; input?: number; output?: number; status?: number; error?: string }
 interface Capture { calls: Call[]; pending: Promise<void>[] }
 const captures = new AsyncLocalStorage<Capture>();
 const originalFetch = globalThis.fetch;
@@ -45,7 +73,13 @@ globalThis.fetch = async (url, init) => {
   const capture = captures.getStore();
   if (!capture) return originalFetch(url, init);
   if (capture.calls.length >= 32) throw new Error('EVAL_CALL_LIMIT');
-  const receipt: Call = { models: [] }; capture.calls.push(receipt);
+  const id = randomUUID();
+  const reservedTokens = typeof init?.body === 'string' ? Math.min(60000, Buffer.byteLength(init.body, 'utf8') + 2048) + 2048 : 62048;
+  const settle = tokenBudget.reserve(reservedTokens);
+  appendFileSync(budgetPath, JSON.stringify({ id, state: 'reserved', accounted: reservedTokens }) + '\n');
+  let settled = false;
+  const finish = (actual?: number) => { if (settled) return; settled = true; settle(actual); appendFileSync(budgetPath, JSON.stringify({ id, state: actual === undefined ? 'conservative' : 'reported', accounted: actual ?? reservedTokens }) + '\n'); };
+  const receipt: Call = { id, models: [] }; capture.calls.push(receipt);
   try {
     const response = await originalFetch(url, init); receipt.status = response.status;
     capture.pending.push(response.clone().text().then(text => {
@@ -59,9 +93,10 @@ globalThis.fetch = async (url, init) => {
           if (data.usage && Number.isSafeInteger(data.usage.completion_tokens)) receipt.output = Math.max(receipt.output ?? 0, data.usage.completion_tokens);
         } catch { /* Ignore non-JSON SSE control lines. */ }
       }
-    }).catch(error => { receipt.error = error instanceof Error ? error.name : 'STREAM_FAILED'; }));
+      finish(receipt.input !== undefined && receipt.output !== undefined ? receipt.input + receipt.output : undefined);
+    }).catch(error => { receipt.error = error instanceof Error ? error.name : 'STREAM_FAILED'; finish(); }));
     return response;
-  } catch (error) { receipt.error = error instanceof Error ? error.name : 'REQUEST_FAILED'; throw error; }
+  } catch (error) { receipt.error = error instanceof Error ? error.name : 'REQUEST_FAILED'; finish(); throw error; }
 };
 
 async function execute(tier: string, model: string, variant: ReleaseVariant, task: typeof tasks[number], repetition: number) {
@@ -76,7 +111,7 @@ async function execute(tier: string, model: string, variant: ReleaseVariant, tas
   let faultObserved = false; let restored = false; let interrupted = false; let answer = '';
   let store: Store | undefined; let service: RunService | undefined;
   let runner: AgentLoop;
-  const abort = AbortSignal.timeout(180000);
+  const abort = AbortSignal.timeout(300000);
   const startedAt = new Date().toISOString();
   try {
     await kernel.plugins.register(join(root, 'core/tools-fs'));
@@ -100,6 +135,7 @@ async function execute(tier: string, model: string, variant: ReleaseVariant, tas
       appendFileSync(resolveInSandbox(ctx.sandboxRoot, 'ledger.jsonl'), JSON.stringify(args) + String.fromCharCode(10));
       toolRecords.push({ name: 'append_record', ok: true }); return { ok: true, data: { appended: true } };
     } });
+    tools.push(createResultTool());
     const providerSource = createProvider({ id: 'eval-' + randomUUID(), baseUrl: baseUrl!, apiKey: apiKey!, model, inputPrice: 0, outputPrice: 0, requestTimeoutMs: 45000 });
     const provider = { ...providerSource, async *chat(messages: LLMMessage[], opts: Parameters<typeof providerSource.chat>[1]) {
       yield* providerSource.chat(messages, { ...opts, maxTokens: 2048, temperature: 0, signal: opts.signal ? AbortSignal.any([opts.signal, abort]) : abort });
@@ -167,21 +203,37 @@ async function execute(tier: string, model: string, variant: ReleaseVariant, tas
 }
 
 const jobs = manifest.models.flatMap(model => tasks.flatMap(task => [1, 2, 3].flatMap(repetition => variants.map(variant => ({ model, task, variant, repetition })))));
-const samples: ReleaseSample[] = [];
+const samples: ReleaseSample[] = [...previous];
+let seed = 20261114;
+for (let i = jobs.length - 1; i > 0; i--) { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; const j = seed % (i + 1); [jobs[i], jobs[j]] = [jobs[j], jobs[i]]; }
+const sampleKey = (row: { tier: string; caseId: string; variant: string; repetition: number }) => JSON.stringify([row.tier, row.caseId, row.variant, row.repetition]);
+const started = new Set(samples.map(sampleKey));
+if (continuing && existsSync(join(output, 'started.jsonl'))) {
+  for (const line of readFileSync(join(output, 'started.jsonl'), 'utf8').trim().split(/\r?\n/).filter(Boolean)) {
+    const key = JSON.parse(line).key;
+    if (!started.has(key)) throw new Error('An already-started sample has unknown outcome; preserve it as invalid before continuing: ' + key);
+  }
+}
+if (started.size !== samples.length) throw new Error('Duplicate existing sample keys');
 let cursor = 0;
 const limit = process.env.EVAL_PREFLIGHT_ONLY === 'true' ? 3 : jobs.length;
 async function worker() {
-  while (cursor < limit) {
+  while (cursor < limit && !tokenBudget.stopped) {
     const job = jobs[cursor++];
+    const key = sampleKey({ tier: job.model.tier, caseId: job.task.id, variant: job.variant, repetition: job.repetition });
+    if (started.has(key)) continue;
+    started.add(key);
+    appendFileSync(join(output, 'started.jsonl'), JSON.stringify({ key, startedAt: new Date().toISOString() }) + '\n');
     const sample = await captures.run({ calls: [], pending: [] }, () => execute(job.model.tier, job.model.requestedModel, job.variant, job.task, job.repetition));
     samples.push(sample);
     console.log(`[release] ${samples.length}/${limit} ${sample.tier} ${sample.caseId} ${sample.variant}#${sample.repetition} complete=${sample.completed} assertions=${sample.assertions.filter(item => item.passed).length}/${sample.assertions.length} calls=${sample.calls} catalog=${catalogSha256.slice(0, 12)}`);
-    writeFileSync(join(output, 'progress.json'), JSON.stringify({ completed: samples.length, expected: jobs.length, updatedAt: new Date().toISOString() }));
+    writeFileSync(join(output, 'progress.json'), JSON.stringify({ completed: samples.length, expected: jobs.length, tokensAccounted: tokenBudget.spent, tokensHeld: tokenBudget.held, tokenLimit: tokenBudget.limit, updatedAt: new Date().toISOString() }));
   }
 }
-try { await Promise.all(Array.from({ length: Math.max(1, Math.min(6, Number(process.env.EVAL_CONCURRENCY) || 4)) }, () => worker())); }
+try { await Promise.all(Array.from({ length: Math.max(1, Math.min(2, Number(process.env.EVAL_CONCURRENCY) || 2)) }, () => worker())); }
 finally { globalThis.fetch = originalFetch; }
 const report = buildReleaseReport(manifest, samples, []);
-writeFileSync(join(output, 'report.json'), JSON.stringify({ ...report, generatedAt: new Date().toISOString() }, null, 2));
+const revisionCurrent = JSON.stringify(sourceHashes()) === JSON.stringify(evaluatedSources);
+writeFileSync(join(output, 'report.json'), JSON.stringify({ ...report, performanceRevisionCurrent: revisionCurrent, tokensAccounted: tokenBudget.spent, tokensHeld: tokenBudget.held, tokenLimit: tokenBudget.limit, generatedAt: new Date().toISOString() }, null, 2));
 console.log(JSON.stringify(report, null, 2));
 process.exitCode = report.readyForRelease ? 0 : 2;

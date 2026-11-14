@@ -625,6 +625,9 @@ export interface ProviderDef {
   capabilities?: ProviderCapabilities;
   /** 可选 Provider 原生 tokenizer；缺失时回退 kernel 的确定性估算器。 */
   tokenizer?: TokenizerAdapter;
+  priceSource?: 'configured' | 'catalog' | 'unknown';
+  outputLimitGuaranteed?: boolean;
+  inputTokenUpperBound?: (messages: LLMMessage[], options: ChatOptions) => number;
   prices?: { in: number; out: number };  // USD / 百万 token，用于成本核算
   chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk>;
 }
@@ -674,6 +677,7 @@ export type LLMChunk =
   | {
       type: 'usage';
       estimated?: boolean;
+      incomplete?: boolean;
       input: number;           // 总输入 token（含缓存命中部分）
       output: number;
       /** 本次请求中 provider 前缀缓存真实命中的输入 token（归一化各厂商字段）：
@@ -683,6 +687,7 @@ export type LLMChunk =
       /** 本次请求中未命中缓存的输入 token（真实命中率 = cachedInput/(cachedInput+missInput)） */
       missInput?: number;
     }
+  | { type: 'model'; model: string }
   | { type: 'done' };
 
 export interface ChatOptions {

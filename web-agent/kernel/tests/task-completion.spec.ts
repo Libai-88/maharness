@@ -144,9 +144,9 @@ describe('AgentRunner 任务完成验收', () => {
     for await (const event of new AgentRunner(f.kernel, bus).run({
       provider, model: 'm', traceId: 'compact-e2e', maxTurns: 2,
       messages: [
-        { role: 'system', content: '【任务约束】必须在工作区完成任务。' },
-        { role: 'system', content: '【验收条件】最终答案必须包含 verified marker。' },
-        { role: 'system', content: '【长期记忆】项目主目录是 maharness。' },
+        { role: 'system', content: '【任务约束】必须在工作区完成任务。', context: { id: 'constraint:378591', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+        { role: 'system', content: '【验收条件】最终答案必须包含 verified marker。', context: { id: 'constraint:374048', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+        { role: 'system', content: '【长期记忆】项目主目录是 maharness。', context: { id: 'constraint:333357', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
         ...Array.from({ length: 40 }, (_, i) => ({ role: 'assistant' as const, content: `历史消息 ${i}：${'长文本'.repeat(40)}` })),
         { role: 'user', content: '请完成这项长任务，并基于最新约束执行。' },
       ],

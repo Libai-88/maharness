@@ -96,10 +96,11 @@ async function checkAccessibility(page: Page) {
 for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复来源，兼容历史记录 ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await setup(page);
-  const run = { id: 'diagnostic-run', sessionId: 'design-0', objective: '核对恢复后的材料', model: 'design-model', providerId: 'design', status: 'interrupted', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, usageStatus: 'unknown', error: '操作结果未知，禁止自动重放', authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+  const run = { billingNotice: '部分模型调用的用量或价格尚未确认，请在任务结束后核对。', id: 'diagnostic-run', sessionId: 'design-0', objective: '核对恢复后的材料', model: 'design-model', providerId: 'design', status: 'interrupted', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, usageStatus: 'unknown', error: '操作结果未知，禁止自动重放', authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
   await page.route('**/api/v2/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
+    if (path.endsWith('/model-calls')) return route.fulfill({ json: [{ id: 'vision-call', purpose: 'vision', providerId: 'design', model: 'design-model', status: 'completed', usageStatus: 'unknown', priceSource: 'unknown', inputEstimate: 12 }] });
     if (path.endsWith('/inputs')) return route.fulfill({ json: [
       { id: 'new-input', turn: 1, providerId: 'design', model: 'design-model', createdAt: 0, messages: [{ role: 'user', content: '核对材料' }], tools: [{ name: 'read_file' }], diagnostics: { messageTokens: 12, toolTokens: 5, sources: [{ source: 'user', tokens: 12 }], fingerprint: 'f'.repeat(64), attemptId: 'attempt-2', resumedFromTurn: 0 } },
       { id: 'old-input', turn: 0, providerId: 'design', model: 'design-model', createdAt: 0, messages: [], tools: [] },
@@ -111,6 +112,9 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
   await page.getByRole('button', { name: '诊断与子任务' }).click();
   const panel = page.getByTestId('run-diagnostics');
   await expect(panel).toContainText('用量不完整');
+  await expect(panel).toContainText('视觉分析');
+  await expect(panel).toContainText('费用待核对');
+  await expect(panel).toContainText('请在任务结束后核对');
   await expect(panel).toContainText('操作结果未知');
   await panel.locator('summary').filter({ hasText: '第 2 轮' }).click();
   await expect(panel.getByText(/本地估算：消息 12 tokens/)).toBeVisible();

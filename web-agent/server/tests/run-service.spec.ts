@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import express from 'express';
@@ -151,7 +152,7 @@ test('recovery accounts for spend after the last checkpoint without double count
     }
   } });
   try {
-    const run = service.create(session, { message: 'work', budgetUsd: 0.1 });
+    const run = service.create(session, { message: 'work', budgetPolicy: 'enforce', budgetUsd: 0.1 });
     await terminal(service, run.id);
     assert.equal(service.get(run.id, 'default').status, 'interrupted');
     assert.equal(store.aggregateSessions()[0].cost, 0.03);
@@ -202,7 +203,7 @@ test('children inherit provider, permissions, and cancellation and settle the sh
     }
   } });
   try {
-    const run = service.create(session, { message: 'work', budgetUsd: 0.1 }); await terminal(service, run.id);
+    const run = service.create(session, { message: 'work', budgetPolicy: 'enforce', budgetUsd: 0.1 }); await terminal(service, run.id);
     assert.equal(childRuns, 1);
     assert.equal(service.get(run.id, 'default').cost, 0.04);
     assert.equal(store.aggregateSessions()[0].cost, 0.04);
@@ -222,7 +223,7 @@ test('parallel reservations cannot spend the same parent budget twice', async ()
       release.resolve(); await first; yield done;
     }
   } });
-  try { const run = service.create(session, { message: 'work', budgetUsd: 0.1 }); await terminal(service, run.id); assert.equal(store.runs.children(run.id, 'default').length, 1); }
+  try { const run = service.create(session, { message: 'work', budgetPolicy: 'enforce', budgetUsd: 0.1 }); await terminal(service, run.id); assert.equal(store.runs.children(run.id, 'default').length, 1); }
   finally { release.resolve(); await service.shutdown(); store.close(); }
 });
 
@@ -364,4 +365,63 @@ test('HTTP subscription disconnect does not cancel run; Last-Event-ID replays co
     assert.ok(body.includes('event: done'));
     assert.ok(body.includes('completed'));
   } finally { proceed.resolve(); await service.shutdown(); await new Promise<void>(resolve => server.close(() => resolve())); store.close(); }
+});
+
+
+test('advisory budget permits completion and accounts auxiliary calls without duplicate settlement', async () => {
+  const billed: ProviderDef = { id: 'billed', label: 'Billed', defaultModel: 'm', prices: { in: 1, out: 2 }, priceSource: 'configured', async *chat() { yield { type: 'usage', input: 10, output: 2 }; yield { type: 'done' }; } };
+  const { service, store, session } = setup({ approveApproval: () => false, async *run(opts) {
+    for await (const _ of callModel(billed, [], { model: 'm' })) {}
+    for await (const _ of callModel(billed, [], { model: 'm' }, 'vision')) {}
+    opts.onUsage?.({ input: 999, output: 999, cost: 999 });
+    yield done;
+  } });
+  try {
+    const run = service.create(session, { message: 'work', budgetUsd: 0.000001 }); await terminal(service, run.id);
+    const result = service.get(run.id, 'default');
+    assert.equal(result.status, 'completed'); assert.equal(result.budgetPolicy, 'advisory');
+    assert.ok(Math.abs(result.cost - 0.000028) < 1e-12);
+    assert.equal(result.tokensIn, 20); assert.match(result.billingNotice!, /超过/);
+    assert.deepEqual(store.runs.modelCalls(run.id).map(call => call.purpose), ['agent', 'vision']);
+    store.runs.acknowledgeBilling(result);
+    assert.equal(service.get(run.id, 'default').billingNotice, undefined);
+    assert.equal(store.runs.modelCalls(run.id).length, 2);
+  } finally { await service.shutdown(); store.close(); }
+});
+
+test('parent ledger includes child model requests exactly once and propagates uncertainty', async () => {
+  const billed: ProviderDef = { id: 'billed', label: 'Billed', defaultModel: 'm', priceSource: 'unknown', async *chat() { yield { type: 'usage', input: 10, output: 2 }; yield { type: 'done' }; } };
+  const { service, store, session } = setup({ approveApproval: () => false, async *run(opts) {
+    if (!opts.parentRunId) await opts.delegate!({ objective: 'child' });
+    for await (const _ of callModel(billed, [], { model: 'm' })) {}
+    yield done;
+  } });
+  try {
+    const run = service.create(session, { message: 'work' }); await terminal(service, run.id);
+    const result = service.get(run.id, 'default');
+    assert.equal(result.status, 'completed'); assert.equal(result.tokensIn, 20);
+    assert.equal(result.usageStatus, 'unknown'); assert.ok(result.billingNotice);
+    assert.equal(store.runs.modelCalls(run.id).length, 1);
+    const child = store.runs.children(run.id, 'default')[0];
+    assert.equal(child.tokensIn, 10); assert.equal(store.runs.modelCalls(child.id)[0].parentRunId, run.id);
+  } finally { await service.shutdown(); store.close(); }
+});
+
+
+test('an explicit deadline cancels an in-flight model request and reports failure', async () => {
+  let stopped = false;
+  const slow: ProviderDef = { id: 'slow', label: 'Slow', defaultModel: 'm', async *chat(_messages, options) {
+    await new Promise<void>((_resolve, reject) => options.signal!.addEventListener('abort', () => { stopped = true; reject(new Error('deadline')); }, { once: true }));
+  } };
+  const { service, store, session } = setup({ approveApproval: () => false, async *run() {
+    for await (const _ of callModel(slow, [], { model: 'm' }, 'vision')) {}
+    yield done;
+  } });
+  try {
+    const run = service.create(session, { message: 'work', deadlineAt: Date.now() + 100 });
+    await new Promise(resolve => setTimeout(resolve, 150));
+    const result = service.get(run.id, 'default');
+    assert.equal(stopped, true); assert.equal(result.status, 'failed'); assert.match(result.error!, /截止/);
+    assert.equal(store.runs.modelCalls(run.id)[0].status, 'cancelled');
+  } finally { await service.shutdown(); store.close(); }
 });

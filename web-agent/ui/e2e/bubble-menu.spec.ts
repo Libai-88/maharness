@@ -62,9 +62,12 @@ test.describe('消息菜单', () => {
   test('触摸长按呼出菜单，点外部关闭', async ({ page }) => {
     await setup(page);
     const bubble = page.getByTestId('msg-bubble-assistant').last();
+    await expect(page.getByTestId('send-btn')).toBeVisible();
+    await bubble.click({ trial: true });
     const box = await bubble.boundingBox();
     expect(box).not.toBeNull();
     const touch = await page.context().newCDPSession(page);
+    await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
     await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }] });
     await expect(page.getByTestId('bubble-menu')).toBeVisible();
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });

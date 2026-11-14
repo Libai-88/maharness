@@ -1,3 +1,4 @@
+import { observeModelRequest } from '../../kernel/model-call';
 /**
  * server/routes/providers.ts —— Provider 管理（网页端；DB 为唯一来源）
  */
@@ -168,7 +169,11 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     try {
       await assertProviderBaseUrl(provider.baseUrl);
       const probe = buildModelToolCheck(provider.baseUrl, provider.protocol, provider.apiKey, model);
-      const response = await fetchWithPublicRedirects(probe.url, probe.init);
+      const response = await observeModelRequest(provider.id, model, 256, async signal => {
+        const value = await fetchWithPublicRedirects(probe.url, { ...probe.init, signal: signal ? AbortSignal.any([signal, probe.init.signal!]) : probe.init.signal });
+        const body = await value.clone().json().catch(() => ({})) as { usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number }; model?: string };
+        return { value, input: body.usage?.prompt_tokens ?? body.usage?.input_tokens, output: body.usage?.completion_tokens ?? body.usage?.output_tokens, actualModel: body.model };
+      });
       let confirmed = false;
       if (response.ok) {
         const reader = response.body?.getReader();
@@ -335,7 +340,11 @@ export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
     const pid = providerId ? String(providerId) : undefined;
     try {
       const [pingUrl, pingInit] = buildPing(base, protocol, String(useKey ?? ''), String(model));
-      const r = await fetchWithPublicRedirects(pingUrl, pingInit);
+      const r = await observeModelRequest(String(providerId ?? 'draft'), String(model), 1, async signal => {
+        const value = await fetchWithPublicRedirects(pingUrl, { ...pingInit, signal: signal ? AbortSignal.any([signal, pingInit.signal!]) : pingInit.signal });
+        const body = await value.clone().json().catch(() => ({})) as { usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
+        return { value, input: body.usage?.prompt_tokens, output: body.usage?.completion_tokens, actualModel: body.model };
+      });
       const latencyMs = Date.now() - started;
       if (!r.ok) {
         // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码

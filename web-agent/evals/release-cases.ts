@@ -1,6 +1,7 @@
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { isDeepStrictEqual } from 'node:util';
 import type { ReleaseCategory } from './release-report';
 
 export interface ReleaseTask {
@@ -12,7 +13,7 @@ const nl = String.fromCharCode(10);
 function json(workspace: string, path: string): unknown {
   try { return JSON.parse(readFileSync(join(workspace, path), 'utf8')); } catch { return undefined; }
 }
-const equal = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
+const equal = isDeepStrictEqual;
 export function releaseTasks(): ReleaseTask[] {
   const tasks: ReleaseTask[] = [];
   const code = [

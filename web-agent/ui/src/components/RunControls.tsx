@@ -25,6 +25,8 @@ export default function RunControls({ run, onChanged, onResume, onNew }: { run: 
     <AlertTitle>{runLabels[run.status]} · {run.model}</AlertTitle>
     <AlertDescription className="flex flex-col gap-2">
       <p>费用 ${run.cost.toFixed(4)}{run.usageStatus === 'estimated' ? '（估算）' : run.usageStatus === 'unknown' ? '（用量不完整）' : ''} · {run.verification ? '验收结果可在任务详情查看' : '结果尚未验证'}</p>
+      {run.billingNotice && <p role="status">{run.billingNotice}</p>}
+      {run.billingNotice && !activeRun(run) && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setBusy(true); void runsApi.acknowledgeBilling(run.id).then(onChanged).catch(error => toast.error(String(error))).finally(() => setBusy(false)); }}>已核对，本次无需处理</Button>}
       {run.error && <p>{run.error}</p>}
       {activeRun(run) && <Button size="sm" variant="outline" className="self-start" aria-expanded={expanded} aria-controls="run-message-editor" onClick={() => setExpanded(value => !value)}>补充或新建任务</Button>}
       {activeRun(run) && expanded && <div id="run-message-editor" className="flex flex-col gap-2">

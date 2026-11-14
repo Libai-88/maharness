@@ -1,3 +1,4 @@
+import { importLegacyContext } from '../kernel/context';
 /**
  * server/db.ts —— SQLite 持久化（better-sqlite3，同步 API，零配置）
  * 表（与 CREATE TABLE 一致）：sessions / messages / providers / models / personas
@@ -380,10 +381,17 @@ export class Store {
     { from: 2, to: 3, run: db => { db.exec(RUN_SCHEMA); } },
     { from: 3, to: 4, run: db => { db.exec(RUN_SCHEMA); } },
     { from: 4, to: 5, run: db => { db.exec(RUN_SCHEMA); } },
+    { from: 5, to: 6, run: db => {
+      db.exec(RUN_SCHEMA);
+      const checkpoints = db.prepare('SELECT run_id,data FROM run_checkpoints_v2').all() as { run_id: string; data: string }[];
+      for (const row of checkpoints) { const checkpoint = JSON.parse(row.data); checkpoint.history = importLegacyContext(checkpoint.history); db.prepare('UPDATE run_checkpoints_v2 SET data=? WHERE run_id=?').run(JSON.stringify(checkpoint), row.run_id); }
+      const rows = db.prepare('SELECT id,record FROM runs_v2').all() as { id: string; record: string }[];
+      for (const row of rows) { const record = JSON.parse(row.record); if (record.budgetUsd !== undefined && record.budgetPolicy === undefined) { record.budgetPolicy = 'enforce'; db.prepare('UPDATE runs_v2 SET record=? WHERE id=?').run(JSON.stringify(record), row.id); } }
+    } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 5;
+  static readonly DB_SCHEMA_VERSION = 6;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 

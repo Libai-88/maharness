@@ -49,7 +49,7 @@ describe('compactHistory：头部 system（运行时提示词）必须原样保�
   });
 
   it('已有摘要锚点且锚点在头部：锚点参与合并，不重复运行时提示词', async () => {
-    const anchor: LLMMessage = { role: 'system', content: `${SUMMARY_MARK}旧摘要事实。` };
+    const anchor: LLMMessage = { role: 'system', content: `${SUMMARY_MARK}旧摘要事实。`, context: { id: 'old-summary', source: 'history-summary', scope: 'history', trust: 'reference', retention: 'summarize' } };
     const history: LLMMessage[] = [anchor, ...longDialog(10)];
     const r = await compactHistory(history, 100, { provider: stubProvider(`${SUMMARY_MARK}合并后的新摘要。`), model: 'stub-model' });
 
@@ -183,10 +183,10 @@ describe('compactHistory：任务与记忆约束完整性', () => {
   });
   it('压缩切点跳过任务/验收/记忆约束消息并逐字保留', async () => {
     const constraints: LLMMessage[] = [
-      { role: 'system', content: '【任务约束】必须在工作区完成任务。' },
-      { role: 'system', content: '【验收条件】输出必须包含 READY。' },
-      { role: 'user', content: '【核心记忆块】用户偏好：中文回复。' },
-      { role: 'user', content: '【长期记忆】项目主目录是 maharness。' },
+      { role: 'system', content: '【任务约束】必须在工作区完成任务。', context: { id: 'constraint:378591', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+      { role: 'system', content: '【验收条件】输出必须包含 READY。', context: { id: 'constraint:313550', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+      { role: 'user', content: '【核心记忆块】用户偏好：中文回复。', context: { id: 'constraint:425679', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+      { role: 'user', content: '【长期记忆】项目主目录是 maharness。', context: { id: 'constraint:333357', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
       ...longDialog(10),
     ];
     const result = await compactHistory(constraints, 100, { provider: stubProvider(`${SUMMARY_MARK}早期事实。`), model: 'stub-model' });
@@ -198,7 +198,7 @@ describe('compactHistory：任务与记忆约束完整性', () => {
   });
 
   it('发现约束丢失时返回 false，作为压缩后的 fail-closed 守卫', () => {
-    const before: LLMMessage[] = [{ role: 'system', content: '【验收条件】必须包含 READY。' }];
+    const before: LLMMessage[] = [{ role: 'system', content: '【验收条件】必须包含 READY。', context: { id: 'constraint:255809', source: 'user', scope: 'run', trust: 'user', retention: 'required' } }];
     const after: LLMMessage[] = [{ role: 'system', content: `${SUMMARY_MARK}READY` }];
     assert.equal(contextIntegrityPreservesConstraints(before, after), false);
   });

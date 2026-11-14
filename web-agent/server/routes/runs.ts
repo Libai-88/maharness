@@ -51,10 +51,11 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
       const issues = validateTaskContract({ objective: text(body.message, '消息'), acceptance });
       if (issues.length) throw new RunError(400, 'INVALID_ACCEPTANCE', issues.join('；'));
     }
+    if (body.budgetPolicy !== undefined && !['advisory', 'enforce'].includes(body.budgetPolicy)) throw new RunError(400, 'INVALID_INPUT', '费用策略无效');
     const record = service.create(session, {
       message: text(body.message, '消息'), provider: body.provider === undefined ? undefined : text(body.provider, '供应商'),
       model: body.model === undefined ? undefined : text(body.model, '模型'),
-      requestKey: req.get('Idempotency-Key'), budgetUsd: explicitNumber(body.budgetUsd, '费用上限'),
+      budgetPolicy: body.budgetPolicy, requestKey: req.get('Idempotency-Key'), budgetUsd: explicitNumber(body.budgetUsd, '费用上限'),
       deadlineAt: explicitNumber(body.deadlineAt, '截止时间'),
       acceptance,
       principalRole: (req as Request & { apiRole?: 'admin' | 'member' | 'readonly' }).apiRole,
@@ -80,6 +81,19 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
   }));
   app.get('/api/v2/runs', wrap((req, res) => res.json(deps.store.runs.list(tenantIdOf(req), typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined))));
   app.get('/api/v2/runs/:id', wrap((req, res) => res.json(service.get(id(req), tenantIdOf(req)))));
+  app.get('/api/v2/runs/:id/model-calls', wrap((req, res) => {
+    const run = service.get(id(req), tenantIdOf(req));
+    const offset = Number(req.query.offset ?? 0), limit = Number(req.query.limit ?? 100);
+    if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) throw new RunError(400, 'INVALID_RANGE', '调用读取范围无效');
+    res.json(deps.store.runs.modelCalls(run.id, offset, limit));
+  }));
+  app.post('/api/v2/runs/:id/billing/acknowledge', wrap((req, res) => {
+    const role = (req as Request & { apiRole?: string }).apiRole;
+    if (role === 'readonly') throw new RunError(403, 'USER_AUTHORIZATION_REQUIRED', '需要用户写权限');
+    const run = service.get(id(req), tenantIdOf(req));
+    if (!RUN_TERMINAL.has(run.status)) throw new RunError(409, 'RUN_ACTIVE', '任务结束后可确认费用');
+    res.json(deps.store.runs.acknowledgeBilling(run));
+  }));
   app.get('/api/v2/runs/:id/children', wrap((req, res) => {
     const run = service.get(id(req), tenantIdOf(req)); res.json(deps.store.runs.children(run.id, run.tenantId));
   }));

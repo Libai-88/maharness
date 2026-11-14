@@ -4,7 +4,9 @@ import { buildReleaseReport, type ReleaseManifest, type ReleaseSample, type Rele
 
 const folder = resolve(process.argv[2] ?? 'evals/reports/release-v2');
 const manifest = JSON.parse(readFileSync(join(folder, 'manifest.json'), 'utf8')) as ReleaseManifest;
-const samples = readFileSync(join(folder, 'samples.jsonl'), 'utf8').split(String.fromCharCode(10)).filter(line => line.trim()).map(line => JSON.parse(line) as ReleaseSample & { startedAt: string; endedAt: string; usageComplete?: boolean });
+const sampleFile = manifest.sampleFile ?? 'samples.jsonl';
+if (!['samples.jsonl', 'scored-samples.jsonl'].includes(sampleFile)) throw new Error('Invalid scoring sample file');
+const samples = readFileSync(join(folder, sampleFile), 'utf8').split(String.fromCharCode(10)).filter(line => line.trim()).map(line => JSON.parse(line) as ReleaseSample & { startedAt: string; endedAt: string; usageComplete?: boolean });
 const evidenceFile = join(folder, 'validation-evidence.json');
 const validations: ReleaseValidation[] = existsSync(evidenceFile) ? JSON.parse(readFileSync(evidenceFile, 'utf8')) : [];
 const report = buildReleaseReport(manifest, samples, validations);
@@ -13,6 +15,7 @@ const percentage = (value: number | null) => value === null ? '未知' : (value 
 const lines = [
   '# maharness v2 真实任务对照评测', '',
   `发布验收：${report.readyForRelease ? '通过' : '未通过'}。完成样本 ${report.observedSamples}/${report.expectedSamples}。`, '',
+  ...(sampleFile === 'scored-samples.jsonl' ? ['评分使用 scored-samples.jsonl；原始执行记录保留在 samples.jsonl。评分修订依据保存在 scoring-audit.json，产物快照保存在 artifact-evidence.jsonl。JSON 对象按内容比较，键顺序不影响结果；模型请求和登记操作未重放。', ''] : []),
   ...(manifest.evaluationScope ? [manifest.evaluationScope, ''] : []),
   '三组使用一致的任务材料、工具和模型请求参数。baseline 加载归档运行时，reference 使用最小循环，v2 使用持久任务服务与当前循环。恢复任务从持久断点继续，产物由文件及可执行断言核对。', '',
   '| 模型请求标识 | 组别 | 成功数 / 样本数 | 成功率 | 模型调用中位数 | 输入 / 输出 token 中位数 |',

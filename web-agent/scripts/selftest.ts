@@ -1022,7 +1022,7 @@ export default {
     },
   };
   const already = [
-    { role: 'system' as const, content: `${SUMMARY_MARK} 已压缩的早期对话` },
+    { role: 'system' as const, content: `${SUMMARY_MARK} 已压缩的早期对话`, context: { id: 'summary', source: 'history-summary', scope: 'history' as const, trust: 'reference' as const, retention: 'summarize' as const } },
     { role: 'user' as const, content: long },
     { role: 'assistant' as const, content: long },
     { role: 'user' as const, content: '问题三：最新问题' },

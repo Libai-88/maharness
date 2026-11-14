@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 /**
  * core/chat/index.ts —— 对话引擎插件
  * 证明"连对话都是插件"：本插件通过能力注册表暴露 chat 服务，server 层只认服务接口。
@@ -187,6 +188,7 @@ export default {
     });
 
     const providerGateway: ProviderGateway = {
+      call: callModel,
       providers: () => service.providers,
       getProvider: (id) => service.providers.find((provider) => provider.id === id),
       models: (providerId) => service.providers

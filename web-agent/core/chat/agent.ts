@@ -1,3 +1,5 @@
+import { isUserMessage } from '../../kernel/context';
+import { callModel, setModelCallTurn } from '../../kernel/model-call';
 /**
  * core/chat/agent.ts —— Agent 执行器（自研）
  * 循环模型：决策(LLM 流式) → 动作(工具执行) → 观测(结果回填)，直到无工具调用。
@@ -159,7 +161,7 @@ export class AgentRunner {
     const history: LLMMessage[] = sanitizeToolHistory([
       { role: 'system', content: systemPrompt, context: { id: 'runtime', source: 'runtime', scope: 'runtime', trust: 'core', retention: 'required' } },
       ...(opts.contextMessages ?? []),
-      ...messages,
+      ...messages.map((message, index) => message.context ? message : { ...message, context: { id: `message:${index}`, source: message.role === 'user' ? 'user' : 'history', scope: 'history' as const, trust: message.role === 'user' ? 'user' as const : 'reference' as const, retention: 'summarize' as const } }),
     ]);
     const tools = typeof this.kernel.plugins.tools === 'function'
       ? this.kernel.plugins.tools()
@@ -221,7 +223,7 @@ export class AgentRunner {
       if (!opts.onHistorySync || history.length <= syncedCount) return;
       const inc = history.slice(syncedCount);
       syncedCount = history.length;
-      opts.onHistorySync(inc.map((m) => ({
+      opts.onHistorySync(inc.filter(m => !m.context || m.context.source === 'user' || m.context.source === 'user-supplement' || m.role === 'assistant' || m.role === 'tool').map((m) => ({
         role: m.role,
         content: m.content ?? null,
         ...(m.role === 'assistant' && m.tool_calls?.length ? { tool_calls: m.tool_calls } : {}),
@@ -265,6 +267,7 @@ export class AgentRunner {
     const deadlineExpired = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
 
     for (let turn = 0; turn < maxTurns; turn++) {
+      setModelCallTurn((opts.turnOffset ?? 0) + turn);
       if (deadlineExpired()) {
         const error = `任务已超过截止时间（${new Date(deadlineAt!).toISOString()}）`;
         scopedTrace.startStep({ traceId, turn, type: 'system', name: 'task-deadline' }).fail(error);
@@ -297,7 +300,18 @@ export class AgentRunner {
       history.push(...(opts.takeMessages?.(history, turn) ?? []));
       // ---- 钩子：调用 LLM 前（记忆注入 / 上下文拼装 / 工具调整） ----
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, ...hookMeta };
+      const knownMessages = new Set(llmCtx.history);
+      const requiredMessages = llmCtx.history.filter(message => message.context?.retention === 'required').map(message => structuredClone(message));
       await this.emitHook('agent.before_llm', llmCtx);
+      for (let index = 0; index < llmCtx.history.length; index++) {
+        const message = llmCtx.history[index];
+        if (!knownMessages.has(message)) llmCtx.history[index] = { ...message, role: message.role === 'system' ? 'user' : message.role, context: { id: `observation:${randomUUID()}`, source: 'plugin-observation', scope: 'run', trust: 'untrusted', retention: 'summarize' } };
+      }
+      for (const required of requiredMessages) {
+        const index = llmCtx.history.findIndex(message => message.context?.id === required.context?.id);
+        if (index < 0) llmCtx.history.unshift(required);
+        else llmCtx.history[index] = required;
+      }
       opts.historyArchive?.save?.(llmCtx.history);
 
       // ---- M1 循环内预算检查：每轮估算 history，超 context.maxTokens → 压缩 ----
@@ -318,7 +332,7 @@ export class AgentRunner {
               llmCtx.history.splice(0, llmCtx.history.length, ...compacted);
               syncedCount = llmCtx.history.length;
             }
-          } catch (error) { if (error instanceof ContextCapacityError || opts.runId) throw error; }
+          } catch (error) { if (signal?.aborted || error instanceof ContextCapacityError || (error as { code?: string })?.code === 'MODEL_BUDGET_UNCERTAIN' || opts.runId) throw error; }
         }
       }
 
@@ -358,8 +372,7 @@ export class AgentRunner {
       // 因此即使历史已有工具消息也可安全查询：跨会话不串陈旧观察，会话内换措辞可命中。
       // promptKey = systemPrompt 指纹：人设/插件规则不同则隔离缓存空间。
       // 排除 before_llm 钩子注入的记忆/教训消息（【长期记忆】/【失败教训】），避免被当作"问题"
-      const realUsers = llmCtx.history.filter((m) => m.role === 'user' && m.content
-        && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
+      const realUsers = llmCtx.history.filter(isUserMessage);
       const lastUser = realUsers[realUsers.length - 1];
       q = lastUser?.content ?? '';
       // 注入完成后、LLM 调用前：把发送序列增量同步入库（教训/记忆/提醒/上一轮工具消息）
@@ -431,7 +444,7 @@ export class AgentRunner {
       });
       let text = '';
       let reasoning = '';
-      let usage: { input: number; output: number; cachedInput?: number; missInput?: number; estimated?: boolean } | undefined;
+      let usage: { input: number; output: number; cachedInput?: number; missInput?: number; estimated?: boolean; incomplete?: boolean } | undefined;
       let collected: ToolCall[] = [];
       let pendingStream: { type: 'delta' | 'reasoning'; text: string }[] = [];
       // 流式思考标签分流：`think 类标签（think/thinking/thought/reasoning）` 等块内文本实时走 reasoning 通道（UI 思考卡即时可见，
@@ -505,10 +518,10 @@ export class AgentRunner {
               yield { type: 'retry', reason: 'attempt', detail: '这条线路刚才没接上，再试一次' };
             }
             try {
-              const release = await opts.acquireExecution?.(signal);
+              const release = opts.modelCallsManaged ? undefined : await opts.acquireExecution?.(signal);
               try {
               opts.onModelInput?.({ diagnostics: describeModelInput(sendHistory, schemas, activeProvider.tokenizer), usage: { inputTokens: countMessageTokens(sendHistory, activeProvider.tokenizer) + estimateTokens(JSON.stringify(schemas)), window: opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000), outputReserve: allocateTokenBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)).output }, turn: (opts.turnOffset ?? 0) + turn, providerId: activeProvider.id, model: chainModel, messages: sendHistory, tools: schemas });
-              for await (const chunk of activeProvider.chat(sendHistory, {
+              for await (const chunk of callModel(activeProvider, sendHistory, {
                 model: chainModel, tools: llmCtx.tools, signal, responseFormat: opts.responseFormat,
               })) {
                 for (const ev of handleChunk(chunk)) yield ev;
@@ -519,7 +532,7 @@ export class AgentRunner {
               pendingStream = [];
               ok = true; // 成功结束
             } catch (err) {
-              reportUsageStatus(usage ? usage.estimated ? 'estimated' : 'reported' : 'unknown');
+              reportUsageStatus(usage && !usage.incomplete ? usage.estimated ? 'estimated' : 'reported' : 'unknown');
               // A failed stream can still be billed. Settle before resetting its response.
               if (usage) {
                 const billed = usage as { input: number; output: number };
@@ -597,7 +610,7 @@ export class AgentRunner {
         return;
       }
       const tIn = usage?.input ?? 0;
-      reportUsageStatus(usage ? usage.estimated ? 'estimated' : 'reported' : 'unknown');
+      reportUsageStatus(usage && !usage.incomplete ? usage.estimated ? 'estimated' : 'reported' : 'unknown');
       const tOut = usage?.output ?? 0;
       totalIn += tIn;
       totalOut += tOut;

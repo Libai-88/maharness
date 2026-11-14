@@ -1,3 +1,4 @@
+import { callEmbedding } from '../../kernel/model-call';
 /**
  * core/chat/provider.ts —— 多 Provider LLM 客户端（全部自研）
  * 统一走 OpenAI 兼容接口（/chat/completions），原生 fetch + SSE 流式解析，零 SDK 依赖。
@@ -28,7 +29,7 @@ import type {
  *  - Anthropic：cache_read_input_tokens（命中读取）；miss ≈ input_tokens - cache_read
  *  不识别任何字段（provider 不支持缓存）时返回 undefined，调用方按「无反馈」处理。 */
 export function normalizeUsage(raw: Record<string, unknown>): {
-  input: number; output: number; cachedInput?: number; missInput?: number;
+  input: number; output: number; cachedInput?: number; missInput?: number; incomplete?: boolean;
 } {
   const input = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0;
   const output = Number(raw.completion_tokens ?? raw.output_tokens ?? 0) || 0;
@@ -50,7 +51,7 @@ export function normalizeUsage(raw: Record<string, unknown>): {
     cachedInput = raw.cache_read_input_tokens;
     missInput = Math.max(0, input - cachedInput);
   }
-  return { input, output, cachedInput, missInput };
+  return { input, output, cachedInput, missInput, ...(!Number.isFinite(raw.prompt_tokens ?? raw.input_tokens) || !Number.isFinite(raw.completion_tokens ?? raw.output_tokens) ? { incomplete: true } : {}) };
 }
 
 export interface ProviderConfig {
@@ -205,6 +206,8 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     capabilities: adapterCapabilities(cfg.protocol),
     models: cfg.models,
     prices: resolvedPrices,
+    priceSource: priceGuessed ? 'unknown' : cfg.inputPrice !== undefined && cfg.outputPrice !== undefined ? 'configured' : 'catalog',
+    outputLimitGuaranteed: true,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
       const protocol = cfg.protocol ?? 'openai';
       if (protocol === 'anthropic') {
@@ -290,6 +293,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
             if (payload === '[DONE]') { finished = true; break; }
             try {
               const json = JSON.parse(payload);
+              if (typeof json.model === 'string') yield { type: 'model', model: json.model };
               const delta = json.choices?.[0]?.delta;
               if (delta?.content) yield { type: 'delta', text: delta.content };
               // 推理模型思考过程：DeepSeek 系 reasoning_content / OpenAI o1 系 reasoning
@@ -314,6 +318,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
                   output: u.output,
                   cachedInput: u.cachedInput,
                   missInput: u.missInput,
+                  ...(u.incomplete ? { incomplete: true } : {}),
                 };
               }
             } catch { /* 非 JSON 行（keep-alive 等）跳过 */ }
@@ -390,6 +395,7 @@ async function* anthropicStream(
         if (!payload || payload === '[DONE]') continue;
         let json: Record<string, unknown>;
         try { json = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
+        if (json.type === 'message_start' && typeof (json.message as { model?: unknown })?.model === 'string') yield { type: 'model', model: (json.message as { model: string }).model };
         for (const chunk of reduceAnthropicEvent(json, st)) yield chunk;
         if (st.errored) throw new Error(`Anthropic 流错误 [${providerId}]: ${st.errored}`);
         if (st.finished) break;
@@ -422,18 +428,18 @@ export function setupEmbedding(ctx: PluginContext): EmbeddingService | undefined
   const apiKey = process.env.EMBEDDING_API_KEY;
   const model = process.env.EMBEDDING_MODEL;
   if (!baseUrl || !apiKey || !model) return undefined;
-  const embed = async (text: string): Promise<number[]> => {
+  const embed = async (text: string): Promise<number[]> => callEmbedding(model, text, async signal => {
     // 本地 embedding（本机 Ollama 等）常见，不做私网限制；超时防 L1 查询被无期限网络请求拖住
     const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
       body: JSON.stringify({ model, input: text }),
-      signal: AbortSignal.timeout(30_000),
+      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
     });
     if (!res.ok) throw new Error(`Embedding 请求失败 ${res.status}`);
     const json = (await res.json()) as { data: { embedding: number[] }[] };
     return json.data[0]?.embedding ?? [];
-  };
+  });
   ctx.cache.setEmbeddingFn(embed);
   ctx.logger.info(`L1 语义缓存已激活（${model}）`);
   return { model, embed };

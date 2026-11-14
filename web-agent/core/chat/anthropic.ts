@@ -119,6 +119,7 @@ export function buildBody(model: string, messages: LLMMessage[], opts: { maxToke
 export interface AnthropicStreamState {
   tools: Map<number, { id: string; name: string; json: string }>;
   usage: { input: number; output: number; cachedInput: number; creation: number };
+  inputReported?: boolean; outputReported?: boolean;
   finished: boolean;
   errored: string | null;
 }
@@ -134,6 +135,7 @@ export function reduceEvent(json: Record<string, unknown>, st: AnthropicStreamSt
   if (type === 'message_start') {
     const msg = json.message as Record<string, unknown> | undefined;
     const u = (msg?.usage ?? {}) as Record<string, unknown>;
+    st.inputReported = typeof u.input_tokens === 'number';
     st.usage.input = Number(u.input_tokens ?? 0) || 0;
     st.usage.cachedInput = Number(u.cache_read_input_tokens ?? 0) || 0;
     st.usage.creation = Number(u.cache_creation_input_tokens ?? 0) || 0;
@@ -171,7 +173,7 @@ export function reduceEvent(json: Record<string, unknown>, st: AnthropicStreamSt
   }
   if (type === 'message_delta') {
     const u = (json.usage ?? {}) as Record<string, unknown>;
-    if (typeof u.output_tokens === 'number') st.usage.output = u.output_tokens;
+    if (typeof u.output_tokens === 'number') { st.usage.output = u.output_tokens; st.outputReported = true; }
     return out;
   }
   if (type === 'message_stop') { st.finished = true; return out; }
@@ -189,6 +191,7 @@ export function usageChunks(st: AnthropicStreamState): Extract<LLMChunk, { type:
   const miss = st.usage.input + st.usage.creation;
   return {
     type: 'usage',
+    ...(!st.inputReported || !st.outputReported ? { incomplete: true } : {}),
     input: total,
     output: st.usage.output,
     cachedInput: st.usage.cachedInput || undefined,

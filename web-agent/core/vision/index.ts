@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 /**
  * core/vision/index.ts —— 图像能力中介（能力路由，不改消息模型）
  * 设计：图片不进主对话上下文（省 token、且文本网关根本不认），
@@ -88,7 +89,7 @@ export default {
       let tokensIn = 0;
       let tokensOut = 0;
       try {
-        for await (const chunk of target.provider.chat(messages, { model: target.model, maxTokens: 1500, ...(signal ? { signal } : {}) })) {
+        for await (const chunk of callModel(target.provider, messages, { model: target.model, maxTokens: 1500, ...(signal ? { signal } : {}) }, 'vision')) {
           if (chunk.type === 'delta') text += chunk.text;
           else if (chunk.type === 'usage') { tokensIn = chunk.input; tokensOut = chunk.output; }
         }

@@ -735,55 +735,17 @@ describe('GET /api/providers/:id/diagnose', () => {
     ]);
   });
 
-  test('真实聊天入口目标预算耗尽时推送 budget_hit 并停止后续调用', async () => {
+  test('显式硬预算无法可靠预留时不发起模型调用', async () => {
     assert.ok(started);
-    started.store.upsertModel({
-      providerId: 'goal-provider', modelId: 'goal-model',
-      contextWindow: 32000, maxOutput: 4096, vision: 0, tools: 1, reasoning: 0,
-      priceIn: 400_000, priceOut: 400_000, source: 'manual', enabled: 1,
-    });
-    refreshChatProviders(started.kernel, started.store);
-    mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
-    writeFileSync(join(process.env.SANDBOX_ROOT!, 'budget-fixture.txt'), 'budget fixture');
-    const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'goal-provider', label: 'Goal Provider', defaultModel: 'goal-model',
-      models: [{ modelId: 'goal-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 400_000, priceOut: 400_000, enabled: true, source: 'test' }],
-      async *chat() {
-        calls++;
-        yield { type: 'tool_call', toolCall: {
-          id: 'record-budget-read', type: 'function',
-          function: { name: 'read_file', arguments: '{"path":"budget-fixture.txt"}' },
-        } };
-        yield { type: 'usage', input: 1010, output: 10, cachedInput: 0, missInput: 1010 };
-        yield { type: 'done' };
-      },
-    }];
-    started.kernel.config.set('agent.modelRouting', {});
-    const session = started.store.createSession('goal-model', 'goal-provider');
-    started.store.updateSession(session.id, { mode: 'goal' });
-    const first = await executeV2(session.id, { message: '记录一次成本并结束，预算 0.42 美元', budgetUsd: 0.42 });
-    assert.equal(first.status, 200);
-    const firstEvents = await first.text();
-    assert.doesNotMatch(firstEvents, /event: task_inference/);
-    assert.match(firstEvents, /event: budget_hit/);
-    assert.equal(calls, 1, '首个请求预算耗尽后不得继续调用模型');
-    const second = await executeV2(session.id, { message: '记录一次成本并结束', budgetUsd: 0.42, acceptance: [{ type: 'output_contains', value: '已记录' }] });
-    assert.equal(second.status, 200);
-    const sse = await second.text();
-    assert.match(sse, /event: budget_hit\ndata: .*"budget":0\.42/);
-    assert.match(sse, /event: error\ndata: .*"kind":"budget"/);
-    assert.doesNotMatch(sse, /event: done\ndata:/);
-    assert.equal(calls, 2, '两次请求各调用一次，预算熔断后不得追加模型调用');
-    const traceId = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse)?.[1];
-    assert.ok(traceId);
-    const breakerResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=cost-breaker`);
-    assert.equal(breakerResponse.status, 200);
-    const breakerTrace = await breakerResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
-    assert.equal(breakerTrace.steps.length, 1);
-    assert.equal(breakerTrace.steps[0]?.status, 'error');
-    assert.match(breakerTrace.steps[0]?.outputSummary ?? '', /熔断/);
+    const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
+    chat.providers = [{ id: 'budget-provider', label: 'Budget', defaultModel: 'm', async *chat() { calls++; yield { type: 'delta', text: 'done' }; } }];
+    const session = started.store.createSession('m', 'budget-provider');
+    const response = await executeV2(session.id, { message: 'work', budgetUsd: 0.42, budgetPolicy: 'enforce' });
+    const sse = await response.text();
+    assert.match(sse, /硬预算/);
+    assert.equal(calls, 0);
+    assert.doesNotMatch(sse, /event: done/);
   });
 
   test('真实聊天入口执行工具并在 Trace 中保留工具结果摘要', async () => {

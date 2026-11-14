@@ -1,0 +1,241 @@
+{
+  "kind": "release-comparison",
+  "readyForRelease": false,
+  "expectedSamples": 540,
+  "observedSamples": 540,
+  "errors": [],
+  "models": [
+    {
+      "tier": "route-1",
+      "requestedModel": "group/never-stuck",
+      "pinnedVersion": null,
+      "baseline": {
+        "samples": 90,
+        "passed": 89,
+        "successRate": 0.9888888888888889,
+        "medianCostUsd": 0,
+        "medianCalls": 4,
+        "medianTokensIn": 10193,
+        "medianTokensOut": 2182.5,
+        "calls": 398,
+        "tokensIn": 1027342,
+        "tokensOut": 193664,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "reference": {
+        "samples": 90,
+        "passed": 88,
+        "successRate": 0.9777777777777777,
+        "medianCostUsd": 0,
+        "medianCalls": 5,
+        "medianTokensIn": 10935.5,
+        "medianTokensOut": 992,
+        "calls": 499,
+        "tokensIn": 1044244,
+        "tokensOut": 111486,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "v2": {
+        "samples": 90,
+        "passed": 88,
+        "successRate": 0.9777777777777777,
+        "medianCostUsd": 0,
+        "medianCalls": 6,
+        "medianTokensIn": 17153,
+        "medianTokensOut": 1318.5,
+        "calls": 571,
+        "tokensIn": 2236650,
+        "tokensOut": 155226,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "medianCostRatio": null
+    },
+    {
+      "tier": "route-2",
+      "requestedModel": "workbuddy/hy4free",
+      "pinnedVersion": null,
+      "baseline": {
+        "samples": 90,
+        "passed": 82,
+        "successRate": 0.9111111111111111,
+        "medianCostUsd": 0,
+        "medianCalls": 4,
+        "medianTokensIn": 9858,
+        "medianTokensOut": 1676.5,
+        "calls": 377,
+        "tokensIn": 934449,
+        "tokensOut": 162594,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "reference": {
+        "samples": 90,
+        "passed": 86,
+        "successRate": 0.9555555555555556,
+        "medianCostUsd": 0,
+        "medianCalls": 6,
+        "medianTokensIn": 11444.5,
+        "medianTokensOut": 948.5,
+        "calls": 508,
+        "tokensIn": 1060816,
+        "tokensOut": 118008,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "v2": {
+        "samples": 90,
+        "passed": 85,
+        "successRate": 0.9444444444444444,
+        "medianCostUsd": 0,
+        "medianCalls": 6,
+        "medianTokensIn": 15334,
+        "medianTokensOut": 1226,
+        "calls": 567,
+        "tokensIn": 2319154,
+        "tokensOut": 143172,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "medianCostRatio": null
+    }
+  ],
+  "gates": [
+    {
+      "id": "matrix",
+      "passed": true,
+      "detail": "540 samples"
+    },
+    {
+      "id": "performance-revision",
+      "passed": true,
+      "detail": "540 个样本在同一冻结执行源码上完成。执行运行时未变；评分器按 JSON 语义比较修订，所有产物统一复核，原始样本与评分审计分别保留。"
+    },
+    {
+      "id": "model-identity",
+      "passed": false,
+      "detail": "Every call must match the fixed model version; route names alone are insufficient"
+    },
+    {
+      "id": "reference-success:route-1",
+      "passed": true,
+      "detail": "Maximum success-rate decline: 5 percentage points"
+    },
+    {
+      "id": "baseline-success:route-1",
+      "passed": false,
+      "detail": "Success rate must meet the old baseline"
+    },
+    {
+      "id": "cost:route-1",
+      "passed": null,
+      "detail": "Maximum median cost increase: 15%; zero-price or missing-cost samples cannot measure a percentage increase"
+    },
+    {
+      "id": "confirmations:route-1",
+      "passed": true,
+      "detail": "Unnecessary confirmations must not increase"
+    },
+    {
+      "id": "reference-success:route-2",
+      "passed": true,
+      "detail": "Maximum success-rate decline: 5 percentage points"
+    },
+    {
+      "id": "baseline-success:route-2",
+      "passed": true,
+      "detail": "Success rate must meet the old baseline"
+    },
+    {
+      "id": "cost:route-2",
+      "passed": null,
+      "detail": "Maximum median cost increase: 15%; zero-price or missing-cost samples cannot measure a percentage increase"
+    },
+    {
+      "id": "confirmations:route-2",
+      "passed": true,
+      "detail": "Unnecessary confirmations must not increase"
+    },
+    {
+      "id": "duplicateEffects",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "permissionViolations",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "eventGaps",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "validation:typecheck",
+      "passed": true,
+      "detail": "validation-details.json#build; npm run build; log SHA-256 f34c441c66d3ff9ccc5cbc18d85efc54342c958e738118b0bcd24423bcb0685a"
+    },
+    {
+      "id": "validation:unit",
+      "passed": true,
+      "detail": "validation-details.json#unit; npm test; log SHA-256 51d67f61ba0870156cfb078ea4334473f828e12fcb86e72da99914111059eeac"
+    },
+    {
+      "id": "validation:security",
+      "passed": true,
+      "detail": "validation-details.json#security; npm run test:security; log SHA-256 a12a89ba43910b17c9c26d4c50a1581192f0bc02ef17eb9cf3f3a0a86da76c03"
+    },
+    {
+      "id": "validation:build",
+      "passed": true,
+      "detail": "validation-details.json#build; npm run build; log SHA-256 f34c441c66d3ff9ccc5cbc18d85efc54342c958e738118b0bcd24423bcb0685a"
+    },
+    {
+      "id": "validation:desktop",
+      "passed": true,
+      "detail": "validation-details.json#browser; npm run e2e; log SHA-256 68d30d5450e302ef23d63c12e9bb862c83211800d3c57bb02db0f004f236dc9e"
+    },
+    {
+      "id": "validation:narrow-screen",
+      "passed": true,
+      "detail": "validation-details.json#browser; npm run e2e; log SHA-256 68d30d5450e302ef23d63c12e9bb862c83211800d3c57bb02db0f004f236dc9e"
+    },
+    {
+      "id": "validation:accessibility",
+      "passed": true,
+      "detail": "validation-details.json#browser; npm run e2e; log SHA-256 68d30d5450e302ef23d63c12e9bb862c83211800d3c57bb02db0f004f236dc9e"
+    },
+    {
+      "id": "validation:reconnect",
+      "passed": true,
+      "detail": "validation-details.json#browser; npm run e2e; log SHA-256 68d30d5450e302ef23d63c12e9bb862c83211800d3c57bb02db0f004f236dc9e"
+    },
+    {
+      "id": "validation:migration-rollback",
+      "passed": true,
+      "detail": "validation-details.json#unit; npm test; log SHA-256 51d67f61ba0870156cfb078ea4334473f828e12fcb86e72da99914111059eeac"
+    },
+    {
+      "id": "validation:plugin-contract",
+      "passed": true,
+      "detail": "validation-details.json#plugin-contract; npm run plugin:lock:verify; log SHA-256 4444b14bed981f7f7cae4f2267ba3526596f3473ce9071678a47f5bb1e15f1eb"
+    }
+  ],
+  "generatedAt": "2026-11-14T11:17:18.504Z",
+  "usageCompleteSamples": 519
+}

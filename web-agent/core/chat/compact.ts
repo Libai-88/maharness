@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 /**
  * core/chat/compact.ts —— 上下文压缩（Context Compaction）
  *
@@ -72,25 +73,11 @@ export function contextBoundaryPreservesTools(history: LLMMessage[], cut: number
     && ![...afterAssistantCalls].some((id) => beforeToolResults.has(id));
 }
 
-const PROTECTED_CONTEXT_PREFIXES = [
-  '【任务约束】', '【验收条件】', '【核心记忆块】', '【长期记忆】', '【失败教训】',
-];
-
-/** 任务、验收和记忆约束属于上下文契约，压缩后必须逐字保留。 */
 export function contextIntegrityPreservesConstraints(before: LLMMessage[], after: LLMMessage[]): boolean {
-  const protectedMessages = before.filter((message) => {
-    if (message.context) return message.context.retention === 'required';
-    const content = String(message.content ?? '');
-    return PROTECTED_CONTEXT_PREFIXES.some((prefix) => content.startsWith(prefix));
-  });
-  return protectedMessages.every((message) => after.some((candidate) =>
-    candidate.role === message.role && candidate.content === message.content));
+  return before.filter(isProtectedContextMessage).every(message => after.some(candidate => candidate.role === message.role && candidate.content === message.content && candidate.context?.id === message.context?.id));
 }
-
 function isProtectedContextMessage(message: LLMMessage): boolean {
-  if (message.context) return message.context.retention === 'required';
-  const content = String(message.content ?? '');
-  return PROTECTED_CONTEXT_PREFIXES.some((prefix) => content.startsWith(prefix));
+  return message.context?.retention === 'required';
 }
 
 /** 摘要提示词：只保留任务相关事实，丢弃寒暄与过程（输出必须以标记开头，否则视为失败降级） */
@@ -133,13 +120,13 @@ export async function compactHistory(history: LLMMessage[], maxTokens: number, o
   // 允许对摘要之后新增的段再次 LLM 摘要——旧摘要与新段一起送入合并成一条新摘要
   // （旧摘要中的事实不丢），不再"永久关闭压缩路径"（旧实现：新摘要直接顶掉旧摘要、
   // 丢掉旧事实；且摘要一旦存在就只能截断，长会话越截越碎）。
-  const summaryIdx = history.findIndex((m) => m.context?.source === 'history-summary' || m.role === 'system' && String(m.content ?? '').startsWith(SUMMARY_MARK));
+  const summaryIdx = history.findIndex((m) => m.context?.source === 'history-summary');
   // 头部 system 消息（运行时提示词）不参与压缩，且必须原样保留：
   // 循环内压缩（agent.ts 每轮 compactFn）传入的 history 首元素就是 AgentRunner 组装的
   // system prompt —— 旧实现 compressibleFrom=0 会把它送进摘要器、并因 prefix 为空而
   // 直接丢弃，导致本轮剩余轮次的请求不再带运行时提示词（且 L3 前缀从此断裂）。
   const headIsSystem = history[0]?.role === 'system'
-    && !String(history[0].content ?? '').startsWith(SUMMARY_MARK);
+    && history[0].context?.source !== 'history-summary';
   let compressibleFrom = summaryIdx >= 0 ? summaryIdx + 1 : (headIsSystem ? 1 : 0);
   while (compressibleFrom < history.length && isProtectedContextMessage(history[compressibleFrom]!)) compressibleFrom++;
 
@@ -215,12 +202,12 @@ async function summarizeSegment(segment: LLMMessage[], opts: CompactOptions): Pr
   try {
     return await Promise.race([(async () => {
       let text = '';
-      for await (const chunk of provider.chat(
+      for await (const chunk of callModel(provider,
         [
           { role: 'system', content: SUMMARIZE_PROMPT },
           { role: 'user', content: segment.map((m) => `${m.role === 'user' ? '用户' : m.role === 'system' ? '既有摘要' : '助手'}: ${m.content ?? ''}`).join('\n---\n') },
         ],
-        { model, signal: abort.signal, maxTokens: Math.min(4096, Math.max(256, Math.floor(countMessageTokens(segment, provider.tokenizer) / 4))) },
+        { model, signal: abort.signal, maxTokens: Math.min(4096, Math.max(256, Math.floor(countMessageTokens(segment, provider.tokenizer) / 4))) }, 'compaction',
       )) {
         if (settled) break;
         if (chunk.type === 'delta') text += chunk.text;
@@ -230,7 +217,8 @@ async function summarizeSegment(segment: LLMMessage[], opts: CompactOptions): Pr
     if (!trimmed.startsWith(SUMMARY_MARK)) return null; // 模型不配合：降级
     return trimmed;
     })(), stopped]);
-  } catch {
+  } catch (error) {
+    if (signal?.aborted || (error as { code?: string })?.code === 'MODEL_BUDGET_UNCERTAIN') throw error;
     return null;
   } finally {
     settled = true;

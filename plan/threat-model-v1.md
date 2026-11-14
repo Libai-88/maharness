@@ -1,7 +1,7 @@
 # maharness 威胁模型 v1
 
-版本：1.1
-核对日期：2026-11-01
+版本：1.2
+核对日期：2026-11-14
 适用范围：当前 `web-agent` 单机部署（local / trusted / remote 三种部署模式）
 
 ## 系统边界
@@ -39,13 +39,15 @@ OS 管理员、已控制当前 OS 用户的攻击者和物理控制设备者不�
 |---|---|---|
 | HTTP/UI 控制面 | DNS rebinding、跨源请求、未授权配置变更 | 部署模式自检（`server/deploy-mode.ts`，remote 缺 TLS/token 拒绝启动、fail-closed）；回环绑定及 Host/Origin 白名单（remote 支持显式 `MAHARNESS_ALLOWED_HOSTS/ORIGINS` 扩展）；可选 `MAHARNESS_API_TOKEN` 保护变更方法，trusted/remote 模式下全 API（含 GET/SSE）强制。API mutation 与审批响应共用凭据决策函数；授权成功/拒绝及 `/api/events` SSE 生命周期发布脱敏事件，并写入 SQLite `authorization_audit`；`GET /api/security/audit` 对读取数量设上限。`server/tests/deploy-mode.spec.ts`、`server/tests/auth.spec.ts`、`server/tests/db.spec.ts` 覆盖部署模式解析与拒绝、决策、轮换、审计脱敏、SSE 清理、持久化与重启读取 |
 | 高风险工具审批 | 伪造、重放审批 | 一次性审批凭据在强制模式下校验；缺失或无效凭据发布脱敏拒绝审计事件。`server/tests/auth.spec.ts` 覆盖缺失、错误、重放和超时 |
-| 工作区与文件工具 | 路径越界、危险根目录登记 | workspace 注册和切换复检危险目录；文件操作受 sandbox 根约束。`server/tests/auth.spec.ts`、`kernel/tests/sandbox.spec.ts` 与对应工具测试覆盖边界 |
+| 工作区与文件工具 | 路径越界、危险根目录登记、受保护内容读取 | workspace 注册和切换复检危险目录；文件操作受 sandbox 根约束，文件读取、目录列举与内容搜索共享受保护路径边界。`server/tests/auth.spec.ts`、`kernel/tests/sandbox.spec.ts`、`core/tools-fs/tests/read-boundary.spec.ts` 覆盖边界 |
 | PowerShell | 只读白名单绕过、参数位注入、副作用命令 | 语法子集判定与审批策略；`core/powershell/tests/approval-bypass.spec.ts` 覆盖脚本块、成员调用、表达式和误拦样本 |
 | MCP stdio/HTTP | 凭据继承、危险调用、私网访问、子进程残留 | 默认最小化 spawn 环境、工具默认需审批、URL/私网校验、Windows 进程树回收；`core/mcp/tests/security.spec.ts` 覆盖对应纯逻辑边界 |
 | Provider 与 `web_fetch` | SSRF、重定向绕过、超大响应 | `server/tests/providers.spec.ts` 覆盖 Provider 主机、协议和 DNS 入口；Provider 与 `web_fetch` 直连将同一次解析的已校验地址交给 socket connector。`server/tests/ssrf.spec.ts`、`core/search/tests/ssrf.spec.ts` 验证单次解析、实际连接使用固定地址、重定向逐跳 pinning、混合公网/私网答案 fail-closed 和响应体上限。`SEARCH_PROXY` 仅用于固定 DuckDuckGo/Tavily 服务地址，配置只接受无凭据的 HTTP(S) 代理 URL，变更时关闭旧 dispatcher；代理解析由用户配置的受信代理负责 |
 | 插件加载 | 未声明 capability 登记、加载失败残留 | manifest 白名单校验、拒绝事件和失败效应回收；`kernel/tests/loader.spec.ts` 覆盖授权、拒绝和兼容模式 |
 | 凭据存储 | 明文落库、主密钥损坏静默丢失 | Provider 密钥加密存储，异常状态诊断及显式重建/备份路径；`server/tests/auth.spec.ts` 覆盖密钥状态与失败行为 |
 | Trace/任务数据 | 敏感参数入日志、跨会话数据暴露、归档增长 | Trace 过滤/脱敏需逐事件核对；归档按天写入并按保留期清理，归档读取限制日期文件与尾部行数 |
+| 模型调用与任务账本 | 辅助请求越过取消或费用边界、重复结算、未知用量被记为零 | 模型调用按任务归属持久化，主循环与辅助请求共享取消和模型槽位；费用提醒与显式硬限制分别执行，硬限制缺少可靠预留时拒绝调用；未知用量或价格保留待核对状态。`kernel/tests/model-call.spec.ts`、`server/tests/run-service.spec.ts` 覆盖辅助取消、预留拒绝、结算幂等、祖先账本与截止时间 |
+| 上下文与 MCP sampling | 观察材料提升为指令、反向请求归属不明 | 上下文依据结构化来源与保留策略组装；插件新观察保持不可信材料身份，必需约束保留；MCP sampling 必须归属唯一活动工具请求。`kernel/tests/model-call.spec.ts`、`core/mcp/tests/sampling.spec.ts` 覆盖来源识别与无归属 sampling 拒绝 |
 
 安全回归映射由 `web-agent/scripts/check-threat-model.mjs` 校验：威胁模型中的代码/测试路径必须存在，`test:security` 中的每个测试文件必须在模型中出现。CI 执行 `npm run check:threat-model`；入口维护角色为安全维护者，代码路径或安全测试集合变更时同步复核本文件。
 

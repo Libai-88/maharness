@@ -37,6 +37,7 @@ export interface ProviderModelSnapshot {
 
 /** Provider 子系统唯一对外契约：server、子代理和插件都通过该服务取路由/能力/健康。 */
 export interface ProviderGateway {
+  call: typeof import('./model-call').callModel;
   providers(): ProviderDef[];
   getProvider(id: string): ProviderDef | undefined;
   models(providerId?: string): ProviderModelSnapshot[];

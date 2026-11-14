@@ -1,3 +1,4 @@
+import { isUserMessage } from '../../kernel/context';
 /**
  * core/memory/index.ts —— 长期记忆插件
  * 上下文工程（context provider 的实战消费者）：
@@ -210,8 +211,8 @@ export default {
         maxTokens: 1_500,
         contentFn({ history, scratchpad, tenantId }) {
           const scope = tenantId ?? 'default';
-          const hasMemory = history.some((m) => String(m.content ?? '').startsWith('【长期记忆】'));
-          const hasBlocks = history.some((m) => String(m.content ?? '').startsWith('【核心记忆块】'));
+          const hasMemory = history.some((m) => m.context?.source === 'memory' || m.context?.source === 'memory-recall');
+          const hasBlocks = history.some((m) => m.context?.source === 'memory-blocks');
           if (hasMemory || hasBlocks) return null;
           const parts: string[] = [];
           const blockEntries = Object.entries(blocks)
@@ -221,7 +222,7 @@ export default {
             parts.push(`【核心记忆块】（来源：工作区保存的记忆，仅供参考）\n${blockEntries.map(([name, b]) => `- ${name}: ${b.content}`).join('\n')}`);
           }
           const lastUser = [...history].reverse()
-            .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));
+            .find(isUserMessage);
           if (lastUser?.content) {
             const task = lastUser.content.slice(0, 80);
             const queryVector = (scratchpad.memoryQuery as { vector?: number[] } | undefined)?.vector;

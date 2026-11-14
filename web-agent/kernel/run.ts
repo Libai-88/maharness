@@ -17,6 +17,9 @@ export interface RunRecord {
   toolNames?: string[];
   instructions?: string;
   maxTurns?: number;
+  budgetPolicy?: 'advisory' | 'enforce';
+  billingAcknowledgedAt?: number;
+  billingNotice?: string;
   usageStatus?: 'reported' | 'estimated' | 'unknown';
 }
 export interface RunEvent { runId: string; seq: number; type: string; data: Record<string, unknown>; createdAt: number; }

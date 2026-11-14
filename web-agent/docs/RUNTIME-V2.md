@@ -36,7 +36,7 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 权限档按租户与工作区保存，并带版本。常规权限允许工作区普通读写，敏感或高风险操作按策略审批，框架源码继续受保护。开发者权限由用户明确开启，允许授权范围内的源码修改及有写权限的子任务。恢复任务重新核对当前授权，不扩大原授权。
 
-子任务继承父任务模型和权限上限，共享父任务费用账本。共享资源队列调度模型和工具执行；审批等待不占执行槽位。默认活动执行容量为 16，默认最大委派深度为 4。父任务取消向子任务传播。固定时间窗口内的委派次数不构成运行边界。
+子任务继承父任务模型和权限上限，共享父任务费用账本。模型请求与工具执行使用独立的公平队列，委派等待释放执行槽位；审批等待不占执行槽位。默认活动执行容量为 16，默认最大委派深度为 4。父任务取消向子任务传播。固定时间窗口内的委派次数不构成运行边界。
 
 框架修改在项目管理目录的隔离 Git worktree 中进行。审阅记录包含差异、内容摘要和验证结果。用户采纳时检查审阅版本与原工作区状态；冲突停止应用。采纳不自动更新或重启当前实例。密钥、权限配置和发布操作继续受保护。隔离 worktree 和应用守卫属于应用层控制。
 
@@ -75,6 +75,16 @@ L1 相似答案缓存默认关闭。L2 工具缓存保留状态指纹和作用�
 
 任务视图和运行轨迹入口提供任务状态、子任务、产物、工具执行记录、完整结果分页和模型输入。每次模型调用记录实际提供商、模型、消息、工具 schema、执行尝试标识、恢复断点和输入指纹。diagnostics.messageTokens、toolTokens 与 sources 为本地估算分项，不代表提供商计费用量；历史记录缺失时显示未记录。输入详情沿用任务认证与租户边界，完整内容不写入普通日志。
 
+## 模型调用与费用
+
+Provider Gateway 暴露统一 call 契约。内置主循环、历史摘要、视觉分析、MCP sampling 和 embedding 经过 kernel/model-call，继承任务取消与调用容量。连接检测、预热和无任务后台索引记入独立维护账本。任务的显式截止时间会主动取消在途请求及子任务，状态与用户主动取消分开记录。MCP stdio sampling 只绑定唯一在途工具任务；缺少归属或并发歧义时拒绝，不借用其他会话。
+
+每个实际请求持久记录调用 ID、用途、逻辑轮次、提供商、请求模型、可用时的返回模型、用量确定性和价格来源。流中断、缺失或部分 usage 保持未知；未知价格不能作为确认零价。主子任务逐请求结算到同一根账本，恢复和重复回执不重复计账。未知执行中的模型请求不会通过重放来获取账单。
+
+advisory 任务在额度超出、价格未知或用量不完整时继续执行，并在任务详情和聊天中提醒。用户可核对后确认，或在现有模型设置中修正具体计费配置。enforce 请求需要适配器可保证的输入计费上界、输出限制及已知价格；缺失条件返回 MODEL_BUDGET_UNCERTAIN。声明真实免费且适配器保证输出限制的调用可预留零费用。供应商账单不构成本地运行时可绝对保证的边界。
+
+数据库 schema 6 在事务迁移中保留旧显式预算的 enforce 语义，并在导入边界标注无结构化来源的旧断点。新任务不通过文本前缀判断用户目标、约束或摘要。插件临时观察不提升为核心指令，也不写入原始用户对话。
+
 ## HTTP API
 
 以下接口沿用实例的认证和租户规则。写入权限档与采纳框架修改要求用户身份授权，不提供为模型授权工具。
@@ -90,6 +100,8 @@ L1 相似答案缓存默认关闭。L2 工具缓存保留状态指纹和作用�
 | POST /api/v2/runs/:id/resume | 用户恢复中断任务 |
 | GET /api/v2/runs/:id/children | 子任务记录 |
 | GET /api/v2/runs/:id/artifacts | 登记产物 |
+| GET /api/v2/runs/:id/model-calls | 按 offset、limit 分页读取任务模型调用账本 |
+| POST /api/v2/runs/:id/billing/acknowledge | 用户核对已结束任务的费用提醒；不改写调用账本 |
 | GET /api/v2/runs/:id/tools | 工具执行记录 |
 | GET /api/v2/runs/:id/inputs | 最近 10 轮模型输入；before 指定更早输入游标 |
 | GET /api/v2/runs/:id/results/:callId | 完整结果分页；offset 和 limit 指定范围 |
@@ -97,7 +109,7 @@ L1 相似答案缓存默认关闭。L2 工具缓存保留状态指纹和作用�
 | PUT /api/v2/workspace/permissions | 用户修改权限档；携带 profile 与 revision |
 | POST /api/providers/:id/tool-check | 用户检测模型原生工具调用能力 |
 
-创建任务可传入 message、provider、model、budgetUsd、deadlineAt 和 acceptance。费用上限、截止时间与验收条件仅从显式配置读取。创建和补充消息支持 Idempotency-Key，同一键用于不同内容时返回冲突。
+创建任务可传入 message、provider、model、budgetUsd、budgetPolicy、deadlineAt 和 acceptance。budgetPolicy 默认为 advisory：费用额度只触发提醒，不停止任务；enforce 必须由用户明确选择，无法可靠预留时不发起新调用。截止时间与验收条件仅从显式配置读取。创建和补充消息支持 Idempotency-Key，同一键用于不同内容时返回冲突。
 
 框架修改接口位于 /api/v2/framework/changes，提供创建、列举、review、validate 和 adopt。adopt 携带用户审阅的 digest。
 
@@ -149,12 +161,15 @@ eval:live 必须显式提供 EVAL_BASE_URL、EVAL_API_KEY、EVAL_MODEL、正数 
 | EVAL_BASELINE_ROOT | 归档版本的 web-agent 绝对目录，依赖需可解析 |
 | EVAL_FREE_CONFIRMED | 当前入口仅接受明确确认为免费的测试模型，值为 true |
 | EVAL_REPORT_DIR | 新的报告目录，默认 evals/reports/release-v2；已有样本时拒绝覆盖 |
-| EVAL_CONCURRENCY | 并发样本数，默认 4，上限 6 |
+| EVAL_CONCURRENCY | 并发样本数，默认 2，上限 2 |
+| EVAL_TOKEN_LIMIT | 全批次输入与输出 token 计账上限，默认 20000000；usage 缺失时保留请求预留 |
 | EVAL_VARIANTS | 可选的组别子集，逗号分隔 baseline、reference、v2；子集运行本身不能满足完整矩阵门禁 |
 
-每个样本最多 32 次网关请求、每次最多 2048 输出 tokens，任务执行时限 180 秒；正常阶段采用默认的 30 轮上限，恢复场景先执行 1 轮、持久化后允许继续 30 轮。运行器不发现其他凭据，不配置备用线路，失败请求不由评测器自动重放。manifest.json 保存任务与模型标识、运行时源码指纹及执行参数。
+每个样本最多 32 次网关请求、每次最多 2048 输出 tokens，任务执行时限 300 秒；正常阶段采用默认的 30 轮上限，恢复场景先执行 1 轮、持久化后允许继续 30 轮。运行器不发现其他凭据，不配置备用线路，失败请求不由评测器自动重放。manifest.json 保存任务与模型标识、运行时源码指纹及执行参数。样本按固定种子交错执行，开始记录与请求预算回执即时持久化；续跑只接受源码指纹一致且尚未开始的样本，已启动但结果未知的样本须先保留为无效记录。
 
 `npm run eval:release:report -- <报告目录>` 从原始样本重新生成 report.json 和 REPORT.md。确定性检查通过证据由 validation-evidence.json 单独提供，每项包含 id、passed 和 evidence；缺少证据时该门禁不通过。报告校验样本完整性、版本身份、成功率差值、副作用重复、事件序列和费用来源。路由别名不能证明固定底层模型版本；免费账单不能据零分母计算 15% 费用增幅，调用和 token 开销单独展示。
+
+`npx tsx scripts/release-rescore.ts <报告目录>` 对仍保有本地临时工作区的已完成批次统一复核产物断言。原始 samples.jsonl 保持不变；评分结果、产物内容与哈希、评分修订分别保存为 scored-samples.jsonl、artifact-evidence.jsonl、scoring-audit.json，报告读取 manifest 指定的评分文件。复核会执行代码产物断言，不发起模型请求或重放工具调用；已有评分审计时拒绝覆盖。
 
 组合报告通过 sources.json 记录每个模型与组别使用的原始批次、样本数和指纹。同一模型与组别采用完整批次，不能按结果挑选样本。evaluated-sources.json 标识性能评测覆盖的源码；评测后修改运行时，需将 performanceRevisionCurrent 设为 false，先前矩阵不能批准当前版本发布。
 

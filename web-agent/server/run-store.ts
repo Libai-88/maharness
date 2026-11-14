@@ -1,3 +1,4 @@
+import type { ModelCallRecord } from '../kernel/model-call';
 import type Database from 'better-sqlite3';
 import { randomUUID } from 'node:crypto';
 import type { RunCheckpoint, RunEvent, RunRecord, RunStatus } from '../kernel/run';
@@ -7,6 +8,11 @@ import { resultPage } from '../kernel/tool-journal';
 export interface ModelToolCheck { status: 'confirmed' | 'not_confirmed'; checkedAt: number; fingerprint: string; reason?: string }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
 export const RUN_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS run_model_calls_v2 (
+    id TEXT PRIMARY KEY, run_id TEXT NOT NULL, record TEXT NOT NULL
+  );
+  CREATE INDEX IF NOT EXISTS run_model_calls_owner ON run_model_calls_v2(run_id);
+
   CREATE TABLE IF NOT EXISTS run_artifacts_v2 (
     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, ref TEXT NOT NULL, record TEXT NOT NULL,
     UNIQUE(run_id,ref)
@@ -56,6 +62,31 @@ export const RUN_SCHEMA = `
 /** State and its public event commit together; subscribers only observe committed facts. */
 export class RunRepository {
   constructor(private readonly db: Database.Database) {}
+  modelCalls(runId: string, offset = 0, limit = 100): ModelCallRecord[] {
+    return (this.db.prepare('SELECT record FROM run_model_calls_v2 WHERE run_id=? ORDER BY rowid LIMIT ? OFFSET ?').all(runId, limit, offset) as { record: string }[]).map(row => JSON.parse(row.record));
+  }
+  startModelCall(record: ModelCallRecord): void {
+    this.db.prepare('INSERT INTO run_model_calls_v2 VALUES(?,?,?)').run(record.id, record.runId ?? '', JSON.stringify(record));
+  }
+  finishModelCall(record: ModelCallRecord): boolean {
+    const row = this.db.prepare('SELECT record FROM run_model_calls_v2 WHERE id=? AND run_id=?').get(record.id, record.runId ?? '') as { record: string } | undefined;
+    if (!row || JSON.parse(row.record).status !== 'running') return false;
+    this.db.prepare('UPDATE run_model_calls_v2 SET record=? WHERE id=?').run(JSON.stringify(record), record.id);
+    return true;
+  }
+  modelReservations(run: RunRecord): number {
+    const rows = this.db.prepare(`WITH RECURSIVE descendants(id) AS (
+      SELECT id FROM runs_v2 WHERE id=? AND tenant_id=?
+      UNION ALL SELECT r.id FROM runs_v2 r JOIN descendants d ON r.parent_id=d.id WHERE r.tenant_id=?
+    ) SELECT c.record FROM run_model_calls_v2 c JOIN descendants d ON d.id=c.run_id
+      WHERE json_extract(c.record,'$.status')='running' OR json_extract(c.record,'$.cost') IS NULL OR json_extract(c.record,'$.usageStatus')!='reported'`)
+      .all(run.id, run.tenantId, run.tenantId) as { record: string }[];
+    return rows.map(row => JSON.parse(row.record) as ModelCallRecord).reduce((sum, call) => sum + Math.max(0, (call.reservedCost ?? 0) - (call.cost ?? 0)), 0);
+  }
+  acknowledgeBilling(run: RunRecord): RunRecord {
+    this.update(run, { billingAcknowledgedAt: Date.now(), billingNotice: undefined }, 'billing_acknowledged', {});
+    return run;
+  }
   artifacts(runId: string): RunArtifact[] {
     return (this.db.prepare('SELECT record FROM run_artifacts_v2 WHERE run_id=? ORDER BY rowid').all(runId) as { record: string }[]).map(row => JSON.parse(row.record));
   }
@@ -106,8 +137,8 @@ export class RunRepository {
   reserveChild(parent: RunRecord, childId: string, requested?: number): number | undefined {
     return this.transaction(() => {
       const available = this.availableBudget(parent);
-      const amount = requested ?? available;
-      if (amount !== undefined && (!Number.isFinite(amount) || amount < 0 || available !== undefined && amount > available + 1e-10)) throw new Error('任务剩余预算不足');
+      const amount = requested;
+      if (amount !== undefined && (!Number.isFinite(amount) || amount < 0 || available !== undefined && parent.budgetPolicy === 'enforce' && amount > available + 1e-10)) throw new Error('任务剩余预算不足');
       this.db.prepare('INSERT INTO run_budget_reservations_v2 VALUES(?,?,?)').run(childId, parent.id, amount ?? 0);
       return amount;
     });
@@ -226,6 +257,8 @@ export class RunRepository {
     const rows = this.db.prepare("SELECT record FROM runs_v2 WHERE status IN ('queued','running','waiting_approval','stopping')").all() as { record: string }[];
     for (const row of rows) this.update(JSON.parse(row.record), { status: 'interrupted' }, 'state', { status: 'interrupted', reason: 'process_restart' });
     this.db.prepare('DELETE FROM run_budget_reservations_v2').run();
+    const calls = this.db.prepare("SELECT record FROM run_model_calls_v2 WHERE json_extract(record,'$.status')='running'").all() as { record: string }[];
+    for (const row of calls) this.finishModelCall({ ...JSON.parse(row.record), status: 'unknown', finishedAt: Date.now(), usageStatus: 'unknown' });
     })();
   }
   permission(tenantId: string, workspace: string): { profile: 'standard' | 'developer'; revision: number } {

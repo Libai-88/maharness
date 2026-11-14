@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 /**
  * server/tests/providers.spec.ts —— Provider URL 安全边界回归测试
  * 覆盖：assertPublicHttpUrl 拒绝私网/环回/链路本地与非法协议（SSRF 防护的
@@ -63,6 +64,7 @@ describe('Provider 配置诊断', () => {
 describe('Provider Gateway 快照', () => {
   test('只暴露 identity/能力/健康，不包含地址或密钥', () => {
     const snapshot = buildProviderGatewaySnapshot({
+      call: callModel,
       providers: () => [{ id: 'p1', label: 'P1', defaultModel: 'm1', protocol: 'openai', chat: async function* () {} }],
       getProvider: () => undefined,
       models: () => [{ providerId: 'p1', providerLabel: 'P1', model: { modelId: 'm1', contextWindow: 1000, maxOutput: 100, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'manual' } }],

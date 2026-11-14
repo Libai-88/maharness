@@ -1,3 +1,4 @@
+import { callModel, currentModelScope, withModelScope, type ModelCallScope } from '../../kernel/model-call';
 /**
  * core/mcp/index.ts —— MCP 客户端插件（接入 MCP 生态：filesystem/github/memory 等外部工具）
  *
@@ -474,6 +475,7 @@ export function buildSpawnPlan(
 }
 
 export class StdioConnection implements McpConnection {
+  private readonly samplingScopes = new Map<symbol, ModelCallScope | undefined>();
   private proc: ReturnType<typeof spawn> | null = null;
   private pending = new Map<number, PendingEntry>();
   private nextId = 1;
@@ -588,7 +590,10 @@ export class StdioConnection implements McpConnection {
     }
     if (method === 'sampling/createMessage' && this.samplingHandler) {
       try {
-        const result = await this.samplingHandler(params ?? {});
+        const scopes = [...this.samplingScopes.values()];
+        const scope = scopes.length === 1 ? scopes[0] : undefined;
+        if (!scope) throw new Error('MCP sampling task ownership is missing or ambiguous');
+        const result = await withModelScope(scope, () => this.samplingHandler!(params ?? {}));
         this.write({ jsonrpc: '2.0', id, result });
       } catch (error) {
         this.write({
@@ -670,8 +675,12 @@ export class StdioConnection implements McpConnection {
   }
 
   async toolsCall(name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<McpCallResult> {
-    const r = (await this.request('tools/call', { name, arguments: args }, signal)) as McpCallResult;
-    return r ?? {};
+    const key = Symbol();
+    this.samplingScopes.set(key, currentModelScope());
+    try {
+      const r = (await this.request('tools/call', { name, arguments: args }, signal)) as McpCallResult;
+      return r ?? {};
+    } finally { this.samplingScopes.delete(key); }
   }
 
   async resourcesList(): Promise<McpResourceDef[]> {
@@ -1138,6 +1147,7 @@ export default {
       return client;
     };
     const samplingHandler = async (params: Record<string, unknown>): Promise<Record<string, unknown>> => {
+      if (!currentModelScope()) throw new Error('MCP sampling requires an unambiguous active task');
       const gateway = ctx.kernel.plugins.resolveService('service:provider-gateway') as ProviderGateway | undefined;
       if (!gateway) throw new Error('MCP sampling 不可用：Provider Gateway 未加载');
       const normalized = normalizeSamplingParams(params);
@@ -1146,12 +1156,12 @@ export default {
       if (!provider) throw new Error('MCP sampling 不可用：没有可用 Provider');
       const model = ctx.config.get<string>('mcp.sampling.model', provider.defaultModel);
       let text = '';
-      for await (const chunk of provider.chat(normalized.messages, {
+      for await (const chunk of callModel(provider, normalized.messages, {
         model,
         signal: AbortSignal.timeout(60_000),
         ...(normalized.maxTokens ? { maxTokens: normalized.maxTokens } : {}),
         ...(normalized.temperature !== undefined ? { temperature: normalized.temperature } : {}),
-      })) {
+      }, 'mcp_sampling')) {
         if (chunk.type === 'delta') text += chunk.text;
       }
       return { role: 'assistant', content: { type: 'text', text }, model };

@@ -1,3 +1,4 @@
+import { inModelScope, ModelAdmissionError, type ModelCallScope } from '../kernel/model-call';
 import { createHash, randomUUID } from 'node:crypto';
 import { describeModelInput } from '../kernel/input-diagnostics';
 import type { ToolCall, ToolResult } from '../kernel/types';
@@ -30,7 +31,15 @@ export class RunService {
   private readonly listeners = new Map<string, Set<(event: RunEvent) => void>>();
   private closing = false;
   private readonly pool: ExecutionPool;
-  constructor(private readonly env: RunEnvironment) { env.store.runs.interruptActive(); this.pool = new ExecutionPool(env.executionSlots ?? 16); }
+  private readonly modelPool: ExecutionPool;
+  private readonly maintenanceAbort = new AbortController();
+  private maintenanceCleanup?: () => void;
+  private readonly maintenancePending = new Map<string, { promise: Promise<void>; resolve(): void }>();
+  constructor(private readonly env: RunEnvironment) { env.store.runs.interruptActive(); this.pool = new ExecutionPool(env.executionSlots ?? 16); this.modelPool = new ExecutionPool(env.executionSlots ?? 16); }
+  maintenanceScope(): ModelCallScope {
+    return { runId: '', signal: this.maintenanceAbort.signal, acquire: signal => this.modelPool.acquire('maintenance', signal), start: call => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); this.maintenancePending.set(call.id, { promise, resolve }); this.env.store.runs.startModelCall(call); }, finish: call => { try { this.env.store.runs.finishModelCall(call); } finally { this.maintenancePending.get(call.id)?.resolve(); this.maintenancePending.delete(call.id); } } };
+  }
+  attachMaintenance(cleanup: () => void): void { this.maintenanceCleanup = cleanup; }
   private publish(event: RunEvent): void {
     const active = this.active.get(event.runId);
     if (active) Object.assign(active.record, this.env.store.runs.get(event.runId, active.record.tenantId));
@@ -49,9 +58,9 @@ export class RunService {
     if (!record) throw new RunError(404, 'RUN_NOT_FOUND', '任务不存在');
     return record;
   }
-  create(session: Session, input: { message: string; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string } }): RunRecord {
+  create(session: Session, input: { message: string; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; budgetPolicy?: 'advisory' | 'enforce'; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string } }): RunRecord {
     const tenantId = session.tenantId ?? 'default';
-    const requestFingerprint = createHash('sha256').update(JSON.stringify([input.message, input.provider ?? null, input.model ?? null, input.budgetUsd ?? null, input.deadlineAt ?? null, input.acceptance ?? null, input.frameworkChange?.id ?? null])).digest('hex');
+    const requestFingerprint = createHash('sha256').update(JSON.stringify([input.message, input.provider ?? null, input.model ?? null, input.budgetUsd ?? null, input.budgetPolicy ?? 'advisory', input.deadlineAt ?? null, input.acceptance ?? null, input.frameworkChange?.id ?? null])).digest('hex');
     if (input.requestKey) {
       const prior = this.env.store.runs.byRequest(tenantId, session.id, input.requestKey);
       if (prior) {
@@ -79,7 +88,7 @@ export class RunService {
       providerId: provider.id, model: input.model || session.model || provider.model, status: 'queued',
       authorization: { workspace: input.frameworkChange?.workspace ?? workspace, ...permission, readOnly: session.mode === 'plan' || input.principalRole === 'readonly', frameworkChangeId: input.frameworkChange?.id },
       createdAt: now, updatedAt: now, cost: 0, tokensIn: 0, tokensOut: 0,
-      budgetUsd: input.budgetUsd, deadlineAt: input.deadlineAt, acceptance: input.acceptance, principalRole: input.principalRole,
+      budgetUsd: input.budgetUsd, budgetPolicy: input.budgetPolicy ?? 'advisory', deadlineAt: input.deadlineAt, acceptance: input.acceptance, principalRole: input.principalRole,
       requestFingerprint,
     };
     // Initial history is a run snapshot; later tasks never reconstruct transient context from dialogue.
@@ -146,6 +155,7 @@ export class RunService {
     };
     const event = this.env.store.runs.transaction(() => {
       child.budgetUsd = this.env.store.runs.reserveChild(parent, id, request.budgetUsd);
+      child.budgetPolicy = parent.budgetPolicy;
       const event = this.env.store.runs.create(child);
       this.env.store.runs.saveCheckpoint(id, { history: [{ role: 'user', content: request.objective, context: { id: `task:${id}`, source: 'user', scope: 'run', trust: 'user', retention: 'required' } }], turn: -1, costUsd: 0, toolResults: [] });
       return event;
@@ -186,8 +196,17 @@ export class RunService {
   }
   private launch(record: RunRecord): void {
     const abort = new AbortController();
+    let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
+    const watchDeadline = () => {
+      if (record.deadlineAt === undefined) return;
+      const remaining = record.deadlineAt - Date.now();
+      if (remaining <= 0) { abort.abort('deadline_exceeded'); return; }
+      deadlineTimer = setTimeout(watchDeadline, Math.min(remaining, 2_147_483_647));
+      deadlineTimer.unref?.();
+    };
+    watchDeadline();
     const promise = new Promise<void>(resolve => setImmediate(resolve)).then(() => this.execute(record, abort))
-      .finally(() => { this.active.delete(record.id); this.env.activity?.(false); });
+      .finally(() => { if (deadlineTimer) clearTimeout(deadlineTimer); this.active.delete(record.id); this.env.activity?.(false); });
     this.active.set(record.id, { abort, promise, record });
     this.env.activity?.(true);
   }
@@ -287,18 +306,56 @@ export class RunService {
       };
       this.publish(repo.update(record, { status: 'running' }));
       this.publish(repo.append(record.id, 'start', { traceId: record.id, runId: record.id }));
+      let ledgerManaged = false;
+      let inputTurn = cp.turn + 1;
+      const modelScope: ModelCallScope = {
+        runId: record.id, rootId: record.rootId, parentRunId: record.parentId, signal: abort.signal,
+        acquire: signal => this.modelPool.acquire(record.rootId, signal),
+        admit: call => {
+          if (record.budgetPolicy !== 'enforce') return;
+          if (call.reservedCost === undefined) throw new ModelAdmissionError('无法在显式硬预算内可靠预留本次模型调用；请核对价格与计费能力，或由用户选择费用提醒模式');
+          let bounded: RunRecord | undefined = repo.get(record.id, record.tenantId)!;
+          while (bounded) {
+            if (bounded.budgetUsd !== undefined && bounded.cost + repo.modelReservations(bounded) + call.reservedCost > bounded.budgetUsd)
+              throw new ModelAdmissionError('本次模型调用超出任务或祖先任务的显式硬预算');
+            bounded = bounded.parentId ? repo.get(bounded.parentId, record.tenantId) : undefined;
+          }
+        },
+        start: call => { ledgerManaged = true; repo.transaction(() => { repo.startModelCall(call); this.publish(repo.append(record.id, 'model_call_started', { callId: call.id, purpose: call.purpose, providerId: call.providerId, model: call.model })); }); },
+        input: (call, messages, tools, tokenizer) => repo.saveModelInput(record.id, { turn: call.turn ?? inputTurn, providerId: call.providerId, model: call.model, messages, tools: tools ?? [], callId: call.id, purpose: call.purpose, diagnostics: { ...describeModelInput(messages, tools ?? [], tokenizer), attemptId, resumedFromTurn: cp.turn } }),
+        finish: call => {
+          const events = repo.transaction(() => {
+            if (!repo.finishModelCall(call)) return [];
+            const current = repo.get(record.id, record.tenantId)!;
+            const delta = { cost: call.cost ?? 0, tokensIn: call.input ?? 0, tokensOut: call.output ?? 0 };
+            const unknown = call.usageStatus === 'unknown' || call.cost === undefined;
+            const usageStatus = current.usageStatus === 'unknown' || unknown ? 'unknown' as const : current.usageStatus === 'estimated' || call.usageStatus === 'estimated' ? 'estimated' as const : 'reported' as const;
+            const billingNotice = unknown ? '部分模型调用的用量或价格尚未确认，请在任务结束后核对。' : current.budgetUsd !== undefined && current.cost + delta.cost > current.budgetUsd ? '任务费用已超过提醒额度，请核对本次用量。' : current.billingNotice;
+            const event = repo.update(record, { cost: current.cost + delta.cost, tokensIn: current.tokensIn + delta.tokensIn, tokensOut: current.tokensOut + delta.tokensOut, usageStatus, billingNotice }, 'model_call_finished', { callId: call.id, purpose: call.purpose, status: call.status, usageStatus, cost: call.cost });
+            saveUsage();
+            const ancestorEvents = repo.accountAncestors(record, delta);
+            for (const ancestorEvent of [...ancestorEvents]) {
+              const ancestor = repo.get(ancestorEvent.runId, record.tenantId)!;
+              if (ancestor.usageMessageId) this.env.store.updateMessageStats(ancestor.usageMessageId, { tokensIn: ancestor.tokensIn, tokensOut: ancestor.tokensOut, cost: ancestor.cost, traceId: ancestor.id });
+              if (unknown || ancestor.budgetUsd !== undefined && ancestor.cost > ancestor.budgetUsd) ancestorEvents.push(repo.update(ancestor, { usageStatus: unknown ? 'unknown' : ancestor.usageStatus, billingNotice: unknown ? '子任务存在待核对的模型用量或价格。' : '任务费用已超过提醒额度，请核对本次用量。' }, 'billing_notice', {}));
+            }
+            return [event, ...ancestorEvents];
+          });
+          events.forEach(event => this.publish(event));
+        },
+      };
       let completed = false;
-      for await (const event of runner.run({
-        ...options, messages: modelHistory(cp.history), traceId: record.id, runId: record.id, executionId: record.id,
+      for await (const event of inModelScope(runner.run({
+        ...options, modelCallsManaged: true, messages: modelHistory(cp.history), traceId: record.id, runId: record.id, executionId: record.id,
         sessionId: record.sessionId, tenantId: record.tenantId, principalRole: record.principalRole,
         parentRunId: record.parentId, parentStepId: record.parentStepId,
         authorization: record.authorization, sandboxRoot: record.authorization.workspace, signal: abort.signal,
-        costBudget: record.budgetUsd === undefined ? undefined : Math.max(0, record.budgetUsd - record.cost),
+        costBudget: record.budgetPolicy !== 'enforce' || record.budgetUsd === undefined ? undefined : Math.max(0, record.budgetUsd - record.cost),
         restoredCostUsd: record.cost, restoredToolResults: cp.toolResults, restoredEnabledTools: cp.enabledTools, turnOffset: cp.turn + 1,
         acquireExecution: signal => this.pool.acquire(record.rootId, signal),
-        availableBudget: () => repo.availableBudget(record),
+        availableBudget: () => record.budgetPolicy === 'enforce' ? repo.availableBudget(record) : undefined,
         delegate: request => this.delegate(record.id, record.tenantId, request),
-        onModelInput: input => repo.saveModelInput(record.id, { ...input, diagnostics: { ...(input.diagnostics ?? describeModelInput(input.messages, input.tools, options.provider.tokenizer)), attemptId, resumedFromTurn: cp.turn } }),
+        onModelInput: input => { inputTurn = input.turn; },
         historyArchive: { save: history => repo.archiveHistory(record.id, modelHistory(history)), search: (query, offset, limit) => repo.searchHistory(record.id, query, offset, limit), read: (id, offset, limit) => repo.readHistory(record.id, id, offset, limit) },
         toolJournal: { start: (id, name, args) => repo.startTool(record.id, id, name, args), finish: (id, result) => repo.finishTool(record.id, id, result), read: (id, offset, limit) => repo.readTool(record.id, id, offset, limit) },
         task: record.acceptance?.length || record.deadlineAt ? { objective: record.objective, acceptance: record.acceptance ?? [], deadlineAt: record.deadlineAt } : undefined,
@@ -318,9 +375,10 @@ export class RunService {
           return delivered.map(message => ({ role: 'user', content: message.content, context: { id: message.id, source: 'user-supplement', scope: 'run', trust: 'user', retention: 'required' } }));
         },
         onCheckpoint: (turn, history, evidence, step) => {
-          repo.saveCheckpoint(record.id, { history: modelHistory(history), turn: step?.phase === 'tool_pending' ? turn - 1 : turn, costUsd: evidence?.costUsd ?? record.cost, toolResults: evidence?.toolResults ?? [], enabledTools: evidence?.enabledTools ?? repo.checkpoint(record.id)?.enabledTools, pending: step?.phase === 'tool_pending', pendingTool: step?.phase === 'tool_pending' ? step.pendingTool : undefined });
+          repo.saveCheckpoint(record.id, { history: modelHistory(history), turn: step?.phase === 'tool_pending' ? turn - 1 : turn, costUsd: ledgerManaged ? record.cost : evidence?.costUsd ?? record.cost, toolResults: evidence?.toolResults ?? [], enabledTools: evidence?.enabledTools ?? repo.checkpoint(record.id)?.enabledTools, pending: step?.phase === 'tool_pending', pendingTool: step?.phase === 'tool_pending' ? step.pendingTool : undefined });
         },
         onUsage: usage => {
+          if (ledgerManaged) return;
           const event = repo.transaction(() => {
             return accountUsage(usagePatch(usage.cost, usage.input, usage.output), 'usage', usage);
           });
@@ -336,13 +394,13 @@ export class RunService {
             current = current.parentId ? repo.get(current.parentId, record.tenantId) : undefined;
           }
         },
-      })) {
+      }), modelScope)) {
         if (record.status === 'waiting_approval' && event.type !== 'approval_required') this.publish(repo.update(record, { status: 'running' }));
         if (event.type === 'approval_required') this.publish(repo.update(record, { status: 'waiting_approval' }));
         if (event.type === 'reasoning') reasoning += event.text;
         if (event.type === 'assistant_done') {
           completed = true;
-          const patch = usagePatch(event.cost, event.usage.input, event.usage.output);
+          const patch = ledgerManaged ? { cost: record.cost, tokensIn: record.tokensIn, tokensOut: record.tokensOut } : usagePatch(event.cost, event.usage.input, event.usage.output);
           const persisted = repo.transaction(() => {
             if (!record.parentId) this.env.store.addMessage({ sessionId: record.sessionId, role: 'assistant', content: event.content, reasoning: event.reasoning || reasoning, traceId: record.id });
             return accountUsage({ answer: event.content, ...patch, status: 'completed' }, 'done', { ...event, cost: patch.cost, usage: { input: patch.tokensIn, output: patch.tokensOut } });
@@ -362,14 +420,16 @@ export class RunService {
     } catch (error) {
       if (!abort.signal.aborted) this.publish(repo.update(record, { status: 'failed', error: error instanceof Error ? error.message : String(error) }));
     } finally {
-      if (abort.signal.aborted && record.status !== 'completed') this.publish(repo.update(record, { status: this.closing ? 'interrupted' : 'cancelled' }));
+      if (abort.signal.aborted && record.status !== 'completed') this.publish(repo.update(record, { status: this.closing ? 'interrupted' : abort.signal.reason === 'deadline_exceeded' ? 'failed' : 'cancelled', ...(abort.signal.reason === 'deadline_exceeded' ? { error: '任务已超过用户设置的截止时间' } : {}) }));
       this.env.store.touchSession(record.sessionId);
       if (!abort.signal.aborted) abort.abort('run_finished');
     }
   }
   async shutdown(): Promise<void> {
     this.closing = true;
+    this.maintenanceAbort.abort(); this.maintenanceCleanup?.();
     for (const { abort } of this.active.values()) abort.abort('server_shutdown');
     await Promise.allSettled([...this.active.values()].map(execution => execution.promise));
+    await Promise.allSettled([...this.maintenancePending.values()].map(call => call.promise));
   }
 }

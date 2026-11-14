@@ -35,7 +35,7 @@ describe('MCP sampling / roots', () => {
     assert.throws(() => normalizeSamplingParams({ messages: [] }), /缺少 user/);
   });
 
-  test('stdio 连接响应 server 的 sampling/createMessage 与 roots/list', async (t) => {
+  test('stdio 拒绝没有任务归属的 sampling，保留 roots/list', async (t) => {
     const conn = new StdioConnection('sampling', {
       type: 'stdio', command: process.execPath, args: ['-e', FIXTURE],
     });
@@ -51,13 +51,12 @@ describe('MCP sampling / roots', () => {
     const result = await conn.toolsCall('echo', {});
     const payload = JSON.parse(String(result.content?.[0]?.text)) as {
       capabilities: { sampling?: unknown; roots?: unknown };
-      sampling: { content: { text: string }; model: string };
+      sampling: { code: number; message: string };
       roots: { roots: { uri: string }[] };
     };
     assert.ok(payload.capabilities.sampling);
     assert.ok(payload.capabilities.roots);
-    assert.equal(payload.sampling.content.text, 'sampled answer');
-    assert.equal(payload.sampling.model, 'fixture-model');
+    assert.match(payload.sampling.message, /ownership/);
     assert.deepEqual(payload.roots.roots, [{ uri: 'file:///workspace', name: 'workspace' }]);
   });
 });

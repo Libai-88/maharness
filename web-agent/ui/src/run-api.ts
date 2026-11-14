@@ -4,6 +4,7 @@ export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' |
 export interface RunInfo {
   id: string; sessionId: string; parentId?: string; objective: string; status: RunStatus;
   providerId: string; model: string; cost: number; tokensIn: number; tokensOut: number;
+  budgetPolicy?: 'advisory' | 'enforce'; billingNotice?: string; billingAcknowledgedAt?: number;
   usageStatus?: 'reported' | 'estimated' | 'unknown';
   eventCursor?: number;
   budgetUsd?: number; deadlineAt?: number;
@@ -11,7 +12,8 @@ export interface RunInfo {
   authorization: { workspace: string; profile: 'standard' | 'developer'; readOnly: boolean; revision: number };
 }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
-export interface ModelInput { diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
+export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number }
+export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
 export interface RunTool { id: string; name: string; status: string; argsSummary: string }
 export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number }
 export const activeRun = (run: RunInfo) => ['queued', 'running', 'waiting_approval', 'stopping'].includes(run.status);
@@ -23,6 +25,8 @@ export const runsApi = {
   supplement: (id: string, message: string) => api(`/api/v2/runs/${id}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message }) }),
   cancel: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST' }),
   resume: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/resume`, { method: 'POST' }),
+  calls: (id: string, offset = 0) => api<ModelCall[]>(`/api/v2/runs/${id}/model-calls?offset=${offset}`),
+  acknowledgeBilling: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/billing/acknowledge`, { method: 'POST' }),
   children: (id: string) => api<RunInfo[]>(`/api/v2/runs/${id}/children`),
   artifacts: (id: string) => api<RunArtifact[]>(`/api/v2/runs/${id}/artifacts`),
   tools: (id: string) => api<RunTool[]>(`/api/v2/runs/${id}/tools`),

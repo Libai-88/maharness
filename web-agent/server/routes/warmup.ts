@@ -1,3 +1,4 @@
+import { callModel } from '../../kernel/model-call';
 /**
  * server/routes/warmup.ts —— L3 前缀缓存预热/保活（server 运维策略）
  * 第一性原理：provider KV 缓存命中的充要条件是「请求前缀逐字节一致且缓存条目存活」。
@@ -118,7 +119,7 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
     const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
     if (mode === 'off') { stopWarmup(entry); warmups.delete(sessionId); return; }
     const probe = mode === 'auto' && entry.rounds === 1;
-    for await (const chunk of entry.provider.chat(msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools, signal: entry.controller.signal })) {
+    for await (const chunk of callModel(entry.provider, msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools, signal: entry.controller.signal }, 'connection_check')) {
       if (chunk.type === 'usage') { hit = chunk.cachedInput ?? 0; miss = chunk.missInput ?? 0; }
     }
     console.log(`[warmup] ${sessionId.slice(0, 8)} 完成（round ${entry.rounds}，${msgs.length} 条，hit=${hit} miss=${miss}）`);

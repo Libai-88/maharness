@@ -1,6 +1,7 @@
 export type ReleaseVariant = 'baseline' | 'reference' | 'v2';
 export type ReleaseCategory = 'code' | 'research' | 'document' | 'recovery' | 'tool-failure';
 export interface ReleaseManifest {
+  sampleFile?: 'samples.jsonl' | 'scored-samples.jsonl';
   evaluationScope?: string;
   performanceRevisionCurrent?: boolean;
   cases: { id: string; category: ReleaseCategory }[];

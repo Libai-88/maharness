@@ -71,12 +71,13 @@ export type AgentEvent =
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
   runId?: string;
+  modelCallsManaged?: boolean;
   toolJournal?: import('./tool-journal').ToolExecutionJournal;
   delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
   acquireExecution?: (signal?: AbortSignal) => Promise<() => void>;
   availableBudget?: () => number | undefined;
   historyArchive?: { save?(messages: LLMMessage[]): void; search(query: string, offset?: number, limit?: number): unknown[]; read(id: string, offset?: number, limit?: number): import('./tool-journal').ToolResultPage | undefined };
-  onModelInput?: (input: { diagnostics?: import('./input-diagnostics').InputDiagnostics; usage?: { inputTokens: number; window: number; outputReserve: number }; turn: number; providerId: string; model: string; messages: LLMMessage[]; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }) => void;
+  onModelInput?: (input: { callId?: string; purpose?: import('./model-call').ModelPurpose; diagnostics?: import('./input-diagnostics').InputDiagnostics; usage?: { inputTokens: number; window: number; outputReserve: number }; turn: number; providerId: string; model: string; messages: LLMMessage[]; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }) => void;
   parentRunId?: string;
   authorization?: import('./run').RunAuthorization;
   /** Called only at model-call boundaries; returned messages are already durable. */

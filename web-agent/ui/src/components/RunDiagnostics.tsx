@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { runsApi, runLabels, type ModelInput, type RunArtifact, type RunInfo, type RunTool } from '../run-api';
+import { runsApi, runLabels, type ModelCall, type ModelInput, type RunArtifact, type RunInfo, type RunTool } from '../run-api';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
+const purposeLabels: Record<string, string> = { agent: '主循环', compaction: '历史摘要', vision: '视觉分析', mcp_sampling: 'MCP 模型请求', embedding: '向量检索', connection_check: '连接检测' };
 interface Detail { children: RunInfo[]; tools: RunTool[]; inputs: ModelInput[]; artifacts: RunArtifact[] }
 export default function RunDiagnostics({ run, onInspect }: { run: RunInfo; onInspect?: (run: RunInfo) => void }) {
   const [detail, setDetail] = useState<Detail>();
   const [error, setError] = useState('');
+  const [calls, setCalls] = useState<ModelCall[]>([]);
   const [result, setResult] = useState<{ id: string; content: string; nextOffset?: number }>();
   const [reading, setReading] = useState(false);
   const [moreInputs, setMoreInputs] = useState(false);
@@ -40,11 +42,14 @@ export default function RunDiagnostics({ run, onInspect }: { run: RunInfo; onIns
     } catch (error) { toast.error(String(error)); }
     finally { if (generation.current === current) setReading(false); }
   };
+  useEffect(() => { let live = true; void runsApi.calls(run.id).then(rows => { if (live) setCalls(rows); }).catch(reason => { if (live) setError(String(reason)); }); return () => { live = false; }; }, [run.id, run.updatedAt]);
   return <div className="flex min-w-0 flex-col gap-4" data-testid="run-diagnostics">
-    <p className="break-words text-sm">{runLabels[run.status]} · {run.model} · ${run.cost.toFixed(4)}{run.usageStatus === 'unknown' ? '（用量不完整）' : run.usageStatus === 'estimated' ? '（估算）' : ''} · 费用上限：{run.budgetUsd === undefined ? '未设置' : `$${run.budgetUsd}`} · 截止时间：{run.deadlineAt === undefined ? '未设置' : new Date(run.deadlineAt).toLocaleString()}</p>
+    <p className="break-words text-sm">{runLabels[run.status]} · {run.model} · ${run.cost.toFixed(4)}{run.usageStatus === 'unknown' ? '（用量不完整）' : run.usageStatus === 'estimated' ? '（估算）' : ''} · 费用{run.budgetPolicy === 'enforce' ? '硬限制' : '提醒额度'}：{run.budgetUsd === undefined ? '未设置' : `$${run.budgetUsd}`} · 截止时间：{run.deadlineAt === undefined ? '未设置' : new Date(run.deadlineAt).toLocaleString()}</p>
     <p className="text-sm text-muted-foreground">费用上限与截止时间来自显式任务配置；子任务费用计入同一父任务。</p>
     {error && <p role="alert">{error}</p>}
     {!detail && !error && <p role="status">正在读取…</p>}
+    {run.billingNotice && <p role="status" className="text-sm">{run.billingNotice}</p>}
+    <section aria-label="模型调用账本" className="flex flex-col gap-2"><h3 className="font-medium">模型调用与费用来源</h3>{calls.length === 0 && <p className="text-sm text-muted-foreground">尚无调用记录；历史任务可能未记录</p>}{calls.map(call => <p key={call.id} className="break-all text-xs">{purposeLabels[call.purpose] ?? call.purpose} · {call.providerId}/{call.actualModel ?? call.model} · {call.status} · 输入 {call.input ?? '未知'} / 输出 {call.output ?? '未知'} · {call.cost === undefined ? '费用待核对' : `$${call.cost.toFixed(6)}`} · 用量 {({ reported: '已报告', estimated: '估算', unknown: '未知' } as Record<string, string>)[call.usageStatus] ?? call.usageStatus} · 价格 {({ configured: '用户配置', catalog: '模型目录', unknown: '未知' } as Record<string, string>)[call.priceSource] ?? call.priceSource}</p>)}{calls.length > 0 && calls.length % 100 === 0 && <Button size="sm" variant="outline" onClick={() => void runsApi.calls(run.id, calls.length).then(rows => setCalls(previous => [...previous, ...rows]))}>读取更多调用</Button>}</section>
     {run.error && <p role="alert" className="break-words">{run.error}</p>}
     <details><summary className="cursor-pointer font-medium">机器验收 · {run.verification ? '有验收记录' : '尚未验证'}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(run.verification ?? '尚未验证', null, 2)}</pre></details>
     {detail && <>
