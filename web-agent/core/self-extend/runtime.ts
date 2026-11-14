@@ -218,7 +218,7 @@ class Session implements TaskPluginSession {
           if (chunk.type === 'tool_call') return failure('PLUGIN_PROVIDER_TOOL_CALL_UNSUPPORTED', '此显式请求未授予工具，供应商返回了工具调用');
         }
         return { ok: true, data: { content, usage } };
-      }), delegates: true },
+      }), delegates: true, timeoutMs: 240_000 },
       tool('create_plugin', '创建或更新任务插件候选版本。source 为默认导出 {id,name,version,onLoad(ctx)} 的完整 TypeScript，或传 files 和 v2 manifest。plugin_status({sdk:true}) 提供接口与示例；enable_plugin 验证并激活。', { id, name: { type: 'string' }, source: { type: 'string' }, files: { type: 'object', additionalProperties: { type: 'string' } }, manifest: { type: 'object' } }, ['id'], async args => {
         if (!validId.test(args.id)) throw new Error('PLUGIN_ID_INVALID');
         const files: Record<string, string> = args.files ?? (typeof args.source === 'string' ? { 'index.ts': args.source } : {});

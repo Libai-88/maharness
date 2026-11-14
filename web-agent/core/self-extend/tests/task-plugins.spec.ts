@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { Kernel } from '../../../kernel';
 import { TaskPlugins } from '../runtime';
+import { ToolExecutor } from '../../chat/tool-executor';
 import type { TaskPluginBinding } from '../../../kernel/task-plugins';
 import type { RunRecord } from '../../../kernel/run';
 import type { ToolContext, PluginManifest } from '../../../kernel/types';
@@ -23,6 +24,39 @@ function fixture() {
 const context = {} as ToolContext;
 const source = (id: string, value: number) => `export default { id: '${id}', name: 'Counter', version: '1.0.0', onLoad(ctx: import('../../kernel/types').PluginContext) { ctx.register({kind: 'tool', tool: {name: 'count_words', version:'2.0.0', permissions: [], description:'Count words', parameters: {type:'object'}, outputSchema: {type:'object'}, sideEffect:'none', async handler() {return {ok:true,data:{count:${value}}};} }}); } };`;
 const manifest = (id: string): PluginManifest => ({ apiVersion: 2, id, name: id, version: '1.0.0', entry: 'index.ts', permissions: { capabilities: { tool: ['count_words'] } } });
+
+test('plugin role delegation uses the child-run deadline and executes once', async () => {
+  const f = fixture(); const run = f.run('role-deadline');
+  run.authorization.pluginDevelopment!.permissions.push('delegate');
+  const session = await f.service.open(run);
+  const call = (name: string, args: unknown) => session.tools().find(tool => tool.name === name)!.handler(args, context);
+  let delegated = 0;
+  try {
+    const staged = await call('create_plugin', {
+      id: 'math-role',
+      source: `export default {id:'math-role',name:'Math Role',version:'1.0.0',onLoad(ctx:import('../../kernel/types').PluginContext){ctx.register({kind:'role',role:{id:'math-check',name:'Math Check',description:'Arithmetic',systemPrompt:'Calculate the expression.',tools:'readonly'}});}};`,
+      manifest: { apiVersion: 2, id: 'math-role', name: 'Math Role', version: '1.0.0', entry: 'index.ts', permissions: { capabilities: { role: ['math-check'] } } },
+    });
+    assert.equal(staged.ok, true, staged.error);
+    const activated = await call('enable_plugin', { id: 'math-role' });
+    assert.equal(activated.ok, true, activated.error);
+    const result = await new ToolExecutor({
+      tool: session.tools().find(tool => tool.name === 'invoke_plugin')!,
+      args: { kind: 'role', name: 'math-check', objective: '3*4' },
+      context: { ...context, sandboxRoot: run.authorization.workspace, authorization: run.authorization, delegate: async request => {
+        delegated++;
+        assert.equal(request.objective, '3*4');
+        assert.equal(request.tools, 'read');
+        await new Promise(resolve => setTimeout(resolve, 40));
+        return { runId: 'child', traceId: 'child-trace', answer: '12', toolCalls: 0, cost: 0, tokensIn: 1, tokensOut: 1, cancelled: false };
+      } },
+      effectStarted: false, timeoutMs: 5, policyApproved: false,
+    }).invoke(false);
+    assert.equal(result.ok, true, result.error);
+    assert.equal((result.data as { answer: string }).answer, '12');
+    assert.equal(delegated, 1);
+  } finally { await session.dispose(); await f.close(); }
+});
 
 test('plugin SDK is discoverable reference material with bounded reads', async () => {
   const f = fixture(); const session = await f.service.open(f.run('sdk'));
