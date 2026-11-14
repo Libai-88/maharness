@@ -136,7 +136,7 @@ async function execute(tier: string, model: string, variant: ReleaseVariant, tas
       toolRecords.push({ name: 'append_record', ok: true }); return { ok: true, data: { appended: true } };
     } });
     tools.push(createResultTool());
-    const providerSource = createProvider({ id: 'eval-' + randomUUID(), baseUrl: baseUrl!, apiKey: apiKey!, model, inputPrice: 0, outputPrice: 0, requestTimeoutMs: 45000 });
+    const providerSource = createProvider({ id: 'eval-' + randomUUID(), baseUrl: baseUrl!, apiKey: apiKey!, model, inputPrice: 0, outputPrice: 0, requestTimeoutMs: 120000 });
     const provider = { ...providerSource, async *chat(messages: LLMMessage[], opts: Parameters<typeof providerSource.chat>[1]) {
       yield* providerSource.chat(messages, { ...opts, maxTokens: 2048, temperature: 0, signal: opts.signal ? AbortSignal.any([opts.signal, abort]) : abort });
     } };

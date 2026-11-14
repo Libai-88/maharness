@@ -186,6 +186,7 @@ export class ProcessPluginHost {
 
   private registerTool(descriptor: ProcessToolDescriptor): void {
     if (!this.hostCtx) throw new Error('process 插件缺少宿主上下文');
+    if (descriptor.invokesTools) throw new Error('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED: ToolContext.invoke 需要可信宿主执行模式');
     if (this.toolUnregisters.has(descriptor.name)) return;
     this.tools.set(descriptor.name, descriptor);
     const def: ToolDef = {

@@ -226,6 +226,12 @@ export interface PluginBus {
 }
 
 export interface PluginContext {
+  /** Resources registered here are disposed with this plugin instance. */
+  resources?: {
+    defer(dispose: () => void | Promise<void>): () => void;
+    timeout(callback: () => void, milliseconds: number): () => void;
+    interval(callback: () => void, milliseconds: number): () => void;
+  };
   pluginId: string;
   kernel: KernelLike;
   bus: PluginBus;
@@ -446,6 +452,8 @@ export interface PersonaDef {
 // ---------- 工具 ----------
 
 export interface ToolDef {
+  /** Composite handlers orchestrate through ToolContext.invoke; leaf calls own physical leases. */
+  invokesTools?: boolean;
   version: string;
   permissions: ToolPermission[];
   delegates?: boolean;
@@ -552,6 +560,8 @@ export interface ToolWarning {
 }
 
 export interface ToolContext {
+  /** Invoke an authorized tool through the host executor, never its raw handler. */
+  invoke?: (name: string, args: unknown, signal?: AbortSignal) => Promise<ToolResult>;
   runSignal?: AbortSignal;
   delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
   results?: Pick<import('./tool-journal').ToolExecutionJournal, 'read'>;

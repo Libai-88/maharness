@@ -8,6 +8,9 @@ import { resultPage } from '../kernel/tool-journal';
 export interface ModelToolCheck { status: 'confirmed' | 'not_confirmed'; checkedAt: number; fingerprint: string; reason?: string }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
 export const RUN_SCHEMA = `
+  CREATE TABLE IF NOT EXISTS run_plugins_v2 (run_id TEXT PRIMARY KEY, bindings TEXT NOT NULL);
+  CREATE TABLE IF NOT EXISTS workspace_plugins_v2 (tenant_id TEXT NOT NULL, workspace TEXT NOT NULL, plugin_id TEXT NOT NULL, binding TEXT NOT NULL, PRIMARY KEY(tenant_id,workspace,plugin_id));
+  CREATE TABLE IF NOT EXISTS plugin_development_v2 (tenant_id TEXT NOT NULL, workspace TEXT NOT NULL, grant_json TEXT NOT NULL, PRIMARY KEY(tenant_id,workspace));
   CREATE TABLE IF NOT EXISTS run_model_calls_v2 (
     id TEXT PRIMARY KEY, run_id TEXT NOT NULL, record TEXT NOT NULL
   );
@@ -62,6 +65,18 @@ export const RUN_SCHEMA = `
 /** State and its public event commit together; subscribers only observe committed facts. */
 export class RunRepository {
   constructor(private readonly db: Database.Database) {}
+  plugins(runId: string): import('../kernel/task-plugins').TaskPluginBinding[] {
+    const row = this.db.prepare('SELECT bindings FROM run_plugins_v2 WHERE run_id=?').get(runId) as { bindings: string } | undefined;
+    return row ? JSON.parse(row.bindings) : [];
+  }
+  putPlugins(runId: string, bindings: import('../kernel/task-plugins').TaskPluginBinding[]): void { this.db.prepare('INSERT OR REPLACE INTO run_plugins_v2 VALUES(?,?)').run(runId, JSON.stringify(bindings)); }
+  workspacePlugins(tenantId: string, workspace: string): import('../kernel/task-plugins').TaskPluginBinding[] { return (this.db.prepare('SELECT binding FROM workspace_plugins_v2 WHERE tenant_id=? AND workspace=? ORDER BY plugin_id').all(tenantId, workspace) as { binding: string }[]).map(row => JSON.parse(row.binding)); }
+  saveWorkspacePlugin(tenantId: string, workspace: string, binding: import('../kernel/task-plugins').TaskPluginBinding): void { this.db.prepare('INSERT OR REPLACE INTO workspace_plugins_v2 VALUES(?,?,?,?)').run(tenantId, workspace, binding.id, JSON.stringify(binding)); }
+  pluginGrant(tenantId: string, workspace: string): import('../kernel/task-plugins').PluginDevelopmentGrant {
+    const row = this.db.prepare('SELECT grant_json FROM plugin_development_v2 WHERE tenant_id=? AND workspace=?').get(tenantId, workspace) as { grant_json: string } | undefined;
+    return row ? JSON.parse(row.grant_json) : { enabled: false, permissions: [], dependencies: [] };
+  }
+  setPluginGrant(tenantId: string, workspace: string, grant: import('../kernel/task-plugins').PluginDevelopmentGrant): void { this.db.prepare('INSERT OR REPLACE INTO plugin_development_v2 VALUES(?,?,?)').run(tenantId, workspace, JSON.stringify(grant)); }
   modelCalls(runId: string, offset = 0, limit = 100): ModelCallRecord[] {
     return (this.db.prepare('SELECT record FROM run_model_calls_v2 WHERE run_id=? ORDER BY rowid LIMIT ? OFFSET ?').all(runId, limit, offset) as { record: string }[]).map(row => JSON.parse(row.record));
   }

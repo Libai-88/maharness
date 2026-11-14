@@ -96,6 +96,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     activeRunCount: () => activeRunCount(),
   };
   const runs = new RunService({
+    plugins: kernel.plugins.resolveService('service:task-plugins') as import('../../kernel/task-plugins').TaskPluginService | undefined,
     store, runner: () => getRunner(kernel),
     tools: () => kernel.plugins.capabilities('tool').map(capability => capability.tool),
     maxDepth: kernel.config.get<number>('agent.maxDelegationDepth', 4),

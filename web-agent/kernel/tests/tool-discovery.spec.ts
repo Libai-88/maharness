@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createToolCatalog } from '../tool-discovery';
+import { createToolCatalog, refreshToolCatalog } from '../tool-discovery';
 import type { ToolContext, ToolDef } from '../types';
 
 test('discovery exposes only run-authorized tools and activation stays scoped to that run', async () => {
@@ -21,7 +21,7 @@ test('discovery exposes only run-authorized tools and activation stays scoped to
 
 test('small authorized tool sets are directly usable without discovery round trips', () => {
   const tool: ToolDef = { name: 'append_record', version: '2.0.0', permissions: ['workspace.write'], parameters: { type: 'object' }, outputSchema: {}, description: 'Record an order', sideEffect: 'write', handler: async () => ({ ok: true }) };
-  assert.equal(createToolCatalog([tool]).some(item => item.name === 'discover_tools' || item.name === 'enable_tools'), false);
+  assert.equal(createToolCatalog([tool]).some(item => item.name === 'discover_tools'), true);
   assert.ok(createToolCatalog([tool]).some(item => item.name === tool.name));
   assert.equal(createToolCatalog([]).some(item => item.name === tool.name), false);
 });
@@ -39,9 +39,26 @@ test('schema volume controls discovery; restored and observation readers remain 
   assert.ok(first.some(tool => tool.name === 'recall_tool_result'));
   assert.equal(first.some(tool => tool.name === 'z_custom'), false);
   assert.ok(createToolCatalog(tools, ['z_custom'], 600).some(tool => tool.name === 'z_custom'));
-  assert.deepEqual(createToolCatalog([make('b'), make('a')]).map(tool => tool.name), ['a', 'b']);
+  assert.deepEqual(createToolCatalog([make('b'), make('a')]).filter(tool => !['discover_tools', 'enable_tools', 'release_tools'].includes(tool.name)).map(tool => tool.name), ['a', 'b']);
   assert.throws(() => createToolCatalog([make('a'), make('a')]), /TOOL_DEFINITION_CONFLICT/);
-  const same = make('a'); assert.equal(createToolCatalog([same, same]).length, 1);
+  const same = make('a'); assert.equal(createToolCatalog([same, same]).filter(tool => tool.name === 'a').length, 1);
+});
+
+test('refresh discovers new capabilities, retains explicit release and removes withdrawn tools', async () => {
+  const tool: ToolDef = { name: 'initial', description: 'initial', version: '2.0.0', permissions: [], parameters: {}, outputSchema: {}, sideEffect: 'none', handler: async () => ({ ok: true }) };
+  const fresh = { ...tool, name: 'new_plugin_tool' };
+  const active = createToolCatalog([tool]);
+  const issued = [...active];
+  await active.find(tool => tool.name === 'release_tools')!.handler({ names: ['initial'] }, {} as ToolContext);
+  refreshToolCatalog(active, [tool, fresh], 2048);
+  assert.equal(active.some(tool => tool.name === 'initial'), false);
+  const result = await active.find(tool => tool.name === 'discover_tools')!.handler({ query: 'new_plugin_tool' }, {} as ToolContext);
+  assert.equal((result.data as { tools: ToolDef[] }).tools[0].name, fresh.name);
+  await active.find(tool => tool.name === 'enable_tools')!.handler({ names: [fresh.name] }, {} as ToolContext);
+  assert.ok(active.some(tool => tool.name === fresh.name));
+  assert.equal(issued.some(tool => tool.name === fresh.name), false);
+  refreshToolCatalog(active, [tool], 2048);
+  assert.equal(active.some(tool => tool.name === fresh.name), false);
 });
 
 test('discovery supports exact names and Chinese descriptions', async () => {

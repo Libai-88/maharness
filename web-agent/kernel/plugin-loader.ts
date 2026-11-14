@@ -177,6 +177,14 @@ function validateManifestExecution(manifest: PluginManifest): void {
   }
 }
 
+export function validatePluginManifest(manifest: PluginManifest): void {
+  validateManifestCompatibility(manifest);
+  validatePermissions(manifest);
+  validateManifestLimits(manifest);
+  validateManifestExecution(manifest);
+  validateRuntimePermissions(manifest);
+}
+
 export function validateRuntimePermissions(manifest: PluginManifest): void {
   const runtime = manifest.permissions?.runtime;
   if (runtime === undefined) return;
@@ -418,6 +426,14 @@ export class PluginLoader {
     private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'watchEnv' | 'configWith' | 'effect' | 'storage' | 'outbound'> & { budget: unknown },
     private coreDir: string,
     private userDir: string,
+    private policy?: {
+      capability?(cap: Capability, manifest: PluginManifest): void;
+      service?(key: string, manifest: PluginManifest): void;
+      resolve?(key: string): unknown;
+      subscribe?(key: string, callback: (value: unknown) => void): () => void;
+      subscribeCapabilities?(kind: Capability['kind'], callback: () => void): () => void;
+      changed?(kind: Capability['kind']): void;
+    },
   ) {
     // 内核内置子系统作为【同权优先级的默认提供者】进入仲裁体系：
     // 内核不再是「不可替换的原语」，而是一个可被接管（provide 同键 + 更高 priority）
@@ -534,11 +550,7 @@ export class PluginLoader {
     try {
       const manifest = JSON.parse(readFileSync(join(dir, 'plugin.json'), 'utf-8')) as PluginManifest;
       id = manifest.id;
-      validateManifestCompatibility(manifest);
-      validatePermissions(manifest);
-      validateManifestLimits(manifest);
-      validateManifestExecution(manifest);
-      validateRuntimePermissions(manifest);
+      validatePluginManifest(manifest);
       const runtime = manifest.permissions?.runtime;
       if (runtime) {
         const entryFile = join(dir, manifest.entry);
@@ -815,6 +827,7 @@ export class PluginLoader {
       get trace() { return loader.resolveView<TraceLike>('service:trace', loader.ctxBase.trace); },
       get cache() { return loader.resolveView<CacheLike>('service:cache', loader.ctxBase.cache); },
       register: (cap: Capability) => {
+        this.policy?.capability?.(cap, inst.manifest);
         try {
           assertCapabilityPermission(inst.manifest, cap);
         } catch (err) {
@@ -897,6 +910,7 @@ export class PluginLoader {
         return () => { remove(); off(); }; // 手动退订：先摘除逆元再退订（dispose 不再二次执行）
       },
       provide: (key: string, value: unknown, priority = 0) => {
+        this.policy?.service?.(key, inst.manifest);
         // 候选登记始终发生（谁提供了什么必须可见），但【生效】必须等本插件 ACTIVE——
         // 「绑定只在提供者活动时对依赖方可见」是启动/停用语义的基石：否则一个
         // enabled=false / lazy 的插件在注册期就能顶掉活动插件的服务。
@@ -914,6 +928,7 @@ export class PluginLoader {
         return () => { remove(); inverse(); };
       },
       inject: (key: string, onChange?: (v: unknown | undefined) => void) => {
+        if (onChange && this.policy?.subscribe) scope.add(this.policy.subscribe(key, onChange));
         // v3 智能重载：登记依赖声明（用服务绑定 seq 做签名分量——绑定换主即 seq 变）
         inst.depHooks.push(() => `service:${key}@${loader.providers.get(key)?.seq ?? 'none'}`);
         let off: () => void = () => {};
@@ -928,11 +943,12 @@ export class PluginLoader {
           scope.add(off);
         }
         return {
-          value: loader.traceServiceGet(key, inst.manifest.id, this.ctxBase.trace)?.value,
+          value: loader.traceServiceGet(key, inst.manifest.id, this.ctxBase.trace)?.value ?? loader.policy?.resolve?.(key),
           stop: off, // 显式退订（未退订时卸载随作用域回收；重复退订幂等）
         };
       },
       onCapabilities: (kind: Capability['kind'], cb: () => void) => {
+          if (loader.policy?.subscribeCapabilities) { const off = loader.policy.subscribeCapabilities(kind, cb); scope.add(off); return off; }
           // v3 智能重载：登记依赖声明（per-kind 版本）
           inst.depHooks.push(() => `caps:${kind}@${loader.capVersions.get(kind) ?? 0}`);
           let set = loader.capSubs.get(kind);
@@ -994,6 +1010,11 @@ export class PluginLoader {
       },
       effect: <T>(fn: () => T | Promise<T>, makeInverse: (v: T) => () => void | Promise<void>) => {
         return scope.effect(fn, makeInverse);
+      },
+      resources: {
+        defer: dispose => { let done = false; const once = () => { if (done) return; done = true; return dispose(); }; const detach = scope.add(once); return () => { detach(); void Promise.resolve().then(once).catch(error => console.warn(`[plugin] ${inst.manifest.id} resource cleanup failed`, error)); }; },
+        timeout: (callback, milliseconds) => { const timer = setTimeout(() => { detach(); if (scope.isArmed) void Promise.resolve().then(callback).catch(error => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error)); }, milliseconds); const detach = scope.add(() => clearTimeout(timer)); return () => { detach(); clearTimeout(timer); }; },
+        interval: (callback, milliseconds) => { const timer = setInterval(() => { if (scope.isArmed) void Promise.resolve().then(callback).catch(error => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error)); }, milliseconds); const detach = scope.add(() => clearInterval(timer)); return () => { detach(); clearInterval(timer); }; },
       },
       logger: {
         info: (msg, meta) => console.log(`[${inst.manifest.id}] ${msg}`, meta ?? ''),
@@ -1200,6 +1221,7 @@ export class PluginLoader {
 
   /** 能力集变化通知（onCapabilities 订阅者） */
   private notifyCapSet(kind: Capability['kind']): void {
+    this.policy?.changed?.(kind);
     this.bumpFact(); // 能力集变化 = 依赖事实变化（依赖该 kind 的插件需重载）
     this.capVersions.set(kind, (this.capVersions.get(kind) ?? 0) + 1); // per-kind 版本：签名精确定位
     const subs = this.capSubs.get(kind);
@@ -1500,11 +1522,7 @@ export class PluginLoader {
       if (fresh.manifest.id !== registryId) {
         throw new Error(`新版本 plugin.json 的 id "${fresh.manifest.id}" 与已注册 id "${registryId}" 不一致（热重载不支持变更插件 id）`);
       }
-      validateManifestCompatibility(fresh.manifest);
-      validatePermissions(fresh.manifest);
-      validateManifestLimits(fresh.manifest);
-      validateManifestExecution(fresh.manifest);
-      validateRuntimePermissions(fresh.manifest);
+      validatePluginManifest(fresh.manifest);
       const oldPermissions = oldManifest.permissions!;
       for (const [kind, names] of Object.entries(fresh.manifest.permissions!.capabilities)) {
         const allowed = oldPermissions.capabilities[kind as Capability['kind']] ?? [];

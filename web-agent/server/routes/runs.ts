@@ -8,6 +8,7 @@ import { validateTaskContract, type TaskCriterion } from '../../kernel/task-veri
 import { FrameworkChanges } from '../framework-changes';
 import { approvalTokens } from './approvals';
 import { getChatService } from './shared';
+import { taskPluginService } from '../../kernel/task-plugins';
 
 function text(value: unknown, label: string): string {
   if (typeof value !== 'string' || !value.trim() || value.length > 1_000_000) throw new RunError(400, 'INVALID_INPUT', `${label}必须是有效文本`);
@@ -28,7 +29,42 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
     try { Promise.resolve(fn(req, res)).catch(fail); } catch (error) { fail(error); }
   };
   const id = (req: Request) => String(req.params.id);
-  app.get('/api/v2/workspace/permissions', wrap((req, res) => res.json(service.workspacePermission(tenantIdOf(req)))));
+  app.get('/api/v2/workspace/permissions', wrap((req, res) => res.json({ ...service.workspacePermission(tenantIdOf(req)), allowedPluginDependencies: deps.kernel.config?.get<string[]>('plugins.allowedDependencies', []) ?? [] })));
+  app.put('/api/v2/workspace/plugin-development', wrap((req, res) => {
+    const role = (req as Request & { apiRole?: string }).apiRole;
+    if (role && role !== 'admin') throw new RunError(403, 'USER_AUTHORIZATION_REQUIRED', '插件开发授权需要用户管理员');
+    const { enabled, permissions, dependencies, revision } = req.body ?? {};
+    const allowed = ['workspace.read', 'workspace.write', 'network', 'process', 'delegate'];
+    const packages = deps.kernel.config.get<string[]>('plugins.allowedDependencies', []);
+    if (typeof enabled !== 'boolean' || !Number.isSafeInteger(revision) || revision < 0 || !Array.isArray(permissions) || permissions.some(p => !allowed.includes(p)) || !Array.isArray(dependencies) || dependencies.some(p => typeof p !== 'string' || !packages.includes(p))) throw new RunError(400, 'INVALID_PLUGIN_GRANT', '插件开发授权范围无效');
+    const result = service.setPluginDevelopment(tenantIdOf(req), { enabled, permissions: [...new Set(permissions)] as import('../../kernel/types').ToolPermission[], dependencies: [...new Set(dependencies)] as string[] }, revision);
+    deps.store.appendAuthorizationAudit({ outcome: 'granted', subject: 'user-api', capability: 'workspace.plugin-development', object: result.workspace, reason: JSON.stringify(result.pluginDevelopment) });
+    res.json(result);
+  }));
+  app.get('/api/v2/runs/:id/plugins', wrap((req, res) => {
+    const run = service.get(id(req), tenantIdOf(req));
+    res.json({ plugins: deps.store.runs.plugins(run.id).map(({ files, ...binding }) => ({ ...binding, files: Object.keys(files) })), grant: run.authorization.pluginDevelopment ?? { enabled: false, permissions: [], dependencies: [] } });
+  }));
+  app.post('/api/v2/runs/:id/plugins/:pluginId/save', wrap((req, res) => {
+    const run = service.get(id(req), tenantIdOf(req));
+    const role = (req as Request & { apiRole?: string }).apiRole;
+    if (role && role !== 'admin') throw new RunError(403, 'USER_AUTHORIZATION_REQUIRED', '保存插件需要用户管理员');
+    const plugins = taskPluginService(deps.kernel);
+    if (!plugins) throw new RunError(503, 'PLUGIN_SERVICE_UNAVAILABLE', '插件服务未启用');
+    try { plugins.save(run, String(req.params.pluginId), text(req.body?.hash, '插件版本')); }
+    catch (error) { throw new RunError(409, 'PLUGIN_SAVE_CONFLICT', String(error)); }
+    res.json({ saved: true });
+  }));
+  app.use('/api/v2/runs/:id/plugins/:pluginId/api/:mount', (req, res, next) => {
+    try {
+      const run = service.get(id(req), tenantIdOf(req));
+      const role = (req as Request & { apiRole?: string }).apiRole;
+      if (role && role !== 'admin') throw new RunError(403, 'USER_AUTHORIZATION_REQUIRED', '任务插件接口需要用户管理员');
+      const route = taskPluginService(deps.kernel)?.routes(run.id).find(item => item.pluginId === req.params.pluginId && item.mount === req.params.mount);
+      if (!route) { res.status(404).json({ code: 'PLUGIN_ROUTE_UNAVAILABLE' }); return; }
+      return Promise.resolve((route.router as (req: Request, res: Response, next: NextFunction) => unknown)(req, res, next)).catch(next);
+    } catch (error) { if (error instanceof RunError) res.status(error.status).json({ code: error.code, error: error.message }); else next(error); }
+  });
   app.put('/api/v2/workspace/permissions', wrap((req, res) => {
     const role = (req as Request & { apiRole?: string }).apiRole;
     if (role && role !== 'admin') throw new RunError(403, 'USER_AUTHORIZATION_REQUIRED', '修改权限档需要用户管理员授权');

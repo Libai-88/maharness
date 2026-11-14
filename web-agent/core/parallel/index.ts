@@ -45,6 +45,7 @@ export interface ParallelAggregate {
 }
 
 export interface ParallelTaskSpec {
+  plugins?: string[];
   id?: string;
   objective: string;
   tools?: string;
@@ -53,6 +54,7 @@ export interface ParallelTaskSpec {
 }
 
 export interface NormalizedParallelTask {
+  plugins?: string[];
   id: string;
   objective: string;
   tools?: string;
@@ -84,7 +86,7 @@ export function normalizeParallelTasks(input: ParallelTaskSpec[]): { tasks?: Nor
     const dependsOn = Array.isArray(task.dependsOn)
       ? [...new Set(task.dependsOn.map((dependency) => String(dependency).trim()).filter(Boolean))]
       : [];
-    tasks.push({ id, objective, tools: task.tools, dependsOn, publish: task.publish !== false, index });
+    tasks.push({ id, objective, plugins: task.plugins, tools: task.tools, dependsOn, publish: task.publish !== false, index });
   }
   for (const task of tasks) {
     for (const dependency of task.dependsOn) {
@@ -233,6 +235,7 @@ export default {
                   id: { type: 'string', description: '可选任务标识（字母/数字/下划线/连字符，≤32）；供 dependsOn 引用' },
                   objective: { type: 'string', description: '该子任务的目标（一句话，明确可交付）' },
                   tools: { type: 'string', enum: ['read', 'all'], description: '工具白名单：read=只读（默认），all=全部工具' },
+                  plugins: { type: 'array', items: { type: 'string' }, description: '显式继承的父任务活动插件 ID' },
                   dependsOn: {
                     type: 'array',
                     items: { type: 'string' },
@@ -260,7 +263,7 @@ export default {
                 const task = tasks.find(candidate => candidate.id === id)!;
                 if (task.dependsOn.some(dependency => !byId.get(dependency)?.ok)) return { taskId: id, objective: task.objective, ok: false, error: '依赖任务未成功', cost: 0 };
                 try {
-                  const result = await tctx.delegate!({ objective: composeDependencyContext(task, byId), tools: task.tools === 'all' ? 'all' : 'read', instructions: PARALLEL_SYSTEM_PROMPT, maxTurns: 12, budgetUsd: shares[task.index] });
+                  const result = await tctx.delegate!({ objective: composeDependencyContext(task, byId), tools: task.tools === 'all' ? 'all' : 'read', instructions: PARALLEL_SYSTEM_PROMPT, maxTurns: 12, budgetUsd: shares[task.index], plugins: task.plugins });
                   return { ...result, taskId: id, objective: task.objective, ok: !result.error };
                 } catch (error) { return { taskId: id, objective: task.objective, ok: false, error: error instanceof Error ? error.message : String(error), cost: 0 }; }
               }));

@@ -13,12 +13,17 @@ export interface RunInfo {
 }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
 export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number }
-export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
+export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
 export interface RunTool { id: string; name: string; status: string; argsSummary: string }
-export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number }
+export interface PluginGrant { enabled: boolean; permissions: string[]; dependencies: string[] }
+export interface TaskPluginInfo { id: string; version: string; hash: string; scope: string; owner: string; state: string; error?: string; files: string[]; manifest: { name: string; requires?: string[]; permissions: { capabilities: Record<string, string[]> } } }
+export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number; pluginDevelopment?: PluginGrant; allowedPluginDependencies?: string[] }
 export const activeRun = (run: RunInfo) => ['queued', 'running', 'waiting_approval', 'stopping'].includes(run.status);
 export const runLabels: Record<RunStatus, string> = { queued: '排队中', running: '执行中', waiting_approval: '等待审批', stopping: '停止中', interrupted: '可恢复', completed: '已结束', failed: '失败', cancelled: '已取消' };
 export const runsApi = {
+  plugins: (id: string) => api<{ plugins: TaskPluginInfo[]; grant: PluginGrant }>(`/api/v2/runs/${id}/plugins`),
+  savePlugin: (id: string, plugin: TaskPluginInfo) => api(`/api/v2/runs/${id}/plugins/${encodeURIComponent(plugin.id)}/save`, { method: 'POST', body: JSON.stringify({ hash: plugin.hash }) }),
+  setPluginDevelopment: (grant: PluginGrant, revision: number) => api<WorkspacePermission>('/api/v2/workspace/plugin-development', { method: 'PUT', body: JSON.stringify({ ...grant, revision }) }),
   list: (sessionId?: string) => api<RunInfo[]>(`/api/v2/runs${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   get: (id: string) => api<RunInfo>(`/api/v2/runs/${id}`),
   create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId }) }),

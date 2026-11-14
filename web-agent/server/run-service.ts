@@ -9,11 +9,13 @@ import type { Store } from './db';
 import { ACTIVE_RUN_STATES } from './run-store';
 import { ExecutionPool } from '../kernel/execution-pool';
 import type { ChildRunRequest, ChildRunResult } from '../kernel/run';
+import type { TaskPluginService, TaskPluginSession, PluginDevelopmentGrant } from '../kernel/task-plugins';
 
 export class RunError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); }
 }
 export interface RunEnvironment {
+  plugins?: TaskPluginService;
   store: Store;
   prepare(record: RunRecord): RunOptions;
   runner(): AgentLoop | undefined;
@@ -35,7 +37,10 @@ export class RunService {
   private readonly maintenanceAbort = new AbortController();
   private maintenanceCleanup?: () => void;
   private readonly maintenancePending = new Map<string, { promise: Promise<void>; resolve(): void }>();
-  constructor(private readonly env: RunEnvironment) { env.store.runs.interruptActive(); this.pool = new ExecutionPool(env.executionSlots ?? 16); this.modelPool = new ExecutionPool(env.executionSlots ?? 16); }
+  constructor(private readonly env: RunEnvironment) {
+    env.store.runs.interruptActive(); this.pool = new ExecutionPool(env.executionSlots ?? 16); this.modelPool = new ExecutionPool(env.executionSlots ?? 16);
+    env.plugins?.attach({ get: id => env.store.runs.plugins(id), put: (id, bindings) => env.store.runs.putPlugins(id, bindings), workspace: (tenant, workspace) => env.store.runs.workspacePlugins(tenant, workspace), save: (tenant, workspace, binding) => env.store.runs.saveWorkspacePlugin(tenant, workspace, binding), event: (id, type, data) => this.publish(env.store.runs.append(id, type, data)) });
+  }
   maintenanceScope(): ModelCallScope {
     return { runId: '', signal: this.maintenanceAbort.signal, acquire: signal => this.modelPool.acquire('maintenance', signal), start: call => { let resolve!: () => void; const promise = new Promise<void>(done => { resolve = done; }); this.maintenancePending.set(call.id, { promise, resolve }); this.env.store.runs.startModelCall(call); }, finish: call => { try { this.env.store.runs.finishModelCall(call); } finally { this.maintenancePending.get(call.id)?.resolve(); this.maintenancePending.delete(call.id); } } };
   }
@@ -86,7 +91,7 @@ export class RunService {
     const record: RunRecord = {
       id, sessionId: session.id, tenantId, rootId: id, depth: 0, objective: input.message,
       providerId: provider.id, model: input.model || session.model || provider.model, status: 'queued',
-      authorization: { workspace: input.frameworkChange?.workspace ?? workspace, ...permission, readOnly: session.mode === 'plan' || input.principalRole === 'readonly', frameworkChangeId: input.frameworkChange?.id },
+      authorization: { workspace: input.frameworkChange?.workspace ?? workspace, ...permission, readOnly: session.mode === 'plan' || input.principalRole === 'readonly', frameworkChangeId: input.frameworkChange?.id, pluginDevelopment: input.frameworkChange ? undefined : this.env.store.runs.pluginGrant(tenantId, workspace) },
       createdAt: now, updatedAt: now, cost: 0, tokensIn: 0, tokensOut: 0,
       budgetUsd: input.budgetUsd, budgetPolicy: input.budgetPolicy ?? 'advisory', deadlineAt: input.deadlineAt, acceptance: input.acceptance, principalRole: input.principalRole,
       requestFingerprint,
@@ -157,6 +162,14 @@ export class RunService {
       child.budgetUsd = this.env.store.runs.reserveChild(parent, id, request.budgetUsd);
       child.budgetPolicy = parent.budgetPolicy;
       const event = this.env.store.runs.create(child);
+      const available = this.env.store.runs.plugins(parent.id).filter(binding => binding.state === 'active');
+      const selected = new Set(request.plugins ?? []);
+      const include = (id: string) => { for (const dependency of available.find(binding => binding.id === id)?.manifest.requires ?? []) if (!selected.has(dependency)) { selected.add(dependency); include(dependency); } };
+      for (const id of selected) include(id);
+      const inherited = available.filter(binding => selected.has(binding.id));
+      if (request.plugins?.some(plugin => !inherited.some(binding => binding.id === plugin))) throw new RunError(400, 'PLUGIN_NOT_INHERITABLE', '只能委派当前活动的任务插件');
+      if (inherited.length && readOnly) throw new RunError(403, 'PLUGIN_INHERITANCE_REQUIRES_WRITE_GRANT', '运行生成代码需要允许写入的子任务授权');
+      this.env.store.runs.putPlugins(id, inherited.map(binding => ({ ...binding, owner: id })));
       this.env.store.runs.saveCheckpoint(id, { history: [{ role: 'user', content: request.objective, context: { id: `task:${id}`, source: 'user', scope: 'run', trust: 'user', retention: 'required' } }], turn: -1, costUsd: 0, toolResults: [] });
       return event;
     });
@@ -187,6 +200,9 @@ export class RunService {
       throw new RunError(409, 'EFFECT_OUTCOME_UNKNOWN', '存在执行结果未知的操作，请先核对外部结果，不能自动重放');
     this.recoverCheckpoint(run, cp);
     const permission = this.env.store.runs.permission(tenant, this.env.workspace(tenant));
+    const grant = this.env.store.runs.pluginGrant(tenant, this.env.workspace(tenant));
+    const previous = run.authorization.pluginDevelopment;
+    run.authorization.pluginDevelopment = previous ? { enabled: previous.enabled && grant.enabled, permissions: previous.permissions.filter(p => grant.permissions.includes(p)), dependencies: previous.dependencies.filter(p => grant.dependencies.includes(p)) } : undefined;
     // Recovery cannot expand the authorization snapshot, including after profile changes.
     run.authorization = { ...run.authorization, profile: run.authorization.profile === 'developer' ? permission.profile : 'standard', revision: permission.revision, readOnly: run.authorization.readOnly || principalRole === 'readonly' };
     if (principalRole) run.principalRole = principalRole;
@@ -248,7 +264,14 @@ export class RunService {
   }
   workspacePermission(tenant: string) {
     const workspace = this.env.workspace(tenant);
-    return { workspace, ...this.env.store.runs.permission(tenant, workspace) };
+    return { workspace, ...this.env.store.runs.permission(tenant, workspace), pluginDevelopment: this.env.store.runs.pluginGrant(tenant, workspace) };
+  }
+  setPluginDevelopment(tenant: string, grant: PluginDevelopmentGrant, revision: number) {
+    const current = this.workspacePermission(tenant);
+    if (current.revision !== revision) throw new RunError(409, 'PERMISSION_CONFLICT', '权限已变化，请刷新');
+    if (this.env.store.runs.active(tenant).length) throw new RunError(409, 'WORKSPACE_BUSY', '请先停止活动任务');
+    this.env.store.runs.transaction(() => { this.env.store.runs.setPluginGrant(tenant, current.workspace, grant); this.env.store.runs.setPermission(tenant, current.workspace, current.profile); });
+    return this.workspacePermission(tenant);
   }
   setWorkspacePermission(tenant: string, profile: 'standard' | 'developer', revision: number) {
     const current = this.workspacePermission(tenant);
@@ -260,6 +283,7 @@ export class RunService {
   private async execute(record: RunRecord, abort: AbortController): Promise<void> {
     const repo = this.env.store.runs;
     let reasoning = '';
+    let plugins: TaskPluginSession | undefined;
     try {
       if (abort.signal.aborted) return;
       const runner = this.env.runner();
@@ -268,11 +292,22 @@ export class RunService {
       const attemptId = randomUUID();
       let ownUsage = { cost: 0, input: 0, output: 0 };
       const options = this.env.prepare(record);
+      plugins = await this.env.plugins?.open(record);
       if (record.instructions) options.contextMessages = [...(options.contextMessages ?? []), {
         role: 'user', content: record.instructions,
         context: { id: `delegation:${record.id}`, source: 'parent_agent', scope: 'run', trust: 'reference', retention: 'required' },
       }];
       if (record.toolNames) options.tools = (this.env.tools?.() ?? []).filter(tool => record.toolNames!.includes(tool.name));
+      if (plugins) {
+        const base = options.tools ?? this.env.tools?.() ?? [];
+        const session = plugins;
+        options.resolveTools = () => [...base.filter(tool => !['create_plugin', 'plugin_status', 'enable_plugin', 'disable_plugin'].includes(tool.name)), ...session.tools()];
+        options.tools = options.resolveTools();
+        options.scopedCapabilities = kind => session.capabilities(kind);
+        options.scopedBus = session.bus;
+        options.capabilityRevision = () => session.revision();
+        options.capabilityBoundary = () => session.boundary();
+      }
       if (record.maxTurns !== undefined) options.maxTurns = record.maxTurns;
       const modelHistory = (history: LLMMessage[]) => {
         const result = [...history];
@@ -322,7 +357,7 @@ export class RunService {
           }
         },
         start: call => { ledgerManaged = true; repo.transaction(() => { repo.startModelCall(call); this.publish(repo.append(record.id, 'model_call_started', { callId: call.id, purpose: call.purpose, providerId: call.providerId, model: call.model })); }); },
-        input: (call, messages, tools, tokenizer) => repo.saveModelInput(record.id, { turn: call.turn ?? inputTurn, providerId: call.providerId, model: call.model, messages, tools: tools ?? [], callId: call.id, purpose: call.purpose, diagnostics: { ...describeModelInput(messages, tools ?? [], tokenizer), attemptId, resumedFromTurn: cp.turn } }),
+        input: (call, messages, tools, tokenizer) => repo.saveModelInput(record.id, { turn: call.turn ?? inputTurn, providerId: call.providerId, model: call.model, messages, tools: tools ?? [], callId: call.id, purpose: call.purpose, diagnostics: { ...describeModelInput(messages, tools ?? [], tokenizer), capabilityRevision: plugins?.revision(), attemptId, resumedFromTurn: cp.turn } }),
         finish: call => {
           const events = repo.transaction(() => {
             if (!repo.finishModelCall(call)) return [];
@@ -420,6 +455,7 @@ export class RunService {
     } catch (error) {
       if (!abort.signal.aborted) this.publish(repo.update(record, { status: 'failed', error: error instanceof Error ? error.message : String(error) }));
     } finally {
+      await plugins?.dispose();
       if (abort.signal.aborted && record.status !== 'completed') this.publish(repo.update(record, { status: this.closing ? 'interrupted' : abort.signal.reason === 'deadline_exceeded' ? 'failed' : 'cancelled', ...(abort.signal.reason === 'deadline_exceeded' ? { error: '任务已超过用户设置的截止时间' } : {}) }));
       this.env.store.touchSession(record.sessionId);
       if (!abort.signal.aborted) abort.abort('run_finished');

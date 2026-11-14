@@ -137,16 +137,17 @@ export default {
             objective: { type: 'string', description: '子代理目标（一句话，明确可交付）' },
             tools: { type: 'string', enum: ['read', 'all'], description: '工具白名单：read=只读（默认），all=全部工具' },
             maxTurns: { type: 'integer', minimum: 1, maximum: 24, description: '最大轮数（默认 12）' },
+            plugins: { type: 'array', items: { type: 'string' }, description: '显式继承的父任务活动插件 ID；需要 tools=all 和写入授权' },
           },
           required: ['objective'],
         },
-        async handler(args: { objective?: string; tools?: string; maxTurns?: number }, tctx: ToolContext) {
+        async handler(args: { objective?: string; tools?: string; maxTurns?: number; plugins?: string[] }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
           const maxTurns = Math.max(1, Math.min(24, Math.floor(Number(args.maxTurns) || 12)));
           if (tctx.delegate) {
-            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT });
+            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT, plugins: args.plugins });
             return { ok: !result.error, ...(result.error ? { error: result.error } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }
 

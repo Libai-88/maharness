@@ -70,6 +70,12 @@ export type AgentEvent =
 
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
+  /** Runtime capabilities are refreshed only before the next model request. */
+  resolveTools?: () => ToolDef[];
+  capabilityRevision?: () => number;
+  scopedCapabilities?: <T extends import('./types').Capability['kind']>(kind: T) => Extract<import('./types').Capability, { kind: T }>[];
+  scopedBus?: PluginBus;
+  capabilityBoundary?: () => Promise<void>;
   runId?: string;
   modelCallsManaged?: boolean;
   toolJournal?: import('./tool-journal').ToolExecutionJournal;

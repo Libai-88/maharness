@@ -69,7 +69,7 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 上下文容量按模型窗口与输出预留计算。压缩保留明确约束并记录来源范围；原始材料仍可读取。必需输入超过容量时返回 CONTEXT_CAPACITY，供用户更换模型或缩减任务。
 
-授权工具 schema 能装入目录预算时直接提供完整工具集，不额外提供发现、启用工具。目录预算为 4096 tokens 与可用输入容量 10% 中的较小值；更大的集合优先提供常用工具，其余通过 discover_tools 和 enable_tools 按需加载。完整结果读取工具与恢复后仍获授权的已启用工具始终保留，不因目录预算而静默删除；模型窗口仍构成输入硬边界。工具顺序稳定，不按任务关键词重排。
+授权工具 schema 能装入目录预算时直接提供完整工具集，同时提供 discover_tools、enable_tools 和 release_tools，支持运行中能力变化与按需释放。目录预算为 4096 tokens 与可用输入容量 10% 中的较小值；更大的集合优先提供常用工具，其余通过 discover_tools 和 enable_tools 按需加载。完整结果读取工具与恢复后仍获授权的已启用工具始终保留，不因目录预算而静默删除；模型窗口仍构成输入硬边界。工具顺序稳定，不按任务关键词重排。
 
 L1 相似答案缓存默认关闭。L2 工具缓存保留状态指纹和作用域，Provider 原生前缀缓存按实际输入复用。备用提供商在设置的备用线路中显式启用并保存顺序。
 
@@ -83,7 +83,7 @@ Provider Gateway 暴露统一 call 契约。内置主循环、历史摘要、视
 
 advisory 任务在额度超出、价格未知或用量不完整时继续执行，并在任务详情和聊天中提醒。用户可核对后确认，或在现有模型设置中修正具体计费配置。enforce 请求需要适配器可保证的输入计费上界、输出限制及已知价格；缺失条件返回 MODEL_BUDGET_UNCERTAIN。声明真实免费且适配器保证输出限制的调用可预留零费用。供应商账单不构成本地运行时可绝对保证的边界。
 
-数据库 schema 6 在事务迁移中保留旧显式预算的 enforce 语义，并在导入边界标注无结构化来源的旧断点。新任务不通过文本前缀判断用户目标、约束或摘要。插件临时观察不提升为核心指令，也不写入原始用户对话。
+数据库 schema 7 在事务迁移中保留旧显式预算的 enforce 语义，并在导入边界标注无结构化来源的旧断点。新任务不通过文本前缀判断用户目标、约束或摘要。插件临时观察不提升为核心指令，也不写入原始用户对话。
 
 ## HTTP API
 
@@ -174,3 +174,18 @@ eval:live 必须显式提供 EVAL_BASE_URL、EVAL_API_KEY、EVAL_MODEL、正数 
 组合报告通过 sources.json 记录每个模型与组别使用的原始批次、样本数和指纹。同一模型与组别采用完整批次，不能按结果挑选样本。evaluated-sources.json 标识性能评测覆盖的源码；评测后修改运行时，需将 performanceRevisionCurrent 设为 false，先前矩阵不能批准当前版本发布。
 
 v2 相对参考循环的成功率下降不得超过 5 个百分点，相对旧基线不得下降；中位费用增幅不得超过 15%。权限越界、副作用重复执行、事件丢失的确定性测试必须全部通过，并验证桌面、窄屏、无障碍和断线恢复。缺少真实对照报告或任一门禁未通过时，不构成 v2 发布验收通过。
+
+
+## 任务插件
+
+工作区设置中的“任务插件开发”默认关闭，与开发者权限独立。用户管理员可通过 PUT /api/v2/workspace/plugin-development 设置 enabled、permissions、dependencies 与当前权限 revision；版本冲突或存在活动任务时拒绝变更。外部依赖必须已在实例的 plugins.allowedDependencies 中批准。模型无法注册该授权接口为自己的工具。
+
+create_plugin 接收 id 和 source，或 files 与完整 v2 manifest，产生 staged 候选；enable_plugin 验证并激活。工具权限不得超过授权；直接宿主文件、进程和网络访问声明被拒绝，业务操作通过统一工具代理调用。完整类型插件仍是可信 JavaScript，静态检查不是代码安全隔离。
+
+plugin_status 返回版本、哈希、能力、文件索引和工作区可用插件；sdk=true 按需读取 SDK 接口与示例，id、path、offset、limit 支持按范围读取源码。invoke_plugin 显式调用 command、role 或 provider；角色通过统一子任务入口执行，供应商经统一模型账本执行且不切换当前模型。persona 通过源码读取按需使用，context 作为临时参考材料参与后续模型输入。
+
+GET /api/v2/runs/:id/plugins 返回插件清单和任务授权快照。POST /api/v2/runs/:id/plugins/:pluginId/save 由用户管理员提交确定 hash，将已验证版本保存到该租户、该工作区。staged 或 error 版本不能保存。GET /api/v2/runs/:id/plugins/:pluginId/api/:mount 仅能访问活动任务插件的相应 API；其他 HTTP 方法沿用相同认证与权限检查。诊断中的 panel 入口要求 api:panel 声明并净化 HTML。
+
+run_plugins_v2 保存任务绑定与源码；workspace_plugins_v2 保存显式复用版本；plugin_development_v2 保存工作区授权。恢复要求源码及 manifest 哈希一致、依赖可解析、当前授权仍有效。子任务的 plugins 参数为明确继承的活动插件 id，运行服务一并复制它们的依赖闭包。任务结束释放运行资源，保存插件和恢复数据库都不撤销外部副作用。
+
+npm run eval:composition 执行 12 个插件专项任务、3 次重复、2 条路由和 baseline/v2 对照，共 144 个样本。它与 eval:release 的 540 样本分开报告，并在运行时设置两批合计的 token 上限。免费路由不能验证非零成本增幅；路由别名不能证明底层模型版本固定。

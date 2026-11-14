@@ -44,6 +44,14 @@ const execution = {
 };
 
 describe('插件进程执行边界', () => {
+  test('process mode rejects composite tools whose invocation callback cannot cross IPC', async (t) => {
+    const f = setup({ composite: { manifest: execution, entry: `export default {id:'composite',name:'composite',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',description:'composite',parameters:{type:'object'},outputSchema:{type:'object'},permissions:[],sideEffect:'read',invokesTools:true,async handler(_args,tctx){return tctx.invoke('read_file',{});}}});}};` } });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
+    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED')));
+  });
+
   test('filesystem=storage 只允许插件存储目录，越界读取被运行时拒绝', async (t) => {
     const f = setup({
       fsprobe: {

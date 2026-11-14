@@ -388,10 +388,11 @@ export class Store {
       const rows = db.prepare('SELECT id,record FROM runs_v2').all() as { id: string; record: string }[];
       for (const row of rows) { const record = JSON.parse(row.record); if (record.budgetUsd !== undefined && record.budgetPolicy === undefined) { record.budgetPolicy = 'enforce'; db.prepare('UPDATE runs_v2 SET record=? WHERE id=?').run(JSON.stringify(record), row.id); } }
     } },
+    { from: 6, to: 7, run: db => { db.exec(RUN_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 6;
+  static readonly DB_SCHEMA_VERSION = 7;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 

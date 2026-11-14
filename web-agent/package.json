@@ -30,7 +30,7 @@
     "tenant:restore": "tsx scripts/tenant-workspace.ts restore",
     "tenant:backups": "tsx scripts/tenant-workspace.ts list",
     "test": "node scripts/run-tests.mjs",
-    "test:security": "node --import tsx --test core/powershell/tests/approval-bypass.spec.ts core/tools-fs/tests/read-boundary.spec.ts kernel/tests/sandbox.spec.ts core/search/tests/ssrf.spec.ts server/tests/providers.spec.ts server/tests/ssrf.spec.ts core/mcp/tests/security.spec.ts server/tests/auth.spec.ts",
+    "test:security": "node --import tsx --test core/powershell/tests/approval-bypass.spec.ts core/tools-fs/tests/read-boundary.spec.ts kernel/tests/sandbox.spec.ts core/search/tests/ssrf.spec.ts server/tests/providers.spec.ts server/tests/ssrf.spec.ts core/mcp/tests/security.spec.ts server/tests/auth.spec.ts core/chat/tests/tool-broker.spec.ts server/tests/plugin-grants.spec.ts core/self-extend/tests/task-plugins.spec.ts",
     "check:threat-model": "node scripts/check-threat-model.mjs",
     "eval": "tsx scripts/agent-eval.ts",
     "eval:ci": "tsx scripts/agent-eval.ts --baseline evals/replay-v2-baseline.json",
@@ -43,7 +43,8 @@
     "ui:build": "npm --prefix ui run build",
     "ui:typecheck": "npm --prefix ui run typecheck",
     "e2e": "npm --prefix ui run e2e",
-    "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck"
+    "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck",
+    "eval:composition": "tsx scripts/composition-live.ts"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
@@ -54,13 +55,13 @@
     "playwright-core": "^1.63.0",
     "tree-sitter-wasms": "^0.1.13",
     "tsx": "^4.19.0",
+    "typescript": "^5.9.3",
     "undici": "^8.10.0",
     "web-tree-sitter": "^0.20.8"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
-    "@types/node": "^22.10.0",
-    "typescript": "^5.7.0"
+    "@types/node": "^22.10.0"
   }
 }

@@ -14,6 +14,7 @@ import { adminToolDenied } from '../../kernel/tool-privilege';
 import { reviewPluginSource } from '../../kernel/plugin-review';
 import { runPluginTrial } from '../../kernel/plugin-trial';
 import { SNAPSHOT_SUFFIX } from '../../kernel/plugin-snapshot';
+import { TaskPlugins } from './runtime';
 
 // 项目根 = 本文件上溯两级（core/self-extend/index.ts → <root>/）
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
@@ -80,6 +81,7 @@ export default {
   name: '自我扩展',
   version: '0.1.0',
   onLoad(ctx) {
+    ctx.provide('service:task-plugins', new TaskPlugins(ctx.kernel));
     const allowedDependencies = ctx.config.get<string[]>('plugins.allowedDependencies', []);
     // ---- 通过总线事件跟踪插件加载状态（纯插件方案，不触碰内核） ----
     const runtime = new Map<string, RuntimeState>();
@@ -138,7 +140,7 @@ export default {
           '2. 插件契约（务必遵守，否则加载失败或注册不上）：默认导出对象 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from "../../kernel/types"；工具注册成功后在运行时可用。注意：不是 initialize/execute/success 那套旧写法；',
           '3. 创建后先用 plugin_status 确认静态审查结果与能力白名单；新插件默认停用，确认安全后用 enable_plugin 显式进入试运行；若 error 或 caps 为空，读取错误信息与插件文件，修复后保存（目录监听会自动重载），再验证；',
           '4. 插件目录名必须等于 id（小写字母/数字/连字符）；',
-          '5. 新插件注册的工具在下一轮对话生效（本轮不能立即调用），完成后告知用户新能力已就绪；',
+          '5. 任务插件启用后，在下一次模型请求中通过 discover_tools 查找并按需 enable_tools；',
           '6. 修改边界：agent 运行时核心（kernel/ 与 core/chat 的执行循环）不可修改；core/ 其余内置插件与 ui/ 前端同属插件体系，可按需修改（core/ 改动经服务重启生效，ui/ 改动经前端构建生效）。',
         ].join('\n'),
       },

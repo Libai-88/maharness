@@ -24,6 +24,7 @@ export default defineConfig({
     env: {
       ...process.env,
       PORT: '3137',
+      AUTO_STOP_IDLE_MS: '0',
       AGENT_DATA_DIR: path.join(os.tmpdir(), `maharness-e2e-${process.pid}`),
     },
   },

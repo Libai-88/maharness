@@ -138,6 +138,49 @@ test('设置主题与品牌选择即时生效并保留偏好', async ({ page }) 
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 
+for (const width of [1440, 390]) test(`任务插件授权默认关闭并独立确认 ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 }); await setup(page);
+  let permission = { workspace: 'D:/workspace', profile: 'standard', revision: 0, pluginDevelopment: { enabled: false, permissions: [] as string[], dependencies: [] as string[] } };
+  const changes: Record<string, unknown>[] = [];
+  await page.route('**/api/v2/workspace/**', async route => {
+    if (route.request().method() === 'PUT') { const body = route.request().postDataJSON(); changes.push(body); permission = { ...permission, revision: permission.revision + 1, pluginDevelopment: body }; }
+    return route.fulfill({ json: permission });
+  });
+  await openSettings(page, '高级');
+  const toggle = page.getByRole('switch', { name: '任务插件开发', exact: true });
+  await expect(toggle).not.toBeChecked();
+  await toggle.click(); await expect(page.getByRole('alertdialog')).toContainText('可信宿主');
+  expect(changes).toHaveLength(0);
+  await page.getByRole('button', { name: '授权任务插件开发', exact: true }).click();
+  await expect(toggle).toBeChecked();
+  expect(changes[0]).toMatchObject({ enabled: true, permissions: ['workspace.read', 'workspace.write'], revision: 0 });
+  await expect(page.getByRole('switch', { name: '开发者权限', exact: true })).not.toBeChecked();
+  await page.getByRole('switch', { name: '网络工具', exact: true }).click();
+  await expect.poll(() => changes.length).toBe(2);
+  expect(changes[1]).toMatchObject({ permissions: ['workspace.read', 'workspace.write', 'network'], revision: 1 });
+  await checkAccessibility(page);
+});
+
+for (const width of [1440, 390]) test(`任务插件版本、保存与净化面板 ${width}`, async ({ page }) => {
+  await page.setViewportSize({ width, height: 900 }); await setup(page);
+  const run = { id: 'plugin-run', sessionId: 'design-0', objective: '插件任务', model: 'design-model', providerId: 'design', status: 'running', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+  let saved = false;
+  await page.route('**/api/v2/**', async route => {
+    const path = new URL(route.request().url()).pathname;
+    if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
+    if (path.endsWith('/plugins')) return route.fulfill({ json: { plugins: [{ id: 'sample', version: '1.2.0', hash: 'abc123456789def', scope: 'run', state: 'active', manifest: { name: '结果插件', requires: ['data-source'], permissions: { capabilities: { api: ['panel'], tool: ['sample_result'] } } } }] } });
+    if (path.endsWith('/save')) { expect(route.request().postDataJSON()).toEqual({ hash: 'abc123456789def' }); saved = true; return route.fulfill({ json: { saved: true } }); }
+    if (path.endsWith('/api/panel')) return route.fulfill({ json: { title: '结果面板', html: '<p>value=29</p><script>window.pluginUnsafe=true</script><img src=x onerror="window.pluginUnsafe=true">' } });
+    return route.fulfill({ json: [] });
+  });
+  if (!await page.getByRole('button', { name: '任务', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await page.getByRole('button', { name: '任务', exact: true }).click(); await page.getByRole('button', { name: '诊断与子任务' }).click();
+  const panel = page.getByTestId('run-diagnostics'); await expect(panel).toContainText('abc123456789'); await expect(panel).toContainText('data-source');
+  await panel.getByRole('button', { name: '查看面板' }).click(); await expect(panel).toContainText('value=29');
+  expect(await page.evaluate(() => (window as unknown as { pluginUnsafe?: boolean }).pluginUnsafe)).toBeUndefined();
+  await panel.getByRole('button', { name: '保存到工作区' }).click(); await expect.poll(() => saved).toBe(true);
+});
+
 test('首次配置流程只在用户检测后请求模型，再选择工作区并开始任务', async ({ page }) => {
   const mutations = await setup(page);
   await openSettings(page);

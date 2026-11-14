@@ -24,11 +24,13 @@ import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { sanitizeToolHistory } from './policy';
-import { createToolCatalog } from '../../kernel/tool-discovery';
+import { createToolCatalog, refreshToolCatalog } from '../../kernel/tool-discovery';
 import { ToolExecutor, abortableDelay } from './tool-executor';
+import { assessToolApproval } from './tool-approval';
 import { historyTools } from '../../kernel/history-tools';
 import { createResultTool, isResultTool } from './result-tool';
 import { describeModelInput } from '../../kernel/input-diagnostics';
+import { createToolBroker, forwardToolEvents } from './tool-broker';
 
 // 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
 export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
@@ -89,28 +91,7 @@ export function annotateToolDef(t: ToolDef): ToolDef {
   return { ...base, description: `${head}${t.description}${tail}` };
 }
 
-/** 审批判定（执行器侧，不进 handler）：
- *  - 工具声明 assessApproval → 按本次参数决定（只读命令免审批、写入命令仍拦）
- *  - risk==='high' → 无条件拦（风险等级是声明式安全边界，不是 UI 标签；
- *    插件工具漏写 approval 时不因「作者疏忽」跳过审批门）
- *  - 否则 approval===true → 无条件拦
- *  - 判定函数抛异常 → 按需要审批处理（fail-closed）
- *  导出供单测。 */
-export function assessToolApproval(tool: ToolDef, args: unknown, tctx: ToolContext): { needsApproval: boolean; reason: string } {
-  if (tool.assessApproval) {
-    try {
-      const r = tool.assessApproval(args, tctx);
-      if (!r?.needsApproval) return { needsApproval: false, reason: '' };
-      return { needsApproval: true, reason: r.reason || `工具 ${tool.name} 本次调用需要用户审批` };
-    } catch (err) {
-      return { needsApproval: true, reason: `审批判定异常（按需审批处理）: ${err instanceof Error ? err.message : String(err)}` };
-    }
-  }
-  if (tool.risk === 'high') return { needsApproval: true, reason: `工具 ${tool.name} 风险等级 high，需要用户审批` };
-  return tool.approval
-    ? { needsApproval: true, reason: `工具 ${tool.name} 声明需要用户审批` }
-    : { needsApproval: false, reason: '' };
-}
+export { assessToolApproval } from './tool-approval';
 
 /** 包裹工具执行：超时保护，防止工具挂起卡死整轮对话。
  *  超时时调用 onTimeout 发起取消信号（执行器为每次工具调用绑定独立 AbortController，
@@ -158,6 +139,19 @@ export class AgentRunner {
     // 物理执行轮数上限不随会话意图调整。
     const maxTurns = opts.maxTurns ?? this.kernel.config.get<number>('agent.maxTurns', 30);
     const systemPrompt = opts.systemPrompt ?? DEFAULT_SYSTEM_PROMPT;
+    const emitHook = async (type: string, data: AgentHookCtx) => {
+      await this.emitHook(type, data);
+      if (!opts.scopedBus) return;
+      const safety = { blocked: data.blocked, blockReason: data.blockReason, forceApproval: data.forceApproval, forceApprovalReason: data.forceApprovalReason, policyApproved: data.policyApproved, args: JSON.stringify(data.tool?.args) };
+      const scoped: AgentHookCtx = { ...data, tools: data.tools.map(({ handler: _handler, assessApproval: _assess, ...tool }) => ({ ...structuredClone(tool), handler: async () => ({ ok: false, error: '使用 ToolContext.invoke 调用宿主工具' }) })) };
+      await opts.scopedBus.waterfall(type, scoped, async () => {});
+      Object.assign(data, { history: scoped.history, tool: scoped.tool, result: scoped.result, content: scoped.content, reasoning: scoped.reasoning });
+      data.blocked = safety.blocked || scoped.blocked;
+      data.blockReason = safety.blocked ? safety.blockReason : scoped.blockReason;
+      data.forceApproval = safety.forceApproval || scoped.forceApproval;
+      data.forceApprovalReason = safety.forceApproval ? safety.forceApprovalReason : scoped.forceApprovalReason;
+      data.policyApproved = safety.policyApproved && safety.args === JSON.stringify(scoped.tool?.args);
+    };
     const history: LLMMessage[] = sanitizeToolHistory([
       { role: 'system', content: systemPrompt, context: { id: 'runtime', source: 'runtime', scope: 'runtime', trust: 'core', retention: 'required' } },
       ...(opts.contextMessages ?? []),
@@ -233,7 +227,7 @@ export class AgentRunner {
 
     // ---- 钩子：输入到达（安全/预处理插件可拦截或改写上下文） ----
     const inputCtx: AgentHookCtx = { traceId, turn: 0, model, history, systemPrompt, tools: toolDefs, scratchpad, ...hookMeta };
-    await this.emitHook('agent.input.received', inputCtx);
+    await emitHook('agent.input.received', inputCtx);
     if (inputCtx.blocked) {
       yield { type: 'error', error: inputCtx.blockReason ?? '已被策略拦截', kind: 'policy' };
       return;
@@ -267,6 +261,12 @@ export class AgentRunner {
     const deadlineExpired = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
 
     for (let turn = 0; turn < maxTurns; turn++) {
+      await opts.capabilityBoundary?.();
+      if (opts.resolveTools && turn > 0) {
+        const fresh = opts.resolveTools();
+        const staticTools = availableTools.filter(tool => ['recall_tool_result', 'search_history', 'read_history'].includes(tool.name));
+        refreshToolCatalog(toolDefs, [...fresh, ...staticTools.filter(tool => !fresh.some(item => item.name === tool.name))].map(annotateToolDef), 4096);
+      }
       setModelCallTurn((opts.turnOffset ?? 0) + turn);
       if (deadlineExpired()) {
         const error = `任务已超过截止时间（${new Date(deadlineAt!).toISOString()}）`;
@@ -302,7 +302,7 @@ export class AgentRunner {
       const llmCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, ...hookMeta };
       const knownMessages = new Set(llmCtx.history);
       const requiredMessages = llmCtx.history.filter(message => message.context?.retention === 'required').map(message => structuredClone(message));
-      await this.emitHook('agent.before_llm', llmCtx);
+      await emitHook('agent.before_llm', llmCtx);
       for (let index = 0; index < llmCtx.history.length; index++) {
         const message = llmCtx.history[index];
         if (!knownMessages.has(message)) llmCtx.history[index] = { ...message, role: message.role === 'system' ? 'user' : message.role, context: { id: `observation:${randomUUID()}`, source: 'plugin-observation', scope: 'run', trust: 'untrusted', retention: 'summarize' } };
@@ -341,8 +341,11 @@ export class AgentRunner {
       // 与 before_llm 钩子并存：钩子 = 命令式（失败教训注入），context = 声明式。
       // 全部追加到 history 末尾（前缀稳定，不破坏 L3）；总预算控制，超限丢弃低权重；
       // 每次注入记入 Trace（context-inject），可观察"谁喂了什么给 LLM"。
-      if (turn === 0) {
-        const ctxProviders = this.kernel.plugins.capabilities('context')
+      {
+        for (let i = llmCtx.history.length - 1; i >= 0; i--) if (llmCtx.history[i].context?.source.startsWith('task-plugin-context:')) llmCtx.history.splice(i, 1);
+        const scopedContexts = opts.scopedCapabilities?.('context') ?? [];
+        const scopedIds = new Set(scopedContexts.map(cap => cap.context.id));
+        const ctxProviders = [...(turn === 0 ? this.kernel.plugins.capabilities('context') : []), ...scopedContexts]
           .map((c) => c.context)
           .sort((a, b) => (b.weight ?? 0) - (a.weight ?? 0));
         let ctxTokens = 0;
@@ -357,7 +360,7 @@ export class AgentRunner {
             const providerCap = cp.maxTokens ?? Number.POSITIVE_INFINITY;
             if (ctxTokens + t > CONTEXT_PROVIDER_BUDGET || t > providerCap) continue;
             ctxTokens += t;
-            llmCtx.history.push({ role: 'user', content, context: { id: `context:${cp.id}`, source: source ?? cp.id, scope: 'run', trust: 'reference', retention: 'summarize' } });
+            llmCtx.history.push({ role: 'user', content, context: { id: `context:${cp.id}`, source: scopedIds.has(cp.id) ? `task-plugin-context:${source ?? cp.id}` : source ?? cp.id, scope: 'run', trust: 'reference', retention: scopedIds.has(cp.id) ? 'ephemeral' : 'summarize' } });
             const cStep = scopedTrace.startStep({ traceId, turn, parentId: opts.parentStepId, type: 'system', name: 'context-inject' });
             cStep.finish({ outputSummary: `${cp.id}${source ? `/${source}` : ''} 注入 ${t} tokens${cp.description ? `（${cp.description.slice(0, 40)}）` : ''}` });
           } catch { /* context provider 自身异常不影响主循环 */ }
@@ -411,7 +414,9 @@ export class AgentRunner {
       }
 
       // ---- 决策：LLM 调用（流式） ----
-      const schemas = llmCtx.tools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
+      const issuedTools = [...llmCtx.tools];
+      const issuedAuthorizedTools = [...(opts.resolveTools?.() ?? opts.tools ?? issuedTools)];
+      const schemas = issuedTools.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
       if (opts.runId) {
         const window = opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000);
         const toolTokens = estimateTokens(JSON.stringify(schemas));
@@ -520,7 +525,7 @@ export class AgentRunner {
             try {
               const release = opts.modelCallsManaged ? undefined : await opts.acquireExecution?.(signal);
               try {
-              opts.onModelInput?.({ diagnostics: describeModelInput(sendHistory, schemas, activeProvider.tokenizer), usage: { inputTokens: countMessageTokens(sendHistory, activeProvider.tokenizer) + estimateTokens(JSON.stringify(schemas)), window: opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000), outputReserve: allocateTokenBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)).output }, turn: (opts.turnOffset ?? 0) + turn, providerId: activeProvider.id, model: chainModel, messages: sendHistory, tools: schemas });
+              opts.onModelInput?.({ diagnostics: { ...describeModelInput(sendHistory, schemas, activeProvider.tokenizer), capabilityRevision: opts.capabilityRevision?.() }, usage: { inputTokens: countMessageTokens(sendHistory, activeProvider.tokenizer) + estimateTokens(JSON.stringify(schemas)), window: opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000), outputReserve: allocateTokenBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)).output }, turn: (opts.turnOffset ?? 0) + turn, providerId: activeProvider.id, model: chainModel, messages: sendHistory, tools: schemas });
               for await (const chunk of callModel(activeProvider, sendHistory, {
                 model: chainModel, tools: llmCtx.tools, signal, responseFormat: opts.responseFormat,
               })) {
@@ -599,7 +604,7 @@ export class AgentRunner {
         const aborted = signal?.aborted === true || err instanceof TaskStoppedError || isAbortError(err);
         const classified = classifyError(err);
         const errMsg = aborted ? '已停止' : (err instanceof Error ? err.message : String(err));
-        await this.emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg, ...hookMeta });
+        await emitHook('agent.on_error', { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, error: errMsg, ...hookMeta });
         if (aborted) step.cancel();
         else step.fail(errMsg, { name: `${activeProvider.id}/${activeModel}`, errorCategory: classified.category, errorCode: classified.code, retryable: classified.retryable, retryDelayMs: classified.retryDelayMs });
         // 已发送序列仍同步入库（失败中断也不丢已观察的上下文；下 run 从这里继续能命中前缀）
@@ -649,7 +654,7 @@ export class AgentRunner {
       }
 
       // ---- 钩子：LLM 输出后（校验/观测；流出的输出暂不可改写） ----
-      await this.emitHook('agent.after_llm', {
+      await emitHook('agent.after_llm', {
         traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad,
         content: text, reasoning, toolCalls: collected,
       });
@@ -737,7 +742,7 @@ export class AgentRunner {
           yield { type: 'error', error, kind: 'deadline' };
           return;
         }
-        const tool = toolDefs.find((t) => t.name === tc.function.name);
+        const tool = issuedTools.find((t) => t.name === tc.function.name);
         let args: unknown = {};
         let argsError: string | null = null;
         try { args = JSON.parse(tc.function.arguments || '{}'); }
@@ -756,7 +761,7 @@ export class AgentRunner {
         yield { type: 'tool_start', id: tc.id, name: tool.name, args: redactTraceValue(args) };
         // ---- 钩子：工具执行前（权限策略 / 参数改写 / 拦截） ----
         const toolCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args }, ...hookMeta };
-        await this.emitHook('agent.before_tool', toolCtx);
+        await emitHook('agent.before_tool', toolCtx);
         if (toolCtx.blocked) {
           opts.toolJournal?.finish(resultId, { ok: false, error: toolCtx.blockReason ?? '已被策略拦截', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } });
           const blockMsg = JSON.stringify({ ok: false, error: toolCtx.blockReason ?? '已被策略拦截' });
@@ -904,7 +909,15 @@ export class AgentRunner {
         const executor = new ToolExecutor({ tool, args: toolArgs, context: tctx, runId: opts.runId, parentRunId: opts.parentRunId,
           acquireExecution: opts.acquireExecution, effectJournal: opts.effectJournal, effectKey, effectStarted,
           timeoutMs: toolTimeout, policyApproved: toolCtx.policyApproved === true });
-        const invokeTool = (approved: boolean, approvalId?: string) => executor.invoke(approved, approvalId);
+        const invokeTool = (approved: boolean, approvalId?: string) => forwardToolEvents(emit => {
+          tctx.invoke = createToolBroker({ tools: issuedAuthorizedTools, caller: tool, context: tctx, options: opts,
+            key: effectKey ?? `${opts.executionId ?? traceId}:${(opts.turnOffset ?? 0) + turn}:${toolIndex}`, board: this.pendingApprovals,
+            timeoutMs: toolTimeout, assess: assessToolApproval, redact: redactTraceValue, emit,
+            before: async (nested, nestedArgs) => { const hook: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: nested.name, args: nestedArgs }, ...hookMeta }; await emitHook('agent.before_tool', hook); return hook; },
+            after: async (nested, nestedArgs, nestedResult) => { const hook: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: nested.name, args: nestedArgs }, result: nestedResult, ...hookMeta }; await emitHook('agent.after_tool', hook); return hook.result ?? nestedResult; },
+          });
+          return executor.invoke(approved, approvalId);
+        });
         if (gate.needsApproval && !tctx.approved && !toolCtx.policyApproved) {
           // C-S2 审批强制下沉执行器：需要审批的调用在未获批准前不进入 handler
           // （执行器不信任工具自觉）——直接构造 needsApproval 结果，走既有审批挂起流：
@@ -918,7 +931,7 @@ export class AgentRunner {
           // 每次工具调用独立取消域：客户端断线（signal）与工具超时都经同一
           // AbortController 传导给 handler——支持 signal 的工具（网络/等待类）
           // 超时即真正中断；fs 类不响应 signal 的工具行为不变（JS 无法强杀）。
-          result = await invokeTool(false);
+          result = yield* invokeTool(false);
         }
 
         // ---- 审批挂起：工具请求用户审批时，执行器暂停等待（安全机制，不可绕过） ----
@@ -965,12 +978,12 @@ export class AgentRunner {
           } else {
             aStep.finish({ outputSummary: `已批准: ${tool.name}` });
             // 已批准：带 approved 标记重试执行（approved=true → 不再触发执行器侧审批拦截）
-            result = await invokeTool(true, approvalId);
+            result = yield* invokeTool(true, approvalId);
           }
         }
         // ---- 钩子：工具执行后（结果过滤/改写） ----
         const afterTCtx: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: tool.name, args: toolArgs }, result, ...hookMeta };
-        await this.emitHook('agent.after_tool', afterTCtx);
+        await emitHook('agent.after_tool', afterTCtx);
         let finalResult = afterTCtx.result ?? result;
         if (result.failure?.outcome === 'unknown') finalResult = { ...finalResult, ok: false, error: result.error, failure: result.failure };
         let safetyNote = '';
@@ -1075,7 +1088,7 @@ export class AgentRunner {
     }
 
     syncHistory(); // 超限路径：最后一轮的工具/助理消息一并入库，续跑可命中前缀
-    await this.emitHook('agent.on_error', { traceId, turn: maxTurns, model, history, systemPrompt, tools: toolDefs, scratchpad, error: `超过最大轮数 ${maxTurns}，已停止`, ...hookMeta });
+    await emitHook('agent.on_error', { traceId, turn: maxTurns, model, history, systemPrompt, tools: toolDefs, scratchpad, error: `超过最大轮数 ${maxTurns}，已停止`, ...hookMeta });
     // 任务画像：截断/失败也算一次任务记录（失败率是自适应策略的输入）
     const lastUserMsg = [...history].reverse()
       .find((m) => m.role === 'user' && m.content && !String(m.content).startsWith('【长期记忆】') && !String(m.content).startsWith('【失败教训】') && !String(m.content).startsWith('【继续】'));

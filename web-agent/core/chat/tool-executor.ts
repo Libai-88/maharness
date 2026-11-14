@@ -4,6 +4,7 @@ import { acquireWriteLock } from '../../kernel/write-lock';
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { TaskStoppedError } from './provider-health';
 import { validateToolArguments, validateAgainstSchema } from '../../kernel/validate';
+import { assessToolApproval } from './tool-approval';
 
 interface ToolExecutionOptions {
   tool: ToolDef;
@@ -35,12 +36,17 @@ export class ToolExecutor {
     if (denied) return { ok: false, error: '当前用户无权执行此操作', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
     if (tctx.authorization?.readOnly && !tool.delegates && tool.sideEffect !== 'none' && tool.sideEffect !== 'read' && !approved)
       return { ok: false, needsApproval: true, approvalSummary: '当前任务的写入和外部变更需要用户批准' };
+    if (!approved && !options.policyApproved) {
+      const gate = assessToolApproval(tool, options.args, tctx);
+      if (gate.needsApproval) return { ok: false, needsApproval: true, approvalSummary: gate.reason };
+    }
     const issues = validateToolArguments(tool, options.args);
     if (issues.length) return { ok: false, error: issues.join('；'), failure: { code: 'TOOL_ARGS_SCHEMA', retryable: false, outcome: 'not_started' } };
     try { tctx.quota?.assertToolCall?.(); }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error), failure: { code: 'TOOL_QUOTA', retryable: false, outcome: 'not_started' } }; }
     const readOnlyEffect = tool.sideEffect === 'none' || tool.sideEffect === 'read';
-    const maxAttempts = readOnlyEffect && tool.idempotent && tool.retry ? Math.max(1, Math.min(3, Math.floor(tool.retry.maxAttempts ?? 2))) : 1;
+    const replaySafeEffect = readOnlyEffect && !tool.invokesTools;
+    const maxAttempts = replaySafeEffect && tool.idempotent && tool.retry ? Math.max(1, Math.min(3, Math.floor(tool.retry.maxAttempts ?? 2))) : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {
       const ac = new AbortController();
       const onClientAbort = () => ac.abort();
@@ -57,8 +63,8 @@ export class ToolExecutor {
         signal?.removeEventListener('abort', onClientAbort);
       };
       try {
-        if (options.runId && !readOnlyEffect && !tool.delegates) releaseWrite = await acquireWriteLock(sandboxRoot, options.parentRunId ?? options.runId, ac.signal);
-        if (!tool.delegates) release = await options.acquireExecution?.(ac.signal);
+        if (options.runId && !readOnlyEffect && !tool.delegates && !tool.invokesTools) releaseWrite = await acquireWriteLock(sandboxRoot, options.parentRunId ?? options.runId, ac.signal);
+        if (!tool.delegates && !tool.invokesTools) release = await options.acquireExecution?.(ac.signal);
         if (ac.signal.aborted) throw new TaskStoppedError('已停止');
         if (effectKey && options.effectJournal && !this.effectStarted) {
           const claim = options.effectJournal.claim(effectKey);
@@ -67,15 +73,16 @@ export class ToolExecutor {
           this.effectStarted = true;
         }
         handlerStarted = true;
-        const handler = Promise.resolve().then(() => tool.handler(options.args, { ...tctx, approved, approvalId, policyApproved: options.policyApproved === true, signal: ac.signal }));
+        const handler = Promise.resolve().then(() => tool.handler(options.args, { ...tctx, approved, approvalId, policyApproved: options.policyApproved === true, signal: ac.signal,
+          invoke: tctx.invoke ? (name, args) => tctx.invoke!(name, args, ac.signal) : undefined }));
         const execution = handler.finally(() => { handlerSettled = true; cleanup(); });
         attemptResult = await withToolTimeout(
           execution,
-          tool.timeoutMs ?? options.timeoutMs,
+          tool.timeoutMs ?? (tool.invokesTools ? 0 : options.timeoutMs),
           () => ac.abort(),
         );
       } catch (err) {
-        attemptResult = { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: ac.signal.aborted ? 'TOOL_INTERRUPTED' : 'TOOL_EXECUTION', retryable: readOnlyEffect, outcome: readOnlyEffect || !this.effectStarted && !!options.effectJournal ? 'not_started' : 'unknown' } };
+        attemptResult = { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: ac.signal.aborted ? 'TOOL_INTERRUPTED' : 'TOOL_EXECUTION', retryable: replaySafeEffect, outcome: replaySafeEffect || !handlerStarted ? 'not_started' : 'unknown' } };
       } finally {
         // A timeout reports uncertainty; physical capacity remains occupied until the handler exits.
         if (!handlerStarted) cleanup();
@@ -87,9 +94,9 @@ export class ToolExecutor {
           this.effectStarted = false;
         }
         if (attemptResult.ok && validateAgainstSchema(attemptResult.data, tool.outputSchema).length)
-          return { ...attemptResult, ok: false, error: `工具 ${tool.name} 输出不符合 schema`, failure: { code: 'TOOL_OUTPUT_SCHEMA', retryable: false, outcome: readOnlyEffect ? 'not_started' : 'applied' } };
+          return { ...attemptResult, ok: false, error: `工具 ${tool.name} 输出不符合 schema`, failure: { code: 'TOOL_OUTPUT_SCHEMA', retryable: false, outcome: replaySafeEffect ? 'not_started' : tool.invokesTools ? 'unknown' : 'applied' } };
         if (!attemptResult.ok && !attemptResult.needsApproval && !attemptResult.failure)
-          return { ...attemptResult, failure: { code: 'TOOL_EXECUTION', retryable: readOnlyEffect, outcome: readOnlyEffect || !handlerStarted ? 'not_started' : 'unknown' } };
+          return { ...attemptResult, failure: { code: 'TOOL_EXECUTION', retryable: replaySafeEffect, outcome: replaySafeEffect || !handlerStarted ? 'not_started' : 'unknown' } };
         return attemptResult;
       }
       const classified = classifyError(new Error(attemptResult.error ?? '工具失败'));

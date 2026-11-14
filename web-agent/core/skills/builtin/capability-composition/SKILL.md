@@ -33,7 +33,7 @@ output: 能力链设计、工具契约和验证结果
 | list_skills → get_skill → 执行 | 按技能指南行事（先查指南再动手） |
 | web_search → remember_fact | 外部信息沉淀为长期记忆 |
 | run_subagent(审查) → read_file(核对其引用) | 子代理产出 → 亲自验证（交叉审查闭环） |
-| create_plugin → plugin_status → 真实任务验证 | 自我扩展闭环（写 → 确认加载 → 验证效果） |
+| create_plugin → enable_plugin → discover_tools → enable_tools → 任务验证 | 自我扩展闭环（写 → 确认加载 → 验证效果） |
 | recall_facts → 直接回答 | 先查记忆再答（不重复犯错） |
 
 ## 组合原则
@@ -42,7 +42,7 @@ output: 能力链设计、工具契约和验证结果
 3. **重要结论交叉验证**：子代理审查或第二视角（如 run_subagent 复核）；
 4. **沉淀为技能**：验证有效的链条用 get_skill("skill-authoring") 固化，
    下次直接 get_skill 复用——链条成为可复用的知识资产；
-5. **新插件自动加入组合空间**：激活即注入，无需改任何现有代码；
+5. **新插件按需加入组合空间**：启用后可发现，按需加载工具，无需改已有实现；
    但它能否被组合，取决于你的描述是否说清输入/输出/限制。
 
 ## 设计"可组合"的新工具（插件作者）
@@ -50,3 +50,9 @@ output: 能力链设计、工具契约和验证结果
 - 输入复用现有工具的输出格式（如路径就用沙箱相对路径）；
 - 输出保持结构化（JSON），让下游工具/LLM 能直接消费；
 - 声明 risk/costHint/approval——组合链里 harness 才能正确判断审批与成本。
+
+## 程序内组合
+
+组合工具声明 invokesTools=true，使用 ToolContext.invoke 调用已有叶工具，权限不得超过调用方与任务授权。服务通过 ctx.provide/ctx.inject 组合，依赖用 manifest.requires 声明；事件用任务总线传递。角色、命令和 Provider 通过 invoke_plugin 显式调用；context 是临时参考材料，persona 不自动成为系统指令。
+
+运行中的插件默认属于任务，用户显式保存源码哈希后可跨任务复用。子任务只继承明确选择的插件及依赖闭包，资源实例独立。停用或任务结束不撤销已发生的外部副作用。

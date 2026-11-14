@@ -77,3 +77,11 @@ OS 管理员、已控制当前 OS 用户的攻击者和物理控制设备者不�
 ## 回滚与响应
 
 安全策略误拒绝时，只回退对应策略配置并保留拒绝审计；不得关闭来源校验或审批凭据来恢复功能。密钥异常时先保留原文件和数据库副本，再按显式恢复流程处理。发现插件逃逸、跨会话/租户数据访问或未授权副作用时，停止远程/共享服务并保全本地审计数据。
+
+## 任务插件组合边界
+
+任务插件开发授权按租户与工作区保存，默认关闭；用户管理员修改且使用权限版本检查。恢复执行只取旧授权与当前授权的交集。任务插件绑定固定源码哈希；依赖按活动版本解析，隔离注册表阻止系统服务接管及能力冲突。任务插件是可信代码，作用域与进程模式不构成操作系统安全隔离。
+
+`web-agent/core/self-extend/runtime.ts` 与 `web-agent/kernel/plugin-files.ts` 校验文件路径、导入路径、依赖和声明权限；`web-agent/core/chat/tool-broker.ts` 将嵌套工具调用交给统一执行器，逐次审批、取消、记账，未知副作用禁止自动重放。
+
+安全回归：`web-agent/core/chat/tests/tool-broker.spec.ts`、`web-agent/server/tests/plugin-grants.spec.ts`、`web-agent/core/self-extend/tests/task-plugins.spec.ts`。
