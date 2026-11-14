@@ -1,0 +1,8 @@
+{
+  "node": "v22.23.3",
+  "platform": "win32",
+  "arch": "x64",
+  "implementationRevision": "1f11902bb9b956e104e57dcb5fd992280bc47566",
+  "baselineRevision": "058c3631c51b9f437dfb6dc74d22348a6fcbeedd",
+  "baselineWorkingTreeClean": true
+}

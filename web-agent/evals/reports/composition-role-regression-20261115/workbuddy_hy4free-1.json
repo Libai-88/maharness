@@ -1,0 +1,464 @@
+{
+  "events": [
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 1,
+      "type": "state",
+      "data": {
+        "status": "queued"
+      },
+      "createdAt": 1794695382374
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 2,
+      "type": "state",
+      "data": {
+        "status": "running"
+      },
+      "createdAt": 1794695382375
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 3,
+      "type": "start",
+      "data": {
+        "traceId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+        "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c"
+      },
+      "createdAt": 1794695382375
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 4,
+      "type": "model_call_started",
+      "data": {
+        "callId": "e0d652a4-82cb-42c3-b8ca-f27aa8c53bf2",
+        "purpose": "agent",
+        "providerId": "role-regression",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794695382377
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 5,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "e0d652a4-82cb-42c3-b8ca-f27aa8c53bf2",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794695382378
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 6,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794695382378
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 7,
+      "type": "tool_start",
+      "data": {
+        "id": "fixture-1",
+        "name": "create_plugin",
+        "args": {
+          "id": "math-role",
+          "source": "export default {id:'math-role',name:'Math Role',version:'1.0.0',onLoad(ctx:import('../../kernel/types').PluginContext){ctx.register({kind:'role',role:{id:'math-check',name:'Math Check',description:'Arithmetic',systemPrompt:'Calculate the user expression and reply with only its numeric result.',tools:'readonly'}});}};",
+          "manifest": {
+            "apiVersion": 2,
+            "id": "math-role",
+            "name": "Math Role",
+            "version": "1.0.0",
+            "entry": "index.ts",
+            "permissions": {
+              "capabilities": {
+                "role": [
+                  "math-check"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "createdAt": 1794695382378
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 8,
+      "type": "plugin_staged",
+      "data": {
+        "id": "math-role",
+        "hash": "84ab99e3533faa62425cd32ee02aa6b49c35b82f6a487c5124a3cd064a8e289d",
+        "checks": [
+          "source",
+          "manifest"
+        ],
+        "activationRequired": true,
+        "revision": 0
+      },
+      "createdAt": 1794695382381
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 9,
+      "type": "tool_result",
+      "data": {
+        "id": "fixture-1",
+        "name": "create_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"math-role\",\"hash\":\"84ab99e3533faa62425cd32ee02aa6b49c35b82f6a487c5124a3cd064a8e289d\",\"state\":\"staged\",\"scope\":\"run\"}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794695382382
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 10,
+      "type": "model_call_started",
+      "data": {
+        "callId": "7626a2e3-18f0-467b-9e62-6a90ec49ccf2",
+        "purpose": "agent",
+        "providerId": "role-regression",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794695382384
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 11,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "7626a2e3-18f0-467b-9e62-6a90ec49ccf2",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794695382385
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 12,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794695382385
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 13,
+      "type": "tool_start",
+      "data": {
+        "id": "fixture-2",
+        "name": "enable_plugin",
+        "args": {
+          "id": "math-role"
+        }
+      },
+      "createdAt": 1794695382385
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 14,
+      "type": "plugin_validated",
+      "data": {
+        "id": "math-role",
+        "hash": "84ab99e3533faa62425cd32ee02aa6b49c35b82f6a487c5124a3cd064a8e289d",
+        "checks": [
+          "source",
+          "manifest",
+          "types",
+          "trial"
+        ],
+        "revision": 0
+      },
+      "createdAt": 1794695383674
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 15,
+      "type": "plugin_activated",
+      "data": {
+        "id": "math-role",
+        "hash": "84ab99e3533faa62425cd32ee02aa6b49c35b82f6a487c5124a3cd064a8e289d",
+        "scope": "run",
+        "revision": 1
+      },
+      "createdAt": 1794695383690
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 16,
+      "type": "tool_result",
+      "data": {
+        "id": "fixture-2",
+        "name": "enable_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"math-role\",\"hash\":\"84ab99e3533faa62425cd32ee02aa6b49c35b82f6a487c5124a3cd064a8e289d\",\"state\":\"active\",\"revision\":1,\"capabilities\":[{\"role\":[\"math-check\"]}]}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794695383691
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 17,
+      "type": "model_call_started",
+      "data": {
+        "callId": "455f8481-9e8e-4d81-83a5-d1bffff4cdbe",
+        "purpose": "agent",
+        "providerId": "role-regression",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794695383693
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 18,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "455f8481-9e8e-4d81-83a5-d1bffff4cdbe",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794695383694
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 19,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794695383694
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 20,
+      "type": "tool_start",
+      "data": {
+        "id": "fixture-3",
+        "name": "invoke_plugin",
+        "args": {
+          "kind": "role",
+          "name": "math-check",
+          "objective": "3*4"
+        }
+      },
+      "createdAt": 1794695383694
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 21,
+      "type": "child_created",
+      "data": {
+        "runId": "a444188d-18b4-437e-9a5d-22350be78bb3",
+        "objective": "3*4"
+      },
+      "createdAt": 1794695383696
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 22,
+      "type": "usage",
+      "data": {
+        "sourceRunId": "a444188d-18b4-437e-9a5d-22350be78bb3",
+        "cost": 0,
+        "tokensIn": 1526,
+        "tokensOut": 36
+      },
+      "createdAt": 1794695421942
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 23,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794695421943
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 24,
+      "type": "usage",
+      "data": {
+        "sourceRunId": "a444188d-18b4-437e-9a5d-22350be78bb3",
+        "cost": 0,
+        "tokensIn": 0,
+        "tokensOut": 0
+      },
+      "createdAt": 1794695421944
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 25,
+      "type": "tool_result",
+      "data": {
+        "id": "fixture-3",
+        "name": "invoke_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"runId\":\"a444188d-18b4-437e-9a5d-22350be78bb3\",\"traceId\":\"a444188d-18b4-437e-9a5d-22350be78bb3\",\"answer\":\"12\",\"cost\":0,\"tokensIn\":\"[REDACTED]\",\"tokensOut\":\"[REDACTED]\",\"toolCalls\":0,\"cancelled\":false}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794695421946
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 26,
+      "type": "model_call_started",
+      "data": {
+        "callId": "733dfd10-587b-46f4-b11d-0447889a6bca",
+        "purpose": "agent",
+        "providerId": "role-regression",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794695421948
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 27,
+      "type": "delta",
+      "data": {
+        "text": "Role invocation fixture finished."
+      },
+      "createdAt": 1794695421949
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 28,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "733dfd10-587b-46f4-b11d-0447889a6bca",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794695421949
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 29,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794695421949
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 30,
+      "type": "done",
+      "data": {
+        "type": "assistant_done",
+        "content": "Role invocation fixture finished.",
+        "reasoning": "",
+        "usage": {
+          "input": 1530,
+          "output": 40
+        },
+        "cost": 0
+      },
+      "createdAt": 1794695421950
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 31,
+      "type": "state",
+      "data": {
+        "status": "completed"
+      },
+      "createdAt": 1794695421951
+    },
+    {
+      "runId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "seq": 32,
+      "type": "plugins_disposed",
+      "data": {
+        "externalEffectsReverted": false,
+        "revision": 2
+      },
+      "createdAt": 1794695421951
+    }
+  ],
+  "tools": [
+    {
+      "id": "c6030332-64cb-4338-b8b5-bc333528e000",
+      "name": "create_plugin",
+      "argsSummary": "{\"id\":\"math-role\",\"source\":\"export default {id:'math-role',name:'Math Role',version:'1.0.0',onLoad(ctx:import('../../kernel/types').PluginContext){ctx.register({kind:'role',role:{id:'math-check',name:'Math Check',description:'Arithmetic',systemPrompt:'Calculate the user expression and reply with onl…",
+      "status": "succeeded",
+      "startedAt": 1794695382378,
+      "finishedAt": 1794695382382
+    },
+    {
+      "id": "4cca6dc2-b6bd-46c9-a3ab-fdc0911fc0d6",
+      "name": "enable_plugin",
+      "argsSummary": "{\"id\":\"math-role\"}",
+      "status": "succeeded",
+      "startedAt": 1794695382385,
+      "finishedAt": 1794695383690
+    },
+    {
+      "id": "00485cce-c00e-4d9d-854d-ff3819643ba0",
+      "name": "invoke_plugin",
+      "argsSummary": "{\"kind\":\"role\",\"name\":\"math-check\",\"objective\":\"3*4\"}",
+      "status": "succeeded",
+      "startedAt": 1794695383694,
+      "finishedAt": 1794695421945
+    }
+  ],
+  "children": [
+    {
+      "id": "a444188d-18b4-437e-9a5d-22350be78bb3",
+      "sessionId": "284c2a7e-e567-40dc-a865-a91f20dd0ebe",
+      "tenantId": "default",
+      "parentId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "rootId": "546b5d53-ee73-4dac-b45f-149c68789f9c",
+      "depth": 1,
+      "objective": "3*4",
+      "providerId": "role-regression",
+      "model": "workbuddy/hy4free",
+      "status": "completed",
+      "authorization": {
+        "workspace": "D:\\Temp\\maharness-role-regression-EBhZ5V",
+        "profile": "standard",
+        "revision": 1,
+        "readOnly": true,
+        "pluginDevelopment": {
+          "enabled": true,
+          "permissions": [
+            "workspace.read",
+            "workspace.write",
+            "delegate"
+          ],
+          "dependencies": []
+        }
+      },
+      "principalRole": "admin",
+      "cost": 0,
+      "tokensIn": 1526,
+      "tokensOut": 36,
+      "createdAt": 1794695383695,
+      "updatedAt": 1794695421944,
+      "parentStepId": "p6d4e-6",
+      "toolNames": [
+        "plugin_status"
+      ],
+      "instructions": "Calculate the user expression and reply with only its numeric result.",
+      "budgetPolicy": "advisory",
+      "usageStatus": "reported",
+      "answer": "12"
+    }
+  ]
+}

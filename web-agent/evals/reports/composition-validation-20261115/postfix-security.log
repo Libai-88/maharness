@@ -1,0 +1,2689 @@
+
+> maharness@0.1.0 test:security
+> node --import tsx --test core/powershell/tests/approval-bypass.spec.ts core/tools-fs/tests/read-boundary.spec.ts kernel/tests/sandbox.spec.ts core/search/tests/ssrf.spec.ts server/tests/providers.spec.ts server/tests/ssrf.spec.ts core/mcp/tests/security.spec.ts server/tests/auth.spec.ts core/chat/tests/tool-broker.spec.ts server/tests/plugin-grants.spec.ts core/self-extend/tests/task-plugins.spec.ts
+
+TAP version 13
+# Subtest: composite calls stream nested approval and use a single physical execution slot
+ok 1 - composite calls stream nested approval and use a single physical execution slot
+  ---
+  duration_ms: 9.1025
+  type: 'test'
+  ...
+# Subtest: nested calls cannot inherit outer approval or expand permissions
+ok 2 - nested calls cannot inherit outer approval or expand permissions
+  ---
+  duration_ms: 0.9062
+  type: 'test'
+  ...
+# Subtest: composite handlers are never automatically retried after nested effects
+ok 3 - composite handlers are never automatically retried after nested effects
+  ---
+  duration_ms: 2.4519
+  type: 'test'
+  ...
+# Subtest: cancellation withdraws nested approval and pending effects never replay
+ok 4 - cancellation withdraws nested approval and pending effects never replay
+  ---
+  duration_ms: 1.4754
+  type: 'test'
+  ...
+# Subtest: A4-1 stdio spawn env：默认最小透传
+    # Subtest: 默认不透传任何 *_API_KEY / 代理 / AGENT_* / 连接串
+    ok 1 - 默认不透传任何 *_API_KEY / 代理 / AGENT_* / 连接串
+      ---
+      duration_ms: 2.7294
+      type: 'test'
+      ...
+    # Subtest: 默认仍透传运行必需项（大小写不敏感）——Windows 上 npx 靠 PATH+PATHEXT 解析
+    ok 2 - 默认仍透传运行必需项（大小写不敏感）——Windows 上 npx 靠 PATH+PATHEXT 解析
+      ---
+      duration_ms: 0.6241
+      type: 'test'
+      ...
+    # Subtest: cfg.env 显式声明的凭据一定透传（给 server 传密钥的唯一正道）
+    ok 3 - cfg.env 显式声明的凭据一定透传（给 server 传密钥的唯一正道）
+      ---
+      duration_ms: 0.4998
+      type: 'test'
+      ...
+    # Subtest: cfg.inheritEnv === true → 全量透传（旧行为，向后兼容逃生口）
+    ok 4 - cfg.inheritEnv === true → 全量透传（旧行为，向后兼容逃生口）
+      ---
+      duration_ms: 0.3403
+      type: 'test'
+      ...
+    # Subtest: inheritEnv 下 cfg.env 覆盖父进程同名变量
+    ok 5 - inheritEnv 下 cfg.env 覆盖父进程同名变量
+      ---
+      duration_ms: 0.2668
+      type: 'test'
+      ...
+    1..5
+ok 5 - A4-1 stdio spawn env：默认最小透传
+  ---
+  duration_ms: 6.4677
+  type: 'suite'
+  ...
+# Subtest: A4-2 审批门：默认需要审批
+    # Subtest: wrapMcpTool 默认（不写 approval）产出 approval === true
+    ok 1 - wrapMcpTool 默认（不写 approval）产出 approval === true
+      ---
+      duration_ms: 1.0485
+      type: 'test'
+      ...
+    # Subtest: cfg.approval: false → approval 为 false（显式关闭，写明风险）
+    ok 2 - cfg.approval: false → approval 为 false（显式关闭，写明风险）
+      ---
+      duration_ms: 0.581
+      type: 'test'
+      ...
+    # Subtest: cfg.approval: true 与未设置同义（都是要求审批）
+    ok 3 - cfg.approval: true 与未设置同义（都是要求审批）
+      ---
+      duration_ms: 0.5689
+      type: 'test'
+      ...
+    # Subtest: risk 标签不当作防护：默认审批与 risk 无关（恒 medium 仍需审批）
+    ok 4 - risk 标签不当作防护：默认审批与 risk 无关（恒 medium 仍需审批）
+      ---
+      duration_ms: 0.5574
+      type: 'test'
+      ...
+    1..4
+ok 6 - A4-2 审批门：默认需要审批
+  ---
+  duration_ms: 3.6788
+  type: 'suite'
+  ...
+# Subtest: A4-3 win32 孙进程回收：taskkill /T /F 参数
+    # Subtest: win32 + 有 pid → /PID <pid> /T /F（杀整棵进程树）
+    ok 1 - win32 + 有 pid → /PID <pid> /T /F（杀整棵进程树）
+      ---
+      duration_ms: 0.7387
+      type: 'test'
+      ...
+    # Subtest: 无 pid / 非 win32 → null（维持 proc.kill 现状，不 spawn taskkill）
+    ok 2 - 无 pid / 非 win32 → null（维持 proc.kill 现状，不 spawn taskkill）
+      ---
+      duration_ms: 0.2355
+      type: 'test'
+      ...
+    1..2
+ok 7 - A4-3 win32 孙进程回收：taskkill /T /F 参数
+  ---
+  duration_ms: 1.2602
+  type: 'suite'
+  ...
+# Subtest: A4-4 http 传输 URL 校验（与 search/providers 防护对齐）
+    # Subtest: 拒绝 http/https 之外的协议（file:// 等）与非法格式
+    ok 1 - 拒绝 http/https 之外的协议（file:// 等）与非法格式
+      ---
+      duration_ms: 2.3329
+      type: 'test'
+      ...
+    # Subtest: 拒绝回环/私网/链路本地 IP 字面量（含 IPv4-mapped 十六进制形式）
+    ok 2 - 拒绝回环/私网/链路本地 IP 字面量（含 IPv4-mapped 十六进制形式）
+      ---
+      duration_ms: 13.8537
+      type: 'test'
+      ...
+    # Subtest: 拒绝本机/内网主机名
+    ok 3 - 拒绝本机/内网主机名
+      ---
+      duration_ms: 0.8887
+      type: 'test'
+      ...
+    # Subtest: 公网主机名：DNS 交由注入的 resolve（不联网），公网通过、解析到内网拒绝
+    ok 4 - 公网主机名：DNS 交由注入的 resolve（不联网），公网通过、解析到内网拒绝
+      ---
+      duration_ms: 1.4917
+      type: 'test'
+      ...
+    # Subtest: 逃生口：AGENT_ALLOW_PRIVATE_URLS=1 或 cfg.allowPrivate 放行本机端点
+    ok 5 - 逃生口：AGENT_ALLOW_PRIVATE_URLS=1 或 cfg.allowPrivate 放行本机端点
+      ---
+      duration_ms: 0.5408
+      type: 'test'
+      ...
+    # Subtest: isPrivateHostAddress 表驱动（覆盖 A3 同族的十六进制映射绕过与保留段）
+    ok 6 - isPrivateHostAddress 表驱动（覆盖 A3 同族的十六进制映射绕过与保留段）
+      ---
+      duration_ms: 0.9351
+      type: 'test'
+      ...
+    # Subtest: 协议版本单一常量：stdio 与 http 共用 2026-07-28
+    ok 7 - 协议版本单一常量：stdio 与 http 共用 2026-07-28
+      ---
+      duration_ms: 0.2166
+      type: 'test'
+      ...
+    1..7
+ok 8 - A4-4 http 传输 URL 校验（与 search/providers 防护对齐）
+  ---
+  duration_ms: 20.8611
+  type: 'suite'
+  ...
+# Subtest: MCP HTTP 认证头
+    # Subtest: 从 tokenEnv 或显式 token 生成 Bearer，不把令牌写进配置
+    ok 1 - 从 tokenEnv 或显式 token 生成 Bearer，不把令牌写进配置
+      ---
+      duration_ms: 0.7143
+      type: 'test'
+      ...
+    # Subtest: 缺少令牌、令牌换行和头注入均 fail-closed
+    ok 2 - 缺少令牌、令牌换行和头注入均 fail-closed
+      ---
+      duration_ms: 0.7748
+      type: 'test'
+      ...
+    1..2
+ok 9 - MCP HTTP 认证头
+  ---
+  duration_ms: 1.8483
+  type: 'suite'
+  ...
+# Subtest: MCP server 调用配额
+    # Subtest: 并发与频率上限在 acquire 时拒绝，release 后并发槽恢复
+    ok 1 - 并发与频率上限在 acquire 时拒绝，release 后并发槽恢复
+      ---
+      duration_ms: 0.561
+      type: 'test'
+      ...
+    1..1
+ok 10 - MCP server 调用配额
+  ---
+  duration_ms: 0.7333
+  type: 'suite'
+  ...
+# [mcp:fixture] 已连接（协议 2026-07-28）
+# Subtest: LR-05 MCP 取消传播与 pending 回收
+    # Subtest: 取消发送 $/cancelRequest，释放 pending，连接可继续调用
+    ok 1 - 取消发送 $/cancelRequest，释放 pending，连接可继续调用
+      ---
+      duration_ms: 189.9817
+      type: 'test'
+      ...
+    # Subtest: HTTP MCP 调用取消后关闭底层请求连接
+    ok 2 - HTTP MCP 调用取消后关闭底层请求连接
+      ---
+      duration_ms: 66.4671
+      type: 'test'
+      ...
+    1..2
+ok 11 - LR-05 MCP 取消传播与 pending 回收
+  ---
+  duration_ms: 256.9896
+  type: 'suite'
+  ...
+# Subtest: MCP 工具 allowlist
+    # Subtest: 未配置或空数组注册全部，配置后只保留命中工具
+    ok 1 - 未配置或空数组注册全部，配置后只保留命中工具
+      ---
+      duration_ms: 0.8924
+      type: 'test'
+      ...
+    1..1
+ok 12 - MCP 工具 allowlist
+  ---
+  duration_ms: 1.0929
+  type: 'suite'
+  ...
+# Subtest: MCP tool annotations
+    # Subtest: readOnly/idempotent/destructive 映射到内核工具契约
+    ok 1 - readOnly/idempotent/destructive 映射到内核工具契约
+      ---
+      duration_ms: 0.3778
+      type: 'test'
+      ...
+    1..1
+ok 13 - MCP tool annotations
+  ---
+  duration_ms: 0.5076
+  type: 'suite'
+  ...
+# Subtest: stdio 启动计划（B18：Windows .cmd 垫片必须经 cmd.exe）
+    # Subtest: win32 + 裸 npx → 经 shell，命令行由我们组装
+    ok 1 - win32 + 裸 npx → 经 shell，命令行由我们组装
+      ---
+      duration_ms: 0.7667
+      type: 'test'
+      ...
+    # Subtest: win32 + .exe → 保持直接 spawn（不绕 shell）
+    ok 2 - win32 + .exe → 保持直接 spawn（不绕 shell）
+      ---
+      duration_ms: 0.263
+      type: 'test'
+      ...
+    # Subtest: 非 win32 一律直接 spawn（行为不变）
+    ok 3 - 非 win32 一律直接 spawn（行为不变）
+      ---
+      duration_ms: 0.2201
+      type: 'test'
+      ...
+    # Subtest: 含命令分隔符的参数被引号包住，不被 cmd.exe 当管道/分隔
+    ok 4 - 含命令分隔符的参数被引号包住，不被 cmd.exe 当管道/分隔
+      ---
+      duration_ms: 0.335
+      type: 'test'
+      ...
+    1..4
+ok 14 - stdio 启动计划（B18：Windows .cmd 垫片必须经 cmd.exe）
+  ---
+  duration_ms: 1.9501
+  type: 'suite'
+  ...
+# Subtest: A1：脚本块/成员调用不得借只读白名单免审批
+    # Subtest: 需审批: Get-ChildItem | Where-Object { [IO.File]::Delete('D:\\tmp
+    ok 1 - 需审批: Get-ChildItem | Where-Object { [IO.File]::Delete('D:\\tmp
+      ---
+      duration_ms: 6.3677
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem | Where-Object { [System.IO.File]::WriteAl
+    ok 2 - 需审批: Get-ChildItem | Where-Object { [System.IO.File]::WriteAl
+      ---
+      duration_ms: 2.9359
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem | Where-Object { [System.Diagnostics.Proce
+    ok 3 - 需审批: Get-ChildItem | Where-Object { [System.Diagnostics.Proce
+      ---
+      duration_ms: 1.0586
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem | Select-Object @{n='x';e={[System.IO.File
+    ok 4 - 需审批: Get-ChildItem | Select-Object @{n='x';e={[System.IO.File
+      ---
+      duration_ms: 0.4703
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem | ForEach-Object { Remove-Item $_ }
+    ok 5 - 需审批: Get-ChildItem | ForEach-Object { Remove-Item $_ }
+      ---
+      duration_ms: 1.5942
+      type: 'test'
+      ...
+    # Subtest: 需审批: dir | Where-Object { [scriptblock]::Create('calc.exe') }
+    ok 6 - 需审批: dir | Where-Object { [scriptblock]::Create('calc.exe') }
+      ---
+      duration_ms: 0.4642
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-Content a.txt | Where-Object { $(Invoke-Expression '
+    ok 7 - 需审批: Get-Content a.txt | Where-Object { $(Invoke-Expression '
+      ---
+      duration_ms: 0.3631
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem -Recurse | Where-Object { New-Object Syste
+    ok 8 - 需审批: Get-ChildItem -Recurse | Where-Object { New-Object Syste
+      ---
+      duration_ms: 1.4158
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem | Where-Object { $_.Name -eq 'a' ; Remove-
+    ok 9 - 需审批: Get-ChildItem | Where-Object { $_.Name -eq 'a' ; Remove-
+      ---
+      duration_ms: 0.8524
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-Process | Where-Object { $_.Name -eq 'a' } | ForEach
+    ok 10 - 需审批: Get-Process | Where-Object { $_.Name -eq 'a' } | ForEach
+      ---
+      duration_ms: 1.0483
+      type: 'test'
+      ...
+    # Subtest: 需审批: $x = Get-Process
+    ok 11 - 需审批: $x = Get-Process
+      ---
+      duration_ms: 0.3005
+      type: 'test'
+      ...
+    # Subtest: 需审批: & calc.exe
+    ok 12 - 需审批: & calc.exe
+      ---
+      duration_ms: 0.211
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem (& calc.exe)
+    ok 13 - 需审批: Get-ChildItem (& calc.exe)
+      ---
+      duration_ms: 0.2576
+      type: 'test'
+      ...
+    # Subtest: 判定给出可读原因（审批卡要说明为什么拦）
+    ok 14 - 判定给出可读原因（审批卡要说明为什么拦）
+      ---
+      duration_ms: 0.4412
+      type: 'test'
+      ...
+    1..14
+ok 15 - A1：脚本块/成员调用不得借只读白名单免审批
+  ---
+  duration_ms: 21.0449
+  type: 'suite'
+  ...
+# Subtest: A10：安全子集只读命令不得被误拦
+    # Subtest: 免审批: Get-ChildItem
+    ok 1 - 免审批: Get-ChildItem
+      ---
+      duration_ms: 0.479
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-ChildItem | Where-Object { $_.Name -like '*.ts' }
+    ok 2 - 免审批: Get-ChildItem | Where-Object { $_.Name -like '*.ts' }
+      ---
+      duration_ms: 0.4739
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-ChildItem -Recurse | Where-Object { $_.PSIsContainer -eq
+    ok 3 - 免审批: Get-ChildItem -Recurse | Where-Object { $_.PSIsContainer -eq
+      ---
+      duration_ms: 0.4541
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-Process | Where-Object { $_.WorkingSet64 -gt 100000000 }
+    ok 4 - 免审批: Get-Process | Where-Object { $_.WorkingSet64 -gt 100000000 }
+      ---
+      duration_ms: 0.6308
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-Content a.txt | Select-String 'a|b'
+    ok 5 - 免审批: Get-Content a.txt | Select-String 'a|b'
+      ---
+      duration_ms: 0.3823
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-Content README.md | Select-String 'foo > bar'
+    ok 6 - 免审批: Get-Content README.md | Select-String 'foo > bar'
+      ---
+      duration_ms: 0.3178
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-ChildItem 2>$null | Measure-Object
+    ok 7 - 免审批: Get-ChildItem 2>$null | Measure-Object
+      ---
+      duration_ms: 0.5024
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-ChildItem | Sort-Object Length -Descending | Select-Obje
+    ok 8 - 免审批: Get-ChildItem | Sort-Object Length -Descending | Select-Obje
+      ---
+      duration_ms: 0.3781
+      type: 'test'
+      ...
+    # Subtest: 免审批: Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    ok 9 - 免审批: Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+      ---
+      duration_ms: 0.3526
+      type: 'test'
+      ...
+    # Subtest: 免审批: git status | Select-String modified
+    ok 10 - 免审批: git status | Select-String modified
+      ---
+      duration_ms: 0.4321
+      type: 'test'
+      ...
+    # Subtest: 免审批: npm run typecheck
+    ok 11 - 免审批: npm run typecheck
+      ---
+      duration_ms: 0.3282
+      type: 'test'
+      ...
+    # Subtest: 免审批: rg -n "class Foo"
+    ok 12 - 免审批: rg -n "class Foo"
+      ---
+      duration_ms: 0.205
+      type: 'test'
+      ...
+    1..12
+ok 16 - A10：安全子集只读命令不得被误拦
+  ---
+  duration_ms: 5.7882
+  type: 'suite'
+  ...
+# Subtest: 脚本块安全子集（单元级）
+    # Subtest: 安全: "$_.Name -like '*.log'"
+    ok 1 - 安全: "$_.Name -like '*.log'"
+      ---
+      duration_ms: 0.6374
+      type: 'test'
+      ...
+    # Subtest: 安全: "$_.PSIsContainer -eq $false"
+    ok 2 - 安全: "$_.PSIsContainer -eq $false"
+      ---
+      duration_ms: 0.1572
+      type: 'test'
+      ...
+    # Subtest: 安全: "$_.Length -gt 1000 -or $_.Name -match 'x'"
+    ok 3 - 安全: "$_.Length -gt 1000 -or $_.Name -match 'x'"
+      ---
+      duration_ms: 0.219
+      type: 'test'
+      ...
+    # Subtest: 安全: ""
+    ok 4 - 安全: ""
+      ---
+      duration_ms: 0.1753
+      type: 'test'
+      ...
+    # Subtest: 不安全: "[IO.File]::Delete('x')"
+    ok 5 - 不安全: "[IO.File]::Delete('x')"
+      ---
+      duration_ms: 0.1852
+      type: 'test'
+      ...
+    # Subtest: 不安全: "$(Get-Random)"
+    ok 6 - 不安全: "$(Get-Random)"
+      ---
+      duration_ms: 0.3162
+      type: 'test'
+      ...
+    # Subtest: 不安全: "@{n='x';e={1}}"
+    ok 7 - 不安全: "@{n='x';e={1}}"
+      ---
+      duration_ms: 0.1788
+      type: 'test'
+      ...
+    # Subtest: 不安全: "$_.Name -eq 'a' ; Remove-Item $_"
+    ok 8 - 不安全: "$_.Name -eq 'a' ; Remove-Item $_"
+      ---
+      duration_ms: 0.1705
+      type: 'test'
+      ...
+    # Subtest: 不安全: "New-Object System.IO.StreamWriter 'x'"
+    ok 9 - 不安全: "New-Object System.IO.StreamWriter 'x'"
+      ---
+      duration_ms: 0.2043
+      type: 'test'
+      ...
+    # Subtest: 不安全: "$_.Kill()"
+    ok 10 - 不安全: "$_.Kill()"
+      ---
+      duration_ms: 0.3583
+      type: 'test'
+      ...
+    # Subtest: 不安全: "$_ = 'x'"
+    ok 11 - 不安全: "$_ = 'x'"
+      ---
+      duration_ms: 0.1609
+      type: 'test'
+      ...
+    # Subtest: 不安全: "& calc.exe"
+    ok 12 - 不安全: "& calc.exe"
+      ---
+      duration_ms: 0.1493
+      type: 'test'
+      ...
+    # Subtest: 花括号不配对按「含代码」处理（不可判定即拦）
+    ok 13 - 花括号不配对按「含代码」处理（不可判定即拦）
+      ---
+      duration_ms: 0.2483
+      type: 'test'
+      ...
+    1..13
+ok 17 - 脚本块安全子集（单元级）
+  ---
+  duration_ms: 3.9851
+  type: 'suite'
+  ...
+# Subtest: 双引号内的子表达式必须审批
+    # Subtest: 需审批: Write-Output "$(Get-Content .env)"
+    ok 1 - 需审批: Write-Output "$(Get-Content .env)"
+      ---
+      duration_ms: 0.5202
+      type: 'test'
+      ...
+    # Subtest: 需审批: Get-ChildItem "$(Remove-Item x)"
+    ok 2 - 需审批: Get-ChildItem "$(Remove-Item x)"
+      ---
+      duration_ms: 0.2046
+      type: 'test'
+      ...
+    # Subtest: 需审批: Write-Host "@(Get-Process)"
+    ok 3 - 需审批: Write-Host "@(Get-Process)"
+      ---
+      duration_ms: 0.2057
+      type: 'test'
+      ...
+    # Subtest: 单引号内的 $() 是字面量，不误拦
+    ok 4 - 单引号内的 $() 是字面量，不误拦
+      ---
+      duration_ms: 0.2505
+      type: 'test'
+      ...
+    # Subtest: 双引号内的普通 & 文本不误拦
+    ok 5 - 双引号内的普通 & 文本不误拦
+      ---
+      duration_ms: 0.2637
+      type: 'test'
+      ...
+    1..5
+ok 18 - 双引号内的子表达式必须审批
+  ---
+  duration_ms: 1.9104
+  type: 'suite'
+  ...
+# Subtest: A3① 内嵌 IPv4 的还原（十六进制压缩形式不再是公网）
+    # Subtest: ::ffff:7f00:1 → 127.0.0.1
+    ok 1 - ::ffff:7f00:1 → 127.0.0.1
+      ---
+      duration_ms: 9.7921
+      type: 'test'
+      ...
+    # Subtest: ::ffff:a00:1 → 10.0.0.1
+    ok 2 - ::ffff:a00:1 → 10.0.0.1
+      ---
+      duration_ms: 2.6565
+      type: 'test'
+      ...
+    # Subtest: ::ffff:c0a8:1 → 192.168.0.1
+    ok 3 - ::ffff:c0a8:1 → 192.168.0.1
+      ---
+      duration_ms: 0.4061
+      type: 'test'
+      ...
+    # Subtest: ::ffff:a9fe:a9fe → 169.254.169.254
+    ok 4 - ::ffff:a9fe:a9fe → 169.254.169.254
+      ---
+      duration_ms: 0.2921
+      type: 'test'
+      ...
+    # Subtest: ::ffff:6440:1 → 100.64.0.1
+    ok 5 - ::ffff:6440:1 → 100.64.0.1
+      ---
+      duration_ms: 0.4693
+      type: 'test'
+      ...
+    # Subtest: ::ffff:c612:0 → 198.18.0.0
+    ok 6 - ::ffff:c612:0 → 198.18.0.0
+      ---
+      duration_ms: 0.2611
+      type: 'test'
+      ...
+    # Subtest: ::7f00:1 → 127.0.0.1
+    ok 7 - ::7f00:1 → 127.0.0.1
+      ---
+      duration_ms: 0.4823
+      type: 'test'
+      ...
+    # Subtest: 2002:7f00:1:: → 127.0.0.1
+    ok 8 - 2002:7f00:1:: → 127.0.0.1
+      ---
+      duration_ms: 0.5243
+      type: 'test'
+      ...
+    # Subtest: 64:ff9b::7f00:1 → 127.0.0.1
+    ok 9 - 64:ff9b::7f00:1 → 127.0.0.1
+      ---
+      duration_ms: 0.7709
+      type: 'test'
+      ...
+    # Subtest: ::ffff:8.8.8.8 → 8.8.8.8
+    ok 10 - ::ffff:8.8.8.8 → 8.8.8.8
+      ---
+      duration_ms: 0.4041
+      type: 'test'
+      ...
+    # Subtest: ::ffff:808:808 → 8.8.8.8
+    ok 11 - ::ffff:808:808 → 8.8.8.8
+      ---
+      duration_ms: 0.1775
+      type: 'test'
+      ...
+    # Subtest: 2002:0808:0808:: → 8.8.8.8
+    ok 12 - 2002:0808:0808:: → 8.8.8.8
+      ---
+      duration_ms: 0.1615
+      type: 'test'
+      ...
+    # Subtest: 64:ff9b::808:808 → 8.8.8.8
+    ok 13 - 64:ff9b::808:808 → 8.8.8.8
+      ---
+      duration_ms: 0.1503
+      type: 'test'
+      ...
+    # Subtest: 点分形式与压缩形式解析出同一组分（::ffff:127.0.0.1 == ::ffff:7f00:1）
+    ok 14 - 点分形式与压缩形式解析出同一组分（::ffff:127.0.0.1 == ::ffff:7f00:1）
+      ---
+      duration_ms: 1.574
+      type: 'test'
+      ...
+    # Subtest: 非法/歧义写法解析为 null（由上层 fail-closed 拒绝）
+    ok 15 - 非法/歧义写法解析为 null（由上层 fail-closed 拒绝）
+      ---
+      duration_ms: 0.297
+      type: 'test'
+      ...
+    1..15
+ok 19 - A3① 内嵌 IPv4 的还原（十六进制压缩形式不再是公网）
+  ---
+  duration_ms: 20.9862
+  type: 'suite'
+  ...
+# Subtest: A3② 私网/保留段判定
+    # Subtest: 拒绝 127.0.0.1
+    ok 1 - 拒绝 127.0.0.1
+      ---
+      duration_ms: 0.9537
+      type: 'test'
+      ...
+    # Subtest: 拒绝 127.255.255.255
+    ok 2 - 拒绝 127.255.255.255
+      ---
+      duration_ms: 0.1518
+      type: 'test'
+      ...
+    # Subtest: 拒绝 10.0.0.1
+    ok 3 - 拒绝 10.0.0.1
+      ---
+      duration_ms: 0.1272
+      type: 'test'
+      ...
+    # Subtest: 拒绝 10.255.255.255
+    ok 4 - 拒绝 10.255.255.255
+      ---
+      duration_ms: 0.124
+      type: 'test'
+      ...
+    # Subtest: 拒绝 172.16.0.1
+    ok 5 - 拒绝 172.16.0.1
+      ---
+      duration_ms: 0.1073
+      type: 'test'
+      ...
+    # Subtest: 拒绝 172.31.255.255
+    ok 6 - 拒绝 172.31.255.255
+      ---
+      duration_ms: 0.2085
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.168.0.1
+    ok 7 - 拒绝 192.168.0.1
+      ---
+      duration_ms: 0.111
+      type: 'test'
+      ...
+    # Subtest: 拒绝 169.254.1.1
+    ok 8 - 拒绝 169.254.1.1
+      ---
+      duration_ms: 0.1037
+      type: 'test'
+      ...
+    # Subtest: 拒绝 169.254.169.254
+    ok 9 - 拒绝 169.254.169.254
+      ---
+      duration_ms: 0.1067
+      type: 'test'
+      ...
+    # Subtest: 拒绝 0.0.0.0
+    ok 10 - 拒绝 0.0.0.0
+      ---
+      duration_ms: 0.1007
+      type: 'test'
+      ...
+    # Subtest: 拒绝 0.255.255.255
+    ok 11 - 拒绝 0.255.255.255
+      ---
+      duration_ms: 0.0984
+      type: 'test'
+      ...
+    # Subtest: 拒绝 100.64.0.1
+    ok 12 - 拒绝 100.64.0.1
+      ---
+      duration_ms: 0.0982
+      type: 'test'
+      ...
+    # Subtest: 拒绝 100.127.255.255
+    ok 13 - 拒绝 100.127.255.255
+      ---
+      duration_ms: 0.095
+      type: 'test'
+      ...
+    # Subtest: 拒绝 198.18.0.1
+    ok 14 - 拒绝 198.18.0.1
+      ---
+      duration_ms: 0.0963
+      type: 'test'
+      ...
+    # Subtest: 拒绝 198.19.255.255
+    ok 15 - 拒绝 198.19.255.255
+      ---
+      duration_ms: 0.1042
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.0.0.1
+    ok 16 - 拒绝 192.0.0.1
+      ---
+      duration_ms: 0.1127
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.88.99.1
+    ok 17 - 拒绝 192.88.99.1
+      ---
+      duration_ms: 0.1058
+      type: 'test'
+      ...
+    # Subtest: 拒绝 224.0.0.1
+    ok 18 - 拒绝 224.0.0.1
+      ---
+      duration_ms: 0.1686
+      type: 'test'
+      ...
+    # Subtest: 拒绝 239.255.255.255
+    ok 19 - 拒绝 239.255.255.255
+      ---
+      duration_ms: 0.1093
+      type: 'test'
+      ...
+    # Subtest: 拒绝 240.0.0.1
+    ok 20 - 拒绝 240.0.0.1
+      ---
+      duration_ms: 0.2018
+      type: 'test'
+      ...
+    # Subtest: 拒绝 255.255.255.255
+    ok 21 - 拒绝 255.255.255.255
+      ---
+      duration_ms: 0.1306
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::1
+    ok 22 - 拒绝 ::1
+      ---
+      duration_ms: 0.1379
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::
+    ok 23 - 拒绝 ::
+      ---
+      duration_ms: 0.1089
+      type: 'test'
+      ...
+    # Subtest: 拒绝 [::1]
+    ok 24 - 拒绝 [::1]
+      ---
+      duration_ms: 0.1507
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fc00::1
+    ok 25 - 拒绝 fc00::1
+      ---
+      duration_ms: 0.1854
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fd12:3456::1
+    ok 26 - 拒绝 fd12:3456::1
+      ---
+      duration_ms: 0.1208
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fe80::1
+    ok 27 - 拒绝 fe80::1
+      ---
+      duration_ms: 0.1091
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fe90::1
+    ok 28 - 拒绝 fe90::1
+      ---
+      duration_ms: 0.108
+      type: 'test'
+      ...
+    # Subtest: 拒绝 febf::1
+    ok 29 - 拒绝 febf::1
+      ---
+      duration_ms: 0.1214
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ff02::1
+    ok 30 - 拒绝 ff02::1
+      ---
+      duration_ms: 0.1082
+      type: 'test'
+      ...
+    # Subtest: 拒绝 100::1
+    ok 31 - 拒绝 100::1
+      ---
+      duration_ms: 0.1099
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fec0::1
+    ok 32 - 拒绝 fec0::1
+      ---
+      duration_ms: 0.1088
+      type: 'test'
+      ...
+    # Subtest: 拒绝 [::ffff:7f00:1]
+    ok 33 - 拒绝 [::ffff:7f00:1]
+      ---
+      duration_ms: 0.1388
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:7f00:1
+    ok 34 - 拒绝 ::ffff:7f00:1
+      ---
+      duration_ms: 0.1082
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:a00:1
+    ok 35 - 拒绝 ::ffff:a00:1
+      ---
+      duration_ms: 0.1043
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:c0a8:1
+    ok 36 - 拒绝 ::ffff:c0a8:1
+      ---
+      duration_ms: 0.1039
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:a9fe:a9fe
+    ok 37 - 拒绝 ::ffff:a9fe:a9fe
+      ---
+      duration_ms: 0.1262
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::7f00:1
+    ok 38 - 拒绝 ::7f00:1
+      ---
+      duration_ms: 0.1354
+      type: 'test'
+      ...
+    # Subtest: 拒绝 2002:7f00:1::
+    ok 39 - 拒绝 2002:7f00:1::
+      ---
+      duration_ms: 0.1187
+      type: 'test'
+      ...
+    # Subtest: 拒绝 64:ff9b::7f00:1
+    ok 40 - 拒绝 64:ff9b::7f00:1
+      ---
+      duration_ms: 0.1244
+      type: 'test'
+      ...
+    # Subtest: 放行 8.8.8.8
+    ok 41 - 放行 8.8.8.8
+      ---
+      duration_ms: 0.1677
+      type: 'test'
+      ...
+    # Subtest: 放行 1.1.1.1
+    ok 42 - 放行 1.1.1.1
+      ---
+      duration_ms: 0.1101
+      type: 'test'
+      ...
+    # Subtest: 放行 100.63.255.255
+    ok 43 - 放行 100.63.255.255
+      ---
+      duration_ms: 0.1076
+      type: 'test'
+      ...
+    # Subtest: 放行 100.128.0.1
+    ok 44 - 放行 100.128.0.1
+      ---
+      duration_ms: 0.0968
+      type: 'test'
+      ...
+    # Subtest: 放行 172.15.255.255
+    ok 45 - 放行 172.15.255.255
+      ---
+      duration_ms: 0.0943
+      type: 'test'
+      ...
+    # Subtest: 放行 172.32.0.1
+    ok 46 - 放行 172.32.0.1
+      ---
+      duration_ms: 0.093
+      type: 'test'
+      ...
+    # Subtest: 放行 198.17.255.255
+    ok 47 - 放行 198.17.255.255
+      ---
+      duration_ms: 0.0938
+      type: 'test'
+      ...
+    # Subtest: 放行 198.20.0.1
+    ok 48 - 放行 198.20.0.1
+      ---
+      duration_ms: 0.0922
+      type: 'test'
+      ...
+    # Subtest: 放行 192.0.1.1
+    ok 49 - 放行 192.0.1.1
+      ---
+      duration_ms: 0.1116
+      type: 'test'
+      ...
+    # Subtest: 放行 192.88.98.1
+    ok 50 - 放行 192.88.98.1
+      ---
+      duration_ms: 0.1006
+      type: 'test'
+      ...
+    # Subtest: 放行 192.88.100.1
+    ok 51 - 放行 192.88.100.1
+      ---
+      duration_ms: 0.0937
+      type: 'test'
+      ...
+    # Subtest: 放行 223.255.255.255
+    ok 52 - 放行 223.255.255.255
+      ---
+      duration_ms: 0.0937
+      type: 'test'
+      ...
+    # Subtest: 放行 1.0.0.1
+    ok 53 - 放行 1.0.0.1
+      ---
+      duration_ms: 0.0901
+      type: 'test'
+      ...
+    # Subtest: 放行 ::ffff:808:808
+    ok 54 - 放行 ::ffff:808:808
+      ---
+      duration_ms: 0.1618
+      type: 'test'
+      ...
+    # Subtest: 放行 2002:0808:0808::
+    ok 55 - 放行 2002:0808:0808::
+      ---
+      duration_ms: 0.115
+      type: 'test'
+      ...
+    # Subtest: 放行 64:ff9b::808:808
+    ok 56 - 放行 64:ff9b::808:808
+      ---
+      duration_ms: 0.1101
+      type: 'test'
+      ...
+    # Subtest: 放行 2001:4860:4860::8888
+    ok 57 - 放行 2001:4860:4860::8888
+      ---
+      duration_ms: 0.102
+      type: 'test'
+      ...
+    # Subtest: 放行 2606:4700:4700::1111
+    ok 58 - 放行 2606:4700:4700::1111
+      ---
+      duration_ms: 0.0988
+      type: 'test'
+      ...
+    # Subtest: isReservedIpv4 按 CIDR 数值判定（不依赖字符串前缀）
+    ok 59 - isReservedIpv4 按 CIDR 数值判定（不依赖字符串前缀）
+      ---
+      duration_ms: 0.2028
+      type: 'test'
+      ...
+    # Subtest: 非 IP 字面量与空串 fail-closed
+    ok 60 - 非 IP 字面量与空串 fail-closed
+      ---
+      duration_ms: 0.3858
+      type: 'test'
+      ...
+    1..60
+ok 20 - A3② 私网/保留段判定
+  ---
+  duration_ms: 10.3954
+  type: 'suite'
+  ...
+# Subtest: A3 URL 级拦截（web_fetch 真正走的入口 assertPublicUrl）
+    # Subtest: 抛错：http://127.0.0.1:3000/api/health
+    ok 1 - 抛错：http://127.0.0.1:3000/api/health
+      ---
+      duration_ms: 2.1196
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://127.255.255.255:3000/api/health
+    ok 2 - 抛错：http://127.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.4066
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://10.0.0.1:3000/api/health
+    ok 3 - 抛错：http://10.0.0.1:3000/api/health
+      ---
+      duration_ms: 0.2983
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://10.255.255.255:3000/api/health
+    ok 4 - 抛错：http://10.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.2626
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://172.16.0.1:3000/api/health
+    ok 5 - 抛错：http://172.16.0.1:3000/api/health
+      ---
+      duration_ms: 0.2637
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://172.31.255.255:3000/api/health
+    ok 6 - 抛错：http://172.31.255.255:3000/api/health
+      ---
+      duration_ms: 0.2429
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://192.168.0.1:3000/api/health
+    ok 7 - 抛错：http://192.168.0.1:3000/api/health
+      ---
+      duration_ms: 0.2315
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://169.254.1.1:3000/api/health
+    ok 8 - 抛错：http://169.254.1.1:3000/api/health
+      ---
+      duration_ms: 0.2172
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://169.254.169.254:3000/api/health
+    ok 9 - 抛错：http://169.254.169.254:3000/api/health
+      ---
+      duration_ms: 0.5068
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://0.0.0.0:3000/api/health
+    ok 10 - 抛错：http://0.0.0.0:3000/api/health
+      ---
+      duration_ms: 0.3287
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://0.255.255.255:3000/api/health
+    ok 11 - 抛错：http://0.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.2412
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://100.64.0.1:3000/api/health
+    ok 12 - 抛错：http://100.64.0.1:3000/api/health
+      ---
+      duration_ms: 0.2067
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://100.127.255.255:3000/api/health
+    ok 13 - 抛错：http://100.127.255.255:3000/api/health
+      ---
+      duration_ms: 0.1886
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://198.18.0.1:3000/api/health
+    ok 14 - 抛错：http://198.18.0.1:3000/api/health
+      ---
+      duration_ms: 0.1755
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://198.19.255.255:3000/api/health
+    ok 15 - 抛错：http://198.19.255.255:3000/api/health
+      ---
+      duration_ms: 0.1798
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://192.0.0.1:3000/api/health
+    ok 16 - 抛错：http://192.0.0.1:3000/api/health
+      ---
+      duration_ms: 0.2582
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://192.88.99.1:3000/api/health
+    ok 17 - 抛错：http://192.88.99.1:3000/api/health
+      ---
+      duration_ms: 0.1733
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://224.0.0.1:3000/api/health
+    ok 18 - 抛错：http://224.0.0.1:3000/api/health
+      ---
+      duration_ms: 0.1562
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://239.255.255.255:3000/api/health
+    ok 19 - 抛错：http://239.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.1512
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://240.0.0.1:3000/api/health
+    ok 20 - 抛错：http://240.0.0.1:3000/api/health
+      ---
+      duration_ms: 0.2743
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://255.255.255.255:3000/api/health
+    ok 21 - 抛错：http://255.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.1552
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::1]:3000/api/health
+    ok 22 - 抛错：http://[::1]:3000/api/health
+      ---
+      duration_ms: 0.1762
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::]:3000/api/health
+    ok 23 - 抛错：http://[::]:3000/api/health
+      ---
+      duration_ms: 0.1865
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::1]:3000/api/health
+    ok 24 - 抛错：http://[::1]:3000/api/health
+      ---
+      duration_ms: 0.1664
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[fc00::1]:3000/api/health
+    ok 25 - 抛错：http://[fc00::1]:3000/api/health
+      ---
+      duration_ms: 0.1848
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[fd12:3456::1]:3000/api/health
+    ok 26 - 抛错：http://[fd12:3456::1]:3000/api/health
+      ---
+      duration_ms: 0.1688
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[fe80::1]:3000/api/health
+    ok 27 - 抛错：http://[fe80::1]:3000/api/health
+      ---
+      duration_ms: 0.2104
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[fe90::1]:3000/api/health
+    ok 28 - 抛错：http://[fe90::1]:3000/api/health
+      ---
+      duration_ms: 0.1867
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[febf::1]:3000/api/health
+    ok 29 - 抛错：http://[febf::1]:3000/api/health
+      ---
+      duration_ms: 0.1898
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[ff02::1]:3000/api/health
+    ok 30 - 抛错：http://[ff02::1]:3000/api/health
+      ---
+      duration_ms: 0.1738
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[100::1]:3000/api/health
+    ok 31 - 抛错：http://[100::1]:3000/api/health
+      ---
+      duration_ms: 0.1645
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[fec0::1]:3000/api/health
+    ok 32 - 抛错：http://[fec0::1]:3000/api/health
+      ---
+      duration_ms: 0.1622
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::ffff:7f00:1]:3000/api/health
+    ok 33 - 抛错：http://[::ffff:7f00:1]:3000/api/health
+      ---
+      duration_ms: 0.1695
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::ffff:7f00:1]:3000/api/health
+    ok 34 - 抛错：http://[::ffff:7f00:1]:3000/api/health
+      ---
+      duration_ms: 0.1806
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::ffff:a00:1]:3000/api/health
+    ok 35 - 抛错：http://[::ffff:a00:1]:3000/api/health
+      ---
+      duration_ms: 0.1739
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::ffff:c0a8:1]:3000/api/health
+    ok 36 - 抛错：http://[::ffff:c0a8:1]:3000/api/health
+      ---
+      duration_ms: 0.1783
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::ffff:a9fe:a9fe]:3000/api/health
+    ok 37 - 抛错：http://[::ffff:a9fe:a9fe]:3000/api/health
+      ---
+      duration_ms: 0.1831
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[::7f00:1]:3000/api/health
+    ok 38 - 抛错：http://[::7f00:1]:3000/api/health
+      ---
+      duration_ms: 0.2293
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[2002:7f00:1::]:3000/api/health
+    ok 39 - 抛错：http://[2002:7f00:1::]:3000/api/health
+      ---
+      duration_ms: 0.2251
+      type: 'test'
+      ...
+    # Subtest: 抛错：http://[64:ff9b::7f00:1]:3000/api/health
+    ok 40 - 抛错：http://[64:ff9b::7f00:1]:3000/api/health
+      ---
+      duration_ms: 0.1807
+      type: 'test'
+      ...
+    # Subtest: 放行：http://8.8.8.8:3000/api/health
+    ok 41 - 放行：http://8.8.8.8:3000/api/health
+      ---
+      duration_ms: 0.7155
+      type: 'test'
+      ...
+    # Subtest: 放行：http://1.1.1.1:3000/api/health
+    ok 42 - 放行：http://1.1.1.1:3000/api/health
+      ---
+      duration_ms: 0.2521
+      type: 'test'
+      ...
+    # Subtest: 放行：http://100.63.255.255:3000/api/health
+    ok 43 - 放行：http://100.63.255.255:3000/api/health
+      ---
+      duration_ms: 0.3008
+      type: 'test'
+      ...
+    # Subtest: 放行：http://100.128.0.1:3000/api/health
+    ok 44 - 放行：http://100.128.0.1:3000/api/health
+      ---
+      duration_ms: 0.4403
+      type: 'test'
+      ...
+    # Subtest: 放行：http://172.15.255.255:3000/api/health
+    ok 45 - 放行：http://172.15.255.255:3000/api/health
+      ---
+      duration_ms: 0.4901
+      type: 'test'
+      ...
+    # Subtest: 放行：http://172.32.0.1:3000/api/health
+    ok 46 - 放行：http://172.32.0.1:3000/api/health
+      ---
+      duration_ms: 0.1862
+      type: 'test'
+      ...
+    # Subtest: 放行：http://198.17.255.255:3000/api/health
+    ok 47 - 放行：http://198.17.255.255:3000/api/health
+      ---
+      duration_ms: 0.1642
+      type: 'test'
+      ...
+    # Subtest: 放行：http://198.20.0.1:3000/api/health
+    ok 48 - 放行：http://198.20.0.1:3000/api/health
+      ---
+      duration_ms: 0.1633
+      type: 'test'
+      ...
+    # Subtest: 放行：http://192.0.1.1:3000/api/health
+    ok 49 - 放行：http://192.0.1.1:3000/api/health
+      ---
+      duration_ms: 0.2796
+      type: 'test'
+      ...
+    # Subtest: 放行：http://192.88.98.1:3000/api/health
+    ok 50 - 放行：http://192.88.98.1:3000/api/health
+      ---
+      duration_ms: 0.2595
+      type: 'test'
+      ...
+    # Subtest: 放行：http://192.88.100.1:3000/api/health
+    ok 51 - 放行：http://192.88.100.1:3000/api/health
+      ---
+      duration_ms: 0.156
+      type: 'test'
+      ...
+    # Subtest: 放行：http://223.255.255.255:3000/api/health
+    ok 52 - 放行：http://223.255.255.255:3000/api/health
+      ---
+      duration_ms: 0.1732
+      type: 'test'
+      ...
+    # Subtest: 放行：http://1.0.0.1:3000/api/health
+    ok 53 - 放行：http://1.0.0.1:3000/api/health
+      ---
+      duration_ms: 0.1387
+      type: 'test'
+      ...
+    # Subtest: 放行：http://[::ffff:808:808]:3000/api/health
+    ok 54 - 放行：http://[::ffff:808:808]:3000/api/health
+      ---
+      duration_ms: 0.1682
+      type: 'test'
+      ...
+    # Subtest: 放行：http://[2002:0808:0808::]:3000/api/health
+    ok 55 - 放行：http://[2002:0808:0808::]:3000/api/health
+      ---
+      duration_ms: 0.1544
+      type: 'test'
+      ...
+    # Subtest: 放行：http://[64:ff9b::808:808]:3000/api/health
+    ok 56 - 放行：http://[64:ff9b::808:808]:3000/api/health
+      ---
+      duration_ms: 0.1613
+      type: 'test'
+      ...
+    # Subtest: 放行：http://[2001:4860:4860::8888]:3000/api/health
+    ok 57 - 放行：http://[2001:4860:4860::8888]:3000/api/health
+      ---
+      duration_ms: 0.1548
+      type: 'test'
+      ...
+    # Subtest: 放行：http://[2606:4700:4700::1111]:3000/api/health
+    ok 58 - 放行：http://[2606:4700:4700::1111]:3000/api/health
+      ---
+      duration_ms: 0.1478
+      type: 'test'
+      ...
+    # Subtest: 原语义不变：协议白名单与内网主机名
+    ok 59 - 原语义不变：协议白名单与内网主机名
+      ---
+      duration_ms: 1.3744
+      type: 'test'
+      ...
+    # Subtest: AGENT_ALLOW_PRIVATE_URLS=1 时本机地址照旧放行（本地 Ollama 场景）
+    ok 60 - AGENT_ALLOW_PRIVATE_URLS=1 时本机地址照旧放行（本地 Ollama 场景）
+      ---
+      duration_ms: 0.39
+      type: 'test'
+      ...
+    1..60
+ok 21 - A3 URL 级拦截（web_fetch 真正走的入口 assertPublicUrl）
+  ---
+  duration_ms: 19.4538
+  type: 'suite'
+  ...
+# Subtest: A3④ web_fetch DNS 钉扎
+    # Subtest: 单次解析结果用于真实 socket 连接；任意网页抓取不经过 SEARCH_PROXY
+    ok 1 - 单次解析结果用于真实 socket 连接；任意网页抓取不经过 SEARCH_PROXY
+      ---
+      duration_ms: 158.6649
+      type: 'test'
+      ...
+    # Subtest: DNS 答案混有公网和私网时 fail-closed 且不连接
+    ok 2 - DNS 答案混有公网和私网时 fail-closed 且不连接
+      ---
+      duration_ms: 3.1176
+      type: 'test'
+      ...
+    1..2
+ok 22 - A3④ web_fetch DNS 钉扎
+  ---
+  duration_ms: 162.1178
+  type: 'suite'
+  ...
+# Subtest: SEC-02 SEARCH_PROXY 可信配置边界
+    # Subtest: 只接受无凭据的 http/https 代理 URL
+    ok 1 - 只接受无凭据的 http/https 代理 URL
+      ---
+      duration_ms: 0.7717
+      type: 'test'
+      ...
+    # Subtest: 代理配置变化时关闭并丢弃旧 dispatcher，清空后回到直连
+    ok 2 - 代理配置变化时关闭并丢弃旧 dispatcher，清空后回到直连
+      ---
+      duration_ms: 2.2516
+      type: 'test'
+      ...
+    1..2
+ok 23 - SEC-02 SEARCH_PROXY 可信配置边界
+  ---
+  duration_ms: 4.4429
+  type: 'suite'
+  ...
+# Subtest: A3③ 体积上限：流式累积 + 越界即断连
+    # Subtest: 无 content-length 的长流：越界即拒，且服务端远未写完（证明未整包驻内存）
+    ok 1 - 无 content-length 的长流：越界即拒，且服务端远未写完（证明未整包驻内存）
+      ---
+      duration_ms: 275.2577
+      type: 'test'
+      ...
+    # Subtest: 有 content-length 的超大响应：预检直接拒，不读正文
+    ok 2 - 有 content-length 的超大响应：预检直接拒，不读正文
+      ---
+      duration_ms: 8.9048
+      type: 'test'
+      ...
+    # Subtest: 上限之内的正常响应仍照常返回（回归保护）
+    ok 3 - 上限之内的正常响应仍照常返回（回归保护）
+      ---
+      duration_ms: 7.0251
+      type: 'test'
+      ...
+    1..3
+ok 24 - A3③ 体积上限：流式累积 + 越界即断连
+  ---
+  duration_ms: 292.286
+  type: 'suite'
+  ...
+# Subtest: plugin role delegation uses the child-run deadline and executes once
+ok 25 - plugin role delegation uses the child-run deadline and executes once
+  ---
+  duration_ms: 3243.2834
+  type: 'test'
+  ...
+# Subtest: plugin SDK is discoverable reference material with bounded reads
+ok 26 - plugin SDK is discoverable reference material with bounded reads
+  ---
+  duration_ms: 10.9374
+  type: 'test'
+  ...
+# Subtest: task plugins activate within the run, isolate versions, preserve active version on failure and save explicitly
+ok 27 - task plugins activate within the run, isolate versions, preserve active version on failure and save explicitly
+  ---
+  duration_ms: 3365.571
+  type: 'test'
+  ...
+# Subtest: development authorization is explicit and manifest permissions cannot expand it
+ok 28 - development authorization is explicit and manifest permissions cannot expand it
+  ---
+  duration_ms: 8.3956
+  type: 'test'
+  ...
+# Subtest: original versions restore from durable binding and altered source is rejected
+ok 29 - original versions restore from durable binding and altered source is rejected
+  ---
+  duration_ms: 2380.4265
+  type: 'test'
+  ...
+# [plugin] 加载失败 full: PLUGIN_SERVICE_CONFLICT: service:runner
+# Subtest: full capability types are scoped, lifecycle resources clear and system services reject takeover
+ok 30 - full capability types are scoped, lifecycle resources clear and system services reject takeover
+  ---
+  duration_ms: 2297.9276
+  type: 'test'
+  ...
+# Subtest: plugin files and imports cannot traverse into host code or grant undeclared dependencies
+ok 31 - plugin files and imports cannot traverse into host code or grant undeclared dependencies
+  ---
+  duration_ms: 12.8595
+  type: 'test'
+  ...
+# Subtest: transitive services compose, dependents prevent release and resources dispose on terminal completion
+ok 32 - transitive services compose, dependents prevent release and resources dispose on terminal completion
+  ---
+  duration_ms: 3538.3556
+  type: 'test'
+  ...
+# Subtest: search engines and directory tools enforce the same private-data boundary as read_file
+ok 33 - search engines and directory tools enforce the same private-data boundary as read_file
+  ---
+  duration_ms: 205.1407
+  type: 'test'
+  ...
+# Subtest: A2：读保护按双基座判定
+    # Subtest: 项目根下的 data/ 与 .env 仍然读拒（旧实现只在沙箱根 == 项目根时有效）
+    ok 1 - 项目根下的 data/ 与 .env 仍然读拒（旧实现只在沙箱根 == 项目根时有效）
+      ---
+      duration_ms: 30.0995
+      type: 'test'
+      ...
+    # Subtest: 沙箱根本下的 data/ 与 .env 照旧拦（两种写法都必须成立）
+    ok 2 - 沙箱根本下的 data/ 与 .env 照旧拦（两种写法都必须成立）
+      ---
+      duration_ms: 26.8555
+      type: 'test'
+      ...
+    1..2
+ok 34 - A2：读保护按双基座判定
+  ---
+  duration_ms: 59.1157
+  type: 'suite'
+  ...
+# Subtest: A2：写侧敏感门（此前完全没有写侧名单）
+    # Subtest: kernel/ 与 core/chat/ 硬拒，且长路径绕过无效
+    ok 1 - kernel/ 与 core/chat/ 硬拒，且长路径绕过无效
+      ---
+      duration_ms: 27.9792
+      type: 'test'
+      ...
+    # Subtest: .env 与 data/ 属「需批准」而非硬拒（用户仍可显式授权）
+    ok 2 - .env 与 data/ 属「需批准」而非硬拒（用户仍可显式授权）
+      ---
+      duration_ms: 24.5268
+      type: 'test'
+      ...
+    # Subtest: sensitiveTarget 给出可读原因（审批卡要说明为什么拦）
+    ok 3 - sensitiveTarget 给出可读原因（审批卡要说明为什么拦）
+      ---
+      duration_ms: 23.5434
+      type: 'test'
+      ...
+    1..3
+ok 35 - A2：写侧敏感门（此前完全没有写侧名单）
+  ---
+  duration_ms: 76.5904
+  type: 'suite'
+  ...
+# Subtest: B10：AGENT_ALLOW_CORE_EDIT 可重置
+    # Subtest: 设置开关并 reset 后放行；撤销并 reset 后恢复保护
+    ok 1 - 设置开关并 reset 后放行；撤销并 reset 后恢复保护
+      ---
+      duration_ms: 24.8525
+      type: 'test'
+      ...
+    1..1
+ok 36 - B10：AGENT_ALLOW_CORE_EDIT 可重置
+  ---
+  duration_ms: 25.2433
+  type: 'suite'
+  ...
+# Subtest: B10：沙箱根不存在时报错归因正确
+    # Subtest: 报「沙箱根目录不存在」而不是「指向沙箱外（符号链接）」
+    ok 1 - 报「沙箱根目录不存在」而不是「指向沙箱外（符号链接）」
+      ---
+      duration_ms: 30.4882
+      type: 'test'
+      ...
+    # Subtest: 沙箱根存在时，在根下新建文件正常解析（不被误拒）
+    ok 2 - 沙箱根存在时，在根下新建文件正常解析（不被误拒）
+      ---
+      duration_ms: 30.183
+      type: 'test'
+      ...
+    # Subtest: 越界仍然拒绝
+    ok 3 - 越界仍然拒绝
+      ---
+      duration_ms: 26.5543
+      type: 'test'
+      ...
+    1..3
+ok 37 - B10：沙箱根不存在时报错归因正确
+  ---
+  duration_ms: 87.9715
+  type: 'suite'
+  ...
+# [secret] D:\\Temp\\mh-auth-471zZo\\data\\secret.key：首次启动：已生成主密钥
+# [academic] 学术智能体接线就绪：ARS 技能路由 persona（priority 25） 
+# [blackboard] 共享黑板就绪：blackboard_put / get / list / delete（会话 0 个） 
+# [browser] 浏览器插件未启用（config.json 设 browser.enabled=true 后重载） 
+# [chat] 已加载 Provider: NEWAPI(claude-sonnet-4-5:free) 
+# [code-intel] 代码智能就绪: repo_map / find_symbol / project_diagnostics / lsp_definition / lsp_hover / lsp_diagnostics 
+# [document] 文档读取就绪: read_document（PDF 文本抽取）/ ocr_image / ocr_pdf 
+# [evolve] 自进化就绪：run 结束自动提案，待确认提案 0 条（D:\\Temp\\mh-auth-471zZo\\data\\skill-proposals） 
+# [goal-plan] 工具就绪: create_plan / update_plan_progress / complete_goal（查询端点 /api/plugins/goal-plan/plan?sessionId=） 
+# [mcp] MCP 客户端就绪（未配置 mcp.servers——在 config.json 添加后热重载本插件即可接入） 
+# [memory] 工具就绪: remember_fact / recall_facts / forget_fact + set/list/delete_memory_block（facts 0 条 · blocks 0 个，分层记忆已启用） 
+# [otel] OTLP 导出未启用（config.json 设 otel.enabled=true 后重载） 
+# [parallel] 工具就绪: run_parallel（多会话并行：并发子代理 + 独立轨迹 + 统一汇总） 
+# [powershell] 工具就绪: powershell_execute（只读 54 个 cmdlet + git/npm 子命令级细分，黑名单 13 类兜底）+ env_probe 
+# [rules] 规则已生效：0 个来源 / 0 字符 / 策略 0 条 
+# [rules] 规则系统就绪：提示规则 0 字符 / 策略规则 0 条（全局 D:\\Temp\\mh-auth-471zZo\\data\\rules，项目 AGENTS.md·CLAUDE.md·.maharness/rules） 
+# [search] 工具就绪: web_search（Tavily）+ web_fetch + web_crawl 
+# [self-extend] 工具就绪: create_plugin / plugin_status —— Agent 可以自己定义自己 
+# [skills] 技能就绪: 5 个（内置 5 / 包 0 / 已装 0 / 项目 0），索引模式=routing 
+# [subagent] 工具就绪: run_subagent（子代理：独立循环 + 只读白名单 + 自我审查） 
+# [todo] 工具就绪: todo_add / todo_update / todo_list + 看板面板（/api/plugins/todo/board/panel） 
+# [tools-fs] 工具就绪: list_dir / read_file / glob / grep / write_file / edit_file / delete_file（沙箱内；普通写默认免审批，.env 与 data/ 写入需批准，kernel/ 与 core/chat/ 硬拒） 
+# [vision] 图像能力就绪: read_image / analyze_image（当前 无带视觉能力的模型，读图会给出配置指引） 
+# [seed] 已从 .env 导入 1 个供应商到本地数据库
+# [seed] 已写入默认人设（可在网页端「设置」编辑）
+# [chat] Provider 已热更新: NEWAPI(claude-sonnet-4-5:free) 
+# [chat] 人设已热更新: 默认人设 
+# [env] 监听 D:\\DEEPSEEK\\maharness\\web-agent（.env 变更将热重载插件）
+#   Web Agent 已启动: http://localhost:63115
+#   沙箱根目录: D:\\Temp\\mh-auth-471zZo\\project\\demo-app
+# Subtest: A6-b 变更类端点的可选 token 门
+    # Subtest: API 错误使用版本化稳定外壳并保留既有文案
+    ok 1 - API 错误使用版本化稳定外壳并保留既有文案
+      ---
+      duration_ms: 48.833
+      type: 'test'
+      ...
+    # Subtest: 健康、就绪与存储端点返回稳定的非泄密契约
+    ok 2 - 健康、就绪与存储端点返回稳定的非泄密契约
+      ---
+      duration_ms: 10.1729
+      type: 'test'
+      ...
+    # Subtest: 就绪与存储故障输入会 fail closed
+    ok 3 - 就绪与存储故障输入会 fail closed
+      ---
+      duration_ms: 0.6431
+      type: 'test'
+      ...
+    # Subtest: HTTP token 与审批凭据共用授权决策：关闭、缺失、错误和正确凭据
+    ok 4 - HTTP token 与审批凭据共用授权决策：关闭、缺失、错误和正确凭据
+      ---
+      duration_ms: 0.4351
+      type: 'test'
+      ...
+    # Subtest: 设置 MAHARNESS_API_TOKEN 后：无头 POST 得 401，带头 POST 成功
+    ok 5 - 设置 MAHARNESS_API_TOKEN 后：无头 POST 得 401，带头 POST 成功
+      ---
+      duration_ms: 36.5806
+      type: 'test'
+      ...
+    # Subtest: PUT/PATCH/DELETE 同受门管辖；GET 只读不受影响
+    ok 6 - PUT/PATCH/DELETE 同受门管辖；GET 只读不受影响
+      ---
+      duration_ms: 10.9356
+      type: 'test'
+      ...
+    # Subtest: 未设置该环境变量时回到本机免鉴权（既有使用方式不变）
+    ok 7 - 未设置该环境变量时回到本机免鉴权（既有使用方式不变）
+      ---
+      duration_ms: 7.0848
+      type: 'test'
+      ...
+    # Subtest: 门是可复用中间件：未启用透传 / 启用后缺头 401 / 只读透传
+    ok 8 - 门是可复用中间件：未启用透传 / 启用后缺头 401 / 只读透传
+      ---
+      duration_ms: 1.2335
+      type: 'test'
+      ...
+    # Subtest: readonly token 只能读，admin token 可变更；trusted 模式全部 API 受门
+    ok 9 - readonly token 只能读，admin token 可变更；trusted 模式全部 API 受门
+      ---
+      duration_ms: 1.2833
+      type: 'test'
+      ...
+    # Subtest: 同一中间件逐请求读取 token：轮换后旧 token 立即失效且不回显
+    ok 10 - 同一中间件逐请求读取 token：轮换后旧 token 立即失效且不回显
+      ---
+      duration_ms: 0.8377
+      type: 'test'
+      ...
+    # Subtest: 错误 token 按来源触发临时锁定，锁定期间即使正确 token 也拒绝
+    ok 11 - 错误 token 按来源触发临时锁定，锁定期间即使正确 token 也拒绝
+      ---
+      duration_ms: 0.6814
+      type: 'test'
+      ...
+    # Subtest: 授权拒绝写入脱敏审计事件，不包含 token、审批 ID 或请求参数
+    ok 12 - 授权拒绝写入脱敏审计事件，不包含 token、审批 ID 或请求参数
+      ---
+      duration_ms: 14.7752
+      type: 'test'
+      ...
+# [rules] 规则已生效：0 个来源 / 0 字符 / 策略 0 条 
+    # Subtest: 成功的变更授权发布脱敏审计事件
+    ok 13 - 成功的变更授权发布脱敏审计事件
+      ---
+      duration_ms: 16.0258
+      type: 'test'
+      ...
+    # Subtest: SSE 连接关闭时只清理一次，并持久化连接生命周期事件
+    ok 14 - SSE 连接关闭时只清理一次，并持久化连接生命周期事件
+      ---
+      duration_ms: 20.0067
+      type: 'test'
+      ...
+    # Subtest: SSE 空闲心跳跨过一个周期后仍可读，关闭后释放连接资源
+    ok 15 - SSE 空闲心跳跨过一个周期后仍可读，关闭后释放连接资源
+      ---
+      duration_ms: 15021.2718
+      type: 'test'
+      ...
+    # Subtest: SSE 连接配额可释放，超限连接必须等待自动重连
+    ok 16 - SSE 连接配额可释放，超限连接必须等待自动重连
+      ---
+      duration_ms: 0.3387
+      type: 'test'
+      ...
+# [chat] Provider 已热更新: NEWAPI(claude-sonnet-4-5:free), AUTH-SPEC-QUOTA-FRBD(quota-model) 
+    # Subtest: 全局事件流与聊天流共用进程级 SSE 配额，并在断开后释放
+    ok 17 - 全局事件流与聊天流共用进程级 SSE 配额，并在断开后释放
+      ---
+      duration_ms: 89.652
+      type: 'test'
+      ...
+    # Subtest: Host/Origin 白名单仍在（token 门不替代 DNS rebinding 防护）
+    ok 18 - Host/Origin 白名单仍在（token 门不替代 DNS rebinding 防护）
+      ---
+      duration_ms: 9.9171
+      type: 'test'
+      ...
+    # Subtest: 插件 API 挂载点（/api/plugins/*）同样受门管辖
+    ok 19 - 插件 API 挂载点（/api/plugins/*）同样受门管辖
+      ---
+      duration_ms: 12.4981
+      type: 'test'
+      ...
+    1..19
+ok 38 - A6-b 变更类端点的可选 token 门
+  ---
+  duration_ms: 16282.2831
+  type: 'suite'
+  ...
+# Subtest: A6-a 危险工作区根
+    # Subtest: POST /api/workspaces 拒绝 C:\\（盘符根），中文理由
+    ok 1 - POST /api/workspaces 拒绝 C:\\（盘符根），中文理由
+      ---
+      duration_ms: 4.1299
+      type: 'test'
+      ...
+    # Subtest: 判定函数：家目录/其祖先/过短路径拒；普通项目目录与本项目根放行
+    ok 2 - 判定函数：家目录/其祖先/过短路径拒；普通项目目录与本项目根放行
+      ---
+      duration_ms: 0.6631
+      type: 'test'
+      ...
+    # Subtest: POST 家目录 → 400 且理由明确
+    ok 3 - POST 家目录 → 400 且理由明确
+      ---
+      duration_ms: 3.1745
+      type: 'test'
+      ...
+    # Subtest: /switch 对已入库的危险行复检拒绝（兜住修复前登记的路径）
+    ok 4 - /switch 对已入库的危险行复检拒绝（兜住修复前登记的路径）
+      ---
+      duration_ms: 5.624
+      type: 'test'
+      ...
+    1..4
+ok 39 - A6-a 危险工作区根
+  ---
+  duration_ms: 13.9675
+  type: 'suite'
+  ...
+# Subtest: A6-c 审批一次性凭据
+    # Subtest: 凭据登记处：铸发稳定、一次性、错值/重放/超时分别拒
+    ok 1 - 凭据登记处：铸发稳定、一次性、错值/重放/超时分别拒
+      ---
+      duration_ms: 0.7216
+      type: 'test'
+      ...
+    # Subtest: 强制模式：缺凭据 401、错凭据 403（先于执行器判定）
+    ok 2 - 强制模式：缺凭据 401、错凭据 403（先于执行器判定）
+      ---
+      duration_ms: 7.1061
+      type: 'test'
+      ...
+# [approvals] 未启用 MAHARNESS_API_TOKEN/MAHARNESS_APPROVAL_TOKEN：本机任意进程仍可回答审批（A6-1 未彻底关闭，详见 server/routes/approvals.ts 注释）
+    # Subtest: 默认（非强制）模式：不带凭据仍按既有方式回答（不破坏现有前端）
+    ok 3 - 默认（非强制）模式：不带凭据仍按既有方式回答（不破坏现有前端）
+      ---
+      duration_ms: 3.1488
+      type: 'test'
+      ...
+    # Subtest: GET /api/approvals 形状不变（挂起项带 approvalToken 字段供前端接线）
+    ok 4 - GET /api/approvals 形状不变（挂起项带 approvalToken 字段供前端接线）
+      ---
+      duration_ms: 2.5755
+      type: 'test'
+      ...
+    1..4
+ok 40 - A6-c 审批一次性凭据
+  ---
+  duration_ms: 13.8863
+  type: 'suite'
+  ...
+# [rules] 规则已生效：0 个来源 / 0 字符 / 策略 1 条 
+# [rules] 规则已生效：0 个来源 / 0 字符 / 策略 1 条 
+# [rules] 已写入通配 allow 策略（*）→ D:\\Temp\\mh-auth-471zZo\\data\\rules.json：全部工具的审批门已被整体放行
+# [rules] 规则已生效：0 个来源 / 0 字符 / 策略 0 条 
+# Subtest: A6-3 策略注入旁路审批门
+    # Subtest: 通配 allow 需显式确认；具体工具名的 allow 不受影响
+    ok 1 - 通配 allow 需显式确认；具体工具名的 allow 不受影响
+      ---
+      duration_ms: 49.2244
+      type: 'test'
+      ...
+    # Subtest: isBlanketAllow 只把「纯通配 + allow」算作整体放行
+    ok 2 - isBlanketAllow 只把「纯通配 + allow」算作整体放行
+      ---
+      duration_ms: 0.2966
+      type: 'test'
+      ...
+# [store] provider p1 的 api_key 解密失败（密钥变更或密文损坏），该供应商不可用: Unsupported state or unable to authenticate data
+# [store] provider p2 的 api_key 解密失败（密钥变更或密文损坏），该供应商不可用: Unsupported state or unable to authenticate data
+    # Subtest: GET /api/security 报出安全姿态且不含任何密钥材料
+    ok 3 - GET /api/security 报出安全姿态且不含任何密钥材料
+      ---
+      duration_ms: 4.5214
+      type: 'test'
+      ...
+    1..3
+ok 41 - A6-3 策略注入旁路审批门
+  ---
+  duration_ms: 54.3376
+  type: 'suite'
+  ...
+# Subtest: A7 密钥存储
+    # Subtest: 解密失败不再静默：ProviderRow.keyBroken + keyStatus() 明细，重录后自动摘除
+    ok 1 - 解密失败不再静默：ProviderRow.keyBroken + keyStatus() 明细，重录后自动摘除
+      ---
+      duration_ms: 39.58
+      type: 'test'
+      ...
+    # Subtest: 无主密钥但库里有密文：标记 no-master-key（不再"看起来已配置"）+ 只读密文探测
+    ok 2 - 无主密钥但库里有密文：标记 no-master-key（不再"看起来已配置"）+ 只读密文探测
+      ---
+      duration_ms: 34.5071
+      type: 'test'
+      ...
+    # Subtest: api_key 不可解时留空写入不覆盖既有密文（二次丢失防护）
+    ok 3 - api_key 不可解时留空写入不覆盖既有密文（二次丢失防护）
+      ---
+      duration_ms: 34.2249
+      type: 'test'
+      ...
+    # Subtest: 密钥文件异常 + 已有密文 → 拒绝重新生成（原字节不动）；显式授权才重建且先备份
+    ok 4 - 密钥文件异常 + 已有密文 → 拒绝重新生成（原字节不动）；显式授权才重建且先备份
+      ---
+      duration_ms: 28.4134
+      type: 'test'
+      ...
+    # Subtest: hardenSecretKeyPath 失败只告警不抛（加固绝不能挡住启动）
+    ok 5 - hardenSecretKeyPath 失败只告警不抛（加固绝不能挡住启动）
+      ---
+      duration_ms: 39.8632
+      type: 'test'
+      ...
+    1..5
+ok 42 - A7 密钥存储
+  ---
+  duration_ms: 176.9394
+  type: 'suite'
+  ...
+# Subtest: workspace plugin grants are independent, revision checked, tenant scoped and cannot widen on recovery
+ok 43 - workspace plugin grants are independent, revision checked, tenant scoped and cannot widen on recovery
+  ---
+  duration_ms: 35.4786
+  type: 'test'
+  ...
+# Subtest: only user admin can edit plugin grants, with approved dependencies and audit records
+ok 44 - only user admin can edit plugin grants, with approved dependencies and audit records
+  ---
+  duration_ms: 120.2925
+  type: 'test'
+  ...
+# Subtest: task plugin APIs isolate tenants and roles and forward async failures
+ok 45 - task plugin APIs isolate tenants and roles and forward async failures
+  ---
+  duration_ms: 29.4585
+  type: 'test'
+  ...
+# Subtest: assertPublicHttpUrl SSRF 校验
+    # Subtest: 拒绝私网 IPv4 段
+    ok 1 - 拒绝私网 IPv4 段
+      ---
+      duration_ms: 2.6967
+      type: 'test'
+      ...
+    # Subtest: 拒绝链路本地与环回
+    ok 2 - 拒绝链路本地与环回
+      ---
+      duration_ms: 0.4258
+      type: 'test'
+      ...
+    # Subtest: 拒绝 IPv6 环回 / ULA / 链路本地（含 IPv4-mapped）
+    ok 3 - 拒绝 IPv6 环回 / ULA / 链路本地（含 IPv4-mapped）
+      ---
+      duration_ms: 8.5912
+      type: 'test'
+      ...
+    # Subtest: 拒绝非 http/https 协议与非法地址格式
+    ok 4 - 拒绝非 http/https 协议与非法地址格式
+      ---
+      duration_ms: 0.7068
+      type: 'test'
+      ...
+    1..4
+ok 46 - assertPublicHttpUrl SSRF 校验
+  ---
+  duration_ms: 14.0718
+  type: 'suite'
+  ...
+# Subtest: Provider 配置诊断
+    # Subtest: 只返回可操作状态，不泄露 key，并区分缺失配置、模型探测和健康故障
+    ok 1 - 只返回可操作状态，不泄露 key，并区分缺失配置、模型探测和健康故障
+      ---
+      duration_ms: 1.1589
+      type: 'test'
+      ...
+    # Subtest: Ollama 无 key 可诊断为有效配置，空地址仍报错
+    ok 2 - Ollama 无 key 可诊断为有效配置，空地址仍报错
+      ---
+      duration_ms: 1.5816
+      type: 'test'
+      ...
+    1..2
+ok 47 - Provider 配置诊断
+  ---
+  duration_ms: 3.157
+  type: 'suite'
+  ...
+# Subtest: Provider Gateway 快照
+    # Subtest: 只暴露 identity/能力/健康，不包含地址或密钥
+    ok 1 - 只暴露 identity/能力/健康，不包含地址或密钥
+      ---
+      duration_ms: 0.8955
+      type: 'test'
+      ...
+    1..1
+ok 48 - Provider Gateway 快照
+  ---
+  duration_ms: 1.5264
+  type: 'suite'
+  ...
+# Subtest: A5① providers 与 web_fetch 用同一套私网判定（交叉比对防漂移）
+    # Subtest: 两处同判：[::ffff:7f00:1]
+    ok 1 - 两处同判：[::ffff:7f00:1]
+      ---
+      duration_ms: 8.0409
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::ffff:7f00:1
+    ok 2 - 两处同判：::ffff:7f00:1
+      ---
+      duration_ms: 0.2383
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::ffff:a00:1
+    ok 3 - 两处同判：::ffff:a00:1
+      ---
+      duration_ms: 0.3028
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::ffff:c0a8:1
+    ok 4 - 两处同判：::ffff:c0a8:1
+      ---
+      duration_ms: 0.3551
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::ffff:a9fe:a9fe
+    ok 5 - 两处同判：::ffff:a9fe:a9fe
+      ---
+      duration_ms: 0.1981
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::7f00:1
+    ok 6 - 两处同判：::7f00:1
+      ---
+      duration_ms: 0.1722
+      type: 'test'
+      ...
+    # Subtest: 两处同判：2002:7f00:1::
+    ok 7 - 两处同判：2002:7f00:1::
+      ---
+      duration_ms: 0.379
+      type: 'test'
+      ...
+    # Subtest: 两处同判：64:ff9b::7f00:1
+    ok 8 - 两处同判：64:ff9b::7f00:1
+      ---
+      duration_ms: 0.2721
+      type: 'test'
+      ...
+    # Subtest: 两处同判：100.64.0.1
+    ok 9 - 两处同判：100.64.0.1
+      ---
+      duration_ms: 0.7809
+      type: 'test'
+      ...
+    # Subtest: 两处同判：100.127.255.255
+    ok 10 - 两处同判：100.127.255.255
+      ---
+      duration_ms: 0.3316
+      type: 'test'
+      ...
+    # Subtest: 两处同判：198.18.0.1
+    ok 11 - 两处同判：198.18.0.1
+      ---
+      duration_ms: 0.1319
+      type: 'test'
+      ...
+    # Subtest: 两处同判：198.19.255.255
+    ok 12 - 两处同判：198.19.255.255
+      ---
+      duration_ms: 0.1372
+      type: 'test'
+      ...
+    # Subtest: 两处同判：192.0.0.1
+    ok 13 - 两处同判：192.0.0.1
+      ---
+      duration_ms: 0.1317
+      type: 'test'
+      ...
+    # Subtest: 两处同判：192.88.99.1
+    ok 14 - 两处同判：192.88.99.1
+      ---
+      duration_ms: 0.1144
+      type: 'test'
+      ...
+    # Subtest: 两处同判：224.0.0.1
+    ok 15 - 两处同判：224.0.0.1
+      ---
+      duration_ms: 0.1207
+      type: 'test'
+      ...
+    # Subtest: 两处同判：240.0.0.1
+    ok 16 - 两处同判：240.0.0.1
+      ---
+      duration_ms: 0.116
+      type: 'test'
+      ...
+    # Subtest: 两处同判：255.255.255.255
+    ok 17 - 两处同判：255.255.255.255
+      ---
+      duration_ms: 0.113
+      type: 'test'
+      ...
+    # Subtest: 两处同判：0.0.0.0
+    ok 18 - 两处同判：0.0.0.0
+      ---
+      duration_ms: 0.1023
+      type: 'test'
+      ...
+    # Subtest: 两处同判：fe80::1
+    ok 19 - 两处同判：fe80::1
+      ---
+      duration_ms: 0.3411
+      type: 'test'
+      ...
+    # Subtest: 两处同判：fe90::1
+    ok 20 - 两处同判：fe90::1
+      ---
+      duration_ms: 0.2594
+      type: 'test'
+      ...
+    # Subtest: 两处同判：febf::1
+    ok 21 - 两处同判：febf::1
+      ---
+      duration_ms: 0.1416
+      type: 'test'
+      ...
+    # Subtest: 两处同判：fc00::1
+    ok 22 - 两处同判：fc00::1
+      ---
+      duration_ms: 0.1338
+      type: 'test'
+      ...
+    # Subtest: 两处同判：fd12:3456::1
+    ok 23 - 两处同判：fd12:3456::1
+      ---
+      duration_ms: 0.1215
+      type: 'test'
+      ...
+    # Subtest: 两处同判：ff02::1
+    ok 24 - 两处同判：ff02::1
+      ---
+      duration_ms: 0.1276
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::1
+    ok 25 - 两处同判：::1
+      ---
+      duration_ms: 0.1322
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::
+    ok 26 - 两处同判：::
+      ---
+      duration_ms: 0.1541
+      type: 'test'
+      ...
+    # Subtest: 两处同判：127.0.0.1
+    ok 27 - 两处同判：127.0.0.1
+      ---
+      duration_ms: 0.172
+      type: 'test'
+      ...
+    # Subtest: 两处同判：10.0.0.8
+    ok 28 - 两处同判：10.0.0.8
+      ---
+      duration_ms: 0.1565
+      type: 'test'
+      ...
+    # Subtest: 两处同判：172.16.0.1
+    ok 29 - 两处同判：172.16.0.1
+      ---
+      duration_ms: 0.1554
+      type: 'test'
+      ...
+    # Subtest: 两处同判：172.31.255.255
+    ok 30 - 两处同判：172.31.255.255
+      ---
+      duration_ms: 0.1469
+      type: 'test'
+      ...
+    # Subtest: 两处同判：192.168.1.1
+    ok 31 - 两处同判：192.168.1.1
+      ---
+      duration_ms: 0.1551
+      type: 'test'
+      ...
+    # Subtest: 两处同判：169.254.169.254
+    ok 32 - 两处同判：169.254.169.254
+      ---
+      duration_ms: 0.1475
+      type: 'test'
+      ...
+    # Subtest: 两处同判：::ffff:808:808
+    ok 33 - 两处同判：::ffff:808:808
+      ---
+      duration_ms: 0.2146
+      type: 'test'
+      ...
+    # Subtest: 两处同判：2002:0808:0808::
+    ok 34 - 两处同判：2002:0808:0808::
+      ---
+      duration_ms: 0.1933
+      type: 'test'
+      ...
+    # Subtest: 两处同判：64:ff9b::808:808
+    ok 35 - 两处同判：64:ff9b::808:808
+      ---
+      duration_ms: 0.3128
+      type: 'test'
+      ...
+    # Subtest: 两处同判：2001:4860:4860::8888
+    ok 36 - 两处同判：2001:4860:4860::8888
+      ---
+      duration_ms: 0.287
+      type: 'test'
+      ...
+    # Subtest: 两处同判：8.8.8.8
+    ok 37 - 两处同判：8.8.8.8
+      ---
+      duration_ms: 0.1526
+      type: 'test'
+      ...
+    # Subtest: 两处同判：1.1.1.1
+    ok 38 - 两处同判：1.1.1.1
+      ---
+      duration_ms: 0.1377
+      type: 'test'
+      ...
+    # Subtest: 两处同判：100.63.255.255
+    ok 39 - 两处同判：100.63.255.255
+      ---
+      duration_ms: 0.1398
+      type: 'test'
+      ...
+    # Subtest: 两处同判：100.128.0.1
+    ok 40 - 两处同判：100.128.0.1
+      ---
+      duration_ms: 0.1342
+      type: 'test'
+      ...
+    # Subtest: 两处同判：172.15.255.255
+    ok 41 - 两处同判：172.15.255.255
+      ---
+      duration_ms: 0.125
+      type: 'test'
+      ...
+    # Subtest: 两处同判：172.32.0.1
+    ok 42 - 两处同判：172.32.0.1
+      ---
+      duration_ms: 0.0908
+      type: 'test'
+      ...
+    # Subtest: 两处同判：198.17.255.255
+    ok 43 - 两处同判：198.17.255.255
+      ---
+      duration_ms: 0.0789
+      type: 'test'
+      ...
+    # Subtest: 两处同判：198.20.0.1
+    ok 44 - 两处同判：198.20.0.1
+      ---
+      duration_ms: 0.1113
+      type: 'test'
+      ...
+    # Subtest: 两处同判：192.0.1.1
+    ok 45 - 两处同判：192.0.1.1
+      ---
+      duration_ms: 0.1144
+      type: 'test'
+      ...
+    # Subtest: 两处同判：192.88.98.1
+    ok 46 - 两处同判：192.88.98.1
+      ---
+      duration_ms: 0.112
+      type: 'test'
+      ...
+    # Subtest: 两处同判：223.255.255.255
+    ok 47 - 两处同判：223.255.255.255
+      ---
+      duration_ms: 0.1138
+      type: 'test'
+      ...
+    # Subtest: 拒绝 [::ffff:7f00:1]
+    ok 48 - 拒绝 [::ffff:7f00:1]
+      ---
+      duration_ms: 0.1997
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:7f00:1
+    ok 49 - 拒绝 ::ffff:7f00:1
+      ---
+      duration_ms: 0.123
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:a00:1
+    ok 50 - 拒绝 ::ffff:a00:1
+      ---
+      duration_ms: 0.1145
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:c0a8:1
+    ok 51 - 拒绝 ::ffff:c0a8:1
+      ---
+      duration_ms: 0.1132
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::ffff:a9fe:a9fe
+    ok 52 - 拒绝 ::ffff:a9fe:a9fe
+      ---
+      duration_ms: 0.1142
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::7f00:1
+    ok 53 - 拒绝 ::7f00:1
+      ---
+      duration_ms: 0.1121
+      type: 'test'
+      ...
+    # Subtest: 拒绝 2002:7f00:1::
+    ok 54 - 拒绝 2002:7f00:1::
+      ---
+      duration_ms: 0.1143
+      type: 'test'
+      ...
+    # Subtest: 拒绝 64:ff9b::7f00:1
+    ok 55 - 拒绝 64:ff9b::7f00:1
+      ---
+      duration_ms: 0.1195
+      type: 'test'
+      ...
+    # Subtest: 拒绝 100.64.0.1
+    ok 56 - 拒绝 100.64.0.1
+      ---
+      duration_ms: 0.1235
+      type: 'test'
+      ...
+    # Subtest: 拒绝 100.127.255.255
+    ok 57 - 拒绝 100.127.255.255
+      ---
+      duration_ms: 0.1074
+      type: 'test'
+      ...
+    # Subtest: 拒绝 198.18.0.1
+    ok 58 - 拒绝 198.18.0.1
+      ---
+      duration_ms: 0.118
+      type: 'test'
+      ...
+    # Subtest: 拒绝 198.19.255.255
+    ok 59 - 拒绝 198.19.255.255
+      ---
+      duration_ms: 0.1063
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.0.0.1
+    ok 60 - 拒绝 192.0.0.1
+      ---
+      duration_ms: 0.1029
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.88.99.1
+    ok 61 - 拒绝 192.88.99.1
+      ---
+      duration_ms: 0.1061
+      type: 'test'
+      ...
+    # Subtest: 拒绝 224.0.0.1
+    ok 62 - 拒绝 224.0.0.1
+      ---
+      duration_ms: 0.1055
+      type: 'test'
+      ...
+    # Subtest: 拒绝 240.0.0.1
+    ok 63 - 拒绝 240.0.0.1
+      ---
+      duration_ms: 0.1007
+      type: 'test'
+      ...
+    # Subtest: 拒绝 255.255.255.255
+    ok 64 - 拒绝 255.255.255.255
+      ---
+      duration_ms: 0.1002
+      type: 'test'
+      ...
+    # Subtest: 拒绝 0.0.0.0
+    ok 65 - 拒绝 0.0.0.0
+      ---
+      duration_ms: 0.0985
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fe80::1
+    ok 66 - 拒绝 fe80::1
+      ---
+      duration_ms: 0.1211
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fe90::1
+    ok 67 - 拒绝 fe90::1
+      ---
+      duration_ms: 0.1182
+      type: 'test'
+      ...
+    # Subtest: 拒绝 febf::1
+    ok 68 - 拒绝 febf::1
+      ---
+      duration_ms: 0.118
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fc00::1
+    ok 69 - 拒绝 fc00::1
+      ---
+      duration_ms: 0.081
+      type: 'test'
+      ...
+    # Subtest: 拒绝 fd12:3456::1
+    ok 70 - 拒绝 fd12:3456::1
+      ---
+      duration_ms: 0.1596
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ff02::1
+    ok 71 - 拒绝 ff02::1
+      ---
+      duration_ms: 0.1003
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::1
+    ok 72 - 拒绝 ::1
+      ---
+      duration_ms: 0.0965
+      type: 'test'
+      ...
+    # Subtest: 拒绝 ::
+    ok 73 - 拒绝 ::
+      ---
+      duration_ms: 0.3366
+      type: 'test'
+      ...
+    # Subtest: 拒绝 127.0.0.1
+    ok 74 - 拒绝 127.0.0.1
+      ---
+      duration_ms: 0.1103
+      type: 'test'
+      ...
+    # Subtest: 拒绝 10.0.0.8
+    ok 75 - 拒绝 10.0.0.8
+      ---
+      duration_ms: 0.1046
+      type: 'test'
+      ...
+    # Subtest: 拒绝 172.16.0.1
+    ok 76 - 拒绝 172.16.0.1
+      ---
+      duration_ms: 0.1034
+      type: 'test'
+      ...
+    # Subtest: 拒绝 172.31.255.255
+    ok 77 - 拒绝 172.31.255.255
+      ---
+      duration_ms: 0.1057
+      type: 'test'
+      ...
+    # Subtest: 拒绝 192.168.1.1
+    ok 78 - 拒绝 192.168.1.1
+      ---
+      duration_ms: 0.0989
+      type: 'test'
+      ...
+    # Subtest: 拒绝 169.254.169.254
+    ok 79 - 拒绝 169.254.169.254
+      ---
+      duration_ms: 0.1043
+      type: 'test'
+      ...
+    # Subtest: 放行 ::ffff:808:808
+    ok 80 - 放行 ::ffff:808:808
+      ---
+      duration_ms: 0.1783
+      type: 'test'
+      ...
+    # Subtest: 放行 2002:0808:0808::
+    ok 81 - 放行 2002:0808:0808::
+      ---
+      duration_ms: 0.1196
+      type: 'test'
+      ...
+    # Subtest: 放行 64:ff9b::808:808
+    ok 82 - 放行 64:ff9b::808:808
+      ---
+      duration_ms: 0.1222
+      type: 'test'
+      ...
+    # Subtest: 放行 2001:4860:4860::8888
+    ok 83 - 放行 2001:4860:4860::8888
+      ---
+      duration_ms: 0.113
+      type: 'test'
+      ...
+    # Subtest: 放行 8.8.8.8
+    ok 84 - 放行 8.8.8.8
+      ---
+      duration_ms: 0.1064
+      type: 'test'
+      ...
+    # Subtest: 放行 1.1.1.1
+    ok 85 - 放行 1.1.1.1
+      ---
+      duration_ms: 0.1
+      type: 'test'
+      ...
+    # Subtest: 放行 100.63.255.255
+    ok 86 - 放行 100.63.255.255
+      ---
+      duration_ms: 0.1206
+      type: 'test'
+      ...
+    # Subtest: 放行 100.128.0.1
+    ok 87 - 放行 100.128.0.1
+      ---
+      duration_ms: 0.1262
+      type: 'test'
+      ...
+    # Subtest: 放行 172.15.255.255
+    ok 88 - 放行 172.15.255.255
+      ---
+      duration_ms: 0.1143
+      type: 'test'
+      ...
+    # Subtest: 放行 172.32.0.1
+    ok 89 - 放行 172.32.0.1
+      ---
+      duration_ms: 0.0817
+      type: 'test'
+      ...
+    # Subtest: 放行 198.17.255.255
+    ok 90 - 放行 198.17.255.255
+      ---
+      duration_ms: 0.0825
+      type: 'test'
+      ...
+    # Subtest: 放行 198.20.0.1
+    ok 91 - 放行 198.20.0.1
+      ---
+      duration_ms: 0.0612
+      type: 'test'
+      ...
+    # Subtest: 放行 192.0.1.1
+    ok 92 - 放行 192.0.1.1
+      ---
+      duration_ms: 0.0597
+      type: 'test'
+      ...
+    # Subtest: 放行 192.88.98.1
+    ok 93 - 放行 192.88.98.1
+      ---
+      duration_ms: 0.0639
+      type: 'test'
+      ...
+    # Subtest: 放行 223.255.255.255
+    ok 94 - 放行 223.255.255.255
+      ---
+      duration_ms: 0.0696
+      type: 'test'
+      ...
+    # Subtest: IPv4-mapped 十六进制压缩形式还原出的数值正确
+    ok 95 - IPv4-mapped 十六进制压缩形式还原出的数值正确
+      ---
+      duration_ms: 0.1752
+      type: 'test'
+      ...
+    # Subtest: 解析不出来一律 fail-closed
+    ok 96 - 解析不出来一律 fail-closed
+      ---
+      duration_ms: 0.1629
+      type: 'test'
+      ...
+    1..96
+ok 49 - A5① providers 与 web_fetch 用同一套私网判定（交叉比对防漂移）
+  ---
+  duration_ms: 26.8939
+  type: 'suite'
+  ...
+# Subtest: A5① assertPublicHttpUrl：协议白名单与私网拦截
+    # Subtest: 拒绝内网/保留段（含 A3 那批压缩形式）
+    ok 1 - 拒绝内网/保留段（含 A3 那批压缩形式）
+      ---
+      duration_ms: 2.2913
+      type: 'test'
+      ...
+    # Subtest: 放行公网字面量
+    ok 2 - 放行公网字面量
+      ---
+      duration_ms: 0.4322
+      type: 'test'
+      ...
+    # Subtest: 协议白名单与格式（不受豁免影响）
+    ok 3 - 协议白名单与格式（不受豁免影响）
+      ---
+      duration_ms: 0.5215
+      type: 'test'
+      ...
+    # Subtest: 主机名仍走 DNS（localhost 解析到回环 → 拒绝）
+    ok 4 - 主机名仍走 DNS（localhost 解析到回环 → 拒绝）
+      ---
+      duration_ms: 67.5952
+      type: 'test'
+      ...
+    1..4
+ok 50 - A5① assertPublicHttpUrl：协议白名单与私网拦截
+  ---
+  duration_ms: 71.3494
+  type: 'suite'
+  ...
+# Subtest: A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则
+    # Subtest: local 模式默认放行本机 Ollama 地址（开箱即用，不需要环境变量）
+    ok 1 - local 模式默认放行本机 Ollama 地址（开箱即用，不需要环境变量）
+      ---
+      duration_ms: 0.549
+      type: 'test'
+      ...
+    # Subtest: 设 =1：本机地址放行（此前 /api/providers/test 无条件校验，"验证密钥"连不上本机 Ollama）
+    ok 2 - 设 =1：本机地址放行（此前 /api/providers/test 无条件校验，"验证密钥"连不上本机 Ollama）
+      ---
+      duration_ms: 0.3135
+      type: 'test'
+      ...
+    # Subtest: 豁免只放宽地址，不放宽协议（file:// 之类仍然拒）
+    ok 3 - 豁免只放宽地址，不放宽协议（file:// 之类仍然拒）
+      ---
+      duration_ms: 0.49
+      type: 'test'
+      ...
+    # Subtest: 只认 "1"（避免 true/0/yes 之类歧义写法在各处表现不同）
+    ok 4 - 只认 "1"（避免 true/0/yes 之类歧义写法在各处表现不同）
+      ---
+      duration_ms: 0.1648
+      type: 'test'
+      ...
+    # Subtest: providers.ts 不再自己读 env、也不再裸调 fetch（A5 的一致性收口）
+    ok 5 - providers.ts 不再自己读 env、也不再裸调 fetch（A5 的一致性收口）
+      ---
+      duration_ms: 1.1987
+      type: 'test'
+      ...
+    1..5
+ok 51 - A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则
+  ---
+  duration_ms: 3.0174
+  type: 'suite'
+  ...
+# Subtest: A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口）
+    # Subtest: DNS 解析结果只取一次，并由实际 socket connector 使用该地址
+    ok 1 - DNS 解析结果只取一次，并由实际 socket connector 使用该地址
+      ---
+      duration_ms: 47.017
+      type: 'test'
+      ...
+    # Subtest: 解析结果混有公网与私网地址时整体拒绝，不发起请求
+    ok 2 - 解析结果混有公网与私网地址时整体拒绝，不发起请求
+      ---
+      duration_ms: 2.2774
+      type: 'test'
+      ...
+    # Subtest: 302 → http://127.0.0.1:xxx 被拒，且绝不向该目标发起请求
+    ok 3 - 302 → http://127.0.0.1:xxx 被拒，且绝不向该目标发起请求
+      ---
+      duration_ms: 9.4396
+      type: 'test'
+      ...
+    # Subtest: manual 跟随：由我们自己跳一跳并复检，最终拿到 200（而非 302 原样返回）
+    ok 4 - manual 跟随：由我们自己跳一跳并复检，最终拿到 200（而非 302 原样返回）
+      ---
+      duration_ms: 9.2007
+      type: 'test'
+      ...
+    # Subtest: 跳数上限：超限报错，不再继续跟
+    ok 5 - 跳数上限：超限报错，不再继续跟
+      ---
+      duration_ms: 32.7793
+      type: 'test'
+      ...
+    # Subtest: 302 无 Location 直接报错（不吞成空 URL）
+    ok 6 - 302 无 Location 直接报错（不吞成空 URL）
+      ---
+      duration_ms: 5.1185
+      type: 'test'
+      ...
+    # Subtest: 跨源跳转剥掉凭据头；同源保留（自己实现 follow 就得把这条规则也实现）
+    ok 7 - 跨源跳转剥掉凭据头；同源保留（自己实现 follow 就得把这条规则也实现）
+      ---
+      duration_ms: 16.102
+      type: 'test'
+      ...
+    # Subtest: 301/302 的 POST 改写为 GET 且丢弃请求体（与 fetch 规范/undici follow 一致）
+    ok 8 - 301/302 的 POST 改写为 GET 且丢弃请求体（与 fetch 规范/undici follow 一致）
+      ---
+      duration_ms: 11.534
+      type: 'test'
+      ...
+    # Subtest: 默认校验器就是真实校验（不注入时本机地址在首跳即被拒）
+    ok 9 - 默认校验器就是真实校验（不注入时本机地址在首跳即被拒）
+      ---
+      duration_ms: 1.9328
+      type: 'test'
+      ...
+    # Subtest: 豁免打开时跟随本机重定向（本机 Ollama 反代到本机另一端口不被拦）
+    ok 10 - 豁免打开时跟随本机重定向（本机 Ollama 反代到本机另一端口不被拦）
+      ---
+      duration_ms: 7.2094
+      type: 'test'
+      ...
+    1..10
+ok 52 - A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口）
+  ---
+  duration_ms: 143.5035
+  type: 'suite'
+  ...
+1..52
+# tests 397
+# suites 36
+# pass 397
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 28326.0781

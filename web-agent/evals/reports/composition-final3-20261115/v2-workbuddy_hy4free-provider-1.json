@@ -1,0 +1,6120 @@
+{
+  "events": [
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 1,
+      "type": "state",
+      "data": {
+        "status": "queued"
+      },
+      "createdAt": 1794690657925
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 2,
+      "type": "state",
+      "data": {
+        "status": "running"
+      },
+      "createdAt": 1794690657926
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 3,
+      "type": "start",
+      "data": {
+        "traceId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+        "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15"
+      },
+      "createdAt": 1794690657926
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 4,
+      "type": "model_call_started",
+      "data": {
+        "callId": "90d00da1-7bbf-46ca-be47-b77cf2fa554c",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690657929
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 5,
+      "type": "reasoning",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794690659931
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 6,
+      "type": "reasoning",
+      "data": {
+        "text": " me"
+      },
+      "createdAt": 1794690660007
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 7,
+      "type": "reasoning",
+      "data": {
+        "text": " understand the task."
+      },
+      "createdAt": 1794690660055
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 8,
+      "type": "reasoning",
+      "data": {
+        "text": " I need to create"
+      },
+      "createdAt": 1794690660104
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 9,
+      "type": "reasoning",
+      "data": {
+        "text": " a plugin called"
+      },
+      "createdAt": 1794690660154
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 10,
+      "type": "reasoning",
+      "data": {
+        "text": " \"local-provider"
+      },
+      "createdAt": 1794690660202
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 11,
+      "type": "reasoning",
+      "data": {
+        "text": "\" that registers"
+      },
+      "createdAt": 1794690660250
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 12,
+      "type": "reasoning",
+      "data": {
+        "text": " a provider with:\n"
+      },
+      "createdAt": 1794690660299
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 13,
+      "type": "reasoning",
+      "data": {
+        "text": "- id=local"
+      },
+      "createdAt": 1794690660348
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 14,
+      "type": "reasoning",
+      "data": {
+        "text": "-response\n- label"
+      },
+      "createdAt": 1794690660400
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 15,
+      "type": "reasoning",
+      "data": {
+        "text": "=Local\n-"
+      },
+      "createdAt": 1794690660449
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 16,
+      "type": "reasoning",
+      "data": {
+        "text": " defaultModel=local"
+      },
+      "createdAt": 1794690660498
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 17,
+      "type": "reasoning",
+      "data": {
+        "text": "\n- chat async"
+      },
+      "createdAt": 1794690660548
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 18,
+      "type": "reasoning",
+      "data": {
+        "text": " generator only"
+      },
+      "createdAt": 1794690660596
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 19,
+      "type": "reasoning",
+      "data": {
+        "text": " outputs delta text \""
+      },
+      "createdAt": 1794690660645
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 20,
+      "type": "reasoning",
+      "data": {
+        "text": "LOCAL-OK\","
+      },
+      "createdAt": 1794690660694
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 21,
+      "type": "reasoning",
+      "data": {
+        "text": " usage input=1"
+      },
+      "createdAt": 1794690660743
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 22,
+      "type": "reasoning",
+      "data": {
+        "text": "/output=1,"
+      },
+      "createdAt": 1794690660846
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 23,
+      "type": "reasoning",
+      "data": {
+        "text": " done\n- no"
+      },
+      "createdAt": 1794690660846
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 24,
+      "type": "reasoning",
+      "data": {
+        "text": " network access"
+      },
+      "createdAt": 1794690660890
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 25,
+      "type": "reasoning",
+      "data": {
+        "text": ", no tools\n\n"
+      },
+      "createdAt": 1794690660938
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 26,
+      "type": "reasoning",
+      "data": {
+        "text": "Then enable it,"
+      },
+      "createdAt": 1794690660989
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 27,
+      "type": "reasoning",
+      "data": {
+        "text": " explicitly invoke"
+      },
+      "createdAt": 1794690661045
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 28,
+      "type": "reasoning",
+      "data": {
+        "text": " this provider with \""
+      },
+      "createdAt": 1794690661086
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 29,
+      "type": "reasoning",
+      "data": {
+        "text": "local\" model,"
+      },
+      "createdAt": 1794690661135
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 30,
+      "type": "reasoning",
+      "data": {
+        "text": " and finally answer \""
+      },
+      "createdAt": 1794690661183
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 31,
+      "type": "reasoning",
+      "data": {
+        "text": "provider=LOCAL-"
+      },
+      "createdAt": 1794690661233
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 32,
+      "type": "reasoning",
+      "data": {
+        "text": "OK\".\n\nLet"
+      },
+      "createdAt": 1794690661281
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 33,
+      "type": "reasoning",
+      "data": {
+        "text": " me first check the"
+      },
+      "createdAt": 1794690661331
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 34,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK"
+      },
+      "createdAt": 1794690661379
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 35,
+      "type": "reasoning",
+      "data": {
+        "text": " to"
+      },
+      "createdAt": 1794690661428
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 36,
+      "type": "reasoning",
+      "data": {
+        "text": " understand the interfaces"
+      },
+      "createdAt": 1794690661477
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 37,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\n"
+      },
+      "createdAt": 1794690661527
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 38,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me start"
+      },
+      "createdAt": 1794690661575
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 39,
+      "type": "reasoning",
+      "data": {
+        "text": " by reading"
+      },
+      "createdAt": 1794690661626
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 40,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690661679
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 41,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin_status"
+      },
+      "createdAt": 1794690661722
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 42,
+      "type": "reasoning",
+      "data": {
+        "text": " with sdk=true to"
+      },
+      "createdAt": 1794690661770
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 43,
+      "type": "reasoning",
+      "data": {
+        "text": " understand the interfaces"
+      },
+      "createdAt": 1794690661820
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 44,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794690661869
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 45,
+      "type": "reasoning",
+      "data": {
+        "text": " and discover"
+      },
+      "createdAt": 1794690661918
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 46,
+      "type": "reasoning",
+      "data": {
+        "text": " tools for provider"
+      },
+      "createdAt": 1794690661969
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 47,
+      "type": "reasoning",
+      "data": {
+        "text": " entries"
+      },
+      "createdAt": 1794690662016
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 48,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\nLet me"
+      },
+      "createdAt": 1794690662064
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 49,
+      "type": "reasoning",
+      "data": {
+        "text": " do both"
+      },
+      "createdAt": 1794690662114
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 50,
+      "type": "reasoning",
+      "data": {
+        "text": " in parallel."
+      },
+      "createdAt": 1794690662164
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 51,
+      "type": "delta",
+      "data": {
+        "text": "I"
+      },
+      "createdAt": 1794690662211
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 52,
+      "type": "delta",
+      "data": {
+        "text": "'ll start by understanding"
+      },
+      "createdAt": 1794690662260
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 53,
+      "type": "delta",
+      "data": {
+        "text": " the plugin"
+      },
+      "createdAt": 1794690662309
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 54,
+      "type": "delta",
+      "data": {
+        "text": " SDK interfaces"
+      },
+      "createdAt": 1794690662358
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 55,
+      "type": "delta",
+      "data": {
+        "text": " and discovering"
+      },
+      "createdAt": 1794690662407
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 56,
+      "type": "delta",
+      "data": {
+        "text": " the relevant"
+      },
+      "createdAt": 1794690662458
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 57,
+      "type": "delta",
+      "data": {
+        "text": " tools."
+      },
+      "createdAt": 1794690662506
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 58,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "90d00da1-7bbf-46ca-be47-b77cf2fa554c",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794690663552
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 59,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794690663553
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 60,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-901116babefec78f",
+        "name": "plugin_status",
+        "args": {
+          "sdk": true
+        }
+      },
+      "createdAt": 1794690663553
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 61,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-901116babefec78f",
+        "name": "plugin_status",
+        "summary": "{\"ok\":true,\"data\":{\"content\":\"# Task plugin SDK v2\\n\\ncreate_plugin({id, source}) stages a TypeScript index.ts; full/multi-file plugins use {id,files:{\\\"index.ts\\\":source,\\\"helper.ts\\\":source},manifest}.\\nmanifest={apiVersion:2,id,name,version:\\\"1.0.0\\\",entry:\\\"index.ts\\\",permissions:{capabilities:{…",
+        "ok": true,
+        "stored": true
+      },
+      "createdAt": 1794690663554
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 62,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-a7ffcab6e94661e0",
+        "name": "discover_tools",
+        "args": {
+          "details": true,
+          "query": "provider invoke command role"
+        }
+      },
+      "createdAt": 1794690663554
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 63,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-a7ffcab6e94661e0",
+        "name": "discover_tools",
+        "summary": "{\"ok\":true,\"data\":{\"total\":1,\"nextOffset\":null,\"tools\":[{\"name\":\"invoke_plugin\",\"description\":\"【副作用:write】显式调用任务插件的 command、role 或 provider。role 创建子任务；provider 仅执行本次请求，不改变当前模型。服务与事件在插件中通过 ctx.inject/ctx.on/ctx.bus 组合。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"kind\":{\"type\":\"string\",\"enum\":[\"comm…",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794690663556
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 64,
+      "type": "model_call_started",
+      "data": {
+        "callId": "f3b785e9-89f1-47bd-9906-230056a43ad3",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690663558
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 65,
+      "type": "reasoning",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794690665573
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 66,
+      "type": "reasoning",
+      "data": {
+        "text": " me"
+      },
+      "createdAt": 1794690665649
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 67,
+      "type": "reasoning",
+      "data": {
+        "text": " read the full SDK"
+      },
+      "createdAt": 1794690665696
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 68,
+      "type": "reasoning",
+      "data": {
+        "text": " documentation"
+      },
+      "createdAt": 1794690665746
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 69,
+      "type": "delta",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794690665792
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 70,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794690665792
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 71,
+      "type": "delta",
+      "data": {
+        "text": " me read the full"
+      },
+      "createdAt": 1794690665841
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 72,
+      "type": "delta",
+      "data": {
+        "text": " SDK documentation."
+      },
+      "createdAt": 1794690665890
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 73,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "f3b785e9-89f1-47bd-9906-230056a43ad3",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794690666829
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 74,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794690666829
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 75,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-94b1feeef12a9ab0",
+        "name": "recall_tool_result",
+        "args": {
+          "id": "54699710-6e0c-466a-9b0d-2cb25ad310a3",
+          "limit": 16000
+        }
+      },
+      "createdAt": 1794690666830
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 76,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-94b1feeef12a9ab0",
+        "name": "recall_tool_result",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"54699710-6e0c-466a-9b0d-2cb25ad310a3\",\"content\":\"{\\\"ok\\\":true,\\\"data\\\":{\\\"content\\\":\\\"# Task plugin SDK v2\\\\n\\\\ncreate_plugin({id, source}) stages a TypeScript index.ts; full/multi-file plugins use {id,files:{\\\\\\\"index.ts\\\\\\\":source,\\\\\\\"helper.ts\\\\\\\":source},manifest}.\\\\nman…",
+        "ok": true,
+        "stored": true
+      },
+      "createdAt": 1794690666831
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 77,
+      "type": "model_call_started",
+      "data": {
+        "callId": "385f32ca-78bb-486f-8755-1f23523054a7",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690666834
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 78,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794690669326
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 79,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK"
+      },
+      "createdAt": 1794690669400
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 80,
+      "type": "reasoning",
+      "data": {
+        "text": " gives"
+      },
+      "createdAt": 1794690669448
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 81,
+      "type": "reasoning",
+      "data": {
+        "text": " me a"
+      },
+      "createdAt": 1794690669498
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 82,
+      "type": "reasoning",
+      "data": {
+        "text": " clear example"
+      },
+      "createdAt": 1794690669545
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 83,
+      "type": "reasoning",
+      "data": {
+        "text": " for"
+      },
+      "createdAt": 1794690669596
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 84,
+      "type": "reasoning",
+      "data": {
+        "text": " provider"
+      },
+      "createdAt": 1794690669644
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 85,
+      "type": "reasoning",
+      "data": {
+        "text": ". I"
+      },
+      "createdAt": 1794690669691
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 86,
+      "type": "reasoning",
+      "data": {
+        "text": " need to create a"
+      },
+      "createdAt": 1794690669742
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 87,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin `"
+      },
+      "createdAt": 1794690669792
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 88,
+      "type": "reasoning",
+      "data": {
+        "text": "local-provider`"
+      },
+      "createdAt": 1794690669844
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 89,
+      "type": "reasoning",
+      "data": {
+        "text": " that"
+      },
+      "createdAt": 1794690669889
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 90,
+      "type": "reasoning",
+      "data": {
+        "text": " registers a provider with"
+      },
+      "createdAt": 1794690669938
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 91,
+      "type": "reasoning",
+      "data": {
+        "text": " id=`"
+      },
+      "createdAt": 1794690669989
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 92,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response`, label"
+      },
+      "createdAt": 1794690670036
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 93,
+      "type": "reasoning",
+      "data": {
+        "text": "=`Local`, default"
+      },
+      "createdAt": 1794690670085
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 94,
+      "type": "reasoning",
+      "data": {
+        "text": "Model=`local`,"
+      },
+      "createdAt": 1794690670136
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 95,
+      "type": "reasoning",
+      "data": {
+        "text": " and"
+      },
+      "createdAt": 1794690670185
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 96,
+      "type": "reasoning",
+      "data": {
+        "text": " chat async generator yielding"
+      },
+      "createdAt": 1794690670232
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 97,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690670282
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 98,
+      "type": "reasoning",
+      "data": {
+        "text": "\n- delta text"
+      },
+      "createdAt": 1794690670335
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 99,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690670388
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 100,
+      "type": "reasoning",
+      "data": {
+        "text": "LOCAL-OK`\n"
+      },
+      "createdAt": 1794690670430
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 101,
+      "type": "reasoning",
+      "data": {
+        "text": "- usage input="
+      },
+      "createdAt": 1794690670479
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 102,
+      "type": "reasoning",
+      "data": {
+        "text": "1/output=1"
+      },
+      "createdAt": 1794690670528
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 103,
+      "type": "reasoning",
+      "data": {
+        "text": "\n- done\n\n"
+      },
+      "createdAt": 1794690670577
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 104,
+      "type": "reasoning",
+      "data": {
+        "text": "No network access"
+      },
+      "createdAt": 1794690670627
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 105,
+      "type": "reasoning",
+      "data": {
+        "text": ", no tools provided"
+      },
+      "createdAt": 1794690670675
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 106,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\nThen"
+      },
+      "createdAt": 1794690670724
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 107,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794690670772
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 108,
+      "type": "reasoning",
+      "data": {
+        "text": " need to enable it and explicitly invoke this provider with model `local`, and finally answer `provider=LOCAL-OK`.\n\nLet me note: manifest apiVersion=2, permissions.capabilities declared by actual kind/name. So:\n```\nmanifest = {\n  apiVersion: 2,\n  id: 'local-provider',\n"
+      },
+      "createdAt": 1794690671963
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 109,
+      "type": "reasoning",
+      "data": {
+        "text": "  name: '"
+      },
+      "createdAt": 1794690671993
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 110,
+      "type": "reasoning",
+      "data": {
+        "text": "Local Provider',\n"
+      },
+      "createdAt": 1794690672042
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 111,
+      "type": "reasoning",
+      "data": {
+        "text": "  version: '"
+      },
+      "createdAt": 1794690672091
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 112,
+      "type": "reasoning",
+      "data": {
+        "text": "1.0."
+      },
+      "createdAt": 1794690672141
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 113,
+      "type": "reasoning",
+      "data": {
+        "text": "0',"
+      },
+      "createdAt": 1794690672189
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 114,
+      "type": "reasoning",
+      "data": {
+        "text": "\n  entry:"
+      },
+      "createdAt": 1794690672240
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 115,
+      "type": "reasoning",
+      "data": {
+        "text": " 'index.ts',\n"
+      },
+      "createdAt": 1794690672287
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 116,
+      "type": "reasoning",
+      "data": {
+        "text": "  permissions: {"
+      },
+      "createdAt": 1794690672337
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 117,
+      "type": "reasoning",
+      "data": {
+        "text": " capabilities: { provider"
+      },
+      "createdAt": 1794690672385
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 118,
+      "type": "reasoning",
+      "data": {
+        "text": ": ['"
+      },
+      "createdAt": 1794690672435
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 119,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response'] }"
+      },
+      "createdAt": 1794690672483
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 120,
+      "type": "reasoning",
+      "data": {
+        "text": " }\n}\n```\n\n"
+      },
+      "createdAt": 1794690672532
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 121,
+      "type": "reasoning",
+      "data": {
+        "text": "Wait —"
+      },
+      "createdAt": 1794690672581
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 122,
+      "type": "reasoning",
+      "data": {
+        "text": " the SDK"
+      },
+      "createdAt": 1794690672629
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 123,
+      "type": "reasoning",
+      "data": {
+        "text": " example"
+      },
+      "createdAt": 1794690672707
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 124,
+      "type": "reasoning",
+      "data": {
+        "text": " says `permissions:{"
+      },
+      "createdAt": 1794690672727
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 125,
+      "type": "reasoning",
+      "data": {
+        "text": "capabilities:{tool"
+      },
+      "createdAt": 1794690672778
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 126,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690672826
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 127,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794690672875
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 128,
+      "type": "reasoning",
+      "data": {
+        "text": "}}`"
+      },
+      "createdAt": 1794690672925
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 129,
+      "type": "reasoning",
+      "data": {
+        "text": " and \""
+      },
+      "createdAt": 1794690672972
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 130,
+      "type": "reasoning",
+      "data": {
+        "text": "Capabilities use kind/name declarations: tool.tool.name, ... provider.provider.id\". Hmm, that's a bit ambiguous. Let me interpret: `capabilities:{provider:['local-response']}` seems right based on `tool:[\"sum_values\"]` style. Actually the example shows `tool:[\"tool_name\"]`."
+      },
+      "createdAt": 1794690674134
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 131,
+      "type": "reasoning",
+      "data": {
+        "text": " So for"
+      },
+      "createdAt": 1794690674135
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 132,
+      "type": "reasoning",
+      "data": {
+        "text": " provider it"
+      },
+      "createdAt": 1794690674181
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 133,
+      "type": "reasoning",
+      "data": {
+        "text": "'d be `provider"
+      },
+      "createdAt": 1794690674230
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 134,
+      "type": "reasoning",
+      "data": {
+        "text": ":['"
+      },
+      "createdAt": 1794690674279
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 135,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response']`.\n\n"
+      },
+      "createdAt": 1794690674328
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 136,
+      "type": "reasoning",
+      "data": {
+        "text": "But"
+      },
+      "createdAt": 1794690674377
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 137,
+      "type": "reasoning",
+      "data": {
+        "text": " the note \"Capabilities"
+      },
+      "createdAt": 1794690674427
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 138,
+      "type": "reasoning",
+      "data": {
+        "text": " use kind/name"
+      },
+      "createdAt": 1794690674477
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 139,
+      "type": "reasoning",
+      "data": {
+        "text": " declarations: tool.tool"
+      },
+      "createdAt": 1794690674528
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 140,
+      "type": "reasoning",
+      "data": {
+        "text": ".name, command.command"
+      },
+      "createdAt": 1794690674578
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 141,
+      "type": "reasoning",
+      "data": {
+        "text": ".name, ... provider"
+      },
+      "createdAt": 1794690674629
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 142,
+      "type": "reasoning",
+      "data": {
+        "text": ".provider.id\" —"
+      },
+      "createdAt": 1794690674680
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 143,
+      "type": "reasoning",
+      "data": {
+        "text": " this might mean something"
+      },
+      "createdAt": 1794690674727
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 144,
+      "type": "reasoning",
+      "data": {
+        "text": " like nested"
+      },
+      "createdAt": 1794690674775
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 145,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794690674828
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 146,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me think."
+      },
+      "createdAt": 1794690674878
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 147,
+      "type": "reasoning",
+      "data": {
+        "text": " Actually it probably"
+      },
+      "createdAt": 1794690674926
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 148,
+      "type": "reasoning",
+      "data": {
+        "text": " means the capability naming"
+      },
+      "createdAt": 1794690674977
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 149,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690675026
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 150,
+      "type": "reasoning",
+      "data": {
+        "text": " a"
+      },
+      "createdAt": 1794690675076
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 151,
+      "type": "reasoning",
+      "data": {
+        "text": " tool capability"
+      },
+      "createdAt": 1794690675124
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 152,
+      "type": "reasoning",
+      "data": {
+        "text": " references"
+      },
+      "createdAt": 1794690675175
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 153,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690675225
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 154,
+      "type": "reasoning",
+      "data": {
+        "text": "tool.tool.name`."
+      },
+      "createdAt": 1794690675275
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 155,
+      "type": "reasoning",
+      "data": {
+        "text": " But"
+      },
+      "createdAt": 1794690675324
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 156,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690675373
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 157,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest example"
+      },
+      "createdAt": 1794690675423
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 158,
+      "type": "reasoning",
+      "data": {
+        "text": " clearly"
+      },
+      "createdAt": 1794690675472
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 159,
+      "type": "reasoning",
+      "data": {
+        "text": " shows flat"
+      },
+      "createdAt": 1794690675522
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 160,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690675572
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 161,
+      "type": "reasoning",
+      "data": {
+        "text": " `{"
+      },
+      "createdAt": 1794690675622
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 162,
+      "type": "reasoning",
+      "data": {
+        "text": "tool"
+      },
+      "createdAt": 1794690675671
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 163,
+      "type": "reasoning",
+      "data": {
+        "text": ":[\"tool_name"
+      },
+      "createdAt": 1794690675722
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 164,
+      "type": "reasoning",
+      "data": {
+        "text": "\"]}`. So"
+      },
+      "createdAt": 1794690675772
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 165,
+      "type": "reasoning",
+      "data": {
+        "text": " I'll go with"
+      },
+      "createdAt": 1794690675829
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 166,
+      "type": "reasoning",
+      "data": {
+        "text": " flat"
+      },
+      "createdAt": 1794690675873
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 167,
+      "type": "reasoning",
+      "data": {
+        "text": " mapping"
+      },
+      "createdAt": 1794690675922
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 168,
+      "type": "reasoning",
+      "data": {
+        "text": ": `{"
+      },
+      "createdAt": 1794690676017
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 169,
+      "type": "reasoning",
+      "data": {
+        "text": "provider:['"
+      },
+      "createdAt": 1794690676020
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 170,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response']}"
+      },
+      "createdAt": 1794690676074
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 171,
+      "type": "reasoning",
+      "data": {
+        "text": "`.\n\nThe"
+      },
+      "createdAt": 1794690676121
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 172,
+      "type": "reasoning",
+      "data": {
+        "text": " task says \"manifest"
+      },
+      "createdAt": 1794690676169
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 173,
+      "type": "reasoning",
+      "data": {
+        "text": " 的 apiVersion"
+      },
+      "createdAt": 1794690676220
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 174,
+      "type": "reasoning",
+      "data": {
+        "text": "=2，permissions"
+      },
+      "createdAt": 1794690676270
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 175,
+      "type": "reasoning",
+      "data": {
+        "text": ".capabilities 按"
+      },
+      "createdAt": 1794690676318
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 176,
+      "type": "reasoning",
+      "data": {
+        "text": "实际 kind/名称"
+      },
+      "createdAt": 1794690676370
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 177,
+      "type": "reasoning",
+      "data": {
+        "text": "声明.\""
+      },
+      "createdAt": 1794690676420
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 178,
+      "type": "reasoning",
+      "data": {
+        "text": " So by"
+      },
+      "createdAt": 1794690676470
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 179,
+      "type": "reasoning",
+      "data": {
+        "text": " actual kind/name"
+      },
+      "createdAt": 1794690676518
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 180,
+      "type": "reasoning",
+      "data": {
+        "text": ". So"
+      },
+      "createdAt": 1794690676569
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 181,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690676617
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 182,
+      "type": "reasoning",
+      "data": {
+        "text": "provider: ['"
+      },
+      "createdAt": 1794690676669
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 183,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response']`."
+      },
+      "createdAt": 1794690676717
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 184,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nAlso"
+      },
+      "createdAt": 1794690676768
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 185,
+      "type": "reasoning",
+      "data": {
+        "text": " note"
+      },
+      "createdAt": 1794690676818
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 186,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690676868
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 187,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin"
+      },
+      "createdAt": 1794690676915
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 188,
+      "type": "reasoning",
+      "data": {
+        "text": " is"
+      },
+      "createdAt": 1794690676965
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 189,
+      "type": "reasoning",
+      "data": {
+        "text": " \""
+      },
+      "createdAt": 1794690677017
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 190,
+      "type": "reasoning",
+      "data": {
+        "text": "不访问网络、"
+      },
+      "createdAt": 1794690677065
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 191,
+      "type": "reasoning",
+      "data": {
+        "text": "不提供工具\""
+      },
+      "createdAt": 1794690677115
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 192,
+      "type": "reasoning",
+      "data": {
+        "text": " —"
+      },
+      "createdAt": 1794690677166
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 193,
+      "type": "reasoning",
+      "data": {
+        "text": " no network access, no tools. So permissions should NOT include network capability? But invoke_plugin for provider requires network grant. Hmm. The task says \"任务已获工作区插件开发和读写/网络/委派授权\" — the task has network grant. But the plugin itself \"不访问网络\" (does not access network). The provider chat"
+      },
+      "createdAt": 1794690678348
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 194,
+      "type": "reasoning",
+      "data": {
+        "text": " generator"
+      },
+      "createdAt": 1794690678360
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 195,
+      "type": "reasoning",
+      "data": {
+        "text": " is"
+      },
+      "createdAt": 1794690678408
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 196,
+      "type": "reasoning",
+      "data": {
+        "text": " pure computation, no"
+      },
+      "createdAt": 1794690678460
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 197,
+      "type": "reasoning",
+      "data": {
+        "text": " network. So we"
+      },
+      "createdAt": 1794690678508
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 198,
+      "type": "reasoning",
+      "data": {
+        "text": " don't need"
+      },
+      "createdAt": 1794690678557
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 199,
+      "type": "reasoning",
+      "data": {
+        "text": " network"
+      },
+      "createdAt": 1794690678609
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 200,
+      "type": "reasoning",
+      "data": {
+        "text": " capability"
+      },
+      "createdAt": 1794690678658
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 201,
+      "type": "reasoning",
+      "data": {
+        "text": " in the manifest"
+      },
+      "createdAt": 1794690678708
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 202,
+      "type": "reasoning",
+      "data": {
+        "text": " for"
+      },
+      "createdAt": 1794690678759
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 203,
+      "type": "reasoning",
+      "data": {
+        "text": " the plugin"
+      },
+      "createdAt": 1794690678807
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 204,
+      "type": "reasoning",
+      "data": {
+        "text": " itself. The"
+      },
+      "createdAt": 1794690678858
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 205,
+      "type": "reasoning",
+      "data": {
+        "text": " invoke_plugin requires"
+      },
+      "createdAt": 1794690678906
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 206,
+      "type": "reasoning",
+      "data": {
+        "text": " network grant on"
+      },
+      "createdAt": 1794690678955
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 207,
+      "type": "reasoning",
+      "data": {
+        "text": " the task"
+      },
+      "createdAt": 1794690679011
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 208,
+      "type": "reasoning",
+      "data": {
+        "text": " side, which is"
+      },
+      "createdAt": 1794690679055
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 209,
+      "type": "reasoning",
+      "data": {
+        "text": " already granted.\n\nLet"
+      },
+      "createdAt": 1794690679105
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 210,
+      "type": "reasoning",
+      "data": {
+        "text": " me create the plugin"
+      },
+      "createdAt": 1794690679155
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 211,
+      "type": "reasoning",
+      "data": {
+        "text": " source"
+      },
+      "createdAt": 1794690679206
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 212,
+      "type": "reasoning",
+      "data": {
+        "text": ":\n\n"
+      },
+      "createdAt": 1794690679255
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 213,
+      "type": "reasoning",
+      "data": {
+        "text": "```ts\nexport"
+      },
+      "createdAt": 1794690679304
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 214,
+      "type": "reasoning",
+      "data": {
+        "text": " default {\n  id"
+      },
+      "createdAt": 1794690679354
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 215,
+      "type": "reasoning",
+      "data": {
+        "text": ": 'local-pro"
+      },
+      "createdAt": 1794690679406
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 216,
+      "type": "reasoning",
+      "data": {
+        "text": "vider',"
+      },
+      "createdAt": 1794690679453
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 217,
+      "type": "reasoning",
+      "data": {
+        "text": "\n  name:"
+      },
+      "createdAt": 1794690679504
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 218,
+      "type": "reasoning",
+      "data": {
+        "text": " 'Local Provider',"
+      },
+      "createdAt": 1794690679552
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 219,
+      "type": "reasoning",
+      "data": {
+        "text": "\n  version:"
+      },
+      "createdAt": 1794690679604
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 220,
+      "type": "reasoning",
+      "data": {
+        "text": " '1.0"
+      },
+      "createdAt": 1794690679654
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 221,
+      "type": "reasoning",
+      "data": {
+        "text": ".0',\n "
+      },
+      "createdAt": 1794690679703
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 222,
+      "type": "reasoning",
+      "data": {
+        "text": " onLoad(ctx:"
+      },
+      "createdAt": 1794690679752
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 223,
+      "type": "reasoning",
+      "data": {
+        "text": " import('../../kernel"
+      },
+      "createdAt": 1794690679802
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 224,
+      "type": "reasoning",
+      "data": {
+        "text": "/types').PluginContext"
+      },
+      "createdAt": 1794690679853
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 225,
+      "type": "reasoning",
+      "data": {
+        "text": ") {\n    ctx"
+      },
+      "createdAt": 1794690679903
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 226,
+      "type": "reasoning",
+      "data": {
+        "text": ".register({\n      kind"
+      },
+      "createdAt": 1794690679951
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 227,
+      "type": "reasoning",
+      "data": {
+        "text": ": 'provider',"
+      },
+      "createdAt": 1794690680003
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 228,
+      "type": "reasoning",
+      "data": {
+        "text": "\n      provider:"
+      },
+      "createdAt": 1794690680052
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 229,
+      "type": "reasoning",
+      "data": {
+        "text": " {\n        id:"
+      },
+      "createdAt": 1794690680101
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 230,
+      "type": "reasoning",
+      "data": {
+        "text": " 'local-response',\n"
+      },
+      "createdAt": 1794690680151
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 231,
+      "type": "reasoning",
+      "data": {
+        "text": "        label: '"
+      },
+      "createdAt": 1794690680200
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 232,
+      "type": "reasoning",
+      "data": {
+        "text": "Local',\n        default"
+      },
+      "createdAt": 1794690680252
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 233,
+      "type": "reasoning",
+      "data": {
+        "text": "Model: 'local"
+      },
+      "createdAt": 1794690680302
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 234,
+      "type": "reasoning",
+      "data": {
+        "text": "',\n        chat:"
+      },
+      "createdAt": 1794690680352
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 235,
+      "type": "reasoning",
+      "data": {
+        "text": " async function* ()"
+      },
+      "createdAt": 1794690680400
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 236,
+      "type": "reasoning",
+      "data": {
+        "text": " {\n          yield {"
+      },
+      "createdAt": 1794690680449
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 237,
+      "type": "reasoning",
+      "data": {
+        "text": " type: 'delta"
+      },
+      "createdAt": 1794690680500
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 238,
+      "type": "reasoning",
+      "data": {
+        "text": "' as const,"
+      },
+      "createdAt": 1794690680550
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 239,
+      "type": "reasoning",
+      "data": {
+        "text": " text: 'LOCAL"
+      },
+      "createdAt": 1794690680599
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 240,
+      "type": "reasoning",
+      "data": {
+        "text": "-OK' };\n"
+      },
+      "createdAt": 1794690680649
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 241,
+      "type": "reasoning",
+      "data": {
+        "text": "          yield { type"
+      },
+      "createdAt": 1794690680698
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 242,
+      "type": "reasoning",
+      "data": {
+        "text": ": 'usage'"
+      },
+      "createdAt": 1794690680750
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 243,
+      "type": "reasoning",
+      "data": {
+        "text": " as const, input"
+      },
+      "createdAt": 1794690680798
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 244,
+      "type": "reasoning",
+      "data": {
+        "text": ": 1, output: 1 };\n          yield { type: 'done' as const };\n        }\n      }\n    });\n  }\n};\n```\n\nNo tools registered, no network. Good.\n\nThen create_plugin, enable_plugin, then invoke_plugin with kind=provider, name=local-response, model=local, messages.\n\nLet me check: invoke"
+      },
+      "createdAt": 1794690682010
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 245,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin signature"
+      },
+      "createdAt": 1794690682048
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 246,
+      "type": "reasoning",
+      "data": {
+        "text": " requires"
+      },
+      "createdAt": 1794690682095
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 247,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690682147
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 248,
+      "type": "reasoning",
+      "data": {
+        "text": "name"
+      },
+      "createdAt": 1794690682195
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 249,
+      "type": "reasoning",
+      "data": {
+        "text": "`,"
+      },
+      "createdAt": 1794690682246
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 250,
+      "type": "reasoning",
+      "data": {
+        "text": " and"
+      },
+      "createdAt": 1794690682296
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 251,
+      "type": "reasoning",
+      "data": {
+        "text": " for"
+      },
+      "createdAt": 1794690682344
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 252,
+      "type": "reasoning",
+      "data": {
+        "text": " provider `model"
+      },
+      "createdAt": 1794690682396
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 253,
+      "type": "reasoning",
+      "data": {
+        "text": "`,"
+      },
+      "createdAt": 1794690682445
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 254,
+      "type": "reasoning",
+      "data": {
+        "text": " `messages`,"
+      },
+      "createdAt": 1794690682493
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 255,
+      "type": "reasoning",
+      "data": {
+        "text": " `maxTokens`."
+      },
+      "createdAt": 1794690682546
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 256,
+      "type": "reasoning",
+      "data": {
+        "text": " name"
+      },
+      "createdAt": 1794690682593
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 257,
+      "type": "reasoning",
+      "data": {
+        "text": " should be the provider"
+      },
+      "createdAt": 1794690682643
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 258,
+      "type": "reasoning",
+      "data": {
+        "text": " id `"
+      },
+      "createdAt": 1794690682693
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 259,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response`. Let"
+      },
+      "createdAt": 1794690682743
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 260,
+      "type": "reasoning",
+      "data": {
+        "text": " me use"
+      },
+      "createdAt": 1794690682795
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 261,
+      "type": "reasoning",
+      "data": {
+        "text": " messages"
+      },
+      "createdAt": 1794690682845
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 262,
+      "type": "reasoning",
+      "data": {
+        "text": " with a user message"
+      },
+      "createdAt": 1794690682893
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 263,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\nLet me"
+      },
+      "createdAt": 1794690682942
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 264,
+      "type": "reasoning",
+      "data": {
+        "text": " be"
+      },
+      "createdAt": 1794690682994
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 265,
+      "type": "reasoning",
+      "data": {
+        "text": " careful about"
+      },
+      "createdAt": 1794690683042
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 266,
+      "type": "reasoning",
+      "data": {
+        "text": " the manifest"
+      },
+      "createdAt": 1794690683091
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 267,
+      "type": "reasoning",
+      "data": {
+        "text": " format"
+      },
+      "createdAt": 1794690683143
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 268,
+      "type": "reasoning",
+      "data": {
+        "text": ". I"
+      },
+      "createdAt": 1794690683193
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 269,
+      "type": "reasoning",
+      "data": {
+        "text": "'ll pass"
+      },
+      "createdAt": 1794690683244
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 270,
+      "type": "reasoning",
+      "data": {
+        "text": " both `"
+      },
+      "createdAt": 1794690683293
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 271,
+      "type": "reasoning",
+      "data": {
+        "text": "source"
+      },
+      "createdAt": 1794690683345
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 272,
+      "type": "reasoning",
+      "data": {
+        "text": "` and `manifest"
+      },
+      "createdAt": 1794690683392
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 273,
+      "type": "reasoning",
+      "data": {
+        "text": "` with"
+      },
+      "createdAt": 1794690683443
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 274,
+      "type": "reasoning",
+      "data": {
+        "text": " `files`. Actually"
+      },
+      "createdAt": 1794690683491
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 275,
+      "type": "reasoning",
+      "data": {
+        "text": " create_plugin accepts"
+      },
+      "createdAt": 1794690683542
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 276,
+      "type": "reasoning",
+      "data": {
+        "text": " either"
+      },
+      "createdAt": 1794690683591
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 277,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690683643
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 278,
+      "type": "reasoning",
+      "data": {
+        "text": "source` (single"
+      },
+      "createdAt": 1794690683693
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 279,
+      "type": "reasoning",
+      "data": {
+        "text": " default"
+      },
+      "createdAt": 1794690683741
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 280,
+      "type": "reasoning",
+      "data": {
+        "text": " index.ts) or"
+      },
+      "createdAt": 1794690683791
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 281,
+      "type": "reasoning",
+      "data": {
+        "text": " `files` +"
+      },
+      "createdAt": 1794690683843
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 282,
+      "type": "reasoning",
+      "data": {
+        "text": " v"
+      },
+      "createdAt": 1794690683890
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 283,
+      "type": "reasoning",
+      "data": {
+        "text": "2 manifest. Since"
+      },
+      "createdAt": 1794690683939
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 284,
+      "type": "reasoning",
+      "data": {
+        "text": " I need"
+      },
+      "createdAt": 1794690683991
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 285,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest"
+      },
+      "createdAt": 1794690684042
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 286,
+      "type": "reasoning",
+      "data": {
+        "text": " with capabilities"
+      },
+      "createdAt": 1794690684089
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 287,
+      "type": "reasoning",
+      "data": {
+        "text": " declaration"
+      },
+      "createdAt": 1794690684144
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 288,
+      "type": "reasoning",
+      "data": {
+        "text": ", I should"
+      },
+      "createdAt": 1794690684189
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 289,
+      "type": "reasoning",
+      "data": {
+        "text": " use `files`"
+      },
+      "createdAt": 1794690684239
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 290,
+      "type": "reasoning",
+      "data": {
+        "text": " +"
+      },
+      "createdAt": 1794690684289
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 291,
+      "type": "reasoning",
+      "data": {
+        "text": " `manifest`.\n\n"
+      },
+      "createdAt": 1794690684341
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 292,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me structure"
+      },
+      "createdAt": 1794690684389
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 293,
+      "type": "reasoning",
+      "data": {
+        "text": ":\n"
+      },
+      "createdAt": 1794690684439
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 294,
+      "type": "reasoning",
+      "data": {
+        "text": "-"
+      },
+      "createdAt": 1794690684491
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 295,
+      "type": "reasoning",
+      "data": {
+        "text": " files"
+      },
+      "createdAt": 1794690684539
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 296,
+      "type": "reasoning",
+      "data": {
+        "text": ": { \"index"
+      },
+      "createdAt": 1794690684589
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 297,
+      "type": "reasoning",
+      "data": {
+        "text": ".ts\": source"
+      },
+      "createdAt": 1794690684640
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 298,
+      "type": "reasoning",
+      "data": {
+        "text": " }\n- manifest:"
+      },
+      "createdAt": 1794690684688
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 299,
+      "type": "reasoning",
+      "data": {
+        "text": " { apiVersion:"
+      },
+      "createdAt": 1794690684739
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 300,
+      "type": "reasoning",
+      "data": {
+        "text": " "
+      },
+      "createdAt": 1794690684789
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 301,
+      "type": "reasoning",
+      "data": {
+        "text": "2, id,"
+      },
+      "createdAt": 1794690684837
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 302,
+      "type": "reasoning",
+      "data": {
+        "text": " name, version"
+      },
+      "createdAt": 1794690684889
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 303,
+      "type": "reasoning",
+      "data": {
+        "text": ", entry:"
+      },
+      "createdAt": 1794690684938
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 304,
+      "type": "reasoning",
+      "data": {
+        "text": " \"index.ts\","
+      },
+      "createdAt": 1794690684988
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 305,
+      "type": "reasoning",
+      "data": {
+        "text": " permissions: { capabilities"
+      },
+      "createdAt": 1794690685039
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 306,
+      "type": "reasoning",
+      "data": {
+        "text": ": { provider:"
+      },
+      "createdAt": 1794690685088
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 307,
+      "type": "reasoning",
+      "data": {
+        "text": " [\"local-response\"]"
+      },
+      "createdAt": 1794690685137
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 308,
+      "type": "reasoning",
+      "data": {
+        "text": " } } }\n\n"
+      },
+      "createdAt": 1794690685188
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 309,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me also"
+      },
+      "createdAt": 1794690685238
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 310,
+      "type": "reasoning",
+      "data": {
+        "text": " think"
+      },
+      "createdAt": 1794690685291
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 311,
+      "type": "reasoning",
+      "data": {
+        "text": " about whether `"
+      },
+      "createdAt": 1794690685338
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 312,
+      "type": "reasoning",
+      "data": {
+        "text": "permissions.cap"
+      },
+      "createdAt": 1794690685387
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 313,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities` needs `"
+      },
+      "createdAt": 1794690685436
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 314,
+      "type": "reasoning",
+      "data": {
+        "text": "network` entry"
+      },
+      "createdAt": 1794690685486
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 315,
+      "type": "reasoning",
+      "data": {
+        "text": " since"
+      },
+      "createdAt": 1794690685538
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 316,
+      "type": "reasoning",
+      "data": {
+        "text": " provider invocation"
+      },
+      "createdAt": 1794690685587
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 317,
+      "type": "reasoning",
+      "data": {
+        "text": " \""
+      },
+      "createdAt": 1794690685637
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 318,
+      "type": "reasoning",
+      "data": {
+        "text": "requires network grant\"."
+      },
+      "createdAt": 1794690685685
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 319,
+      "type": "reasoning",
+      "data": {
+        "text": " But"
+      },
+      "createdAt": 1794690685735
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 320,
+      "type": "reasoning",
+      "data": {
+        "text": " that's about"
+      },
+      "createdAt": 1794690685788
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 321,
+      "type": "reasoning",
+      "data": {
+        "text": " the caller"
+      },
+      "createdAt": 1794690685835
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 322,
+      "type": "reasoning",
+      "data": {
+        "text": " ("
+      },
+      "createdAt": 1794690685885
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 323,
+      "type": "reasoning",
+      "data": {
+        "text": "invoke_plugin tool"
+      },
+      "createdAt": 1794690685937
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 324,
+      "type": "reasoning",
+      "data": {
+        "text": "), not the plugin"
+      },
+      "createdAt": 1794690685987
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 325,
+      "type": "reasoning",
+      "data": {
+        "text": ". The plugin declares"
+      },
+      "createdAt": 1794690686034
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 326,
+      "type": "reasoning",
+      "data": {
+        "text": " capabilities"
+      },
+      "createdAt": 1794690686083
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 327,
+      "type": "reasoning",
+      "data": {
+        "text": " it registers"
+      },
+      "createdAt": 1794690686135
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 328,
+      "type": "reasoning",
+      "data": {
+        "text": ". Actually"
+      },
+      "createdAt": 1794690686183
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 329,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794690686235
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 330,
+      "type": "reasoning",
+      "data": {
+        "text": " hmm — \""
+      },
+      "createdAt": 1794690686283
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 331,
+      "type": "reasoning",
+      "data": {
+        "text": "permissions.capabilities "
+      },
+      "createdAt": 1794690686334
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 332,
+      "type": "reasoning",
+      "data": {
+        "text": "按实际 kind/"
+      },
+      "createdAt": 1794690686391
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 333,
+      "type": "reasoning",
+      "data": {
+        "text": "名称声明\" means"
+      },
+      "createdAt": 1794690686434
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 334,
+      "type": "reasoning",
+      "data": {
+        "text": " declare by actual kind"
+      },
+      "createdAt": 1794690686483
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 335,
+      "type": "reasoning",
+      "data": {
+        "text": "/name. Since"
+      },
+      "createdAt": 1794690686536
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 336,
+      "type": "reasoning",
+      "data": {
+        "text": " we only register a"
+      },
+      "createdAt": 1794690686583
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 337,
+      "type": "reasoning",
+      "data": {
+        "text": " provider, we declare"
+      },
+      "createdAt": 1794690686633
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 338,
+      "type": "reasoning",
+      "data": {
+        "text": " provider"
+      },
+      "createdAt": 1794690686684
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 339,
+      "type": "reasoning",
+      "data": {
+        "text": " capability"
+      },
+      "createdAt": 1794690686732
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 340,
+      "type": "reasoning",
+      "data": {
+        "text": ". Good"
+      },
+      "createdAt": 1794690686784
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 341,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794690686833
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 342,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nActually, wait"
+      },
+      "createdAt": 1794690686883
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 343,
+      "type": "reasoning",
+      "data": {
+        "text": ". Let me reconsider"
+      },
+      "createdAt": 1794690686932
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 344,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690686984
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 345,
+      "type": "reasoning",
+      "data": {
+        "text": " maybe the capability"
+      },
+      "createdAt": 1794690687034
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 346,
+      "type": "reasoning",
+      "data": {
+        "text": " declaration is a"
+      },
+      "createdAt": 1794690687085
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 347,
+      "type": "reasoning",
+      "data": {
+        "text": " list of strings"
+      },
+      "createdAt": 1794690687134
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 348,
+      "type": "reasoning",
+      "data": {
+        "text": " like `['"
+      },
+      "createdAt": 1794690687182
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 349,
+      "type": "reasoning",
+      "data": {
+        "text": "provider.local-response']`? The SDK says: \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.\" \n\nHmm, this reads like: for a tool capability, the name is `tool.name"
+      },
+      "createdAt": 1794690688333
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 350,
+      "type": "reasoning",
+      "data": {
+        "text": "`;"
+      },
+      "createdAt": 1794690688334
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 351,
+      "type": "reasoning",
+      "data": {
+        "text": " for command"
+      },
+      "createdAt": 1794690688381
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 352,
+      "type": "reasoning",
+      "data": {
+        "text": ", `command"
+      },
+      "createdAt": 1794690688432
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 353,
+      "type": "reasoning",
+      "data": {
+        "text": ".name`; etc"
+      },
+      "createdAt": 1794690688479
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 354,
+      "type": "reasoning",
+      "data": {
+        "text": ". But"
+      },
+      "createdAt": 1794690688530
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 355,
+      "type": "reasoning",
+      "data": {
+        "text": " the manifest example `"
+      },
+      "createdAt": 1794690688582
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 356,
+      "type": "reasoning",
+      "data": {
+        "text": "cap"
+      },
+      "createdAt": 1794690688629
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 357,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities:{tool:"
+      },
+      "createdAt": 1794690688681
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 358,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794690688731
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 359,
+      "type": "reasoning",
+      "data": {
+        "text": "}` uses"
+      },
+      "createdAt": 1794690688781
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 360,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690688831
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 361,
+      "type": "reasoning",
+      "data": {
+        "text": " tool"
+      },
+      "createdAt": 1794690688879
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 362,
+      "type": "reasoning",
+      "data": {
+        "text": "'s"
+      },
+      "createdAt": 1794690688930
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 363,
+      "type": "reasoning",
+      "data": {
+        "text": " name directly"
+      },
+      "createdAt": 1794690688980
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 364,
+      "type": "reasoning",
+      "data": {
+        "text": " (`"
+      },
+      "createdAt": 1794690689028
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 365,
+      "type": "reasoning",
+      "data": {
+        "text": "sum"
+      },
+      "createdAt": 1794690689079
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 366,
+      "type": "reasoning",
+      "data": {
+        "text": "_values` would"
+      },
+      "createdAt": 1794690689129
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 367,
+      "type": "reasoning",
+      "data": {
+        "text": " be `[\""
+      },
+      "createdAt": 1794690689180
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 368,
+      "type": "reasoning",
+      "data": {
+        "text": "sum_values\"]`)."
+      },
+      "createdAt": 1794690689228
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 369,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\n"
+      },
+      "createdAt": 1794690689277
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 370,
+      "type": "reasoning",
+      "data": {
+        "text": "Hmm"
+      },
+      "createdAt": 1794690689329
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 371,
+      "type": "reasoning",
+      "data": {
+        "text": ", actually maybe the"
+      },
+      "createdAt": 1794690689378
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 372,
+      "type": "reasoning",
+      "data": {
+        "text": " format"
+      },
+      "createdAt": 1794690689427
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 373,
+      "type": "reasoning",
+      "data": {
+        "text": " is `{"
+      },
+      "createdAt": 1794690689478
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 374,
+      "type": "reasoning",
+      "data": {
+        "text": " tool"
+      },
+      "createdAt": 1794690689528
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 375,
+      "type": "reasoning",
+      "data": {
+        "text": ": [\"sum_values"
+      },
+      "createdAt": 1794690689578
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 376,
+      "type": "reasoning",
+      "data": {
+        "text": "\"] }` where"
+      },
+      "createdAt": 1794690689626
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 377,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690689677
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 378,
+      "type": "reasoning",
+      "data": {
+        "text": " array"
+      },
+      "createdAt": 1794690689728
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 379,
+      "type": "reasoning",
+      "data": {
+        "text": " contains"
+      },
+      "createdAt": 1794690689778
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 380,
+      "type": "reasoning",
+      "data": {
+        "text": " names"
+      },
+      "createdAt": 1794690689828
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 381,
+      "type": "reasoning",
+      "data": {
+        "text": ". And the"
+      },
+      "createdAt": 1794690689876
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 382,
+      "type": "reasoning",
+      "data": {
+        "text": " \"kind/name"
+      },
+      "createdAt": 1794690689930
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 383,
+      "type": "reasoning",
+      "data": {
+        "text": " declarations\" note"
+      },
+      "createdAt": 1794690689979
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 384,
+      "type": "reasoning",
+      "data": {
+        "text": " describes how"
+      },
+      "createdAt": 1794690690027
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 385,
+      "type": "reasoning",
+      "data": {
+        "text": " to reference"
+      },
+      "createdAt": 1794690690079
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 386,
+      "type": "reasoning",
+      "data": {
+        "text": " them elsewhere"
+      },
+      "createdAt": 1794690690128
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 387,
+      "type": "reasoning",
+      "data": {
+        "text": " ("
+      },
+      "createdAt": 1794690690179
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 388,
+      "type": "reasoning",
+      "data": {
+        "text": "e"
+      },
+      "createdAt": 1794690690227
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 389,
+      "type": "reasoning",
+      "data": {
+        "text": ".g., in requires"
+      },
+      "createdAt": 1794690690278
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 390,
+      "type": "reasoning",
+      "data": {
+        "text": " or"
+      },
+      "createdAt": 1794690690326
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 391,
+      "type": "reasoning",
+      "data": {
+        "text": " grants). I"
+      },
+      "createdAt": 1794690690376
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 392,
+      "type": "reasoning",
+      "data": {
+        "text": "'ll go with the"
+      },
+      "createdAt": 1794690690427
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 393,
+      "type": "reasoning",
+      "data": {
+        "text": " flat object"
+      },
+      "createdAt": 1794690690476
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 394,
+      "type": "reasoning",
+      "data": {
+        "text": " with"
+      },
+      "createdAt": 1794690690526
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 395,
+      "type": "reasoning",
+      "data": {
+        "text": " arrays"
+      },
+      "createdAt": 1794690690577
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 396,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\n"
+      },
+      "createdAt": 1794690690625
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 397,
+      "type": "reasoning",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794690690676
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 398,
+      "type": "reasoning",
+      "data": {
+        "text": " me just create"
+      },
+      "createdAt": 1794690690724
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 399,
+      "type": "reasoning",
+      "data": {
+        "text": " it."
+      },
+      "createdAt": 1794690690774
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 400,
+      "type": "reasoning",
+      "data": {
+        "text": " I'll do create_plugin first, then enable_plugin, then invoke_plugin — these are dependent, so sequential. But I can batch create first, then check.\n\nActually let me do create_plugin alone first to see validation errors, then enable, then invoke. But to"
+      },
+      "createdAt": 1794690691960
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 401,
+      "type": "reasoning",
+      "data": {
+        "text": " be efficient, maybe"
+      },
+      "createdAt": 1794690691969
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 402,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794690692019
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 403,
+      "type": "reasoning",
+      "data": {
+        "text": " can do"
+      },
+      "createdAt": 1794690692067
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 404,
+      "type": "reasoning",
+      "data": {
+        "text": " create then"
+      },
+      "createdAt": 1794690692119
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 405,
+      "type": "reasoning",
+      "data": {
+        "text": " enable in"
+      },
+      "createdAt": 1794690692169
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 406,
+      "type": "reasoning",
+      "data": {
+        "text": " one"
+      },
+      "createdAt": 1794690692219
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 407,
+      "type": "reasoning",
+      "data": {
+        "text": " block? No"
+      },
+      "createdAt": 1794690692267
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 408,
+      "type": "reasoning",
+      "data": {
+        "text": " — enable depends on"
+      },
+      "createdAt": 1794690692323
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 409,
+      "type": "reasoning",
+      "data": {
+        "text": " create succeeding (validation"
+      },
+      "createdAt": 1794690692372
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 410,
+      "type": "reasoning",
+      "data": {
+        "text": "). Actually"
+      },
+      "createdAt": 1794690692421
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 411,
+      "type": "reasoning",
+      "data": {
+        "text": " enable_plugin validates and"
+      },
+      "createdAt": 1794690692471
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 412,
+      "type": "reasoning",
+      "data": {
+        "text": " activates a"
+      },
+      "createdAt": 1794690692520
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 413,
+      "type": "reasoning",
+      "data": {
+        "text": " staged candidate"
+      },
+      "createdAt": 1794690692571
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 414,
+      "type": "reasoning",
+      "data": {
+        "text": ";"
+      },
+      "createdAt": 1794690692619
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 415,
+      "type": "reasoning",
+      "data": {
+        "text": " it"
+      },
+      "createdAt": 1794690692669
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 416,
+      "type": "reasoning",
+      "data": {
+        "text": "'s"
+      },
+      "createdAt": 1794690692719
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 417,
+      "type": "reasoning",
+      "data": {
+        "text": " dependent"
+      },
+      "createdAt": 1794690692770
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 418,
+      "type": "reasoning",
+      "data": {
+        "text": " on create. Let"
+      },
+      "createdAt": 1794690692820
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 419,
+      "type": "reasoning",
+      "data": {
+        "text": " me be"
+      },
+      "createdAt": 1794690692869
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 420,
+      "type": "reasoning",
+      "data": {
+        "text": " careful and"
+      },
+      "createdAt": 1794690692920
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 421,
+      "type": "reasoning",
+      "data": {
+        "text": " do sequentially"
+      },
+      "createdAt": 1794690692969
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 422,
+      "type": "reasoning",
+      "data": {
+        "text": " to"
+      },
+      "createdAt": 1794690693018
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 423,
+      "type": "reasoning",
+      "data": {
+        "text": " catch"
+      },
+      "createdAt": 1794690693070
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 424,
+      "type": "reasoning",
+      "data": {
+        "text": " errors.\n\n"
+      },
+      "createdAt": 1794690693117
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 425,
+      "type": "reasoning",
+      "data": {
+        "text": "Actually"
+      },
+      "createdAt": 1794690693204
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 426,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794690693217
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 427,
+      "type": "reasoning",
+      "data": {
+        "text": " I could do create"
+      },
+      "createdAt": 1794690693268
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 428,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin,"
+      },
+      "createdAt": 1794690693316
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 429,
+      "type": "reasoning",
+      "data": {
+        "text": " then in"
+      },
+      "createdAt": 1794690693366
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 430,
+      "type": "reasoning",
+      "data": {
+        "text": " next"
+      },
+      "createdAt": 1794690693418
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 431,
+      "type": "reasoning",
+      "data": {
+        "text": " turn enable_plugin,"
+      },
+      "createdAt": 1794690693467
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 432,
+      "type": "reasoning",
+      "data": {
+        "text": " then invoke_plugin."
+      },
+      "createdAt": 1794690693517
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 433,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me do create"
+      },
+      "createdAt": 1794690693567
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 434,
+      "type": "reasoning",
+      "data": {
+        "text": " +"
+      },
+      "createdAt": 1794690693617
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 435,
+      "type": "reasoning",
+      "data": {
+        "text": " enable together"
+      },
+      "createdAt": 1794690693669
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 436,
+      "type": "reasoning",
+      "data": {
+        "text": "? The"
+      },
+      "createdAt": 1794690693718
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 437,
+      "type": "reasoning",
+      "data": {
+        "text": " instruction"
+      },
+      "createdAt": 1794690693766
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 438,
+      "type": "reasoning",
+      "data": {
+        "text": " says make"
+      },
+      "createdAt": 1794690693817
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 439,
+      "type": "reasoning",
+      "data": {
+        "text": " independent calls in same"
+      },
+      "createdAt": 1794690693865
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 440,
+      "type": "reasoning",
+      "data": {
+        "text": " block;"
+      },
+      "createdAt": 1794690693916
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 441,
+      "type": "reasoning",
+      "data": {
+        "text": " dependent"
+      },
+      "createdAt": 1794690693965
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 442,
+      "type": "reasoning",
+      "data": {
+        "text": " ones must"
+      },
+      "createdAt": 1794690694015
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 443,
+      "type": "reasoning",
+      "data": {
+        "text": " wait. enable"
+      },
+      "createdAt": 1794690694066
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 444,
+      "type": "reasoning",
+      "data": {
+        "text": " depends on create."
+      },
+      "createdAt": 1794690694119
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 445,
+      "type": "reasoning",
+      "data": {
+        "text": " So sequential.\n\n"
+      },
+      "createdAt": 1794690694165
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 446,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me first"
+      },
+      "createdAt": 1794690694216
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 447,
+      "type": "reasoning",
+      "data": {
+        "text": " create the"
+      },
+      "createdAt": 1794690694265
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 448,
+      "type": "delta",
+      "data": {
+        "text": "I"
+      },
+      "createdAt": 1794690694315
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 449,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin."
+      },
+      "createdAt": 1794690694315
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 450,
+      "type": "delta",
+      "data": {
+        "text": " have the full"
+      },
+      "createdAt": 1794690694364
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 451,
+      "type": "delta",
+      "data": {
+        "text": " SDK spec"
+      },
+      "createdAt": 1794690694414
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 452,
+      "type": "delta",
+      "data": {
+        "text": ". Now I"
+      },
+      "createdAt": 1794690694465
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 453,
+      "type": "delta",
+      "data": {
+        "text": "'ll create the `"
+      },
+      "createdAt": 1794690694513
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 454,
+      "type": "delta",
+      "data": {
+        "text": "local-provider`"
+      },
+      "createdAt": 1794690694567
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 455,
+      "type": "delta",
+      "data": {
+        "text": " plugin with a"
+      },
+      "createdAt": 1794690694616
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 456,
+      "type": "delta",
+      "data": {
+        "text": " v2 manifest declaring"
+      },
+      "createdAt": 1794690694666
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 457,
+      "type": "delta",
+      "data": {
+        "text": " only"
+      },
+      "createdAt": 1794690694716
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 458,
+      "type": "delta",
+      "data": {
+        "text": " the provider capability ("
+      },
+      "createdAt": 1794690694766
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 459,
+      "type": "delta",
+      "data": {
+        "text": "no tools"
+      },
+      "createdAt": 1794690694816
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 460,
+      "type": "delta",
+      "data": {
+        "text": ", no network)."
+      },
+      "createdAt": 1794690694865
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 461,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "385f32ca-78bb-486f-8755-1f23523054a7",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794690698614
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 462,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794690698614
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 463,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-a4683a1dd3fe53fe",
+        "name": "create_plugin",
+        "args": {
+          "id": "local-provider",
+          "name": "Local Provider",
+          "files": {
+            "index.ts": "export default {\n  id: 'local-provider',\n  name: 'Local Provider',\n  version: '1.0.0',\n  onLoad(ctx: import('../../kernel/types').PluginContext) {\n    ctx.register({\n      kind: 'provider',\n      provider: {\n        id: 'local-response',\n        label: 'Local',\n        defaultModel: 'local',\n        chat: async function* () {\n          yield { type: 'delta' as const, text: 'LOCAL-OK' };\n          yield { type: 'usage' as const, input: 1, output: 1 };\n          yield { type: 'done' as const };\n        }\n      }\n    });\n  }\n};\n"
+          },
+          "manifest": {
+            "apiVersion": 2,
+            "id": "local-provider",
+            "name": "Local Provider",
+            "version": "1.0.0",
+            "entry": "index.ts",
+            "permissions": {
+              "capabilities": {
+                "provider": [
+                  "local-response"
+                ]
+              }
+            }
+          }
+        }
+      },
+      "createdAt": 1794690698615
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 464,
+      "type": "plugin_staged",
+      "data": {
+        "id": "local-provider",
+        "hash": "d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59",
+        "checks": [
+          "source",
+          "manifest"
+        ],
+        "activationRequired": true,
+        "revision": 0
+      },
+      "createdAt": 1794690698618
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 465,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-a4683a1dd3fe53fe",
+        "name": "create_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"local-provider\",\"hash\":\"d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59\",\"state\":\"staged\",\"scope\":\"run\"}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794690698619
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 466,
+      "type": "model_call_started",
+      "data": {
+        "callId": "21b9f15c-7266-4647-b092-20adc7a64d43",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690698623
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 467,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794690700822
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 468,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin"
+      },
+      "createdAt": 1794690700899
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 469,
+      "type": "reasoning",
+      "data": {
+        "text": " is staged. Now"
+      },
+      "createdAt": 1794690700947
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 470,
+      "type": "reasoning",
+      "data": {
+        "text": " enable it. Note"
+      },
+      "createdAt": 1794690700998
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 471,
+      "type": "reasoning",
+      "data": {
+        "text": " the manifest capabilities structure"
+      },
+      "createdAt": 1794690701048
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 472,
+      "type": "reasoning",
+      "data": {
+        "text": " -"
+      },
+      "createdAt": 1794690701097
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 473,
+      "type": "reasoning",
+      "data": {
+        "text": " the SDK"
+      },
+      "createdAt": 1794690701147
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 474,
+      "type": "reasoning",
+      "data": {
+        "text": " says \"Capabilities use"
+      },
+      "createdAt": 1794690701197
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 475,
+      "type": "reasoning",
+      "data": {
+        "text": " kind/name declarations"
+      },
+      "createdAt": 1794690701247
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 476,
+      "type": "reasoning",
+      "data": {
+        "text": ": ..."
+      },
+      "createdAt": 1794690701296
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 477,
+      "type": "reasoning",
+      "data": {
+        "text": " provider.provider.id\"."
+      },
+      "createdAt": 1794690701347
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 478,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me check whether"
+      },
+      "createdAt": 1794690701397
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 479,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794690701447
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 480,
+      "type": "reasoning",
+      "data": {
+        "text": " format should"
+      },
+      "createdAt": 1794690701497
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 481,
+      "type": "reasoning",
+      "data": {
+        "text": " be `"
+      },
+      "createdAt": 1794690701547
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 482,
+      "type": "reasoning",
+      "data": {
+        "text": "{\"provider\": [\""
+      },
+      "createdAt": 1794690701597
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 483,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response\"]}`"
+      },
+      "createdAt": 1794690701646
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 484,
+      "type": "reasoning",
+      "data": {
+        "text": " or `"
+      },
+      "createdAt": 1794690701696
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 485,
+      "type": "reasoning",
+      "data": {
+        "text": "{\"provider\":"
+      },
+      "createdAt": 1794690701746
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 486,
+      "type": "reasoning",
+      "data": {
+        "text": " {\"provider"
+      },
+      "createdAt": 1794690701796
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 487,
+      "type": "reasoning",
+      "data": {
+        "text": "\": ..."
+      },
+      "createdAt": 1794690701845
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 488,
+      "type": "reasoning",
+      "data": {
+        "text": "}}`. Actually"
+      },
+      "createdAt": 1794690701896
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 489,
+      "type": "reasoning",
+      "data": {
+        "text": " the capability"
+      },
+      "createdAt": 1794690701945
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 490,
+      "type": "reasoning",
+      "data": {
+        "text": " declaration likely"
+      },
+      "createdAt": 1794690701995
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 491,
+      "type": "reasoning",
+      "data": {
+        "text": " uses the"
+      },
+      "createdAt": 1794690702044
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 492,
+      "type": "reasoning",
+      "data": {
+        "text": " shape"
+      },
+      "createdAt": 1794690702094
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 493,
+      "type": "reasoning",
+      "data": {
+        "text": " `permissions"
+      },
+      "createdAt": 1794690702145
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 494,
+      "type": "reasoning",
+      "data": {
+        "text": ".capabilities`"
+      },
+      "createdAt": 1794690702194
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 495,
+      "type": "reasoning",
+      "data": {
+        "text": " key"
+      },
+      "createdAt": 1794690702244
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 496,
+      "type": "reasoning",
+      "data": {
+        "text": "ed by kind,"
+      },
+      "createdAt": 1794690702302
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 497,
+      "type": "reasoning",
+      "data": {
+        "text": " with names"
+      },
+      "createdAt": 1794690702344
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 498,
+      "type": "reasoning",
+      "data": {
+        "text": " array"
+      },
+      "createdAt": 1794690702394
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 499,
+      "type": "reasoning",
+      "data": {
+        "text": ". The"
+      },
+      "createdAt": 1794690702444
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 500,
+      "type": "reasoning",
+      "data": {
+        "text": " example minimal"
+      },
+      "createdAt": 1794690702496
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 501,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest"
+      },
+      "createdAt": 1794690702545
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 502,
+      "type": "reasoning",
+      "data": {
+        "text": ": `permissions:{"
+      },
+      "createdAt": 1794690702594
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 503,
+      "type": "reasoning",
+      "data": {
+        "text": "capabilities:{tool"
+      },
+      "createdAt": 1794690702647
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 504,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794690702694
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 505,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794690702745
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 506,
+      "type": "reasoning",
+      "data": {
+        "text": "}}`. So"
+      },
+      "createdAt": 1794690702830
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 507,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690702843
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 508,
+      "type": "reasoning",
+      "data": {
+        "text": "provider"
+      },
+      "createdAt": 1794690702892
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 509,
+      "type": "reasoning",
+      "data": {
+        "text": ": [\""
+      },
+      "createdAt": 1794690702940
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 510,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response\"]`"
+      },
+      "createdAt": 1794690702989
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 511,
+      "type": "reasoning",
+      "data": {
+        "text": " fits"
+      },
+      "createdAt": 1794690703039
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 512,
+      "type": "reasoning",
+      "data": {
+        "text": ". Good"
+      },
+      "createdAt": 1794690703088
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 513,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\nNow"
+      },
+      "createdAt": 1794690703136
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 514,
+      "type": "reasoning",
+      "data": {
+        "text": " enable the"
+      },
+      "createdAt": 1794690703185
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 515,
+      "type": "delta",
+      "data": {
+        "text": "Plugin"
+      },
+      "createdAt": 1794690703233
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 516,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin."
+      },
+      "createdAt": 1794690703233
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 517,
+      "type": "delta",
+      "data": {
+        "text": " staged successfully"
+      },
+      "createdAt": 1794690703282
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 518,
+      "type": "delta",
+      "data": {
+        "text": ". Now let me"
+      },
+      "createdAt": 1794690703331
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 519,
+      "type": "delta",
+      "data": {
+        "text": " enable it."
+      },
+      "createdAt": 1794690703381
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 520,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "21b9f15c-7266-4647-b092-20adc7a64d43",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794690704515
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 521,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794690704515
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 522,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-a4edaae2de21d876",
+        "name": "enable_plugin",
+        "args": {
+          "id": "local-provider",
+          "hash": "d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59"
+        }
+      },
+      "createdAt": 1794690704516
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 523,
+      "type": "plugin_validated",
+      "data": {
+        "id": "local-provider",
+        "hash": "d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59",
+        "checks": [
+          "source",
+          "manifest",
+          "types",
+          "trial"
+        ],
+        "revision": 0
+      },
+      "createdAt": 1794690706029
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 524,
+      "type": "plugin_activated",
+      "data": {
+        "id": "local-provider",
+        "hash": "d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59",
+        "scope": "run",
+        "revision": 1
+      },
+      "createdAt": 1794690706044
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 525,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-a4edaae2de21d876",
+        "name": "enable_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"local-provider\",\"hash\":\"d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59\",\"state\":\"active\",\"revision\":1,\"capabilities\":[{\"provider\":[\"local-response\"]}]}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794690706045
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 526,
+      "type": "model_call_started",
+      "data": {
+        "callId": "14ea1692-6949-4de1-90d8-35b756b3dc91",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690706048
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 527,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794690707943
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 528,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin"
+      },
+      "createdAt": 1794690708017
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 529,
+      "type": "reasoning",
+      "data": {
+        "text": " is active. Now"
+      },
+      "createdAt": 1794690708062
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 530,
+      "type": "reasoning",
+      "data": {
+        "text": " I need"
+      },
+      "createdAt": 1794690708112
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 531,
+      "type": "reasoning",
+      "data": {
+        "text": " to explicitly invoke the"
+      },
+      "createdAt": 1794690708159
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 532,
+      "type": "reasoning",
+      "data": {
+        "text": " provider using"
+      },
+      "createdAt": 1794690708208
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 533,
+      "type": "reasoning",
+      "data": {
+        "text": " invoke"
+      },
+      "createdAt": 1794690708258
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 534,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin with kind='"
+      },
+      "createdAt": 1794690708307
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 535,
+      "type": "reasoning",
+      "data": {
+        "text": "provider', name='"
+      },
+      "createdAt": 1794690708355
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 536,
+      "type": "reasoning",
+      "data": {
+        "text": "local-response', model"
+      },
+      "createdAt": 1794690708404
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 537,
+      "type": "reasoning",
+      "data": {
+        "text": "='local',"
+      },
+      "createdAt": 1794690708453
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 538,
+      "type": "reasoning",
+      "data": {
+        "text": " messages. Let me"
+      },
+      "createdAt": 1794690708502
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 539,
+      "type": "reasoning",
+      "data": {
+        "text": " do that."
+      },
+      "createdAt": 1794690708550
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 540,
+      "type": "delta",
+      "data": {
+        "text": "Plugin is active with"
+      },
+      "createdAt": 1794690708599
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 541,
+      "type": "delta",
+      "data": {
+        "text": " the `local"
+      },
+      "createdAt": 1794690708648
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 542,
+      "type": "delta",
+      "data": {
+        "text": "-response` provider capability"
+      },
+      "createdAt": 1794690708698
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 543,
+      "type": "delta",
+      "data": {
+        "text": ". Now I"
+      },
+      "createdAt": 1794690708745
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 544,
+      "type": "delta",
+      "data": {
+        "text": "'ll explicitly invoke this"
+      },
+      "createdAt": 1794690708794
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 545,
+      "type": "delta",
+      "data": {
+        "text": " provider with the"
+      },
+      "createdAt": 1794690708842
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 546,
+      "type": "delta",
+      "data": {
+        "text": " `local` model"
+      },
+      "createdAt": 1794690708892
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 547,
+      "type": "delta",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794690708940
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 548,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "14ea1692-6949-4de1-90d8-35b756b3dc91",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794690710034
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 549,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794690710034
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 550,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-9e19919fabf2f18a",
+        "name": "invoke_plugin",
+        "args": {
+          "kind": "provider",
+          "name": "local-response",
+          "model": "local",
+          "messages": [
+            {
+              "role": "user",
+              "content": "ping"
+            }
+          ],
+          "maxTokens": "[REDACTED]"
+        }
+      },
+      "createdAt": 1794690710035
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 551,
+      "type": "model_call_started",
+      "data": {
+        "callId": "6592a704-ca31-4bb9-a696-8226e3c20759",
+        "purpose": "agent",
+        "providerId": "local-response",
+        "model": "local"
+      },
+      "createdAt": 1794690710037
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 552,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "6592a704-ca31-4bb9-a696-8226e3c20759",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "unknown"
+      },
+      "createdAt": 1794690710037
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 553,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-9e19919fabf2f18a",
+        "name": "invoke_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"content\":\"LOCAL-OK\",\"usage\":{\"input\":1,\"output\":1}}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794690710038
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 554,
+      "type": "model_call_started",
+      "data": {
+        "callId": "1af76201-e492-4717-b362-169d9b4e9f6b",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "workbuddy/hy4free"
+      },
+      "createdAt": 1794690710041
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 555,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794690712047
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 556,
+      "type": "reasoning",
+      "data": {
+        "text": " provider"
+      },
+      "createdAt": 1794690712113
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 557,
+      "type": "reasoning",
+      "data": {
+        "text": " returned"
+      },
+      "createdAt": 1794690712162
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 558,
+      "type": "reasoning",
+      "data": {
+        "text": " LOCAL"
+      },
+      "createdAt": 1794690712211
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 559,
+      "type": "reasoning",
+      "data": {
+        "text": "-OK with"
+      },
+      "createdAt": 1794690712264
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 560,
+      "type": "reasoning",
+      "data": {
+        "text": " usage input=1"
+      },
+      "createdAt": 1794690712311
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 561,
+      "type": "reasoning",
+      "data": {
+        "text": "/output=1 as"
+      },
+      "createdAt": 1794690712360
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 562,
+      "type": "reasoning",
+      "data": {
+        "text": " expected. Now final"
+      },
+      "createdAt": 1794690712410
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 563,
+      "type": "reasoning",
+      "data": {
+        "text": " answer: provider="
+      },
+      "createdAt": 1794690712457
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 564,
+      "type": "reasoning",
+      "data": {
+        "text": "LOCAL-OK."
+      },
+      "createdAt": 1794690712508
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 565,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\n"
+      },
+      "createdAt": 1794690712556
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 566,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me also"
+      },
+      "createdAt": 1794690712605
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 567,
+      "type": "reasoning",
+      "data": {
+        "text": " verify via"
+      },
+      "createdAt": 1794690712652
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 568,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin_status maybe not"
+      },
+      "createdAt": 1794690712763
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 569,
+      "type": "reasoning",
+      "data": {
+        "text": " needed"
+      },
+      "createdAt": 1794690712763
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 570,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794690712800
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 571,
+      "type": "reasoning",
+      "data": {
+        "text": " but could"
+      },
+      "createdAt": 1794690712850
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 572,
+      "type": "reasoning",
+      "data": {
+        "text": " be"
+      },
+      "createdAt": 1794690712898
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 573,
+      "type": "reasoning",
+      "data": {
+        "text": " good to"
+      },
+      "createdAt": 1794690712946
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 574,
+      "type": "reasoning",
+      "data": {
+        "text": " confirm capability"
+      },
+      "createdAt": 1794690713004
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 575,
+      "type": "reasoning",
+      "data": {
+        "text": " registered"
+      },
+      "createdAt": 1794690713042
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 576,
+      "type": "reasoning",
+      "data": {
+        "text": ". Already"
+      },
+      "createdAt": 1794690713092
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 577,
+      "type": "reasoning",
+      "data": {
+        "text": " confirmed"
+      },
+      "createdAt": 1794690713140
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 578,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794690713191
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 579,
+      "type": "reasoning",
+      "data": {
+        "text": " Final"
+      },
+      "createdAt": 1794690713241
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 580,
+      "type": "delta",
+      "data": {
+        "text": "插件"
+      },
+      "createdAt": 1794690713288
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 581,
+      "type": "reasoning",
+      "data": {
+        "text": " answer."
+      },
+      "createdAt": 1794690713288
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 582,
+      "type": "delta",
+      "data": {
+        "text": "创建"
+      },
+      "createdAt": 1794690713339
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 583,
+      "type": "delta",
+      "data": {
+        "text": "、"
+      },
+      "createdAt": 1794690713388
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 584,
+      "type": "delta",
+      "data": {
+        "text": "启用与"
+      },
+      "createdAt": 1794690713437
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 585,
+      "type": "delta",
+      "data": {
+        "text": "调用均已完成"
+      },
+      "createdAt": 1794690713482
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 586,
+      "type": "delta",
+      "data": {
+        "text": "，结果"
+      },
+      "createdAt": 1794690713535
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 587,
+      "type": "delta",
+      "data": {
+        "text": "基于"
+      },
+      "createdAt": 1794690713581
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 588,
+      "type": "delta",
+      "data": {
+        "text": "工具"
+      },
+      "createdAt": 1794690713629
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 589,
+      "type": "delta",
+      "data": {
+        "text": "返回：\n\n- `"
+      },
+      "createdAt": 1794690713682
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 590,
+      "type": "delta",
+      "data": {
+        "text": "create_plugin`："
+      },
+      "createdAt": 1794690713730
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 591,
+      "type": "delta",
+      "data": {
+        "text": "暂存"
+      },
+      "createdAt": 1794690713776
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 592,
+      "type": "delta",
+      "data": {
+        "text": " `local-provider"
+      },
+      "createdAt": 1794690713826
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 593,
+      "type": "delta",
+      "data": {
+        "text": "`（hash"
+      },
+      "createdAt": 1794690713874
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 594,
+      "type": "delta",
+      "data": {
+        "text": " `d8d"
+      },
+      "createdAt": 1794690713924
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 595,
+      "type": "delta",
+      "data": {
+        "text": "4df35…"
+      },
+      "createdAt": 1794690713971
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 596,
+      "type": "delta",
+      "data": {
+        "text": "`），manifest"
+      },
+      "createdAt": 1794690714020
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 597,
+      "type": "delta",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690714069
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 598,
+      "type": "delta",
+      "data": {
+        "text": "apiVersion=2"
+      },
+      "createdAt": 1794690714120
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 599,
+      "type": "delta",
+      "data": {
+        "text": "`，`"
+      },
+      "createdAt": 1794690714168
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 600,
+      "type": "delta",
+      "data": {
+        "text": "permissions.capabilities`"
+      },
+      "createdAt": 1794690714215
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 601,
+      "type": "delta",
+      "data": {
+        "text": " 仅声明 `"
+      },
+      "createdAt": 1794690714263
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 602,
+      "type": "delta",
+      "data": {
+        "text": "provider:"
+      },
+      "createdAt": 1794690714312
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 603,
+      "type": "delta",
+      "data": {
+        "text": " [\"local-response\"]"
+      },
+      "createdAt": 1794690714362
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 604,
+      "type": "delta",
+      "data": {
+        "text": "`"
+      },
+      "createdAt": 1794690714410
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 605,
+      "type": "delta",
+      "data": {
+        "text": "；注册"
+      },
+      "createdAt": 1794690714461
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 606,
+      "type": "delta",
+      "data": {
+        "text": "了"
+      },
+      "createdAt": 1794690714507
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 607,
+      "type": "delta",
+      "data": {
+        "text": " provider"
+      },
+      "createdAt": 1794690714556
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 608,
+      "type": "delta",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794690714605
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 609,
+      "type": "delta",
+      "data": {
+        "text": "id=local-response"
+      },
+      "createdAt": 1794690714656
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 610,
+      "type": "delta",
+      "data": {
+        "text": "`、`label=Local"
+      },
+      "createdAt": 1794690714704
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 611,
+      "type": "delta",
+      "data": {
+        "text": "`、`defaultModel="
+      },
+      "createdAt": 1794690714753
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 612,
+      "type": "delta",
+      "data": {
+        "text": "local`，其"
+      },
+      "createdAt": 1794690714801
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 613,
+      "type": "delta",
+      "data": {
+        "text": " `chat` "
+      },
+      "createdAt": 1794690714851
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 614,
+      "type": "delta",
+      "data": {
+        "text": "异步生成器依次"
+      },
+      "createdAt": 1794690714897
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 615,
+      "type": "delta",
+      "data": {
+        "text": " yield"
+      },
+      "createdAt": 1794690714948
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 616,
+      "type": "delta",
+      "data": {
+        "text": " `delta` "
+      },
+      "createdAt": 1794690714996
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 617,
+      "type": "delta",
+      "data": {
+        "text": "文本 `LOCAL-"
+      },
+      "createdAt": 1794690715046
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 618,
+      "type": "delta",
+      "data": {
+        "text": "OK`、`usage {"
+      },
+      "createdAt": 1794690715092
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 619,
+      "type": "delta",
+      "data": {
+        "text": "input:1,"
+      },
+      "createdAt": 1794690715143
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 620,
+      "type": "delta",
+      "data": {
+        "text": "output:1}`"
+      },
+      "createdAt": 1794690715190
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 621,
+      "type": "delta",
+      "data": {
+        "text": "、`done`。未"
+      },
+      "createdAt": 1794690715239
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 622,
+      "type": "delta",
+      "data": {
+        "text": "注册"
+      },
+      "createdAt": 1794690715288
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 623,
+      "type": "delta",
+      "data": {
+        "text": "工具"
+      },
+      "createdAt": 1794690715336
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 624,
+      "type": "delta",
+      "data": {
+        "text": "、未访问网络"
+      },
+      "createdAt": 1794690715386
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 625,
+      "type": "delta",
+      "data": {
+        "text": "。"
+      },
+      "createdAt": 1794690715433
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 626,
+      "type": "delta",
+      "data": {
+        "text": "\n- `enable"
+      },
+      "createdAt": 1794690715484
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 627,
+      "type": "delta",
+      "data": {
+        "text": "_plugin`：状态 `"
+      },
+      "createdAt": 1794690715533
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 628,
+      "type": "delta",
+      "data": {
+        "text": "active`（"
+      },
+      "createdAt": 1794690715581
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 629,
+      "type": "delta",
+      "data": {
+        "text": "revision 1），"
+      },
+      "createdAt": 1794690715629
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 630,
+      "type": "delta",
+      "data": {
+        "text": "能力列表"
+      },
+      "createdAt": 1794690715682
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 631,
+      "type": "delta",
+      "data": {
+        "text": " `["
+      },
+      "createdAt": 1794690715728
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 632,
+      "type": "delta",
+      "data": {
+        "text": "{\"provider\":[\""
+      },
+      "createdAt": 1794690715775
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 633,
+      "type": "delta",
+      "data": {
+        "text": "local-response\"]}]"
+      },
+      "createdAt": 1794690715824
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 634,
+      "type": "delta",
+      "data": {
+        "text": "`。\n- `invoke"
+      },
+      "createdAt": 1794690715874
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 635,
+      "type": "delta",
+      "data": {
+        "text": "_plugin`（"
+      },
+      "createdAt": 1794690715922
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 636,
+      "type": "delta",
+      "data": {
+        "text": "kind"
+      },
+      "createdAt": 1794690715971
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 637,
+      "type": "delta",
+      "data": {
+        "text": "=`"
+      },
+      "createdAt": 1794690716022
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 638,
+      "type": "delta",
+      "data": {
+        "text": "provider`，name=`"
+      },
+      "createdAt": 1794690716071
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 639,
+      "type": "delta",
+      "data": {
+        "text": "local-response`，model"
+      },
+      "createdAt": 1794690716119
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 640,
+      "type": "delta",
+      "data": {
+        "text": "=`local`）："
+      },
+      "createdAt": 1794690716166
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 641,
+      "type": "delta",
+      "data": {
+        "text": "返回 `{\"ok"
+      },
+      "createdAt": 1794690716215
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 642,
+      "type": "delta",
+      "data": {
+        "text": "\":true,\"data"
+      },
+      "createdAt": 1794690716264
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 643,
+      "type": "delta",
+      "data": {
+        "text": "\":{\"content\":\"LOCAL"
+      },
+      "createdAt": 1794690716314
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 644,
+      "type": "delta",
+      "data": {
+        "text": "-OK\",\"usage"
+      },
+      "createdAt": 1794690716362
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 645,
+      "type": "delta",
+      "data": {
+        "text": "\":{\"input\":1"
+      },
+      "createdAt": 1794690716411
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 646,
+      "type": "delta",
+      "data": {
+        "text": ",\"output\":1"
+      },
+      "createdAt": 1794690716459
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 647,
+      "type": "delta",
+      "data": {
+        "text": "}}"
+      },
+      "createdAt": 1794690716508
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 648,
+      "type": "delta",
+      "data": {
+        "text": "}`。\n\nprovider"
+      },
+      "createdAt": 1794690716556
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 649,
+      "type": "delta",
+      "data": {
+        "text": "=LOCAL-OK"
+      },
+      "createdAt": 1794690716605
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 650,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "1af76201-e492-4717-b362-169d9b4e9f6b",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "unknown",
+        "cost": 0
+      },
+      "createdAt": 1794690717020
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 651,
+      "type": "usage_status",
+      "data": {
+        "status": "unknown"
+      },
+      "createdAt": 1794690717020
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 652,
+      "type": "done",
+      "data": {
+        "type": "assistant_done",
+        "content": "插件创建、启用与调用均已完成，结果基于工具返回：\n\n- `create_plugin`：暂存 `local-provider`（hash `d8d4df35…`），manifest `apiVersion=2`，`permissions.capabilities` 仅声明 `provider: [\"local-response\"]`；注册了 provider `id=local-response`、`label=Local`、`defaultModel=local`，其 `chat` 异步生成器依次 yield `delta` 文本 `LOCAL-OK`、`usage {input:1,output:1}`、`done`。未注册工具、未访问网络。\n- `enable_plugin`：状态 `active`（revision 1），能力列表 `[{\"provider\":[\"local-response\"]}]`。\n- `invoke_plugin`（kind=`provider`，name=`local-response`，model=`local`）：返回 `{\"ok\":true,\"data\":{\"content\":\"LOCAL-OK\",\"usage\":{\"input\":1,\"output\":1}}}`。\n\nprovider=LOCAL-OK",
+        "reasoning": "Let me understand the task. I need to create a plugin called \"local-provider\" that registers a provider with:\n- id=local-response\n- label=Local\n- defaultModel=local\n- chat async generator only outputs delta text \"LOCAL-OK\", usage input=1/output=1, done\n- no network access, no tools\n\nThen enable it, explicitly invoke this provider with \"local\" model, and finally answer \"provider=LOCAL-OK\".\n\nLet me first check the SDK to understand the interfaces.\n\nLet me start by reading the plugin_status with sdk=true to understand the interfaces, and discover tools for provider entries.\n\nLet me do both in parallel.Let me read the full SDK documentation.The SDK gives me a clear example for provider. I need to create a plugin `local-provider` that registers a provider with id=`local-response`, label=`Local`, defaultModel=`local`, and chat async generator yielding:\n- delta text `LOCAL-OK`\n- usage input=1/output=1\n- done\n\nNo network access, no tools provided.\n\nThen I need to enable it and explicitly invoke this provider with model `local`, and finally answer `provider=LOCAL-OK`.\n\nLet me note: manifest apiVersion=2, permissions.capabilities declared by actual kind/name. So:\n```\nmanifest = {\n  apiVersion: 2,\n  id: 'local-provider',\n  name: 'Local Provider',\n  version: '1.0.0',\n  entry: 'index.ts',\n  permissions: { capabilities: { provider: ['local-response'] } }\n}\n```\n\nWait — the SDK example says `permissions:{capabilities:{tool:[\"tool_name\"]}}` and \"Capabilities use kind/name declarations: tool.tool.name, ... provider.provider.id\". Hmm, that's a bit ambiguous. Let me interpret: `capabilities:{provider:['local-response']}` seems right based on `tool:[\"sum_values\"]` style. Actually the example shows `tool:[\"tool_name\"]`. So for provider it'd be `provider:['local-response']`.\n\nBut the note \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, ... provider.provider.id\" — this might mean something like nested. Let me think. Actually it probably means the capability naming: a tool capability references `tool.tool.name`. But the manifest example clearly shows flat: `{tool:[\"tool_name\"]}`. So I'll go with flat mapping: `{provider:['local-response']}`.\n\nThe task says \"manifest 的 apiVersion=2，permissions.capabilities 按实际 kind/名称声明.\" So by actual kind/name. So `provider: ['local-response']`.\n\nAlso note the plugin is \"不访问网络、不提供工具\" — no network access, no tools. So permissions should NOT include network capability? But invoke_plugin for provider requires network grant. Hmm. The task says \"任务已获工作区插件开发和读写/网络/委派授权\" — the task has network grant. But the plugin itself \"不访问网络\" (does not access network). The provider chat generator is pure computation, no network. So we don't need network capability in the manifest for the plugin itself. The invoke_plugin requires network grant on the task side, which is already granted.\n\nLet me create the plugin source:\n\n```ts\nexport default {\n  id: 'local-provider',\n  name: 'Local Provider',\n  version: '1.0.0',\n  onLoad(ctx: import('../../kernel/types').PluginContext) {\n    ctx.register({\n      kind: 'provider',\n      provider: {\n        id: 'local-response',\n        label: 'Local',\n        defaultModel: 'local',\n        chat: async function* () {\n          yield { type: 'delta' as const, text: 'LOCAL-OK' };\n          yield { type: 'usage' as const, input: 1, output: 1 };\n          yield { type: 'done' as const };\n        }\n      }\n    });\n  }\n};\n```\n\nNo tools registered, no network. Good.\n\nThen create_plugin, enable_plugin, then invoke_plugin with kind=provider, name=local-response, model=local, messages.\n\nLet me check: invoke_plugin signature requires `name`, and for provider `model`, `messages`, `maxTokens`. name should be the provider id `local-response`. Let me use messages with a user message.\n\nLet me be careful about the manifest format. I'll pass both `source` and `manifest` with `files`. Actually create_plugin accepts either `source` (single default index.ts) or `files` + v2 manifest. Since I need manifest with capabilities declaration, I should use `files` + `manifest`.\n\nLet me structure:\n- files: { \"index.ts\": source }\n- manifest: { apiVersion: 2, id, name, version, entry: \"index.ts\", permissions: { capabilities: { provider: [\"local-response\"] } } }\n\nLet me also think about whether `permissions.capabilities` needs `network` entry since provider invocation \"requires network grant\". But that's about the caller (invoke_plugin tool), not the plugin. The plugin declares capabilities it registers. Actually, hmm — \"permissions.capabilities 按实际 kind/名称声明\" means declare by actual kind/name. Since we only register a provider, we declare provider capability. Good.\n\nActually, wait. Let me reconsider: maybe the capability declaration is a list of strings like `['provider.local-response']`? The SDK says: \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.\" \n\nHmm, this reads like: for a tool capability, the name is `tool.name`; for command, `command.name`; etc. But the manifest example `capabilities:{tool:[\"tool_name\"]}` uses the tool's name directly (`sum_values` would be `[\"sum_values\"]`).\n\nHmm, actually maybe the format is `{ tool: [\"sum_values\"] }` where the array contains names. And the \"kind/name declarations\" note describes how to reference them elsewhere (e.g., in requires or grants). I'll go with the flat object with arrays.\n\nLet me just create it. I'll do create_plugin first, then enable_plugin, then invoke_plugin — these are dependent, so sequential. But I can batch create first, then check.\n\nActually let me do create_plugin alone first to see validation errors, then enable, then invoke. But to be efficient, maybe I can do create then enable in one block? No — enable depends on create succeeding (validation). Actually enable_plugin validates and activates a staged candidate; it's dependent on create. Let me be careful and do sequentially to catch errors.\n\nActually, I could do create_plugin, then in next turn enable_plugin, then invoke_plugin. Let me do create + enable together? The instruction says make independent calls in same block; dependent ones must wait. enable depends on create. So sequential.\n\nLet me first create the plugin.The plugin is staged. Now enable it. Note the manifest capabilities structure - the SDK says \"Capabilities use kind/name declarations: ... provider.provider.id\". Let me check whether the format should be `{\"provider\": [\"local-response\"]}` or `{\"provider\": {\"provider\": ...}}`. Actually the capability declaration likely uses the shape `permissions.capabilities` keyed by kind, with names array. The example minimal manifest: `permissions:{capabilities:{tool:[\"tool_name\"]}}`. So `provider: [\"local-response\"]` fits. Good.\n\nNow enable the plugin.The plugin is active. Now I need to explicitly invoke the provider using invoke_plugin with kind='provider', name='local-response', model='local', messages. Let me do that.The provider returned LOCAL-OK with usage input=1/output=1 as expected. Now final answer: provider=LOCAL-OK.\n\nLet me also verify via plugin_status maybe not needed, but could be good to confirm capability registered. Already confirmed. Final answer.",
+        "usage": {
+          "input": 20834,
+          "output": 2456
+        },
+        "cost": 0
+      },
+      "createdAt": 1794690717022
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 653,
+      "type": "state",
+      "data": {
+        "status": "completed"
+      },
+      "createdAt": 1794690717022
+    },
+    {
+      "runId": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "seq": 654,
+      "type": "plugins_disposed",
+      "data": {
+        "externalEffectsReverted": false,
+        "revision": 2
+      },
+      "createdAt": 1794690717022
+    }
+  ],
+  "plugins": [
+    {
+      "id": "local-provider",
+      "version": "1.0.0",
+      "hash": "d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59",
+      "scope": "run",
+      "owner": "68a5f3e7-519f-4fea-a9ec-cc3c8b23af15",
+      "manifest": {
+        "apiVersion": 2,
+        "id": "local-provider",
+        "name": "Local Provider",
+        "version": "1.0.0",
+        "entry": "index.ts",
+        "permissions": {
+          "capabilities": {
+            "provider": [
+              "local-response"
+            ]
+          }
+        }
+      },
+      "state": "stopped",
+      "files": [
+        "index.ts"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "id": "54699710-6e0c-466a-9b0d-2cb25ad310a3",
+      "name": "plugin_status",
+      "argsSummary": "{\"sdk\":true}",
+      "status": "succeeded",
+      "startedAt": 1794690663553,
+      "finishedAt": 1794690663554
+    },
+    {
+      "id": "9dee04a3-a862-4605-a44b-1d1727b29465",
+      "name": "discover_tools",
+      "argsSummary": "{\"details\":true,\"query\":\"provider invoke command role\"}",
+      "status": "succeeded",
+      "startedAt": 1794690663554,
+      "finishedAt": 1794690663555
+    },
+    {
+      "id": "57844945-ed95-40dd-ae0f-e71575570876",
+      "name": "recall_tool_result",
+      "argsSummary": "{\"id\":\"54699710-6e0c-466a-9b0d-2cb25ad310a3\",\"limit\":16000}",
+      "status": "succeeded",
+      "startedAt": 1794690666829,
+      "finishedAt": 1794690666831
+    },
+    {
+      "id": "cd955068-092f-4f7a-bbb8-cf0cb1cbe040",
+      "name": "create_plugin",
+      "argsSummary": "{\"id\":\"local-provider\",\"name\":\"Local Provider\",\"files\":{\"index.ts\":\"export default {\\n  id: 'local-provider',\\n  name: 'Local Provider',\\n  version: '1.0.0',\\n  onLoad(ctx: import('../../kernel/types').PluginContext) {\\n    ctx.register({\\n      kind: 'provider',\\n      provider: {\\n        id: 'loc…",
+      "status": "succeeded",
+      "startedAt": 1794690698615,
+      "finishedAt": 1794690698619
+    },
+    {
+      "id": "e9819428-9fc4-4945-b73a-01a22e107e70",
+      "name": "enable_plugin",
+      "argsSummary": "{\"id\":\"local-provider\",\"hash\":\"d8d4df35e3adeaea1bfcf776ce659ebece27a287e6eb916d4833128eafbbdc59\"}",
+      "status": "succeeded",
+      "startedAt": 1794690704516,
+      "finishedAt": 1794690706045
+    },
+    {
+      "id": "f41448d8-90ac-49fa-8944-5438a0079107",
+      "name": "invoke_plugin",
+      "argsSummary": "{\"kind\":\"provider\",\"name\":\"local-response\",\"model\":\"local\",\"messages\":[{\"role\":\"user\",\"content\":\"ping\"}],\"maxTokens\":\"[REDACTED]\"}",
+      "status": "succeeded",
+      "startedAt": 1794690710035,
+      "finishedAt": 1794690710038
+    }
+  ]
+}

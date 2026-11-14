@@ -1,0 +1,5 @@
+
+> maharness@0.1.0 check:threat-model
+> node scripts/check-threat-model.mjs
+
+Threat model mapping valid: 23 referenced files, 11 security specs.

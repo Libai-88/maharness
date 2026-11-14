@@ -1,0 +1,52 @@
+[
+  {
+    "id": "typecheck",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: TypeScript checks passed"
+  },
+  {
+    "id": "unit",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: 1250 passed, 0 failed; 1 optional full-Chromium download test skipped in standard suite"
+  },
+  {
+    "id": "security",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: 396 passed"
+  },
+  {
+    "id": "build",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: UI typecheck, UI production build and backend typecheck passed"
+  },
+  {
+    "id": "desktop",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: Playwright full suite: 90 passed; desktop cases included"
+  },
+  {
+    "id": "narrow-screen",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: Playwright full suite: 90 passed; 390px and 900px cases included"
+  },
+  {
+    "id": "accessibility",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: Playwright axe checks passed"
+  },
+  {
+    "id": "reconnect",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: ui/e2e/sse-reconnect.spec.ts and persistent-run browser flows passed"
+  },
+  {
+    "id": "migration-rollback",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: server/tests/db.spec.ts upgrade, transaction failure and backup restore tests passed"
+  },
+  {
+    "id": "plugin-contract",
+    "passed": true,
+    "evidence": "../composition-validation-20261115/checks.json: Task plugin scope, immutable versions, SDK, dependency composition, cancellation, approval and API role/tenant tests passed"
+  }
+]

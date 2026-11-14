@@ -1,0 +1,6260 @@
+{
+  "events": [
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 1,
+      "type": "state",
+      "data": {
+        "status": "queued"
+      },
+      "createdAt": 1794682403638
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 2,
+      "type": "state",
+      "data": {
+        "status": "running"
+      },
+      "createdAt": 1794682403649
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 3,
+      "type": "start",
+      "data": {
+        "traceId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+        "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc"
+      },
+      "createdAt": 1794682403649
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 4,
+      "type": "model_call_started",
+      "data": {
+        "callId": "69511ca3-d788-489a-8f1e-92d2c25b3b49",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682403672
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 5,
+      "type": "reasoning",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794682406275
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 6,
+      "type": "reasoning",
+      "data": {
+        "text": " me"
+      },
+      "createdAt": 1794682406348
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 7,
+      "type": "reasoning",
+      "data": {
+        "text": " understand the task"
+      },
+      "createdAt": 1794682406396
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 8,
+      "type": "reasoning",
+      "data": {
+        "text": ". I"
+      },
+      "createdAt": 1794682406446
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 9,
+      "type": "reasoning",
+      "data": {
+        "text": " need to create and"
+      },
+      "createdAt": 1794682406496
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 10,
+      "type": "reasoning",
+      "data": {
+        "text": " enable a \""
+      },
+      "createdAt": 1794682406545
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 11,
+      "type": "reasoning",
+      "data": {
+        "text": "calculator\" plugin"
+      },
+      "createdAt": 1794682406595
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 12,
+      "type": "reasoning",
+      "data": {
+        "text": " that provides a"
+      },
+      "createdAt": 1794682406645
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 13,
+      "type": "reasoning",
+      "data": {
+        "text": " `sum_values(num"
+      },
+      "createdAt": 1794682406694
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 14,
+      "type": "reasoning",
+      "data": {
+        "text": "bers:number[]"
+      },
+      "createdAt": 1794682406746
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 15,
+      "type": "reasoning",
+      "data": {
+        "text": ")` tool. Then"
+      },
+      "createdAt": 1794682406793
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 16,
+      "type": "reasoning",
+      "data": {
+        "text": " call it in the"
+      },
+      "createdAt": 1794682406845
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 17,
+      "type": "reasoning",
+      "data": {
+        "text": " current task to compute"
+      },
+      "createdAt": 1794682406892
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 18,
+      "type": "reasoning",
+      "data": {
+        "text": " [12,13"
+      },
+      "createdAt": 1794682406950
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 19,
+      "type": "reasoning",
+      "data": {
+        "text": ",17], and"
+      },
+      "createdAt": 1794682406991
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 20,
+      "type": "reasoning",
+      "data": {
+        "text": " finally answer sum="
+      },
+      "createdAt": 1794682407044
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 21,
+      "type": "reasoning",
+      "data": {
+        "text": "42."
+      },
+      "createdAt": 1794682407091
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 22,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nLet me first"
+      },
+      "createdAt": 1794682407140
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 23,
+      "type": "reasoning",
+      "data": {
+        "text": " check the plugin_status"
+      },
+      "createdAt": 1794682407191
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 24,
+      "type": "reasoning",
+      "data": {
+        "text": " with sdk=true to understand the interface and examples.\n\nAlso discover_tools for command, role, provider entries. Actually the task says \"命令、角色、供应商入口通过 discover_tools 查找\" - command, role, provider entries are found via discover_tools. But for calling a tool, I need to use the tool. Let me think.\n\nActually the plugin provides a tool"
+      },
+      "createdAt": 1794682408424
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 25,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794682408434
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 26,
+      "type": "reasoning",
+      "data": {
+        "text": "sum_values`. To"
+      },
+      "createdAt": 1794682408484
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 27,
+      "type": "reasoning",
+      "data": {
+        "text": " call it, I"
+      },
+      "createdAt": 1794682408533
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 28,
+      "type": "reasoning",
+      "data": {
+        "text": " might"
+      },
+      "createdAt": 1794682408583
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 29,
+      "type": "reasoning",
+      "data": {
+        "text": " need to use discover"
+      },
+      "createdAt": 1794682408632
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 30,
+      "type": "reasoning",
+      "data": {
+        "text": "_tools/"
+      },
+      "createdAt": 1794682408682
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 31,
+      "type": "reasoning",
+      "data": {
+        "text": "enable_tools to load"
+      },
+      "createdAt": 1794682408732
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 32,
+      "type": "reasoning",
+      "data": {
+        "text": " the tool,"
+      },
+      "createdAt": 1794682408781
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 33,
+      "type": "reasoning",
+      "data": {
+        "text": " then call"
+      },
+      "createdAt": 1794682408831
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 34,
+      "type": "reasoning",
+      "data": {
+        "text": " it. Or"
+      },
+      "createdAt": 1794682408881
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 35,
+      "type": "reasoning",
+      "data": {
+        "text": " via"
+      },
+      "createdAt": 1794682408930
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 36,
+      "type": "reasoning",
+      "data": {
+        "text": " Tool"
+      },
+      "createdAt": 1794682408981
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 37,
+      "type": "reasoning",
+      "data": {
+        "text": "Context.invoke. Let"
+      },
+      "createdAt": 1794682409030
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 38,
+      "type": "reasoning",
+      "data": {
+        "text": " me first"
+      },
+      "createdAt": 1794682409079
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 39,
+      "type": "reasoning",
+      "data": {
+        "text": " look"
+      },
+      "createdAt": 1794682409130
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 40,
+      "type": "reasoning",
+      "data": {
+        "text": " at the SDK.\n\n"
+      },
+      "createdAt": 1794682409179
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 41,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me start by"
+      },
+      "createdAt": 1794682409229
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 42,
+      "type": "reasoning",
+      "data": {
+        "text": " reading the"
+      },
+      "createdAt": 1794682409279
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 43,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK and"
+      },
+      "createdAt": 1794682409334
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 44,
+      "type": "reasoning",
+      "data": {
+        "text": " discovering"
+      },
+      "createdAt": 1794682409418
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 45,
+      "type": "delta",
+      "data": {
+        "text": "I"
+      },
+      "createdAt": 1794682409487
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 46,
+      "type": "reasoning",
+      "data": {
+        "text": " tools."
+      },
+      "createdAt": 1794682409487
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 47,
+      "type": "delta",
+      "data": {
+        "text": "'ll start by examining"
+      },
+      "createdAt": 1794682409540
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 48,
+      "type": "delta",
+      "data": {
+        "text": " the plugin"
+      },
+      "createdAt": 1794682409588
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 49,
+      "type": "delta",
+      "data": {
+        "text": " SDK documentation and discovering"
+      },
+      "createdAt": 1794682409639
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 50,
+      "type": "delta",
+      "data": {
+        "text": " available tools."
+      },
+      "createdAt": 1794682409688
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 51,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "69511ca3-d788-489a-8f1e-92d2c25b3b49",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682410697
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 52,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682410698
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 53,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-a6a489886fe09f89",
+        "name": "plugin_status",
+        "args": {
+          "sdk": true
+        }
+      },
+      "createdAt": 1794682410700
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 54,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-a6a489886fe09f89",
+        "name": "plugin_status",
+        "summary": "{\"ok\":true,\"data\":{\"content\":\"# Task plugin SDK v2\\n\\ncreate_plugin({id, source}) stages a TypeScript index.ts; full/multi-file plugins use {id,files:{\\\"index.ts\\\":source,\\\"helper.ts\\\":source},manifest}.\\nmanifest={apiVersion:2,id,name,version:\\\"1.0.0\\\",entry:\\\"index.ts\\\",permissions:{capabilities:{…",
+        "ok": true,
+        "stored": true
+      },
+      "createdAt": 1794682410705
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 55,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-8da573cffa742519",
+        "name": "discover_tools",
+        "args": {
+          "details": true,
+          "query": "calculator sum invoke tool command role provider"
+        }
+      },
+      "createdAt": 1794682410705
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 56,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-8da573cffa742519",
+        "name": "discover_tools",
+        "summary": "{\"ok\":true,\"data\":{\"total\":2,\"nextOffset\":null,\"tools\":[{\"name\":\"invoke_plugin\",\"description\":\"【副作用:write】显式调用任务插件的 command、role 或 provider。role 创建子任务；provider 仅执行本次请求，不改变当前模型。服务与事件在插件中通过 ctx.inject/ctx.on/ctx.bus 组合。\",\"parameters\":{\"type\":\"object\",\"properties\":{\"kind\":{\"type\":\"string\",\"enum\":[\"comm…",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682410708
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 57,
+      "type": "model_call_started",
+      "data": {
+        "callId": "76e19b7c-85e0-4d4f-ab3c-71f707b6c538",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682410711
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 58,
+      "type": "reasoning",
+      "data": {
+        "text": "Let"
+      },
+      "createdAt": 1794682412722
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 59,
+      "type": "reasoning",
+      "data": {
+        "text": " me"
+      },
+      "createdAt": 1794682412797
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 60,
+      "type": "reasoning",
+      "data": {
+        "text": " read the full SDK"
+      },
+      "createdAt": 1794682412846
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 61,
+      "type": "reasoning",
+      "data": {
+        "text": " documentation first"
+      },
+      "createdAt": 1794682412896
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 62,
+      "type": "delta",
+      "data": {
+        "text": "Let me"
+      },
+      "createdAt": 1794682412946
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 63,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682412946
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 64,
+      "type": "delta",
+      "data": {
+        "text": " read the full SDK"
+      },
+      "createdAt": 1794682412996
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 65,
+      "type": "delta",
+      "data": {
+        "text": " documentation to understand"
+      },
+      "createdAt": 1794682413045
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 66,
+      "type": "delta",
+      "data": {
+        "text": " the exact API"
+      },
+      "createdAt": 1794682413095
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 67,
+      "type": "delta",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682413144
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 68,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "76e19b7c-85e0-4d4f-ab3c-71f707b6c538",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682414053
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 69,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682414053
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 70,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-85c4a271d5fee259",
+        "name": "recall_tool_result",
+        "args": {
+          "id": "55ca9cd1-ed13-45e3-9317-0f6819decddc",
+          "limit": 16000
+        }
+      },
+      "createdAt": 1794682414054
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 71,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-85c4a271d5fee259",
+        "name": "recall_tool_result",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"55ca9cd1-ed13-45e3-9317-0f6819decddc\",\"content\":\"{\\\"ok\\\":true,\\\"data\\\":{\\\"content\\\":\\\"# Task plugin SDK v2\\\\n\\\\ncreate_plugin({id, source}) stages a TypeScript index.ts; full/multi-file plugins use {id,files:{\\\\\\\"index.ts\\\\\\\":source,\\\\\\\"helper.ts\\\\\\\":source},manifest}.\\\\nman…",
+        "ok": true,
+        "stored": true
+      },
+      "createdAt": 1794682414059
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 72,
+      "type": "model_call_started",
+      "data": {
+        "callId": "16576829-2b53-4f8c-bdda-e76b313b0ec7",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682414063
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 73,
+      "type": "reasoning",
+      "data": {
+        "text": "Now"
+      },
+      "createdAt": 1794682417080
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 74,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794682417202
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 75,
+      "type": "reasoning",
+      "data": {
+        "text": " understand the SDK."
+      },
+      "createdAt": 1794682417251
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 76,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me note"
+      },
+      "createdAt": 1794682417300
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 77,
+      "type": "reasoning",
+      "data": {
+        "text": " the key"
+      },
+      "createdAt": 1794682417350
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 78,
+      "type": "reasoning",
+      "data": {
+        "text": " points"
+      },
+      "createdAt": 1794682417400
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 79,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794682417451
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 80,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\n1. `"
+      },
+      "createdAt": 1794682417502
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 81,
+      "type": "reasoning",
+      "data": {
+        "text": "create_plugin({id"
+      },
+      "createdAt": 1794682417550
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 82,
+      "type": "reasoning",
+      "data": {
+        "text": ", source})`"
+      },
+      "createdAt": 1794682417600
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 83,
+      "type": "reasoning",
+      "data": {
+        "text": " stages a TypeScript index"
+      },
+      "createdAt": 1794682417652
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 84,
+      "type": "reasoning",
+      "data": {
+        "text": ".ts;"
+      },
+      "createdAt": 1794682417699
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 85,
+      "type": "reasoning",
+      "data": {
+        "text": " full/multi-file"
+      },
+      "createdAt": 1794682417749
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 86,
+      "type": "reasoning",
+      "data": {
+        "text": " plugins use `{id"
+      },
+      "createdAt": 1794682417801
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 87,
+      "type": "reasoning",
+      "data": {
+        "text": ", files:{\""
+      },
+      "createdAt": 1794682417850
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 88,
+      "type": "reasoning",
+      "data": {
+        "text": "index.ts\":source"
+      },
+      "createdAt": 1794682417899
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 89,
+      "type": "reasoning",
+      "data": {
+        "text": ",..."
+      },
+      "createdAt": 1794682417949
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 90,
+      "type": "reasoning",
+      "data": {
+        "text": "}, manifest}"
+      },
+      "createdAt": 1794682417999
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 91,
+      "type": "reasoning",
+      "data": {
+        "text": "`.\n2."
+      },
+      "createdAt": 1794682418128
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 92,
+      "type": "reasoning",
+      "data": {
+        "text": " `manifest={api"
+      },
+      "createdAt": 1794682418128
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 93,
+      "type": "reasoning",
+      "data": {
+        "text": "Version:2,id"
+      },
+      "createdAt": 1794682418148
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 94,
+      "type": "reasoning",
+      "data": {
+        "text": ",name,version:\""
+      },
+      "createdAt": 1794682418200
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 95,
+      "type": "reasoning",
+      "data": {
+        "text": "1.0."
+      },
+      "createdAt": 1794682418249
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 96,
+      "type": "reasoning",
+      "data": {
+        "text": "0\",entry:\""
+      },
+      "createdAt": 1794682418299
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 97,
+      "type": "reasoning",
+      "data": {
+        "text": "index.ts\",permissions"
+      },
+      "createdAt": 1794682418350
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 98,
+      "type": "reasoning",
+      "data": {
+        "text": ":{capabilities:{"
+      },
+      "createdAt": 1794682418397
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 99,
+      "type": "reasoning",
+      "data": {
+        "text": "tool:"
+      },
+      "createdAt": 1794682418449
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 100,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794682418498
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 101,
+      "type": "reasoning",
+      "data": {
+        "text": "}}"
+      },
+      "createdAt": 1794682418547
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 102,
+      "type": "reasoning",
+      "data": {
+        "text": "}`.\n3."
+      },
+      "createdAt": 1794682418600
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 103,
+      "type": "reasoning",
+      "data": {
+        "text": " Capabilities use kind"
+      },
+      "createdAt": 1794682418647
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 104,
+      "type": "reasoning",
+      "data": {
+        "text": "/name declarations:"
+      },
+      "createdAt": 1794682418698
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 105,
+      "type": "reasoning",
+      "data": {
+        "text": " `tool.tool.name"
+      },
+      "createdAt": 1794682418747
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 106,
+      "type": "reasoning",
+      "data": {
+        "text": "`, etc.\n"
+      },
+      "createdAt": 1794682418796
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 107,
+      "type": "reasoning",
+      "data": {
+        "text": "4. `enable"
+      },
+      "createdAt": 1794682418847
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 108,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin({id})"
+      },
+      "createdAt": 1794682418897
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 109,
+      "type": "reasoning",
+      "data": {
+        "text": "` validates and activates"
+      },
+      "createdAt": 1794682418947
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 110,
+      "type": "reasoning",
+      "data": {
+        "text": ";"
+      },
+      "createdAt": 1794682418996
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 111,
+      "type": "reasoning",
+      "data": {
+        "text": " `discover_tools"
+      },
+      "createdAt": 1794682419048
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 112,
+      "type": "reasoning",
+      "data": {
+        "text": "({query:\"name"
+      },
+      "createdAt": 1794682419099
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 113,
+      "type": "reasoning",
+      "data": {
+        "text": "\"})` finds"
+      },
+      "createdAt": 1794682419146
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 114,
+      "type": "reasoning",
+      "data": {
+        "text": " tools; `enable"
+      },
+      "createdAt": 1794682419196
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 115,
+      "type": "reasoning",
+      "data": {
+        "text": "_tools({names:"
+      },
+      "createdAt": 1794682419246
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 116,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"name\"]"
+      },
+      "createdAt": 1794682419297
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 117,
+      "type": "reasoning",
+      "data": {
+        "text": "})` exposes schemas"
+      },
+      "createdAt": 1794682419347
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 118,
+      "type": "reasoning",
+      "data": {
+        "text": " in the next request"
+      },
+      "createdAt": 1794682419396
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 119,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\nThe"
+      },
+      "createdAt": 1794682419447
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 120,
+      "type": "reasoning",
+      "data": {
+        "text": " task"
+      },
+      "createdAt": 1794682419496
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 121,
+      "type": "reasoning",
+      "data": {
+        "text": " specifies"
+      },
+      "createdAt": 1794682419545
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 122,
+      "type": "reasoning",
+      "data": {
+        "text": ":\n"
+      },
+      "createdAt": 1794682419596
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 123,
+      "type": "reasoning",
+      "data": {
+        "text": "- Plugin"
+      },
+      "createdAt": 1794682419646
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 124,
+      "type": "reasoning",
+      "data": {
+        "text": " exports default object `{"
+      },
+      "createdAt": 1794682419698
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 125,
+      "type": "reasoning",
+      "data": {
+        "text": "id,name,version"
+      },
+      "createdAt": 1794682419746
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 126,
+      "type": "reasoning",
+      "data": {
+        "text": ",onLoad(ctx"
+      },
+      "createdAt": 1794682419795
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 127,
+      "type": "reasoning",
+      "data": {
+        "text": ")}`\n- Tool"
+      },
+      "createdAt": 1794682419845
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 128,
+      "type": "reasoning",
+      "data": {
+        "text": "Def must contain"
+      },
+      "createdAt": 1794682419895
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 129,
+      "type": "reasoning",
+      "data": {
+        "text": " name"
+      },
+      "createdAt": 1794682419945
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 130,
+      "type": "reasoning",
+      "data": {
+        "text": ", version, description"
+      },
+      "createdAt": 1794682420022
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 131,
+      "type": "reasoning",
+      "data": {
+        "text": ", permissions, side"
+      },
+      "createdAt": 1794682420047
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 132,
+      "type": "reasoning",
+      "data": {
+        "text": "Effect, parameters,"
+      },
+      "createdAt": 1794682420094
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 133,
+      "type": "reasoning",
+      "data": {
+        "text": " outputSchema, async"
+      },
+      "createdAt": 1794682420144
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 134,
+      "type": "reasoning",
+      "data": {
+        "text": " handler(args,tctx"
+      },
+      "createdAt": 1794682420196
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 135,
+      "type": "reasoning",
+      "data": {
+        "text": ")\n- Success returns"
+      },
+      "createdAt": 1794682420244
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 136,
+      "type": "reasoning",
+      "data": {
+        "text": " `{ok:true,"
+      },
+      "createdAt": 1794682420294
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 137,
+      "type": "reasoning",
+      "data": {
+        "text": "data:...}"
+      },
+      "createdAt": 1794682420343
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 138,
+      "type": "reasoning",
+      "data": {
+        "text": "`\n- PluginContext"
+      },
+      "createdAt": 1794682420395
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 139,
+      "type": "reasoning",
+      "data": {
+        "text": " type available via"
+      },
+      "createdAt": 1794682420444
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 140,
+      "type": "reasoning",
+      "data": {
+        "text": " `import('../../"
+      },
+      "createdAt": 1794682420494
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 141,
+      "type": "reasoning",
+      "data": {
+        "text": "kernel/types').Plugin"
+      },
+      "createdAt": 1794682420544
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 142,
+      "type": "reasoning",
+      "data": {
+        "text": "Context`\n- Task"
+      },
+      "createdAt": 1794682420594
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 143,
+      "type": "reasoning",
+      "data": {
+        "text": " has workspace"
+      },
+      "createdAt": 1794682420644
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 144,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin dev and"
+      },
+      "createdAt": 1794682420695
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 145,
+      "type": "reasoning",
+      "data": {
+        "text": " read/write/network/de"
+      },
+      "createdAt": 1794682420744
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 146,
+      "type": "reasoning",
+      "data": {
+        "text": "legate authorization\n"
+      },
+      "createdAt": 1794682420797
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 147,
+      "type": "reasoning",
+      "data": {
+        "text": "- Can"
+      },
+      "createdAt": 1794682420847
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 148,
+      "type": "reasoning",
+      "data": {
+        "text": " only use pure computation"
+      },
+      "createdAt": 1794682420897
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 149,
+      "type": "reasoning",
+      "data": {
+        "text": ", ctx.storage,"
+      },
+      "createdAt": 1794682420947
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 150,
+      "type": "reasoning",
+      "data": {
+        "text": " and ToolContext.invoke"
+      },
+      "createdAt": 1794682420997
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 151,
+      "type": "reasoning",
+      "data": {
+        "text": " host tools;"
+      },
+      "createdAt": 1794682421047
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 152,
+      "type": "reasoning",
+      "data": {
+        "text": " cannot"
+      },
+      "createdAt": 1794682421099
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 153,
+      "type": "reasoning",
+      "data": {
+        "text": " directly"
+      },
+      "createdAt": 1794682421147
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 154,
+      "type": "reasoning",
+      "data": {
+        "text": " import files"
+      },
+      "createdAt": 1794682421197
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 155,
+      "type": "reasoning",
+      "data": {
+        "text": "/process/network\n"
+      },
+      "createdAt": 1794682421246
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 156,
+      "type": "reasoning",
+      "data": {
+        "text": "- Modules use local"
+      },
+      "createdAt": 1794682421297
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 157,
+      "type": "reasoning",
+      "data": {
+        "text": " relative imports; no"
+      },
+      "createdAt": 1794682421346
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 158,
+      "type": "reasoning",
+      "data": {
+        "text": " dependencies"
+      },
+      "createdAt": 1794682421396
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 159,
+      "type": "reasoning",
+      "data": {
+        "text": " to"
+      },
+      "createdAt": 1794682421446
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 160,
+      "type": "reasoning",
+      "data": {
+        "text": " install\n- manifest"
+      },
+      "createdAt": 1794682421496
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 161,
+      "type": "reasoning",
+      "data": {
+        "text": " apiVersion=2"
+      },
+      "createdAt": 1794682421546
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 162,
+      "type": "reasoning",
+      "data": {
+        "text": ", permissions.capabilities"
+      },
+      "createdAt": 1794682421596
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 163,
+      "type": "reasoning",
+      "data": {
+        "text": " declared by actual kind"
+      },
+      "createdAt": 1794682421646
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 164,
+      "type": "reasoning",
+      "data": {
+        "text": "/name\n-"
+      },
+      "createdAt": 1794682421696
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 165,
+      "type": "reasoning",
+      "data": {
+        "text": " role/provider/p"
+      },
+      "createdAt": 1794682421746
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 166,
+      "type": "reasoning",
+      "data": {
+        "text": "ersona/context"
+      },
+      "createdAt": 1794682421795
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 167,
+      "type": "reasoning",
+      "data": {
+        "text": " names are id;"
+      },
+      "createdAt": 1794682421845
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 168,
+      "type": "reasoning",
+      "data": {
+        "text": " api is mount;"
+      },
+      "createdAt": 1794682421896
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 169,
+      "type": "reasoning",
+      "data": {
+        "text": " listener is event\n"
+      },
+      "createdAt": 1794682421945
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 170,
+      "type": "reasoning",
+      "data": {
+        "text": "- Tool"
+      },
+      "createdAt": 1794682421996
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 171,
+      "type": "reasoning",
+      "data": {
+        "text": " not"
+      },
+      "createdAt": 1794682422045
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 172,
+      "type": "reasoning",
+      "data": {
+        "text": " provided can be"
+      },
+      "createdAt": 1794682422095
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 173,
+      "type": "reasoning",
+      "data": {
+        "text": " discovered and loaded\n"
+      },
+      "createdAt": 1794682422148
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 174,
+      "type": "reasoning",
+      "data": {
+        "text": "- Create and enable"
+      },
+      "createdAt": 1794682422198
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 175,
+      "type": "reasoning",
+      "data": {
+        "text": " calculator plugin, providing"
+      },
+      "createdAt": 1794682422248
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 176,
+      "type": "reasoning",
+      "data": {
+        "text": " sum"
+      },
+      "createdAt": 1794682422297
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 177,
+      "type": "reasoning",
+      "data": {
+        "text": "_values(numbers:"
+      },
+      "createdAt": 1794682422349
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 178,
+      "type": "reasoning",
+      "data": {
+        "text": "number[]) tool\n"
+      },
+      "createdAt": 1794682422397
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 179,
+      "type": "reasoning",
+      "data": {
+        "text": "- In"
+      },
+      "createdAt": 1794682422447
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 180,
+      "type": "reasoning",
+      "data": {
+        "text": " current task call it"
+      },
+      "createdAt": 1794682422497
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 181,
+      "type": "reasoning",
+      "data": {
+        "text": " to compute"
+      },
+      "createdAt": 1794682422547
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 182,
+      "type": "reasoning",
+      "data": {
+        "text": " [12,13"
+      },
+      "createdAt": 1794682422597
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 183,
+      "type": "reasoning",
+      "data": {
+        "text": ",17], final"
+      },
+      "createdAt": 1794682422646
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 184,
+      "type": "reasoning",
+      "data": {
+        "text": " answer sum=42"
+      },
+      "createdAt": 1794682422698
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 185,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nSo"
+      },
+      "createdAt": 1794682422748
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 186,
+      "type": "reasoning",
+      "data": {
+        "text": " I need to:"
+      },
+      "createdAt": 1794682422798
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 187,
+      "type": "reasoning",
+      "data": {
+        "text": "\n1. Create"
+      },
+      "createdAt": 1794682422848
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 188,
+      "type": "reasoning",
+      "data": {
+        "text": " the calculator"
+      },
+      "createdAt": 1794682422897
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 189,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin with manifest"
+      },
+      "createdAt": 1794682422947
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 190,
+      "type": "reasoning",
+      "data": {
+        "text": " (apiVersion="
+      },
+      "createdAt": 1794682422998
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 191,
+      "type": "reasoning",
+      "data": {
+        "text": "2, permissions.cap"
+      },
+      "createdAt": 1794682423048
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 192,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities with tool:"
+      },
+      "createdAt": 1794682423097
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 193,
+      "type": "reasoning",
+      "data": {
+        "text": " [\""
+      },
+      "createdAt": 1794682423147
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 194,
+      "type": "reasoning",
+      "data": {
+        "text": "sum_values\"])\n"
+      },
+      "createdAt": 1794682423197
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 195,
+      "type": "reasoning",
+      "data": {
+        "text": "2. Enable the"
+      },
+      "createdAt": 1794682423247
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 196,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin\n3."
+      },
+      "createdAt": 1794682423297
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 197,
+      "type": "reasoning",
+      "data": {
+        "text": " Discover the sum"
+      },
+      "createdAt": 1794682423346
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 198,
+      "type": "reasoning",
+      "data": {
+        "text": "_values tool and enable"
+      },
+      "createdAt": 1794682423397
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 199,
+      "type": "reasoning",
+      "data": {
+        "text": " it\n4."
+      },
+      "createdAt": 1794682423447
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 200,
+      "type": "reasoning",
+      "data": {
+        "text": " Call it with ["
+      },
+      "createdAt": 1794682423496
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 201,
+      "type": "reasoning",
+      "data": {
+        "text": "12,13,"
+      },
+      "createdAt": 1794682423546
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 202,
+      "type": "reasoning",
+      "data": {
+        "text": "17]\n5."
+      },
+      "createdAt": 1794682423595
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 203,
+      "type": "reasoning",
+      "data": {
+        "text": " Answer sum=42"
+      },
+      "createdAt": 1794682423646
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 204,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nLet me be"
+      },
+      "createdAt": 1794682423696
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 205,
+      "type": "reasoning",
+      "data": {
+        "text": " careful about the Tool"
+      },
+      "createdAt": 1794682423745
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 206,
+      "type": "reasoning",
+      "data": {
+        "text": "Def requirements:"
+      },
+      "createdAt": 1794682423796
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 207,
+      "type": "reasoning",
+      "data": {
+        "text": "\n"
+      },
+      "createdAt": 1794682423845
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 208,
+      "type": "reasoning",
+      "data": {
+        "text": "- name, version"
+      },
+      "createdAt": 1794682423895
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 209,
+      "type": "reasoning",
+      "data": {
+        "text": ", description, permissions"
+      },
+      "createdAt": 1794682423945
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 210,
+      "type": "reasoning",
+      "data": {
+        "text": ", sideEffect,"
+      },
+      "createdAt": 1794682423995
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 211,
+      "type": "reasoning",
+      "data": {
+        "text": " parameters, outputSchema"
+      },
+      "createdAt": 1794682424044
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 212,
+      "type": "reasoning",
+      "data": {
+        "text": ", async handler(args"
+      },
+      "createdAt": 1794682424094
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 213,
+      "type": "reasoning",
+      "data": {
+        "text": ",tctx)\n-"
+      },
+      "createdAt": 1794682424144
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 214,
+      "type": "reasoning",
+      "data": {
+        "text": " Success"
+      },
+      "createdAt": 1794682424195
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 215,
+      "type": "reasoning",
+      "data": {
+        "text": " returns {"
+      },
+      "createdAt": 1794682424244
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 216,
+      "type": "reasoning",
+      "data": {
+        "text": "ok:true,data"
+      },
+      "createdAt": 1794682424294
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 217,
+      "type": "reasoning",
+      "data": {
+        "text": ":...}\n\nThe"
+      },
+      "createdAt": 1794682424344
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 218,
+      "type": "reasoning",
+      "data": {
+        "text": " handler signature"
+      },
+      "createdAt": 1794682424394
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 219,
+      "type": "reasoning",
+      "data": {
+        "text": " should be"
+      },
+      "createdAt": 1794682424443
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 220,
+      "type": "reasoning",
+      "data": {
+        "text": " `async handler(args"
+      },
+      "createdAt": 1794682424494
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 221,
+      "type": "reasoning",
+      "data": {
+        "text": ", tctx)`."
+      },
+      "createdAt": 1794682424548
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 222,
+      "type": "reasoning",
+      "data": {
+        "text": " The minimal"
+      },
+      "createdAt": 1794682424593
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 223,
+      "type": "reasoning",
+      "data": {
+        "text": " example has"
+      },
+      "createdAt": 1794682424644
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 224,
+      "type": "reasoning",
+      "data": {
+        "text": " `async handler(args"
+      },
+      "createdAt": 1794682424693
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 225,
+      "type": "reasoning",
+      "data": {
+        "text": ":unknown)`."
+      },
+      "createdAt": 1794682424744
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 226,
+      "type": "reasoning",
+      "data": {
+        "text": " But the task says"
+      },
+      "createdAt": 1794682424793
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 227,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794682424844
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 228,
+      "type": "reasoning",
+      "data": {
+        "text": " Tool"
+      },
+      "createdAt": 1794682424893
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 229,
+      "type": "reasoning",
+      "data": {
+        "text": "Def must contain"
+      },
+      "createdAt": 1794682424945
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 230,
+      "type": "reasoning",
+      "data": {
+        "text": " `async handler(args"
+      },
+      "createdAt": 1794682424996
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 231,
+      "type": "reasoning",
+      "data": {
+        "text": ",tctx)`. So"
+      },
+      "createdAt": 1794682425045
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 232,
+      "type": "reasoning",
+      "data": {
+        "text": " I should include the"
+      },
+      "createdAt": 1794682425094
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 233,
+      "type": "reasoning",
+      "data": {
+        "text": " second"
+      },
+      "createdAt": 1794682425145
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 234,
+      "type": "reasoning",
+      "data": {
+        "text": " parameter t"
+      },
+      "createdAt": 1794682425195
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 235,
+      "type": "reasoning",
+      "data": {
+        "text": "ctx. It"
+      },
+      "createdAt": 1794682425244
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 236,
+      "type": "reasoning",
+      "data": {
+        "text": " might"
+      },
+      "createdAt": 1794682425294
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 237,
+      "type": "reasoning",
+      "data": {
+        "text": " be unused"
+      },
+      "createdAt": 1794682425344
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 238,
+      "type": "reasoning",
+      "data": {
+        "text": ", but I"
+      },
+      "createdAt": 1794682425400
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 239,
+      "type": "reasoning",
+      "data": {
+        "text": " can"
+      },
+      "createdAt": 1794682425444
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 240,
+      "type": "reasoning",
+      "data": {
+        "text": " include it to"
+      },
+      "createdAt": 1794682425494
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 241,
+      "type": "reasoning",
+      "data": {
+        "text": " be"
+      },
+      "createdAt": 1794682425544
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 242,
+      "type": "reasoning",
+      "data": {
+        "text": " safe.\n\n"
+      },
+      "createdAt": 1794682425594
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 243,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me think"
+      },
+      "createdAt": 1794682425643
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 244,
+      "type": "reasoning",
+      "data": {
+        "text": " about manifest"
+      },
+      "createdAt": 1794682425693
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 245,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682425742
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 246,
+      "type": "reasoning",
+      "data": {
+        "text": " The"
+      },
+      "createdAt": 1794682425793
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 247,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK says:\n`manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}`\n\nWait, but it also says \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, ...\". Hmm, let me re-read.\n\n\"manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}.\nCapabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.\"\n\nSo there's an example form `permissions:{capabilities:{tool:[\"tool_name\"]}}` — that's kind → array of names. But \"Capabilities use kind/name declarations: tool.tool.name\" suggests perhaps a nested object form? Hmm.\n\nActually I think the format is `capabilities: { <kind>: [ \"<name>\" ] }`. The \"tool.tool.name\" is describing the path: for a tool capability, the name is `tool.name`. Let me think again.\n\nActually reading: \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, ...\" — I interpret this as: for kind `tool`, the declared name is `tool.name` (i.e., the ToolDef's `name` field). For kind `command`, the declared name is `command.name`. For `service`, it's `service.id`. Etc. So maybe the capabilities object keys are the kind, and values are arrays of the names.\n\nBut wait — \"tool.tool.name\" literally reads like a dot path `tool.tool.name`. Hmm. Could be a nested object: `capabilities: { tool: { tool: { name: ... } } }`? That seems odd.\n\nLet me reconsider. The manifest example: `permissions:{capabilities:{tool:[\"tool_name\"]}}`. That clearly shows `capabilities` is an object with key `tool` (the kind) and value an array of strings (the names). So for our plugin, it would be `capabilities: {tool: [\"sum_values\"]}`.\n\nThe line \"Capabilities use kind/name declarations: tool.tool.name, ...\" might mean the capability path key naming: e.g., a tool capability named `sum_values` would be declared as `tool.sum_values`? Hmm.\n\n"
+      },
+      "createdAt": 1794682435503
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 248,
+      "type": "reasoning",
+      "data": {
+        "text": "Hmm"
+      },
+      "createdAt": 1794682435503
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 249,
+      "type": "reasoning",
+      "data": {
+        "text": ", this"
+      },
+      "createdAt": 1794682435550
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 250,
+      "type": "reasoning",
+      "data": {
+        "text": " is ambiguous. Let"
+      },
+      "createdAt": 1794682435599
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 251,
+      "type": "reasoning",
+      "data": {
+        "text": " me look"
+      },
+      "createdAt": 1794682435649
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 252,
+      "type": "reasoning",
+      "data": {
+        "text": " for"
+      },
+      "createdAt": 1794682435699
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 253,
+      "type": "reasoning",
+      "data": {
+        "text": " more info"
+      },
+      "createdAt": 1794682435748
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 254,
+      "type": "reasoning",
+      "data": {
+        "text": ". Maybe plugin"
+      },
+      "createdAt": 1794682435799
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 255,
+      "type": "reasoning",
+      "data": {
+        "text": "_status with"
+      },
+      "createdAt": 1794682435849
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 256,
+      "type": "reasoning",
+      "data": {
+        "text": " id"
+      },
+      "createdAt": 1794682435898
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 257,
+      "type": "reasoning",
+      "data": {
+        "text": "/path can"
+      },
+      "createdAt": 1794682435947
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 258,
+      "type": "reasoning",
+      "data": {
+        "text": " read existing plugin sources"
+      },
+      "createdAt": 1794682435998
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 259,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794682436048
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 260,
+      "type": "reasoning",
+      "data": {
+        "text": " or there might be"
+      },
+      "createdAt": 1794682436099
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 261,
+      "type": "reasoning",
+      "data": {
+        "text": " examples."
+      },
+      "createdAt": 1794682436149
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 262,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me check plugin"
+      },
+      "createdAt": 1794682436201
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 263,
+      "type": "reasoning",
+      "data": {
+        "text": "_status for existing"
+      },
+      "createdAt": 1794682436251
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 264,
+      "type": "reasoning",
+      "data": {
+        "text": " plugins to"
+      },
+      "createdAt": 1794682436301
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 265,
+      "type": "reasoning",
+      "data": {
+        "text": " see the actual"
+      },
+      "createdAt": 1794682436351
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 266,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest format used"
+      },
+      "createdAt": 1794682436400
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 267,
+      "type": "reasoning",
+      "data": {
+        "text": " by"
+      },
+      "createdAt": 1794682436452
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 268,
+      "type": "reasoning",
+      "data": {
+        "text": " working plugins.\n\n"
+      },
+      "createdAt": 1794682436501
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 269,
+      "type": "reasoning",
+      "data": {
+        "text": "Actually,"
+      },
+      "createdAt": 1794682436551
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 270,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794682436601
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 271,
+      "type": "reasoning",
+      "data": {
+        "text": " could"
+      },
+      "createdAt": 1794682436651
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 272,
+      "type": "reasoning",
+      "data": {
+        "text": " just"
+      },
+      "createdAt": 1794682436701
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 273,
+      "type": "reasoning",
+      "data": {
+        "text": " try create"
+      },
+      "createdAt": 1794682436753
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 274,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin with the straightforward"
+      },
+      "createdAt": 1794682436801
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 275,
+      "type": "reasoning",
+      "data": {
+        "text": " format"
+      },
+      "createdAt": 1794682436850
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 276,
+      "type": "reasoning",
+      "data": {
+        "text": " and enable"
+      },
+      "createdAt": 1794682436900
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 277,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin to"
+      },
+      "createdAt": 1794682436950
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 278,
+      "type": "reasoning",
+      "data": {
+        "text": " see"
+      },
+      "createdAt": 1794682437000
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 279,
+      "type": "reasoning",
+      "data": {
+        "text": " if validation"
+      },
+      "createdAt": 1794682437049
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 280,
+      "type": "reasoning",
+      "data": {
+        "text": " passes. If it"
+      },
+      "createdAt": 1794682437100
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 281,
+      "type": "reasoning",
+      "data": {
+        "text": " fails, I'll"
+      },
+      "createdAt": 1794682437150
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 282,
+      "type": "reasoning",
+      "data": {
+        "text": " adjust. But"
+      },
+      "createdAt": 1794682437201
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 283,
+      "type": "reasoning",
+      "data": {
+        "text": " enable"
+      },
+      "createdAt": 1794682437270
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 284,
+      "type": "reasoning",
+      "data": {
+        "text": "_plugin has"
+      },
+      "createdAt": 1794682437300
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 285,
+      "type": "reasoning",
+      "data": {
+        "text": " side effects ("
+      },
+      "createdAt": 1794682437387
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 286,
+      "type": "reasoning",
+      "data": {
+        "text": "write) -"
+      },
+      "createdAt": 1794682437400
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 287,
+      "type": "reasoning",
+      "data": {
+        "text": " it's"
+      },
+      "createdAt": 1794682437450
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 288,
+      "type": "reasoning",
+      "data": {
+        "text": " fine, we"
+      },
+      "createdAt": 1794682437499
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 289,
+      "type": "reasoning",
+      "data": {
+        "text": " can iterate.\n\n"
+      },
+      "createdAt": 1794682437550
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 290,
+      "type": "reasoning",
+      "data": {
+        "text": "But"
+      },
+      "createdAt": 1794682437601
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 291,
+      "type": "reasoning",
+      "data": {
+        "text": " let me first check"
+      },
+      "createdAt": 1794682437651
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 292,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin_status to see"
+      },
+      "createdAt": 1794682437700
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 293,
+      "type": "reasoning",
+      "data": {
+        "text": " existing workspace"
+      },
+      "createdAt": 1794682437750
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 294,
+      "type": "reasoning",
+      "data": {
+        "text": " plugins,"
+      },
+      "createdAt": 1794682437802
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 295,
+      "type": "reasoning",
+      "data": {
+        "text": " which might give"
+      },
+      "createdAt": 1794682437851
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 296,
+      "type": "reasoning",
+      "data": {
+        "text": " me a real"
+      },
+      "createdAt": 1794682437901
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 297,
+      "type": "reasoning",
+      "data": {
+        "text": " example manifest"
+      },
+      "createdAt": 1794682437950
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 298,
+      "type": "reasoning",
+      "data": {
+        "text": ".\n\n"
+      },
+      "createdAt": 1794682438000
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 299,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me call plugin"
+      },
+      "createdAt": 1794682438052
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 300,
+      "type": "reasoning",
+      "data": {
+        "text": "_status without sdk"
+      },
+      "createdAt": 1794682438099
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 301,
+      "type": "reasoning",
+      "data": {
+        "text": " to list"
+      },
+      "createdAt": 1794682438150
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 302,
+      "type": "reasoning",
+      "data": {
+        "text": " plugins."
+      },
+      "createdAt": 1794682438199
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 303,
+      "type": "delta",
+      "data": {
+        "text": "I"
+      },
+      "createdAt": 1794682438249
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 304,
+      "type": "delta",
+      "data": {
+        "text": " have the SDK documentation"
+      },
+      "createdAt": 1794682438298
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 305,
+      "type": "delta",
+      "data": {
+        "text": ". Let me check"
+      },
+      "createdAt": 1794682438349
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 306,
+      "type": "delta",
+      "data": {
+        "text": " existing plugins"
+      },
+      "createdAt": 1794682438398
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 307,
+      "type": "delta",
+      "data": {
+        "text": " for a"
+      },
+      "createdAt": 1794682438447
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 308,
+      "type": "delta",
+      "data": {
+        "text": " real manifest example"
+      },
+      "createdAt": 1794682438497
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 309,
+      "type": "delta",
+      "data": {
+        "text": " before creating"
+      },
+      "createdAt": 1794682438546
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 310,
+      "type": "delta",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682438597
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 311,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "16576829-2b53-4f8c-bdda-e76b313b0ec7",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682439205
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 312,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682439205
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 313,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-b9efe54e57454560",
+        "name": "plugin_status",
+        "args": {}
+      },
+      "createdAt": 1794682439206
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 314,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-b9efe54e57454560",
+        "name": "plugin_status",
+        "summary": "{\"ok\":true,\"data\":{\"revision\":0,\"sdk\":{\"tool\":\"plugin_status\",\"args\":{\"sdk\":true}},\"grant\":{\"enabled\":true,\"permissions\":[\"workspace.read\",\"workspace.write\",\"network\",\"delegate\"],\"dependencies\":[]},\"plugins\":[],\"available\":[]}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682439207
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 315,
+      "type": "model_call_started",
+      "data": {
+        "callId": "ca161eca-24d5-49ad-9bf8-2dbff3270f63",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682439210
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 316,
+      "type": "reasoning",
+      "data": {
+        "text": "No"
+      },
+      "createdAt": 1794682440865
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 317,
+      "type": "reasoning",
+      "data": {
+        "text": " existing"
+      },
+      "createdAt": 1794682440942
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 318,
+      "type": "reasoning",
+      "data": {
+        "text": " plugins. I'll"
+      },
+      "createdAt": 1794682440992
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 319,
+      "type": "reasoning",
+      "data": {
+        "text": " create the calculator"
+      },
+      "createdAt": 1794682441041
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 320,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin with a full"
+      },
+      "createdAt": 1794682441089
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 321,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest"
+      },
+      "createdAt": 1794682441141
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 322,
+      "type": "reasoning",
+      "data": {
+        "text": " (apiVersion="
+      },
+      "createdAt": 1794682441271
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 323,
+      "type": "reasoning",
+      "data": {
+        "text": "2) as"
+      },
+      "createdAt": 1794682441271
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 324,
+      "type": "reasoning",
+      "data": {
+        "text": " requested"
+      },
+      "createdAt": 1794682441287
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 325,
+      "type": "reasoning",
+      "data": {
+        "text": ". The"
+      },
+      "createdAt": 1794682441338
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 326,
+      "type": "reasoning",
+      "data": {
+        "text": " task says"
+      },
+      "createdAt": 1794682441388
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 327,
+      "type": "reasoning",
+      "data": {
+        "text": " \""
+      },
+      "createdAt": 1794682441437
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 328,
+      "type": "reasoning",
+      "data": {
+        "text": "manifest"
+      },
+      "createdAt": 1794682441488
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 329,
+      "type": "reasoning",
+      "data": {
+        "text": " 的 apiVersion"
+      },
+      "createdAt": 1794682441538
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 330,
+      "type": "reasoning",
+      "data": {
+        "text": "=2，permissions"
+      },
+      "createdAt": 1794682441588
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 331,
+      "type": "reasoning",
+      "data": {
+        "text": ".capabilities 按"
+      },
+      "createdAt": 1794682441639
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 332,
+      "type": "reasoning",
+      "data": {
+        "text": "实际 kind/名称"
+      },
+      "createdAt": 1794682441689
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 333,
+      "type": "reasoning",
+      "data": {
+        "text": "声明\" — declare"
+      },
+      "createdAt": 1794682441736
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 334,
+      "type": "reasoning",
+      "data": {
+        "text": " capabilities"
+      },
+      "createdAt": 1794682441788
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 335,
+      "type": "reasoning",
+      "data": {
+        "text": " by actual kind/"
+      },
+      "createdAt": 1794682441839
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 336,
+      "type": "reasoning",
+      "data": {
+        "text": "name. So I"
+      },
+      "createdAt": 1794682441888
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 337,
+      "type": "reasoning",
+      "data": {
+        "text": " need to"
+      },
+      "createdAt": 1794682441938
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 338,
+      "type": "reasoning",
+      "data": {
+        "text": " declare the"
+      },
+      "createdAt": 1794682441988
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 339,
+      "type": "reasoning",
+      "data": {
+        "text": " tool capability:"
+      },
+      "createdAt": 1794682442039
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 340,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794682442087
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 341,
+      "type": "reasoning",
+      "data": {
+        "text": "{\""
+      },
+      "createdAt": 1794682442137
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 342,
+      "type": "reasoning",
+      "data": {
+        "text": "tool\":[\"sum"
+      },
+      "createdAt": 1794682442191
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 343,
+      "type": "reasoning",
+      "data": {
+        "text": "_values\"]}` or"
+      },
+      "createdAt": 1794682442241
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 344,
+      "type": "reasoning",
+      "data": {
+        "text": " similar.\n\n"
+      },
+      "createdAt": 1794682442287
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 345,
+      "type": "reasoning",
+      "data": {
+        "text": "From"
+      },
+      "createdAt": 1794682442337
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 346,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK"
+      },
+      "createdAt": 1794682442386
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 347,
+      "type": "reasoning",
+      "data": {
+        "text": ": `"
+      },
+      "createdAt": 1794682442444
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 348,
+      "type": "reasoning",
+      "data": {
+        "text": "manifest={apiVersion"
+      },
+      "createdAt": 1794682442485
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 349,
+      "type": "reasoning",
+      "data": {
+        "text": ":2,id,name"
+      },
+      "createdAt": 1794682442535
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 350,
+      "type": "reasoning",
+      "data": {
+        "text": ",version:\""
+      },
+      "createdAt": 1794682442585
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 351,
+      "type": "reasoning",
+      "data": {
+        "text": "1.0."
+      },
+      "createdAt": 1794682442636
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 352,
+      "type": "reasoning",
+      "data": {
+        "text": "0\",entry:\""
+      },
+      "createdAt": 1794682442686
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 353,
+      "type": "reasoning",
+      "data": {
+        "text": "index.ts\",permissions"
+      },
+      "createdAt": 1794682442737
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 354,
+      "type": "reasoning",
+      "data": {
+        "text": ":{capabilities:{"
+      },
+      "createdAt": 1794682442786
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 355,
+      "type": "reasoning",
+      "data": {
+        "text": "tool:"
+      },
+      "createdAt": 1794682442839
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 356,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794682442887
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 357,
+      "type": "reasoning",
+      "data": {
+        "text": "}}}`. And \""
+      },
+      "createdAt": 1794682442937
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 358,
+      "type": "reasoning",
+      "data": {
+        "text": "Capabilities use kind/"
+      },
+      "createdAt": 1794682442986
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 359,
+      "type": "reasoning",
+      "data": {
+        "text": "name declarations: tool"
+      },
+      "createdAt": 1794682443037
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 360,
+      "type": "reasoning",
+      "data": {
+        "text": ".tool.name, command"
+      },
+      "createdAt": 1794682443085
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 361,
+      "type": "reasoning",
+      "data": {
+        "text": ".command.name,"
+      },
+      "createdAt": 1794682443137
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 362,
+      "type": "reasoning",
+      "data": {
+        "text": " ...\". H"
+      },
+      "createdAt": 1794682443189
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 363,
+      "type": "reasoning",
+      "data": {
+        "text": "mm, that's"
+      },
+      "createdAt": 1794682443235
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 364,
+      "type": "reasoning",
+      "data": {
+        "text": " a bit ambiguous."
+      },
+      "createdAt": 1794682443287
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 365,
+      "type": "reasoning",
+      "data": {
+        "text": " Let me re"
+      },
+      "createdAt": 1794682443336
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 366,
+      "type": "reasoning",
+      "data": {
+        "text": "-read.\n\n"
+      },
+      "createdAt": 1794682443387
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 367,
+      "type": "reasoning",
+      "data": {
+        "text": "\"manifest"
+      },
+      "createdAt": 1794682443436
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 368,
+      "type": "reasoning",
+      "data": {
+        "text": "={apiVersion:"
+      },
+      "createdAt": 1794682443484
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 369,
+      "type": "reasoning",
+      "data": {
+        "text": "2,id,name,"
+      },
+      "createdAt": 1794682443534
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 370,
+      "type": "reasoning",
+      "data": {
+        "text": "version:\"1."
+      },
+      "createdAt": 1794682443585
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 371,
+      "type": "reasoning",
+      "data": {
+        "text": "0.0\","
+      },
+      "createdAt": 1794682443635
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 372,
+      "type": "reasoning",
+      "data": {
+        "text": "entry:\"index.ts"
+      },
+      "createdAt": 1794682443683
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 373,
+      "type": "reasoning",
+      "data": {
+        "text": "\",permissions:{cap"
+      },
+      "createdAt": 1794682443732
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 374,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities:{tool:"
+      },
+      "createdAt": 1794682443781
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 375,
+      "type": "reasoning",
+      "data": {
+        "text": "[\"tool_name\"]"
+      },
+      "createdAt": 1794682443831
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 376,
+      "type": "reasoning",
+      "data": {
+        "text": "}}"
+      },
+      "createdAt": 1794682443883
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 377,
+      "type": "reasoning",
+      "data": {
+        "text": "}. Cap"
+      },
+      "createdAt": 1794682443930
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 378,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities use kind/"
+      },
+      "createdAt": 1794682443982
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 379,
+      "type": "reasoning",
+      "data": {
+        "text": "name declarations: tool"
+      },
+      "createdAt": 1794682444033
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 380,
+      "type": "reasoning",
+      "data": {
+        "text": ".tool.name, command"
+      },
+      "createdAt": 1794682444079
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 381,
+      "type": "reasoning",
+      "data": {
+        "text": ".command.name, service"
+      },
+      "createdAt": 1794682444130
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 382,
+      "type": "reasoning",
+      "data": {
+        "text": ".service.id, context"
+      },
+      "createdAt": 1794682444178
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 383,
+      "type": "reasoning",
+      "data": {
+        "text": ".context.id, role"
+      },
+      "createdAt": 1794682444230
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 384,
+      "type": "reasoning",
+      "data": {
+        "text": ".role.id, provider"
+      },
+      "createdAt": 1794682444280
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 385,
+      "type": "reasoning",
+      "data": {
+        "text": ".provider.id, persona"
+      },
+      "createdAt": 1794682444330
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 386,
+      "type": "reasoning",
+      "data": {
+        "text": ".persona.id"
+      },
+      "createdAt": 1794682444379
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 387,
+      "type": "reasoning",
+      "data": {
+        "text": ", api.api.m"
+      },
+      "createdAt": 1794682444426
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 388,
+      "type": "reasoning",
+      "data": {
+        "text": "ount, listener.event"
+      },
+      "createdAt": 1794682444476
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 389,
+      "type": "reasoning",
+      "data": {
+        "text": ".\"\n\nSo the capabilities"
+      },
+      "createdAt": 1794682444526
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 390,
+      "type": "reasoning",
+      "data": {
+        "text": " object maps"
+      },
+      "createdAt": 1794682444576
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 391,
+      "type": "reasoning",
+      "data": {
+        "text": " kind →"
+      },
+      "createdAt": 1794682444625
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 392,
+      "type": "reasoning",
+      "data": {
+        "text": " array of names"
+      },
+      "createdAt": 1794682444676
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 393,
+      "type": "reasoning",
+      "data": {
+        "text": ". For tool"
+      },
+      "createdAt": 1794682444724
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 394,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794682444776
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 395,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794682444823
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 396,
+      "type": "reasoning",
+      "data": {
+        "text": " name is `tool"
+      },
+      "createdAt": 1794682444874
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 397,
+      "type": "reasoning",
+      "data": {
+        "text": ".name`"
+      },
+      "createdAt": 1794682444922
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 398,
+      "type": "reasoning",
+      "data": {
+        "text": " i"
+      },
+      "createdAt": 1794682444974
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 399,
+      "type": "reasoning",
+      "data": {
+        "text": ".e. \"sum"
+      },
+      "createdAt": 1794682445027
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 400,
+      "type": "reasoning",
+      "data": {
+        "text": "_values\". So"
+      },
+      "createdAt": 1794682445074
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 401,
+      "type": "reasoning",
+      "data": {
+        "text": " `cap"
+      },
+      "createdAt": 1794682445126
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 402,
+      "type": "reasoning",
+      "data": {
+        "text": "abilities: { tool"
+      },
+      "createdAt": 1794682445173
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 403,
+      "type": "reasoning",
+      "data": {
+        "text": ": [\"sum_values"
+      },
+      "createdAt": 1794682445222
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 404,
+      "type": "reasoning",
+      "data": {
+        "text": "\"] }`. The"
+      },
+      "createdAt": 1794682445273
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 405,
+      "type": "reasoning",
+      "data": {
+        "text": " dotted"
+      },
+      "createdAt": 1794682445320
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 406,
+      "type": "reasoning",
+      "data": {
+        "text": " notation"
+      },
+      "createdAt": 1794682445371
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 407,
+      "type": "reasoning",
+      "data": {
+        "text": " \"tool.tool.name"
+      },
+      "createdAt": 1794682445422
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 408,
+      "type": "reasoning",
+      "data": {
+        "text": "\" describes the path"
+      },
+      "createdAt": 1794682445470
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 409,
+      "type": "reasoning",
+      "data": {
+        "text": ": kind `"
+      },
+      "createdAt": 1794682445520
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 410,
+      "type": "reasoning",
+      "data": {
+        "text": "tool`, then `"
+      },
+      "createdAt": 1794682445569
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 411,
+      "type": "reasoning",
+      "data": {
+        "text": "tool.name`."
+      },
+      "createdAt": 1794682445620
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 412,
+      "type": "reasoning",
+      "data": {
+        "text": " So"
+      },
+      "createdAt": 1794682445667
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 413,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794682445718
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 414,
+      "type": "reasoning",
+      "data": {
+        "text": "'ll use `{"
+      },
+      "createdAt": 1794682445769
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 415,
+      "type": "reasoning",
+      "data": {
+        "text": "tool: [\"sum"
+      },
+      "createdAt": 1794682445815
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 416,
+      "type": "reasoning",
+      "data": {
+        "text": "_values\"]}`."
+      },
+      "createdAt": 1794682445866
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 417,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nLet me write"
+      },
+      "createdAt": 1794682445973
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 418,
+      "type": "reasoning",
+      "data": {
+        "text": " the plugin source"
+      },
+      "createdAt": 1794682445973
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 419,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682446017
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 420,
+      "type": "reasoning",
+      "data": {
+        "text": " Tool"
+      },
+      "createdAt": 1794682446066
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 421,
+      "type": "reasoning",
+      "data": {
+        "text": "Def must contain"
+      },
+      "createdAt": 1794682446116
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 422,
+      "type": "reasoning",
+      "data": {
+        "text": " name, version,"
+      },
+      "createdAt": 1794682446164
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 423,
+      "type": "reasoning",
+      "data": {
+        "text": " description, permissions,"
+      },
+      "createdAt": 1794682446214
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 424,
+      "type": "reasoning",
+      "data": {
+        "text": " sideEffect, parameters"
+      },
+      "createdAt": 1794682446264
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 425,
+      "type": "reasoning",
+      "data": {
+        "text": ", outputSchema,"
+      },
+      "createdAt": 1794682446312
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 426,
+      "type": "reasoning",
+      "data": {
+        "text": " async handler(args,"
+      },
+      "createdAt": 1794682446362
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 427,
+      "type": "reasoning",
+      "data": {
+        "text": " tctx). Success"
+      },
+      "createdAt": 1794682446411
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 428,
+      "type": "reasoning",
+      "data": {
+        "text": " returns {ok:true"
+      },
+      "createdAt": 1794682446464
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 429,
+      "type": "reasoning",
+      "data": {
+        "text": ",data"
+      },
+      "createdAt": 1794682446510
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 430,
+      "type": "reasoning",
+      "data": {
+        "text": ":"
+      },
+      "createdAt": 1794682446561
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 431,
+      "type": "reasoning",
+      "data": {
+        "text": "...}.\n\n"
+      },
+      "createdAt": 1794682446611
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 432,
+      "type": "reasoning",
+      "data": {
+        "text": "Note"
+      },
+      "createdAt": 1794682446659
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 433,
+      "type": "reasoning",
+      "data": {
+        "text": " handler"
+      },
+      "createdAt": 1794682446708
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 434,
+      "type": "reasoning",
+      "data": {
+        "text": " signature must"
+      },
+      "createdAt": 1794682446758
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 435,
+      "type": "reasoning",
+      "data": {
+        "text": " include"
+      },
+      "createdAt": 1794682446809
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 436,
+      "type": "reasoning",
+      "data": {
+        "text": " tctx ("
+      },
+      "createdAt": 1794682446859
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 437,
+      "type": "reasoning",
+      "data": {
+        "text": "even if unused"
+      },
+      "createdAt": 1794682446906
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 438,
+      "type": "reasoning",
+      "data": {
+        "text": ")"
+      },
+      "createdAt": 1794682446958
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 439,
+      "type": "reasoning",
+      "data": {
+        "text": " per"
+      },
+      "createdAt": 1794682447007
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 440,
+      "type": "reasoning",
+      "data": {
+        "text": " the requirement"
+      },
+      "createdAt": 1794682447054
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 441,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682447104
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 442,
+      "type": "reasoning",
+      "data": {
+        "text": " I'll add"
+      },
+      "createdAt": 1794682447154
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 443,
+      "type": "reasoning",
+      "data": {
+        "text": " `async handler(args"
+      },
+      "createdAt": 1794682447203
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 444,
+      "type": "reasoning",
+      "data": {
+        "text": ": unknown, t"
+      },
+      "createdAt": 1794682447254
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 445,
+      "type": "reasoning",
+      "data": {
+        "text": "ctx: ..."
+      },
+      "createdAt": 1794682447301
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 446,
+      "type": "reasoning",
+      "data": {
+        "text": ")`."
+      },
+      "createdAt": 1794682447353
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 447,
+      "type": "reasoning",
+      "data": {
+        "text": " Type"
+      },
+      "createdAt": 1794682447401
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 448,
+      "type": "reasoning",
+      "data": {
+        "text": " for"
+      },
+      "createdAt": 1794682447452
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 449,
+      "type": "reasoning",
+      "data": {
+        "text": " Tool"
+      },
+      "createdAt": 1794682447501
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 450,
+      "type": "reasoning",
+      "data": {
+        "text": "Context — maybe"
+      },
+      "createdAt": 1794682447549
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 451,
+      "type": "reasoning",
+      "data": {
+        "text": " import from"
+      },
+      "createdAt": 1794682447606
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 452,
+      "type": "reasoning",
+      "data": {
+        "text": " kernel"
+      },
+      "createdAt": 1794682447650
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 453,
+      "type": "reasoning",
+      "data": {
+        "text": "/types too"
+      },
+      "createdAt": 1794682447699
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 454,
+      "type": "reasoning",
+      "data": {
+        "text": ". Let me check"
+      },
+      "createdAt": 1794682447750
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 455,
+      "type": "reasoning",
+      "data": {
+        "text": " if"
+      },
+      "createdAt": 1794682447799
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 456,
+      "type": "reasoning",
+      "data": {
+        "text": " there's a Tool"
+      },
+      "createdAt": 1794682447849
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 457,
+      "type": "reasoning",
+      "data": {
+        "text": "Context type. The"
+      },
+      "createdAt": 1794682447897
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 458,
+      "type": "reasoning",
+      "data": {
+        "text": " SDK mentions"
+      },
+      "createdAt": 1794682447961
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 459,
+      "type": "reasoning",
+      "data": {
+        "text": " \"ToolContext has"
+      },
+      "createdAt": 1794682447997
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 460,
+      "type": "reasoning",
+      "data": {
+        "text": " runId,parent"
+      },
+      "createdAt": 1794682448048
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 461,
+      "type": "reasoning",
+      "data": {
+        "text": "RunId,..."
+      },
+      "createdAt": 1794682448097
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 462,
+      "type": "reasoning",
+      "data": {
+        "text": "\". I could type"
+      },
+      "createdAt": 1794682448145
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 463,
+      "type": "reasoning",
+      "data": {
+        "text": " as"
+      },
+      "createdAt": 1794682448197
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 464,
+      "type": "reasoning",
+      "data": {
+        "text": " `import('../../"
+      },
+      "createdAt": 1794682448248
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 465,
+      "type": "reasoning",
+      "data": {
+        "text": "kernel/types').Tool"
+      },
+      "createdAt": 1794682448297
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 466,
+      "type": "reasoning",
+      "data": {
+        "text": "Context` —"
+      },
+      "createdAt": 1794682448344
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 467,
+      "type": "reasoning",
+      "data": {
+        "text": " might"
+      },
+      "createdAt": 1794682448394
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 468,
+      "type": "reasoning",
+      "data": {
+        "text": " not exist"
+      },
+      "createdAt": 1794682448446
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 469,
+      "type": "reasoning",
+      "data": {
+        "text": ". Safer to"
+      },
+      "createdAt": 1794682448494
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 470,
+      "type": "reasoning",
+      "data": {
+        "text": " use `unknown`"
+      },
+      "createdAt": 1794682448544
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 471,
+      "type": "reasoning",
+      "data": {
+        "text": " or just"
+      },
+      "createdAt": 1794682448595
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 472,
+      "type": "reasoning",
+      "data": {
+        "text": " `_"
+      },
+      "createdAt": 1794682448646
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 473,
+      "type": "reasoning",
+      "data": {
+        "text": "tctx:"
+      },
+      "createdAt": 1794682448700
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 474,
+      "type": "reasoning",
+      "data": {
+        "text": " unknown`. Actually"
+      },
+      "createdAt": 1794682448745
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 475,
+      "type": "reasoning",
+      "data": {
+        "text": " the requirement says \""
+      },
+      "createdAt": 1794682448793
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 476,
+      "type": "reasoning",
+      "data": {
+        "text": "async handler(args,t"
+      },
+      "createdAt": 1794682448843
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 477,
+      "type": "reasoning",
+      "data": {
+        "text": "ctx)\" — two"
+      },
+      "createdAt": 1794682448894
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 478,
+      "type": "reasoning",
+      "data": {
+        "text": " params. I'll"
+      },
+      "createdAt": 1794682448944
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 479,
+      "type": "reasoning",
+      "data": {
+        "text": " name"
+      },
+      "createdAt": 1794682448993
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 480,
+      "type": "reasoning",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794682449043
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 481,
+      "type": "reasoning",
+      "data": {
+        "text": " second `_"
+      },
+      "createdAt": 1794682449092
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 482,
+      "type": "reasoning",
+      "data": {
+        "text": "tctx:"
+      },
+      "createdAt": 1794682449143
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 483,
+      "type": "reasoning",
+      "data": {
+        "text": " unknown` to avoid"
+      },
+      "createdAt": 1794682449192
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 484,
+      "type": "reasoning",
+      "data": {
+        "text": " unused errors"
+      },
+      "createdAt": 1794682449285
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 485,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794682449289
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 486,
+      "type": "reasoning",
+      "data": {
+        "text": " or use `t"
+      },
+      "createdAt": 1794682449348
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 487,
+      "type": "reasoning",
+      "data": {
+        "text": "ctx: any"
+      },
+      "createdAt": 1794682449398
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 488,
+      "type": "reasoning",
+      "data": {
+        "text": "`. Let me use"
+      },
+      "createdAt": 1794682449449
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 489,
+      "type": "reasoning",
+      "data": {
+        "text": " `"
+      },
+      "createdAt": 1794682449495
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 490,
+      "type": "reasoning",
+      "data": {
+        "text": "tctx: import"
+      },
+      "createdAt": 1794682449547
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 491,
+      "type": "reasoning",
+      "data": {
+        "text": "('../../kernel/types"
+      },
+      "createdAt": 1794682449596
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 492,
+      "type": "reasoning",
+      "data": {
+        "text": "').ToolContext`"
+      },
+      "createdAt": 1794682449644
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 493,
+      "type": "reasoning",
+      "data": {
+        "text": " if"
+      },
+      "createdAt": 1794682449697
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 494,
+      "type": "reasoning",
+      "data": {
+        "text": " it exists..."
+      },
+      "createdAt": 1794682449743
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 495,
+      "type": "reasoning",
+      "data": {
+        "text": " risk"
+      },
+      "createdAt": 1794682449795
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 496,
+      "type": "reasoning",
+      "data": {
+        "text": ". Let me check"
+      },
+      "createdAt": 1794682449844
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 497,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin_status with path"
+      },
+      "createdAt": 1794682449892
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 498,
+      "type": "reasoning",
+      "data": {
+        "text": " to kernel"
+      },
+      "createdAt": 1794682449941
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 499,
+      "type": "reasoning",
+      "data": {
+        "text": "/types"
+      },
+      "createdAt": 1794682449993
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 500,
+      "type": "reasoning",
+      "data": {
+        "text": "? Probably"
+      },
+      "createdAt": 1794682450043
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 501,
+      "type": "reasoning",
+      "data": {
+        "text": " not accessible"
+      },
+      "createdAt": 1794682450092
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 502,
+      "type": "reasoning",
+      "data": {
+        "text": ". I'll just"
+      },
+      "createdAt": 1794682450178
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 503,
+      "type": "reasoning",
+      "data": {
+        "text": " use a"
+      },
+      "createdAt": 1794682450195
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 504,
+      "type": "reasoning",
+      "data": {
+        "text": " loose"
+      },
+      "createdAt": 1794682450241
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 505,
+      "type": "reasoning",
+      "data": {
+        "text": " type to"
+      },
+      "createdAt": 1794682450293
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 506,
+      "type": "reasoning",
+      "data": {
+        "text": " be"
+      },
+      "createdAt": 1794682450344
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 507,
+      "type": "reasoning",
+      "data": {
+        "text": " safe."
+      },
+      "createdAt": 1794682450393
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 508,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nLet"
+      },
+      "createdAt": 1794682450441
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 509,
+      "type": "reasoning",
+      "data": {
+        "text": " me do"
+      },
+      "createdAt": 1794682450519
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 510,
+      "type": "reasoning",
+      "data": {
+        "text": " validation"
+      },
+      "createdAt": 1794682450542
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 511,
+      "type": "reasoning",
+      "data": {
+        "text": " of"
+      },
+      "createdAt": 1794682450591
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 512,
+      "type": "reasoning",
+      "data": {
+        "text": " input"
+      },
+      "createdAt": 1794682450647
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 513,
+      "type": "reasoning",
+      "data": {
+        "text": " too"
+      },
+      "createdAt": 1794682450690
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 514,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794682450741
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 515,
+      "type": "reasoning",
+      "data": {
+        "text": " but keep it simple"
+      },
+      "createdAt": 1794682450788
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 516,
+      "type": "reasoning",
+      "data": {
+        "text": ". Sum"
+      },
+      "createdAt": 1794682450840
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 517,
+      "type": "reasoning",
+      "data": {
+        "text": " ["
+      },
+      "createdAt": 1794682450888
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 518,
+      "type": "reasoning",
+      "data": {
+        "text": "12,13,"
+      },
+      "createdAt": 1794682450940
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 519,
+      "type": "reasoning",
+      "data": {
+        "text": "17] = "
+      },
+      "createdAt": 1794682450987
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 520,
+      "type": "reasoning",
+      "data": {
+        "text": "42.\n\nAlso"
+      },
+      "createdAt": 1794682451040
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 521,
+      "type": "reasoning",
+      "data": {
+        "text": " permissions"
+      },
+      "createdAt": 1794682451087
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 522,
+      "type": "reasoning",
+      "data": {
+        "text": ": []"
+      },
+      "createdAt": 1794682451137
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 523,
+      "type": "reasoning",
+      "data": {
+        "text": " side"
+      },
+      "createdAt": 1794682451188
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 524,
+      "type": "reasoning",
+      "data": {
+        "text": "Effect: 'none"
+      },
+      "createdAt": 1794682451235
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 525,
+      "type": "reasoning",
+      "data": {
+        "text": "'"
+      },
+      "createdAt": 1794682451286
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 526,
+      "type": "reasoning",
+      "data": {
+        "text": " — pure computation,"
+      },
+      "createdAt": 1794682451339
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 527,
+      "type": "reasoning",
+      "data": {
+        "text": " no host"
+      },
+      "createdAt": 1794682451389
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 528,
+      "type": "reasoning",
+      "data": {
+        "text": " tools needed.\n\n"
+      },
+      "createdAt": 1794682451440
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 529,
+      "type": "reasoning",
+      "data": {
+        "text": "Let me create with"
+      },
+      "createdAt": 1794682451491
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 530,
+      "type": "reasoning",
+      "data": {
+        "text": " files +"
+      },
+      "createdAt": 1794682451538
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 531,
+      "type": "reasoning",
+      "data": {
+        "text": " manifest.\n\n"
+      },
+      "createdAt": 1794682451590
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 532,
+      "type": "reasoning",
+      "data": {
+        "text": "Then"
+      },
+      "createdAt": 1794682451638
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 533,
+      "type": "reasoning",
+      "data": {
+        "text": " enable_plugin,"
+      },
+      "createdAt": 1794682451688
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 534,
+      "type": "reasoning",
+      "data": {
+        "text": " then discover_tools/"
+      },
+      "createdAt": 1794682451745
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 535,
+      "type": "reasoning",
+      "data": {
+        "text": "enable_tools for"
+      },
+      "createdAt": 1794682451794
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 536,
+      "type": "reasoning",
+      "data": {
+        "text": " sum_values, then"
+      },
+      "createdAt": 1794682451849
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 537,
+      "type": "reasoning",
+      "data": {
+        "text": " call it.\n\n"
+      },
+      "createdAt": 1794682451898
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 538,
+      "type": "reasoning",
+      "data": {
+        "text": "Actually how"
+      },
+      "createdAt": 1794682451947
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 539,
+      "type": "reasoning",
+      "data": {
+        "text": " do I call the"
+      },
+      "createdAt": 1794682452008
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 540,
+      "type": "reasoning",
+      "data": {
+        "text": " tool once"
+      },
+      "createdAt": 1794682452059
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 541,
+      "type": "reasoning",
+      "data": {
+        "text": " enabled"
+      },
+      "createdAt": 1794682452108
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 542,
+      "type": "reasoning",
+      "data": {
+        "text": "? discover_tools finds"
+      },
+      "createdAt": 1794682452157
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 543,
+      "type": "reasoning",
+      "data": {
+        "text": " tools"
+      },
+      "createdAt": 1794682452206
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 544,
+      "type": "reasoning",
+      "data": {
+        "text": "; enable_tools exposes"
+      },
+      "createdAt": 1794682452257
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 545,
+      "type": "reasoning",
+      "data": {
+        "text": " schemas in next request"
+      },
+      "createdAt": 1794682452307
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 546,
+      "type": "reasoning",
+      "data": {
+        "text": ". Then the"
+      },
+      "createdAt": 1794682452357
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 547,
+      "type": "reasoning",
+      "data": {
+        "text": " tool `"
+      },
+      "createdAt": 1794682452406
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 548,
+      "type": "reasoning",
+      "data": {
+        "text": "sum_values` becomes"
+      },
+      "createdAt": 1794682452458
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 549,
+      "type": "reasoning",
+      "data": {
+        "text": " available as a function"
+      },
+      "createdAt": 1794682452505
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 550,
+      "type": "reasoning",
+      "data": {
+        "text": " I"
+      },
+      "createdAt": 1794682452558
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 551,
+      "type": "reasoning",
+      "data": {
+        "text": " can call directly"
+      },
+      "createdAt": 1794682452605
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 552,
+      "type": "reasoning",
+      "data": {
+        "text": " ("
+      },
+      "createdAt": 1794682452658
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 553,
+      "type": "reasoning",
+      "data": {
+        "text": "as"
+      },
+      "createdAt": 1794682452707
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 554,
+      "type": "reasoning",
+      "data": {
+        "text": " a model"
+      },
+      "createdAt": 1794682452757
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 555,
+      "type": "reasoning",
+      "data": {
+        "text": " tool). Let me"
+      },
+      "createdAt": 1794682452807
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 556,
+      "type": "reasoning",
+      "data": {
+        "text": " proceed"
+      },
+      "createdAt": 1794682452855
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 557,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682452906
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 558,
+      "type": "reasoning",
+      "data": {
+        "text": "\n\nCreate"
+      },
+      "createdAt": 1794682452956
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 559,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin first."
+      },
+      "createdAt": 1794682453007
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 560,
+      "type": "delta",
+      "data": {
+        "text": "Now"
+      },
+      "createdAt": 1794682453056
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 561,
+      "type": "delta",
+      "data": {
+        "text": " I'll create the"
+      },
+      "createdAt": 1794682453108
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 562,
+      "type": "delta",
+      "data": {
+        "text": " calculator plugin with a"
+      },
+      "createdAt": 1794682453157
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 563,
+      "type": "delta",
+      "data": {
+        "text": " full"
+      },
+      "createdAt": 1794682453208
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 564,
+      "type": "delta",
+      "data": {
+        "text": " v2 manifest and"
+      },
+      "createdAt": 1794682453257
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 565,
+      "type": "delta",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794682453306
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 566,
+      "type": "delta",
+      "data": {
+        "text": " required"
+      },
+      "createdAt": 1794682453360
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 567,
+      "type": "delta",
+      "data": {
+        "text": " Tool"
+      },
+      "createdAt": 1794682453408
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 568,
+      "type": "delta",
+      "data": {
+        "text": "Def fields"
+      },
+      "createdAt": 1794682453457
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 569,
+      "type": "delta",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682453509
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 570,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "ca161eca-24d5-49ad-9bf8-2dbff3270f63",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682459874
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 571,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682459874
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 572,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-9394773402b04b16",
+        "name": "create_plugin",
+        "args": {
+          "files": {
+            "index.ts": "export default {\n  id: 'calculator',\n  name: 'Calculator',\n  version: '1.0.0',\n  onLoad(ctx: import('../../kernel/types').PluginContext) {\n    ctx.register({ kind: 'tool', tool: {\n      name: 'sum_values',\n      version: '1.0.0',\n      description: 'Sum an array of numeric values and return their total.',\n      permissions: [],\n      sideEffect: 'none',\n      parameters: {\n        type: 'object',\n        properties: {\n          numbers: { type: 'array', items: { type: 'number' }, description: 'Numbers to add' }\n        },\n        required: ['numbers'],\n        additionalProperties: false\n      },\n      outputSchema: {\n        type: 'object',\n        properties: { sum: { type: 'number' } },\n        required: ['sum']\n      },\n      async handler(args: unknown, tctx: unknown) {\n        void tctx;\n        const { numbers } = args as { numbers: number[] };\n        if (!Array.isArray(numbers) || !numbers.every((n) => typeof n === 'number' && Number.isFinite(n))) {\n          return { ok: false, error: 'numbers must be an array of finite numbers' };\n        }\n        const sum = numbers.reduce((a, b) => a + b, 0);\n        return { ok: true, data: { sum } };\n      }\n    }});\n  }\n};\n"
+          },
+          "id": "calculator",
+          "manifest": {
+            "apiVersion": 2,
+            "id": "calculator",
+            "name": "Calculator",
+            "version": "1.0.0",
+            "entry": "index.ts",
+            "permissions": {
+              "capabilities": {
+                "tool": [
+                  "sum_values"
+                ]
+              }
+            }
+          },
+          "name": "Calculator"
+        }
+      },
+      "createdAt": 1794682459875
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 573,
+      "type": "plugin_staged",
+      "data": {
+        "id": "calculator",
+        "hash": "ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182",
+        "checks": [
+          "source",
+          "manifest"
+        ],
+        "activationRequired": true,
+        "revision": 0
+      },
+      "createdAt": 1794682460551
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 574,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-9394773402b04b16",
+        "name": "create_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"calculator\",\"hash\":\"ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182\",\"state\":\"staged\",\"scope\":\"run\"}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682460552
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 575,
+      "type": "model_call_started",
+      "data": {
+        "callId": "3f88879c-7a73-4258-8a17-61e4108e1d41",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682460555
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 576,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794682462861
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 577,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin"
+      },
+      "createdAt": 1794682462978
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 578,
+      "type": "reasoning",
+      "data": {
+        "text": " is staged. Now"
+      },
+      "createdAt": 1794682462985
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 579,
+      "type": "delta",
+      "data": {
+        "text": "Plugin staged successfully. Now let me enable it to validate and activate."
+      },
+      "createdAt": 1794682464203
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 580,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "3f88879c-7a73-4258-8a17-61e4108e1d41",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682464534
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 581,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682464534
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 582,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-973f39bce4452944",
+        "name": "enable_plugin",
+        "args": {
+          "hash": "ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182",
+          "id": "calculator"
+        }
+      },
+      "createdAt": 1794682464535
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 583,
+      "type": "plugin_validated",
+      "data": {
+        "id": "calculator",
+        "hash": "ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182",
+        "checks": [
+          "source",
+          "manifest",
+          "types",
+          "trial"
+        ],
+        "revision": 0
+      },
+      "createdAt": 1794682466358
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 584,
+      "type": "plugin_activated",
+      "data": {
+        "id": "calculator",
+        "hash": "ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182",
+        "scope": "run",
+        "revision": 1
+      },
+      "createdAt": 1794682466538
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 585,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-973f39bce4452944",
+        "name": "enable_plugin",
+        "summary": "{\"ok\":true,\"data\":{\"id\":\"calculator\",\"hash\":\"ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182\",\"state\":\"active\",\"revision\":1,\"capabilities\":[{\"tool\":[\"sum_values\"]}]}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682466539
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 586,
+      "type": "model_call_started",
+      "data": {
+        "callId": "4679ee43-ad9e-467b-9e26-388f67b2a7b0",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682466544
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 587,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794682468665
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 588,
+      "type": "reasoning",
+      "data": {
+        "text": " plugin"
+      },
+      "createdAt": 1794682468738
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 589,
+      "type": "reasoning",
+      "data": {
+        "text": " is active. Now"
+      },
+      "createdAt": 1794682468788
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 590,
+      "type": "reasoning",
+      "data": {
+        "text": " I need to discover"
+      },
+      "createdAt": 1794682468836
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 591,
+      "type": "reasoning",
+      "data": {
+        "text": " and enable the tool"
+      },
+      "createdAt": 1794682468886
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 592,
+      "type": "reasoning",
+      "data": {
+        "text": ","
+      },
+      "createdAt": 1794682468936
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 593,
+      "type": "reasoning",
+      "data": {
+        "text": " then call it."
+      },
+      "createdAt": 1794682468985
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 594,
+      "type": "delta",
+      "data": {
+        "text": "Plugin is active with"
+      },
+      "createdAt": 1794682469089
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 595,
+      "type": "delta",
+      "data": {
+        "text": " the"
+      },
+      "createdAt": 1794682469134
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 596,
+      "type": "delta",
+      "data": {
+        "text": " `sum_values`"
+      },
+      "createdAt": 1794682469183
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 597,
+      "type": "delta",
+      "data": {
+        "text": " tool. Now let"
+      },
+      "createdAt": 1794682469233
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 598,
+      "type": "delta",
+      "data": {
+        "text": " me discover and enable"
+      },
+      "createdAt": 1794682469282
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 599,
+      "type": "delta",
+      "data": {
+        "text": " the tool schema"
+      },
+      "createdAt": 1794682469331
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 600,
+      "type": "delta",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682469381
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 601,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "4679ee43-ad9e-467b-9e26-388f67b2a7b0",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682469972
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 602,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682469972
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 603,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-be920ef99e8b65b9",
+        "name": "discover_tools",
+        "args": {
+          "details": true,
+          "query": "sum_values"
+        }
+      },
+      "createdAt": 1794682469973
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 604,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-be920ef99e8b65b9",
+        "name": "discover_tools",
+        "summary": "{\"ok\":true,\"data\":{\"total\":1,\"nextOffset\":null,\"tools\":[{\"name\":\"sum_values\",\"description\":\"【副作用:none】Sum an array of numeric values and return their total.\",\"parameters\":{\"type\":\"object\",\"properties\":{\"numbers\":{\"type\":\"array\",\"items\":{\"type\":\"number\"},\"description\":\"Numbers to add\"}},\"required\":[\"…",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682469975
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 605,
+      "type": "model_call_started",
+      "data": {
+        "callId": "08483633-557e-4b91-90a2-f6267316b8ef",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682469978
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 606,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "08483633-557e-4b91-90a2-f6267316b8ef",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682473414
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 607,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682473414
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 608,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-8b4362308232d8dc",
+        "name": "enable_tools",
+        "args": {
+          "names": [
+            "sum_values"
+          ]
+        }
+      },
+      "createdAt": 1794682473415
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 609,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-8b4362308232d8dc",
+        "name": "enable_tools",
+        "summary": "{\"ok\":true,\"data\":{\"enabled\":[\"sum_values\"]}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682473416
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 610,
+      "type": "model_call_started",
+      "data": {
+        "callId": "09372c1e-fdd6-4650-9c60-e78ed58cc560",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682473420
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 611,
+      "type": "delta",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794682475446
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 612,
+      "type": "delta",
+      "data": {
+        "text": " tool is now"
+      },
+      "createdAt": 1794682475452
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 613,
+      "type": "delta",
+      "data": {
+        "text": " enabled. Let me"
+      },
+      "createdAt": 1794682475502
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 614,
+      "type": "delta",
+      "data": {
+        "text": " call it with the"
+      },
+      "createdAt": 1794682475553
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 615,
+      "type": "delta",
+      "data": {
+        "text": " requested numbers"
+      },
+      "createdAt": 1794682475603
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 616,
+      "type": "delta",
+      "data": {
+        "text": " ["
+      },
+      "createdAt": 1794682475653
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 617,
+      "type": "delta",
+      "data": {
+        "text": "12, 13"
+      },
+      "createdAt": 1794682475704
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 618,
+      "type": "delta",
+      "data": {
+        "text": ", 17]."
+      },
+      "createdAt": 1794682475754
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 619,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "09372c1e-fdd6-4650-9c60-e78ed58cc560",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682477377
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 620,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682477377
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 621,
+      "type": "tool_start",
+      "data": {
+        "id": "chatcmpl-tool-9f9107501b851fcf",
+        "name": "sum_values",
+        "args": {
+          "numbers": [
+            12,
+            13,
+            17
+          ]
+        }
+      },
+      "createdAt": 1794682477378
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 622,
+      "type": "tool_result",
+      "data": {
+        "id": "chatcmpl-tool-9f9107501b851fcf",
+        "name": "sum_values",
+        "summary": "{\"ok\":true,\"data\":{\"sum\":42}}",
+        "ok": true,
+        "stored": false
+      },
+      "createdAt": 1794682477380
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 623,
+      "type": "model_call_started",
+      "data": {
+        "callId": "1ce010b8-fd3c-45ce-80a1-3f4b550c5f5b",
+        "purpose": "agent",
+        "providerId": "composition",
+        "model": "group/never-stuck"
+      },
+      "createdAt": 1794682477385
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 624,
+      "type": "reasoning",
+      "data": {
+        "text": "The"
+      },
+      "createdAt": 1794682479162
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 625,
+      "type": "reasoning",
+      "data": {
+        "text": " tool"
+      },
+      "createdAt": 1794682479233
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 626,
+      "type": "reasoning",
+      "data": {
+        "text": " returned {"
+      },
+      "createdAt": 1794682479283
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 627,
+      "type": "reasoning",
+      "data": {
+        "text": "ok:true,data"
+      },
+      "createdAt": 1794682479334
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 628,
+      "type": "reasoning",
+      "data": {
+        "text": ":{sum:42"
+      },
+      "createdAt": 1794682479383
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 629,
+      "type": "reasoning",
+      "data": {
+        "text": "}}. So"
+      },
+      "createdAt": 1794682479433
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 630,
+      "type": "reasoning",
+      "data": {
+        "text": " sum"
+      },
+      "createdAt": 1794682479483
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 631,
+      "type": "reasoning",
+      "data": {
+        "text": "=42. Done"
+      },
+      "createdAt": 1794682479534
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 632,
+      "type": "delta",
+      "data": {
+        "text": "已完成"
+      },
+      "createdAt": 1794682479583
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 633,
+      "type": "reasoning",
+      "data": {
+        "text": "."
+      },
+      "createdAt": 1794682479583
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 634,
+      "type": "delta",
+      "data": {
+        "text": "。创建的"
+      },
+      "createdAt": 1794682479633
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 635,
+      "type": "delta",
+      "data": {
+        "text": " `calculator`"
+      },
+      "createdAt": 1794682479683
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 636,
+      "type": "delta",
+      "data": {
+        "text": " 插件导出"
+      },
+      "createdAt": 1794682479732
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 637,
+      "type": "delta",
+      "data": {
+        "text": "默认"
+      },
+      "createdAt": 1794682479783
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 638,
+      "type": "delta",
+      "data": {
+        "text": "对象 `{id:'"
+      },
+      "createdAt": 1794682479833
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 639,
+      "type": "delta",
+      "data": {
+        "text": "calculator',name"
+      },
+      "createdAt": 1794682479883
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 640,
+      "type": "delta",
+      "data": {
+        "text": ":'Calculator',version"
+      },
+      "createdAt": 1794682479933
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 641,
+      "type": "delta",
+      "data": {
+        "text": ":'1.0"
+      },
+      "createdAt": 1794682479985
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 642,
+      "type": "delta",
+      "data": {
+        "text": ".0',on"
+      },
+      "createdAt": 1794682480033
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 643,
+      "type": "delta",
+      "data": {
+        "text": "Load(ctx)}`，"
+      },
+      "createdAt": 1794682480083
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 644,
+      "type": "delta",
+      "data": {
+        "text": "通过 `ctx.register"
+      },
+      "createdAt": 1794682480134
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 645,
+      "type": "delta",
+      "data": {
+        "text": "({"
+      },
+      "createdAt": 1794682480184
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 646,
+      "type": "delta",
+      "data": {
+        "text": "kind:'tool',"
+      },
+      "createdAt": 1794682480233
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 647,
+      "type": "delta",
+      "data": {
+        "text": "tool:{"
+      },
+      "createdAt": 1794682480284
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 648,
+      "type": "delta",
+      "data": {
+        "text": "...}})` "
+      },
+      "createdAt": 1794682480334
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 649,
+      "type": "delta",
+      "data": {
+        "text": "注册了 `sum"
+      },
+      "createdAt": 1794682480384
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 650,
+      "type": "delta",
+      "data": {
+        "text": "_values` 工具"
+      },
+      "createdAt": 1794682480435
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 651,
+      "type": "delta",
+      "data": {
+        "text": "，ToolDef "
+      },
+      "createdAt": 1794682480484
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 652,
+      "type": "delta",
+      "data": {
+        "text": "包含 `name,"
+      },
+      "createdAt": 1794682480533
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 653,
+      "type": "delta",
+      "data": {
+        "text": "version"
+      },
+      "createdAt": 1794682480583
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 654,
+      "type": "delta",
+      "data": {
+        "text": ",description,permissions"
+      },
+      "createdAt": 1794682480633
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 655,
+      "type": "delta",
+      "data": {
+        "text": ",sideEffect,"
+      },
+      "createdAt": 1794682480684
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 656,
+      "type": "delta",
+      "data": {
+        "text": "parameters,outputSchema"
+      },
+      "createdAt": 1794682480734
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 657,
+      "type": "delta",
+      "data": {
+        "text": ",async handler(args"
+      },
+      "createdAt": 1794682480784
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 658,
+      "type": "delta",
+      "data": {
+        "text": ",tctx)`，成功返回 `{ok:true,data:{sum:...}}`。manifest 使用 `apiVersion:2`，`permissions.capabilities` 按实际声明 `{\"tool\":[\"sum_values\"]}`。\n\n执行结果：\n- `create_plugin` → staged（hash `ce6a49a6…`）\n- `enable_plugin` → active，capabilities `[{\"tool\":[\"sum_values\"]}]`\n- `discover_tools` / `enable_tools` → `sum_values` 已加载\n- `sum_values({numbers:[12,13,17]})` → `{ok:true,data:{sum:42}}`\n\n**sum=42**"
+      },
+      "createdAt": 1794682492430
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 659,
+      "type": "model_call_finished",
+      "data": {
+        "callId": "1ce010b8-fd3c-45ce-80a1-3f4b550c5f5b",
+        "purpose": "agent",
+        "status": "completed",
+        "usageStatus": "reported",
+        "cost": 0
+      },
+      "createdAt": 1794682492760
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 660,
+      "type": "usage_status",
+      "data": {
+        "status": "reported"
+      },
+      "createdAt": 1794682492760
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 661,
+      "type": "done",
+      "data": {
+        "type": "assistant_done",
+        "content": "已完成。创建的 `calculator` 插件导出默认对象 `{id:'calculator',name:'Calculator',version:'1.0.0',onLoad(ctx)}`，通过 `ctx.register({kind:'tool',tool:{...}})` 注册了 `sum_values` 工具，ToolDef 包含 `name,version,description,permissions,sideEffect,parameters,outputSchema,async handler(args,tctx)`，成功返回 `{ok:true,data:{sum:...}}`。manifest 使用 `apiVersion:2`，`permissions.capabilities` 按实际声明 `{\"tool\":[\"sum_values\"]}`。\n\n执行结果：\n- `create_plugin` → staged（hash `ce6a49a6…`）\n- `enable_plugin` → active，capabilities `[{\"tool\":[\"sum_values\"]}]`\n- `discover_tools` / `enable_tools` → `sum_values` 已加载\n- `sum_values({numbers:[12,13,17]})` → `{ok:true,data:{sum:42}}`\n\n**sum=42**",
+        "reasoning": "Let me understand the task. I need to create and enable a \"calculator\" plugin that provides a `sum_values(numbers:number[])` tool. Then call it in the current task to compute [12,13,17], and finally answer sum=42.\n\nLet me first check the plugin_status with sdk=true to understand the interface and examples.\n\nAlso discover_tools for command, role, provider entries. Actually the task says \"命令、角色、供应商入口通过 discover_tools 查找\" - command, role, provider entries are found via discover_tools. But for calling a tool, I need to use the tool. Let me think.\n\nActually the plugin provides a tool `sum_values`. To call it, I might need to use discover_tools/enable_tools to load the tool, then call it. Or via ToolContext.invoke. Let me first look at the SDK.\n\nLet me start by reading the SDK and discovering tools.Let me read the full SDK documentation first.Now I understand the SDK. Let me note the key points:\n\n1. `create_plugin({id, source})` stages a TypeScript index.ts; full/multi-file plugins use `{id, files:{\"index.ts\":source,...}, manifest}`.\n2. `manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}`.\n3. Capabilities use kind/name declarations: `tool.tool.name`, etc.\n4. `enable_plugin({id})` validates and activates; `discover_tools({query:\"name\"})` finds tools; `enable_tools({names:[\"name\"]})` exposes schemas in the next request.\n\nThe task specifies:\n- Plugin exports default object `{id,name,version,onLoad(ctx)}`\n- ToolDef must contain name, version, description, permissions, sideEffect, parameters, outputSchema, async handler(args,tctx)\n- Success returns `{ok:true,data:...}`\n- PluginContext type available via `import('../../kernel/types').PluginContext`\n- Task has workspace plugin dev and read/write/network/delegate authorization\n- Can only use pure computation, ctx.storage, and ToolContext.invoke host tools; cannot directly import files/process/network\n- Modules use local relative imports; no dependencies to install\n- manifest apiVersion=2, permissions.capabilities declared by actual kind/name\n- role/provider/persona/context names are id; api is mount; listener is event\n- Tool not provided can be discovered and loaded\n- Create and enable calculator plugin, providing sum_values(numbers:number[]) tool\n- In current task call it to compute [12,13,17], final answer sum=42\n\nSo I need to:\n1. Create the calculator plugin with manifest (apiVersion=2, permissions.capabilities with tool: [\"sum_values\"])\n2. Enable the plugin\n3. Discover the sum_values tool and enable it\n4. Call it with [12,13,17]\n5. Answer sum=42\n\nLet me be careful about the ToolDef requirements:\n- name, version, description, permissions, sideEffect, parameters, outputSchema, async handler(args,tctx)\n- Success returns {ok:true,data:...}\n\nThe handler signature should be `async handler(args, tctx)`. The minimal example has `async handler(args:unknown)`. But the task says the ToolDef must contain `async handler(args,tctx)`. So I should include the second parameter tctx. It might be unused, but I can include it to be safe.\n\nLet me think about manifest. The SDK says:\n`manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}`\n\nWait, but it also says \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, ...\". Hmm, let me re-read.\n\n\"manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}.\nCapabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.\"\n\nSo there's an example form `permissions:{capabilities:{tool:[\"tool_name\"]}}` — that's kind → array of names. But \"Capabilities use kind/name declarations: tool.tool.name\" suggests perhaps a nested object form? Hmm.\n\nActually I think the format is `capabilities: { <kind>: [ \"<name>\" ] }`. The \"tool.tool.name\" is describing the path: for a tool capability, the name is `tool.name`. Let me think again.\n\nActually reading: \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, ...\" — I interpret this as: for kind `tool`, the declared name is `tool.name` (i.e., the ToolDef's `name` field). For kind `command`, the declared name is `command.name`. For `service`, it's `service.id`. Etc. So maybe the capabilities object keys are the kind, and values are arrays of the names.\n\nBut wait — \"tool.tool.name\" literally reads like a dot path `tool.tool.name`. Hmm. Could be a nested object: `capabilities: { tool: { tool: { name: ... } } }`? That seems odd.\n\nLet me reconsider. The manifest example: `permissions:{capabilities:{tool:[\"tool_name\"]}}`. That clearly shows `capabilities` is an object with key `tool` (the kind) and value an array of strings (the names). So for our plugin, it would be `capabilities: {tool: [\"sum_values\"]}`.\n\nThe line \"Capabilities use kind/name declarations: tool.tool.name, ...\" might mean the capability path key naming: e.g., a tool capability named `sum_values` would be declared as `tool.sum_values`? Hmm.\n\nHmm, this is ambiguous. Let me look for more info. Maybe plugin_status with id/path can read existing plugin sources, or there might be examples. Let me check plugin_status for existing plugins to see the actual manifest format used by working plugins.\n\nActually, I could just try create_plugin with the straightforward format and enable_plugin to see if validation passes. If it fails, I'll adjust. But enable_plugin has side effects (write) - it's fine, we can iterate.\n\nBut let me first check plugin_status to see existing workspace plugins, which might give me a real example manifest.\n\nLet me call plugin_status without sdk to list plugins.No existing plugins. I'll create the calculator plugin with a full manifest (apiVersion=2) as requested. The task says \"manifest 的 apiVersion=2，permissions.capabilities 按实际 kind/名称声明\" — declare capabilities by actual kind/name. So I need to declare the tool capability: `{\"tool\":[\"sum_values\"]}` or similar.\n\nFrom SDK: `manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}`. And \"Capabilities use kind/name declarations: tool.tool.name, command.command.name, ...\". Hmm, that's a bit ambiguous. Let me re-read.\n\n\"manifest={apiVersion:2,id,name,version:\"1.0.0\",entry:\"index.ts\",permissions:{capabilities:{tool:[\"tool_name\"]}}}. Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.\"\n\nSo the capabilities object maps kind → array of names. For tool, the name is `tool.name` i.e. \"sum_values\". So `capabilities: { tool: [\"sum_values\"] }`. The dotted notation \"tool.tool.name\" describes the path: kind `tool`, then `tool.name`. So I'll use `{tool: [\"sum_values\"]}`.\n\nLet me write the plugin source. ToolDef must contain name, version, description, permissions, sideEffect, parameters, outputSchema, async handler(args, tctx). Success returns {ok:true,data:...}.\n\nNote handler signature must include tctx (even if unused) per the requirement. I'll add `async handler(args: unknown, tctx: ...)`. Type for ToolContext — maybe import from kernel/types too. Let me check if there's a ToolContext type. The SDK mentions \"ToolContext has runId,parentRunId,...\". I could type as `import('../../kernel/types').ToolContext` — might not exist. Safer to use `unknown` or just `_tctx: unknown`. Actually the requirement says \"async handler(args,tctx)\" — two params. I'll name the second `_tctx: unknown` to avoid unused errors, or use `tctx: any`. Let me use `tctx: import('../../kernel/types').ToolContext` if it exists... risk. Let me check plugin_status with path to kernel/types? Probably not accessible. I'll just use a loose type to be safe.\n\nLet me do validation of input too, but keep it simple. Sum [12,13,17] = 42.\n\nAlso permissions: [] sideEffect: 'none' — pure computation, no host tools needed.\n\nLet me create with files + manifest.\n\nThen enable_plugin, then discover_tools/enable_tools for sum_values, then call it.\n\nActually how do I call the tool once enabled? discover_tools finds tools; enable_tools exposes schemas in next request. Then the tool `sum_values` becomes available as a function I can call directly (as a model tool). Let me proceed.\n\nCreate plugin first.The plugin is staged. NowThe plugin is active. Now I need to discover and enable the tool, then call it.The tool returned {ok:true,data:{sum:42}}. So sum=42. Done.",
+        "usage": {
+          "input": 36799,
+          "output": 3141
+        },
+        "cost": 0
+      },
+      "createdAt": 1794682492762
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 662,
+      "type": "state",
+      "data": {
+        "status": "completed"
+      },
+      "createdAt": 1794682492763
+    },
+    {
+      "runId": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "seq": 663,
+      "type": "plugins_disposed",
+      "data": {
+        "externalEffectsReverted": false,
+        "revision": 2
+      },
+      "createdAt": 1794682492763
+    }
+  ],
+  "plugins": [
+    {
+      "id": "calculator",
+      "version": "1.0.0",
+      "hash": "ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182",
+      "scope": "run",
+      "owner": "ca837b46-83ce-4350-a936-c2bacefd7acc",
+      "manifest": {
+        "apiVersion": 2,
+        "id": "calculator",
+        "name": "Calculator",
+        "version": "1.0.0",
+        "entry": "index.ts",
+        "permissions": {
+          "capabilities": {
+            "tool": [
+              "sum_values"
+            ]
+          }
+        }
+      },
+      "state": "stopped",
+      "files": [
+        "index.ts"
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "id": "55ca9cd1-ed13-45e3-9317-0f6819decddc",
+      "name": "plugin_status",
+      "argsSummary": "{\"sdk\":true}",
+      "status": "succeeded",
+      "startedAt": 1794682410700,
+      "finishedAt": 1794682410705
+    },
+    {
+      "id": "d09e4055-8e93-4ca5-b090-fd7b1af46010",
+      "name": "discover_tools",
+      "argsSummary": "{\"details\":true,\"query\":\"calculator sum invoke tool command role provider\"}",
+      "status": "succeeded",
+      "startedAt": 1794682410705,
+      "finishedAt": 1794682410707
+    },
+    {
+      "id": "a57dbd12-83a2-4bee-9f22-4f5a27261833",
+      "name": "recall_tool_result",
+      "argsSummary": "{\"id\":\"55ca9cd1-ed13-45e3-9317-0f6819decddc\",\"limit\":16000}",
+      "status": "succeeded",
+      "startedAt": 1794682414054,
+      "finishedAt": 1794682414058
+    },
+    {
+      "id": "eac255cf-2300-4179-b08a-ff1c36bda79e",
+      "name": "plugin_status",
+      "argsSummary": "{}",
+      "status": "succeeded",
+      "startedAt": 1794682439206,
+      "finishedAt": 1794682439207
+    },
+    {
+      "id": "67aaf06e-2268-4d39-a06e-aa66aad499d7",
+      "name": "create_plugin",
+      "argsSummary": "{\"files\":{\"index.ts\":\"export default {\\n  id: 'calculator',\\n  name: 'Calculator',\\n  version: '1.0.0',\\n  onLoad(ctx: import('../../kernel/types').PluginContext) {\\n    ctx.register({ kind: 'tool', tool: {\\n      name: 'sum_values',\\n      version: '1.0.0',\\n      description: 'Sum an array of nume…",
+      "status": "succeeded",
+      "startedAt": 1794682459875,
+      "finishedAt": 1794682460552
+    },
+    {
+      "id": "46717960-3bcb-44da-9dfc-989a938e9612",
+      "name": "enable_plugin",
+      "argsSummary": "{\"hash\":\"ce6a49a65ebc83b95a4f5c94e75d77adcd17c0f00d2819bc1087cacef44f3182\",\"id\":\"calculator\"}",
+      "status": "succeeded",
+      "startedAt": 1794682464535,
+      "finishedAt": 1794682466539
+    },
+    {
+      "id": "9ed08a00-c6b4-46c8-bdac-690f288b7f67",
+      "name": "discover_tools",
+      "argsSummary": "{\"details\":true,\"query\":\"sum_values\"}",
+      "status": "succeeded",
+      "startedAt": 1794682469973,
+      "finishedAt": 1794682469974
+    },
+    {
+      "id": "7d785694-6f1c-456d-b68d-9e3a5cfb3a36",
+      "name": "enable_tools",
+      "argsSummary": "{\"names\":[\"sum_values\"]}",
+      "status": "succeeded",
+      "startedAt": 1794682473414,
+      "finishedAt": 1794682473416
+    },
+    {
+      "id": "3d803435-e77e-4c73-b499-bc01195e8dcb",
+      "name": "sum_values",
+      "argsSummary": "{\"numbers\":[12,13,17]}",
+      "status": "succeeded",
+      "startedAt": 1794682477378,
+      "finishedAt": 1794682477380
+    }
+  ]
+}

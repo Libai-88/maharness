@@ -1,0 +1,3170 @@
+{
+  "expected": 144,
+  "observed": 144,
+  "complete": true,
+  "sourceRevisionCurrent": true,
+  "tokensAccounted": 5627132,
+  "tokenLimit": 10386690,
+  "models": [
+    {
+      "model": "group/never-stuck",
+      "variants": [
+        {
+          "variant": "baseline",
+          "samples": 36,
+          "passed": 0,
+          "completeUsage": 24,
+          "tokensIn": 499598
+        },
+        {
+          "variant": "v2",
+          "samples": 36,
+          "passed": 22,
+          "completeUsage": 31,
+          "tokensIn": 1379592
+        }
+      ]
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "variants": [
+        {
+          "variant": "baseline",
+          "samples": 36,
+          "passed": 0,
+          "completeUsage": 2,
+          "tokensIn": 266316
+        },
+        {
+          "variant": "v2",
+          "samples": 36,
+          "passed": 19,
+          "completeUsage": 19,
+          "tokensIn": 1020290
+        }
+      ]
+    }
+  ],
+  "failures": [
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "failed-upgrade",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "calls": 1,
+      "usageComplete": false,
+      "elapsedMs": 77899
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "multi-file",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1333,
+      "tokensOut": 2851,
+      "calls": 2,
+      "usageComplete": false,
+      "elapsedMs": 137118
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3382,
+      "tokensOut": 5438,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 213269
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "dependency",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 21773,
+      "tokensOut": 7911,
+      "calls": 8,
+      "usageComplete": false,
+      "elapsedMs": 269113
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "provider",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 12435,
+      "tokensOut": 3871,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 147796,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 14636,
+      "tokensOut": 1860,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 129503
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "service-tool",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7375,
+      "tokensOut": 4343,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 84144,
+      "error": "LLM 请求失败 [composition] 400: {\"error\":{\"code\":null,\"message\":\"WorkBuddy: Invalid request parameters\",\"param\":null,\"type\":\"invalid_request_error\"}}\n"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "multi-file",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1333,
+      "tokensOut": 1688,
+      "calls": 2,
+      "usageComplete": false,
+      "elapsedMs": 111913
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3550,
+      "tokensOut": 2818,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 140662
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "service-tool",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3569,
+      "tokensOut": 4209,
+      "calls": 2,
+      "usageComplete": true,
+      "elapsedMs": 152750,
+      "error": "插件未通过隔离试运行: 插件 pricing 未获准注册 capability service:pricing"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "service-tool",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3419,
+      "tokensOut": 1503,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 120344
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 15997,
+      "tokensOut": 4389,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 181527,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 math-role 未获准注册 capability role:math-check"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "command",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11552,
+      "tokensOut": 522,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 97437,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 command-sample 未获准注册 capability command:upper"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "provider",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 30249,
+      "tokensOut": 2788,
+      "calls": 7,
+      "usageComplete": true,
+      "elapsedMs": 160665,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 local-provider 未获准注册 capability provider:local-response"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "event-listener",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 71314,
+      "tokensOut": 4690,
+      "calls": 13,
+      "usageComplete": false,
+      "elapsedMs": 311984,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "pure-tool",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 52726,
+      "tokensOut": 9978,
+      "calls": 9,
+      "usageComplete": false,
+      "elapsedMs": 380321,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "dependency",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 8855,
+      "tokensOut": 2308,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 174776,
+      "error": "已停止"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "failed-upgrade",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3389,
+      "tokensOut": 5177,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 153544,
+      "error": "LLM 流异常中断 [composition]：连接已关闭但未收到 [DONE] 结束标记"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "context",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3455,
+      "tokensOut": 2670,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 264270,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "context",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1335,
+      "tokensOut": 312,
+      "calls": 1,
+      "usageComplete": true,
+      "elapsedMs": 91061,
+      "error": "插件未通过隔离试运行: 插件 context-note 未获准注册 capability context:task-note"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3627,
+      "tokensOut": 2069,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 134470
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7994,
+      "tokensOut": 2812,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 142104
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "provider",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1356,
+      "tokensOut": 963,
+      "calls": 2,
+      "usageComplete": false,
+      "elapsedMs": 94960
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 6635,
+      "tokensOut": 1589,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 124262
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5689,
+      "tokensOut": 1498,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 130217
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "failed-upgrade",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 13866,
+      "tokensOut": 6508,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 277539,
+      "error": "插件未通过隔离试运行: 插件 stable-plugin 未获准注册 capability tool:stable_value"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3975,
+      "tokensOut": 596,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 92448
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "provider",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5979,
+      "tokensOut": 2153,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 137202
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3600,
+      "tokensOut": 5154,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 219744,
+      "error": "已停止"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 2933,
+      "tokensOut": 2873,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 139648
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "event-listener",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 49829,
+      "tokensOut": 4183,
+      "calls": 10,
+      "usageComplete": true,
+      "elapsedMs": 193554,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 event-counter 未获准注册 capability listener:counter.value"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 8097,
+      "tokensOut": 6708,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 185317,
+      "error": "插件未通过隔离试运行: 插件 math-role 未获准注册 capability role:undefined"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "dependency",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 18616,
+      "tokensOut": 2991,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 147426,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 factor-base 未获准注册 capability service:factor"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "api-panel",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 39451,
+      "tokensOut": 9330,
+      "calls": 9,
+      "usageComplete": false,
+      "elapsedMs": 274962
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 10740,
+      "tokensOut": 4352,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 92845,
+      "error": "LLM 请求失败 [composition] 400: {\"error\":{\"code\":null,\"message\":\"WorkBuddy: Invalid request parameters\",\"param\":null,\"type\":\"invalid_request_error\"}}\n"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 8812,
+      "tokensOut": 2879,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 143608
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "event-listener",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5811,
+      "tokensOut": 3342,
+      "calls": 3,
+      "usageComplete": true,
+      "elapsedMs": 135532,
+      "error": "插件未通过隔离试运行: 工具 probe_discover 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "service-tool",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 16585,
+      "tokensOut": 4180,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 193160
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "provider",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 10744,
+      "tokensOut": 2185,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 129452,
+      "error": "插件已存在: plugins/local-provider（直接编辑其文件即可修改，勿重复创建）"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "context",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5035,
+      "tokensOut": 1652,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 136940
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 17995,
+      "tokensOut": 703,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 106102,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 math-role 未获准注册 capability role:math-check"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "pure-tool",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 12150,
+      "tokensOut": 2867,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 143221
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11339,
+      "tokensOut": 3116,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 139948
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 18484,
+      "tokensOut": 2837,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 160043
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "multi-file",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 22468,
+      "tokensOut": 5952,
+      "calls": 7,
+      "usageComplete": false,
+      "elapsedMs": 134851,
+      "error": "LLM 请求失败 [composition] 400: {\"error\":{\"code\":null,\"message\":\"WorkBuddy: Invalid request parameters\",\"param\":null,\"type\":\"invalid_request_error\"}}\n"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 15599,
+      "tokensOut": 3346,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 164153
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "multi-file",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 4570,
+      "tokensOut": 4806,
+      "calls": 3,
+      "usageComplete": true,
+      "elapsedMs": 151433,
+      "error": "插件未通过隔离试运行: Transform failed with 1 error:\nD:\\DEEPSEEK\\maharness\\.git\\maharness-evaluation\\composition-baseline\\web-agent\\.plugin-trial-wcenrE\\plugins\\words@aa29329220\\index.ts:1:12: ERROR: Expected \";\" but found \":\""
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3850,
+      "tokensOut": 284,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 90783
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3172,
+      "tokensOut": 4410,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 174791
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "service-tool",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5321,
+      "tokensOut": 1799,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 161559,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "release-resources",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5581,
+      "tokensOut": 1712,
+      "calls": 3,
+      "usageComplete": true,
+      "elapsedMs": 114135,
+      "error": "插件未通过隔离试运行: 工具 lifetime_value 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3605,
+      "tokensOut": 1063,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 114310
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3942,
+      "tokensOut": 478,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 87256
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "provider",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 12186,
+      "tokensOut": 5413,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 214466,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "api-panel",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "registered panel source",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 34598,
+      "tokensOut": 6014,
+      "calls": 8,
+      "usageComplete": true,
+      "elapsedMs": 229463,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 result-panel 未获准注册 capability api:panel"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "dependency",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 14419,
+      "tokensOut": 5910,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 101105,
+      "error": "LLM 请求失败 [composition] 400: {\"error\":{\"code\":\"400\",\"message\":\"商汤小浣熊: inference request is invalid\",\"param\":null,\"type\":\"invalid_request_error\"},\"raccoon_request_id\":\"18e803fbc1b50a18-be24d813-f027-42fc-a17c-88e97e0926a2\"}"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "pure-tool",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1320,
+      "tokensOut": 2281,
+      "calls": 2,
+      "usageComplete": false,
+      "elapsedMs": 136090
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "failed-upgrade",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "calls": 1,
+      "usageComplete": false,
+      "elapsedMs": 75347
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "command",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 16396,
+      "tokensOut": 9913,
+      "calls": 7,
+      "usageComplete": false,
+      "elapsedMs": 342049,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "pure-tool",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 44327,
+      "tokensOut": 3494,
+      "calls": 10,
+      "usageComplete": false,
+      "elapsedMs": 311719,
+      "error": "已停止"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "pure-tool",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "calls": 1,
+      "usageComplete": false,
+      "elapsedMs": 76529
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "pure-tool",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7484,
+      "tokensOut": 6649,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 228500
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "service-tool",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11136,
+      "tokensOut": 4109,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 184538
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "event-listener",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 82537,
+      "tokensOut": 9948,
+      "calls": 16,
+      "usageComplete": false,
+      "elapsedMs": 335850
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "multi-file",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 9691,
+      "tokensOut": 9216,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 190770
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3940,
+      "tokensOut": 400,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 99511
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "release-resources",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": true
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 72071,
+      "tokensOut": 6355,
+      "calls": 10,
+      "usageComplete": true,
+      "elapsedMs": 202591
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "api-panel",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 6415,
+      "tokensOut": 4015,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 164795
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "event-listener",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5030,
+      "tokensOut": 1511,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 165422,
+      "error": "已停止"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "provider",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3017,
+      "tokensOut": 979,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 115445
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "api-panel",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 0,
+      "tokensOut": 0,
+      "calls": 1,
+      "usageComplete": false,
+      "elapsedMs": 74690
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "context",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 20366,
+      "tokensOut": 12540,
+      "calls": 6,
+      "usageComplete": true,
+      "elapsedMs": 268084
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "context",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 20201,
+      "tokensOut": 4184,
+      "calls": 7,
+      "usageComplete": false,
+      "elapsedMs": 180213
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "command",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 15437,
+      "tokensOut": 1613,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 120290,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 command-sample 未获准注册 capability command:upper"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11331,
+      "tokensOut": 3158,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 150635
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "api-panel",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 13441,
+      "tokensOut": 4461,
+      "calls": 4,
+      "usageComplete": true,
+      "elapsedMs": 170711,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "multi-file",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1333,
+      "tokensOut": 4096,
+      "calls": 1,
+      "usageComplete": true,
+      "elapsedMs": 86814
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "context",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 31927,
+      "tokensOut": 10355,
+      "calls": 7,
+      "usageComplete": true,
+      "elapsedMs": 285333,
+      "error": "插件未通过隔离试运行: 插件 context-note 未获准注册 capability context:task-note"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "dependency",
+      "repetition": 3,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7628,
+      "tokensOut": 3402,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 144539
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "failed-upgrade",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 19426,
+      "tokensOut": 2289,
+      "calls": 6,
+      "usageComplete": true,
+      "elapsedMs": 166322,
+      "error": "插件未通过隔离试运行: 工具 stable_value 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "failed-upgrade",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "failed activation preserved working version",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 4616,
+      "tokensOut": 556,
+      "calls": 3,
+      "usageComplete": true,
+      "elapsedMs": 90867,
+      "error": "插件已存在: plugins/stable-plugin（直接编辑其文件即可修改，勿重复创建）"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "dependency",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7267,
+      "tokensOut": 1209,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 109997
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "release-resources",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 7590,
+      "tokensOut": 4380,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 83761,
+      "error": "LLM 请求失败 [composition] 400: {\"error\":{\"code\":null,\"message\":\"WorkBuddy: Invalid request parameters\",\"param\":null,\"type\":\"invalid_request_error\"}}\n"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "event-listener",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3720,
+      "tokensOut": 2145,
+      "calls": 2,
+      "usageComplete": true,
+      "elapsedMs": 114915,
+      "error": "插件未通过隔离试运行: 插件 event-counter 未获准注册 capability listener:undefined"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "release-resources",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 9767,
+      "tokensOut": 7066,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 269130,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "api-panel",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 5798,
+      "tokensOut": 3274,
+      "calls": 3,
+      "usageComplete": true,
+      "elapsedMs": 143065,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "role",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 13568,
+      "tokensOut": 6687,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 227194
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "command",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11634,
+      "tokensOut": 7872,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 233070,
+      "error": "插件未通过隔离试运行: 工具 command-sample_upper 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "dependency",
+      "repetition": 1,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 27644,
+      "tokensOut": 3147,
+      "calls": 7,
+      "usageComplete": true,
+      "elapsedMs": 153647,
+      "error": "Error: PLUGIN_TRIAL_FAILED: 插件 factor-base 未获准注册 capability service:factor"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "command",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 19835,
+      "tokensOut": 9812,
+      "calls": 8,
+      "usageComplete": false,
+      "elapsedMs": 279724
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "release-resources",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "explicit release observed",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 14629,
+      "tokensOut": 5202,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 189609
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3664,
+      "tokensOut": 3266,
+      "calls": 3,
+      "usageComplete": false,
+      "elapsedMs": 184957,
+      "error": "已停止"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "context",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 11963,
+      "tokensOut": 3569,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 146703
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "multi-file",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "multiple source files",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 9491,
+      "tokensOut": 7354,
+      "calls": 5,
+      "usageComplete": false,
+      "elapsedMs": 280657,
+      "error": "已停止"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "api-panel",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3633,
+      "tokensOut": 1103,
+      "calls": 2,
+      "usageComplete": true,
+      "elapsedMs": 102943,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "service-tool",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 40169,
+      "tokensOut": 10979,
+      "calls": 11,
+      "usageComplete": false,
+      "elapsedMs": 317573
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "service-tool",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "new tools used in this run",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 17394,
+      "tokensOut": 5074,
+      "calls": 5,
+      "usageComplete": true,
+      "elapsedMs": 184325,
+      "error": "插件未通过隔离试运行: 工具 quote_total 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "dependency",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 3371,
+      "tokensOut": 2213,
+      "calls": 2,
+      "usageComplete": true,
+      "elapsedMs": 121359,
+      "error": "源码不符合插件契约（缺少: handler）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "command",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 43839,
+      "tokensOut": 6554,
+      "calls": 8,
+      "usageComplete": true,
+      "elapsedMs": 220289,
+      "error": "插件未通过隔离试运行: 工具 probe_command_entry 缺少有效的 v2 版本、schema、副作用或权限声明"
+    },
+    {
+      "model": "group/never-stuck",
+      "caseId": "role",
+      "repetition": 2,
+      "variant": "v2",
+      "completed": false,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": true
+        },
+        {
+          "name": "role delegated",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 16272,
+      "tokensOut": 3987,
+      "calls": 6,
+      "usageComplete": false,
+      "elapsedMs": 123645,
+      "error": "工具执行超时（30s）"
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "api-panel",
+      "repetition": 2,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "registered panel source",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 1329,
+      "tokensOut": 890,
+      "calls": 2,
+      "usageComplete": false,
+      "elapsedMs": 113163
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "dependency",
+      "repetition": 3,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 6557,
+      "tokensOut": 2261,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 138735
+    },
+    {
+      "model": "workbuddy/hy4free",
+      "caseId": "dependency",
+      "repetition": 1,
+      "variant": "baseline",
+      "completed": true,
+      "assertions": [
+        {
+          "name": "proof in final answer",
+          "passed": false
+        },
+        {
+          "name": "required plugin capability contracts",
+          "passed": false
+        },
+        {
+          "name": "contiguous events",
+          "passed": true
+        }
+      ],
+      "tokensIn": 6395,
+      "tokensOut": 2634,
+      "calls": 4,
+      "usageComplete": false,
+      "elapsedMs": 156010
+    }
+  ],
+  "readyForRelease": false
+}

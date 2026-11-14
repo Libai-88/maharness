@@ -1,0 +1,10 @@
+{
+  "kind": "hybrid-role-timeout-regression",
+  "expected": 6,
+  "observed": 6,
+  "passed": 5,
+  "sourceRevisionCurrent": true,
+  "tokensAccounted": 11939,
+  "tokenLimit": 1000000,
+  "notComparativePerformanceEvidence": true
+}

@@ -1,0 +1,241 @@
+{
+  "kind": "release-comparison",
+  "readyForRelease": false,
+  "expectedSamples": 540,
+  "observedSamples": 540,
+  "errors": [],
+  "models": [
+    {
+      "tier": "route-1",
+      "requestedModel": "group/never-stuck",
+      "pinnedVersion": null,
+      "baseline": {
+        "samples": 90,
+        "passed": 89,
+        "successRate": 0.9888888888888889,
+        "medianCostUsd": 0,
+        "medianCalls": 5,
+        "medianTokensIn": 12872,
+        "medianTokensOut": 1072,
+        "calls": 494,
+        "tokensIn": 1205511,
+        "tokensOut": 109970,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "reference": {
+        "samples": 90,
+        "passed": 90,
+        "successRate": 1,
+        "medianCostUsd": 0,
+        "medianCalls": 5,
+        "medianTokensIn": 11118,
+        "medianTokensOut": 917.5,
+        "calls": 495,
+        "tokensIn": 1048162,
+        "tokensOut": 117664,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "v2": {
+        "samples": 90,
+        "passed": 87,
+        "successRate": 0.9666666666666667,
+        "medianCostUsd": 0,
+        "medianCalls": 6,
+        "medianTokensIn": 18125,
+        "medianTokensOut": 1099,
+        "calls": 564,
+        "tokensIn": 2101789,
+        "tokensOut": 142936,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "medianCostRatio": null
+    },
+    {
+      "tier": "route-2",
+      "requestedModel": "workbuddy/hy4free",
+      "pinnedVersion": null,
+      "baseline": {
+        "samples": 90,
+        "passed": 85,
+        "successRate": 0.9444444444444444,
+        "medianCostUsd": 0,
+        "medianCalls": 5,
+        "medianTokensIn": 12571.5,
+        "medianTokensOut": 964,
+        "calls": 487,
+        "tokensIn": 1175214,
+        "tokensOut": 102428,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "reference": {
+        "samples": 90,
+        "passed": 83,
+        "successRate": 0.9222222222222223,
+        "medianCostUsd": 0,
+        "medianCalls": 5,
+        "medianTokensIn": 11305,
+        "medianTokensOut": 911,
+        "calls": 482,
+        "tokensIn": 999872,
+        "tokensOut": 112019,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "v2": {
+        "samples": 90,
+        "passed": 82,
+        "successRate": 0.9111111111111111,
+        "medianCostUsd": 0,
+        "medianCalls": 6,
+        "medianTokensIn": 18824,
+        "medianTokensOut": 1412.5,
+        "calls": 586,
+        "tokensIn": 2619706,
+        "tokensOut": 171783,
+        "unnecessaryConfirmations": 0,
+        "duplicateEffects": 0,
+        "permissionViolations": 0,
+        "eventGaps": 0
+      },
+      "medianCostRatio": null
+    }
+  ],
+  "gates": [
+    {
+      "id": "matrix",
+      "passed": true,
+      "detail": "540 samples"
+    },
+    {
+      "id": "performance-revision",
+      "passed": false,
+      "detail": "完整 540 样本评测对应 1f11902；最终运行源码 1d9473c 的角色委派超时补丁仅有独立确定性及混合真实回归，未重跑完整性能矩阵。三组共享文件工具、材料和读写授权；baseline 使用归档 Kernel/AgentRunner 与 JSON 断点，reference/v2 使用 RunService 与 SQLite，服务封装和输入组装不同。"
+    },
+    {
+      "id": "model-identity",
+      "passed": false,
+      "detail": "Every call must match the fixed model version; route names alone are insufficient"
+    },
+    {
+      "id": "reference-success:route-1",
+      "passed": true,
+      "detail": "Maximum success-rate decline: 5 percentage points"
+    },
+    {
+      "id": "baseline-success:route-1",
+      "passed": false,
+      "detail": "Success rate must meet the old baseline"
+    },
+    {
+      "id": "cost:route-1",
+      "passed": null,
+      "detail": "Maximum median cost increase: 15%; zero-price or missing-cost samples cannot measure a percentage increase"
+    },
+    {
+      "id": "confirmations:route-1",
+      "passed": true,
+      "detail": "Unnecessary confirmations must not increase"
+    },
+    {
+      "id": "reference-success:route-2",
+      "passed": true,
+      "detail": "Maximum success-rate decline: 5 percentage points"
+    },
+    {
+      "id": "baseline-success:route-2",
+      "passed": false,
+      "detail": "Success rate must meet the old baseline"
+    },
+    {
+      "id": "cost:route-2",
+      "passed": null,
+      "detail": "Maximum median cost increase: 15%; zero-price or missing-cost samples cannot measure a percentage increase"
+    },
+    {
+      "id": "confirmations:route-2",
+      "passed": true,
+      "detail": "Unnecessary confirmations must not increase"
+    },
+    {
+      "id": "duplicateEffects",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "permissionViolations",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "eventGaps",
+      "passed": true,
+      "detail": "No observed violations"
+    },
+    {
+      "id": "validation:typecheck",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-typecheck.log"
+    },
+    {
+      "id": "validation:unit",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-unit.log"
+    },
+    {
+      "id": "validation:security",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-security.log"
+    },
+    {
+      "id": "validation:build",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-build.log"
+    },
+    {
+      "id": "validation:desktop",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-browser.log"
+    },
+    {
+      "id": "validation:narrow-screen",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-browser.log"
+    },
+    {
+      "id": "validation:accessibility",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-browser.log"
+    },
+    {
+      "id": "validation:reconnect",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-browser.log"
+    },
+    {
+      "id": "validation:migration-rollback",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-unit.log"
+    },
+    {
+      "id": "validation:plugin-contract",
+      "passed": true,
+      "detail": "../composition-validation-20261115/postfix-security.log"
+    }
+  ],
+  "generatedAt": "2026-11-14T22:30:10.892Z",
+  "usageCompleteSamples": 519
+}

@@ -1,0 +1,21 @@
+{
+  "kind": "hybrid-role-timeout-regression",
+  "models": [
+    "group/never-stuck",
+    "workbuddy/hy4free"
+  ],
+  "repetitions": 3,
+  "expectedSamples": 6,
+  "parent": "deterministic fixture; no parent gateway requests",
+  "child": "live configured model route",
+  "initialChildDelayMs": 35000,
+  "ordinaryToolTimeoutMs": 30000,
+  "maxChildRequests": 4,
+  "maxOutputTokens": 512,
+  "requestTimeoutMs": 120000,
+  "sampleTimeoutMs": 300000,
+  "tokenLimit": 1000000,
+  "sourceRevision": "fc55e40b01dfc7290e481e04094e1a27c050f610831216eeb5aa7055c25c5544",
+  "comparativePerformanceEvidence": false,
+  "implementationRevision": "1d9473cf5a15e40e7b55bd7fc6de4557c9db2f83"
+}

@@ -1,0 +1,41 @@
+{
+  "limit": 20000000,
+  "preflightAccounted": 613310,
+  "batches": [
+    {
+      "dir": "composition-preflight-20261115",
+      "accounted": 236717,
+      "requests": 27,
+      "unsettled": 0
+    },
+    {
+      "dir": "composition-preflight-sdk-20261115",
+      "accounted": 118498,
+      "requests": 16,
+      "unsettled": 0
+    },
+    {
+      "dir": "composition-final-20261115",
+      "accounted": 95636,
+      "requests": 19,
+      "unsettled": 2
+    },
+    {
+      "dir": "release-composition-final-20261115",
+      "accounted": 109691,
+      "requests": 39,
+      "unsettled": 2
+    },
+    {
+      "dir": "composition-final2-20261115",
+      "accounted": 52768,
+      "requests": 6,
+      "unsettled": 2
+    }
+  ],
+  "finalAllocations": {
+    "composition": 10386690,
+    "release": 9000000
+  },
+  "unknownReceipts": "Unsettled calls retain their entire reservation; prior batches are excluded from final performance metrics"
+}

@@ -1,0 +1,12 @@
+{
+  "kind": "artifact-rescore",
+  "reason": "JSON object key order does not change its value; array ordering, value types and duplicate effects remain significant",
+  "samples": 540,
+  "originalSamplesSha256": "dbc7d066215d312151b1a58241ad53ce63e2bd7f85578a8308ce5e1014cde887",
+  "scoredSamplesSha256": "58d7a3376e4693223fa5cd9cb25830f72542669b77b0aae17f376018b9f6ba07",
+  "graderSha256": "e20dfc936814b511ef398354cd4f8f023737aca1f0f2161481f9b388ddd47afe",
+  "modelRequestsReplayed": 0,
+  "toolCallsReplayed": 0,
+  "codeAssertionsReexecuted": 108,
+  "changedSamples": []
+}

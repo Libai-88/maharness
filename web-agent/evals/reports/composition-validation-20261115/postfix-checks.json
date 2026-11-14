@@ -1,0 +1,73 @@
+{
+  "implementationRevision": "1d9473cf5a15e40e7b55bd7fc6de4557c9db2f83",
+  "unit": {
+    "passed": 1251,
+    "failed": 0,
+    "skipped": 1
+  },
+  "security": {
+    "passed": 397,
+    "failed": 0
+  },
+  "selftest": {
+    "passed": 90,
+    "failed": 0
+  },
+  "replay": {
+    "passed": 28,
+    "failed": 0
+  },
+  "browser": {
+    "passed": 90,
+    "failed": 0,
+    "workers": 2
+  },
+  "typecheck": true,
+  "build": true,
+  "logs": {
+    "browser": {
+      "file": "postfix-browser.log",
+      "sha256": "7f7e36cd9bfdec278b27384653fa977ef2d32e39c0d9701e81941db25a124949"
+    },
+    "build": {
+      "file": "postfix-build.log",
+      "sha256": "babf354d2fd0d178e2572a9acd65f0113c742f78d79d333cca5a8cacb8df73a9"
+    },
+    "replay": {
+      "file": "postfix-replay.log",
+      "sha256": "c8915341fdc0b4c371d61dd1b511970190ac5fc2333637d2999a3aef90a8e249"
+    },
+    "security": {
+      "file": "postfix-security.log",
+      "sha256": "6de42279474f8759b65cd4bf8fff5649942129e6425c9a546b474457a417e4a5"
+    },
+    "selftest": {
+      "file": "postfix-selftest.log",
+      "sha256": "c528f40f8b0724cef5e0ff3b02cd4c1f40f22b3e118af827356e6a301a07976a"
+    },
+    "typecheck": {
+      "file": "postfix-typecheck.log",
+      "sha256": "2f79df65b4e4be7dc1619002e9e2090f2b122234d8912dd971809eaa60842330"
+    },
+    "unit": {
+      "file": "postfix-unit.log",
+      "sha256": "951ee54796bd08c180756f0b4acbd2a3711e2582cebe3df39a060f36660319c1"
+    },
+    "role-before-fix": {
+      "file": "role-before-fix.log",
+      "sha256": "bb52c2a058bafdc9ae4100d727f6c5a45490a9594ade81921c9e73d87c8d4ce1"
+    },
+    "role-after-fix": {
+      "file": "role-after-fix.log",
+      "sha256": "179cadea50141d7efbf1495e49f3143518ff8e7d09152b45129565539c4d9c19"
+    },
+    "role-script-typecheck": {
+      "file": "role-script-typecheck.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  },
+  "roleRegression": {
+    "beforeFix": "failed with ordinary tool timeout",
+    "afterFix": "passed; delegate executed once"
+  }
+}
