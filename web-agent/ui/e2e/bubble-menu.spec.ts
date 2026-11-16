@@ -210,6 +210,34 @@ test.describe('任务验收证据', () => {
 });
 
 test.describe('工具审批', () => {
+  test('提交失败时保留审批卡，等待清单校准或用户重试', async ({ page }) => {
+    await setup(page);
+    await mockTaskEvents(page, async (route) => {
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-approval-failure"}',
+        '',
+        'event: approval_required',
+        'data: {"approvalId":"approval-e2e-failure","name":"delete_file","summary":"删除 reports/draft.md","approvalToken":"one-time-failure-token"}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+      ].join('\n');
+      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
+    });
+    await page.route('**/api/approvals**', (route) =>
+      route.fulfill({ status: 503, json: { error: '审批服务暂时不可用' } }));
+    await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
+    await page.keyboard.press('Enter');
+
+    const card = page.getByTestId('approval-card');
+    await expect(card).toContainText('删除 reports/draft.md');
+    await card.getByRole('button', { name: '可以，去做吧' }).click();
+    await expect(card).toHaveCount(1);
+    await expect(page.getByText('审批服务暂时不可用')).toBeVisible();
+  });
+
   for (const decision of [
     { approved: true, label: '批准', button: '可以，去做吧' },
     { approved: false, label: '拒绝', button: '先别' },

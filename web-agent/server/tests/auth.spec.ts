@@ -5,8 +5,8 @@
  *       未设该变量时保持既有本机免鉴权行为（向后兼容）；
  *   (a) 危险工作区根：POST /api/workspaces 拒绝 C:\（以及家目录、过短路径），
  *       /switch 对「修复前已入库的危险行」同样复检拒绝；
- *   (c) 审批一次性凭据：强制模式下缺凭据 401、错凭据 403、凭据一次性（重放 403）；
- *       非强制模式下不带凭据仍可回答（不破坏现有前端）；
+ *   (c) 审批一次性凭据：默认强制下缺凭据 401、错凭据 403、凭据一次性（重放 403）；
+ *       local 显式设 0 时兼容旧调用；
  *   A6-3：通配 allow 策略需显式确认；
  *   A7：keyBroken 暴露、拒绝静默重建密钥、icacls 失败不抛。
  * Host 头这类 fetch 不便伪造的请求走 node:http 裸请求。
@@ -55,7 +55,7 @@ const { buildReadinessSnapshot, buildStorageSnapshot, readStorageSnapshot } = aw
 const { SseConnectionLimiter } = await import('../routes/shared');
 const { Store, hasEncryptedProviderKeys } = await import('../db');
 const { resolveSecretKey, encryptSecret, isEncrypted, hardenSecretKeyPath } = await import('../secrets');
-const { ApprovalTokenRegistry, approvalTokens } = await import('../routes/approvals');
+const { ApprovalTokenRegistry } = await import('../routes/approvals');
 const { assessWorkspaceRoot } = await import('../routes/workspaces');
 const { isBlanketAllow } = await import('../routes/rules');
 const { CredentialFailureLimiter, decideCredentialAuthorization } = await import('../security-policy');
@@ -586,11 +586,17 @@ describe('A6-c 审批一次性凭据', () => {
     delete process.env.MAHARNESS_APPROVAL_TOKEN;
   });
 
-  test('默认（非强制）模式：不带凭据仍按既有方式回答（不破坏现有前端）', async () => {
-    approvalTokens.issue('app-y', undefined, Date.now() + 60_000); // 有记录但请求不带凭据
-    const r = await post('/api/approvals/app-y', { approved: true });
-    assert.notEqual(r.status, 401, '未强制时不该因为没带凭据就拒绝');
-    assert.notEqual(r.status, 403);
+  test('local 默认强制；显式 0 才允许无凭据兼容调用', async () => {
+    const missing = await post('/api/approvals/app-y', { approved: true });
+    assert.equal(missing.status, 401, '本地默认也不能盲发审批');
+    process.env.MAHARNESS_APPROVAL_TOKEN = '0';
+    try {
+      const r = await post('/api/approvals/app-y', { approved: true });
+      assert.notEqual(r.status, 401, '显式兼容模式不该因为没带凭据就拒绝');
+      assert.notEqual(r.status, 403);
+    } finally {
+      delete process.env.MAHARNESS_APPROVAL_TOKEN;
+    }
   });
 
   test('GET /api/approvals 形状不变（挂起项带 approvalToken 字段供前端接线）', async () => {
@@ -638,7 +644,7 @@ describe('A6-3 策略注入旁路审批门', () => {
     const s = await (await fetch(`${base}/api/security`)).json() as Record<string, unknown>;
     assert.equal(s.mutationAuthRequired, true);
     assert.equal(s.mutationTokenHeader, MUTATION_TOKEN_HEADER);
-    assert.equal(s.approvalTokenRequired, false);
+    assert.equal(s.approvalTokenRequired, true);
     const text = JSON.stringify(s);
     assert.equal(text.includes(TOKEN), false, '状态接口不得回显 token');
     assert.equal(text.includes('v1:'), false, '不得回显凭据密文');

@@ -1,7 +1,7 @@
 /**
  * server/tests/deploy-mode.spec.ts —— API-02 部署模式回归
  * 覆盖：模式解析（local/trusted/remote 前置校验、fail-closed）、
- * trusted 下 GET 也强制 token、审批凭据在 trusted 模式自动强制。
+ * trusted 下 GET 也强制 token、审批凭据默认强制且 remote/trusted 不可关闭。
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -79,15 +79,22 @@ describe('部署模式解析（API-02）', () => {
     assert.ok(!r.ok && r.errors[0].includes('无效值'));
   });
 
-  test('审批凭据：trusted/remote 模式自动强制', () => {
+  test('审批凭据：默认强制，remote/trusted 不可关闭', () => {
     const prev = process.env.MAHARNESS_APPROVAL_TOKEN;
+    const prevMode = process.env.MAHARNESS_MODE;
     process.env.MAHARNESS_APPROVAL_TOKEN = '';
     process.env.MAHARNESS_MODE = 'trusted';
     assert.equal(approvalTokenRequired(), true);
     process.env.MAHARNESS_MODE = 'local';
+    assert.equal(approvalTokenRequired(), true);
+    process.env.MAHARNESS_APPROVAL_TOKEN = '0';
     assert.equal(approvalTokenRequired(), false);
-    process.env.MAHARNESS_MODE = prev ?? '';
-    if (!prev) delete process.env.MAHARNESS_MODE;
+    process.env.MAHARNESS_MODE = 'remote';
+    assert.equal(approvalTokenRequired(), true, 'remote 不允许关闭审批凭据');
+    if (prev === undefined) delete process.env.MAHARNESS_APPROVAL_TOKEN;
+    else process.env.MAHARNESS_APPROVAL_TOKEN = prev;
+    if (prevMode === undefined) delete process.env.MAHARNESS_MODE;
+    else process.env.MAHARNESS_MODE = prevMode;
   });
 
   test('guard：trusted 下无头 GET 401、带头放行；local 下 GET 放行', async () => {

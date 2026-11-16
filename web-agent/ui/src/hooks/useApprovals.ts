@@ -144,9 +144,12 @@ export function useApprovals(opts: {
       // 403 = 凭据错/重放，404 = 已过期：说清是哪一种，别只丢一句"无效"
       const msg = err instanceof Error ? err.message : String(err);
       toast.error(/403|凭据/.test(msg) ? '这次审批的凭据已失效（它只能用一次），请等它重新挂起或让 agent 再请求一次' : msg);
+      // 网络失败时服务端可能仍在等待；先向权威清单校准，取不到就保留卡片供重试。
+      void reseed();
+      return;
     }
     setApprovals((prev) => prev.filter((a) => a.id !== id));
-  }, []);
+  }, [reseed]);
 
   return { approvals, onApprovalRequired, onGlobalApproval, respond };
 }

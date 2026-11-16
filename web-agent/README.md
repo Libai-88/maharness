@@ -103,7 +103,9 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
   - `MAHARNESS_API_TOKEN`：把"改变 agent 行为与审批语义"（批准危险命令 / 切沙箱根 / 注入
     allow 策略）变成需要显式授权。凭据**由人在设置页录入本浏览器**，不经服务端下发——
     服务端下发等于对本机所有进程公开，门会退化成装饰。
-  - `MAHARNESS_APPROVAL_TOKEN`：回答审批必须回带该次挂起的一次性凭据（单次有效，重放被拒）。
+  - `MAHARNESS_APPROVAL_TOKEN`：回答审批默认必须回带该次挂起的一次性凭据（单次有效，
+    重放被拒）。页面通过会话 SSE、全局 SSE 和挂起清单自动取得并回带；
+    `local` 模式可用 `MAHARNESS_APPROVAL_TOKEN=0` 显式关闭兼容，trusted/remote 始终强制。
   - 当前状态、主密钥是否可用、审批门是否已被通配 allow 策略整体放行，都在
     **设置 → 高级 → 安全**如实显示（`GET /api/security`，不含任何密钥材料）。
 - **部署模式（`MAHARNESS_MODE`，默认 `local`）**：
@@ -131,8 +133,8 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
    所以上面的凭据门挡的是"无意图的本机调用"（其它工具/脚本/端口扫描/被注入的插件），
    不是也不是想要成为隔离边界——真正的隔离要靠单独的 OS 用户或容器。
 2. 租户是文件级逻辑分区，不是进程级隔离：default 使用全局工作区，其他租户的文件根位于 `<工作区>/.tenants/<tenantId>`；Agent 工具、子代理、文件 API 与 Git API 都按租户根解析。Provider、人设、技能与插件配置仍是全实例共享，变更仅 admin。迁移前可用 `npm run tenant:backup -- --tenant <id>` 快照，失败时用 `tenant:restore` 回滚。不要把不同信任级别的用户放进同一个实例；remote/team 在强隔离缺失时 fail-closed。
-3. 审批凭据目前同时经 `GET /api/approvals` 下发，因此它只把"代批"的门槛从
-   "知道 id"抬到"必须先列举且凭据单次有效"；要彻底关闭请启用 `MAHARNESS_API_TOKEN`。
+3. 审批凭据经页面可用的 `GET /api/approvals` 与 SSE 下发，因此它挡住盲猜 ID 和重放，
+   但不能区分同用户下的其它本机进程；要关闭本机进程代批，请启用 `MAHARNESS_API_TOKEN`。
 4. `MAHARNESS_API_TOKEN` 一旦启用，页面需在设置→高级→安全 录入同一个值，
    否则修改类操作会全部 401（这是设计，不是故障）。
 5. Provider 与网页抓取直连会把同一次 DNS 解析结果用于校验和 socket 连接，重定向逐跳重新校验并 pinning。`SEARCH_PROXY` 仅用于固定的 DuckDuckGo/Tavily 搜索服务请求；只接受无凭据的 HTTP(S) 代理 URL，配置变化会关闭旧连接池；代理端解析由用户配置的受信代理负责，不适用于不可信代理。
@@ -288,7 +290,7 @@ Provider（`<NAME>_BASE_URL/API_KEY/MODEL` 自动发现，任意命名）之外�
 | `MAHARNESS_READONLY_TENANT` | `default` | 只读 token 绑定的租户；不匹配的 `x-maharness-tenant` 一律 403 |
 | `MAHARNESS_DEFAULT_TENANT` | `default` | 无 `x-maharness-tenant` 头时使用的默认租户；会话列表/消息/删除/统计已按租户隔离 |
 | `MAHARNESS_INTERNAL_BASE_URL` | 空 | remote TLS 模式下调度器回环调用地址（如 `https://127.0.0.1:3000`）；local/trusted 自动使用 `http://127.0.0.1:<PORT>` |
-| `MAHARNESS_APPROVAL_TOKEN` | 未设（不强制） | 强制回答审批回带一次性凭据；前端已自动回带，设 `1` 即生效 |
+| `MAHARNESS_APPROVAL_TOKEN` | 未设（强制） | 回答审批需回带一次性凭据；local 显式设 `0` 关闭，trusted/remote 不可关闭 |
 | `MAHARNESS_ALLOW_BLANKET_ALLOW` | 未设 | 允许经 HTTP 写入"对全部工具放行"的策略规则（默认需 `confirm:true` 显式确认） |
 | `MAHARNESS_ALLOW_SECRET_KEY_RESET` | 未设 | 允许在主密钥文件异常且库中已有密文时重建密钥（默认拒绝并备份原文件） |
 | `MAHARNESS_ALLOW_SKILL_HASH_MISMATCH` | 未设 | 允许技能同步时哈希不符仍落盘（默认拒绝并回报实际哈希） |

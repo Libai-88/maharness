@@ -15,13 +15,10 @@
  *     挂起审批铸一个随机凭据；POST 必须回带它，用过即作废（一次性的），重放一律 403。
  *     语义是「只有真的看见了这张审批卡的人，才能回答它」，把「盲猜/枚举 id 直接 POST」
  *     和「同一凭据重复使用」两条路收掉。
- *  **威胁模型边界（诚实版，别把它当鉴权）**：凭据本身是经 GET /api/approvals 下发的，
- *  本机任意进程也能调这个 GET 拿到它——所以 (2) 相对今天只是**抬高门槛**（从"知道 id 就行"
- *  变成"必须先列举、且凭据单次有效"），不能替代 (1)。要真正把代批路径关闭，需要
- *  MAHARNESS_API_TOKEN（进程外的显式授权），或把凭据改走「只有页面拿得到、本机进程拿不到」
- *  的通道（SSE 下发 + 前端回带，见下方 TODO）。
- *  默认行为：MAHARNESS_APPROVAL_TOKEN 未设 = 不强制凭据（既有前端不改动即可继续用）；
- *  但**请求只要带了凭据就必须正确**（不带不拦，带错必拒）——这样前端接线可以先于强制开关完成。
+ *  **威胁模型边界（诚实版，别把它当鉴权）**：凭据经 GET /api/approvals 与 SSE 下发给页面，
+ *  同用户的本机进程也能取得它。因此 (2) 抬高盲猜与重放门槛，不能替代 (1) 的进程外授权。
+ *  默认行为：local/trusted/remote 都要求一次性凭据；local 可用 MAHARNESS_APPROVAL_TOKEN=0
+ *  显式关闭，trusted/remote 不允许关闭。前端三条审批通道都已自动回带凭据。
  */
 import type { Express, Request } from 'express';
 import { randomBytes, timingSafeEqual } from 'node:crypto';
@@ -31,11 +28,11 @@ import { auditAuthorizationDenial, auditAuthorizationGrant, decideCredentialAuth
 /** 一次性审批凭据的请求头名（也可以放 body 的 approvalToken 字段） */
 export const APPROVAL_TOKEN_HEADER = 'x-maharness-approval-token';
 
-/** 是否强制要求凭据：显式 env 开关，或 trusted/remote 部署模式（API-02）下自动强制 */
+/** 是否强制要求凭据：默认强制；只有 local 可用显式 0 关闭兼容 */
 export function approvalTokenRequired(): boolean {
-  if (process.env.MAHARNESS_APPROVAL_TOKEN === '1') return true;
   const mode = (process.env.MAHARNESS_MODE ?? 'local').trim().toLowerCase();
-  return mode === 'trusted' || mode === 'remote';
+  if (mode === 'trusted' || mode === 'remote') return true;
+  return process.env.MAHARNESS_APPROVAL_TOKEN?.trim() !== '0';
 }
 
 interface IssuedToken {
@@ -154,12 +151,6 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
       return res.status(404).json({ error: '这个请求已经过期了' });
     }
     const provided = providedApprovalToken(req);
-    // TODO(A6-1 闭环，需要 ui/ 与 SSE 侧配合，交由维护者拍板)：
-    //   现在凭据只经 GET /api/approvals 下发。要让它成为「只有页面上那个人拿得到」的通道，
-    //   需要在 approval_required / approval.requested 事件帧里一并下发 approvalToken
-    //   （server/routes/chat.ts:362、server/routes/events.ts:53，均不在本次改动范围内），
-    //   并让 ui/src/api.ts 的 approvalsApi.respond 回带它。完成后把 MAHARNESS_APPROVAL_TOKEN=1
-    //   设为默认即可彻底关闭「本机进程代批」。
     const verdict = provided ? approvalTokens.verify(id, provided) : undefined;
     const decision = decideCredentialAuthorization({
       enabled: approvalTokenRequired(),
@@ -188,11 +179,10 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
       subject: 'approval-token', capability: 'approval:respond', object: '/api/approvals/:id',
     }, deps.store);
     // expired：交给挂起判定；已过期的审批会按既有语义被拒绝并清理。
-    if (!provided && !approvalTokenRequired() && !warnedLooseMode) {
+    if (!approvalTokenRequired() && !warnedLooseMode) {
       warnedLooseMode = true;
-      // 只提示一次：默认宽松模式是给既有前端留的兼容位，别让它变成「以为已经关闭了」
-      console.warn('[approvals] 未启用 MAHARNESS_API_TOKEN/MAHARNESS_APPROVAL_TOKEN：'
-        + '本机任意进程仍可回答审批（A6-1 未彻底关闭，详见 server/routes/approvals.ts 注释）');
+      console.warn('[approvals] MAHARNESS_APPROVAL_TOKEN=0：本地兼容模式未强制一次性审批凭据；'
+        + '远程或受信部署仍会强制。');
     }
     // 审批走执行循环服务（service:runner）的共享审批板入口——与 chat 服务解耦：
     // 循环被别的插件接管时，审批语义（含子代理/并行的审批）仍由接管者负责兑现。
