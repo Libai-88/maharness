@@ -94,10 +94,25 @@ export default {
       },
       getSystemPrompt: () => service.systemPrompt,
       getRuntimePrompt: makeBasePrompt,
-      getUserContext: () => [
-        ...service.userPersonas.map((persona, index) => ({ id: `persona:${index}`, ...persona })),
-        ...ctx.kernel.plugins.capabilities('persona').map(cap => cap.persona).filter(persona => persona.tier === 'user' && persona.id !== 'user-rules'),
-      ].map(persona => ({ role: 'user', content: persona.content, context: { id: persona.id, source: `user-settings:${persona.name}`, scope: 'workspace', trust: 'user', retention: 'required' } })),
+      getUserContext: () => {
+        const configured = service.userPersonas.map((persona, index) => ({
+          id: `user-persona:${index}`, ...persona,
+          source: `user-persistent:${persona.name}`, trust: 'user' as const,
+        }));
+        const plugins = ctx.kernel.plugins.capabilities('persona')
+          .map(cap => cap.persona)
+          .filter(persona => persona.id !== 'user-rules')
+          .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || left.id.localeCompare(right.id))
+          .map(persona => ({
+            id: persona.id, name: persona.name, content: persona.content,
+            source: `${persona.id === 'skills-rules' ? 'skill-guidance' : 'plugin-persona'}:${persona.name}`,
+            trust: 'reference' as const,
+          }));
+        return [...configured, ...plugins].map(persona => ({
+          role: 'user' as const, content: persona.content,
+          context: { id: persona.id, source: persona.source, scope: 'workspace' as const, trust: persona.trust, retention: 'required' as const },
+        }));
+      },
       /** 挂起审批清单（可按会话过滤）：前端首屏/刷新后据此恢复审批卡 */
       listApprovals: (sessionId?: string): PendingApproval[] =>
         globalApprovalBoard.listPending(sessionId).map((a) => ({ ...a, args: redactTraceValue(a.args) })),

@@ -88,7 +88,7 @@ function StepRow({
   const badge = TYPE_BADGE[step.type] ?? { label: step.type.toUpperCase(), cls: 'sys' };
   const running = step.status === 'running';
   const failed = step.status === 'error';
-  const hasDetails = Boolean(step.tokensIn || step.tokensOut || step.cost || step.inputSummary || step.outputSummary || step.error);
+  const hasDetails = Boolean(step.tokensIn || step.tokensOut || step.cost || step.inputSummary || step.outputSummary || step.error || step.toolVersion || step.sideEffect);
   const expandable = hasChildren || hasDetails;
   const line = (
     <TraceLine
@@ -120,6 +120,7 @@ function StepRow({
         <span>↑{step.tokensIn ?? 0} ↓{step.tokensOut ?? 0}{step.cost ? ` · $${step.cost.toFixed(4)}` : ''}</span>
       )}
       {step.inputSummary && <span>来源：{step.inputSummary}</span>}
+      {step.toolVersion && <span>工具版本：{step.toolVersion}{step.sideEffect ? ` · 声明副作用：${step.sideEffect}` : ''}{step.sideEffectOutcome ? ` · 执行结果：${step.sideEffectOutcome}` : ''}</span>}
       {step.outputSummary && <span>{step.outputSummary}</span>}
       {step.error && <span className="text-destructive">{step.error}</span>}
     </TraceCollapsibleContent>

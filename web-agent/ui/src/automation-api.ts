@@ -44,5 +44,6 @@ export const automationApi = {
   pause: (id: string, revision: number) => api<{ automation: Automation }>(`/api/automations/${encodeURIComponent(id)}/pause`, { method: 'POST', body: JSON.stringify({ revision }) }),
   resume: (id: string, revision: number) => api<{ automation: Automation }>(`/api/automations/${encodeURIComponent(id)}/resume`, { method: 'POST', body: JSON.stringify({ revision }) }),
   run: (id: string, revision: number) => api<{ occurrence: AutomationOccurrence }>(`/api/automations/${encodeURIComponent(id)}/run`, { method: 'POST', body: JSON.stringify({ revision }) }),
+  cancelRun: (id: string, runId: string) => api<{ occurrence: AutomationOccurrence; run: { status: string } }>(`/api/automations/${encodeURIComponent(id)}/runs/${encodeURIComponent(runId)}/cancel`, { method: 'POST' }),
   cancel: (id: string, revision: number) => api<{ automation: Automation }>(`/api/automations/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({ revision }) }),
 };

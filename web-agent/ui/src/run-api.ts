@@ -2,6 +2,11 @@ import type { Material, MaterialRef } from './material-api';
 import { api, authHeaders, type ChatHandlers, type ErrorKind } from './api';
 
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
+export type RuleSource = 'runtime' | 'user' | 'project' | 'skill' | 'plugin' | 'example';
+export interface RuleDescriptor {
+  id: string; label: string; source: RuleSource; scope: 'runtime' | 'workspace' | 'run';
+  priority: number; trust: 'core' | 'user' | 'reference'; contentHash: string; active: boolean;
+}
 export interface RunInfo {
   materials?: Material[];
   id: string; sessionId: string; parentId?: string; objective: string; status: RunStatus;
@@ -13,11 +18,19 @@ export interface RunInfo {
   answer?: string; error?: string; verification?: unknown; createdAt: number; updatedAt: number;
   problem?: { code: string; stage: string; hint: string };
   authorization: { workspace: string; profile: 'standard' | 'developer'; readOnly: boolean; revision: number };
+  capabilityResolution?: { selected: string[]; tools: string[]; reason: string; conflicts: { capabilityId: string; shadowedBy: string }[] };
+  ruleResolution?: { schemaVersion: 1; applied: RuleDescriptor[]; ignored: RuleDescriptor[]; conflicts: { left: string; right: string; reason: string; winner: string }[] };
+  origin?: { kind: 'automation'; automationId: string; occurrenceId: string };
 }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number } }
 export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number; finishReason?: string; errorCode?: string }
 export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
-export interface RunTool { id: string; name: string; status: string; argsSummary: string; failure?: { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown' } }
+export interface RunTool {
+  id: string; name: string; status: string; argsSummary: string;
+  version?: string; sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  sideEffectOutcome?: 'none' | 'not_started' | 'applied' | 'unknown';
+  failure?: { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown' };
+}
 export interface PluginGrant { enabled: boolean; permissions: string[]; dependencies: string[] }
 export interface TaskPluginInfo { id: string; version: string; hash: string; scope: string; owner: string; state: string; error?: string; files: string[]; manifest: { name: string; requires?: string[]; permissions: { capabilities: Record<string, string[]> } } }
 export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number; pluginDevelopment?: PluginGrant; allowedPluginDependencies?: string[] }

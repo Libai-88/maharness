@@ -63,7 +63,8 @@ describe('Trace 生命周期', () => {
     try {
       const dir = join(root, 'traces');
       const t1 = new Trace(new EventBus(), dir);
-      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'tool_call', name: 'read_file' }).finish({ outputSummary: 'ok' });
+      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'tool_call', name: 'read_file', toolVersion: '1.4.0', sideEffect: 'read' })
+        .finish({ outputSummary: 'ok', sideEffectOutcome: 'none' });
       t1.startStep({ traceId: 'arch-1', turn: 0, attempt: 2, type: 'system', name: 'cost-breaker', parentId: 'par-9' }).fail('x');
       t1.flush(); // 同步落盘
       t1.dispose();
@@ -78,6 +79,9 @@ describe('Trace 生命周期', () => {
       assert.equal(children[0]?.attempt, 2, '归档应保留重试序号');
       const named = t2.queryArchive('arch-1', { name: 'read_file' });
       assert.equal(named.length, 1, 'name 过滤生效');
+      assert.equal(named[0]?.toolVersion, '1.4.0');
+      assert.equal(named[0]?.sideEffect, 'read');
+      assert.equal(named[0]?.sideEffectOutcome, 'none');
       t2.dispose();
     } finally {
       rmSync(root, { recursive: true, force: true });

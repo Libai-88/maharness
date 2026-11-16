@@ -425,7 +425,7 @@ export class RunService {
         delegate: (request, signal) => this.delegate(record.id, record.tenantId, request, signal),
         onModelInput: input => { inputTurn = input.turn; },
         historyArchive: { save: history => repo.archiveHistory(record.id, modelHistory(history)), search: (query, offset, limit) => repo.searchHistory(record.id, query, offset, limit), read: (id, offset, limit) => repo.readHistory(record.id, id, offset, limit) },
-        toolJournal: { start: (id, name, args) => repo.startTool(record.id, id, name, args), finish: (id, result) => repo.finishTool(record.id, id, result), read: (id, offset, limit) => repo.readTool(record.id, id, offset, limit) },
+        toolJournal: { start: (id, name, args, meta) => repo.startTool(record.id, id, name, args, meta), finish: (id, result) => repo.finishTool(record.id, id, result), read: (id, offset, limit) => repo.readTool(record.id, id, offset, limit) },
         task: record.acceptance?.length || record.deadlineAt ? { objective: record.objective, acceptance: record.acceptance ?? [], deadlineAt: record.deadlineAt } : undefined,
         effectJournal: { peek: key => this.env.store.peekToolEffect(record.id, key), claim: key => this.env.store.claimToolEffect(record.id, key), release: key => this.env.store.releaseToolEffect(record.id, key), complete: (key, result) => this.env.store.completeToolEffect(record.id, key, result) },
         takeMessages: (history, turn) => {

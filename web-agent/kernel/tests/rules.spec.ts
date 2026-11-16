@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   diffPolicyRules, dryRunPolicy, evaluatePolicy, loadPromptRules, loadPolicyRules,
-  matchPolicy, resolveRuleDescriptors, rulesSignature, runtimeRuleDescriptor, validatePolicyRules,
+  matchPolicy, personaRuleDescriptor, resolveRuleDescriptors, rulesSignature, runtimeRuleDescriptor, validatePolicyRules,
 } from '../rules';
 import type { RuleDescriptor } from '../types';
 
@@ -82,6 +82,19 @@ describe('loadPromptRules', () => {
 });
 
 describe('结构化规则裁决', () => {
+  test('用户人设、技能建议和插件建议保持各自来源与信任级别', () => {
+    const rules = [
+      { context: { id: 'user', source: 'user-persistent:我' }, content: 'user' },
+      { context: { id: 'skill', source: 'skill-guidance:技能' }, content: 'skill' },
+      { context: { id: 'plugin', source: 'plugin-persona:插件' }, content: 'plugin' },
+    ].map(personaRuleDescriptor);
+    assert.deepEqual(rules.map(rule => [rule.source, rule.priority, rule.trust]), [
+      ['user', 75, 'user'],
+      ['skill', 60, 'reference'],
+      ['plugin', 55, 'reference'],
+    ]);
+  });
+
   test('按优先级去重、记录冲突和未生效来源', () => {
     const rule = (id: string, source: RuleDescriptor['source'], priority: number, hash: string, active = true): RuleDescriptor => ({
       id, label: id, source, scope: source === 'runtime' ? 'runtime' : 'workspace', priority,

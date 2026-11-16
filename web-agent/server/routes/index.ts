@@ -46,7 +46,7 @@ import { registerRunRoutes } from './runs';
 import { getRunner } from './shared';
 import { tenantSandboxRoot } from '../tenant-workspace';
 import { beginRun, endRun } from '../index';
-import { loadPromptRules, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
+import { loadPromptRules, personaRuleDescriptor, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -149,16 +149,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         contentHash: createHash('sha256').update(record.objective).digest('hex'),
         active: true,
       };
-      const personaDescriptors = userContext.map((message, index) => ({
-        id: `persona:${message.context?.id ?? index}`,
-        label: message.context?.source ?? `用户人设 ${index + 1}`,
-        source: 'user' as const,
-        scope: 'workspace' as const,
-        priority: 75,
-        trust: 'user' as const,
-        contentHash: createHash('sha256').update(message.content ?? '').digest('hex'),
-        active: true,
-      }));
+      const personaDescriptors = userContext.map(personaRuleDescriptor);
       const resolvedRules = resolveRuleDescriptors([
         runtimeRuleDescriptor(),
         instructionDescriptor,

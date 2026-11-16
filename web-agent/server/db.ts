@@ -441,6 +441,10 @@ export class Store {
     const sCols = this.db.prepare(`PRAGMA table_info(sessions)`).all() as { name: string }[];
     const cpCols = this.db.prepare('PRAGMA table_info(agent_checkpoints)').all() as { name: string }[];
     if (!cpCols.some((c) => c.name === 'run_id')) this.db.exec('ALTER TABLE agent_checkpoints ADD COLUMN run_id TEXT');
+    const toolCols = this.db.prepare('PRAGMA table_info(run_tool_calls_v2)').all() as { name: string }[];
+    if (!toolCols.some((c) => c.name === 'tool_version')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN tool_version TEXT');
+    if (!toolCols.some((c) => c.name === 'side_effect')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN side_effect TEXT');
+    if (!toolCols.some((c) => c.name === 'side_effect_outcome')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN side_effect_outcome TEXT');
     const modelCols = this.db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
     if (!modelCols.some((c) => c.name === 'latency_ms')) this.db.exec('ALTER TABLE models ADD COLUMN latency_ms INTEGER');
     if (!modelCols.some((c) => c.name === 'privacy_tier')) this.db.exec('ALTER TABLE models ADD COLUMN privacy_tier TEXT');

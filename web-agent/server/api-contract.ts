@@ -29,6 +29,7 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/automations/:id/pause', response: 'object', description: '暂停自动化' },
   { method: 'POST', path: '/api/automations/:id/resume', response: 'object', description: '恢复自动化' },
   { method: 'POST', path: '/api/automations/:id/run', response: 'object', description: '立即运行自动化' },
+  { method: 'POST', path: '/api/automations/:id/runs/:runId/cancel', response: 'object', description: '停止自动化的一次运行' },
   { method: 'DELETE', path: '/api/automations/:id', response: 'object', description: '取消自动化' },
   { method: 'GET', path: '/api/materials/capabilities', response: 'object', description: '文件处理与 OCR 能力状态' },
   { method: 'PUT', path: '/api/document/ocr', response: 'object', description: '配置可选 OCR 引擎' },

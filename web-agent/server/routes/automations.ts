@@ -76,6 +76,12 @@ export function registerAutomationRoutes(app: Express, deps: RouteDeps): void {
     } catch (error) { sendError(res, error); }
   });
 
+  app.post('/api/automations/:id/runs/:runId/cancel', (req, res) => {
+    try {
+      res.status(202).json(service.cancelRun(tenantIdOf(req), String(req.params.id), String(req.params.runId)));
+    } catch (error) { sendError(res, error); }
+  });
+
   app.delete('/api/automations/:id', (req, res) => {
     try {
       const body = { ...(req.body ?? {}), revision: req.body?.revision ?? req.query.revision };

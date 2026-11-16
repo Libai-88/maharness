@@ -778,7 +778,9 @@ export class AgentRunner {
         try { args = JSON.parse(tc.function.arguments || '{}'); }
         catch { args = { _raw: tc.function.arguments }; argsError = '工具参数不是合法 JSON'; }
         const resultId = opts.runId ? randomUUID() : tc.id;
-        opts.toolJournal?.start(resultId, tc.function.name, summarize(redactTraceValue(args)));
+        opts.toolJournal?.start(resultId, tc.function.name, summarize(redactTraceValue(args)), tool ? {
+          version: tool.version, sideEffect: tool.sideEffect,
+        } : undefined);
         if (!tool) {
           const missMsg = `工具不存在: ${tc.function.name}`;
           opts.toolJournal?.finish(resultId, { ok: false, error: missMsg, failure: { code: 'TOOL_NOT_FOUND', retryable: false, outcome: 'not_started' } });
@@ -889,7 +891,8 @@ export class AgentRunner {
         );
         const tStep = scopedTrace.startStep({
           traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(redactTraceValue(toolArgs)),
-          parentId: opts.parentStepId,
+          parentId: opts.parentStepId, toolVersion: tool.version, sideEffect: tool.sideEffect,
+          ...(tool.discovery?.pluginId ? { pluginId: tool.discovery.pluginId } : {}),
         });
         // ToolContext 先构造（类型 = ToolContext ∪ 局部扩展字段，注解声明可携带扩展）：
         //  - H3 预算透传：remainingBudget = 主循环剩余预算（kernel ToolContext 契约尚未
@@ -998,7 +1001,7 @@ export class AgentRunner {
           const approved = await decision;
           if (signal?.aborted) {
             aStep.cancel();
-            tStep.cancel();
+            tStep.cancel({ sideEffectOutcome: 'not_started' });
             throw new TaskStoppedError('已停止');
           }
           if (!approved) {
@@ -1039,10 +1042,13 @@ export class AgentRunner {
               .fail(issues.slice(0, 3).join('；'), { outputSummary: `${tool.name} 返回结构校验失败（${issues.length} 项）` });
           }
         }
+        const sideEffectOutcome = finalResult.ok
+          ? tool.sideEffect === 'none' || tool.sideEffect === 'read' ? 'none' : 'applied'
+          : finalResult.failure?.outcome ?? 'not_started';
         if (finalResult.ok) {
-          tStep.finish({ outputSummary: summarize(finalResult.data) });
+          tStep.finish({ outputSummary: summarize(finalResult.data), sideEffectOutcome });
         } else {
-          tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult) });
+          tStep.fail(finalResult.error ?? '工具执行失败', { outputSummary: summarize(finalResult), sideEffectOutcome });
         }
         if (effectKey && executor.effectStarted && opts.effectJournal && finalResult.failure?.outcome !== 'unknown') opts.effectJournal.complete(effectKey, finalResult);
         opts.toolJournal?.finish(resultId, finalResult);

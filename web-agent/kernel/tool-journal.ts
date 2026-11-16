@@ -2,7 +2,7 @@ import type { ToolResult } from './types';
 
 export interface ToolResultPage { id: string; content: string; length: number; offset: number; nextOffset?: number; truncated: boolean; }
 export interface ToolExecutionJournal {
-  start(id: string, name: string, argsSummary: string): void;
+  start(id: string, name: string, argsSummary: string, meta?: { version?: string; sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible' }): void;
   finish(id: string, result: ToolResult): void;
   read(id: string, offset?: number, limit?: number): ToolResultPage | undefined;
 }

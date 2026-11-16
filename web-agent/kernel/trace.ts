@@ -204,7 +204,7 @@ export class Trace {
       id: step.id,
       finish: (extra) => this.settle(step, 'done', undefined, extra),
       fail: (error, extra) => this.settle(step, 'error', error, extra),
-      cancel: () => this.settle(step, 'cancelled', undefined),
+      cancel: (extra) => this.settle(step, 'cancelled', undefined, extra),
     };
   }
 

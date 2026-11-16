@@ -784,6 +784,9 @@ export interface TraceStepInit {
   /** 父步骤 id（span 树）：子代理/并行等子任务的步骤挂到调用方工具步骤下，
    *  跨 traceId 也能从父轨迹下钻到子轨迹（OpenAI tracing 的 span 层级） */
   parentId?: string;
+  /** 工具调用事实：版本与声明的副作用，用于审计实际执行契约。 */
+  toolVersion?: string;
+  sideEffect?: ToolDef['sideEffect'];
 }
 
 export interface TraceStep extends TraceStepInit {
@@ -804,6 +807,7 @@ export interface TraceStep extends TraceStepInit {
   errorCode?: string;
   retryable?: boolean;
   retryDelayMs?: number;
+  sideEffectOutcome?: 'none' | 'not_started' | 'applied' | 'unknown';
 }
 
 export interface StepHandle {
@@ -814,7 +818,7 @@ export interface StepHandle {
   /** 失败收尾 */
   fail(error: string, extra?: Partial<TraceStep>): void;
   /** 取消收尾 */
-  cancel(): void;
+  cancel(extra?: Partial<TraceStep>): void;
 }
 
 export interface TraceStats {

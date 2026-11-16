@@ -37,7 +37,7 @@ test('observed model capability is scoped to endpoint, protocol, credentials and
 test('artifact identities survive updates and full tool results remain paged', () => {
   const store = new Store(':memory:');
   try {
-    store.runs.startTool('run', 'call-1', 'write_file', 'report.md');
+    store.runs.startTool('run', 'call-1', 'write_file', 'report.md', { version: '2.1.0', sideEffect: 'write' });
     const result = { ok: true, data: { text: 'a'.repeat(20000) }, evidence: [{ kind: 'file' as const, label: '报告', ref: 'report.md', artifact: true }] };
     store.runs.finishTool('run', 'call-1', result);
     const [first] = store.runs.artifacts('run');
@@ -46,6 +46,10 @@ test('artifact identities survive updates and full tool results remain paged', (
     const [updated] = store.runs.artifacts('run');
     assert.equal(first.id, updated.id);
     assert.equal(updated.callId, 'call-2');
+    const [tool] = store.runs.toolCalls('run');
+    assert.equal(tool?.version, '2.1.0');
+    assert.equal(tool?.sideEffect, 'write');
+    assert.equal(tool?.sideEffectOutcome, 'applied');
     assert.deepEqual(store.runs.artifacts('another-run'), []);
     const page = store.runs.readTool('run', 'call-1', 0, 8000)!;
     assert.equal(page.truncated, true);

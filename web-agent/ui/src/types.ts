@@ -354,6 +354,10 @@ export interface TraceStep {
   cacheLayer?: string;
   /** 父步骤 id（span 树）：子代理/并行子任务挂到调用方工具步骤下，可跨 traceId 下钻 */
   parentId?: string;
+  pluginId?: string;
+  toolVersion?: string;
+  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  sideEffectOutcome?: 'none' | 'not_started' | 'applied' | 'unknown';
   status: 'running' | 'done' | 'error' | 'cancelled';
   error?: string;
   ts: number;

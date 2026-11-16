@@ -19,8 +19,8 @@ import type { Express } from 'express';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { RouteDeps } from './shared';
-import { dryRunPolicy, isBlanketAllow, isWildcardTool, loadPolicyRules, runtimeRuleDescriptor, validatePolicyRules } from '../../kernel/rules';
+import { getChatService, type RouteDeps } from './shared';
+import { dryRunPolicy, isBlanketAllow, isWildcardTool, loadPolicyRules, personaRuleDescriptor, resolveRuleDescriptors, runtimeRuleDescriptor, validatePolicyRules } from '../../kernel/rules';
 import type { PolicyRule } from '../../kernel/rules';
 import { atomicWriteFileSync, ConcurrentWriteError, fileRevisionSync } from '../../kernel/atomic-file';
 
@@ -179,12 +179,14 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/rules/effective', (_req, res) => {
     const s = svc();
     const resolved = s?.resolution?.();
+    const contextRules = (getChatService(kernel)?.getUserContext?.() ?? []).map(personaRuleDescriptor);
+    const effective = resolveRuleDescriptors([runtimeRuleDescriptor(), ...contextRules, ...(resolved?.applied ?? [])]);
     res.json({
       schemaVersion: 1,
       precedence: ['runtime', 'current-user-instruction', 'confirmed-project-or-user-rules', 'skill-and-plugin-guidance', 'examples-and-style'],
-      applied: [runtimeRuleDescriptor(), ...(resolved?.applied ?? [])],
-      ignored: resolved?.ignored ?? [],
-      conflicts: resolved?.conflicts ?? [],
+      applied: effective.applied,
+      ignored: [...(resolved?.ignored ?? []), ...effective.ignored.filter(rule => !(resolved?.ignored ?? []).some(item => item.id === rule.id))],
+      conflicts: [...(resolved?.conflicts ?? []), ...effective.conflicts],
       policy: s?.policy() ?? [],
       errors: s?.errors() ?? [],
     });

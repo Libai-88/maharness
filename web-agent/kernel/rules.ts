@@ -28,6 +28,27 @@ export function runtimeRuleDescriptor(): RuleDescriptor {
   };
 }
 
+/** Map user-context layers to stable rule provenance without letting plugin guidance become user authority. */
+export function personaRuleDescriptor(
+  message: { context?: { id?: string; source?: string }; content?: string | null },
+  index: number,
+): RuleDescriptor {
+  const source = message.context?.source ?? '';
+  const kind = source.startsWith('user-persistent:') ? 'user'
+    : source.startsWith('skill-guidance:') ? 'skill'
+    : 'plugin';
+  return {
+    id: `persona:${message.context?.id ?? index}`,
+    label: source || `persona-${index + 1}`,
+    source: kind,
+    scope: 'workspace',
+    priority: kind === 'user' ? 75 : kind === 'skill' ? 60 : 55,
+    trust: kind === 'user' ? 'user' : 'reference',
+    contentHash: createHash('sha256').update(message.content ?? '').digest('hex'),
+    active: true,
+  };
+}
+
 export interface RuleSource {
   scope: 'global' | 'project';
   label: string;

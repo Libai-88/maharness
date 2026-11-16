@@ -37,6 +37,7 @@ export const RUN_SCHEMA = `
   CREATE TABLE IF NOT EXISTS run_tool_calls_v2 (
     run_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_summary TEXT NOT NULL,
     status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, result TEXT,
+    tool_version TEXT, side_effect TEXT, side_effect_outcome TEXT,
     PRIMARY KEY(run_id,call_id)
   );
   CREATE TABLE IF NOT EXISTS runs_v2 (
@@ -119,8 +120,9 @@ export class RunRepository {
     const rows = this.db.prepare('SELECT id,turn,created_at,input FROM run_model_inputs_v2 WHERE run_id=? AND (? IS NULL OR rowid < (SELECT rowid FROM run_model_inputs_v2 WHERE id=? AND run_id=?)) ORDER BY rowid DESC LIMIT ?').all(runId, before ?? null, before ?? null, runId, Math.max(1, Math.min(100, limit))) as { id: string; turn: number; created_at: number; input: string }[];
     return rows.map(row => ({ id: row.id, turn: row.turn, createdAt: row.created_at, ...JSON.parse(row.input) }));
   }
-  startTool(runId: string, id: string, name: string, argsSummary: string): void {
-    this.db.prepare('INSERT INTO run_tool_calls_v2(run_id,call_id,name,args_summary,status,started_at) VALUES(?,?,?,?,?,?)').run(runId, id, name, argsSummary, 'started', Date.now());
+  startTool(runId: string, id: string, name: string, argsSummary: string, meta?: { version?: string; sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible' }): void {
+    this.db.prepare('INSERT INTO run_tool_calls_v2(run_id,call_id,name,args_summary,status,started_at,tool_version,side_effect) VALUES(?,?,?,?,?,?,?,?)')
+      .run(runId, id, name, argsSummary, 'started', Date.now(), meta?.version ?? null, meta?.sideEffect ?? null);
   }
   finishTool(runId: string, id: string, result: ToolResult): void {
     for (const evidence of result.ok ? result.evidence ?? [] : []) {
@@ -129,15 +131,23 @@ export class RunRepository {
       const artifact: RunArtifact = { id: existing?.id ?? randomUUID(), runId, callId: id, kind: evidence.kind, label: evidence.label, ref: evidence.ref, createdAt: Date.now(), ...(evidence.value && typeof evidence.value === 'object' ? { metadata: evidence.value as RunArtifact['metadata'] } : {}) };
       this.db.prepare('INSERT OR REPLACE INTO run_artifacts_v2 VALUES(?,?,?,?)').run(artifact.id, runId, artifact.ref, JSON.stringify(artifact));
     }
-    this.db.prepare('UPDATE run_tool_calls_v2 SET status=?,finished_at=?,result=? WHERE run_id=? AND call_id=?').run(result.failure?.outcome === 'unknown' ? 'unknown' : result.ok ? 'succeeded' : 'failed', Date.now(), JSON.stringify(result), runId, id);
+    const call = this.db.prepare('SELECT side_effect AS sideEffect FROM run_tool_calls_v2 WHERE run_id=? AND call_id=?').get(runId, id) as { sideEffect: string | null } | undefined;
+    const sideEffectOutcome = result.failure?.outcome
+      ?? (result.ok ? (call?.sideEffect === 'none' || call?.sideEffect === 'read' || !call?.sideEffect ? 'none' : 'applied') : 'not_started');
+    this.db.prepare('UPDATE run_tool_calls_v2 SET status=?,finished_at=?,result=?,side_effect_outcome=? WHERE run_id=? AND call_id=?')
+      .run(result.failure?.outcome === 'unknown' ? 'unknown' : result.ok ? 'succeeded' : 'failed', Date.now(), JSON.stringify(result), sideEffectOutcome, runId, id);
   }
   readTool(runId: string, id: string, offset?: number, limit?: number) {
     const row = this.db.prepare('SELECT result FROM run_tool_calls_v2 WHERE run_id=? AND call_id=?').get(runId, id) as { result: string | null } | undefined;
     return row?.result ? resultPage(id, row.result, offset, limit) : undefined;
   }
   toolCalls(runId: string) {
-    const rows = this.db.prepare("SELECT call_id AS id,name,args_summary AS argsSummary,status,started_at AS startedAt,finished_at AS finishedAt,json_extract(result,'$.failure') AS failure FROM run_tool_calls_v2 WHERE run_id=? ORDER BY rowid").all(runId) as { id: string; name: string; argsSummary: string; status: string; startedAt: number; finishedAt: number | null; failure: string | null }[];
-    return rows.map(({ failure, ...row }) => ({ ...row, ...(failure ? { failure: JSON.parse(failure) as NonNullable<ToolResult['failure']> } : {}) }));
+    const rows = this.db.prepare("SELECT call_id AS id,name,args_summary AS argsSummary,status,started_at AS startedAt,finished_at AS finishedAt,tool_version AS version,side_effect AS sideEffect,side_effect_outcome AS sideEffectOutcome,json_extract(result,'$.failure') AS failure FROM run_tool_calls_v2 WHERE run_id=? ORDER BY rowid").all(runId) as { id: string; name: string; argsSummary: string; status: string; startedAt: number; finishedAt: number | null; version: string | null; sideEffect: 'none' | 'read' | 'write' | 'external' | 'irreversible' | null; sideEffectOutcome: 'none' | 'not_started' | 'applied' | 'unknown' | null; failure: string | null }[];
+    return rows.map(({ failure, version, sideEffect, sideEffectOutcome, ...row }) => ({
+      ...row,
+      ...(version ? { version } : {}), ...(sideEffect ? { sideEffect } : {}), ...(sideEffectOutcome ? { sideEffectOutcome } : {}),
+      ...(failure ? { failure: JSON.parse(failure) as NonNullable<ToolResult['failure']> } : {}),
+    }));
   }
   transaction<T>(work: () => T): T { return this.db.transaction(work)(); }
   children(parentId: string, tenantId: string): RunRecord[] {

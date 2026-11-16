@@ -635,6 +635,16 @@ export class AutomationService {
     return this.store.automations.update({ ...current, state: 'cancelled', nextDueAt: undefined, revision: current.revision + 1, updatedAt: this.now() }, expectedRevision);
   }
 
+  cancelRun(tenantId: string, id: string, runId: string): { occurrence: AutomationOccurrence; run: RunRecord } {
+    this.get(tenantId, id);
+    const occurrence = this.store.automations.occurrences(tenantId, id).find(item => item.runId === runId);
+    if (!occurrence) throw new AutomationError(404, 'AUTOMATION_RUN_NOT_FOUND', '该自动化下没有这条运行记录');
+    if (occurrence.state !== 'running') throw new AutomationError(409, 'AUTOMATION_RUN_NOT_ACTIVE', '只有正在运行的自动化实例可以停止');
+    if (!this.runs) throw new AutomationError(503, 'AUTOMATION_RUN_UNAVAILABLE', '任务运行服务暂不可用');
+    const run = this.runs.cancel(runId, tenantId);
+    return { occurrence, run };
+  }
+
   runNow(tenantId: string, id: string, expectedRevision?: number): AutomationOccurrence {
     const item = this.get(tenantId, id);
     if (expectedRevision !== undefined && item.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请刷新后运行');
@@ -690,7 +700,7 @@ export class AutomationService {
   tools(): ToolDef[] {
     const capability = {
       id: 'automation', name: '任务自动化', description: '按时间、文件变化或公开 URL 变化创建并运行可追踪任务。',
-      tools: ['automation_list', 'automation_get', 'automation_create', 'automation_update', 'automation_pause', 'automation_resume', 'automation_run', 'automation_cancel'],
+      tools: ['automation_list', 'automation_get', 'automation_create', 'automation_update', 'automation_pause', 'automation_resume', 'automation_run', 'automation_cancel', 'automation_cancel_run'],
       aliases: ['定时任务', '周期任务', '文件监控', '网址监控'],
       inputs: ['prompt', 'schedule', 'workspace-file', 'public-url'], outputs: ['run', 'result', 'history'], risk: 'medium' as const, sideEffect: 'external' as const,
     };
@@ -768,6 +778,8 @@ export class AutomationService {
       make('automation_resume', '恢复一个已确认的自动化。', 'write', { id, revision }, ['id', 'revision'], (args, ctx) => this.resume(ctx.tenantId ?? 'default', String(args.id), Number(args.revision))),
       make('automation_run', '立即运行一个已启用的自动化，并创建可追踪任务。', 'external', { id, revision }, ['id'], (args, ctx) => this.runNow(ctx.tenantId ?? 'default', String(args.id), args.revision === undefined ? undefined : Number(args.revision))),
       make('automation_cancel', '取消自动化；不会再创建新运行。', 'write', { id, revision }, ['id', 'revision'], (args, ctx) => this.cancel(ctx.tenantId ?? 'default', String(args.id), Number(args.revision))),
+      make('automation_cancel_run', '停止指定自动化的一次运行；不会取消自动化定义或未来计划。先读取 automation_get 获取 runId。', 'external',
+        { id, runId: { type: 'string' } }, ['id', 'runId'], (args, ctx) => this.cancelRun(ctx.tenantId ?? 'default', String(args.id), String(args.runId))),
     ];
   }
 

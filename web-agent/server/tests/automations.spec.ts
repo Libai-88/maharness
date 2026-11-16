@@ -45,7 +45,8 @@ function setup(nowValue = Date.UTC(2026, 2, 1, 12, 0, 0)) {
     },
     cancel(id: string, tenantId: string) {
       const run = store.runs.get(id, tenantId)!;
-      store.runs.update(run, { status: 'cancelled' });
+      const event = store.runs.update(run, { status: 'cancelled' });
+      for (const listener of listeners.get(id) ?? []) listener(event);
       return run;
     },
     subscribe(id: string, listener: (event: RunEvent) => void) {
@@ -349,6 +350,23 @@ describe('自动化计划与触发', () => {
       const occurrence = f.service.runNow('default', item.id);
       assert.equal(occurrence.state, 'skipped');
       assert.equal(f.store.runs.get('existing-run', 'default')?.status, 'running');
+    } finally { f.store.close(); }
+  });
+
+  test('停止本次只取消归属该自动化的活动 Run，不影响自动化定义', () => {
+    const f = setup();
+    try {
+      const item = f.service.create('default', { name: '可停止任务', prompt: '运行', trigger: { type: 'manual' } }, 'user');
+      const occurrence = f.service.runNow('default', item.id);
+      assert.ok(occurrence.runId);
+      const other = f.service.create('default', { name: '其他任务', prompt: '运行', trigger: { type: 'manual' } }, 'user');
+      assert.throws(() => f.service.cancelRun('default', other.id, occurrence.runId!), /该自动化下没有这条运行记录/);
+      assert.equal(f.store.runs.get(occurrence.runId!, 'default')?.status, 'running');
+      const stopped = f.service.cancelRun('default', item.id, occurrence.runId!);
+      assert.equal(stopped.run.status, 'cancelled');
+      assert.equal(f.service.occurrences('default', item.id)[0]?.state, 'cancelled');
+      assert.equal(f.service.get('default', item.id).state, 'active');
+      assert.equal(f.service.tools().some(tool => tool.name === 'automation_cancel_run'), true);
     } finally { f.store.close(); }
   });
 
