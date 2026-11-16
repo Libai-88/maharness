@@ -160,7 +160,7 @@ test('工作台新增事项后立即刷新聚合结果', async ({ page }) => {
     items.push(item);
     return route.fulfill({ json: { item } });
   });
-  await page.route('**/api/workbench/summary', route => route.fulfill({
+  await page.route('**/api/workbench/summary*', route => route.fulfill({
     json: {
       schemaVersion: 1, today: new Date().toISOString().slice(0, 10), todayItems: items, overdue: [], upcoming: [], unscheduled: [],
       pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [], notes: [],
