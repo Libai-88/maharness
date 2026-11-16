@@ -11,6 +11,7 @@ import { AgentRunner } from '../core/chat/agent';
 import { globalApprovalBoard } from '../core/chat/approvals';
 import { createProvider } from '../core/chat/provider';
 import { TokenBudget } from '../evals/strengthening';
+import { evaluationReservationUsd } from '../evals/provider-budget';
 import { AutomationService } from '../server/automations';
 import { Store } from '../server/db';
 import { RunService } from '../server/run-service';
@@ -156,8 +157,9 @@ function providerFor(caseId: number) {
         options: Parameters<typeof original.chat>[1],
       ) {
         if (calls >= maxCallsPerCase) throw new Error('EVAL_CALL_LIMIT');
-        const held = Buffer.byteLength(JSON.stringify({ messages, tools: options.tools })) + maxOutputTokens + 4096;
-        const maxCost = (held * Math.max(providerConfig.priceIn, providerConfig.priceOut)) / 1e6;
+        const inputBound = Buffer.byteLength(JSON.stringify({ messages, tools: options.tools })) + 4096;
+        const held = inputBound + maxOutputTokens;
+        const maxCost = evaluationReservationUsd(inputBound, maxOutputTokens, providerConfig.priceIn, providerConfig.priceOut);
         if (budgetUsd > 0 && configuredCostUsd + maxCost > budgetUsd) throw new Error('EVAL_COST_LIMIT');
         const settle = tokenBudget.reserve(held);
         const receipt: Receipt = {

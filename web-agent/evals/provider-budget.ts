@@ -15,6 +15,10 @@ function units(value: number): number {
   return result;
 }
 
+export function evaluationReservationUsd(inputUpperBound: number, outputLimit: number, inputUsdPerMillion: number, outputUsdPerMillion: number): number {
+  return (inputUpperBound * inputUsdPerMillion + outputLimit * outputUsdPerMillion) / 1_000_000;
+}
+
 /** A synchronous reservation is shared across every model, variant and concurrent call. */
 export class EvaluationBudget {
   private readonly limitUnits: number;
@@ -83,7 +87,7 @@ export function budgetedEvaluationProvider(provider: ProviderDef, settings: Eval
       const maxTokens = Math.min(options.maxTokens ?? config.maxOutputTokens, config.maxOutputTokens);
       const tools = options.tools?.map(tool => ({ name: tool.name, description: tool.description, parameters: tool.parameters }));
       const inputBound = Buffer.byteLength(JSON.stringify({ messages, tools }), 'utf8') + 4096;
-      const estimate = (input: number, output: number) => (input * config.inputUsdPerMillion + output * config.outputUsdPerMillion) / 1_000_000;
+      const estimate = (input: number, output: number) => evaluationReservationUsd(input, output, config.inputUsdPerMillion, config.outputUsdPerMillion);
       const reservation = budget.reserve(config.model, estimate(inputBound, maxTokens), config.scope);
       let input = 0; let output = 0; let reported = false; let uncertain = false; let complete = false; let failed = false;
       try {

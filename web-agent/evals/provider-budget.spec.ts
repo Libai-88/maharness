@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import type { ProviderDef, LLMChunk } from '../kernel/types';
-import { EvaluationBudget, budgetedEvaluationProvider } from './provider-budget';
+import { EvaluationBudget, budgetedEvaluationProvider, evaluationReservationUsd } from './provider-budget';
 
 const pricing = { model: 'test', inputUsdPerMillion: 1, outputUsdPerMillion: 1, maxOutputTokens: 16 };
 const mock = (chat: ProviderDef['chat']): ProviderDef => ({ id: 'test', label: 'Test', defaultModel: 'test', chat });
@@ -10,6 +10,10 @@ async function collect(provider: ProviderDef, options: { model?: string; signal?
   for await (const chunk of provider.chat([{ role: 'user', content: 'work', images: options.images }], { model: options.model ?? 'test', signal: options.signal, maxTokens: options.maxTokens })) chunks.push(chunk);
   return chunks;
 }
+
+test('reservations price input and output limits separately', () => {
+  assert.equal(evaluationReservationUsd(1_000, 100, 1, 10), 0.002);
+});
 
 test('invalid budgets, prices, model identity and unpriced images never start a provider call', async () => {
   let calls = 0;

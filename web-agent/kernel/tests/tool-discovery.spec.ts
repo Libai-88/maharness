@@ -138,6 +138,25 @@ test('one capability composed from multiple tools is not reported as an internal
   assert.deepEqual(capabilityConflicts(active), []);
 });
 
+test('capability discovery matches its name inside a natural-language action phrase', async () => {
+  const descriptor = {
+    id: 'personal.items', name: '个人事项', description: '记录、改期、完成和查询个人任务与计划。',
+    tools: ['item_create'], aliases: ['待办', '任务', '提醒我'], inputs: ['title'], outputs: ['item'],
+    risk: 'low' as const, sideEffect: 'write' as const,
+  };
+  const tool = {
+    name: 'item_create', description: '创建个人事项', version: '3.0.0', permissions: ['workspace.write'],
+    sideEffect: 'write' as const, parameters: { type: 'object' }, outputSchema: { type: 'object' },
+    handler: async () => ({ ok: true }), discovery: { initial: false, pluginId: 'todo', capabilities: [descriptor] },
+  } satisfies ToolDef;
+  const active = createToolCatalog([tool], [], 1);
+  const result = await active.find(item => item.name === 'discover_capabilities')!.handler({
+    query: '记录个人事项 日历 日程 保存事件',
+  }, {} as ToolContext);
+  const rows = (result.data as { capabilities: { id: string }[] }).capabilities;
+  assert.deepEqual(rows.map(row => row.id), ['personal.items']);
+});
+
 test('cross-plugin capability conflicts are reported once per competing owner', () => {
   const makeOwner = (pluginId: string, names: string[]) => {
     const descriptor = {

@@ -51,7 +51,7 @@
       "name": "个人事项",
       "description": "记录、改期、完成和查询个人任务与计划。",
       "tools": ["item_list", "item_get", "item_create", "item_update", "item_complete"],
-      "aliases": ["待办", "任务", "提醒我", "安排事项"],
+      "aliases": ["待办", "任务", "事项", "提醒我", "安排", "安排事项", "个人事项", "计划", "日历", "日程", "日程安排", "todo", "task", "plan", "reminder", "calendar", "event", "schedule"],
       "inputs": ["title", "date", "time-zone", "priority"],
       "outputs": ["personal-item"],
       "risk": "low",

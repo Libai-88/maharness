@@ -98,12 +98,19 @@ export function createToolCatalog(authorized: ToolDef[], restoredEnabled: string
     async handler(args: { query?: string; limit?: number; offset?: number }) {
       const query = String(args.query ?? '').toLowerCase().trim();
       const words = query.split(/[\s，、,]+/).filter(Boolean);
+      const compactQuery = query.replace(/[\s_\-，、,。:：;；/]+/g, '');
       const haystack = (item: { key: string; descriptor: CapabilityDescriptor }) => [
         item.key, item.descriptor.name, item.descriptor.description,
         ...(item.descriptor.aliases ?? []), ...(item.descriptor.inputs ?? []), ...(item.descriptor.outputs ?? []), ...(item.descriptor.examples ?? []),
       ].join(' ').toLowerCase();
       const matches = capabilityIndex.entries
-        .map(item => ({ ...item, score: words.reduce((sum, word) => sum + (haystack(item).includes(word) ? 1 : 0), 0) }))
+        .map(item => {
+          const names = [item.descriptor.name, ...(item.descriptor.aliases ?? [])]
+            .map(value => value.toLowerCase().replace(/[\s_\-，、,。:：;；/]+/g, ''))
+            .filter(value => value.length >= 2);
+          const nameScore = names.some(name => compactQuery.includes(name)) ? 3 : 0;
+          return { ...item, score: nameScore + words.reduce((sum, word) => sum + (haystack(item).includes(word) ? 1 : 0), 0) };
+        })
         .filter(item => !words.length || item.score > 0)
         .sort((a, b) => b.score - a.score || a.key.localeCompare(b.key));
       const offset = Math.max(0, args.offset ?? 0);
