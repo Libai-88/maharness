@@ -727,7 +727,18 @@ export class AutomationService {
   occurrences(tenantId: string, id?: string): AutomationRunSummary[] {
     return this.store.automations.occurrences(tenantId, id).map(occurrence => {
       if (!occurrence.runId || !this.runs) return occurrence;
-      try { return { ...occurrence, run: this.runs.get(occurrence.runId, tenantId) }; }
+      try {
+        const run = this.runs.get(occurrence.runId, tenantId);
+        const state: AutomationOccurrenceState = run.status === 'completed' ? 'completed'
+          : run.status === 'cancelled' ? 'cancelled'
+          : run.status === 'failed' || run.status === 'interrupted' ? 'failed' : 'running';
+        const reason = state === 'failed'
+          ? run.error ?? (run.status === 'interrupted' ? '服务重启，任务由用户恢复' : undefined)
+          : undefined;
+        const updatedAt = occurrence.state === state && occurrence.reason === reason ? occurrence.updatedAt : this.now();
+        if (updatedAt !== occurrence.updatedAt) this.store.automations.finishOccurrence(occurrence.id, state, run.id, reason, updatedAt);
+        return { ...occurrence, state, reason, updatedAt, run };
+      }
       catch { return { ...occurrence, runMissing: true }; }
     });
   }
@@ -960,15 +971,19 @@ export class AutomationService {
     this.execute(committed.automation, committed.occurrence, now);
   }
 
-  private resolveProvider(providerId: unknown, model: unknown): { id: string; model: string } | undefined {
+  private resolveProvider(providerId: unknown, model: unknown): { id: string; model: string } {
     const providers = this.store.listProviders().filter(provider => provider.enabled);
     const provider = typeof providerId === 'string' && providerId
       ? providers.find(item => item.id === providerId)
       : providers[0];
-    if (typeof providerId === 'string' && providerId && !provider) {
-      throw new AutomationError(400, 'PROVIDER_UNAVAILABLE', `模型供应商 ${providerId} 当前不可用`);
-    }
-    return provider ? { id: provider.id, model: typeof model === 'string' && model ? model : provider.model } : undefined;
+    if (!provider) throw new AutomationError(
+      400,
+      'PROVIDER_UNAVAILABLE',
+      typeof providerId === 'string' && providerId
+        ? `模型供应商 ${providerId} 当前不可用`
+        : '请先在设置中启用模型供应商',
+    );
+    return { id: provider.id, model: typeof model === 'string' && model ? model : provider.model };
   }
 
   private budget(value: unknown): number | undefined {

@@ -64,7 +64,7 @@ function setup(nowValue = Date.UTC(2026, 2, 1, 12, 0, 0)) {
   const service = new AutomationService(store, () => root, () => now, { filePollMs: 1_000, urlPollMs: 30_000 });
   service.attach(runs);
   return {
-    root, store, service,
+    root, store, service, runs,
     setNow(value: number) { now = value; },
     finishRun,
   };
@@ -270,6 +270,18 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { f.store.close(); }
   });
 
+  test('没有可用 Provider 时不保存自动化', () => {
+    const f = setup();
+    try {
+      f.store.setProviderEnabled('fixture', 0);
+      assert.throws(
+        () => f.service.create('default', { name: '任务', prompt: '执行', trigger: { type: 'manual' } }, 'user'),
+        /请先在设置中启用模型供应商/,
+      );
+      assert.equal(f.service.list('default').length, 0);
+    } finally { f.store.close(); }
+  });
+
   test('定义和服务重启后仍可读取', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-automation-restart-'));
     roots.push(root);
@@ -333,6 +345,21 @@ describe('自动化计划与触发', () => {
       assert.equal(history[0]?.run, undefined);
       assert.equal(history[0]?.runMissing, true);
       assert.doesNotThrow(() => f.service.list('default'));
+    } finally { f.store.close(); }
+  });
+
+  test('中断的自动化 Run 恢复完成后历史状态随 Run 校正', () => {
+    const f = setup();
+    try {
+      const item = f.service.create('default', { name: '恢复', prompt: '运行', trigger: { type: 'manual' } }, 'user');
+      const occurrence = f.service.runNow('default', item.id);
+      f.store.runs.update(f.store.runs.get(occurrence.runId!, 'default')!, { status: 'interrupted' });
+
+      f.service.attach(f.runs);
+      assert.equal(f.service.occurrences('default', item.id)[0]?.state, 'failed');
+
+      f.store.runs.update(f.store.runs.get(occurrence.runId!, 'default')!, { status: 'completed' });
+      assert.equal(f.service.occurrences('default', item.id)[0]?.state, 'completed');
     } finally { f.store.close(); }
   });
 
