@@ -33,6 +33,19 @@ async function withServer(tenantId: string, inspect: (summary: Record<string, an
   store.runs.update(run, { status: 'completed' });
   store.runs.startTool(run.id, 'call-1', 'read_file', '{"path":"README.md"}');
   store.runs.finishTool(run.id, 'call-1', { ok: false, error: 'bad path', failure: { code: 'INVALID_PATH', retryable: false, outcome: 'not_started' } });
+  for (let index = 0; index < 20; index++) {
+    store.runs.startTool(run.id, `artifact-${index}`, 'write_file', JSON.stringify({ path: `outputs/old-${index}.txt` }));
+    store.runs.finishTool(run.id, `artifact-${index}`, { ok: true, evidence: [{ artifact: true, kind: 'file', label: `旧产物 ${index}`, ref: `outputs/old-${index}.txt` }] });
+  }
+  await new Promise(resolve => setTimeout(resolve, 10));
+  const latestRun: RunRecord = {
+    ...run, id: 'latest-run', rootId: 'latest-run', objective: '生成最新报告', createdAt: 3_000, updatedAt: 4_000,
+    cost: 0, tokensIn: 0, tokensOut: 0,
+  };
+  store.runs.create(latestRun);
+  store.runs.update(latestRun, { status: 'completed' });
+  store.runs.startTool(latestRun.id, 'artifact-latest', 'write_file', JSON.stringify({ path: 'outputs/latest.txt' }));
+  store.runs.finishTool(latestRun.id, 'artifact-latest', { ok: true, evidence: [{ artifact: true, kind: 'file', label: '最新产物', ref: 'outputs/latest.txt' }] });
   items.create(tenantId, { title: '核对周报', due: dateInTimeZone(Date.now(), 'Asia/Shanghai'), timeZone: 'Asia/Shanghai' });
   const app = express();
   app.use((req, _res, next) => { (req as typeof req & { tenantId?: string }).tenantId = tenantId; next(); });
@@ -94,7 +107,8 @@ describe('工作台聚合与本地体验指标', () => {
     await withServer('tenant-a', summary => {
       assert.equal(summary.todayItems[0]?.title, '核对周报');
       assert.equal(summary.pendingAutomations.length, 1);
-      assert.equal(summary.recentRuns[0]?.id, 'completed-run');
+      assert.equal(summary.recentRuns[0]?.id, 'latest-run');
+      assert.equal(summary.artifacts[0]?.label, '最新产物');
       assert.equal(summary.metrics.firstTaskSuccessRate, 100);
       assert.equal(summary.metrics.invalidToolCalls, 1);
       assert.equal(summary.metrics.duplicateToolCalls, 0);

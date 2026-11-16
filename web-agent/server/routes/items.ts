@@ -18,6 +18,9 @@ export function registerItemRoutes(app: Express, deps: RouteDeps, runs: RunServi
     }
   };
   const validateMaterials = (tenant: string, refs: unknown) => deps.store.materials.validate(refs, tenant, tenantSandboxRoot(deps.kernel.config.get<string>('sandboxRoot', deps.kernel.rootDir), tenant), deps.kernel.rootDir);
+  const watchReview = (tenant: string, itemId: string, runId: string, itemRevision: number) => {
+    const stop=runs.subscribe(runId,()=>{const current=deps.store.runs.get(runId,tenant);if(current&&RUN_TERMINAL.has(current.status)){if(current.status==='completed'&&(current.answer?.trim()||deps.store.runs.artifacts(runId).length))service().review(tenant,itemId,itemRevision);stop();}});
+  };
   const enrich = (tenant: string, initial: PersonalItem, attempts: ItemAttempt[]) => {
     let item = initial;
     const history = attempts.map(attempt => {
@@ -63,7 +66,12 @@ export function registerItemRoutes(app: Express, deps: RouteDeps, runs: RunServi
     if(item.revision!==req.body?.revision) throw new ItemError(409,'VERSION_CONFLICT','事项已变化，请刷新后执行');
     if(item.lifecycle!=='todo') throw new ItemError(409,'ITEM_NOT_OPEN','请先将事项重新打开');
     const latest=items.attempts(tenant,id)[0];const previous=latest?deps.store.runs.get(latest.runId,tenant):undefined;
-    if(previous?.status==='interrupted' && !req.body?.newAttempt) throw new ItemError(409,'RESUME_AVAILABLE','已有中断任务，请继续任务或明确另起执行');
+    if(previous?.status==='interrupted' && !req.body?.newAttempt){
+      const resumed=runs.resume(previous.id,tenant,(req as any).apiRole);
+      watchReview(tenant,id,resumed.id,item.revision);
+      res.status(202).json({run:resumed,sessionId:resumed.sessionId});
+      return;
+    }
     const chat=getChatService(deps.kernel);const provider=req.body?.provider ? chat?.providers.find(p=>p.id===req.body.provider) : chat?.providers.find(p=>p.id===priorSession?.provider)??chat?.providers[0];
     if(!provider) throw new ItemError(400,'PROVIDER_UNAVAILABLE','请先配置模型');
     validateMaterials(tenant,item.materials);
@@ -74,7 +82,7 @@ export function registerItemRoutes(app: Express, deps: RouteDeps, runs: RunServi
     if (intentRevision !== item.revision) throw new ItemError(409,'VERSION_CONFLICT','请为更新后的事项重新发起执行');
     const run=runs.create(session,{message,materials:item.materials,provider:provider.id,model:session.model||provider.defaultModel,requestKey:`item:${id}:${key}`,principalRole:(req as any).apiRole});
     items.attach(tenant,id,run.id,item.revision);
-    const stop=runs.subscribe(run.id,()=>{const current=deps.store.runs.get(run.id,tenant);if(current&&RUN_TERMINAL.has(current.status)){if(current.status==='completed'&&(current.answer?.trim()||deps.store.runs.artifacts(run.id).length))items.review(tenant,id,item.revision);stop();}});
+    watchReview(tenant,id,run.id,item.revision);
     res.status(202).json({run,sessionId:session.id});
   }));
 }

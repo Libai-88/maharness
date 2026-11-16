@@ -23,7 +23,10 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
     const active = rows.filter(item => !['done', 'archived'].includes(item.lifecycle));
     const automations = deps.automations?.list(tenantId) ?? [];
     const recentRuns = deps.store.runs.list(tenantId).slice(0, 12);
-    const artifacts = recentRuns.flatMap(run => deps.store.runs.artifacts(run.id)).slice(-20).reverse();
+    const artifacts = recentRuns
+      .flatMap(run => deps.store.runs.artifacts(run.id))
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
+      .slice(0, 20);
     const workspace = items.workspace(tenantId).data;
     const metrics = workbenchMetrics(deps, tenantId);
     res.json({
