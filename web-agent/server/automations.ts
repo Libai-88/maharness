@@ -72,6 +72,11 @@ interface TriggerBaseline {
   error?: string;
 }
 
+interface PolledValueCommit {
+  automation?: AutomationDefinition;
+  occurrence?: AutomationOccurrence;
+}
+
 export class AutomationError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = 'AutomationError'; }
 }
@@ -232,6 +237,57 @@ export class AutomationRepository {
       id, automationId: input.automationId, tenantId: input.tenantId, occurrenceKey: input.occurrenceKey,
       dueAt: input.dueAt, state: 'running', reason: input.reason, createdAt: input.now, updatedAt: input.now,
     } : undefined;
+  }
+
+  /** Claim a due schedule and advance it atomically so a restart cannot leave the same due time stuck. */
+  claimDue(item: AutomationDefinition, nextDueAt: number | undefined, now: number): AutomationOccurrence | undefined {
+    return this.db.transaction(() => {
+      const dueAt = item.nextDueAt!;
+      const latest = this.get(item.tenantId, item.id);
+      if (!latest || latest.nextDueAt !== dueAt || latest.revision !== item.revision
+        || latest.state !== 'active' || latest.approval !== 'confirmed') return undefined;
+      const occurrence = this.beginOccurrence({
+        automationId: item.id, tenantId: item.tenantId, occurrenceKey: triggerOccurrenceKey(item.trigger, dueAt),
+        dueAt, reason: 'schedule', now,
+      });
+      if (!occurrence) return undefined;
+      this.update({
+        ...latest, nextDueAt, lastTriggeredAt: now,
+        state: latest.trigger.type === 'once' ? 'completed' : latest.state,
+        revision: latest.revision + 1, updatedAt: now,
+      }, latest.revision);
+      return occurrence;
+    })();
+  }
+
+  /** Persist a polled value, its baseline, and a changed-content occurrence in one transaction. */
+  commitPolledValue(input: {
+    item: AutomationDefinition;
+    value: string;
+    source: 'file' | 'url';
+    now: number;
+    patch?: Pick<AutomationDefinition, 'triggerEtag' | 'triggerLastModified'>;
+  }): PolledValueCommit {
+    return this.db.transaction(() => {
+      const latest = this.get(input.item.tenantId, input.item.id);
+      if (!latest || latest.state !== 'active' || latest.approval !== 'confirmed'
+        || JSON.stringify(latest.trigger) !== JSON.stringify(input.item.trigger)) return {};
+      const previous = this.baseline(latest.tenantId, latest.id)?.value ?? latest.triggerValue;
+      const changed = !!previous && previous !== input.value;
+      const automation: AutomationDefinition = {
+        ...latest, ...input.patch, triggerValue: input.value, triggerCheckedAt: input.now, triggerError: undefined,
+        ...(changed ? { lastTriggeredAt: input.now } : {}),
+        revision: latest.revision + 1, updatedAt: input.now,
+      };
+      this.update(automation, latest.revision);
+      this.saveBaseline(automation, input.now);
+      const occurrence = changed ? this.beginOccurrence({
+        automationId: latest.id, tenantId: latest.tenantId,
+        occurrenceKey: `${input.source}:${input.now}:${input.value}`,
+        dueAt: input.now, reason: input.source, now: input.now,
+      }) : undefined;
+      return { automation, ...(occurrence ? { occurrence } : {}) };
+    })();
   }
 
   finishOccurrence(id: string, state: AutomationOccurrenceState, runId?: string, reason?: string, now = Date.now()): void {
@@ -668,18 +724,9 @@ export class AutomationService {
   async tick(now = this.now()): Promise<void> {
     for (const item of this.store.automations.due(now)) {
       const dueAt = item.nextDueAt!;
-      const occurrence = this.store.automations.beginOccurrence({
-        automationId: item.id, tenantId: item.tenantId, occurrenceKey: triggerOccurrenceKey(item.trigger, dueAt),
-        dueAt, reason: 'schedule', now,
-      });
-      if (!occurrence) continue;
       const next = nextTriggerTime(item.trigger, dueAt);
-      const latest = this.get(item.tenantId, item.id);
-      this.store.automations.update({
-        ...latest, nextDueAt: next, lastTriggeredAt: now,
-        state: item.trigger.type === 'once' ? 'completed' : latest.state,
-        revision: latest.revision + 1, updatedAt: now,
-      }, latest.revision);
+      const occurrence = this.store.automations.claimDue(item, next, now);
+      if (!occurrence) continue;
       if (now - dueAt > 24 * 60 * 60_000) {
         this.store.automations.finishOccurrence(occurrence.id, 'skipped', undefined, '已超过 24 小时补跑窗口', now);
         continue;
@@ -883,30 +930,19 @@ export class AutomationService {
     }
     if (!response.ok) throw new AutomationError(502, 'URL_TRIGGER_HTTP', `URL 返回 HTTP ${response.status}`);
     const value = await hashBoundedResponseBody(response);
-    const latest = this.get(item.tenantId, item.id);
-    this.store.automations.update({
-      ...latest, triggerEtag: response.headers.get('etag') ?? latest.triggerEtag,
-      triggerLastModified: response.headers.get('last-modified') ?? latest.triggerLastModified,
-      triggerCheckedAt: now, triggerError: undefined, revision: latest.revision + 1, updatedAt: now,
-    }, latest.revision);
-    await this.applyTriggerValue(this.get(item.tenantId, item.id), value, now, 'url');
+    await this.applyTriggerValue(item, value, now, 'url', {
+      triggerEtag: response.headers.get('etag') ?? item.triggerEtag,
+      triggerLastModified: response.headers.get('last-modified') ?? item.triggerLastModified,
+    });
   }
 
-  private async applyTriggerValue(item: AutomationDefinition, value: string, now: number, source: 'file' | 'url'): Promise<void> {
-    const previous = this.store.automations.baseline(item.tenantId, item.id)?.value ?? item.triggerValue;
-    const latest = this.get(item.tenantId, item.id);
-    this.store.automations.update({ ...latest, triggerValue: value, triggerCheckedAt: now, triggerError: undefined, revision: latest.revision + 1, updatedAt: now }, latest.revision);
-    this.store.automations.saveBaseline(this.get(item.tenantId, item.id), now);
-    if (!previous || previous === value) return;
-    const refreshed = this.get(item.tenantId, item.id);
-    const occurrence = this.store.automations.beginOccurrence({
-      automationId: item.id, tenantId: item.tenantId, occurrenceKey: triggerOccurrenceKey(item.trigger, now, value),
-      dueAt: now, reason: source, now,
-    });
-    if (!occurrence) return;
-    const next = this.get(item.tenantId, item.id);
-    this.store.automations.update({ ...next, lastTriggeredAt: now, revision: next.revision + 1, updatedAt: now }, next.revision);
-    this.execute(refreshed, occurrence, now);
+  private async applyTriggerValue(
+    item: AutomationDefinition, value: string, now: number, source: 'file' | 'url',
+    patch?: Pick<AutomationDefinition, 'triggerEtag' | 'triggerLastModified'>,
+  ): Promise<void> {
+    const committed = this.store.automations.commitPolledValue({ item, value, source, now, patch });
+    if (!committed.automation || !committed.occurrence) return;
+    this.execute(committed.automation, committed.occurrence, now);
   }
 
   private resolveProvider(providerId: unknown, model: unknown): { id: string; model: string } | undefined {

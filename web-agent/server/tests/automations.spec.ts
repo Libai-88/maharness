@@ -402,6 +402,75 @@ describe('自动化计划与触发', () => {
     } finally { f.store.close(); }
   });
 
+  test('文件内容 A→B→A→B 能重新捕获第二次 B', async () => {
+    const f = setup();
+    try {
+      const item = f.service.create('default', { name: '文件', prompt: '处理', trigger: { type: 'file', path: 'inbox.csv' } }, 'user');
+      f.service.confirm('default', item.id, item.revision);
+      const start = Date.now();
+      writeFileSync(join(f.root, 'inbox.csv'), 'a');
+      await f.service.tick(start);
+      for (const [offset, value] of [2_000, 4_000, 6_000].entries()) {
+        writeFileSync(join(f.root, 'inbox.csv'), ['b', 'a', 'b'][offset]);
+        await f.service.tick(start + value);
+      }
+      const bHash = createHash('sha256').update('b').digest('hex');
+      const bOccurrences = f.store.automations.occurrences('default', item.id)
+        .filter(occurrence => occurrence.occurrenceKey.endsWith(`:${bHash}`));
+      assert.equal(bOccurrences.length, 2);
+      assert.equal(new Set(bOccurrences.map(occurrence => occurrence.occurrenceKey)).size, 2);
+    } finally { f.store.close(); }
+  });
+
+  test('推进到期计划失败时事务回滚 occurrence 和 nextDueAt', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-automation-atomic-'));
+    roots.push(root);
+    const file = join(root, 'agent.db');
+    const store = new Store(file);
+    const now = Date.UTC(2026, 2, 1, 12, 0, 0);
+    store.upsertProvider({ id: 'fixture', label: 'Fixture', baseUrl: 'https://example.test/v1', apiKey: '', model: 'fixture-model' });
+    const service = new AutomationService(store, () => root, () => now);
+    const item = service.create('default', {
+      name: '日报', prompt: '整理', trigger: { type: 'schedule', recurrence: 'daily', time: '09:00', timeZone: 'UTC' },
+    }, 'user');
+    const confirmed = service.confirm('default', item.id, item.revision);
+    const raw = new Database(file);
+    try {
+      raw.exec(`CREATE TRIGGER fail_due_advance BEFORE UPDATE OF next_due_at ON automations_v3
+        BEGIN SELECT RAISE(ABORT, 'forced advance failure'); END;`);
+      assert.throws(
+        () => store.automations.claimDue(confirmed, confirmed.nextDueAt! + 86_400_000, now),
+        /forced advance failure/,
+      );
+      assert.equal(store.automations.occurrences('default', item.id).length, 0);
+      assert.equal(service.get('default', item.id).nextDueAt, confirmed.nextDueAt);
+    } finally {
+      raw.close();
+      store.close();
+    }
+  });
+
+  test('重启后同一到期时间不会被重复创建', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-automation-reopen-'));
+    roots.push(root);
+    const file = join(root, 'agent.db');
+    const now = Date.UTC(2026, 2, 1, 12, 0, 0);
+    let store = new Store(file);
+    store.upsertProvider({ id: 'fixture', label: 'Fixture', baseUrl: 'https://example.test/v1', apiKey: '', model: 'fixture-model' });
+    let service = new AutomationService(store, () => root, () => now);
+    const item = service.create('default', { name: '一次', prompt: '执行', trigger: { type: 'once', at: now + 1_000 } }, 'user');
+    await service.tick(item.nextDueAt);
+    assert.equal(store.automations.occurrences('default', item.id).length, 1);
+    store.close();
+
+    store = new Store(file);
+    service = new AutomationService(store, () => root, () => now);
+    try {
+      await service.tick(item.nextDueAt);
+      assert.equal(store.automations.occurrences('default', item.id).length, 1);
+    } finally { store.close(); }
+  });
+
   test('文件触发器拒绝生成目录大小写绕过和符号链接越界', async () => {
     const f = setup();
     try {
