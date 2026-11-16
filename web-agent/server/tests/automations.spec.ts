@@ -92,6 +92,86 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { f.store.close(); }
   });
 
+  test('自动化工具接受常见 cron/字段别名并转换为预设触发结构', async () => {
+    const f = setup();
+    try {
+      const create = f.service.tools().find(item => item.name === 'automation_create')!;
+      const result = await create.handler({
+        name: '周一提醒',
+        prompt: '整理资料',
+        trigger: { type: 'schedule', cron: '0 9 * * 1', timezone: 'Asia/Shanghai' },
+      }, { tenantId: 'default', providerId: 'fixture', model: 'fixture-model' } as never);
+      assert.equal(result.ok, true);
+      const scheduled = f.service.list('default').find(item => item.name === '周一提醒')!;
+      assert.deepEqual(scheduled.trigger, {
+        type: 'schedule', recurrence: 'weekly', time: '09:00', timeZone: 'Asia/Shanghai', dayOfWeek: 1,
+      });
+      assert.equal(scheduled.approval, 'pending');
+
+      const file = await create.handler({
+        name: '文件提醒',
+        prompt: '整理资料',
+        trigger: { type: 'file', filePath: 'inbox/data.csv' },
+      }, { tenantId: 'default', providerId: 'fixture', model: 'fixture-model' } as never);
+      assert.equal(file.ok, true);
+      assert.equal(f.service.list('default').find(item => item.name === '文件提醒')?.trigger.type, 'file');
+    } finally { f.store.close(); }
+  });
+
+  test('自动化校验失败返回可操作提示并声明可重试', async () => {
+    const f = setup();
+    try {
+      const create = f.service.tools().find(item => item.name === 'automation_create')!;
+      const result = await create.handler({
+        name: '错误时间',
+        prompt: '整理资料',
+        trigger: { type: 'once', at: 'not-a-date' },
+      }, { tenantId: 'default' } as never);
+      assert.equal(result.ok, false);
+      assert.equal(result.failure?.code, 'INVALID_TRIGGER');
+      assert.equal(result.failure?.retryable, true);
+      assert.match((result.data as { hint: string }).hint, /type:"once"/);
+    } finally { f.store.close(); }
+  });
+
+  test('自动化工具按公开契约归一化字符串月日与 Unix 秒时间', async () => {
+    const f = setup();
+    try {
+      const create = f.service.tools().find(item => item.name === 'automation_create')!;
+      const monthly = await create.handler({
+        name: '月度提醒',
+        prompt: '整理资料',
+        trigger: { type: 'schedule', recurrence: 'monthly', dayOfMonth: '15', time: '09:00', timeZone: 'Asia/Shanghai' },
+      }, { tenantId: 'default' } as never);
+      assert.equal(monthly.ok, true);
+      const scheduled = f.service.list('default').find(item => item.name === '月度提醒')!;
+      assert.equal(scheduled.trigger.type === 'schedule' && scheduled.trigger.dayOfMonth, 15);
+
+      const seconds = Math.trunc((Date.now() + 3_600_000) / 1000);
+      const once = await create.handler({
+        name: '一次性提醒',
+        prompt: '提醒我',
+        trigger: { type: 'once', at: seconds },
+      }, { tenantId: 'default' } as never);
+      assert.equal(once.ok, true);
+      const oneOff = f.service.list('default').find(item => item.name === '一次性提醒')!;
+      assert.equal(oneOff.trigger.type === 'once' && oneOff.trigger.at, seconds * 1000);
+    } finally { f.store.close(); }
+  });
+
+  test('automation_update 公开 patch 契约而不是无约束对象', () => {
+    const f = setup();
+    try {
+      const tool = f.service.tools().find(item => item.name === 'automation_update')!;
+      const patch = (tool.parameters.properties as Record<string, any>).patch;
+      assert.equal(patch.additionalProperties, false);
+      assert.ok(patch.properties.prompt);
+      assert.ok(patch.properties.trigger.properties.timeZone);
+      assert.ok(patch.properties.materials.items);
+      assert.deepEqual(tool.discovery?.pluginId, 'server.automations');
+    } finally { f.store.close(); }
+  });
+
   test('模型创建一次性任务直接生效，周期和文件任务保持待确认', () => {
     const f = setup();
     try {

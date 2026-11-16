@@ -329,15 +329,95 @@ export function nextTriggerTime(trigger: AutomationTrigger, after: number): numb
   return undefined;
 }
 
+const RECURRENCE_ALIASES: Record<string, Extract<AutomationTrigger, { type: 'schedule' }>['recurrence']> = {
+  daily: 'daily', day: 'daily', everyday: 'daily', '每日': 'daily', '每天': 'daily',
+  weekdays: 'weekdays', weekday: 'weekdays', '工作日': 'weekdays', '每个工作日': 'weekdays',
+  weekly: 'weekly', week: 'weekly', '每周': 'weekly',
+  monthly: 'monthly', month: 'monthly', '每月': 'monthly',
+};
+const WEEKDAY_ALIASES: Record<string, number> = {
+  sun: 0, sunday: 0, '周日': 0, '星期日': 0, '星期天': 0,
+  mon: 1, monday: 1, '周一': 1, '星期一': 1,
+  tue: 2, tuesday: 2, '周二': 2, '星期二': 2,
+  wed: 3, wednesday: 3, '周三': 3, '星期三': 3,
+  thu: 4, thursday: 4, '周四': 4, '星期四': 4,
+  fri: 5, friday: 5, '周五': 5, '星期五': 5,
+  sat: 6, saturday: 6, '周六': 6, '星期六': 6,
+};
+
+function timestampValue(value: unknown): number {
+  if (typeof value === 'string') return Date.parse(value);
+  if (typeof value === 'number' && Number.isFinite(value)) return value > 0 && value < 1e12 ? value * 1000 : value;
+  return Number.NaN;
+}
+
+function weekdayValue(value: unknown): number | undefined {
+  if (value === undefined) return undefined;
+  if (typeof value === 'number' && Number.isInteger(value)) return value;
+  const text = String(value).trim().toLowerCase();
+  if (/^\d$/.test(text)) return Number(text);
+  return WEEKDAY_ALIASES[text];
+}
+
+function presetCron(cron: unknown): Partial<Record<string, unknown>> {
+  const text = String(cron ?? '').trim();
+  const match = /^(\d{1,2})\s+(\d{1,2})\s+(\*|\d{1,2})\s+\*\s+(\*|\d|1-5|[A-Za-z]{3,9})$/i.exec(text);
+  if (!match) return {};
+  const minute = Number(match[1]);
+  const hour = Number(match[2]);
+  if (minute > 59 || hour > 23) return {};
+  const result: Record<string, unknown> = { recurrence: 'daily', time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}` };
+  const dayOfMonth = match[3];
+  const dayOfWeek = match[4];
+  if (dayOfMonth !== '*') {
+    result.recurrence = 'monthly';
+    result.dayOfMonth = Number(dayOfMonth);
+  } else if (dayOfWeek === '1-5') {
+    result.recurrence = 'weekdays';
+  } else if (dayOfWeek !== '*') {
+    const weekday = weekdayValue(dayOfWeek);
+    if (weekday === undefined || weekday < 0 || weekday > 6) return {};
+    result.recurrence = 'weekly';
+    result.dayOfWeek = weekday;
+  }
+  return result;
+}
+
+/** Translate common model-supplied shapes into the public preset trigger contract. */
+function normalizeTriggerInput(value: unknown): unknown {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return value;
+  const raw = value as Record<string, unknown>;
+  const requestedType = String(raw.type ?? raw.kind ?? '').trim().toLowerCase();
+  const type = requestedType === 'recurring' || requestedType === 'cron' ? 'schedule' : requestedType;
+  const trigger: Record<string, unknown> = { ...raw, type };
+  if (type === 'once') {
+    trigger.at = raw.at ?? raw.runAt ?? raw.scheduledAt ?? raw.datetime ?? raw.when;
+  } else if (type === 'schedule') {
+    trigger.timeZone = raw.timeZone ?? raw.timezone;
+    const recurrence = String(raw.recurrence ?? raw.repeat ?? raw.frequency ?? '').trim().toLowerCase();
+    trigger.recurrence = RECURRENCE_ALIASES[recurrence] ?? raw.recurrence;
+    trigger.dayOfWeek = weekdayValue(raw.dayOfWeek ?? raw.weekday);
+    const dayOfMonth = raw.dayOfMonth ?? raw.monthDay;
+    trigger.dayOfMonth = dayOfMonth === undefined ? undefined : Number(dayOfMonth);
+    trigger.startAt = raw.startAt === undefined ? undefined : timestampValue(raw.startAt);
+    if (raw.cron !== undefined) Object.assign(trigger, presetCron(raw.cron), {});
+  } else if (type === 'file') {
+    trigger.path = raw.path ?? raw.file ?? raw.filePath ?? raw.watchPath;
+  } else if (type === 'url') {
+    trigger.url = raw.url ?? raw.href ?? raw.address;
+  }
+  for (const key of ['kind', 'timezone', 'repeat', 'frequency', 'weekday', 'monthDay', 'runAt', 'scheduledAt', 'datetime', 'when', 'file', 'filePath', 'watchPath', 'href', 'address'])
+    delete trigger[key];
+  return trigger;
+}
+
 function assertValidTrigger(value: unknown): AutomationTrigger {
-  const trigger = value as Partial<AutomationTrigger> | null;
+  const trigger = normalizeTriggerInput(value) as Partial<AutomationTrigger> | null;
   if (!trigger || typeof trigger !== 'object') throw new AutomationError(400, 'INVALID_TRIGGER', '触发器格式无效');
   if (trigger.type === 'manual') return { type: 'manual' };
   if (trigger.type === 'once') {
     const rawAt = trigger.at ?? (trigger as Record<string, unknown>).runAt;
-    const at = typeof rawAt === 'string'
-      ? Date.parse(rawAt)
-      : typeof rawAt === 'number' ? rawAt : Number.NaN;
+    const at = timestampValue(rawAt);
     if (!Number.isFinite(at) || at <= 0) throw new AutomationError(400, 'INVALID_TRIGGER', '一次性任务需要有效时间');
     return { type: 'once', at: Math.trunc(at) };
   }
@@ -377,9 +457,31 @@ function triggerOccurrenceKey(trigger: AutomationTrigger, dueAt: number, value?:
   return `${trigger.type}:${value ?? dueAt}`;
 }
 
-function failure(error: unknown): { ok: false; error: string; failure: { code: string; retryable: boolean; outcome: 'not_started' } } {
+function failure(error: unknown): {
+  ok: false;
+  error: string;
+  data: { hint: string };
+  failure: { code: string; retryable: boolean; outcome: 'not_started' };
+} {
   const code = error instanceof AutomationError ? error.code : 'AUTOMATION_ERROR';
-  return { ok: false, error: error instanceof Error ? error.message : String(error), failure: { code, retryable: false, outcome: 'not_started' } };
+  const hints: Record<string, string> = {
+    INVALID_TRIGGER: 'Use one of: {type:"once",at:"ISO-8601"}; {type:"schedule",recurrence:"daily|weekdays|weekly|monthly",time:"HH:mm",timeZone:"IANA"}; {type:"file",path:"workspace/relative/path"}; {type:"url",url:"https://..."}; or {type:"manual"}.',
+    INVALID_AUTOMATION: 'Provide a non-empty name (1-120 chars) and prompt (1-20000 chars).',
+    INVALID_MATERIALS: 'Attach at most 10 items with {id,version} from the current workspace.',
+    INVALID_BUDGET: 'Use a non-negative numeric budgetUsd.',
+    PROVIDER_UNAVAILABLE: 'Use an enabled provider id or omit providerId to use the current provider.',
+    AUTOMATION_VERSION_CONFLICT: 'Call automation_get, then retry with the returned revision.',
+    AUTOMATION_NEEDS_CONFIRMATION: 'The user must confirm this automation in the Automation page before it can run.',
+    AUTOMATION_NOT_ACTIVE: 'Confirm or resume the automation before running it now.',
+    AUTOMATION_NOT_FOUND: 'Call automation_list to find the current automation id.',
+  };
+  const retryable = ['INVALID_TRIGGER', 'INVALID_AUTOMATION', 'INVALID_MATERIALS', 'INVALID_BUDGET', 'PROVIDER_UNAVAILABLE', 'AUTOMATION_VERSION_CONFLICT', 'AUTOMATION_NEEDS_CONFIRMATION', 'AUTOMATION_NOT_ACTIVE', 'AUTOMATION_NOT_FOUND'].includes(code);
+  return {
+    ok: false,
+    error: error instanceof Error ? error.message : String(error),
+    data: { hint: hints[code] ?? 'Read the current state with the matching automation_* read tool before retrying.' },
+    failure: { code, retryable, outcome: 'not_started' },
+  };
 }
 
 export class AutomationService {
@@ -556,7 +658,7 @@ export class AutomationService {
     const make = (name: string, description: string, sideEffect: ToolDef['sideEffect'], properties: Record<string, unknown>, required: string[], handler: (args: Record<string, unknown>, ctx: ToolContext) => Promise<unknown> | unknown): ToolDef => ({
       name, description, version: '3.0.0', permissions: sideEffect === 'read' ? ['workspace.read'] : ['workspace.read', 'workspace.write'],
       risk: sideEffect === 'read' ? 'low' : 'medium', sideEffect, contentTrust: 'trusted', parameters: { type: 'object', properties, required, additionalProperties: false }, outputSchema: { type: 'object' },
-      discovery: { initial: false, keywords: ['自动化', '定时', '排期', 'trigger', 'automation'], capabilities: [capability] },
+      discovery: { initial: false, pluginId: 'server.automations', pluginVersion: '3.0.0', keywords: ['自动化', '定时', '排期', 'trigger', 'automation'], capabilities: [capability] },
       async handler(toolArgs, ctx) {
         try {
           const value = await handler(toolArgs as Record<string, unknown>, ctx);
@@ -568,20 +670,44 @@ export class AutomationService {
     const revision = { type: 'integer', minimum: 1 };
     const trigger = {
       type: 'object',
-      description: '使用预设触发器字段，不要传递 cron 表达式。once 示例：{type:"once",at:"2026-11-16T12:30:00Z"}；schedule 示例：{type:"schedule",recurrence:"weekly",dayOfWeek:1,time:"09:00",timeZone:"Asia/Shanghai"}。',
+      description: '使用预设触发器字段。once 示例：{type:"once",at:"2026-11-16T12:30:00Z"}；schedule 示例：{type:"schedule",recurrence:"weekly",dayOfWeek:1,time:"09:00",timeZone:"Asia/Shanghai"}；file 示例：{type:"file",path:"inbox/report.csv"}。',
       properties: {
         type: { type: 'string', enum: ['manual', 'once', 'schedule', 'file', 'url'] },
-        at: { type: 'string', description: '一次性任务的 ISO 8601 日期时间。' },
+        at: { type: ['string', 'number'], description: '一次性任务的 ISO 8601 日期时间或 Unix 时间戳。' },
+        runAt: { type: ['string', 'number'], description: 'at 的兼容别名。' },
+        scheduledAt: { type: ['string', 'number'], description: 'at 的兼容别名。' },
+        datetime: { type: ['string', 'number'], description: 'at 的兼容别名。' },
+        when: { type: ['string', 'number'], description: 'at 的兼容别名。' },
         recurrence: { type: 'string', enum: ['daily', 'weekdays', 'weekly', 'monthly'] },
+        cron: { type: 'string', description: '兼容常见五段 cron；系统只转换为每日、工作日、每周或每月预设。优先使用 recurrence。' },
         time: { type: 'string', description: '周期运行时间 HH:mm' },
         timeZone: { type: 'string', description: 'IANA 时区，如 Asia/Shanghai' },
-        dayOfWeek: { type: 'integer', minimum: 0, maximum: 6, description: '每周触发日，0 为周日，1 为周一' },
-        dayOfMonth: { type: 'integer', minimum: 1, maximum: 31 },
-        startAt: { type: 'integer', description: '可选周期起始时间，Unix 毫秒' },
+        timezone: { type: 'string', description: 'timeZone 的兼容别名。' },
+        dayOfWeek: { type: ['integer', 'string'], description: '每周触发日：0 为周日，1 为周一；也接受 Monday/周一。' },
+        weekday: { type: ['integer', 'string'], description: 'dayOfWeek 的兼容别名。' },
+        dayOfMonth: { type: ['integer', 'string'], description: '每月触发日 1-31。' },
+        startAt: { type: ['string', 'number'], description: '可选周期起始时间，ISO 8601 或 Unix 时间戳' },
         path: { type: 'string', description: 'file 触发器使用的工作区相对路径，不能指向 outputs/ 或运行时目录' },
+        filePath: { type: 'string', description: 'path 的兼容别名。' },
+        watchPath: { type: 'string', description: 'path 的兼容别名。' },
         url: { type: 'string', description: 'url 触发器使用的公开 http/https 地址' },
       },
       required: ['type'],
+      additionalProperties: false,
+    };
+    const patch = {
+      type: 'object',
+      description: '只传需要修改的字段；修改敏感字段后自动化会重新进入待确认状态。',
+      properties: {
+        name: { type: 'string' },
+        prompt: { type: 'string' },
+        trigger,
+        materials: { type: 'array', maxItems: 10, items: { type: 'object', properties: { id: { type: 'string' }, version: { type: 'string' } }, required: ['id', 'version'], additionalProperties: false } },
+        providerId: { type: 'string' },
+        model: { type: 'string' },
+        budgetUsd: { type: 'number', minimum: 0 },
+        budgetPolicy: { type: 'string', enum: ['advisory', 'enforce'] },
+      },
       additionalProperties: false,
     };
     return [
@@ -597,8 +723,8 @@ export class AutomationService {
         ['name', 'prompt', 'trigger'], (args, ctx) => this.create(ctx.tenantId ?? 'default', {
           ...(args as Record<string, unknown>), providerId: ctx.providerId, model: ctx.model,
         }, 'agent', ctx.sessionId)),
-      make('automation_update', '修改自动化。必须使用 revision；修改任务、触发器、资料或模型后重新进入待确认状态。', 'write',
-        { id, revision, patch: { type: 'object' } }, ['id', 'revision', 'patch'], (args, ctx) => this.update(ctx.tenantId ?? 'default', String(args.id), Number(args.revision), (args.patch ?? {}) as Record<string, unknown>, 'agent')),
+      make('automation_update', '修改自动化。先读取 automation_get 的 revision；patch 只放需要修改的字段。修改名称、任务、触发器、资料或模型后重新进入待确认状态。', 'write',
+        { id, revision, patch }, ['id', 'revision', 'patch'], (args, ctx) => this.update(ctx.tenantId ?? 'default', String(args.id), Number(args.revision), (args.patch ?? {}) as Record<string, unknown>, 'agent')),
       make('automation_pause', '暂停自动化；已经运行的任务不受影响。', 'write', { id, revision }, ['id', 'revision'], (args, ctx) => this.pause(ctx.tenantId ?? 'default', String(args.id), Number(args.revision))),
       make('automation_resume', '恢复一个已确认的自动化。', 'write', { id, revision }, ['id', 'revision'], (args, ctx) => this.resume(ctx.tenantId ?? 'default', String(args.id), Number(args.revision))),
       make('automation_run', '立即运行一个已启用的自动化，并创建可追踪任务。', 'external', { id, revision }, ['id'], (args, ctx) => this.runNow(ctx.tenantId ?? 'default', String(args.id), args.revision === undefined ? undefined : Number(args.revision))),

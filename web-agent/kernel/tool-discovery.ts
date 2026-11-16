@@ -51,9 +51,16 @@ export function createToolCatalog(authorized: ToolDef[], restoredEnabled: string
   };
   const capabilityIndex = (() => {
     const all: { key: string; owner: string; descriptor: CapabilityDescriptor }[] = [];
+    const descriptorOwners = new WeakMap<object, string>();
     for (const tool of authorized) {
       for (const descriptor of tool.discovery?.capabilities ?? []) {
-        all.push({ key: descriptor.id, owner: tool.discovery?.pluginId ?? tool.name, descriptor });
+        // Tools that share one descriptor object are facets of the same capability,
+        // not competing owners. Explicit plugin ids remain the strongest owner key.
+        const owner = tool.discovery?.pluginId
+          ?? descriptorOwners.get(descriptor)
+          ?? tool.name;
+        if (!descriptorOwners.has(descriptor)) descriptorOwners.set(descriptor, owner);
+        all.push({ key: descriptor.id, owner, descriptor });
       }
     }
     const byKey = new Map<string, { key: string; owner: string; descriptor: CapabilityDescriptor }>();
@@ -61,7 +68,8 @@ export function createToolCatalog(authorized: ToolDef[], restoredEnabled: string
     for (const item of all.sort((a, b) => a.key.localeCompare(b.key) || a.owner.localeCompare(b.owner))) {
       const current = byKey.get(item.key);
       if (!current) byKey.set(item.key, item);
-      else if (current.owner !== item.owner) conflicts.push({ capabilityId: item.key, shadowedBy: current.owner });
+      else if (current.owner !== item.owner && !conflicts.some(conflict => conflict.capabilityId === item.key && conflict.shadowedBy === current.owner))
+        conflicts.push({ capabilityId: item.key, shadowedBy: current.owner });
     }
     const state = states.get(active)!;
     state.conflicts = conflicts;

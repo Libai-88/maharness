@@ -123,3 +123,36 @@ test('任务能力索引按意图发现、稳定去重并只加载胜出插件�
   const second = createToolCatalog([z, ...filler, a], [], 1);
   assert.equal(second.some(item => item.name === 'read_pdf_a'), false);
 });
+
+test('one capability composed from multiple tools is not reported as an internal conflict', () => {
+  const descriptor = {
+    id: 'automation', name: '任务自动化', description: '管理自动化', tools: ['automation_cancel', 'automation_create'],
+    aliases: ['自动化'], inputs: ['prompt'], outputs: ['run'], risk: 'medium' as const, sideEffect: 'external' as const,
+  };
+  const tool = (name: string): ToolDef => ({
+    name, description: name, version: '3.0.0', permissions: [], sideEffect: 'write',
+    parameters: { type: 'object' }, outputSchema: { type: 'object' }, handler: async () => ({ ok: true }),
+    discovery: { initial: false, capabilities: [descriptor] },
+  });
+  const active = createToolCatalog([tool('automation_cancel'), tool('automation_create')], [], 1);
+  assert.deepEqual(capabilityConflicts(active), []);
+});
+
+test('cross-plugin capability conflicts are reported once per competing owner', () => {
+  const makeOwner = (pluginId: string, names: string[]) => {
+    const descriptor = {
+      id: 'document.read', name: '读取文档', description: '读取文档', tools: names,
+      aliases: ['文件'], inputs: ['pdf'], outputs: ['text'], risk: 'low' as const, sideEffect: 'read' as const,
+    };
+    return names.map(name => ({
+      name, description: name, version: '3.0.0', permissions: ['workspace.read'], sideEffect: 'read' as const,
+      parameters: { type: 'object' }, outputSchema: { type: 'object' }, handler: async () => ({ ok: true }),
+      discovery: { initial: false, pluginId, capabilities: [descriptor] },
+    } satisfies ToolDef));
+  };
+  const active = createToolCatalog([
+    ...makeOwner('alpha', ['alpha_read', 'alpha_extract']),
+    ...makeOwner('zeta', ['zeta_read', 'zeta_extract']),
+  ], [], 1);
+  assert.deepEqual(capabilityConflicts(active), [{ capabilityId: 'document.read', shadowedBy: 'alpha' }]);
+});

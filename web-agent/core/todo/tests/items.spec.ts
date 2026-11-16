@@ -28,6 +28,35 @@ test('item_create exposes natural fields without requiring operationId', async (
     assert.equal(f.items.list('default')[0]?.title, '提交笔记');
   } finally { f.clean(); }
 });
+test('item_create normalizes priority and date-time aliases while preserving structured failures', async () => {
+  const f = fixture();
+  try {
+    const registered: unknown[] = [];
+    registerItemTools({
+      register(capability: unknown) { registered.push(capability); return () => {}; },
+    } as never, f.items);
+    const tool = (registered as Array<{ kind: string; tool?: { name: string; handler(args: unknown, context: unknown): Promise<{ ok: boolean; data?: unknown; failure?: { code: string; retryable: boolean }; error?: string }> } }>)
+      .find(item => item.kind === 'tool' && item.tool?.name === 'item_create')?.tool!;
+    const created = await tool.handler({
+      title: '提交笔记',
+      dueDate: '2026-11-17T18:30:00+08:00',
+      timezone: 'Asia/Shanghai',
+      priority: '高',
+    }, { tenantId: 'default' });
+    assert.equal(created.ok, true);
+    const item = f.items.list('default')[0]!;
+    assert.equal(item.due, '2026-11-17');
+    assert.equal(item.dueTime, '18:30');
+    assert.equal(item.prio, 2);
+    assert.equal(item.timeZone, 'Asia/Shanghai');
+
+    const invalid = await tool.handler({ title: '错误日期', due: '2026-02-30' }, { tenantId: 'default' });
+    assert.equal(invalid.ok, false);
+    assert.equal(invalid.failure?.code, 'INVALID_DATE');
+    assert.equal(invalid.failure?.retryable, true);
+    assert.equal(invalid.error, '日期无效');
+  } finally { f.clean(); }
+});
 test('personal items persist across restart, isolate tenants and deduplicate operations', () => {
   const f=fixture();try {
     const args={title:'写周报',timeZone:'Asia/Shanghai',operationId:'one'};

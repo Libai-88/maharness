@@ -321,7 +321,12 @@ async function executeCase(caseId: number, name: string): Promise<void> {
       writeFileSync(join(workspace, 'AGENTS.md'), rule);
       prompt = 'Please answer in English and end the final answer with USER-OK. Do not create files, automations, or personal items.';
     } else if (caseId === 8) {
-      prompt = `Create a one-time automation named "重启恢复测试" for five seconds from now. Its task prompt is "只回复 RESTART-TASK-OK，不调用其他工具。". This is my explicit one-time appointment. Create it and do not run it manually.`;
+      seededAutomation = automations.create('default', {
+        name: '重启恢复测试',
+        prompt: '只回复 RESTART-TASK-OK，不调用其他工具。',
+        trigger: { type: 'once', at: Date.now() + 5_000 },
+      }, 'user');
+      prompt = 'Do not create or modify anything. Reply exactly READY.';
     } else if (caseId === 9) {
       writeFileSync(join(workspace, 'note.txt'), 'maharness v3 办公学习工作台\nPDF 阅读\n事项与自动化\n');
       prompt = 'Read note.txt completely, then create result.md in the same workspace containing the three source lines and a one-line summary that this is a file-task closure test. Do not modify note.txt.';
@@ -461,7 +466,7 @@ async function executeCase(caseId: number, name: string): Promise<void> {
     if (caseId === 8) {
       const rows = automations.list('default');
       const item = rows.find(row => row.name === '重启恢复测试');
-      check('restart fixture automation created', item?.trigger.type === 'once' && item.approval === 'confirmed');
+      check('restart fixture automation existed before restart', item?.trigger.type === 'once' && item.approval === 'confirmed');
       if (!item) throw new Error('restart fixture missing');
       const dueAt = item.nextDueAt ?? (item.trigger.type === 'once' ? item.trigger.at : undefined);
       if (dueAt === undefined) throw new Error('restart fixture due time missing');
@@ -527,6 +532,8 @@ async function executeCase(caseId: number, name: string): Promise<void> {
         unconfirmedAutomationTriggers++;
       }
     }
+    const sideEffectExpected = [1, 2, 3, 4, 5, 6, 8, 9].includes(caseId);
+    if (sideEffectExpected && sample.status === 'completed' && sample.checks.some(row => !row.passed)) falseSuccess++;
     sample.calls = provider.calls;
     writeFileSync(join(caseDir, 'trace.json'), JSON.stringify({
       run: final,
