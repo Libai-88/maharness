@@ -1,10 +1,11 @@
 import { after, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
-import { AutomationService, nextScheduleOccurrence, type AutomationTrigger } from '../automations';
+import { AutomationService, URL_TRIGGER_MAX_BYTES, hashBoundedResponseBody, nextScheduleOccurrence, type AutomationTrigger } from '../automations';
 import { Store } from '../db';
 import type { RunService } from '../run-service';
 import type { RunEvent, RunRecord } from '../../kernel/run';
@@ -194,6 +195,41 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { f.store.close(); }
   });
 
+  test('用户编辑敏感字段同样重新待确认，其他状态不能绕过状态机', () => {
+    const f = setup();
+    try {
+      const created = f.service.create('default', {
+        name: '周报', prompt: '整理周报',
+        trigger: { type: 'schedule', recurrence: 'weekly', dayOfWeek: 1, time: '09:00', timeZone: 'Asia/Shanghai' },
+      }, 'user');
+      assert.equal(created.approval, 'confirmed');
+      const changed = f.service.update('default', created.id, created.revision, { prompt: '整理新版周报' }, 'user');
+      assert.equal(changed.approval, 'pending');
+      assert.equal(changed.state, 'draft');
+      assert.equal(changed.nextDueAt, undefined);
+      assert.throws(() => f.service.pause('default', changed.id, changed.revision), /只有已启用的自动化可以暂停/);
+      const confirmed = f.service.confirm('default', changed.id, changed.revision);
+      assert.equal(confirmed.state, 'active');
+      assert.throws(() => f.service.confirm('default', confirmed.id, confirmed.revision), /不在待确认状态/);
+      assert.throws(() => f.service.resume('default', confirmed.id, confirmed.revision), /只有已暂停的自动化可以恢复/);
+    } finally { f.store.close(); }
+  });
+
+  test('过期一次性自动化不能通过确认重新启用', () => {
+    const f = setup();
+    try {
+      const created = f.service.create('default', {
+        name: '一次性任务', prompt: '执行',
+        trigger: { type: 'once', at: Date.UTC(2026, 2, 1, 13, 0, 0) },
+      }, 'agent');
+      const pending = f.service.update('default', created.id, created.revision, {
+        trigger: { type: 'once', at: Date.UTC(2026, 2, 1, 11, 0, 0) },
+      }, 'agent');
+      assert.equal(pending.approval, 'pending');
+      assert.throws(() => f.service.confirm('default', pending.id, pending.revision), /一次性任务时间已过/);
+    } finally { f.store.close(); }
+  });
+
   test('显式不可用 Provider 不静默回退到其他模型', () => {
     const f = setup();
     try {
@@ -296,6 +332,22 @@ describe('自动化计划与触发', () => {
       await f.service.tick(later + 2_000);
       assert.equal(f.store.automations.occurrences('default', item.id).length, 1);
     } finally { f.store.close(); }
+  });
+
+  test('URL 触发器在读取前和流式读取中都不超过 2 MB', async () => {
+    const declared = new Response('small', { headers: { 'content-length': String(URL_TRIGGER_MAX_BYTES + 1) } });
+    await assert.rejects(hashBoundedResponseBody(declared), /超过 2 MB/);
+    let pulled = 0;
+    const body = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        if (pulled > 3) { controller.close(); return; }
+        controller.enqueue(new Uint8Array(URL_TRIGGER_MAX_BYTES / 2));
+      },
+    });
+    await assert.rejects(hashBoundedResponseBody(new Response(body)), /超过 2 MB/);
+    assert.equal(pulled < 4, true);
+    assert.equal(await hashBoundedResponseBody(new Response('safe')), createHash('sha256').update('safe').digest('hex'));
   });
 });
 

@@ -335,6 +335,34 @@ const RECURRENCE_ALIASES: Record<string, Extract<AutomationTrigger, { type: 'sch
   weekly: 'weekly', week: 'weekly', '每周': 'weekly',
   monthly: 'monthly', month: 'monthly', '每月': 'monthly',
 };
+export const URL_TRIGGER_MAX_BYTES = 2 * 1024 * 1024;
+
+export async function hashBoundedResponseBody(response: Response): Promise<string> {
+  const declared = Number(response.headers.get('content-length'));
+  if (Number.isFinite(declared) && declared > URL_TRIGGER_MAX_BYTES) {
+    await response.body?.cancel().catch(() => undefined);
+    throw new AutomationError(413, 'URL_TRIGGER_TOO_LARGE', 'URL 响应超过 2 MB');
+  }
+  if (!response.body) return createHash('sha256').update('').digest('hex');
+  const reader = response.body.getReader();
+  const hash = createHash('sha256');
+  let size = 0;
+  try {
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > URL_TRIGGER_MAX_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        throw new AutomationError(413, 'URL_TRIGGER_TOO_LARGE', 'URL 响应超过 2 MB');
+      }
+      hash.update(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  return hash.digest('hex');
+}
 const WEEKDAY_ALIASES: Record<string, number> = {
   sun: 0, sunday: 0, '周日': 0, '星期日': 0, '星期天': 0,
   mon: 1, monday: 1, '周一': 1, '星期一': 1,
@@ -545,7 +573,7 @@ export class AutomationService {
     return this.store.automations.create(item);
   }
 
-  update(tenantId: string, id: string, expectedRevision: number, patch: Record<string, unknown>, actor: 'user' | 'agent'): AutomationDefinition {
+  update(tenantId: string, id: string, expectedRevision: number, patch: Record<string, unknown>, _actor: 'user' | 'agent'): AutomationDefinition {
     const current = this.get(tenantId, id);
     if (current.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请重新读取后修改');
     const sensitive = ['name', 'prompt', 'trigger', 'materials', 'providerId', 'model', 'budgetUsd', 'budgetPolicy'].some(key => patch[key] !== undefined);
@@ -561,7 +589,7 @@ export class AutomationService {
       revision: current.revision + 1, updatedAt: this.now(),
     };
     if (!item.name || item.name.length > 120 || !item.prompt || item.prompt.length > 20_000) throw new AutomationError(400, 'INVALID_AUTOMATION', '名称或任务提示无效');
-    if (sensitive && actor === 'agent') {
+    if (sensitive) {
       item.approval = 'pending'; item.state = 'draft'; item.nextDueAt = undefined;
     } else if (item.approval === 'confirmed') {
       item.nextDueAt = nextTriggerTime(item.trigger, this.now());
@@ -572,14 +600,17 @@ export class AutomationService {
   confirm(tenantId: string, id: string, expectedRevision: number): AutomationDefinition {
     const current = this.get(tenantId, id);
     if (current.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请刷新后确认');
+    if (current.approval !== 'pending' || current.state !== 'draft') throw new AutomationError(409, 'AUTOMATION_NOT_PENDING', '该自动化不在待确认状态');
     const now = this.now();
     const item = { ...current, approval: 'confirmed' as const, state: 'active' as const, nextDueAt: nextTriggerTime(current.trigger, now), revision: current.revision + 1, updatedAt: now };
+    if (current.trigger.type === 'once' && item.nextDueAt === undefined) throw new AutomationError(409, 'AUTOMATION_TRIGGER_EXPIRED', '一次性任务时间已过，请先修改运行时间');
     return this.store.automations.update(item, expectedRevision);
   }
 
   pause(tenantId: string, id: string, expectedRevision: number): AutomationDefinition {
     const current = this.get(tenantId, id);
     if (current.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请刷新后操作');
+    if (current.state !== 'active') throw new AutomationError(409, 'AUTOMATION_NOT_ACTIVE', '只有已启用的自动化可以暂停');
     return this.store.automations.update({ ...current, state: 'paused', revision: current.revision + 1, updatedAt: this.now() }, expectedRevision);
   }
 
@@ -587,6 +618,7 @@ export class AutomationService {
     const current = this.get(tenantId, id);
     if (current.approval !== 'confirmed') throw new AutomationError(409, 'AUTOMATION_NEEDS_CONFIRMATION', '请先确认自动化');
     if (current.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请刷新后操作');
+    if (current.state !== 'paused') throw new AutomationError(409, 'AUTOMATION_NOT_PAUSED', '只有已暂停的自动化可以恢复');
     const now = this.now();
     return this.store.automations.update({ ...current, state: 'active', nextDueAt: nextTriggerTime(current.trigger, now), revision: current.revision + 1, updatedAt: now }, expectedRevision);
   }
@@ -831,9 +863,7 @@ export class AutomationService {
       return;
     }
     if (!response.ok) throw new AutomationError(502, 'URL_TRIGGER_HTTP', `URL 返回 HTTP ${response.status}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > 2 * 1024 * 1024) throw new AutomationError(413, 'URL_TRIGGER_TOO_LARGE', 'URL 响应超过 2 MB');
-    const value = createHash('sha256').update(bytes).digest('hex');
+    const value = await hashBoundedResponseBody(response);
     const latest = this.get(item.tenantId, item.id);
     this.store.automations.update({
       ...latest, triggerEtag: response.headers.get('etag') ?? latest.triggerEtag,
