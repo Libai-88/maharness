@@ -4,7 +4,7 @@ import { AgentRunner } from '../agent';
 import { ExecutionPool } from '../../../kernel/execution-pool';
 import { acquireWriteLock } from '../../../kernel/write-lock';
 import { isProviderCircuitOpen, LLMHttpError, noteProviderFailure, PROVIDER_CIRCUIT_RESET_MS, PROVIDER_CIRCUIT_THRESHOLD } from '../provider-health';
-import type { EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, TraceStepInit, ToolDef } from '../../../kernel/types';
+import type { AgentEvent, EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, TraceStepInit, ToolDef } from '../../../kernel/types';
 
 const bus: EventBusLike = {
   on: () => () => {}, emit: () => {}, emitAsync: async () => {}, serial: async () => undefined,
@@ -51,6 +51,41 @@ test('readonly principal cannot obtain write authority through approval', async 
     tools: [{version: '2.0.0', permissions: [], outputSchema: {},  name: 'write_test', description: 'write', parameters: { type: 'object' }, sideEffect: 'write', async handler() { invoked = true; return { ok: true }; } }],
   })) { if (event.type === 'approval_required') approval = true; }
   assert.equal(invoked, false); assert.equal(approval, false);
+});
+
+test('known tool precondition failures remain observations and allow corrective retry', async () => {
+  let calls = 0;
+  let sawExplicitFailure = false;
+  const provider: ProviderDef = {
+    id: 'edit-no-match', label: 'test', defaultModel: 'm',
+    async *chat(messages) {
+      calls++;
+      if (calls === 1) {
+        yield { type: 'tool_call', toolCall: { id: 'edit-1', type: 'function', function: { name: 'edit_file', arguments: '{}' } } };
+      } else {
+        const observation = messages.findLast(message => message.role === 'tool');
+        sawExplicitFailure = /"code":"EDIT_NO_MATCH"/.test(observation?.content ?? '')
+          && /"outcome":"not_started"/.test(observation?.content ?? '');
+        yield { type: 'delta', text: '已改用准确原文重试' };
+      }
+      yield { type: 'done' };
+    },
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({
+    provider, model: 'm', traceId: 'edit-no-match', messages: [{ role: 'user', content: '修改文件' }], maxTurns: 3,
+    tools: [{
+      version: '2.0.0', permissions: ['workspace.write'], outputSchema: {}, name: 'edit_file', description: 'edit file',
+      parameters: { type: 'object' }, sideEffect: 'write',
+      async handler() {
+        return { ok: false, error: '第 1 处编辑未找到匹配文本（文件未改动）', failure: { code: 'EDIT_NO_MATCH', retryable: false, outcome: 'not_started' as const } };
+      },
+    }],
+  })) events.push(event);
+  assert.equal(calls, 2);
+  assert.equal(sawExplicitFailure, true);
+  assert.equal(events.some(event => event.type === 'error' && event.kind === 'policy'), false);
+  assert.equal(events.some(event => event.type === 'assistant_done' && event.content === '已改用准确原文重试'), true);
 });
 
 function kernel(): KernelLike {
