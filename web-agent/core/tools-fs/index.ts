@@ -577,7 +577,7 @@ export default {
             replaceAll: !!e.replaceAll,
           }));
           const outcome = applyEdits(r.text, normalized);
-          if (!outcome.ok) return { ok: false, error: `${outcome.error}（文件未改动）` };
+          if (!outcome.ok) return { ok: false, error: `${outcome.error}（文件未改动）`, failure: { code: 'EDIT_NO_MATCH', retryable: false, outcome: 'not_started' } };
           const review = reviewPluginWrite(tctx.sandboxRoot, file, outcome.text, pluginReviewOptions());
           if (review && !review.ok) {
             return {

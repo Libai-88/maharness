@@ -1,9 +1,9 @@
 import type { MaterialRef } from './material-api';
 import { activeRun, runsApi, type RunInfo } from './run-api';
-import { subscribeRun } from './api';
+import { subscribeRun, streamChat } from './run-api';
 // ui/src/App.tsx —— 应用状态协调器
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, streamChat, subscribeEvents, traceApi } from './api';
+import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sessionApi, subscribeEvents, traceApi } from './api';
 import { useApprovals } from './hooks/useApprovals';
 import { useTraceSteps } from './hooks/useTraceSteps';
 import type { ErrorKind } from './api';

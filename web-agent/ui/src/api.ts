@@ -118,8 +118,6 @@ export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'polic
 /** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
  *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
 
-export { streamChat, subscribeRun } from './run-api';
-
 // ---------- 全局事件订阅（Trace 实时面板） ----------
 
 /** 全局事件订阅（Trace 实时面板 / plan / todo / 审批 / provider 健康）。

@@ -24,6 +24,10 @@ test('file writes and edits reject stale versions and preserve concurrent conten
       assert.equal(result.failure?.outcome, 'not_started');
       assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'concurrent');
     }
+    const mismatch = await tools.get('edit_file')!.handler({ path: 'file.txt', edits: [{ oldText: 'missing text', newText: 'replacement' }] }, context);
+    assert.equal(mismatch.failure?.code, 'EDIT_NO_MATCH');
+    assert.equal(mismatch.failure?.outcome, 'not_started');
+    assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'concurrent');
     const existing = await tools.get('write_file')!.handler({ path: 'file.txt', expectedVersion: null, content: 'overwrite' }, context);
     assert.equal(existing.ok, false);
     const created = await tools.get('write_file')!.handler({ path: 'new.txt', expectedVersion: null, content: 'created' }, context);

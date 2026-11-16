@@ -449,6 +449,7 @@ export default {
           const timeoutSec = Math.min(Math.max(Number(args.timeoutSec) || 15, 1), 60);
 
           const { needsApproval, reason } = assessCommand(command);
+          const readOnly = !needsApproval;
           // A8 纵深防御（与 delete_file 的 handler 侧二次校验对齐）：执行器审批门是主防线，
           // 但「策略放行 / 已批准」之外若有任何路径绕过门直接调 handler（未来的新调用面、
           // 插件互调），高危命令也不该落下去。注意 policyApproved 是用户写的 allow 规则，
@@ -474,9 +475,9 @@ export default {
             if (r.code === 0) {
               return { ok: true, data: { exitCode: r.code, output: combined, truncated } };
             }
-            return { ok: false, error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}`, data: { exitCode: r.code, output: combined, truncated }, failure: { code: 'COMMAND_EXIT_NONZERO', retryable: false, outcome: 'unknown' } };
+            return { ok: false, error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}`, data: { exitCode: r.code, output: combined, truncated }, failure: { code: 'COMMAND_EXIT_NONZERO', retryable: false, outcome: readOnly ? 'not_started' : 'unknown' } };
           } catch (err) {
-            return { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: tctx.signal?.aborted ? 'COMMAND_CANCELLED' : 'COMMAND_EXECUTION', retryable: false, outcome: 'unknown' } };
+            return { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: tctx.signal?.aborted ? 'COMMAND_CANCELLED' : 'COMMAND_EXECUTION', retryable: false, outcome: readOnly ? 'not_started' : 'unknown' } };
           }
         },
       },

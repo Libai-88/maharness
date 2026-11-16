@@ -23,6 +23,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
+    // C++ grammar is a self-contained lazy chunk requested only for cpp fences.
+    chunkSizeWarningLimit: 800,
     rollupOptions: {
       input: { main: path.resolve(__dirname, 'index.html'), todo: path.resolve(__dirname, 'todo.html'), workbench: path.resolve(__dirname, 'workbench.html') },
       output: {
@@ -36,7 +38,9 @@ export default defineConfig({
           if (/node_modules[\\/](react|react-dom|scheduler)[\\/]/.test(id)) return 'vendor-react';
           if (/node_modules[\\/]motion(-dom|-utils)?[\\/]/.test(id) || /node_modules[\\/]framer-motion[\\/]/.test(id)) return 'vendor-motion';
           if (/node_modules[\\/](@shikijs[\\/](core|primitive|engine-javascript|vscode-textmate)|shiki[\\/]dist[\\/](core|engine-javascript))[\\/]/.test(id)) return 'vendor-shiki';
-          if (/node_modules[\\/](dompurify|streamdown|marked|react-markdown|remark|rehype|unified|hast|mdast|micromark|remend)[\\/]/.test(id)) return 'vendor-markdown';
+          if (/node_modules[\\/]streamdown[\\/]/.test(id)) return 'vendor-streamdown';
+          if (/node_modules[\\/](dompurify|marked|react-markdown|remark|rehype|unified|hast|mdast|micromark|remend)[\\/]/.test(id)) return 'vendor-markdown';
+          if (/node_modules[\\/](recharts|react-smooth|victory-vendor|d3-[^\\/]+|internmap|decimal.js-light)[\\/]/.test(id)) return 'vendor-charts';
           if (/node_modules[\\/]sonner[\\/]/.test(id)) return 'vendor-sonner';
           if (/node_modules[\\/]@dnd-kit[\\/]/.test(id)) return 'vendor-dnd';
           return undefined;

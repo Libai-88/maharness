@@ -115,7 +115,7 @@ async function execute(job: typeof jobs[number]) {
     for (const plugin of ['skills', 'document', 'academic', 'tools-fs', 'powershell']) { await kernel.plugins.register(join(root, 'core', plugin)); await kernel.plugins.enable(plugin); }
     const tools = kernel.plugins.tools().map(tool => ({ ...tool, async handler(args: unknown, context: Parameters<typeof tool.handler>[1]) { const result = await tool.handler(args, context); results.push({ name: tool.name, args, result }); return result; } }));
     const original = createProvider({ id: config.id, baseUrl: config.baseUrl, apiKey: config.apiKey, model: config.model, protocol: config.protocol, inputPrice: config.priceIn, outputPrice: config.priceOut, requestTimeoutMs });
-    const provider = { ...original, async *chat(messages: Parameters<typeof original.chat>[0], options: Parameters<typeof original.chat>[1]) {
+    const provider = { ...original, inputTokenUpperBound: (messages: Parameters<typeof original.chat>[0], options: Parameters<typeof original.chat>[1]) => Buffer.byteLength(JSON.stringify({ messages, tools: options.tools })), async *chat(messages: Parameters<typeof original.chat>[0], options: Parameters<typeof original.chat>[1]) {
       if (sample.calls >= callLimit || longContentSuite && receipts.length >= 100) throw new Error('EVAL_CALL_LIMIT');
       const held = Buffer.byteLength(JSON.stringify({ messages, tools: options.tools })) + maxOutputTokens + 4096;
       const maxCost = (held * Math.max(config.priceIn, config.priceOut)) / 1e6;

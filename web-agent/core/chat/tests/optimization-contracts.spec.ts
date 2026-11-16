@@ -40,6 +40,9 @@ test('actual default core tool inventory has executable contracts and PowerShell
       assert.equal(failed.ok,false); assert.equal((failed.data as {exitCode:number}).exitCode,7);
       assert.equal(failed.failure?.outcome,'unknown');
       assert.equal((failed.data as {output:string}).output.includes('partial'),true);
+      const readOnlyFailed=await powershell.handler({command:'Get-Content missing-workbench-eval-file.txt'},ctx);
+      assert.equal(readOnlyFailed.ok,false);
+      assert.equal(readOnlyFailed.failure?.outcome,'not_started');
       const start=tools.find(tool=>tool.name==='command_start')!;
       const started=await start.handler({command:"Write-Output 'background'"},ctx);
       assert.equal(started.ok,true);assert.deepEqual(validateAgainstSchema(started.data,start.outputSchema),[]);

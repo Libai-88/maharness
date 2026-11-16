@@ -335,9 +335,9 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
         await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
         reader.releaseLock();
       }
-      // M7 断流半包：流正常结束但未收到 [DONE] 标记 → 视为错误抛出（半截响应不可信，
-      // 进入重试链——重试状态由执行器 C1 重置，前端作废残段重新累积）
-      if (!finished) {
+      // Some OpenAI-compatible gateways close after a terminal finish_reason without
+      // sending [DONE]. An absent finish_reason still indicates an untrusted partial stream.
+      if (!finished && rawReason === undefined) {
         throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
       }
       yield* flushToolCalls();

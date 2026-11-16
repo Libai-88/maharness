@@ -269,6 +269,18 @@ describe('Anthropic 原生端点端到端', () => {
     assert.equal(lastRequest?.headers.authorization, 'Bearer sk-x');
   });
 
+  it('OpenAI 兼容流可在 finish_reason 后结束，缺少任一结束标记仍报断流', async () => {
+    const base = await startMock();
+    httpStatus = 200;
+    sseFrames = ['data: {"choices":[{"delta":{"content":"完成"},"finish_reason":"stop"}]}\n\n'];
+    const p = createProvider({ id: 'oai-finish', baseUrl: base, apiKey: 'sk-x', model: 'gpt-4o', protocol: 'openai' });
+    const chunks = await collect(p, [user('hi')], 'gpt-4o');
+    assert.equal(chunks.at(-1)?.type, 'done');
+
+    sseFrames = ['data: {"choices":[{"delta":{"content":"半截"}}]}\n\n'];
+    await assert.rejects(() => collect(p, [user('hi')], 'gpt-4o'), /未收到 \[DONE\]/);
+  });
+
   it('OpenAI 流取消后关闭底层 SSE 连接', async () => {
     let closed = false;
     const server = createServer((_req, res) => {
