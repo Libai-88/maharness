@@ -54,7 +54,7 @@ export interface WorkbenchSummary {
 }
 
 export const workbenchApi = {
-  summary: () => api<WorkbenchSummary>('/api/workbench/summary'),
+  summary: () => api<WorkbenchSummary>(`/api/workbench/summary?timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
   execute: (item: WorkbenchItem) => api<{ sessionId: string }>(`/api/items/${encodeURIComponent(item.id)}/execute`, {
     method: 'POST',
     headers: { 'Idempotency-Key': crypto.randomUUID() },

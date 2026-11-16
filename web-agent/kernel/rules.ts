@@ -13,6 +13,21 @@ import { createHash } from 'node:crypto';
 import { matchesGlob } from './fssearch';
 import type { RuleDescriptor, RuleResolution } from './types';
 
+export const RUNTIME_RULE_TEXT = '运行时不变量：工具授权、审批、取消、预算与安全问题不可被规则文件覆盖。';
+
+export function runtimeRuleDescriptor(): RuleDescriptor {
+  return {
+    id: 'runtime:invariants',
+    label: '运行时不变量',
+    source: 'runtime',
+    scope: 'runtime',
+    priority: 1000,
+    trust: 'core',
+    contentHash: createHash('sha256').update(RUNTIME_RULE_TEXT).digest('hex'),
+    active: true,
+  };
+}
+
 export interface RuleSource {
   scope: 'global' | 'project';
   label: string;

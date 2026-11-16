@@ -2,12 +2,23 @@ import type { Express } from 'express';
 import type { PersonalItems } from '../../core/todo/items';
 import { tenantIdOf, type RouteDeps } from './shared';
 
+export function dateInTimeZone(now: number, timeZone = 'UTC'): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(now));
+  const value = Object.fromEntries(parts.map(part => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
+}
+
 export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/workbench/summary', (req, res) => {
     const tenantId = tenantIdOf(req);
     const items = deps.kernel.plugins.resolveService('service:personal-items') as PersonalItems | undefined;
     if (!items) return res.status(503).json({ code: 'ITEMS_UNAVAILABLE', error: '事项能力不可用' });
-    const today = new Date().toISOString().slice(0, 10);
+    const timeZone = typeof req.query.timeZone === 'string' ? req.query.timeZone : 'UTC';
+    let today: string;
+    try { today = dateInTimeZone(Date.now(), timeZone); }
+    catch { return res.status(400).json({ code: 'INVALID_TIMEZONE', error: '时区无效' }); }
     const rows = items.list(tenantId);
     const active = rows.filter(item => !['done', 'archived'].includes(item.lifecycle));
     const automations = deps.automations?.list(tenantId) ?? [];

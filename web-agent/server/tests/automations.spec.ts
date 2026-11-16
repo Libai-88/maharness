@@ -185,6 +185,25 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { f.store.close(); }
   });
 
+  test('用户创建周期、文件和 URL 任务保持待确认，手动与一次性任务直接生效', () => {
+    const f = setup();
+    try {
+      const schedule = f.service.create('default', { name: '日报', prompt: '整理日报', trigger: { type: 'schedule', recurrence: 'daily', time: '09:00', timeZone: 'Asia/Shanghai' } }, 'user');
+      const file = f.service.create('default', { name: '文件监控', prompt: '处理文件', trigger: { type: 'file', path: 'inbox/data.csv' } }, 'user');
+      const url = f.service.create('default', { name: '网页监控', prompt: '检查网页', trigger: { type: 'url', url: 'https://example.com/report' } }, 'user');
+      const manual = f.service.create('default', { name: '手动任务', prompt: '按需执行', trigger: { type: 'manual' } }, 'user');
+      const once = f.service.create('default', { name: '单次提醒', prompt: '提醒我', trigger: { type: 'once', at: Date.now() + 3_600_000 } }, 'user');
+      for (const item of [schedule, file, url]) {
+        assert.equal(item.approval, 'pending');
+        assert.equal(item.state, 'draft');
+      }
+      for (const item of [manual, once]) {
+        assert.equal(item.approval, 'confirmed');
+        assert.equal(item.state, 'active');
+      }
+    } finally { f.store.close(); }
+  });
+
   test('修改敏感字段后重新待确认，过期 revision 拒绝覆盖', () => {
     const f = setup();
     try {
@@ -195,15 +214,19 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { f.store.close(); }
   });
 
-  test('用户编辑敏感字段同样重新待确认，其他状态不能绕过状态机', () => {
+  test('用户创建周期任务仍需确认，敏感字段变更后重新待确认', () => {
     const f = setup();
     try {
       const created = f.service.create('default', {
         name: '周报', prompt: '整理周报',
         trigger: { type: 'schedule', recurrence: 'weekly', dayOfWeek: 1, time: '09:00', timeZone: 'Asia/Shanghai' },
       }, 'user');
-      assert.equal(created.approval, 'confirmed');
-      const changed = f.service.update('default', created.id, created.revision, { prompt: '整理新版周报' }, 'user');
+      assert.equal(created.approval, 'pending');
+      assert.equal(created.state, 'draft');
+      const active = f.service.confirm('default', created.id, created.revision);
+      assert.equal(active.approval, 'confirmed');
+      assert.equal(active.state, 'active');
+      const changed = f.service.update('default', active.id, active.revision, { prompt: '整理新版周报' }, 'user');
       assert.equal(changed.approval, 'pending');
       assert.equal(changed.state, 'draft');
       assert.equal(changed.nextDueAt, undefined);
@@ -335,6 +358,7 @@ describe('自动化计划与触发', () => {
     try {
       f.store.upsertProvider({ id: 'fixture', label: 'Fixture', baseUrl: 'https://example.test/v1', apiKey: '', model: 'fixture-model' });
       const item = f.service.create('default', { name: '日报', prompt: '整理', trigger: { type: 'schedule', recurrence: 'daily', time: '09:00', timeZone: 'UTC', startAt: start + 3_600_000 } }, 'user');
+      f.service.confirm('default', item.id, item.revision);
       f.setNow(start + 26 * 3_600_000);
       await f.service.tick(start + 26 * 3_600_000);
       const occurrence = f.store.automations.occurrences('default', item.id)[0];
@@ -347,6 +371,7 @@ describe('自动化计划与触发', () => {
     const f = setup();
     try {
       const item = f.service.create('default', { name: '文件', prompt: '处理', trigger: { type: 'file', path: 'inbox.csv' } }, 'user');
+      f.service.confirm('default', item.id, item.revision);
       writeFileSync(join(f.root, 'inbox.csv'), 'a');
       await f.service.tick(Date.now());
       assert.equal(f.store.automations.occurrences('default', item.id).length, 0);
@@ -377,6 +402,7 @@ describe('自动化计划与触发', () => {
       const item = f.service.create('default', {
         name: '链接监控', prompt: '处理', trigger: { type: 'file', path: 'escape/secret.txt' },
       }, 'user');
+      f.service.confirm('default', item.id, item.revision);
       await f.service.tick(Date.UTC(2026, 2, 1, 12, 0, 1));
       assert.equal(f.service.get('default', item.id).triggerError, '文件触发器越出工作区');
       assert.equal(f.store.automations.baseline('default', item.id), undefined);

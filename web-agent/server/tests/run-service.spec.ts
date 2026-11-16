@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { Kernel } from '../../kernel';
 import { AgentRunner } from '../../core/chat/agent';
 import type { KernelLike, ToolDef } from '../../kernel/types';
+import { resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
 
 const provider: ProviderDef = { id: 'test', label: 'Test', defaultModel: 'test', async *chat() {} };
 const done = { type: 'assistant_done' as const, content: 'complete', reasoning: '', usage: { input: 10, output: 2 }, cost: 0.02 };
@@ -297,6 +298,31 @@ test('raw history survives compaction and temporary context cannot remove identi
     const checkpoint = store.runs.checkpoint(run.id)!;
     assert.equal(checkpoint.history.filter(message => message.content === 'same text').length, 1);
     assert.equal(store.runs.searchHistory(run.id, 'rules').length, 0);
+  } finally { await service.shutdown(); store.close(); }
+});
+
+test('rule resolution is recorded as durable run metadata and a trace event', async () => {
+  const { service, store, session, environment } = setup({ approveApproval: () => false, async *run() { yield done; } });
+  const ruleResolution = resolveRuleDescriptors([
+    runtimeRuleDescriptor(),
+    {
+      id: 'instruction', label: '当前用户指令', source: 'user', scope: 'run', priority: 900, trust: 'user',
+      contentHash: 'instruction', active: true,
+    },
+    {
+      id: 'project', label: 'AGENTS.md', source: 'project', scope: 'workspace', priority: 80, trust: 'user',
+      contentHash: 'project', active: true,
+    },
+  ]);
+  environment.prepare = () => ({ provider, model: 'test', traceId: '', messages: [], ruleResolution });
+  try {
+    const run = service.create(session, { message: 'current request' });
+    await terminal(service, run.id);
+    assert.deepEqual(service.get(run.id, 'default').ruleResolution?.applied.map(rule => rule.id), [
+      'runtime:invariants', 'instruction', 'project',
+    ]);
+    const event = store.runs.events(run.id).find(item => item.type === 'rule_resolution');
+    assert.deepEqual(event?.data.applied, ['runtime:invariants', 'instruction', 'project']);
   } finally { await service.shutdown(); store.close(); }
 });
 

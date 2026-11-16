@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   diffPolicyRules, dryRunPolicy, evaluatePolicy, loadPromptRules, loadPolicyRules,
-  matchPolicy, resolveRuleDescriptors, rulesSignature, validatePolicyRules,
+  matchPolicy, resolveRuleDescriptors, rulesSignature, runtimeRuleDescriptor, validatePolicyRules,
 } from '../rules';
 import type { RuleDescriptor } from '../types';
 
@@ -97,6 +97,25 @@ describe('结构化规则裁决', () => {
     assert.deepEqual(result.applied.map(item => item.id), ['user-rule', 'skill']);
     assert.deepEqual(result.ignored.map(item => item.id), ['disabled', 'project']);
     assert.deepEqual(result.conflicts[0], { left: 'user-rule', right: 'project', reason: 'same_content_duplicate', winner: 'user-rule' });
+  });
+
+  test('运行时、当前指令、项目与持久规则按固定优先级合并', () => {
+    const rule = (id: string, source: RuleDescriptor['source'], priority: number, hash: string): RuleDescriptor => ({
+      id, label: id, source, scope: source === 'runtime' ? 'runtime' : source === 'user' && id.startsWith('instruction') ? 'run' : 'workspace',
+      priority, trust: source === 'project' ? 'user' : source === 'user' ? 'user' : 'core', contentHash: hash, active: true,
+    });
+    const result = resolveRuleDescriptors([
+      rule('persistent-user', 'user', 70, 'persistent'),
+      rule('project-winner', 'project', 80, 'duplicate'),
+      rule('global-loser', 'user', 70, 'duplicate'),
+      rule('instruction', 'user', 900, 'instruction'),
+      runtimeRuleDescriptor(),
+    ]);
+    assert.deepEqual(result.applied.map(item => item.id), [
+      'runtime:invariants', 'instruction', 'project-winner', 'persistent-user',
+    ]);
+    assert.ok(result.conflicts.some(conflict =>
+      conflict.reason === 'same_content_duplicate' && conflict.winner === 'project-winner' && conflict.right === 'global-loser'));
   });
 });
 

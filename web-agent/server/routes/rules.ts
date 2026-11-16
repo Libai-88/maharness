@@ -18,9 +18,9 @@
 import type { Express } from 'express';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import type { RouteDeps } from './shared';
-import { dryRunPolicy, isBlanketAllow, isWildcardTool, loadPolicyRules, validatePolicyRules } from '../../kernel/rules';
+import { dryRunPolicy, isBlanketAllow, isWildcardTool, loadPolicyRules, runtimeRuleDescriptor, validatePolicyRules } from '../../kernel/rules';
 import type { PolicyRule } from '../../kernel/rules';
 import { atomicWriteFileSync, ConcurrentWriteError, fileRevisionSync } from '../../kernel/atomic-file';
 
@@ -178,16 +178,11 @@ export function registerRulesRoutes(app: Express, deps: RouteDeps): void {
 
   app.get('/api/rules/effective', (_req, res) => {
     const s = svc();
-    const runtime = '运行时不变量：工具授权、审批、取消、预算与安全问题不可被规则文件覆盖。';
-    const runtimeRule = {
-      id: 'runtime:invariants', label: '运行时不变量', source: 'runtime' as const, scope: 'runtime' as const,
-      priority: 1000, trust: 'core' as const, contentHash: createHash('sha256').update(runtime).digest('hex'), active: true,
-    };
     const resolved = s?.resolution?.();
     res.json({
       schemaVersion: 1,
       precedence: ['runtime', 'current-user-instruction', 'confirmed-project-or-user-rules', 'skill-and-plugin-guidance', 'examples-and-style'],
-      applied: [runtimeRule, ...(resolved?.applied ?? [])],
+      applied: [runtimeRuleDescriptor(), ...(resolved?.applied ?? [])],
       ignored: resolved?.ignored ?? [],
       conflicts: resolved?.conflicts ?? [],
       policy: s?.policy() ?? [],

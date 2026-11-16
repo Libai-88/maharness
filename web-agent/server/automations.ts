@@ -482,7 +482,9 @@ function assertValidTrigger(value: unknown): AutomationTrigger {
   throw new AutomationError(400, 'INVALID_TRIGGER', '未知触发器类型');
 }
 
-function triggerNeedsConfirmation(trigger: AutomationTrigger): boolean { return trigger.type !== 'once'; }
+function triggerNeedsConfirmation(trigger: AutomationTrigger): boolean {
+  return trigger.type === 'schedule' || trigger.type === 'file' || trigger.type === 'url';
+}
 function triggerOccurrenceKey(trigger: AutomationTrigger, dueAt: number, value?: string): string {
   return `${trigger.type}:${value ?? dueAt}`;
 }
@@ -562,7 +564,7 @@ export class AutomationService {
     if (trigger.type === 'once' && trigger.at < now) throw new AutomationError(400, 'INVALID_TRIGGER', '一次性任务时间必须晚于当前时间');
     const materials = this.validateMaterials(tenantId, input.materials);
     const provider = this.resolveProvider(input.providerId, input.model);
-    const confirmed = actor === 'user' || !triggerNeedsConfirmation(trigger);
+    const confirmed = !triggerNeedsConfirmation(trigger);
     const item: AutomationDefinition = {
       id: randomUUID(), tenantId, workspace: this.workspace(tenantId), name, prompt, trigger,
       state: confirmed ? 'active' : 'draft', approval: confirmed ? 'confirmed' : 'pending', createdBy: actor,

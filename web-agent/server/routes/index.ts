@@ -6,6 +6,7 @@ import { setMaintenanceModelScope } from '../../kernel/model-call';
  * （JSON body 解析、健康检查）；共享工具见 shared.ts，L3 缓存预热见 warmup.ts。
  */
 import express from 'express';
+import { createHash } from 'node:crypto';
 import { existsSync, statfsSync } from 'node:fs';
 import type { Express } from 'express';
 import type { Kernel } from '../../kernel';
@@ -45,7 +46,7 @@ import { registerRunRoutes } from './runs';
 import { getRunner } from './shared';
 import { tenantSandboxRoot } from '../tenant-workspace';
 import { beginRun, endRun } from '../index';
-import { loadPromptRules } from '../../kernel/rules';
+import { loadPromptRules, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -129,15 +130,54 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       const chat = getChatService(kernel);
       const provider = chat?.providers.find(p => p.id === record.providerId);
       if (!chat || !provider) throw new Error('任务模型供应商不可用，请恢复配置后重试');
-      const rules = loadPromptRules({ dataDir: kernel.paths.data, projectRoot: record.authorization.workspace, maxChars: Number.MAX_SAFE_INTEGER });
+      const rulesEnabled = kernel.config.get<boolean>('rules.enabled', true);
+      const rules = rulesEnabled
+        ? loadPromptRules({
+            dataDir: kernel.paths.data,
+            projectRoot: record.authorization.workspace,
+            maxChars: Math.max(1000, kernel.config.get<number>('rules.maxChars', 12_000)),
+          })
+        : { text: '', sources: [], resolution: { schemaVersion: 1 as const, applied: [], ignored: [], conflicts: [] } };
+      const userContext = chat.getUserContext?.() ?? [];
+      const instructionDescriptor = {
+        id: `user-instruction:${record.id}`,
+        label: '当前用户指令',
+        source: 'user' as const,
+        scope: 'run' as const,
+        priority: 900,
+        trust: 'user' as const,
+        contentHash: createHash('sha256').update(record.objective).digest('hex'),
+        active: true,
+      };
+      const personaDescriptors = userContext.map((message, index) => ({
+        id: `persona:${message.context?.id ?? index}`,
+        label: message.context?.source ?? `用户人设 ${index + 1}`,
+        source: 'user' as const,
+        scope: 'workspace' as const,
+        priority: 75,
+        trust: 'user' as const,
+        contentHash: createHash('sha256').update(message.content ?? '').digest('hex'),
+        active: true,
+      }));
+      const resolvedRules = resolveRuleDescriptors([
+        runtimeRuleDescriptor(),
+        instructionDescriptor,
+        ...personaDescriptors,
+        ...rules.resolution.applied,
+      ]);
+      const ruleResolution = {
+        ...resolvedRules,
+        ignored: [...rules.resolution.ignored, ...resolvedRules.ignored.filter(rule => !rules.resolution.ignored.some(item => item.id === rule.id))],
+        conflicts: [...rules.resolution.conflicts, ...resolvedRules.conflicts],
+      };
       return {
         provider, model: record.model, messages: [], traceId: record.id,
-        ruleResolution: rules.resolution,
+        ruleResolution,
         tools: [...kernel.plugins.tools(), ...automationTools],
         contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
         systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
         contextMessages: [
-          ...(chat.getUserContext?.() ?? []),
+          ...userContext,
           ...(rules.text ? [{ role: 'user' as const, content: rules.text, context: { id: 'workspace-rules', source: rules.sources.filter(source => source.exists).map(source => source.file).join(';'), scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } }] : []),
           { role: 'system', content: `工作区: ${record.authorization.workspace}\n授权: ${record.authorization.profile}${record.authorization.readOnly ? '；变更需要审批' : ''}`, context: { id: 'authorization', source: 'runtime-authorization', scope: 'runtime', trust: 'core', retention: 'required' } },
         ],
