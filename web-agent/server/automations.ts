@@ -1,9 +1,10 @@
 import type Database from 'better-sqlite3';
 import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, statSync } from 'node:fs';
-import { isAbsolute, relative, resolve } from 'node:path';
+import { isAbsolute } from 'node:path';
 import type { MaterialRef } from '../kernel/material';
 import { RUN_TERMINAL, type RunRecord } from '../kernel/run';
+import { resolveInSandbox } from '../kernel/sandbox';
 import type { ToolContext, ToolDef } from '../kernel/types';
 import type { RunService } from './run-service';
 import type { Store } from './db';
@@ -467,8 +468,9 @@ function assertValidTrigger(value: unknown): AutomationTrigger {
   }
   if (trigger.type === 'file') {
     const path = String(trigger.path ?? '').replace(/\\/g, '/').trim();
-    if (!path || isAbsolute(path) || path.split('/').includes('..')) throw new AutomationError(400, 'INVALID_TRIGGER', '文件触发器只能使用工作区内的相对路径');
-    if (path === 'outputs' || path.startsWith('outputs/') || path.startsWith('.maharness/')) throw new AutomationError(400, 'INVALID_TRIGGER', '文件触发器不能指向生成或运行时目录');
+    const segments = path.split('/').filter(segment => segment && segment !== '.');
+    if (!path || isAbsolute(path) || segments.includes('..')) throw new AutomationError(400, 'INVALID_TRIGGER', '文件触发器只能使用工作区内的相对路径');
+    if (['outputs', '.maharness'].includes(segments[0]?.toLowerCase())) throw new AutomationError(400, 'INVALID_TRIGGER', '文件触发器不能指向生成或运行时目录');
     return { type: 'file', path };
   }
   if (trigger.type === 'url') {
@@ -620,7 +622,9 @@ export class AutomationService {
     if (current.revision !== expectedRevision) throw new AutomationError(409, 'AUTOMATION_VERSION_CONFLICT', '自动化已变化，请刷新后操作');
     if (current.state !== 'paused') throw new AutomationError(409, 'AUTOMATION_NOT_PAUSED', '只有已暂停的自动化可以恢复');
     const now = this.now();
-    return this.store.automations.update({ ...current, state: 'active', nextDueAt: nextTriggerTime(current.trigger, now), revision: current.revision + 1, updatedAt: now }, expectedRevision);
+    const nextDueAt = nextTriggerTime(current.trigger, now);
+    if (current.trigger.type === 'once' && nextDueAt === undefined) throw new AutomationError(409, 'AUTOMATION_TRIGGER_EXPIRED', '一次性任务时间已过，请先修改运行时间');
+    return this.store.automations.update({ ...current, state: 'active', nextDueAt, revision: current.revision + 1, updatedAt: now }, expectedRevision);
   }
 
   cancel(tenantId: string, id: string, expectedRevision: number): AutomationDefinition {
@@ -641,11 +645,12 @@ export class AutomationService {
     return this.execute(item, occurrence);
   }
 
-  occurrences(tenantId: string, id?: string): (AutomationOccurrence & { run?: RunRecord })[] {
-    return this.store.automations.occurrences(tenantId, id).map(occurrence => ({
-      ...occurrence,
-      ...(occurrence.runId && this.runs ? { run: this.runs.get(occurrence.runId, tenantId) } : {}),
-    }));
+  occurrences(tenantId: string, id?: string): (AutomationOccurrence & { run?: RunRecord; runMissing?: boolean })[] {
+    return this.store.automations.occurrences(tenantId, id).map(occurrence => {
+      if (!occurrence.runId || !this.runs) return occurrence;
+      try { return { ...occurrence, run: this.runs.get(occurrence.runId, tenantId) }; }
+      catch { return { ...occurrence, runMissing: true }; }
+    });
   }
 
   async tick(now = this.now()): Promise<void> {
@@ -827,9 +832,9 @@ export class AutomationService {
   private async checkFile(item: AutomationDefinition, path: string, now: number): Promise<void> {
     const interval = Math.max(1_000, this.opts.filePollMs ?? 5_000);
     if (item.triggerCheckedAt && now - item.triggerCheckedAt < interval) return;
-    const target = resolve(item.workspace, path);
-    const rel = relative(item.workspace, target).replace(/\\/g, '/');
-    if (!rel || rel.startsWith('..') || isAbsolute(rel)) throw new AutomationError(403, 'FILE_TRIGGER_OUTSIDE_WORKSPACE', '文件触发器越出工作区');
+    let target: string;
+    try { target = resolveInSandbox(item.workspace, path); }
+    catch { throw new AutomationError(403, 'FILE_TRIGGER_OUTSIDE_WORKSPACE', '文件触发器越出工作区'); }
     if (!existsSync(target)) {
       const latest = this.get(item.tenantId, item.id);
       this.store.automations.update({ ...latest, triggerCheckedAt: now, triggerError: '文件不存在', revision: latest.revision + 1, updatedAt: now }, latest.revision);

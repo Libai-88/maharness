@@ -1,7 +1,7 @@
 import { after, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
@@ -227,6 +227,15 @@ describe('自动化定义、确认与版本边界', () => {
       }, 'agent');
       assert.equal(pending.approval, 'pending');
       assert.throws(() => f.service.confirm('default', pending.id, pending.revision), /一次性任务时间已过/);
+
+      const paused = f.service.create('default', {
+        name: '暂停的单次任务', prompt: '执行',
+        trigger: { type: 'once', at: Date.UTC(2026, 2, 1, 13, 0, 0) },
+      }, 'user');
+      const stopped = f.service.pause('default', paused.id, paused.revision);
+      f.setNow(Date.UTC(2026, 2, 1, 14, 0, 0));
+      assert.throws(() => f.service.resume('default', stopped.id, stopped.revision), /一次性任务时间已过/);
+      assert.equal(f.service.get('default', stopped.id).state, 'paused');
     } finally { f.store.close(); }
   });
 
@@ -286,6 +295,22 @@ describe('自动化计划与触发', () => {
     } finally { f.store.close(); }
   });
 
+  test('删除运行会话后保留自动化历史且不阻断列表', () => {
+    const f = setup();
+    try {
+      const item = f.service.create('default', { name: '历史', prompt: '运行', trigger: { type: 'manual' } }, 'user');
+      const occurrence = f.service.runNow('default', item.id);
+      f.finishRun(occurrence.runId!);
+      const run = f.store.runs.get(occurrence.runId!, 'default')!;
+      f.store.deleteSession(run.sessionId);
+      const history = f.service.occurrences('default', item.id);
+      assert.equal(history.length, 1);
+      assert.equal(history[0]?.run, undefined);
+      assert.equal(history[0]?.runMissing, true);
+      assert.doesNotThrow(() => f.service.list('default'));
+    } finally { f.store.close(); }
+  });
+
   test('同一自动化已有活动运行时，新触发标记跳过', () => {
     const f = setup();
     try {
@@ -331,6 +356,31 @@ describe('自动化计划与触发', () => {
       await f.service.tick(later);
       await f.service.tick(later + 2_000);
       assert.equal(f.store.automations.occurrences('default', item.id).length, 1);
+    } finally { f.store.close(); }
+  });
+
+  test('文件触发器拒绝生成目录大小写绕过和符号链接越界', async () => {
+    const f = setup();
+    try {
+      assert.throws(
+        () => f.service.create('default', { name: '生成目录', prompt: '处理', trigger: { type: 'file', path: 'OUTPUTS/report.csv' } }, 'user'),
+        /不能指向生成或运行时目录/,
+      );
+      assert.throws(
+        () => f.service.create('default', { name: '相对生成目录', prompt: '处理', trigger: { type: 'file', path: './outputs/report.csv' } }, 'user'),
+        /不能指向生成或运行时目录/,
+      );
+      const outside = mkdtempSync(join(tmpdir(), 'mh-automation-outside-'));
+      roots.push(outside);
+      writeFileSync(join(outside, 'secret.txt'), 'outside');
+      symlinkSync(outside, join(f.root, 'escape'), process.platform === 'win32' ? 'junction' : 'dir');
+      const item = f.service.create('default', {
+        name: '链接监控', prompt: '处理', trigger: { type: 'file', path: 'escape/secret.txt' },
+      }, 'user');
+      await f.service.tick(Date.UTC(2026, 2, 1, 12, 0, 1));
+      assert.equal(f.service.get('default', item.id).triggerError, '文件触发器越出工作区');
+      assert.equal(f.store.automations.baseline('default', item.id), undefined);
+      assert.equal(f.store.automations.occurrences('default', item.id).length, 0);
     } finally { f.store.close(); }
   });
 

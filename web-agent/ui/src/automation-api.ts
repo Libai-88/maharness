@@ -18,6 +18,7 @@ export interface AutomationOccurrence {
   runId?: string;
   updatedAt: number;
   run?: { status: string; sessionId: string; answer?: string; error?: string };
+  runMissing?: boolean;
 }
 
 export interface Automation extends WorkbenchAutomation {
