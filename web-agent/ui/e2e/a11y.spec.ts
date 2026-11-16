@@ -32,6 +32,8 @@ async function setup(page: Page) {
       return bubbles + hasHero;
     })
     .toBeGreaterThan(0);
+  // 空库冷启动会先加载模型、再创建首个会话；Composer 只有在会话就绪后才能提交。
+  await expect.poll(() => new URL(page.url()).searchParams.get('session')).toBeTruthy();
 }
 
 /** axe 注入 + 扫描：只保留严重（critical）与严重偏上（serious）违规 */
