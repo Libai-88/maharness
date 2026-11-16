@@ -88,7 +88,6 @@ export class PersonalItems {
     this.changed(tenant); return result;
   }
   saveWorkspace(tenant: string, input: unknown, revision: number, importing = false) {
-    if (tenant !== 'default') fail('WORKBENCH_TENANT', '完整工作台当前仅支持 default 租户', 403);
     if (!input || typeof input !== 'object' || !['tasks', 'notes', 'projects'].every(key => Array.isArray((input as any)[key]))) fail('INVALID_WORKBENCH', '工作台格式无效');
     this.migrate(tenant);
     this.db(db => db.transaction(() => {

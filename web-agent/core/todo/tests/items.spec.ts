@@ -99,7 +99,7 @@ test('completion creates exactly one next repeat; archived items stay out of act
     const archived=f.items.update('a',f.items.list('a')[1].id,1,{lifecycle:'archived'});assert.equal(archived.status,'cancel');
   }finally{f.clean();}
 });
-test('workbench edits and model items share versions and preserve system links',()=>{
+test('workbench edits stay tenant scoped, share versions and preserve system links',()=>{
   const f=fixture();try {
     let item=f.items.create('default',{title:'准备材料'},'source');
     item=f.items.update('default',item.id,item.revision,{executionSessionId:'execution'});
@@ -110,7 +110,11 @@ test('workbench edits and model items share versions and preserve system links',
     const empty=blank();f.items.saveWorkspace('default',empty,saved.revision);
     assert.equal(f.items.get('default',item.id).lifecycle,'archived');
     assert.equal(f.items.get('default',item.id).status,'cancel');
-    assert.throws(()=>f.items.saveWorkspace('a',empty,0),code('WORKBENCH_TENANT'));
+    const tenantItem=f.items.create('a',{title:'租户事项'});
+    const tenantSnapshot=f.items.workspace('a');tenantSnapshot.data.tasks[0].title='租户事项已更新';
+    f.items.saveWorkspace('a',tenantSnapshot.data,tenantSnapshot.revision);
+    assert.equal(f.items.get('a',tenantItem.id).title,'租户事项已更新');
+    assert.equal(f.items.list('default').length,1);
   }finally{f.clean();}
 });
 test('server migration backs up originals, merges versions and strips sample records once',()=>{

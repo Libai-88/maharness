@@ -47,6 +47,7 @@ import { getRunner } from './shared';
 import { tenantSandboxRoot } from '../tenant-workspace';
 import { beginRun, endRun } from '../index';
 import { loadPromptRules, personaRuleDescriptor, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
+import { runtimeClockContext } from '../runtime-context';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -168,6 +169,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
         systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
         contextMessages: [
+          runtimeClockContext(),
           ...userContext,
           ...(rules.text ? [{ role: 'user' as const, content: rules.text, context: { id: 'workspace-rules', source: rules.sources.filter(source => source.exists).map(source => source.file).join(';'), scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } }] : []),
           { role: 'system', content: `工作区: ${record.authorization.workspace}\n授权: ${record.authorization.profile}${record.authorization.readOnly ? '；变更需要审批' : ''}`, context: { id: 'authorization', source: 'runtime-authorization', scope: 'runtime', trust: 'core', retention: 'required' } },

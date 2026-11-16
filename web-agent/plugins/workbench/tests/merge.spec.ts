@@ -35,12 +35,23 @@ describe('workbench 桥合并', () => {
       } as never) as { ok: boolean; data?: { tasks: { title: string }[] } };
       assert.equal(result.ok, true);
       assert.deepEqual(result.data?.tasks.map(item => item.title), ['团队事项']);
-      let workspace: { data: { tasks: { title: string }[] } } | undefined;
+      let workspace: { revision: number; data: { tasks: { title: string }[] } } | undefined;
       api!.router({ method: 'GET', path: '/data', tenantId: 'team-a' } as never, {
         json: (value: typeof workspace) => { workspace = value; },
         status: () => ({ json: () => {} }),
       } as never);
       assert.deepEqual(workspace?.data.tasks.map(item => item.title), ['团队事项']);
+      workspace!.data.tasks[0].title = '团队事项已更新';
+      let saved: { data: { tasks: { title: string }[] } } | undefined;
+      api!.router({
+        method: 'PUT', path: '/data', tenantId: 'team-a',
+        body: { data: workspace!.data, revision: workspace!.revision },
+      } as never, {
+        json: (value: typeof saved) => { saved = value; },
+        status: () => ({ json: () => {} }),
+      } as never);
+      assert.deepEqual(saved?.data.tasks.map(item => item.title), ['团队事项已更新']);
+      assert.deepEqual(items.list('default').map(item => item.title), ['默认租户']);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

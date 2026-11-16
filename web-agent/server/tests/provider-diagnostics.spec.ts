@@ -279,6 +279,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     const calls: string[] = [];
+    let receivedClockContext = false;
     chat.providers = [{
       id: 'diagnostic-provider', label: 'Diagnostic Provider', defaultModel: 'gpt-diagnostic',
       models: [{
@@ -288,6 +289,8 @@ describe('GET /api/providers/:id/diagnose', () => {
       }],
       async *chat(messages, options) {
         calls.push(`${options.model}:${messages.find(message => message.context?.source === 'user')?.content ?? ''}`);
+        receivedClockContext = messages.some(message => message.context?.id === 'runtime-clock'
+          && message.context.trust === 'core' && /UTC 时间：\d{4}-\d{2}-\d{2}T/.test(message.content ?? ''));
         yield { type: 'delta', text: ' routed' };
         yield { type: 'done' };
       },
@@ -305,6 +308,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(sse, /event: done\ndata:/);
     assert.equal(calls.length, 1);
     assert.equal(calls[0], 'gpt-diagnostic:你好，请简短回答');
+    assert.equal(receivedClockContext, true);
 
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=model-route`);
     assert.equal(traceResponse.status, 200);
