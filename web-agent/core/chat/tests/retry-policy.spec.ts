@@ -88,6 +88,40 @@ test('known tool precondition failures remain observations and allow corrective 
   assert.equal(events.some(event => event.type === 'assistant_done' && event.content === '已改用准确原文重试'), true);
 });
 
+test('call-specific read-only side effect lets a failed shell observation recover without an unknown-effect stop', async () => {
+  let calls = 0;
+  let sawNotStarted = false;
+  const provider: ProviderDef = {
+    id: 'dynamic-read-shell', label: 'test', defaultModel: 'm',
+    async *chat(messages) {
+      calls++;
+      if (calls === 1) {
+        yield { type: 'tool_call', toolCall: { id: 'shell-1', type: 'function', function: { name: 'powershell_execute', arguments: '{"command":"Get-ChildItem"}' } } };
+      } else {
+        const observation = messages.findLast(message => message.role === 'tool');
+        sawNotStarted = /"code":"TOOL_EXECUTION"/.test(observation?.content ?? '')
+          && /"outcome":"not_started"/.test(observation?.content ?? '');
+        yield { type: 'delta', text: '已改用文件工具读取' };
+      }
+      yield { type: 'done' };
+    },
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({
+    provider, model: 'm', traceId: 'dynamic-read-shell', messages: [{ role: 'user', content: '查看文件' }], maxTurns: 3,
+    tools: [{
+      version: '2.0.0', permissions: ['process'], outputSchema: {}, name: 'powershell_execute', description: 'shell',
+      parameters: { type: 'object', properties: { command: { type: 'string' } }, required: ['command'] }, sideEffect: 'irreversible',
+      classifySideEffect(args) { return String((args as { command?: string }).command ?? '').startsWith('Get-') ? 'read' : 'irreversible'; },
+      async handler() { throw new Error('cmdlet unavailable'); },
+    }],
+  })) events.push(event);
+  assert.equal(calls, 2);
+  assert.equal(sawNotStarted, true);
+  assert.equal(events.some(event => event.type === 'error' && event.kind === 'policy'), false);
+  assert.equal(events.some(event => event.type === 'assistant_done' && event.content === '已改用文件工具读取'), true);
+});
+
 function kernel(): KernelLike {
   const config = new Map<string, unknown>([
     ['agent.toolTimeoutMs', 1000], ['agent.reasoningBudget', 640], ['agent.reasoningTotalBudget', 2000],

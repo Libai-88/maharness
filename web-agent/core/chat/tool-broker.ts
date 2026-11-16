@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
 import type { ToolContext, ToolDef, ToolResult } from '../../kernel/types';
-import { shouldJournalToolEffect } from '../../kernel/tool-contract';
+import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
 import { ToolExecutor } from './tool-executor';
 import type { ApprovalBoard } from './approvals';
 
@@ -32,7 +32,7 @@ export function createToolBroker(input: BrokerOptions, depth = 0): NonNullable<T
     const id = randomUUID();
     const key = `${input.key}:nested:${sequence++}:${name}:${createHash('sha256').update(JSON.stringify(args)).digest('hex')}`;
     const journal = input.options.toolJournal;
-    journal?.start(id, name, JSON.stringify(input.redact(args)).slice(0, 500));
+    journal?.start(id, name, JSON.stringify(input.redact(args)).slice(0, 500), { version: tool.version, sideEffect: toolSideEffectLabel(tool, args) });
     input.emit({ type: 'tool_start', id, name, args: input.redact(args) });
     let result: ToolResult;
     try {
@@ -41,9 +41,10 @@ export function createToolBroker(input: BrokerOptions, depth = 0): NonNullable<T
       const context: ToolContext = { ...input.context, signal: signal && input.context.signal ? AbortSignal.any([signal, input.context.signal]) : signal ?? input.context.signal, approved: false, approvalId: undefined, policyApproved: false };
       context.invoke = createToolBroker({ ...input, caller: tool, context, key }, depth + 1);
       const gate = input.assess(tool, actual, context);
-      if (context.authorization?.readOnly && !tool.delegates && !['none', 'read'].includes(tool.sideEffect)) { gate.needsApproval = true; gate.reason = '当前任务的写入需要用户批准'; hook.policyApproved = false; }
+      const sideEffect = effectiveToolSideEffect(tool, actual);
+      if (context.authorization?.readOnly && !tool.delegates && !['none', 'read'].includes(sideEffect)) { gate.needsApproval = true; gate.reason = '当前任务的写入需要用户批准'; hook.policyApproved = false; }
       if (hook.forceApproval) { gate.needsApproval = true; gate.reason = hook.forceApprovalReason ?? '策略要求审批'; hook.policyApproved = false; }
-      const effectKey = shouldJournalToolEffect(tool) ? key : undefined;
+      const effectKey = shouldJournalToolEffect(tool, actual) ? key : undefined;
       const executor = new ToolExecutor({ tool, args: actual, context, runId: input.options.runId, parentRunId: input.options.parentRunId,
         acquireExecution: input.options.acquireExecution, effectJournal: input.options.effectJournal, effectKey, effectStarted: false, timeoutMs: input.timeoutMs, policyApproved: hook.policyApproved === true });
       if (hook.blocked) result = denied('TOOL_PERMISSION', hook.blockReason ?? '调用已被策略阻止');

@@ -20,7 +20,7 @@ import type {
 // 循环契约来自内核（kernel/loop.ts）：内核承诺接口形状，本文件只实现行为。
 import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
 import { verifyTaskContract } from '../../kernel/task-verifier';
-import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
+import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { sanitizeToolHistory } from './policy';
@@ -779,7 +779,7 @@ export class AgentRunner {
         catch { args = { _raw: tc.function.arguments }; argsError = '工具参数不是合法 JSON'; }
         const resultId = opts.runId ? randomUUID() : tc.id;
         opts.toolJournal?.start(resultId, tc.function.name, summarize(redactTraceValue(args)), tool ? {
-          version: tool.version, sideEffect: tool.sideEffect,
+          version: tool.version, sideEffect: toolSideEffectLabel(tool, args),
         } : undefined);
         if (!tool) {
           const missMsg = `工具不存在: ${tc.function.name}`;
@@ -801,7 +801,9 @@ export class AgentRunner {
           yield { type: 'tool_result', id: tc.id, name: tool.name, summary: toolCtx.blockReason ?? '已被策略拦截', ok: false };
           continue;
         }
-        const permissionDenied = opts.principalRole === 'readonly' && !tool.delegates && tool.sideEffect !== 'none' && tool.sideEffect !== 'read'
+        const toolArgs = toolCtx.tool?.args ?? args;
+        const effectiveSideEffect = effectiveToolSideEffect(tool, toolArgs);
+        const permissionDenied = opts.principalRole === 'readonly' && !tool.delegates && effectiveSideEffect !== 'none' && effectiveSideEffect !== 'read'
           || tool.permissions?.includes('admin') && opts.principalRole !== undefined && opts.principalRole !== 'admin';
         if (permissionDenied) {
           const result: ToolResult = { ok: false, error: '当前用户无权执行此操作', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
@@ -810,7 +812,6 @@ export class AgentRunner {
           yield { type: 'tool_result', id: tc.id, name: tool.name, summary: result.error!, ok: false };
           continue;
         }
-        const toolArgs = toolCtx.tool?.args ?? args;
         // structured tool contract：参数在进入审批/执行前做机器校验。
         // 非法参数不交给 handler——否则工具要么返回含糊错误，要么带病执行。
         const invalidMessage = argsError
@@ -839,7 +840,7 @@ export class AgentRunner {
           continue;
         }
         let result: ToolResult;
-        const effectKey = opts.executionId && shouldJournalToolEffect(tool)
+        const effectKey = opts.executionId && shouldJournalToolEffect(tool, toolArgs)
           ? `${(opts.turnOffset ?? 0) + turn}:${toolIndex}:${tool.name}:${createHash('sha256').update(JSON.stringify(toolArgs ?? null)).digest('hex').slice(0, 16)}`
           : undefined;
         const journalClaim = effectKey && opts.effectJournal
@@ -884,14 +885,14 @@ export class AgentRunner {
               toolCallId: tc.id,
               effectKey,
               resultId,
-              sideEffect: toolSideEffectLabel(tool),
+              sideEffect: toolSideEffectLabel(tool, toolArgs),
               argsPreview: summarize(redactTraceValue(toolArgs), 160),
             },
           },
         );
         const tStep = scopedTrace.startStep({
           traceId, turn, type: 'tool_call', name: tool.name, inputSummary: summarize(redactTraceValue(toolArgs)),
-          parentId: opts.parentStepId, toolVersion: tool.version, sideEffect: tool.sideEffect,
+          parentId: opts.parentStepId, toolVersion: tool.version, sideEffect: effectiveSideEffect,
           ...(tool.discovery?.pluginId ? { pluginId: tool.discovery.pluginId } : {}),
         });
         // ToolContext 先构造（类型 = ToolContext ∪ 局部扩展字段，注解声明可携带扩展）：
@@ -925,7 +926,7 @@ export class AgentRunner {
           runSignal: signal,
         };
         const gate = assessToolApproval(tool, toolArgs, tctx);
-        if (opts.authorization?.readOnly && !tool.delegates && tool.sideEffect !== 'none' && tool.sideEffect !== 'read') {
+        if (opts.authorization?.readOnly && !tool.delegates && effectiveSideEffect !== 'none' && effectiveSideEffect !== 'read') {
           gate.needsApproval = true;
           gate.reason = '当前任务的写入和外部变更需要用户批准';
           toolCtx.policyApproved = false;
@@ -1036,14 +1037,14 @@ export class AgentRunner {
         if (finalResult.ok && tool.outputSchema) {
           const issues = validateAgainstSchema(finalResult.data, tool.outputSchema);
           if (issues.length > 0) {
-            finalResult = { ...finalResult, ok: false, error: `工具 ${tool.name} 输出不符合 schema`, failure: { code: 'TOOL_OUTPUT_SCHEMA', retryable: false, outcome: tool.sideEffect === 'none' || tool.sideEffect === 'read' ? 'not_started' : 'applied' } };
+            finalResult = { ...finalResult, ok: false, error: `工具 ${tool.name} 输出不符合 schema`, failure: { code: 'TOOL_OUTPUT_SCHEMA', retryable: false, outcome: effectiveSideEffect === 'none' || effectiveSideEffect === 'read' ? 'not_started' : 'applied' } };
             outputNote = `\n【输出校验】工具 ${tool.name} 的返回与声明格式不符（${issues.length} 项）：${issues.slice(0, 3).join('；')}${issues.length > 3 ? `；等 ${issues.length} 项` : ''}。请核对返回结构，或说明为何无法满足。`;
             scopedTrace.startStep({ traceId, turn, type: 'system', name: 'output-validate', parentId: opts.parentStepId })
               .fail(issues.slice(0, 3).join('；'), { outputSummary: `${tool.name} 返回结构校验失败（${issues.length} 项）` });
           }
         }
         const sideEffectOutcome = finalResult.ok
-          ? tool.sideEffect === 'none' || tool.sideEffect === 'read' ? 'none' : 'applied'
+          ? effectiveSideEffect === 'none' || effectiveSideEffect === 'read' ? 'none' : 'applied'
           : finalResult.failure?.outcome ?? 'not_started';
         if (finalResult.ok) {
           tStep.finish({ outputSummary: summarize(finalResult.data), sideEffectOutcome });

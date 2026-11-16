@@ -9,7 +9,7 @@
  */
 import { spawn } from 'node:child_process';
 import { CommandProcesses, isolatedProcessEnvironment } from './processes';
-import type { Plugin, ToolContext } from '../../kernel/types';
+import type { Plugin, ToolContext, ToolSideEffect } from '../../kernel/types';
 import { adminToolDenied } from '../../kernel/tool-privilege';
 
 /** 只读可执行程序 / cmdlet 别名（首 token 命中且**参数不含可执行构造**才免审批）。
@@ -314,6 +314,11 @@ export function assessCommand(command: string): { needsApproval: boolean; reason
   };
 }
 
+/** Read-only allowlisted commands stay recoverable; approved writes retain the conservative contract. */
+export function powershellSideEffect(command: string): ToolSideEffect {
+  return assessCommand(command).needsApproval ? 'irreversible' : 'read';
+}
+
 const MAX_OUTPUT = 8000;
 /** 流式阶段的内存上限：输出截断发生在返回前，但不能让无限流先把进程内存吃满。 */
 const STREAM_CAP = 128_000;
@@ -440,6 +445,9 @@ export default {
           const command = String((args as { command?: string })?.command ?? '').trim();
           if (!command) return { needsApproval: false, reason: '' };
           return assessCommand(command);
+        },
+        classifySideEffect(args) {
+          return powershellSideEffect(String((args as { command?: string })?.command ?? '').trim());
         },
         async handler(args: { command?: string; timeoutSec?: number }, tctx: ToolContext) {
           const denied = adminToolDenied(tctx, '在宿主 Windows 上执行 PowerShell');

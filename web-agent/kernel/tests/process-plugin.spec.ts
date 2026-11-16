@@ -71,6 +71,13 @@ describe('插件进程执行边界', () => {
     assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('executionTimeoutMs')));
   });
 
+  test('process mode rejects call-specific side-effect classifiers instead of hiding the loss', async t => {
+    const f = setup({ dynamic: { manifest: execution, entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},classifySideEffect:()=> 'read',async handler(){return {ok:true}}}})}}` } });
+    t.after(f.cleanup); await f.kernel.plugins.loadAll();
+    assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
+    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('classifySideEffect')));
+  });
+
   test('filesystem=storage 只允许插件存储目录，越界读取被运行时拒绝', async (t) => {
     const f = setup({
       fsprobe: {

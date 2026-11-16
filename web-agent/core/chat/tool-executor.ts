@@ -5,6 +5,7 @@ import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { TaskStoppedError } from './provider-health';
 import { validateToolArguments, validateAgainstSchema } from '../../kernel/validate';
 import { assessToolApproval } from './tool-approval';
+import { effectiveToolSideEffect } from '../../kernel/tool-contract';
 
 interface ToolExecutionOptions {
   tool: ToolDef;
@@ -30,11 +31,12 @@ export class ToolExecutor {
     const tctx = options.context;
     const signal = tctx.signal;
     const sandboxRoot = tctx.sandboxRoot;
+    const sideEffect = effectiveToolSideEffect(tool, options.args);
     if (signal?.aborted) throw new TaskStoppedError('已停止');
-    const denied = tctx.principal?.role === 'readonly' && !tool.delegates && tool.sideEffect !== 'none' && tool.sideEffect !== 'read'
+    const denied = tctx.principal?.role === 'readonly' && !tool.delegates && sideEffect !== 'none' && sideEffect !== 'read'
       || tool.permissions.includes('admin') && tctx.principal !== undefined && tctx.principal.role !== 'admin';
     if (denied) return { ok: false, error: '当前用户无权执行此操作', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
-    if (tctx.authorization?.readOnly && !tool.delegates && tool.sideEffect !== 'none' && tool.sideEffect !== 'read' && !approved)
+    if (tctx.authorization?.readOnly && !tool.delegates && sideEffect !== 'none' && sideEffect !== 'read' && !approved)
       return { ok: false, needsApproval: true, approvalSummary: '当前任务的写入和外部变更需要用户批准' };
     if (!approved && !options.policyApproved) {
       const gate = assessToolApproval(tool, options.args, tctx);
@@ -44,7 +46,7 @@ export class ToolExecutor {
     if (issues.length) return { ok: false, error: issues.join('；'), failure: { code: 'TOOL_ARGS_SCHEMA', retryable: false, outcome: 'not_started' } };
     try { tctx.quota?.assertToolCall?.(); }
     catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error), failure: { code: 'TOOL_QUOTA', retryable: false, outcome: 'not_started' } }; }
-    const readOnlyEffect = tool.sideEffect === 'none' || tool.sideEffect === 'read';
+    const readOnlyEffect = sideEffect === 'none' || sideEffect === 'read';
     const replaySafeEffect = readOnlyEffect && !tool.invokesTools;
     const maxAttempts = replaySafeEffect && tool.idempotent && tool.retry ? Math.max(1, Math.min(3, Math.floor(tool.retry.maxAttempts ?? 2))) : 1;
     for (let attempt = 0; attempt < maxAttempts; attempt++) {

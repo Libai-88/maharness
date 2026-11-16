@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { annotateToolDef } from '../../core/chat/agent';
-import { shouldJournalToolEffect, toolSideEffectLabel } from '../tool-contract';
+import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../tool-contract';
 import type { ToolDef } from '../types';
 
 const tool = (sideEffect: ToolDef['sideEffect'] = 'external'): ToolDef => ({
@@ -22,6 +22,21 @@ describe('工具副作用契约', () => {
     assert.equal(shouldJournalToolEffect(tool('external')), true);
     assert.equal(shouldJournalToolEffect(tool('irreversible')), true);
     assert.equal(toolSideEffectLabel(tool()), 'external');
+  });
+
+  test('调用级副作用优先于静态保守声明，异常时回退静态声明', () => {
+    const dynamic: ToolDef = {
+      ...tool('irreversible'),
+      classifySideEffect(args) {
+        return (args as { read?: boolean }).read ? 'read' : 'irreversible';
+      },
+    };
+    assert.equal(effectiveToolSideEffect(dynamic, { read: true }), 'read');
+    assert.equal(shouldJournalToolEffect(dynamic, { read: true }), false);
+    assert.equal(toolSideEffectLabel(dynamic, { read: true }), 'read');
+    assert.equal(effectiveToolSideEffect(dynamic, { read: false }), 'irreversible');
+    assert.equal(shouldJournalToolEffect(dynamic, { read: false }), true);
+    assert.equal(effectiveToolSideEffect({ ...dynamic, classifySideEffect() { throw new Error('bad input'); } }, {}), 'irreversible');
   });
 
   test('工具描述保留副作用边界', () => {

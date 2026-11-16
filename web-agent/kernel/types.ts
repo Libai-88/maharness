@@ -98,6 +98,8 @@ export interface PluginManifest {
   capabilityIndex?: CapabilityDescriptor[];
 }
 
+export type ToolSideEffect = 'none' | 'read' | 'write' | 'external' | 'irreversible';
+
 export interface CapabilityDescriptor {
   id: string;
   name: string;
@@ -107,7 +109,7 @@ export interface CapabilityDescriptor {
   inputs?: string[];
   outputs?: string[];
   risk?: 'low' | 'medium' | 'high';
-  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  sideEffect?: ToolSideEffect;
   examples?: string[];
 }
 
@@ -529,7 +531,9 @@ export interface ToolDef {
   /** 工具副作用契约：仅幂等工具允许执行器对瞬时失败自动重试。默认不重试。 */
   idempotent?: boolean;
   /** 副作用分类：read/none 不进入恢复账本（恢复时重新观察）；write/external/irreversible 进入账本。 */
-  sideEffect: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  sideEffect: ToolSideEffect;
+  /** 按参数细化副作用。未声明或判定异常时回退到保守的静态 sideEffect。 */
+  classifySideEffect?(args: unknown): ToolSideEffect;
   /** 内容信任来源：untrusted（网页/文档/MCP/浏览器）会在执行后做提示注入与敏感信息扫描。 */
   contentTrust?: 'trusted' | 'untrusted';
   retry?: { maxAttempts?: number; backoffMs?: number };

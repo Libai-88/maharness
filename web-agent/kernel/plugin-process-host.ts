@@ -216,6 +216,7 @@ function makeContext(opts: {
       if (cap.kind !== 'tool') throw new Error('process 插件仅支持注册 tool 能力');
       const tool = cap.tool;
       if (tool.assessApproval) throw new Error('process 插件不支持动态 assessApproval，请在 manifest/ToolDef 上使用静态 approval');
+      if (tool.classifySideEffect) throw new Error('process 插件不支持动态 classifySideEffect，请使用静态 sideEffect');
       if (tool.executionTimeoutMs) throw new Error('process 插件不支持动态 executionTimeoutMs，请使用静态 timeoutMs');
       if (tool.invokesTools) throw new Error('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED: ToolContext.invoke 需要可信宿主执行模式');
       if (!childCtx) throw new Error('process 插件上下文尚未初始化');

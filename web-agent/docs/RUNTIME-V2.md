@@ -54,7 +54,9 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 工具定义必须包含名称、版本、用途、输入 schema、输出 schema、副作用类型与权限声明。调用上下文携带任务身份、工作区、有效授权、取消信号和剩余预算。
 
-可信宿主工具可通过 executionTimeoutMs(args) 返回本次执行期限；process 工具使用静态 timeoutMs，拒绝跨进程传递动态期限函数。
+可信宿主工具可通过 `classifySideEffect(args)` 返回本次调用的副作用分类，未声明或判定异常时回退静态 `sideEffect`。权限交集、写锁、恢复账本、Trace 与运行诊断均使用本次调用分类；process 工具拒绝跨进程传递该函数。
+
+可信宿主工具可通过 `executionTimeoutMs(args)` 返回本次执行期限；process 工具使用静态 `timeoutMs`，拒绝跨进程传递动态期限函数。
 
 | 结果字段 | 契约 |
 | --- | --- |

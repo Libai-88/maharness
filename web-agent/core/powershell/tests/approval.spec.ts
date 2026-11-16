@@ -1,6 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { assessCommand, isReadOnlyCommand } from '../index';
+import { assessCommand, isReadOnlyCommand, powershellSideEffect } from '../index';
 
 describe('PowerShell 只读判定（免审批白名单）', () => {
   const free = [
@@ -70,5 +70,12 @@ describe('分段判定不被拼接命令绕过', () => {
   });
   it('空命令不放行', () => {
     assert.equal(isReadOnlyCommand('   '), false);
+  });
+});
+
+describe('PowerShell 调用级副作用', () => {
+  it('只读白名单命令可安全重放，写入命令保持保守', () => {
+    assert.equal(powershellSideEffect('Get-ChildItem | Select-Object Name'), 'read');
+    assert.equal(powershellSideEffect('Move-Item inbox/a.txt organized/a.txt'), 'irreversible');
   });
 });
