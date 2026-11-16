@@ -12,11 +12,19 @@
 - 标题、正文、辅助信息、数值建立统一层级；列表与表单保持相同间距。
 - 首页贴纸采用官方 Attachment 纵向图片卡，保留倾斜、换图与恢复默认交互。
 
+## 主导航与页面路由
+
+主导航固定为“会话、文件、工作台、自动化”，设置固定在侧边栏底部。运行记录、插件管理、统计与高级诊断进入设置或工作台扩展区，插件不能任意增加一级导航。
+
+页面使用统一 `{ view, session? }` 路由。从任意功能页或设置点击会话会关闭当前页面并返回对应聊天；文件、工作台、自动化、设置与插件页提供明确关闭按钮，并支持 `Esc` 和浏览器后退返回会话。窄屏同样保留这些入口。
+
+空会话展示办公、学习、文件整理与自动化示例，显示模型、文件、联网和 OCR 的真实可用状态。Provider 设置提供 OpenAI、DeepSeek、Anthropic 与 Ollama 预设、凭据填写、连接检测和失败修复步骤。
+
 ## 替换清单
 
 | 区域 | 官方组件 | 交互要求 |
 | --- | --- | --- |
-| 应用导航与会话 | Sidebar、DropdownMenu、Input、Checkbox | 折叠导航、重命名、置顶、归档与批量管理 |
+| 应用导航与会话 | Sidebar、DropdownMenu、Input、Checkbox | 四项主导航、固定设置、关闭按钮、重命名、置顶、归档与批量管理 |
 | Chat 空状态 | Empty、Button、Attachment | 欢迎问候、快捷提问与首页贴纸 |
 | Chat 消息流 | MessageScroller、Message、Bubble | 用户消息锚定、流式跟随、阅读历史时停止跟随、回到最新 |
 | 消息操作 | ContextMenu、Button、Tooltip | 右键、触摸长按、键盘操作、复制、引用、重发与移除 |
@@ -34,8 +42,10 @@
 | 设置表单 | Field、Input、Textarea、Select、Switch、Slider、ToggleGroup | 可访问标签、分组、保存与即时设置 |
 | 人设管理 | Card、Dialog、Field、Switch、AlertDialog | 新建、编辑、启停与删除确认 |
 | 通用反馈 | Alert、Empty、Skeleton、Spinner、Sonner | 错误、空态、加载与操作反馈 |
-| 待办看板 | Card、Input、Select、Sheet、Field | 搜索、来源与状态筛选、拖拽、编辑与删除 |
-| 工作台 | Sidebar、Tabs、Card、Field、Command、Dialog、Sonner | 任务、项目、灵感、复盘与本地文件同步 |
+| 个人事项 | Card、Input、Select、Sheet、Field | 搜索、来源与状态筛选、编辑、确认结果与继续执行 |
+| 主工作台 | Card、Badge、Button、Alert、Tabs | 今日与逾期事项、待确认自动化、运行、产物、项目、笔记和本地体验指标 |
+| 自动化 | Card、Field、Select、Button、Alert、Table | 自然语言任务、预设触发器、确认、启停、立即运行与执行历史 |
+| 完整工作台扩展 | Sidebar、Tabs、Card、Field、Command、Dialog、Sonner | 项目、灵感、复盘、数据维护与本地文件同步 |
 
 ## 执行顺序
 
@@ -60,7 +70,7 @@
 | P1 | 验收与审批 | 任务确认采用 Item + Sheet，验收结果采用 TraceCollapsible；审批保持独立 Item | 逐项证据可查看，批准与拒绝只提交一次，关闭确认面板保留验收草稿 |
 | P1 | 欢迎页 | Empty + 建议 Button + Attachment，贴纸自适应摆放 | 无模型时有明确入口，贴纸在窄屏也可换图与恢复 |
 
-只迁移已有功能，不增加附件上传、联网模式或新的模型协议。
+附件按钮、拖入文件、工作区文件引用和选中内容继续作为任务输入；工具与能力选择由 Agent 根据自然语言目标完成。
 
 ### Chat 优化清单
 
@@ -78,7 +88,7 @@
 
 ## 插件页面
 
-- 插件页面使用独立构建入口，共用主应用的官方组件与主题变量；保留 iframe 隔离和现有 API 地址。
+- 插件页面从设置的高级入口打开，共用主应用的官方组件与主题变量；保留 iframe 隔离和现有 API 地址。插件页面使用统一关闭、Esc 与后退行为。
 - 待办看板保留四列、搜索、来源筛选、状态切换、拖拽、新建、编辑、优先级与删除；拖拽采用现有 dnd-kit，状态选择同时支持键盘。
 - 工作台保留任务列表、看板、四象限、时间轴、月历、项目、灵感、复盘、备份、回收站、番茄钟与文件同步；数据格式与存储键保持兼容。
 

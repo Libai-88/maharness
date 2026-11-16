@@ -16,7 +16,7 @@
 | 输入与缓存 | L1 相似答案缓存默认关闭；L2 工具结果缓存保留状态作用域，Provider 按实际输入复用原生前缀 |
 | Windows-first | 路径沙箱（防穿越）、编码自动识别（UTF-8/UTF-16/GBK）、中文路径 |
 
-运行时状态、任务 API、权限、插件契约与迁移规则见 [运行时与插件契约 v2](docs/RUNTIME-V2.md)；架构与验收见 [AI 原生运行时](docs/AI-NATIVE-V2.md)。任务内插件支持独立授权、版本绑定、同任务启用与用户显式保存，见 [可组合架构](docs/ARCHITECTURE.md)。
+运行时状态、任务 API、权限、插件契约与迁移规则见 [运行时与插件契约 v3](docs/RUNTIME-V2.md)；架构与验收见 [AI 原生运行时](docs/AI-NATIVE-V2.md)。任务内插件支持独立授权、版本绑定、同任务启用与用户显式保存，见 [可组合架构](docs/ARCHITECTURE.md)。
 
 工具契约、插件编写、目录开销与取消语义的针对性轻量评测：`npm run eval:optimization`；可通过 `-- --report <新文件路径>` 保存源码指纹和结果。覆盖范围与验证结果见 [优化验证](docs/OPTIMIZATION-ACCEPTANCE.md)。
 
@@ -45,14 +45,15 @@ npm run start:all  # 生产模式：构建前端后单端口启动 → http://lo
 
   长文档支持分段草稿、回读及最终发布，中断后可检查和下载已保存文件。验证范围与真实模型结果见 [长内容交付与任务恢复验收](docs/LONG-CONTENT-ACCEPTANCE.md)。
 
-- **待办与工作台**：用自然语言记录个人安排，关联资料，在专属会话执行并确认结果。工作台聚合今日事项、执行进度和最近结果；完整工作台保留项目、笔记与复盘。见 [个人事项与工作台](docs/PERSONAL-ITEMS.md)。
+- **工作台与事项**：用自然语言记录个人安排，关联资料，在专属会话执行并确认结果。工作台聚合今日事项、逾期提醒、待确认自动化、运行、产物、项目与笔记；完整工作台保留项目、笔记与复盘。见 [个人事项与工作台](docs/PERSONAL-ITEMS.md)。
+- **自动化**：用自然语言创建手动、单次、每日、工作日、每周、每月、文件变化或公开 URL 变化任务。一次性预约可立即生效；周期、文件和 URL 触发必须由用户确认。执行历史、下次运行和审批等待均在工作台与自动化页展示。
 - **对话**：输入消息，Enter 发送。Agent 会自动调用工具（读文件/写文件/列目录）并展示执行过程。
 - **模型切换**：右上角下拉切换已配置的 Provider 模型（DeepSeek/OpenAI/通义…）。
 - **会话模式**：普通模式自主执行；计划模式允许观察，变更操作等待批准；目标模式展示目标与进度，执行循环与普通模式相同。计划工具按需使用。
 - **计划状态机**：步骤只允许 pending → in_progress/done/blocked、blocked → in_progress、done → 重新打开等合法迁移；`complete_goal` 在仍有未完成步骤时拒绝收尾；重新打开步骤会清除计划完成位。
 - **斜杠命令**：输入框输入 `/` **弹出命令面板**——方向键选择、Enter 执行、Tab 补全、Esc 关闭；命令直接执行（不消耗 LLM）——`/help` 全部命令、`/new` 新会话、`/clear` 清空、`/plan` `/goal` `/normal` 切模式、`/model <名称>` 切模型。
 - **上下文管理**：按模型窗口和输出预留计算输入容量；压缩保留明确约束与来源，原始材料可检索。必需内容超过容量时明确报错，模型输入组成可在运行诊断中查看。
-- **文件 Tab（工作区）**：左侧「文件」Tab —— 添加/切换工作区（Agent 文件工具的沙箱边界，切换立即生效），浏览文件树、点击文件预览内容。
+- **文件**：主导航「文件」——添加或切换工作区（Agent 文件工具的沙箱边界，切换立即生效），浏览文件树、预览文件，并把当前文件带入任务。
 - **技能系统**：设置面板下方「技能」—— 已安装技能（内置 + 技能包 + 用户）查看/卸载，市场技能一键安装（放入 `market/` 目录的 SKILL.md 技能包即进入市场）。Agent 侧通过 `list_skills` / `get_skill` / `get_skill_file` 按需读取技能指南与技能包内多文件资源（agents/references/templates/shared/scripts），实现自我设计；frontmatter 支持 `version`、`requires`、`allowed-tools`，缺失依赖会进入契约告警并按会话执行工具白名单；覆盖安装前自动保留 5 份历史快照，可用 `rollback_skill` 回滚。
 
 ## 学术智能体（ARS 融合）
@@ -65,9 +66,9 @@ maharness 已融合 [Academic Research Skills (ARS)](https://github.com/Imbad020
 - **academic-pipeline**：10 阶段全流程编排——研究→写作→完整性核查→评审→修改→定稿（强制人机确认检查点）
 
 模型可按任务需要，通过 `get_skill` / `get_skill_file` 读取学术技能与角色材料，通过 `run_subagent` / `run_parallel` 委派研究工作，产物写入当前工作区。技能安装本身不强制切换执行流程。技能包说明见 [docs/ARS-学术智能体融合.md](docs/ARS-学术智能体融合.md)。
-- **插件面板**：左侧「插件」Tab —— 查看所有插件状态，一键启用/停用/重载。工作台已提供任务、灵感、项目、复盘与数据备份。
-- **统计面板**：左侧「统计」Tab —— 全局概览（会话/消息/tokens/成本/截断次数）、本次运行明细、每会话上下文用量（估算 token 与预算对比、截断状态）、三层缓存命中率（L1 语义问答 / L2 工具结果 / L3 prompt 前缀复用）与综合命中率；「生态健康」聚合插件运行/错误、MCP server 状态/熔断/OAuth 与当前租户会话数。
-- **运行轨迹**：右上角「运行轨迹」—— 实时显示每次 LLM 调用与工具执行的耗时、token、成本、缓存命中（黑箱解药）。
+- **主导航**：固定为「会话、文件、工作台、自动化」，设置固定在侧边栏底部。功能页提供关闭按钮，并支持 Esc 返回与浏览器后退。
+- **高级入口**：插件管理、运行记录、缓存与成本、生态健康位于「设置 → 高级」。插件可继续贡献页面，但不能任意增加主侧栏一级入口。
+- **运行轨迹**：聊天右上角「运行轨迹」实时显示每次 LLM 调用与工具执行的耗时、token、成本、能力选择、规则裁决与缓存命中。
 
 ## 安全模型（机器强制，不依赖提示词）
 
@@ -159,7 +160,28 @@ plugins/clock/index.ts
 ```
 
 ```json
-{ "id": "clock", "name": "时钟工具", "version": "0.1.0", "entry": "index.ts", "enabled": true }
+{
+  "id": "clock",
+  "name": "时钟工具",
+  "version": "0.1.0",
+  "entry": "index.ts",
+  "enabled": true,
+  "apiVersion": 3,
+  "compatibility": { "api": { "min": "3.0.0", "max": "3.0.0" } },
+  "permissions": {
+    "capabilities": { "tool": ["get_current_time"] }
+  },
+  "capabilityIndex": [{
+    "id": "clock.current-time",
+    "name": "查看当前时间",
+    "description": "读取当前日期和时间。",
+    "tools": ["get_current_time"],
+    "aliases": ["现在几点", "当前时间"],
+    "outputs": ["text"],
+    "risk": "low",
+    "sideEffect": "read"
+  }]
+}
 ```
 
 ```ts
@@ -184,6 +206,8 @@ export default {
 ```
 
 能力类型：`tool`（Agent 工具）/ `listener`（事件监听）/ `command`（斜杠命令）/ `provider`（LLM 提供者）/ `service`（对外服务）。
+
+`apiVersion: 3` 是当前插件契约。加载器接受 `apiVersion: 2`，并通过兼容适配层补齐默认元数据；v2 插件不能声明 v3 专属的 `capabilityIndex`。能力索引只用于发现和选择，实际执行仍以已授权工具及权限检查为准。
 
 ### Agent 自己写插件（自我扩展）
 

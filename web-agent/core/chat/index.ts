@@ -6,7 +6,7 @@ import { callModel } from '../../kernel/model-call';
  * 提示词由运行环境与用户明确配置的人设组成。
  * 插件能力通过工具描述与发现接口暴露。
  */
-import type { PersonaDef, Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/types';
 import { SERVICE_KEYS } from '../../kernel/types';
 import { AgentRunner, defaultRunnerFactory, annotateToolDef, redactTraceValue } from './agent';
 import { compactHistory } from './compact';
@@ -88,14 +88,8 @@ export default {
       },
       refreshPrompt() {
         // 用户作用域的人设按 priority 降序排列。
-        const allPersonas = ctx.kernel.plugins
-          .capabilities('persona')
-          .map((c) => c.persona as PersonaDef)
-          .sort((a, b) => (b.priority ?? 0) - (a.priority ?? 0));
-        const userTier = allPersonas.filter((p) => p.tier === 'user');
         const parts = [makeBasePrompt()];
         for (const p of service.userPersonas) parts.push(`【${p.name}】\n${p.content}`);
-        for (const p of userTier) parts.push(`【${p.name}】\n${p.content}`);
         service.systemPrompt = parts.join('\n\n');
       },
       getSystemPrompt: () => service.systemPrompt,

@@ -1,5 +1,5 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, ChartNoAxesCombined, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Puzzle, Settings, Trash2, X } from 'lucide-react';
+import { Archive, BriefcaseBusiness, CalendarClock, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Settings, Trash2, X } from 'lucide-react';
 import BrandMark from '@/brand/BrandMark';
 import type { Session } from '../types';
 import { AGENT_NAME, APP_VERSION, chatTime, displayTitle, previewOf } from '../voice';
@@ -44,10 +44,9 @@ export interface TabDef {
 
 export const BUILTIN_TABS: TabDef[] = [
   { key: 'chat', label: '会话', icon: <MessageCircle /> },
-  { key: 'runs', label: '运行记录', icon: <ListChecks /> },
   { key: 'files', label: '文件', icon: <Folder /> },
-  { key: 'plugins', label: '插件', icon: <Puzzle /> },
-  { key: 'stats', label: '统计', icon: <ChartNoAxesCombined /> },
+  { key: 'workbench', label: '工作台', icon: <BriefcaseBusiness /> },
+  { key: 'automations', label: '自动化', icon: <CalendarClock /> },
 ];
 
 interface Props {
@@ -55,7 +54,6 @@ interface Props {
   activeId: string | null;
   activeTab: MainTab;
   onTab: (t: MainTab) => void;
-  pluginTabs?: TabDef[];
   onSelect: (id: string) => void;
   onCreate: () => void;
   onDelete: (id: string) => void;
@@ -86,7 +84,6 @@ export default memo(function Sidebar({
   activeId,
   activeTab,
   onTab,
-  pluginTabs = [],
   onSelect,
   onCreate,
   onDelete,
@@ -326,7 +323,7 @@ export default memo(function Sidebar({
         <SidebarGroup>
           <SidebarGroupLabel>工作区</SidebarGroupLabel>
           <SidebarMenu>
-            {BUILTIN_TABS.slice(0, 2).concat(pluginTabs, BUILTIN_TABS.slice(2)).map((tab) => (
+            {BUILTIN_TABS.map((tab) => (
               <SidebarMenuItem key={tab.key}>
                 <SidebarMenuButton isActive={activeTab === tab.key && !settingsOpen} tooltip={tab.label} onClick={() => { onTab(tab.key); setOpenMobile(false); }}>
                   {tab.icon}

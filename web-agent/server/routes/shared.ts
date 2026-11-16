@@ -14,6 +14,7 @@ import type { CompactOptions, CompactResult } from '../../core/chat/compact';
 import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
 import type { Scheduler } from '../scheduler';
+import type { AutomationService } from '../automations';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Response } from 'express';
@@ -32,6 +33,7 @@ export interface RouteDeps {
   /** 活跃 chat run 计数（M3 自动停止机制的事实源；句柄审计对外暴露用） */
   activeRunCount?: () => number;
   scheduler?: Scheduler;
+  automations?: AutomationService;
 }
 
 export const DEFAULT_TENANT = 'default';

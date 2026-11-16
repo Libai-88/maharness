@@ -24,7 +24,7 @@ import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { sanitizeToolHistory } from './policy';
-import { createToolCatalog, refreshToolCatalog, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
+import { capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
 import { ToolExecutor, abortableDelay } from './tool-executor';
 import { assessToolApproval } from './tool-approval';
 import { historyTools } from '../../kernel/history-tools';
@@ -619,7 +619,7 @@ export class AgentRunner {
         syncHistory();
         const errorKind = aborted ? 'aborted' : classified.category === 'auth' || classified.category === 'parameter'
           || classified.category === 'business' || classified.category === 'transient' ? classified.category : 'upstream';
-        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { toolResults: runStats.toolResults, costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) });
+        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { toolResults: runStats.toolResults, costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs), selectedCapabilities: selectedCapabilityNames(toolDefs), capabilityConflicts: capabilityConflicts(toolDefs) });
         yield { type: 'error', error: errMsg, kind: errorKind, code: aborted ? 'ABORTED' : classified.code, stage: 'model' };
         return;
       }
@@ -661,7 +661,7 @@ export class AgentRunner {
           : '上次正文达到输出上限，内容尚未完成。请从断点继续，不重复已有内容；长文档可先分段保存草稿。',
           context: { id: `integrity:${traceId}:${(opts.turnOffset ?? 0) + turn}`, source: 'response-integrity', scope: 'run', trust: 'core', retention: 'required' } });
         syncHistory();
-        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { ...runStats, costUsd: restoredCost + totalCost });
+        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { ...runStats, costUsd: restoredCost + totalCost, selectedCapabilities: selectedCapabilityNames(toolDefs), capabilityConflicts: capabilityConflicts(toolDefs) });
         if (truncationsWithoutSave >= 2) {
           yield { type: 'error', error: '连续两次输出达到上限且未保存新内容，任务已中断。已保存的草稿可检查和下载。', kind: 'upstream', code: 'OUTPUT_TRUNCATED', stage: 'model' };
           return;
@@ -874,7 +874,7 @@ export class AgentRunner {
         opts.onCheckpoint?.(
           (opts.turnOffset ?? 0) + turn,
           [...history],
-          { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) },
+          { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs), selectedCapabilities: selectedCapabilityNames(toolDefs), capabilityConflicts: capabilityConflicts(toolDefs) },
           {
             phase: 'tool_pending',
             pendingTool: {
@@ -1113,7 +1113,7 @@ export class AgentRunner {
       opts.onCheckpoint?.(
         (opts.turnOffset ?? 0) + turn,
         history,
-        { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) },
+        { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs), selectedCapabilities: selectedCapabilityNames(toolDefs), capabilityConflicts: capabilityConflicts(toolDefs) },
         { phase: 'turn_end' },
       );
     }

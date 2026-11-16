@@ -21,7 +21,8 @@ export type EventListener = (e: Event) => unknown | Promise<unknown>;
 // ============ 插件 ============
 
 export interface PluginManifest {
-  apiVersion: 2;
+  /** v3 is the authoring contract. v2 remains accepted through the loader adapter. */
+  apiVersion: 2 | 3;
   id: string;
   name: string;
   version: string;
@@ -93,6 +94,46 @@ export interface PluginManifest {
   nav?: NavDef;
   /** 插件 API 响应契约：键为相对路由（如 GET /panel），值为 JSON Schema 子集。 */
   api?: { responses?: Record<string, Record<string, unknown>> };
+  /** v3 task-facing capability groups. These describe discoverability; tools still enforce permissions. */
+  capabilityIndex?: CapabilityDescriptor[];
+}
+
+export interface CapabilityDescriptor {
+  id: string;
+  name: string;
+  description: string;
+  tools: string[];
+  aliases?: string[];
+  inputs?: string[];
+  outputs?: string[];
+  risk?: 'low' | 'medium' | 'high';
+  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  examples?: string[];
+}
+
+export interface CapabilityResolution {
+  selected: string[];
+  tools: string[];
+  reason: string;
+  conflicts: { capabilityId: string; shadowedBy: string }[];
+}
+
+export interface RuleDescriptor {
+  id: string;
+  label: string;
+  source: 'runtime' | 'user' | 'project' | 'skill' | 'plugin' | 'example';
+  scope: 'runtime' | 'workspace' | 'run';
+  priority: number;
+  trust: 'core' | 'user' | 'reference';
+  contentHash: string;
+  active: boolean;
+}
+
+export interface RuleResolution {
+  schemaVersion: 1;
+  applied: RuleDescriptor[];
+  ignored: RuleDescriptor[];
+  conflicts: { left: string; right: string; reason: string; winner: string }[];
 }
 
 /** 用户可见的插件加载诊断；不包含源码、参数或凭据。 */
@@ -453,7 +494,13 @@ export interface PersonaDef {
 
 export interface ToolDef {
   /** Discovery hints never grant execution permissions. */
-  discovery?: { initial?: boolean; keywords?: string[]; pluginId?: string; pluginVersion?: string };
+  discovery?: {
+    initial?: boolean;
+    keywords?: string[];
+    pluginId?: string;
+    pluginVersion?: string;
+    capabilities?: CapabilityDescriptor[];
+  };
   /** Composite handlers orchestrate through ToolContext.invoke; leaf calls own physical leases. */
   invokesTools?: boolean;
   version: string;

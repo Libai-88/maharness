@@ -37,6 +37,7 @@
     "eval:optimization": "tsx scripts/optimization-eval.ts",
     "eval:workbench": "tsx scripts/workbench-eval.ts",
     "eval:workbench:live": "tsx scripts/workbench-live.ts",
+    "eval:v3:live": "tsx scripts/v3-live.ts",
     "eval:long-content:live": "tsx scripts/workbench-live.ts --long-content",
     "eval:live": "tsx scripts/eval-live.ts",
     "eval:release": "tsx scripts/release-live.ts",

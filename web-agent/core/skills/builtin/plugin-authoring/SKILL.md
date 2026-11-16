@@ -9,14 +9,14 @@ applies-when:
 reject-when:
   - 现有能力已足够且无需扩展
 input: 目标能力、接口、权限和生命周期
-output: v2 插件源码与可核对的运行结果
+output: v3 插件源码与可核对的运行结果
 ---
 
 # 插件契约
 
 ## 任务内开发
 
-plugin_status 查看有效开发授权、任务版本和工作区可复用插件；plugin_status({sdk:true}) 按需读取 SDK 接口和最小示例，支持 offset/limit 分页。create_plugin 创建候选，enable_plugin 执行源码、manifest、类型与隔离试运行验证后激活。下一次模型请求通过 discover_tools 查找新工具，再用 enable_tools 按需加载。disable_plugin 释放任务实例；release_tools 仅释放后续输入中的工具 schema。
+plugin_status 查看有效开发授权、任务版本和工作区可复用插件；plugin_status({sdk:true}) 按需读取 SDK 接口和最小示例，支持 offset/limit 分页。create_plugin 创建候选，enable_plugin 执行源码、manifest、类型与隔离试运行验证后激活。下一次模型请求通过 discover_capabilities 查找任务能力，再用 enable_capabilities 加载对应工具；直接工具目录继续使用 discover_tools/enable_tools。disable_plugin 释放任务实例；release_tools 仅释放后续输入中的工具 schema。
 
 开发授权默认关闭，由用户在工作区设置中开启。工具权限和外部依赖不能超过授权；无法自行批准依赖、改变权限或替换系统运行服务。候选失败保留活动旧版。任务结束清理运行资源，用户显式保存确定哈希后才可跨任务复用。
 
@@ -27,12 +27,23 @@ create_plugin 可以接收 source 字符串，或多文件 files 与 manifest：
   "id": "word-count",
   "files": { "index.ts": "默认导出的插件源码", "helper.ts": "本地纯函数" },
   "manifest": {
-    "apiVersion": 2,
+    "apiVersion": 3,
     "id": "word-count",
     "name": "Word count",
     "version": "1.0.0",
     "entry": "index.ts",
-    "permissions": { "capabilities": { "tool": ["count_words"] } }
+    "permissions": { "capabilities": { "tool": ["count_words"] } },
+    "capabilityIndex": [{
+      "id": "text.count-words",
+      "name": "统计词数",
+      "description": "统计文本中的空白分隔词数量。",
+      "tools": ["count_words"],
+      "aliases": ["字数", "词数"],
+      "inputs": ["text"],
+      "outputs": ["count"],
+      "risk": "low",
+      "sideEffect": "none"
+    }]
   }
 }
 ```
@@ -57,13 +68,13 @@ export default {
 };
 ```
 
-id 使用小写字母、数字和连字符，最多 32 字符。源码文件使用插件内相对路径，不传 plugin.json。可导入本地模块与明确批准的包；SDK 类型用 ../../kernel/types 的 type import，不导入宿主实现或其他插件内部文件。纯工具可从 source 推导 manifest，其他能力使用完整清单。
+id 使用小写字母、数字和连字符，最多 32 字符。源码文件使用插件内相对路径，不传 plugin.json。可导入本地模块与明确批准的包；SDK 类型用 ../../kernel/types 的 type import，不导入宿主实现或其他插件内部文件。纯工具可从 source 推导 manifest，其他能力使用完整清单。`capabilityIndex` 只能引用 `permissions.capabilities.tool` 已授权工具；v2 清单通过兼容适配层运行，但不能声明能力索引。
 
 ## 能力和调用入口
 
 | kind | 定义 | 使用 |
 | --- | --- | --- |
-| tool | tool: ToolDef | 原生工具调用；按需 discover_tools/enable_tools |
+| tool | tool: ToolDef | 原生工具调用；按需 discover_capabilities/enable_capabilities，或 discover_tools/enable_tools |
 | service | service: {id,instance} 或 ctx.provide(key,value) | ctx.inject(key).value；onChange 回调观察依赖变化 |
 | context | context: {id,description,contentFn} | 每次模型请求重新求值，作为临时参考材料 |
 | listener | {event,listener} | 任务事件总线；ctx.bus.emit/emitAsync 发射 |
@@ -104,4 +115,4 @@ node scripts/plugin-scaffold.mjs create my-plugin
 node scripts/plugin-scaffold.mjs validate plugins/my-plugin
 ```
 
-实例插件的 nav 可贡献 panel、iframe 或受信任的 module 页面。plugins/ 受目录监听；core/ 内置插件需显式重载或重启；vendor/ 是技能材料。实例级的循环、缓存等服务替换由管理员配置，不属于任务生成插件的授权。
+实例插件可贡献 panel、iframe 或受信任的 module 页面，入口位于设置的高级区域，不增加主导航。plugins/ 受目录监听；core/ 内置插件需显式重载或重启；vendor/ 是技能材料。实例级的循环、缓存等服务替换由管理员配置，不属于任务生成插件的授权。

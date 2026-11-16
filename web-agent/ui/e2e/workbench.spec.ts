@@ -97,6 +97,7 @@ test('浏览器历史数据经确认导入应用存储，原备份保留', async
   expect(saved().tasks.some(task=>task.id==='legacy-extra')).toBe(false);
   await page.getByRole('button',{name:'确认',exact:true}).click();
   await expect.poll(()=>saved().tasks.some(task=>task.id==='legacy-extra')).toBeTruthy();
+  await expect(page.getByRole('alertdialog')).toHaveCount(0);
   expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('pd_workbench_v1')!).tasks[0].title)).toBe('浏览器历史事项');
   await checkAccessibility(page);
 });

@@ -294,8 +294,8 @@ class Session implements TaskPluginSession {
         if (!args.manifest && !review.capabilityInferenceComplete) throw new Error('PLUGIN_MANIFEST_REQUIRED: 动态能力声明需要显式 manifest；能力授权不会自动推断');
         const permissions: Record<string, string[]> = {};
         for (const cap of review.capabilities) (permissions[cap.kind] ??= []).push(cap.name);
-        const manifest: PluginManifest = args.manifest ?? { apiVersion: 2, id: args.id, name: args.name ?? args.id, version: '0.1.0', entry: 'index.ts', permissions: { capabilities: permissions, dependencies: review.dependencies } };
-        if (manifest.id !== args.id || manifest.apiVersion !== 2 || typeof manifest.name !== 'string' || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version) || !manifest.permissions?.capabilities || !files[manifest.entry]
+        const manifest: PluginManifest = args.manifest ?? { apiVersion: 3, id: args.id, name: args.name ?? args.id, version: '0.1.0', entry: 'index.ts', permissions: { capabilities: permissions, dependencies: review.dependencies } };
+        if (manifest.id !== args.id || ![2, 3].includes(manifest.apiVersion) || typeof manifest.name !== 'string' || typeof manifest.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(manifest.version) || !manifest.permissions?.capabilities || !files[manifest.entry]
           || manifest.requires !== undefined && (!Array.isArray(manifest.requires) || manifest.requires.some(dep => !validId.test(dep)))
           || Object.values(manifest.permissions.capabilities).some(names => !Array.isArray(names) || names.some(name => typeof name !== 'string' || !name))) throw new Error('PLUGIN_MANIFEST_INVALID');
         try { validatePluginManifest(manifest); } catch (error) { throw new Error('PLUGIN_MANIFEST_INVALID: ' + String(error)); }

@@ -29,6 +29,8 @@ import PluginTabView from './PluginTabView';
 const MaterialViewer = lazy(() => import('./MaterialViewer'));
 const RunsView = lazy(() => import('./RunsView'));
 const FilesView = lazy(() => import('./FilesView'));
+const WorkbenchView = lazy(() => import('./WorkbenchView'));
+const AutomationsView = lazy(() => import('./AutomationsView'));
 const PluginsView = lazy(() => import('./PluginsView'));
 const StatsView = lazy(() => import('./StatsView'));
 const SettingsView = lazy(() => import('./SettingsView'));
@@ -72,8 +74,9 @@ interface Props {
   modelLabel: string;
   modelTag: string;
   pluginRunning: number;
+  pluginNav: PluginNavItem[];
   modeItems: { key: string; label: string; dot?: string; sub?: string }[];
-  pluginTabs: { key: string; label: string; icon: React.ReactNode }[];
+  workbenchTabKey?: string;
   activePluginNav: PluginNavItem | null;
   pendingInference: { objective: string; rationale: string; confidence: number } | null;
   onTab: (tab: MainTab) => void;
@@ -112,7 +115,7 @@ export default function AppView(props: Props) {
     activeTab, settingsOpen, traceSteps, traceStats, traceOpen, plan, todos, theme, brand,
     checkpoint, resuming, budgetHit, sessionCost, streamStatus, liveState, squad, approvals,
     providerAuthFailed, currentSession, groupMembers, activity, modeLabel, modelLabel,
-    modelTag, pluginRunning, modeItems, pluginTabs, activePluginNav, pendingInference,
+    modelTag, pluginRunning, pluginNav, modeItems, workbenchTabKey, activePluginNav, pendingInference,
   } = props;
 
   const [pendingFile, setPendingFile] = useState<{ material: Material; quote?: string }>();
@@ -150,7 +153,6 @@ export default function AppView(props: Props) {
           activeId={activeId}
           activeTab={activeTab}
           onTab={props.onTab}
-          pluginTabs={pluginTabs}
           onSelect={props.onSelectSession}
           onCreate={props.onCreateSession}
           onDelete={props.onDeleteSession}
@@ -216,7 +218,7 @@ export default function AppView(props: Props) {
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>
-                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
+                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activeTab === 'workbench' ? '工作台' : activeTab === 'automations' ? '自动化' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
                     </BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
@@ -299,6 +301,11 @@ export default function AppView(props: Props) {
                   onThemeChange={props.onThemeChange}
                   brand={brand}
                   onBrandChange={props.onBrandChange}
+                  onOpenPlugins={() => props.onTab('plugins')}
+                  onOpenRuns={() => props.onTab('runs')}
+                  onOpenStats={() => props.onTab('stats')}
+                  pluginNav={pluginNav}
+                  onOpenPluginNav={props.onTab}
                 />
               ) : activeTab === 'chat' ? (
                 <div className="flex min-h-0 flex-1">
@@ -367,9 +374,17 @@ export default function AppView(props: Props) {
                   )}
                 </div>
               ) : activeTab === 'runs' ? (
-                <RunsView onSession={id => { props.onSelectSession(id); props.onActiveTabChange('chat'); }} />
+                <RunsView onSession={id => props.onSelectSession(id)} />
               ) : activeTab === 'files' ? (
                 <FilesView onFrameworkTask={props.onFrameworkTask} onUseMaterial={useMaterial} />
+              ) : activeTab === 'workbench' ? (
+                <WorkbenchView
+                  onSession={props.onSelectSession}
+                  onAutomations={() => props.onTab('automations')}
+                  onOpenWorkbench={() => props.onTab(workbenchTabKey ?? 'workbench')}
+                />
+              ) : activeTab === 'automations' ? (
+                <AutomationsView onSession={props.onSelectSession} />
               ) : activeTab === 'plugins' ? (
                 <PluginsView plugins={plugins} diagnostics={pluginDiagnostics} onAction={props.onPluginAction} />
               ) : activePluginNav ? (

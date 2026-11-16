@@ -6,8 +6,8 @@
   "enabled": true,
   "compatibility": {
     "api": {
-      "min": "2.0.0",
-      "max": "2.0.0"
+      "min": "3.0.0",
+      "max": "3.0.0"
     }
   },
   "limits": {
@@ -35,5 +35,29 @@
       ]
     }
   },
-  "apiVersion": 2
+  "apiVersion": 3,
+  "capabilityIndex": [
+    {
+      "id": "document.read",
+      "name": "阅读文件",
+      "description": "读取 PDF、Word、表格、演示文稿和图像的结构化内容及来源定位。",
+      "tools": ["read_document", "read_document_content", "ocr_image", "ocr_pdf"],
+      "aliases": ["查看文件", "读取文档", "分析 PDF", "理解论文"],
+      "inputs": ["pdf", "docx", "xlsx", "csv", "pptx", "image"],
+      "outputs": ["structured-content", "source-anchor"],
+      "risk": "low",
+      "sideEffect": "read"
+    },
+    {
+      "id": "document.author",
+      "name": "创建与修改文件",
+      "description": "创建和定点修改 DOCX、XLSX、CSV、PPTX，并保留来源版本与修改摘要。",
+      "tools": ["create_document", "patch_document", "begin_document_draft", "read_document_draft", "update_document_draft", "finalize_document_draft"],
+      "aliases": ["写 Word", "做表格", "做 PPT", "生成文档"],
+      "inputs": ["structured-content", "source-version", "target-anchor"],
+      "outputs": ["docx", "xlsx", "csv", "pptx"],
+      "risk": "medium",
+      "sideEffect": "write"
+    }
+  ]
 }

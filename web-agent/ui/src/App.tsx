@@ -36,7 +36,6 @@ function dingOnce() {
   } catch { /* 音频不可用时静默 */ }
 }
 import type { MainTab } from './components/Sidebar';
-import { Blocks, ClipboardCheck, BriefcaseBusiness } from 'lucide-react';
 import { toast } from 'sonner';
 import { applyFavicon } from './brand/favicon';
 import AppView from './components/AppView';
@@ -47,21 +46,30 @@ import AppView from './components/AppView';
 // 前端遍历 /api/nav 生成标签页，内容由 PluginTabView 通用渲染（前端不认识任何插件）。
 function preloadSecondaryViews() {
   void import('./components/FilesView');
+  void import('./components/WorkbenchView');
+  void import('./components/AutomationsView');
   void import('./components/PluginsView');
   void import('./components/StatsView');
   void import('./components/SettingsView');
 }
 
-/**
- * 插件图标解析：nav.icon 是插件声明的图标名，这里是前端内置图标表。
- * 未知名回落到通用插件图标——插件写错图标名不该导致它的页面无法使用。
- */
-function pluginIcon(name: string | null): React.ReactNode {
-  switch (name) {
-    case 'workbench': return <BriefcaseBusiness size={14} />;
-    case 'todo': return <ClipboardCheck size={14} />;
-    default: return <Blocks size={14} />;
-  }
+function viewFromLocation(): { tab: MainTab; settings: boolean; session?: string } {
+  const params = new URLSearchParams(location.search);
+  const view = params.get('view') ?? 'chat';
+  return {
+    tab: view === 'settings' ? 'chat' : view,
+    settings: view === 'settings',
+    session: params.get('session') ?? undefined,
+  };
+}
+
+function writeViewLocation(view: string, sessionId?: string | null, replace = false): void {
+  const params = new URLSearchParams(location.search);
+  params.set('view', view);
+  if (sessionId) params.set('session', sessionId);
+  else if (view === 'chat') params.delete('session');
+  const next = `${location.pathname}?${params.toString()}${location.hash}`;
+  history[replace ? 'replaceState' : 'pushState'](null, '', next);
 }
 
 /** 模型条目 id = provider@model（服务端 /api/models 约定） */
@@ -90,6 +98,7 @@ function readBrand(): Brand {
 }
 
 export default function App() {
+  const initialView = viewFromLocation();
   const [sessions, setSessions] = useState<Session[]>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -99,8 +108,8 @@ export default function App() {
   const [plugins, setPlugins] = useState<PluginInfo[]>([]);
   const [pluginDiagnostics, setPluginDiagnostics] = useState<PluginDiagnostic[]>([]);
   const [providers, setProviders] = useState<ProviderInfo[]>([]);
-  const [activeTab, setActiveTab] = useState<MainTab>('chat');
-  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [activeTab, setActiveTab] = useState<MainTab>(initialView.tab);
+  const [settingsOpen, setSettingsOpen] = useState(initialView.settings);
   const { steps: traceSteps, open: traceOpen, setOpen: setTraceOpen, record: recordTraceStep, clear: clearTraceSteps } = useTraceSteps();
   const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
   const [plan, setPlan] = useState<PlanState | null>(null);
@@ -137,6 +146,8 @@ export default function App() {
   // 会话镜像 ref：全局事件回调里判断"这条是不是当前会话的"（避免闭包捕获旧 activeId）
   const activeIdRef = useRef<string | null>(activeId);
   activeIdRef.current = activeId;
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
   // 本会话经历过的 traceId：轨迹面板据此只显示"这场对话"的步骤（旧版把别的会话的
   // trace.step 也混进来，你在 A 会话里看到 B 会话正在干什么）
   const traceIdsRef = useRef(new Set<string>());
@@ -146,6 +157,34 @@ export default function App() {
   }, [clearTraceSteps]);
   const { approvals, onApprovalRequired: onApprovalFromStream, onGlobalApproval: onApprovalFromBus, respond: respondApproval } =
     useApprovals({ activeId, pushSystemMessage });
+
+  useEffect(() => {
+    const applyLocation = () => {
+      const next = viewFromLocation();
+      setSettingsOpen(next.settings);
+      setActiveTab(next.tab);
+      if (next.tab === 'chat' && next.session && sessionsRef.current.some(session => session.id === next.session)) {
+        setActiveId(next.session);
+      }
+    };
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
+      if (activeTab !== 'chat' || settingsOpen) {
+        event.preventDefault();
+        setActiveTab('chat');
+        setSettingsOpen(false);
+        writeViewLocation('chat', activeIdRef.current);
+      }
+    };
+    window.addEventListener('popstate', applyLocation);
+    window.addEventListener('keydown', onEscape);
+    return () => {
+      window.removeEventListener('popstate', applyLocation);
+      window.removeEventListener('keydown', onEscape);
+    };
+  }, [activeTab, settingsOpen]);
 
   // ---- 流式文本 rAF 合帧缓冲 ----
   // SSE 每 chunk 一次 setState 会让 App 整树以 chunk 频率全量重渲染（长会话下明显卡顿）。
@@ -322,6 +361,7 @@ export default function App() {
         initialId = ss.find(session => session.id === new URLSearchParams(location.search).get('session'))?.id ?? ss[0].id;
       }
       setActiveId(initialId);
+      writeViewLocation(settingsOpen ? 'settings' : activeTab, initialId, true);
     } catch (err) {
       console.error('[maharness] 初始加载失败:', err);
       toast.error(`初始加载失败：${err instanceof Error ? err.message : String(err)}`);
@@ -331,6 +371,7 @@ export default function App() {
   const selectSession = useCallback(async (id: string) => {
     setActiveTab('chat');
     setSettingsOpen(false);
+    writeViewLocation('chat', id);
     if (id === activeIdRef.current) return;
     abortRef.current?.abort();
     setStreaming(false); setCurrentRun(null);
@@ -351,6 +392,9 @@ export default function App() {
       const s = await sessionApi.create(sel?.model ?? '');
       setSessions((prev) => [s, ...prev]);
       setActiveId(s.id);
+      setActiveTab('chat');
+      setSettingsOpen(false);
+      writeViewLocation('chat', s.id);
       setMessages([]);
       clearTraceSteps();
       traceIdsRef.current.clear();
@@ -742,7 +786,17 @@ export default function App() {
     void traceApi.stats().then(setTraceStats).catch(() => undefined);
   }, []);
 
-  const toggleSettings = useCallback(() => setSettingsOpen((v) => !v), []);
+  const setSettingsOpenWithRoute = useCallback((open: boolean) => {
+    setSettingsOpen(open);
+    if (open) {
+      setActiveTab('chat');
+      writeViewLocation('settings', activeIdRef.current);
+    } else {
+      setActiveTab('chat');
+      writeViewLocation('chat', activeIdRef.current);
+    }
+  }, []);
+  const toggleSettings = useCallback(() => setSettingsOpenWithRoute(!settingsOpen), [setSettingsOpenWithRoute, settingsOpen]);
 
   const currentSession = sessions.find((s) => s.id === activeId);
   // 微信群聊隐喻：会话头显示成员数（maharness + 你 + 已入群的子代理）
@@ -821,10 +875,6 @@ export default function App() {
       .catch(() => undefined);
   }, []);
   useEffect(() => { refreshNav(); }, [refreshNav, plugins]);
-  const pluginTabs = useMemo(
-    () => pluginNav.map((n) => ({ key: n.key, label: n.label, icon: pluginIcon(n.icon) })),
-    [pluginNav],
-  );
   useEffect(() => {
     // 当前标签页的贡献者确实不在了（插件被停用/卸载）→ 回落到会话页，不留死页面。
     // 必须等成功取过一次导航才判定，避免把「还没加载/取失败」误当「插件没了」。
@@ -832,6 +882,7 @@ export default function App() {
     if (typeof activeTab === 'string' && activeTab.startsWith('plugin:')
       && !pluginNav.some((n) => n.key === activeTab)) {
       setActiveTab('chat');
+      writeViewLocation('chat', activeIdRef.current);
     }
   }, [pluginNav, activeTab]);
   const activePluginNav = pluginNav.find((n) => n.key === activeTab) ?? null;
@@ -839,6 +890,7 @@ export default function App() {
   const onTab = useCallback((t: MainTab) => {
     setActiveTab(t);
     setSettingsOpen(false);
+    writeViewLocation(t, activeIdRef.current);
   }, []);
 
   return (
@@ -864,7 +916,7 @@ export default function App() {
       checkpoint={checkpoint}
       currentRun={currentRun}
       onNewTask={newTask}
-      onFrameworkTask={(id, message) => { setActiveTab('chat'); void send(message, id); }}
+      onFrameworkTask={(id, message) => { setActiveTab('chat'); setSettingsOpen(false); writeViewLocation('chat', activeIdRef.current); void send(message, id); }}
       onRunChanged={() => { if (currentRun) void runsApi.get(currentRun.id).then(setCurrentRun); }}
       resuming={resuming}
       budgetHit={budgetHit}
@@ -881,8 +933,9 @@ export default function App() {
       modelLabel={modelLabel}
       modelTag={modelTag}
       pluginRunning={pluginRunning}
+      pluginNav={pluginNav}
       modeItems={modeItems}
-      pluginTabs={pluginTabs}
+      workbenchTabKey={pluginNav.find(item => item.pluginId === 'workbench')?.key}
       activePluginNav={activePluginNav}
       pendingInference={pendingInference}
       onTab={onTab}
@@ -911,8 +964,12 @@ export default function App() {
       onTraceOpenChange={setTraceOpen}
       onThemeChange={setTheme}
       onBrandChange={setBrand}
-      onActiveTabChange={setActiveTab}
-      onSettingsOpenChange={setSettingsOpen}
+      onActiveTabChange={(tab) => {
+        setActiveTab(tab);
+        setSettingsOpen(false);
+        writeViewLocation(tab, activeIdRef.current);
+      }}
+      onSettingsOpenChange={setSettingsOpenWithRoute}
     />
   );
 }

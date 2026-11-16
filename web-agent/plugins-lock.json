@@ -17,11 +17,17 @@
           ]
         }
       },
-      "updatedAt": 1794801548366
+      "updatedAt": 1794828261776
     },
     "workbench": {
       "version": "0.3.0",
       "integrity": "88d3e824c8",
+      "compatibility": {
+        "api": {
+          "min": "3.0.0",
+          "max": "3.0.0"
+        }
+      },
       "permissions": {
         "capabilities": {
           "persona": [
@@ -39,7 +45,7 @@
           ]
         }
       },
-      "updatedAt": 1794801548367
+      "updatedAt": 1794828261777
     }
   }
 }

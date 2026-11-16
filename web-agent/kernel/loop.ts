@@ -75,6 +75,7 @@ export interface RunOptions {
   capabilityRevision?: () => number;
   scopedCapabilities?: <T extends import('./types').Capability['kind']>(kind: T) => Extract<import('./types').Capability, { kind: T }>[];
   scopedBus?: PluginBus;
+  ruleResolution?: import('./types').RuleResolution;
   capabilityBoundary?: () => Promise<void>;
   runId?: string;
   modelCallsManaged?: boolean;
@@ -150,7 +151,7 @@ export interface RunOptions {
   onCheckpoint?: (
     turn: number,
     history: LLMMessage[],
-    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[] },
+    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: { capabilityId: string; shadowedBy: string }[] },
     step?: {
       phase: 'turn_end' | 'tool_pending';
       pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string; effectKey?: string; resultId?: string };

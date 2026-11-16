@@ -9,8 +9,8 @@
   ],
   "compatibility": {
     "api": {
-      "min": "2.0.0",
-      "max": "2.0.0"
+      "min": "3.0.0",
+      "max": "3.0.0"
     }
   },
   "limits": {
@@ -28,5 +28,18 @@
       ]
     }
   },
-  "apiVersion": 2
+  "apiVersion": 3,
+  "capabilityIndex": [
+    {
+      "id": "academic.research",
+      "name": "学术资料阅读与核验",
+      "description": "检索公开论文、核验 DOI 与题录，并支持论文阅读、资料对比和引用整理。",
+      "tools": ["search_papers", "verify_reference"],
+      "aliases": ["论文", "文献", "参考文献", "DOI", "学术检索"],
+      "inputs": ["paper", "doi", "citation"],
+      "outputs": ["paper-summary", "comparison", "bibliography", "bibtex"],
+      "risk": "low",
+      "sideEffect": "external"
+    }
+  ]
 }

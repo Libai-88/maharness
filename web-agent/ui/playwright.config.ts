@@ -5,6 +5,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { defineConfig } from '@playwright/test';
 
+// Playwright 的交互式 reporter 会设置 FORCE_COLOR；同时继承终端级 NO_COLOR
+// 会让 Node 在每个 webserver/worker 启动时发出冲突警告。
+delete process.env.NO_COLOR;
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 45_000,

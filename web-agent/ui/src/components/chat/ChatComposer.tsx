@@ -64,7 +64,7 @@ export default function ChatComposer({
   return (
     <div data-testid="chat-composer" className="mx-auto flex w-full max-w-3xl min-w-0 shrink-0 flex-col gap-2 px-4 pt-2 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
       {(context.length > 0 || pendingInference) && (
-        <ScrollArea data-testid="chat-context" role="region" aria-label="任务状态与审批" className="max-h-[min(30dvh,16rem)] [&_[data-slot=scroll-area-viewport]]:max-h-[min(30dvh,16rem)] [&_[data-slot=scroll-area-viewport]]:overscroll-contain">
+        <ScrollArea data-testid="chat-context" role="region" aria-label="任务状态与审批" className="max-h-[min(22dvh,10rem)] [&_[data-slot=scroll-area-viewport]]:max-h-[min(22dvh,10rem)] [&_[data-slot=scroll-area-viewport]]:overscroll-contain">
           <div className="flex min-w-0 flex-col gap-2 pr-3">
           {pendingInference && (
             <Sheet key={pendingInference.objective}>

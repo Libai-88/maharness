@@ -6,8 +6,8 @@
   "enabled": true,
   "compatibility": {
     "api": {
-      "min": "2.0.0",
-      "max": "2.0.0"
+      "min": "3.0.0",
+      "max": "3.0.0"
     }
   },
   "limits": {
@@ -44,5 +44,28 @@
     "mode": "iframe",
     "page": "/page"
   },
-  "apiVersion": 2
+  "apiVersion": 3,
+  "capabilityIndex": [
+    {
+      "id": "personal.items",
+      "name": "个人事项",
+      "description": "记录、改期、完成和查询个人任务与计划。",
+      "tools": ["item_list", "item_get", "item_create", "item_update", "item_complete"],
+      "aliases": ["待办", "任务", "提醒我", "安排事项"],
+      "inputs": ["title", "date", "time-zone", "priority"],
+      "outputs": ["personal-item"],
+      "risk": "low",
+      "sideEffect": "write"
+    },
+    {
+      "id": "agent.progress",
+      "name": "执行步骤",
+      "description": "维护当前多步任务的进度，不混入个人事项。",
+      "tools": ["todo_add", "todo_update", "todo_list"],
+      "aliases": ["执行清单", "多步进度"],
+      "outputs": ["progress-card"],
+      "risk": "low",
+      "sideEffect": "write"
+    }
+  ]
 }

@@ -15,6 +15,12 @@ async function mockPluginShell(page: Page) {
   await page.route('**/api/nav', (route) => route.fulfill({ json: { items: [] } }));
 }
 
+async function openPluginManager(page: Page) {
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('tab', { name: '高级', exact: true }).click();
+  await page.getByRole('button', { name: '插件管理', exact: true }).click();
+}
+
 test('插件面板展示启动错误与修复建议', async ({ page }) => {
   await mockPluginShell(page);
   await page.route('**/api/plugins', (route) => route.fulfill({ json: [{
@@ -33,7 +39,7 @@ test('插件面板展示启动错误与修复建议', async ({ page }) => {
   await page.route('**/api/plugins/broken-plugin/panel', (route) => route.fulfill({ status: 404, body: '' }));
 
   await page.goto('/');
-  await page.getByRole('button', { name: '插件', exact: true }).click();
+  await openPluginManager(page);
   await expect(page.getByText('Broken Plugin')).toBeVisible();
   await page.getByText('Broken Plugin').click();
   const detail = page.getByRole('dialog');
@@ -64,7 +70,7 @@ test('插件失败后可通过重载恢复运行状态', async ({ page }) => {
   });
 
   await page.goto('/');
-  await page.getByRole('button', { name: '插件', exact: true }).click();
+  await openPluginManager(page);
   await page.getByText('Recoverable Plugin').click();
   const detail = page.getByRole('dialog');
   await expect(detail.getByText('入口文件不存在', { exact: false })).toBeVisible();

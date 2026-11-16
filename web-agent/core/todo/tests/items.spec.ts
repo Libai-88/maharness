@@ -4,9 +4,30 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ItemError, PersonalItems } from '../items';
+import { registerItemTools } from '../item-tools';
 import { blank, taskDefaults } from '../../../plugins/workbench/model';
 const fixture = () => { const root = mkdtempSync(join(tmpdir(),'maharness-items-')); return { root, items: new PersonalItems(root), clean: () => rmSync(root,{recursive:true,force:true}) }; };
 const code = (expected:string) => (error:unknown) => error instanceof ItemError && error.code === expected;
+test('item_create exposes natural fields without requiring operationId', async () => {
+  const f = fixture();
+  try {
+    const registered: unknown[] = [];
+    registerItemTools({
+      register(capability: unknown) {
+        registered.push(capability);
+        return () => {};
+      },
+    } as never, f.items);
+    const tool = (registered as Array<{ kind: string; tool?: { name: string; parameters: { required: string[]; properties: Record<string, { description?: string }> }; handler(args: unknown, context: unknown): Promise<{ ok: boolean }> } }>)
+      .find(item => item.kind === 'tool' && item.tool?.name === 'item_create')?.tool;
+    assert.ok(tool);
+    assert.deepEqual(tool!.parameters.required, ['title']);
+    assert.match(tool!.parameters.properties.prio?.description ?? '', /优先级/);
+    const result = await tool!.handler({ title: '提交笔记', due: '2026-11-17', dueTime: '18:30', timeZone: 'Asia/Shanghai' }, { tenantId: 'default' });
+    assert.equal(result.ok, true);
+    assert.equal(f.items.list('default')[0]?.title, '提交笔记');
+  } finally { f.clean(); }
+});
 test('personal items persist across restart, isolate tenants and deduplicate operations', () => {
   const f=fixture();try {
     const args={title:'写周报',timeZone:'Asia/Shanghai',operationId:'one'};

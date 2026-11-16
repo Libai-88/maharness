@@ -38,7 +38,7 @@ import { pluginLockEntryOf, readPluginLock, verifyPluginLock } from './plugin-lo
 import { ProcessPluginHost } from './plugin-process';
 import { capabilityName } from './capability-identity';
 import type {
-  Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike, ToolDef,
+  Capability, CapabilityDescriptor, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike, ToolDef,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
@@ -75,8 +75,9 @@ export function resolveToolConflicts(entries: ToolCatalogEntry[]): ToolCatalogEn
 }
 let serviceTraceSeq = 0;
 const serviceTracePrefix = `service-${process.pid}-${Math.random().toString(16).slice(2, 8)}`;
-/** 插件清单兼容的宿主 API 版本；与产品版本解耦，避免补丁发布意外拒绝插件。 */
-export const PLUGIN_API_VERSION = '2.0.0';
+/** 插件清单兼容的宿主 API 版本；v2 清单通过适配层继续运行。 */
+export const PLUGIN_API_VERSION = '3.0.0';
+export const LEGACY_PLUGIN_API_VERSION = '2.0.0';
 
 function semver(value: unknown): [number, number, number] | undefined {
   if (typeof value !== 'string') return undefined;
@@ -90,7 +91,9 @@ function compareVersion(a: [number, number, number], b: [number, number, number]
 }
 
 function validateManifestCompatibility(manifest: PluginManifest): void {
-  if (manifest.apiVersion !== 2) throw new Error(`插件 ${manifest.id} 需要迁移到 apiVersion: 2；旧插件已停用，不能推测其权限`);
+  if (manifest.apiVersion !== 2 && manifest.apiVersion !== 3) {
+    throw new Error(`插件 ${manifest.id} 必须使用 apiVersion: 2 或 3`);
+  }
   const range = manifest.compatibility?.api;
   if (range === undefined) return;
   if (!range || typeof range !== 'object' || Array.isArray(range)) {
@@ -104,9 +107,36 @@ function validateManifestCompatibility(manifest: PluginManifest): void {
   if (min && max && compareVersion(min, max) > 0) {
     throw new Error(`插件 ${manifest.id} compatibility.api.min 不能高于 max`);
   }
-  const host = semver(PLUGIN_API_VERSION)!;
+  const host = semver(manifest.apiVersion === 2 ? LEGACY_PLUGIN_API_VERSION : PLUGIN_API_VERSION)!;
   if ((min && compareVersion(host, min) < 0) || (max && compareVersion(host, max) > 0)) {
     throw new Error(`插件 ${manifest.id} 不兼容宿主插件 API ${PLUGIN_API_VERSION}`);
+  }
+}
+
+function validateCapabilityIndex(manifest: PluginManifest): void {
+  if (manifest.apiVersion === 2) {
+    if (manifest.capabilityIndex !== undefined) throw new Error(`插件 ${manifest.id} 的 capabilityIndex 需要 apiVersion: 3`);
+    return;
+  }
+  if (manifest.capabilityIndex === undefined) return;
+  if (!Array.isArray(manifest.capabilityIndex)) throw new Error(`插件 ${manifest.id} capabilityIndex 必须是数组`);
+  const ids = new Set<string>();
+  const tools = new Set(manifest.permissions.capabilities.tool ?? []);
+  for (const item of manifest.capabilityIndex as CapabilityDescriptor[]) {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id.trim()
+      || typeof item.name !== 'string' || !item.name.trim()
+      || typeof item.description !== 'string' || !item.description.trim()
+      || !Array.isArray(item.tools) || !item.tools.length
+      || item.tools.some(tool => typeof tool !== 'string' || !tool.trim())) {
+      throw new Error(`插件 ${manifest.id} 的 capabilityIndex 项必须包含 id、name、description 和 tools`);
+    }
+    if (ids.has(item.id)) throw new Error(`插件 ${manifest.id} capabilityIndex.id 重复: ${item.id}`);
+    ids.add(item.id);
+    for (const tool of item.tools) {
+      if (!tools.has(tool) && !tools.has('*')) {
+        throw new Error(`插件 ${manifest.id} capabilityIndex ${item.id} 引用了未授权工具 ${tool}`);
+      }
+    }
   }
 }
 
@@ -168,9 +198,15 @@ function validateManifestExecution(manifest: PluginManifest): void {
 export function validatePluginManifest(manifest: PluginManifest): void {
   validateManifestCompatibility(manifest);
   validatePermissions(manifest);
+  validateCapabilityIndex(manifest);
   validateManifestLimits(manifest);
   validateManifestExecution(manifest);
   validateRuntimePermissions(manifest);
+}
+
+/** Compatibility metadata added to v3 tool discovery without changing execution permissions. */
+export function capabilityDiscoveryOf(manifest: PluginManifest, toolName: string): CapabilityDescriptor[] {
+  return (manifest.capabilityIndex ?? []).filter(item => item.tools.includes(toolName));
 }
 
 export function validateRuntimePermissions(manifest: PluginManifest): void {
@@ -1700,7 +1736,21 @@ export class PluginLoader {
       const inst = this.registry.get(id);
       if (!inst || inst.state !== 'started') continue;
       for (const cap of inst.caps) {
-        if (cap.kind === 'tool') entries.push({ pluginId: id, tool: cap.tool });
+        if (cap.kind === 'tool') {
+          const capabilities = capabilityDiscoveryOf(inst.manifest, cap.tool.name);
+          entries.push({
+            pluginId: id,
+            tool: {
+              ...cap.tool,
+              discovery: {
+                ...cap.tool.discovery,
+                pluginId: id,
+                pluginVersion: inst.manifest.version,
+                ...(capabilities.length ? { capabilities } : {}),
+              },
+            },
+          });
+        }
       }
     }
     return resolveToolConflicts(entries);

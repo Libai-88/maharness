@@ -5,7 +5,7 @@ import DocumentSettings from './DocumentSettings';
 import { useCallback, useEffect, useState } from 'react';
 import { configApi, getMutationToken, getTenantId, metaApi, providersApi, rulesApi, securityApi, setMutationToken, setTenantId, statsApi, type SecurityPosture } from '../api';
 import type { PolicyDryRunView, RulesView, RuntimeConfig } from '../api';
-import type { ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
+import type { PluginNavItem, ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, StatsInfo } from '../types';
 import type { Brand, Theme } from '../App';
 import { toast } from 'sonner';
 import { Check, ChevronsUpDown, Plus, ShieldAlert, Trash2, X } from 'lucide-react';
@@ -33,6 +33,11 @@ import { useIsMobile } from '@/hooks/use-mobile';
 
 interface Props {
   onStartTask?: () => void;
+  onOpenPlugins?: () => void;
+  onOpenRuns?: () => void;
+  onOpenStats?: () => void;
+  pluginNav?: PluginNavItem[];
+  onOpenPluginNav?: (key: string) => void;
   providers: ProviderInfo[];
   onChanged: () => void;
   theme: Theme;
@@ -44,6 +49,12 @@ interface Props {
 type SettingTab = 'general' | 'providers' | 'context' | 'routing' | 'personas' | 'rules' | 'skills' | 'advanced';
 
 const EMPTY: ProviderForm = { label: '', baseUrl: '', apiKey: '', model: '', protocol: 'openai', priceIn: '', priceOut: '' };
+const PROVIDER_PRESETS: { label: string; baseUrl: string; model: string; protocol: string }[] = [
+  { label: 'OpenAI', baseUrl: 'https://api.openai.com/v1', model: 'gpt-4.1-mini', protocol: 'openai' },
+  { label: 'DeepSeek', baseUrl: 'https://api.deepseek.com/v1', model: 'deepseek-chat', protocol: 'openai' },
+  { label: 'Anthropic', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5', protocol: 'anthropic' },
+  { label: 'Ollama 本地', baseUrl: 'http://localhost:11434/v1', model: 'llama3.2', protocol: 'ollama' },
+];
 
 function SettingsHeading({ title, description, children }: { title: string; description: string; children?: React.ReactNode }) {
   return <header className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><h1>{title}</h1><p>{description}</p></div>{children}</header>;
@@ -240,7 +251,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
       {(creating || editing) && (
         <Card>
           <CardHeader><CardTitle>{creating ? '新增 Provider' : `编辑 · ${editing!.label}`}</CardTitle><CardDescription>保存后即可在对话中切换模型。</CardDescription></CardHeader>
-          <CardContent><FieldGroup className="grid grid-cols-1 md:grid-cols-2">
+          <CardContent>{creating && <div className="mb-4 flex flex-wrap gap-2">{PROVIDER_PRESETS.map(preset => <Button key={preset.label} type="button" size="sm" variant="outline" onClick={() => setForm({ ...EMPTY, ...preset, apiKey: form.apiKey })}>{preset.label}</Button>)}</div>}<FieldGroup className="grid grid-cols-1 md:grid-cols-2">
             <Field><FieldLabel htmlFor="provider-label">Provider 名称</FieldLabel><Input id="provider-label" placeholder="如 DeepSeek" value={form.label} onChange={(e) => setForm({ ...form, label: e.target.value })} /></Field>
             <Field><FieldLabel htmlFor="provider-base">Base URL</FieldLabel><Input id="provider-base" placeholder={isLocal ? 'http://localhost:11434/v1' : 'https://api.deepseek.com'} value={form.baseUrl} onChange={(e) => setForm({ ...form, baseUrl: e.target.value })} /></Field>
             <Field><FieldLabel htmlFor="provider-key">API Key</FieldLabel><Input id="provider-key" placeholder={isLocal ? '本地网关可留空' : editing ? '留空保留已保存的密钥' : '输入 API Key'} type="password" autoComplete="off" value={form.apiKey} onChange={(e) => setForm({ ...form, apiKey: e.target.value })} /></Field>
@@ -261,6 +272,7 @@ function ProvidersSection({ providers, onChanged }: { providers: ProviderInfo[];
             <Field><FieldLabel htmlFor="provider-price-in">输入价格（USD / 1M tokens）</FieldLabel><Input id="provider-price-in" inputMode="decimal" value={form.priceIn ?? ''} onChange={(e) => setForm({ ...form, priceIn: e.target.value })} /></Field>
             <Field><FieldLabel htmlFor="provider-price-out">输出价格（USD / 1M tokens）</FieldLabel><Input id="provider-price-out" inputMode="decimal" value={form.priceOut ?? ''} onChange={(e) => setForm({ ...form, priceOut: e.target.value })} /></Field>
           </FieldGroup>
+          {msg && !msg.ok && <p className="mt-4 text-sm text-muted-foreground">检查 Base URL 与 API Key，再点击“测试连接”。失败时可用“拉取模型列表”确认服务端返回的模型 ID。凭据只保存在本机配置中。</p>}
           {models.length > 0 && (
             <Popover open={modelOpen} onOpenChange={setModelOpen}>
               <PopoverTrigger asChild><Button variant="outline" className="mt-4 w-full justify-between" role="combobox" aria-label={`选择已拉取的模型（${models.length}）`} aria-expanded={modelOpen}>选择已拉取的模型（{models.length}）<ChevronsUpDown data-icon="inline-end" /></Button></PopoverTrigger>
@@ -862,7 +874,7 @@ function SecuritySection() {
   );
 }
 
-export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange, onStartTask }: Props) {
+export default function SettingsView({ providers, onChanged, theme, onThemeChange, brand, onBrandChange, onStartTask, onOpenPlugins, onOpenRuns, onOpenStats, pluginNav = [], onOpenPluginNav }: Props) {
   const [tab, setTab] = useState<SettingTab>('general');
   const mobile = useIsMobile();
   const navs: { key: SettingTab; label: string; badge?: string }[] = [
@@ -924,6 +936,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         <TabsContent value="advanced" className="flex flex-col gap-3">
           <>
             <SettingsHeading title="高级" description="审计日志、本地存储与安全。" />
+            <Card><CardHeader><CardTitle>扩展与诊断</CardTitle><CardDescription>插件页面、运行记录和成本统计保留在高级入口。</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" onClick={onOpenPlugins}>插件管理</Button>{pluginNav.filter(item => item.pluginId !== 'workbench').map(item => <Button key={item.key} variant="outline" onClick={() => onOpenPluginNav?.(item.key)}>{item.pluginName} · {item.label}</Button>)}<Button variant="outline" onClick={onOpenRuns}>运行记录</Button><Button variant="outline" onClick={onOpenStats}>缓存与成本</Button></CardContent></Card>
             <Card><CardHeader><CardTitle>审计与存储</CardTitle><CardDescription>打开本地数据、配置及工作区。</CardDescription></CardHeader><CardContent><FieldGroup>
               {[['traces', 'JSONL 审计日志', 'data/traces'], ['db', '数据存储', 'data/agent.db'], ['sandbox', '沙箱根目录', '文件工具与文件 API 的可访问范围'], ['config', '用户配置', 'config.json']].map(([kind, label, description]) => <Field key={kind} orientation="horizontal"><FieldContent><FieldTitle>{label}</FieldTitle><FieldDescription>{description}</FieldDescription></FieldContent><Button variant="outline" size="sm" aria-label={`打开${label}`} onClick={() => { void metaApi.open(kind).catch((error) => toast.error(String(error))); }}>打开</Button></Field>)}
             </FieldGroup></CardContent></Card>

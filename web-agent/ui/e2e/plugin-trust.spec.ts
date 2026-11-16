@@ -31,10 +31,16 @@ async function mockShell(page: Page) {
   await page.route('**/api/nav', (route) => route.fulfill({ json: { items: [NAV_ITEM] } }));
 }
 
+async function openPluginPage(page: Page, label: string) {
+  await page.getByRole('button', { name: '设置', exact: true }).click();
+  await page.getByRole('tab', { name: '高级', exact: true }).click();
+  await page.getByRole('button', { name: label, exact: true }).click();
+}
+
 test('iframe 插件页头明示沙箱信任等级，iframe 带 sandbox 属性', async ({ page }) => {
   await mockShell(page);
   await page.goto('/');
-  await page.getByRole('button', { name: '看板' }).click();
+  await openPluginPage(page, 'Demo Board · 看板');
   const trust = page.locator('[data-trust]');
   await expect(trust).toContainText('iframe 沙箱');
   await expect(trust).toHaveAttribute('data-trust', 'iframe');
@@ -56,7 +62,7 @@ test('panel 插件页头明示净化片段信任等级', async ({ page }) => {
     json: { title: '演示面板', html: '<p>面板内容</p>' },
   }));
   await page.goto('/');
-  await page.getByRole('button', { name: '面板', exact: true }).click();
+  await openPluginPage(page, 'Demo Panel · 面板');
   const trust = page.locator('[data-trust]');
   await expect(trust).toContainText('净化片段');
   await expect(trust).toHaveAttribute('data-trust', 'panel');

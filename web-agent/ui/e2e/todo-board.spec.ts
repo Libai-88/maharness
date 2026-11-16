@@ -24,8 +24,8 @@ async function setup(page: Page, theme = 'light') {
     if (method === 'DELETE') cards = cards.filter((card) => card.id !== id);
     return route.fulfill({ json: method === 'GET' ? { cards } : { ok: true } });
   });
-  await page.goto('/api/plugins/todo/board/page');
-  await expect(page).toHaveURL(/\/todo\.html$/);
+  await page.goto('/todo.html?history=1');
+  await expect(page).toHaveURL(/\/todo\.html\?history=1$/);
   await expect(page.getByRole('heading', { name: '待办看板' })).toBeVisible();
   await expect(page.getByRole('button', { name: '检查消息布局', exact: true })).toBeVisible();
   return mutations;

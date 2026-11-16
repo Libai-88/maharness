@@ -1,11 +1,11 @@
 import { taskPluginExamples } from './examples';
 /** On-demand reference material; never appended automatically to system instructions. */
-export const taskPluginSDK = `# Task plugin SDK v2
+export const taskPluginSDK = `# Task plugin SDK v3
 
 create_plugin({id, source}) stages a TypeScript index.ts; full/multi-file plugins use {id,files:{"index.ts":source,"helper.ts":source},manifest}.
-manifest={apiVersion:2,id,name,version:"1.0.0",entry:"index.ts",permissions:{capabilities:{tool:["tool_name"]}}}.
+manifest={apiVersion:3,id,name,version:"1.0.0",entry:"index.ts",permissions:{capabilities:{tool:["tool_name"]}},capabilityIndex:[{id:"domain.action",name:"Readable action",description:"Task-facing capability",tools:["tool_name"],aliases:["natural phrase"],inputs:["format"],outputs:["format"],risk:"low",sideEffect:"read"}]}.
 Capabilities use kind/name declarations: tool.tool.name, command.command.name, service.service.id, context.context.id, role.role.id, provider.provider.id, persona.persona.id, api.api.mount, listener.event.
-enable_plugin({id}) validates and returns registered capability identifiers. Small catalogs expose tools directly on the next request; when discover_tools is present, it finds hidden tools and enable_tools exposes their schemas. disable_plugin({id}) releases the instance. Requires/permissions are not expanded automatically.
+enable_plugin({id}) validates and returns registered capability identifiers. Small catalogs expose tools directly on the next request; with a large catalog, discover_capabilities finds task-facing capabilities and enable_capabilities exposes their authorized tools. discover_tools/enable_tools remain the direct tool interface. capabilityIndex may only name tools already listed in permissions.capabilities.tool. Version 2 manifests remain loadable through the compatibility adapter without v3-only metadata. disable_plugin({id}) releases the instance. Requires/permissions are not expanded automatically.
 
 Examples: plugin_status({example:'tool'}) returns a complete tested source and manifest.
 Available examples: ${taskPluginExamples.map(item => item.id).join(', ')}.

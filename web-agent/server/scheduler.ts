@@ -3,6 +3,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path';
 import type { Store } from './db';
 import type { RunService } from './run-service';
+import type { AutomationService } from './automations';
 
 export type ScheduleState = 'pending' | 'running' | 'done' | 'failed';
 
@@ -51,6 +52,7 @@ export class Scheduler {
   private stopped = false;
   private readonly running = new Set<string>();
   private service?: Pick<RunService, 'get' | 'resume'>;
+  private automations?: AutomationService;
 
   constructor(
     private readonly store: Store,
@@ -66,6 +68,7 @@ export class Scheduler {
     }
   }
   attach(service: Pick<RunService, 'get' | 'resume'>): void { this.service = service; }
+  attachAutomations(service: AutomationService): void { this.automations = service; }
 
   start(): void {
     if (this.timer || this.stopped) return;
@@ -119,6 +122,7 @@ export class Scheduler {
   async tick(): Promise<void> {
     if (this.stopped) return;
     const now = this.now();
+    await this.automations?.tick(now);
     const due = this.jobs.filter((job) => job.state === 'pending' && job.dueAt <= now && !this.running.has(job.id));
     await Promise.all(due.map((job) => this.run(job)));
   }

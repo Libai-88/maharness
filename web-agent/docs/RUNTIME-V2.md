@@ -1,8 +1,8 @@
-# maharness 运行时与插件契约 v2
+# maharness 运行时与插件契约 v3
 
 ## 运行模型
 
-用户界面和 HTTP API 通过 RunService 发起任务。RunService 保存任务状态、执行事件、断点、工具结果、子任务关系和费用记录，并调用可替换的 Agent 循环。默认循环组装当前输入、调用模型、执行原生工具调用、回填观察，直至模型回答结束或运行中断。规划、技能、记忆与委派由模型按需使用。
+用户界面和 HTTP API 通过 RunService 发起任务。RunService 保存任务状态、执行事件、断点、工具结果、子任务关系、规则裁决、能力选择、副作用和费用记录，并调用可替换的 Agent 循环。默认循环组装当前输入、调用模型、执行原生工具调用、回填观察，直至模型回答结束或运行中断。规划、技能、记忆、委派与自动化由模型按需使用。
 
 会话保存对话，任务保存一次目标的执行状态。同一会话同时只能运行一个主任务；子任务受父任务管理。关闭页面或断开事件订阅不会停止任务。服务重启后，未完成任务显示为可恢复，等待用户操作。
 
@@ -18,6 +18,16 @@
 | cancelled | 用户取消 |
 
 completed 与机器验收分别记录。没有显式验收条件或验收记录时，界面显示结果尚未验证。
+
+## 插件契约与能力发现
+
+运行时插件 API 为 `3.0.0`。新插件声明 `apiVersion: 3`；加载器接受 `apiVersion: 2`，通过兼容适配层提供默认元数据，且不扩大原清单声明的权限。v2 插件不能声明 v3 专属能力索引，现有工具、服务、角色、Provider、页面与事件调用继续可用。
+
+`CapabilityDescriptor` 描述业务能力、适用任务、输入与输出格式、风险、副作用、底层工具、别名和可用状态。`capabilityIndex` 中的每个工具必须已在该插件 `permissions.capabilities.tool` 中授权。能力是发现与选择层，实际调用仍由工具 schema、权限、审批、取消、预算和副作用账本约束。
+
+目录较大时，模型默认看到压缩能力索引。`discover_capabilities` 按意图分页查找能力，`enable_capabilities` 加载其底层工具。重复能力按键排序并以稳定优先级去重，冲突、胜出者、已选能力和加载结果写入 Run 元数据、检查点和 Trace。`discover_tools`、`enable_tools`、`release_tools` 保留为直接或兼容入口。
+
+`CapabilityResolution` 记录 `selected`、`tools`、`reason` 和 `conflicts`。工具版本随实际调用记录；插件卸载或替换不取消已发出的调用批次。
 
 ## 开始任务
 
@@ -65,9 +75,13 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 文件读取、目录列举、文件名匹配与内容搜索共享受保护路径边界。工作区内部 data/ 和 .env 不作为模型可读材料；原生搜索与 JS 回退执行相同过滤，权限边界变化后的旧搜索缓存不复用。
 
-## 模型输入与诊断
+## 规则、模型输入与诊断
 
-原始对话、运行事件和模型输入分别保存。ContextItem 记录来源、作用域、信任级别和保留策略。网页、文件、MCP 返回及父代理说明保留为任务材料或观察，不提升为核心系统指令。插件用途通过工具描述和能力发现暴露。用户明确设置的规则保留其来源。
+原始对话、运行事件和模型输入分别保存。`RuleDescriptor` 将运行时不变量、当前用户指令、项目与持久用户规则、技能建议、插件建议和示例分层传递；`RuleResolution` 按固定优先级裁决并记录来源、作用域、内容哈希、冲突、忽略项和胜出者。
+
+固定优先级为：运行时不变量与安全边界 > 当前明确用户指令 > 已确认的项目或持久用户规则 > 技能和插件建议 > 示例与样式。网页、文件、MCP 返回、工具输出及父代理说明保留为任务材料或观察，不能提升为核心系统指令。`GET /api/rules/effective` 返回当前生效规则、冲突和未执行原因。
+
+ContextItem 记录来源、作用域、信任级别和保留策略。插件用途通过工具描述和能力发现暴露。用户明确设置的规则保留其来源。
 
 上下文容量按模型窗口与输出预留计算。压缩保留明确约束并记录来源范围；原始材料仍可读取。必需输入超过容量时返回 CONTEXT_CAPACITY，供用户更换模型或缩减任务。
 
@@ -85,7 +99,7 @@ Provider Gateway 暴露统一 call 契约。内置主循环、历史摘要、视
 
 advisory 任务在额度超出、价格未知或用量不完整时继续执行，并在任务详情和聊天中提醒。用户可核对后确认，或在现有模型设置中修正具体计费配置。enforce 请求需要适配器可保证的输入计费上界、输出限制及已知价格；缺失条件返回 MODEL_BUDGET_UNCERTAIN。声明真实免费且适配器保证输出限制的调用可预留零费用。供应商账单不构成本地运行时可绝对保证的边界。
 
-数据库 schema 7 在事务迁移中保留旧显式预算的 enforce 语义，并在导入边界标注无结构化来源的旧断点。新任务不通过文本前缀判断用户目标、约束或摘要。插件临时观察不提升为核心指令，也不写入原始用户对话。
+新任务不通过文本前缀判断用户目标、约束或摘要。历史断点中缺失结构化来源的预算仍保留原 `enforce` 语义。插件临时观察不提升为核心指令，也不写入原始用户对话。
 
 ## HTTP API
 
@@ -110,18 +124,39 @@ advisory 任务在额度超出、价格未知或用量不完整时继续执行�
 | GET /api/v2/workspace/permissions | 当前工作区权限档 |
 | PUT /api/v2/workspace/permissions | 用户修改权限档；携带 profile 与 revision |
 | POST /api/providers/:id/tool-check | 用户检测模型原生工具调用能力 |
+| GET /api/rules/effective | 生效规则、冲突与未执行原因 |
+| GET /api/workbench/summary | 工作台聚合事项、自动化、运行、产物、项目、笔记和本地指标 |
+| GET /api/automations | 自动化定义与最近执行 |
+| POST /api/automations | 创建自动化 |
+| GET /api/automations/:id/runs | 自动化执行历史 |
+| PATCH /api/automations/:id | 按 revision 修改自动化 |
+| POST /api/automations/:id/confirm | 用户确认待审批自动化 |
+| POST /api/automations/:id/pause | 暂停新运行 |
+| POST /api/automations/:id/resume | 恢复已确认自动化 |
+| POST /api/automations/:id/run | 立即创建一次独立 Run |
+| DELETE /api/automations/:id | 取消自动化 |
 
 创建任务可传入 message、provider、model、budgetUsd、budgetPolicy、deadlineAt 和 acceptance。budgetPolicy 默认为 advisory：费用额度只触发提醒，不停止任务；enforce 必须由用户明确选择，无法可靠预留时不发起新调用。截止时间与验收条件仅从显式配置读取。创建和补充消息支持 Idempotency-Key，同一键用于不同内容时返回冲突。
 
 框架修改接口位于 /api/v2/framework/changes，提供创建、列举、review、validate 和 adopt。adopt 携带用户审阅的 digest。
 
+## 自动化内核
+
+`AutomationDefinition` 保存名称、任务提示词、租户与工作区、资料版本、Provider 与模型、预算策略、触发器、IANA 时区、启停与审批状态、创建者和关联事项。触发器支持手动、单次时间、每日、工作日、每周、每月、工作区文件变化和公开 URL 变化。
+
+自动化定义、计划发生时间、触发基线和 Run 关联保存在 SQLite。每个发生使用幂等键创建独立 Run；重启后恢复未决计划。逾期 24 小时内最多补跑一次，更早的发生标记为跳过并进入工作台。同一自动化默认最多保持一个活动 Run；暂停只阻止新 Run，取消活动实例调用现有 RunService。
+
+模型通过 `automation_list/get/create/update/pause/resume/run/cancel` 操作自动化。用户明确要求的一次性预约可直接创建；周期、文件与 URL 监控首次必须由用户确认。模型不能设置或绕过确认状态。任务提示词、触发器、资料版本或模型变化后，自动化重新进入待确认状态。
+
+文件触发忽略 `outputs/` 等生成目录。URL 触发只接受公开地址，并复用 SSRF、DNS 逐跳检查、超时、取消、ETag 与内容哈希边界。自动化 Run 沿用当前权限交集、审批策略、预算账本、检查点和产物机制；无人值守遇到审批时进入 `waiting_approval`，不会自动批准。
+
 ## 数据迁移与回滚
 
-升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带 pre-v2 标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建当前 schema。
+升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带迁移前标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建 schema 9。
 
-历史会话、模型配置、用户规则和产物保留。旧断点在聊天中可查看；用户核对先前操作后，以明确目标发起新任务，不自动重放旧工具。
+schema 8 到 9 新增 `automations_v3`、`automation_occurrences_v3`、`automation_trigger_baselines_v3` 及 Run 来源字段。历史会话、Run、文件、事项、模型配置、用户规则、插件授权与审批记录保持不变。旧断点在聊天中可查看；用户核对先前操作后，以明确目标发起新任务，不自动重放旧工具。
 
-插件必须声明 apiVersion: 2。旧插件被停用并显示契约迁移原因。迁移配置前保留原文件，不自动重写用户自定义规则。
+新插件声明 `apiVersion: 3`。v2 插件通过适配层继续运行，但不获得 v3 能力索引等专属元数据。迁移配置前保留原文件，不自动重写用户自定义规则。
 
 回滚步骤：
 
@@ -146,48 +181,18 @@ npm run build
 npm run e2e
 ```
 
-eval:ci 使用确定性回放。eval:live 为文本回答与评分冒烟，报告 kind 为 text-smoke，不能替代运行时任务成功率、工具执行、恢复或成本对照。
+v3 定向确定性测试覆盖 schema 8 到 9 迁移、v2 插件适配、能力去重、规则冲突、自动化幂等、时区与 DST、服务重启、逾期补跑、并发抑制、分层确认、权限交集、审批等待、取消、文件变化、URL 限流、SSRF、会话导航、关闭按钮和移动端返回。浏览器 E2E 覆盖从设置、插件页和工作台点击会话返回聊天、功能页关闭、四项稳定导航、Provider 配置、文件导入、事项创建和周期自动化确认。
 
-eval:live 必须显式提供 EVAL_BASE_URL、EVAL_API_KEY、EVAL_MODEL、正数 EVAL_BUDGET_USD，以及 EVAL_INPUT_USD_PER_MILLION 和 EVAL_OUTPUT_USD_PER_MILLION。费用单位为 USD。评测不读取 NEWAPI 凭据作为备用。每次请求前预留费用；失败、响应不确定或 usage 缺失时保留保守预留，不自动重发。
-
-发布对照评测要求固定 30 个真实任务，每任务 3 次，至少两档模型，对比旧基线、同模型同工具同权限的最小参考循环与 v2。三组使用一致材料、模型版本和预算；优先使用文件、命令结果和任务断言评分。成功率、确认次数、重复执行与中位费用分别报告。
-
-`npm run eval:release` 执行 30 个固定任务的三组对照，每个模型共 270 个样本。任务覆盖可执行代码断言、带来源的材料核对、文档产物、持久断点恢复和工具故障。每个样本使用独立临时工作区，原始结果即时追加到报告目录的 samples.jsonl。baseline 从明确指定的归档运行时加载；reference 和 v2 使用同一持久任务服务。
-
-执行前显式配置以下环境变量：
-
-| 变量 | 内容 |
-| --- | --- |
-| EVAL_BASE_URL / EVAL_API_KEY | 测试网关地址与凭据；凭据仅通过进程环境传入 |
-| EVAL_MODELS | 逗号分隔的测试模型标识 |
-| EVAL_BASELINE_ROOT | 归档版本的 web-agent 绝对目录，依赖需可解析 |
-| EVAL_FREE_CONFIRMED | 当前入口仅接受明确确认为免费的测试模型，值为 true |
-| EVAL_REPORT_DIR | 新的报告目录，默认 evals/reports/release-v2；已有样本时拒绝覆盖 |
-| EVAL_CONCURRENCY | 并发样本数，默认 2，上限 2 |
-| EVAL_TOKEN_LIMIT | 全批次输入与输出 token 计账上限，默认 20000000；usage 缺失时保留请求预留 |
-| EVAL_VARIANTS | 可选的组别子集，逗号分隔 baseline、reference、v2；子集运行本身不能满足完整矩阵门禁 |
-
-每个样本最多 32 次网关请求、每次最多 2048 输出 tokens，任务执行时限 300 秒；正常阶段采用默认的 30 轮上限，恢复场景先执行 1 轮、持久化后允许继续 30 轮。运行器不发现其他凭据，不配置备用线路，失败请求不由评测器自动重放。manifest.json 保存任务与模型标识、运行时源码指纹及执行参数。样本按固定种子交错执行，开始记录与请求预算回执即时持久化；续跑只接受源码指纹一致且尚未开始的样本，已启动但结果未知的样本须先保留为无效记录。
-
-`npm run eval:release:report -- <报告目录>` 从原始样本重新生成 report.json 和 REPORT.md。确定性检查通过证据由 validation-evidence.json 单独提供，每项包含 id、passed 和 evidence；缺少证据时该门禁不通过。报告校验样本完整性、版本身份、成功率差值、副作用重复、事件序列和费用来源。路由别名不能证明固定底层模型版本；免费账单不能据零分母计算 15% 费用增幅，调用和 token 开销单独展示。
-
-`npx tsx scripts/release-rescore.ts <报告目录>` 对仍保有本地临时工作区的已完成批次统一复核产物断言。原始 samples.jsonl 保持不变；评分结果、产物内容与哈希、评分修订分别保存为 scored-samples.jsonl、artifact-evidence.jsonl、scoring-audit.json，报告读取 manifest 指定的评分文件。复核会执行代码产物断言，不发起模型请求或重放工具调用；已有评分审计时拒绝覆盖。
-
-组合报告通过 sources.json 记录每个模型与组别使用的原始批次、样本数和指纹。同一模型与组别采用完整批次，不能按结果挑选样本。evaluated-sources.json 标识性能评测覆盖的源码；评测后修改运行时，需将 performanceRevisionCurrent 设为 false，先前矩阵不能批准当前版本发布。
-
-v2 相对参考循环的成功率下降不得超过 5 个百分点，相对旧基线不得下降；中位费用增幅不得超过 15%。权限越界、副作用重复执行、事件丢失的确定性测试必须全部通过，并验证桌面、窄屏、无障碍和断线恢复。缺少真实对照报告或任一门禁未通过时，不构成 v2 发布验收通过。
-
+真实模型验收使用当前已配置的单一模型与既有预算，最多执行 9 个样本，覆盖一次性预约、周期任务确认、修改或暂停自动化、文件触发、工作台事项更新、大工具目录能力选择、规则冲突、重启恢复和文件任务闭环。通过条件为至少 8/9 完成预期任务、未经确认创建周期或触发任务为 0、虚假成功状态为 0；Trace 记录耗时、模型调用数、token 与费用。没有可用模型或预算时记录“未执行”。
 
 ## 任务插件
 
 工作区设置中的“任务插件开发”默认关闭，与开发者权限独立。用户管理员可通过 PUT /api/v2/workspace/plugin-development 设置 enabled、permissions、dependencies 与当前权限 revision；版本冲突或存在活动任务时拒绝变更。外部依赖必须已在实例的 plugins.allowedDependencies 中批准。模型无法注册该授权接口为自己的工具。
 
-create_plugin 接收 id 和 source，或 files 与完整 v2 manifest，产生 staged 候选；enable_plugin 验证并激活。工具权限不得超过授权；直接宿主文件、进程和网络访问声明被拒绝，业务操作通过统一工具代理调用。完整类型插件仍是可信 JavaScript，静态检查不是代码安全隔离。
+create_plugin 接收 id 和 source，或 files 与完整 v3 manifest，产生 staged 候选；enable_plugin 验证并激活。v3 manifest 可声明 `capabilityIndex`，索引只能引用已授权工具。工具权限不得超过授权；直接宿主文件、进程和网络访问声明被拒绝，业务操作通过统一工具代理调用。完整类型插件仍是可信 JavaScript，静态检查不是代码安全隔离。
 
 plugin_status 返回版本、哈希、实际注册能力、文件索引和工作区可用插件；sdk=true 按需读取 SDK 接口，example 按九类能力或 composition 返回完整源码与 manifest，id、path、offset、limit 支持按范围读取源码。公共类型入口为 kernel/plugin-sdk。自动 manifest 推断按能力种类读取 name、id、mount 或 event；动态注册需要显式 manifest。类型错误返回阶段、错误码、文件、行列与消息。invoke_plugin 显式调用 command、role 或 provider；command 默认执行期限 30 秒，可通过 CommandDef.timeoutMs 声明，handler 第二参数接收 signal；role/provider 为 240 秒。角色通过统一子任务入口执行，取消与失败保留为失败结果；供应商经统一模型账本执行且不切换当前模型。persona 通过源码读取按需使用，context 作为临时参考材料参与后续模型输入。
 
 GET /api/v2/runs/:id/plugins 返回插件清单和任务授权快照。POST /api/v2/runs/:id/plugins/:pluginId/save 由用户管理员提交确定 hash，将已验证版本保存到该租户、该工作区。staged 或 error 版本不能保存。GET /api/v2/runs/:id/plugins/:pluginId/api/:mount 仅能访问活动任务插件的相应 API；其他 HTTP 方法沿用相同认证与权限检查。诊断中的 panel 入口要求 api:panel 声明并净化 HTML。
 
 run_plugins_v2 保存任务绑定与源码；workspace_plugins_v2 保存显式复用版本；plugin_development_v2 保存工作区授权。恢复要求源码及 manifest 哈希一致、依赖可解析、当前授权仍有效。子任务的 plugins 参数为明确继承的活动插件 id，运行服务一并复制它们的依赖闭包。任务结束释放运行资源，保存插件和恢复数据库都不撤销外部副作用。
-
-npm run eval:composition 执行 12 个插件专项任务、3 次重复、2 条路由和 baseline/v2 对照，共 144 个样本。它与 eval:release 的 540 样本分开报告，并在运行时设置两批合计的 token 上限。免费路由不能验证非零成本增幅；路由别名不能证明底层模型版本固定。

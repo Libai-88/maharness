@@ -31,5 +31,5 @@ test('iframe source conversation returns to the host chat',async({page,request})
   // A source link is supplied by the trusted tool context, represented here by the API fixture.
   await page.route(`**/api/items/${created.item.id}`,route=>route.fulfill({json:{item:{...created.item,sourceSessionId:source.id},attempts:[]}}));
   await page.route('**/api/items',async route=>{const response=await route.fetch();const data=await response.json();data.items=data.items.map((item:{id:string})=>item.id===created.item.id?{...item,sourceSessionId:source.id}:item);await route.fulfill({json:data});});
-  await page.goto('/');await page.getByRole('button',{name:'待办',exact:true}).click();const frame=page.frameLocator('iframe[title="待办"]');await frame.getByRole('button',{name:created.item.title,exact:true}).click();await frame.getByRole('button',{name:'来源会话',exact:true}).click();await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();await expect(page.locator('iframe[title="待办"]')).toHaveCount(0);
+  await page.goto(`/todo.html?item=${encodeURIComponent(created.item.id)}`);await page.getByRole('button',{name:'来源会话',exact:true}).click();await expect(page.getByRole('textbox',{name:'消息',exact:true})).toBeVisible();await expect(page).toHaveURL(new RegExp(`session=${encodeURIComponent(source.id)}`));
 });

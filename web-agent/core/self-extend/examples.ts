@@ -15,7 +15,7 @@ const registrations: { id: string; kind: Capability['kind']; name: string; code:
 
 export const taskPluginExamples = registrations.map(({ id, kind, name, code }) => {
   const pluginId = `example-${id}`;
-  const manifest: PluginManifest = { apiVersion: 2, id: pluginId, name: id, version: '1.0.0', entry: 'index.ts', permissions: { capabilities: { [kind]: [name] } } };
+  const manifest: PluginManifest = { apiVersion: 3, id: pluginId, name: id, version: '1.0.0', entry: 'index.ts', permissions: { capabilities: { [kind]: [name] } } };
   const source = `export default {id:'${pluginId}',name:'${id}',version:'1.0.0',onLoad(ctx:import('../../kernel/plugin-sdk').PluginContext){ctx.register(${code});}};`;
   return { id, kind, name, manifest, source };
 });

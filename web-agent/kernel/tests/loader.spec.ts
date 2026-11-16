@@ -12,12 +12,14 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Kernel } from '../index';
+import { validatePluginManifest } from '../plugin-loader';
+import type { PluginManifest } from '../types';
 
 interface Fixture {
   kernel: Kernel;
   rootDir: string;
   userPluginsDir: string;
-  cleanup: () => void;
+  cleanup: () => Promise<void>;
 }
 
 /** manifests：插件 id → 附加的 plugin.json 字段（如 config schema） */
@@ -37,8 +39,8 @@ function setup(pluginDefs: Record<string, string>, manifests: Record<string, Rec
     kernel,
     rootDir,
     userPluginsDir,
-    cleanup: () => {
-      try { kernel.trace.flush(); } catch { /* 落盘失败不影响清理 */ }
+    cleanup: async () => {
+      try { await kernel.stop(); } catch { /* 资源释放失败仍继续清理临时目录 */ }
       try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* 句柄迟释放时留待系统清理 */ }
     },
   };
@@ -429,6 +431,26 @@ describe('PluginLoader capability 权限白名单', () => {
 });
 
 describe('PluginLoader manifest API 兼容范围', () => {
+  test('v2 兼容清单不获得 v3 capabilityIndex，v3 能力只能引用已授权工具', () => {
+    const base: PluginManifest = {
+      apiVersion: 2, id: 'legacy', name: 'Legacy', version: '1.0.0', entry: 'index.ts',
+      permissions: { capabilities: { tool: ['legacy_tool'] } },
+    };
+    assert.doesNotThrow(() => validatePluginManifest(base));
+    assert.throws(() => validatePluginManifest({
+      ...base,
+      capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
+    }), /需要 apiVersion: 3/);
+    assert.doesNotThrow(() => validatePluginManifest({
+      ...base, apiVersion: 3,
+      capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
+    }));
+    assert.throws(() => validatePluginManifest({
+      ...base, apiVersion: 3,
+      capabilityIndex: [{ id: 'legacy.write', name: 'Write', description: 'Write data', tools: ['write_without_permission'] }],
+    }), /未授权工具/);
+  });
+
   test('当前 API 在声明范围内时插件正常加载', async (t) => {
     const f = setup({ compatible: '' }, { compatible: { compatibility: { api: { min: '2.0.0', max: '2.2.0' } } } });
     t.after(f.cleanup);

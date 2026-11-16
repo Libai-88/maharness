@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ChatMessage } from '../../types';
 import type { ChatTimelineItem } from '../../chat/model';
 import { AGENT_NAME } from '../../voice';
@@ -5,6 +6,8 @@ import HeroSticker from '../HeroSticker';
 import { UsersRound as IconParallel } from 'lucide-react';
 import BrandMark from '@/brand/BrandMark';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { materialApi, type MaterialCapabilities } from '../../material-api';
 import { Empty, EmptyContent, EmptyDescription, EmptyHeader, EmptyMedia, EmptyTitle } from '@/components/ui/empty';
 import { Marker, MarkerContent, MarkerIcon } from '@/components/ui/marker';
 import {
@@ -53,6 +56,12 @@ export default function ChatThread({
   streaming,
   onOpenSettings,
 }: Props) {
+  const [capabilities, setCapabilities] = useState<MaterialCapabilities | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void materialApi.capabilities().then(value => { if (alive) setCapabilities(value); }).catch(() => undefined);
+    return () => { alive = false; };
+  }, []);
   return (
     <MessageScrollerProvider defaultScrollPosition="end">
       <MessageScroller className="min-h-0 flex-1">
@@ -72,6 +81,14 @@ export default function ChatThread({
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
+                      <div className="mb-2 flex flex-wrap justify-center gap-1.5">
+                        {[
+                          ['模型', hasModels],
+                          ['文件处理', capabilities?.document ?? false],
+                          ['联网', capabilities?.search ?? false],
+                          ['OCR', Boolean(capabilities?.ocr?.status && capabilities.ocr.status !== 'disabled')],
+                        ].map(([label, available]) => <Badge key={String(label)} variant={available ? 'secondary' : 'outline'}>{String(label)} · {available ? '可用' : '未配置'}</Badge>)}
+                      </div>
                       {hasModels ? (
                         <div className="flex flex-wrap justify-center gap-2">
                           {['总结文件并标注来源', '整理表格并生成汇总', '把资料制作成汇报演示', '读懂并对比论文', '批量整理工作区文件'].map((suggestion) => (

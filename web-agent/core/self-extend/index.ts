@@ -252,7 +252,7 @@ export default {
             id,
             manifest: {
               id, name, version: '0.1.0', entry: 'index.ts',
-              apiVersion: 2, permissions: { capabilities: permissions, dependencies: review.dependencies },
+              apiVersion: 3, permissions: { capabilities: permissions, dependencies: review.dependencies },
             },
             source,
           });
@@ -267,7 +267,7 @@ export default {
           mkdirSync(dir, { recursive: true });
           writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
             id, name, version: '0.1.0', entry: 'index.ts', enabled: false,
-            apiVersion: 2, permissions: { capabilities: permissions, dependencies: review.dependencies },
+            apiVersion: 3, permissions: { capabilities: permissions, dependencies: review.dependencies },
           }, null, 2), 'utf8');
           writeFileSync(join(dir, 'index.ts'), source, 'utf8');
 

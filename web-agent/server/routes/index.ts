@@ -32,7 +32,10 @@ import { registerEventRoutes } from './events';
 import { registerCommandRoutes } from './commands';
 import { registerTenantRoutes } from './tenants';
 import { registerScheduleRoutes } from './schedules';
+import { registerAutomationRoutes } from './automations';
+import { registerWorkbenchRoutes } from './workbench';
 import type { Scheduler } from '../scheduler';
+import { AutomationService } from '../automations';
 import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
@@ -91,9 +94,21 @@ export function readStorageSnapshot(dataDir: string): StorageSnapshot {
 export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): RunService {
   app.use(express.json({ limit: '5mb' }));
 
+  const automations = new AutomationService(
+    store,
+    tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
+    Date.now,
+    {
+      filePollMs: kernel.config.get<number>('automation.filePollMs', 5_000),
+      urlPollMs: kernel.config.get<number>('automation.urlPollMs', 300_000),
+    },
+  );
+  const automationTools = automations.tools();
+
   const deps = {
     kernel, store, tracker,
     ...(scheduler ? { scheduler } : {}),
+    automations,
     sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
     activeRunCount: () => activeRunCount(),
   };
@@ -101,7 +116,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     projectRoot: kernel.rootDir,
     plugins: kernel.plugins.resolveService('service:task-plugins') as import('../../kernel/task-plugins').TaskPluginService | undefined,
     store, runner: () => getRunner(kernel),
-    tools: () => kernel.plugins.capabilities('tool').map(capability => capability.tool),
+    tools: () => [...kernel.plugins.capabilities('tool').map(capability => capability.tool), ...automationTools],
     maxDepth: kernel.config.get<number>('agent.maxDelegationDepth', 4),
     executionSlots: kernel.config.get<number>('agent.executionSlots', 16),
     workspace: tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
@@ -117,6 +132,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       const rules = loadPromptRules({ dataDir: kernel.paths.data, projectRoot: record.authorization.workspace, maxChars: Number.MAX_SAFE_INTEGER });
       return {
         provider, model: record.model, messages: [], traceId: record.id,
+        ruleResolution: rules.resolution,
+        tools: [...kernel.plugins.tools(), ...automationTools],
         contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
         systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
         contextMessages: [
@@ -135,6 +152,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerRunRoutes(app, deps, runs);
   registerItemRoutes(app, deps, runs);
   scheduler?.attach(runs);
+  automations.attach(runs);
+  scheduler?.attachAutomations(automations);
 
   // ---------- 健康检查（M4 前置：bin 脚本据此校验进程身份/版本；无鉴权阻碍，只读无害） ----------
   app.get('/api/health', (_req, res) => {
@@ -168,6 +187,8 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerSessionRoutes(app, deps);    // 会话 CRUD / 消息 / 批量删除
   registerTenantRoutes(app, deps);     // OPS-01 租户注册表
   registerScheduleRoutes(app, deps);   // 长任务到点续跑
+  registerAutomationRoutes(app, deps);
+  registerWorkbenchRoutes(app, deps);
   registerChatRoutes(app, deps, runs);
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）

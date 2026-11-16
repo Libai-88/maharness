@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createToolCatalog, refreshToolCatalog, releasedToolNames, toolCatalogBudget } from '../tool-discovery';
+import { capabilityConflicts, createToolCatalog, refreshToolCatalog, releasedToolNames, selectedCapabilityNames, toolCatalogBudget } from '../tool-discovery';
 import type { ToolContext, ToolDef } from '../types';
 
 test('discovery exposes only run-authorized tools and activation stays scoped to that run', async () => {
@@ -95,4 +95,31 @@ test('plugin discovery metadata is searchable without changing authorization or 
   assert.equal((result.data as { tools: ToolDef[] }).tools[0].discovery?.pluginId, 'cells');
   const snapshot = () => JSON.stringify(createToolCatalog([tool], [], 0).map(({ name, description, parameters }) => ({ name, description, parameters })));
   assert.equal(snapshot(), snapshot());
+});
+
+test('任务能力索引按意图发现、稳定去重并只加载胜出插件工具', async () => {
+  const capability = (tools: string[]) => ({
+    id: 'document.read', name: '阅读文件', description: '阅读 PDF 并定位来源', tools,
+    aliases: ['PDF', '来源'], inputs: ['pdf'], outputs: ['source-anchor'], risk: 'low' as const, sideEffect: 'read' as const,
+  });
+  const tool = (name: string, pluginId: string): ToolDef => ({
+    name, description: '读取 PDF', version: '3.0.0', permissions: ['workspace.read'], sideEffect: 'read',
+    parameters: { type: 'object' }, outputSchema: { type: 'object' }, handler: async () => ({ ok: true }),
+    discovery: { initial: false, pluginId, pluginVersion: '1.0.0', capabilities: [capability([name])] },
+  });
+  const a = tool('read_pdf_a', 'alpha'); const z = tool('read_pdf_z', 'zeta');
+  const filler = Array.from({ length: 14 }, (_, index) => ({ ...tool(`filler_${index}`, `p${index}`), discovery: {} }));
+  const catalog = createToolCatalog([a, z, ...filler], [], 1);
+  const discover = catalog.find(item => item.name === 'discover_capabilities')!;
+  const found = await discover.handler({ query: 'PDF 来源' }, {} as ToolContext);
+  const entries = (found.data as { capabilities: { id: string; availableTools: string[] }[] }).capabilities;
+  assert.equal(entries.length, 1); assert.equal(entries[0]?.id, 'document.read');
+  assert.deepEqual(entries[0]?.availableTools, ['read_pdf_a']);
+  assert.deepEqual(capabilityConflicts(catalog), [{ capabilityId: 'document.read', shadowedBy: 'alpha' }]);
+  await catalog.find(item => item.name === 'enable_capabilities')!.handler({ ids: ['document.read'] }, {} as ToolContext);
+  assert.deepEqual(selectedCapabilityNames(catalog), ['document.read']);
+  assert.equal(catalog.some(item => item.name === 'read_pdf_a'), true);
+  assert.equal(catalog.some(item => item.name === 'read_pdf_z'), false);
+  const second = createToolCatalog([z, ...filler, a], [], 1);
+  assert.equal(second.some(item => item.name === 'read_pdf_a'), false);
 });

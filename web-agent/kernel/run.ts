@@ -23,9 +23,12 @@ export interface RunRecord {
   billingAcknowledgedAt?: number;
   billingNotice?: string;
   usageStatus?: 'reported' | 'estimated' | 'unknown';
+  capabilityResolution?: import('./types').CapabilityResolution;
+  ruleResolution?: import('./types').RuleResolution;
+  origin?: { kind: 'automation'; automationId: string; occurrenceId: string };
 }
 export interface RunEvent { runId: string; seq: number; type: string; data: Record<string, unknown>; createdAt: number; }
-export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
+export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: { capabilityId: string; shadowedBy: string }[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
 export interface ManagedExecution { runChild(options: RunOptions, parentId: string): AsyncGenerator<AgentEvent>; }
 export interface ChildRunRequest { parentStepId?: string; objective: string; tools?: 'read' | 'all'; plugins?: string[]; instructions?: string; maxTurns?: number; budgetUsd?: number; }
 export interface ChildRunResult { runId: string; traceId: string; answer: string; toolCalls: number; cost: number; tokensIn: number; tokensOut: number; error?: string; cancelled: boolean; }

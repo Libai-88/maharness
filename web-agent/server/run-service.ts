@@ -65,11 +65,12 @@ export class RunService {
     if (!record) throw new RunError(404, 'RUN_NOT_FOUND', '任务不存在');
     return record;
   }
-  create(session: Session, input: { message: string; materials?: import('../kernel/material').MaterialRef[]; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; budgetPolicy?: 'advisory' | 'enforce'; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string } }): RunRecord {
+  create(session: Session, input: { message: string; materials?: import('../kernel/material').MaterialRef[]; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; budgetPolicy?: 'advisory' | 'enforce'; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string }; origin?: RunRecord['origin'] }): RunRecord {
     const tenantId = session.tenantId ?? 'default';
     if (input.materials !== undefined && (!Array.isArray(input.materials) || input.materials.length > 10 || input.materials.some(ref => !ref || typeof ref.id !== 'string' || typeof ref.version !== 'string'))) throw new RunError(400, 'INVALID_MATERIALS', '最多附加 10 个有效文件引用');
     const fingerprintParts: unknown[] = [input.message, input.provider ?? null, input.model ?? null, input.budgetUsd ?? null, input.budgetPolicy ?? 'advisory', input.deadlineAt ?? null, input.acceptance ?? null, input.frameworkChange?.id ?? null];
     if (input.materials?.length) fingerprintParts.push(input.materials.map(({ id, version }) => ({ id, version })));
+    if (input.origin) fingerprintParts.push(input.origin);
     const requestFingerprint = createHash('sha256').update(JSON.stringify(fingerprintParts)).digest('hex');
     if (input.requestKey) {
       const prior = this.env.store.runs.byRequest(tenantId, session.id, input.requestKey);
@@ -101,6 +102,7 @@ export class RunService {
       createdAt: now, updatedAt: now, cost: 0, tokensIn: 0, tokensOut: 0,
       budgetUsd: input.budgetUsd, budgetPolicy: input.budgetPolicy ?? 'advisory', deadlineAt: input.deadlineAt, acceptance: input.acceptance, principalRole: input.principalRole,
       requestFingerprint,
+      ...(input.origin ? { origin: input.origin } : {}),
       ...(materials.length ? { materials } : {}),
     };
     // Initial history is a run snapshot; later tasks never reconstruct transient context from dialogue.
@@ -315,6 +317,13 @@ export class RunService {
       const attemptId = randomUUID();
       let ownUsage = { cost: 0, input: 0, output: 0 };
       const options = this.env.prepare(record);
+      if (options.ruleResolution) {
+        repo.update(record, { ruleResolution: options.ruleResolution }, 'rule_resolution', {
+          applied: options.ruleResolution.applied.map(rule => rule.id),
+          ignored: options.ruleResolution.ignored.map(rule => rule.id),
+          conflicts: options.ruleResolution.conflicts.length,
+        });
+      }
       plugins = await this.env.plugins?.open(record);
       if (record.instructions) options.contextMessages = [...(options.contextMessages ?? []), {
         role: 'user', content: record.instructions,
@@ -420,7 +429,7 @@ export class RunService {
         task: record.acceptance?.length || record.deadlineAt ? { objective: record.objective, acceptance: record.acceptance ?? [], deadlineAt: record.deadlineAt } : undefined,
         effectJournal: { peek: key => this.env.store.peekToolEffect(record.id, key), claim: key => this.env.store.claimToolEffect(record.id, key), release: key => this.env.store.releaseToolEffect(record.id, key), complete: (key, result) => this.env.store.completeToolEffect(record.id, key, result) },
         takeMessages: (history, turn) => {
-          const current: RunCheckpoint = { history: modelHistory(history), turn: cp.turn + turn, costUsd: record.cost, toolResults: repo.checkpoint(record.id)?.toolResults ?? [], enabledTools: repo.checkpoint(record.id)?.enabledTools, releasedTools: repo.checkpoint(record.id)?.releasedTools };
+          const current: RunCheckpoint = { history: modelHistory(history), turn: cp.turn + turn, costUsd: record.cost, toolResults: repo.checkpoint(record.id)?.toolResults ?? [], enabledTools: repo.checkpoint(record.id)?.enabledTools, releasedTools: repo.checkpoint(record.id)?.releasedTools, selectedCapabilities: repo.checkpoint(record.id)?.selectedCapabilities, capabilityConflicts: repo.checkpoint(record.id)?.capabilityConflicts };
           const events: RunEvent[] = [];
           const delivered = repo.transaction(() => {
             const messages = repo.deliverMessages(record.id, current);
@@ -434,7 +443,11 @@ export class RunService {
           return delivered.map(message => ({ role: 'user', content: message.content, context: { id: message.id, source: 'user-supplement', scope: 'run', trust: 'user', retention: 'required' } }));
         },
         onCheckpoint: (turn, history, evidence, step) => {
-          repo.saveCheckpoint(record.id, { history: modelHistory(history), turn: step?.phase === 'tool_pending' ? turn - 1 : turn, costUsd: ledgerManaged ? record.cost : evidence?.costUsd ?? record.cost, toolResults: evidence?.toolResults ?? [], enabledTools: evidence?.enabledTools ?? repo.checkpoint(record.id)?.enabledTools, releasedTools: evidence?.releasedTools ?? repo.checkpoint(record.id)?.releasedTools, pending: step?.phase === 'tool_pending', pendingTool: step?.phase === 'tool_pending' ? step.pendingTool : undefined });
+          repo.saveCheckpoint(record.id, { history: modelHistory(history), turn: step?.phase === 'tool_pending' ? turn - 1 : turn, costUsd: ledgerManaged ? record.cost : evidence?.costUsd ?? record.cost, toolResults: evidence?.toolResults ?? [], enabledTools: evidence?.enabledTools ?? repo.checkpoint(record.id)?.enabledTools, releasedTools: evidence?.releasedTools ?? repo.checkpoint(record.id)?.releasedTools, selectedCapabilities: evidence?.selectedCapabilities ?? repo.checkpoint(record.id)?.selectedCapabilities, capabilityConflicts: evidence?.capabilityConflicts ?? repo.checkpoint(record.id)?.capabilityConflicts, pending: step?.phase === 'tool_pending', pendingTool: step?.phase === 'tool_pending' ? step.pendingTool : undefined });
+          if (evidence?.selectedCapabilities?.length) {
+            const resolution = { selected: evidence.selectedCapabilities, tools: evidence.enabledTools ?? [], reason: 'agent_enabled_capability', conflicts: evidence.capabilityConflicts ?? [] };
+            if (JSON.stringify(record.capabilityResolution) !== JSON.stringify(resolution)) repo.update(record, { capabilityResolution: resolution }, 'capability_resolution', resolution);
+          }
         },
         onUsage: usage => {
           if (ledgerManaged) return;

@@ -44,6 +44,12 @@ async function setup(page: Page) {
     else if (path === '/api/providers/design/tool-check') data = { status: 'confirmed', checkedAt: Date.now() };
     else if (path === '/api/v2/workspace/permissions') data = { profile: 'standard', revision: 0, workspace: 'D:/workspace' };
     else if (path === '/api/items') data = { items: [], projects: [] };
+    else if (path === '/api/workbench/summary') data = {
+      schemaVersion: 1, today: new Date().toISOString().slice(0, 10), todayItems: [], overdue: [], upcoming: [], unscheduled: [],
+      pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [], notes: [],
+      metrics: { schemaVersion: 1, firstTaskSuccessRate: null, takeoverRate: null, recoveredAfterFailureRate: null, automaticRecoveryRate: null, invalidToolCalls: 0, duplicateToolCalls: 0, capabilitySelectionFailures: 0, durationMs: 0, modelCalls: 0, costUsd: 0 },
+    };
+    else if (path === '/api/automations') data = { automations: [], occurrences: [] };
     else if (path === '/api/v2/runs') data = [];
     else if (path === '/api/providers/design') data = { ...provider, ...body };
     else if (path === '/api/config') {
@@ -83,6 +89,11 @@ async function openSettings(page: Page, tab?: string) {
   if (tab) await page.getByRole('tab', { name: tab, exact: true }).click();
 }
 
+async function openAdvancedPage(page: Page, label: '插件管理' | '运行记录' | '缓存与成本') {
+  await openSettings(page, '高级');
+  await page.getByRole('button', { name: label, exact: true }).click();
+}
+
 test('侧边栏选择当前或其他会话会退出功能页及设置，保留会话内容', async ({ page }) => {
   await setup(page);
   await page.route('**/api/sessions/*/messages', route => route.fulfill({ json: [{ id: 'saved-message', role: 'user', content: '已保存的会话内容', ts: 1 }] }));
@@ -102,21 +113,109 @@ test('侧边栏选择当前或其他会话会退出功能页及设置，保留�
   await expect(page.getByText('已保存的会话内容', { exact: true })).toBeVisible();
 });
 
-test('功能页和设置的关闭按钮直接返回会话', async ({ page }) => {
+test('固定功能页和设置的关闭按钮直接返回会话', async ({ page }) => {
   await setup(page);
-  await page.route('**/api/nav', route => route.fulfill({ json: { items: [{ key: 'plugin:design-plugin', pluginId: 'design-plugin', pluginName: '示例插件', label: '扩展页面', icon: null, order: 1, mode: 'panel', url: '/api/plugins/design-plugin/panel', moduleUrl: null, statusUrl: null, statusIntervalMs: 0 }] } }));
-  await page.reload();
   const input = page.getByRole('textbox', { name: '消息', exact: true });
   await expect(input).toBeVisible();
-  for (const name of ['运行记录', '文件', '插件', '统计', '扩展页面']) {
+  for (const name of ['文件', '工作台', '自动化']) {
     await page.getByRole('button', { name, exact: true }).click();
     await page.getByRole('button', { name: '关闭页面，返回会话', exact: true }).click();
     await expect(input).toBeVisible();
   }
-  await page.getByRole('button', { name: '文件', exact: true }).click();
   await openSettings(page);
   await page.getByRole('button', { name: '关闭设置', exact: true }).click();
   await expect(input).toBeVisible();
+  for (const name of ['插件管理', '运行记录', '缓存与成本'] as const) {
+    await openAdvancedPage(page, name);
+    await page.getByRole('button', { name: '关闭页面，返回会话', exact: true }).click();
+    await expect(input).toBeVisible();
+  }
+});
+
+test('主导航固定四项，浏览器后退与 Esc 返回会话', async ({ page }) => {
+  await setup(page);
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+  for (const name of ['会话', '文件', '工作台', '自动化']) {
+    await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
+  }
+  await page.getByRole('button', { name: '工作台', exact: true }).click();
+  await expect(page).toHaveURL(/view=workbench/);
+  await page.goBack();
+  await expect(input).toBeVisible();
+  await expect(page).toHaveURL(/view=chat/);
+  await page.getByRole('button', { name: '自动化', exact: true }).click();
+  await expect(page).toHaveURL(/view=automations/);
+  await page.keyboard.press('Escape');
+  await expect(input).toBeVisible();
+});
+
+test('工作台新增事项后立即刷新聚合结果', async ({ page }) => {
+  await setup(page);
+  const items: Record<string, unknown>[] = [];
+  let posted: Record<string, unknown> | undefined;
+  await page.route('**/api/items', async route => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    posted = route.request().postDataJSON();
+    const item = { id: 'item-new', title: posted.title, lifecycle: 'todo', revision: 0 };
+    items.push(item);
+    return route.fulfill({ json: { item } });
+  });
+  await page.route('**/api/workbench/summary', route => route.fulfill({
+    json: {
+      schemaVersion: 1, today: new Date().toISOString().slice(0, 10), todayItems: items, overdue: [], upcoming: [], unscheduled: [],
+      pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [], notes: [],
+      metrics: { schemaVersion: 1, firstTaskSuccessRate: null, takeoverRate: null, recoveredAfterFailureRate: null, automaticRecoveryRate: null, invalidToolCalls: 0, duplicateToolCalls: 0, capabilitySelectionFailures: 0, durationMs: 0, modelCalls: 0, costUsd: 0 },
+    },
+  }));
+
+  await page.getByRole('button', { name: '工作台', exact: true }).click();
+  await page.getByLabel('新增事项').fill('整理明天会议资料');
+  await page.getByRole('button', { name: '添加', exact: true }).click();
+
+  await expect(page.getByText('整理明天会议资料', { exact: true })).toBeVisible();
+  expect(posted).toMatchObject({ title: '整理明天会议资料' });
+  expect(posted?.timeZone).toBeTruthy();
+  expect(posted?.operationId).toBeTruthy();
+});
+
+test('周期自动化创建后待确认，确认后才启用', async ({ page }) => {
+  await setup(page);
+  let revision = 0;
+  let automation: Record<string, unknown> | undefined;
+  const automationPayload = () => ({
+    id: 'automation-weekly', workspace: 'D:/workspace', createdBy: 'user', materials: [],
+    name: '每周整理项目进展', prompt: '整理本周新增文件并生成进展摘要。',
+    trigger: { type: 'schedule', recurrence: 'weekly', time: '09:00', timeZone: 'Asia/Shanghai', dayOfWeek: 1 },
+    createdAt: Date.now(), updatedAt: Date.now(), ...automation,
+  });
+  await page.route('**/api/automations', async route => {
+    if (route.request().method() === 'POST') {
+      const input = route.request().postDataJSON();
+      revision = 0;
+      automation = { ...input, state: 'draft', approval: 'pending', revision };
+      return route.fulfill({ json: { automation: automationPayload() } });
+    }
+    return route.fulfill({ json: { automations: automation ? [automationPayload()] : [], occurrences: [] } });
+  });
+  await page.route('**/api/automations/*/confirm', async route => {
+    const body = route.request().postDataJSON();
+    expect(body).toEqual({ revision });
+    revision++;
+    automation = { ...automation, state: 'active', approval: 'approved', revision };
+    return route.fulfill({ json: { automation: automationPayload() } });
+  });
+
+  await page.getByRole('button', { name: '自动化', exact: true }).click();
+  await page.getByLabel('名称').fill('每周整理项目进展');
+  await page.getByLabel('要执行的任务').fill('整理本周新增文件并生成进展摘要。');
+  await page.getByRole('combobox', { name: '触发方式' }).click();
+  await page.getByRole('option', { name: '周期时间' }).click();
+  await page.getByRole('button', { name: '创建自动化', exact: true }).click();
+
+  await expect(page.getByText('待确认', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '确认', exact: true }).click();
+  await expect(page.getByText('已启用', { exact: true })).toBeVisible();
+  expect(revision).toBe(1);
 });
 
 async function checkAccessibility(page: Page) {
@@ -145,8 +244,7 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
     ] });
     return route.fulfill({ json: [] });
   });
-  if (!await page.getByRole('button', { name: '运行记录', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
-  await page.getByRole('button', { name: '运行记录', exact: true }).click();
+  await openAdvancedPage(page, '运行记录');
   await page.getByRole('button', { name: '诊断与子任务' }).click();
   const panel = page.getByTestId('run-diagnostics');
   await expect(panel).toContainText('用量不完整');
@@ -170,7 +268,7 @@ for (const [type, label] of [['task_verified', '机器验收通过'], ['task_par
   await setup(page);
   const run = { id: 'verified-run', sessionId: 'design-0', objective: '核对产物', model: 'design-model', providerId: 'design', status: 'completed', verification: { type }, cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
   await page.route('**/api/v2/**', route => route.fulfill({ json: new URL(route.request().url()).pathname === '/api/v2/runs' ? [run] : [] }));
-  await page.getByRole('button', { name: '运行记录', exact: true }).click();
+  await openAdvancedPage(page, '运行记录');
   await page.getByRole('button', { name: '诊断与子任务' }).click();
   await expect(page.getByTestId('run-diagnostics')).toContainText(`机器验收 · ${label}`);
   await expect(page.getByTestId('run-diagnostics')).toContainText('执行完成');
@@ -224,8 +322,7 @@ for (const width of [1440, 390]) test(`任务插件版本、保存与净化面�
     if (path.endsWith('/api/panel')) return route.fulfill({ json: { title: '结果面板', html: '<p>value=29</p><script>window.pluginUnsafe=true</script><img src=x onerror="window.pluginUnsafe=true">' } });
     return route.fulfill({ json: [] });
   });
-  if (!await page.getByRole('button', { name: '运行记录', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
-  await page.getByRole('button', { name: '运行记录', exact: true }).click(); await page.getByRole('button', { name: '诊断与子任务' }).click();
+  await openAdvancedPage(page, '运行记录'); await page.getByRole('button', { name: '诊断与子任务' }).click();
   const panel = page.getByTestId('run-diagnostics'); await expect(panel).toContainText('abc123456789'); await expect(panel).toContainText('data-source');
   await panel.getByRole('button', { name: '查看面板' }).click(); await expect(panel).toContainText('value=29');
   expect(await page.evaluate(() => (window as unknown as { pluginUnsafe?: boolean }).pluginUnsafe)).toBeUndefined();
@@ -337,12 +434,12 @@ for (const width of [390, 900, 1440]) {
       await checkAccessibility(page);
     }
     await page.getByRole('button', { name: '关闭设置' }).click();
-    for (const name of ['插件', '统计']) {
-      if (width < 768) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
-      await page.getByRole('button', { name, exact: true }).click();
-      await expect(page.getByRole('heading', { level: 1 })).toContainText(name === '插件' ? '插件管理' : '缓存与成本');
+    for (const name of ['插件管理', '缓存与成本'] as const) {
+      await openAdvancedPage(page, name);
+      await expect(page.getByRole('heading', { level: 1 })).toContainText(name);
       await checkAccessibility(page);
       await page.screenshot({ path: testInfo.outputPath(`${name}.png`) });
+      await page.getByRole('button', { name: '关闭页面，返回会话', exact: true }).click();
     }
   });
 }

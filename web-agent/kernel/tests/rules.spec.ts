@@ -1,12 +1,13 @@
-import { describe, it, before, after } from 'node:test';
+import { describe, it, test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
   diffPolicyRules, dryRunPolicy, evaluatePolicy, loadPromptRules, loadPolicyRules,
-  matchPolicy, rulesSignature, validatePolicyRules,
+  matchPolicy, resolveRuleDescriptors, rulesSignature, validatePolicyRules,
 } from '../rules';
+import type { RuleDescriptor } from '../types';
 
 let dataDir = '';
 let projectRoot = '';
@@ -58,6 +59,44 @@ describe('loadPromptRules', () => {
     writeFileSync(join(projectRoot, 'CLAUDE.md'), '新增一条规则');
     const b = rulesSignature(loadPromptRules({ dataDir, projectRoot }).sources);
     assert.notEqual(a, b);
+  });
+
+  it('相同内容的全局与项目规则保留冲突来源，并裁决项目优先', () => {
+    const localData = mkdtempSync(join(tmpdir(), 'mh-rules-duplicate-data-'));
+    const localProject = mkdtempSync(join(tmpdir(), 'mh-rules-duplicate-project-'));
+    try {
+      const duplicate = '始终使用项目规则。';
+      mkdirSync(join(localData, 'rules'), { recursive: true });
+      writeFileSync(join(localData, 'rules', 'global.md'), duplicate);
+      writeFileSync(join(localProject, 'AGENTS.md'), duplicate);
+      const result = loadPromptRules({ dataDir: localData, projectRoot: localProject });
+      assert.equal(result.text.split(duplicate).length - 1, 1);
+      assert.equal(result.resolution.applied[0]?.source, 'project');
+      assert.ok(result.resolution.conflicts.some(conflict =>
+        conflict.reason === 'same_content_duplicate' && conflict.winner.startsWith('rules:project:')));
+    } finally {
+      rmSync(localData, { recursive: true, force: true });
+      rmSync(localProject, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('结构化规则裁决', () => {
+  test('按优先级去重、记录冲突和未生效来源', () => {
+    const rule = (id: string, source: RuleDescriptor['source'], priority: number, hash: string, active = true): RuleDescriptor => ({
+      id, label: id, source, scope: source === 'runtime' ? 'runtime' : 'workspace', priority,
+      trust: source === 'runtime' || source === 'user' || source === 'project' ? 'user' : 'reference',
+      contentHash: hash, active,
+    });
+    const result = resolveRuleDescriptors([
+      rule('project', 'project', 600, 'same'),
+      rule('user-rule', 'user', 700, 'same'),
+      rule('skill', 'skill', 200, 'skill'),
+      rule('disabled', 'plugin', 900, 'disabled', false),
+    ]);
+    assert.deepEqual(result.applied.map(item => item.id), ['user-rule', 'skill']);
+    assert.deepEqual(result.ignored.map(item => item.id), ['disabled', 'project']);
+    assert.deepEqual(result.conflicts[0], { left: 'user-rule', right: 'project', reason: 'same_content_duplicate', winner: 'user-rule' });
   });
 });
 

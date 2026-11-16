@@ -235,7 +235,7 @@ test('首页贴纸换图持久化并可恢复默认照片', async ({ page }) => 
   await setup(page, []);
   const sticker = page.getByTestId('hero-sticker').locator('img');
   const original = await sticker.getAttribute('src');
-  await page.locator('input[type="file"]').setInputFiles({ name: 'photo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>') });
+  await page.getByTestId('hero-sticker').locator('input[type="file"]').setInputFiles({ name: 'photo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>') });
   await expect(sticker).toHaveAttribute('src', /^data:image\/jpeg/);
   const custom = await sticker.getAttribute('src');
   await page.reload();

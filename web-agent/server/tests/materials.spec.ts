@@ -65,7 +65,15 @@ test('Run references persist in checkpoints and participate in idempotency', asy
   try { const session = store.createSession('test', 'test'); const run = service.create(session, { message: 'read', materials: [a], requestKey: 'same' }); assert.equal(service.create(session, { message: 'read', materials: [a], requestKey: 'same' }).id, run.id); assert.throws(() => service.create(session, { message: 'read', materials: [b], requestKey: 'same' }), /不同/); assert.equal(service.get(run.id, 'default').materials?.[0]?.version, a.version); assert.match(JSON.stringify(store.runs.checkpoint(run.id)), /material-references/); } finally { await service.shutdown(); }
 }));
 test('Schema 7 migration retains sessions and adds the material registry', () => {
-  const root = mkdtempSync(join(tmpdir(), 'mh-schema8-')); const path = join(root, 'test.sqlite'); let store = new Store(path); const session = store.createSession('test', 'test'); store.close();
+  const root = mkdtempSync(join(tmpdir(), 'mh-schema8-')); const path = join(root, 'test.sqlite'); let store: Store | undefined = new Store(path); const session = store.createSession('test', 'test'); store.close();
   const raw = new Database(path); raw.exec('DROP TABLE materials_v1; DROP TABLE run_materials_v1; PRAGMA user_version=7'); raw.close();
-  try { store = new Store(path); assert.equal(store.schemaVersion, 8); assert.equal(store.listSessions()[0]?.id, session.id); writeFileSync(join(root, 'note.md'), 'test'); assert.ok(store.materials.register('default', root, 'note.md', root).id); store.close(); assert.ok(readdirSync(root).some(name => name.includes('.pre-v2-'))); } finally { rmSync(root, { recursive: true, force: true }); }
+  try {
+    store = new Store(path);
+    assert.equal(store.schemaVersion, 9);
+    assert.equal(store.listSessions()[0]?.id, session.id);
+    const tables = new Set((store as unknown as { db: Database.Database }).db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: unknown) => (row as { name: string }).name));
+    assert.ok(tables.has('automations_v3')); assert.ok(tables.has('automation_occurrences_v3')); assert.ok(tables.has('automation_trigger_baselines_v3'));
+    writeFileSync(join(root, 'note.md'), 'test'); assert.ok(store.materials.register('default', root, 'note.md', root).id);
+    assert.ok(readdirSync(root).some(name => name.includes('.pre-v2-')));
+  } finally { store?.close(); rmSync(root, { recursive: true, force: true }); }
 });

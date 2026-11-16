@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import type { Plugin } from '../../kernel/types';
 import { dryRunPolicy, loadPromptRules, loadPolicyRules, rulesSignature, matchPolicy } from '../../kernel/rules';
 import type { PolicyRule, RuleSource } from '../../kernel/rules';
+import type { RuleResolution } from '../../kernel/types';
 
 /** agent.before_tool 钩子负载中本插件用到的字段（与 core/chat/agent.ts 的 AgentHookCtx 对齐） */
 interface BeforeToolCtx {
@@ -42,6 +43,7 @@ export default {
     let sources: RuleSource[] = [];
     let policy: PolicyRule[] = [];
     let errors: string[] = [];
+    let resolution: RuleResolution = { schemaVersion: 1, applied: [], ignored: [], conflicts: [] };
     let sig = '';
     let unregisterPersona: (() => void) | null = null;
 
@@ -73,6 +75,7 @@ export default {
       sources = r.sources;
       policy = p.rules;
       errors = p.errors;
+      resolution = r.resolution;
       publish();
       ctx.logger.info(`规则已生效：${r.sources.filter(s => s.exists).length} 个来源 / ${r.text.length} 字符 / 策略 ${p.rules.length} 条${p.errors.length ? ` / ${p.errors.length} 个策略文件解析失败` : ''}`);
       return true;
@@ -110,6 +113,7 @@ export default {
           /** 子代理/并行/评审继承主会话用户规则 */
           promptBlock: (): string => (enabled ? promptText : ''),
           sources: () => sources,
+          resolution: () => resolution,
           policy: () => policy,
           errors: () => errors,
           reload: () => refresh(true),
@@ -131,16 +135,16 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
-        output: '{sources, promptChars, policy, errors}',
+        output: '{sources, promptChars, policy, errors, resolution}',
         outputSchema: {
-          type: 'object', required: ['sources', 'promptChars', 'policy', 'errors'],
-          properties: { sources: { type: 'array' }, promptChars: { type: 'integer' }, policy: { type: 'array' }, errors: { type: 'array' } },
+          type: 'object', required: ['sources', 'promptChars', 'policy', 'errors', 'resolution'],
+          properties: { sources: { type: 'array' }, promptChars: { type: 'integer' }, policy: { type: 'array' }, errors: { type: 'array' }, resolution: { type: 'object' } },
         },
-        description: '查看当前生效的用户规则来源（全局/项目文件）与策略规则。用户问「你遵守哪些规则/项目有什么约定」时调一次即可。',
+        description: '查看当前生效的规则来源、去重裁决与策略规则。用户问「你遵守哪些规则/项目有什么约定」时调一次即可。',
         parameters: { type: 'object', properties: {} },
         async handler() {
           refresh();
-          return { ok: true, data: { sources: sources.filter(s => s.exists), promptChars: promptText.length, policy, errors } };
+          return { ok: true, data: { sources: sources.filter(s => s.exists), promptChars: promptText.length, policy, errors, resolution } };
         },
       },
     });

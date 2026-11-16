@@ -9,7 +9,9 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import { createHash } from 'node:crypto';
 import { matchesGlob } from './fssearch';
+import type { RuleDescriptor, RuleResolution } from './types';
 
 export interface RuleSource {
   scope: 'global' | 'project';
@@ -18,6 +20,9 @@ export interface RuleSource {
   exists: boolean;
   chars: number;
   mtimeMs: number;
+  priority: number;
+  trust: 'user';
+  contentHash: string;
 }
 
 export interface PromptRulesResult {
@@ -25,8 +30,30 @@ export interface PromptRulesResult {
   text: string;
   sources: RuleSource[];
   truncated: boolean;
+  resolution: RuleResolution;
   /** 供 UI 展示的可编辑目标 */
   editable: { scope: 'global' | 'project'; defaultFile: string; candidates: string[] };
+}
+
+/** Deterministic source-aware resolution. Duplicate text is kept once; higher-priority sources win. */
+export function resolveRuleDescriptors(input: RuleDescriptor[]): RuleResolution {
+  const ordered = [...input].sort((a, b) => b.priority - a.priority || a.id.localeCompare(b.id));
+  const hashes = new Map<string, RuleDescriptor>();
+  const applied: RuleDescriptor[] = [];
+  const ignored: RuleDescriptor[] = [];
+  const conflicts: RuleResolution['conflicts'] = [];
+  for (const item of ordered) {
+    if (!item.active) { ignored.push(item); continue; }
+    const prior = hashes.get(item.contentHash);
+    if (prior) {
+      ignored.push(item);
+      conflicts.push({ left: prior.id, right: item.id, reason: 'same_content_duplicate', winner: prior.id });
+      continue;
+    }
+    hashes.set(item.contentHash, item);
+    applied.push(item);
+  }
+  return { schemaVersion: 1, applied, ignored, conflicts };
 }
 
 export interface PolicyRule {
@@ -90,10 +117,14 @@ export function loadPromptRules(opts: {
   const pushFile = (scope: 'global' | 'project', file: string, label: string) => {
     const r = readIfExists(file);
     const abs = resolve(file);
-    const source: RuleSource = { scope, label, file: abs, exists: !!r, chars: r ? r.text.length : 0, mtimeMs: r?.mtimeMs ?? 0 };
+    const text = r ? stripFrontMatter(r.text) : '';
+    const source: RuleSource = {
+      scope, label, file: abs, exists: !!r, chars: r ? r.text.length : 0, mtimeMs: r?.mtimeMs ?? 0,
+      priority: scope === 'project' ? 80 : 70, trust: 'user',
+      contentHash: createHash('sha256').update(text).digest('hex'),
+    };
     sources.push(source);
     if (!r) return;
-    const text = stripFrontMatter(r.text);
     if (text) collected.push({ scope, label, file: abs, text, source });
   };
 
@@ -108,9 +139,27 @@ export function loadPromptRules(opts: {
   // 项目规则更具体、更该保留：先项目后全局
   const ordered = [...collected.filter(c => c.scope === 'project'), ...collected.filter(c => c.scope === 'global')];
   const kept: typeof ordered = [];
+  const consideredFiles = new Set<string>();
+  const seenHashes = new Set<string>();
   for (const c of ordered) {
-    if (c.text.length <= budget) { kept.push(c); budget -= c.text.length; continue; }
-    if (budget > 400) { kept.push({ ...c, text: `${c.text.slice(0, budget)}\n…（该规则文件已按预算截断）` }); truncated = true; budget = 0; }
+    if (seenHashes.has(c.source.contentHash)) {
+      // Keep the source active so resolution can report the duplicate and its winner.
+      consideredFiles.add(c.source.file);
+      continue;
+    }
+    seenHashes.add(c.source.contentHash);
+    if (c.text.length <= budget) {
+      kept.push(c);
+      consideredFiles.add(c.source.file);
+      budget -= c.text.length;
+      continue;
+    }
+    if (budget > 400) {
+      kept.push({ ...c, text: `${c.text.slice(0, budget)}\n…（该规则文件已按预算截断）` });
+      consideredFiles.add(c.source.file);
+      truncated = true;
+      budget = 0;
+    }
     else truncated = true;
   }
   const text = kept
@@ -120,6 +169,16 @@ export function loadPromptRules(opts: {
     text,
     sources,
     truncated,
+    resolution: resolveRuleDescriptors(sources.map(source => ({
+      id: `rules:${source.scope}:${source.label}:${source.contentHash.slice(0, 8)}`,
+      label: source.label,
+      source: source.scope === 'project' ? 'project' : 'user',
+      scope: 'workspace',
+      priority: source.priority,
+      trust: source.trust,
+      contentHash: source.contentHash,
+      active: source.exists && consideredFiles.has(source.file),
+    }))),
     editable: {
       scope: 'project',
       defaultFile: join(root, 'AGENTS.md'),
