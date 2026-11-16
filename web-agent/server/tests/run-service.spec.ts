@@ -37,16 +37,33 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('delegation call cancellation stops only its child while the parent remains usable', async () => {
+  const ready=deferred(),holdParent=deferred();let options:RunOptions|undefined;
+  const {service,store,session}=setup({approveApproval:()=>false,async *run(opts){
+    if(!opts.parentRunId){options=opts;ready.resolve();await holdParent.promise;yield done;}
+    else {await new Promise<void>(resolve=>{if(opts.signal?.aborted)resolve();else opts.signal?.addEventListener('abort',()=>resolve(),{once:true})});}
+  }});
+  try {
+    const parent=service.create(session,{message:'parent'});await ready.promise;
+    const ac=new AbortController();const child=options!.delegate!({objective:'child'},ac.signal);
+    ac.abort('call_deadline');const result=await child;
+    assert.equal(result.cancelled,true);assert.equal(service.get(parent.id,'default').status,'running');
+    holdParent.resolve();await service.shutdown();
+    assert.equal(store.runs.children(parent.id,'default').length,1);
+  }finally{holdParent.resolve();await service.shutdown();store.close();}
+});
+
 test('enabled tool schemas survive database reopen and a queued supplement at recovery', async () => {
   const workspace = mkdtempSync(join(tmpdir(), 'mh-enabled-recovery-'));
   const database = join(workspace, 'runs.db');
   const kernel = new Kernel(workspace);
-  let store = new Store(database); let calls = 0; let writes = 0; let maxTurns = 1;
+  let store = new Store(database); let calls = 0; let writes = 0; const maxTurns = 5;
   const custom: ToolDef = { name: 'custom_export', description: 'Export a result', version: '2.0.0', permissions: ['workspace.write'], sideEffect: 'write', parameters: { type: 'object' }, outputSchema: { type: 'object' }, async handler() { writes++; return { ok: true, data: {} }; } };
   const source: ProviderDef = { id: 'mock', label: 'mock', defaultModel: 'mock', prices: { in: 0, out: 0 }, async *chat(_history, options) {
     calls++;
     if (calls === 1) yield { type: 'tool_call', toolCall: { id: 'enable-1', type: 'function', function: { name: 'enable_tools', arguments: '{"names":["custom_export"]}' } } };
-    else if (calls === 2) {
+    else if (calls === 2) throw new Error('fixture connection interruption');
+    else if (calls === 3) {
       assert.equal(options.tools?.some(tool => tool.name === 'custom_export'), true);
       yield { type: 'tool_call', toolCall: { id: 'export-1', type: 'function', function: { name: 'custom_export', arguments: '{}' } } };
     } else yield { type: 'delta', text: 'exported' };
@@ -59,13 +76,13 @@ test('enabled tool schemas survive database reopen and a queued supplement at re
     const run = service.create(session, { message: 'Export a result.' }); await terminal(service, run.id);
     assert.equal(service.get(run.id, 'default').status, 'interrupted');
     assert.ok(store.runs.checkpoint(run.id)?.enabledTools?.includes('custom_export'));
-    await service.shutdown(); store.close(); store = new Store(database); maxTurns = 5;
+    await service.shutdown(); store.close(); store = new Store(database);
     service = new RunService(environment());
     const finished = terminal(service, run.id); service.resume(run.id, 'default');
     service.supplement(run.id, 'default', 'Preserve the export format.');
     await finished;
     assert.equal(service.get(run.id, 'default').status, 'completed');
-    assert.equal(writes, 1); assert.equal(calls, 3);
+    assert.equal(writes, 1); assert.equal(calls, 4);
     assert.ok(store.runs.checkpoint(run.id)?.enabledTools?.includes('custom_export'));
   } finally { await service.shutdown(); store.close(); await kernel.stop(); }
 });
@@ -169,6 +186,8 @@ test('tool results persist with bounded pages and cannot cross run or tenant bou
   const { service, store, session } = setup({ approveApproval: () => false, async *run(opts) {
     opts.toolJournal!.start('call-1', 'read_file', 'file.txt');
     opts.toolJournal!.finish('call-1', { ok: true, data: { text: 'x'.repeat(20000) } });
+    opts.toolJournal!.start('call-2', 'command_start', 'command');
+    opts.toolJournal!.finish('call-2', { ok: false, error: 'Unknown effect', failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'unknown' } });
     const page = opts.toolJournal!.read('call-1', 10, 3000)!;
     assert.equal(page.content.length, 3000);
     assert.equal(page.nextOffset, 3010);
@@ -179,7 +198,11 @@ test('tool results persist with bounded pages and cannot cross run or tenant bou
     const run = service.create(session, { message: 'work' }); await terminal(service, run.id);
     assert.ok(store.runs.readTool(run.id, 'call-1'));
     assert.equal(store.runs.readTool('other-run', 'call-1'), undefined);
-    assert.equal(store.runs.toolCalls(run.id).length, 1);
+    const tools = store.runs.toolCalls(run.id);
+    assert.equal(tools.length, 2);
+    assert.equal(tools[0].failure, undefined);
+    assert.equal(tools[1].status, 'unknown');
+    assert.deepEqual(tools[1].failure, { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'unknown' });
     assert.throws(() => service.get(run.id, 'other-tenant'));
   } finally { await service.shutdown(); store.close(); }
 });
@@ -424,4 +447,28 @@ test('an explicit deadline cancels an in-flight model request and reports failur
     assert.equal(stopped, true); assert.equal(result.status, 'failed'); assert.match(result.error!, /截止/);
     assert.equal(store.runs.modelCalls(run.id)[0].status, 'cancelled');
   } finally { await service.shutdown(); store.close(); }
+});
+
+test('resume rejects expired deadlines and exhausted original turn limits before launch', async () => {
+  let executions = 0;
+  const fixture = setup({ approveApproval: () => false, async *run(options) { executions++; options.onCheckpoint?.(0, options.messages, { costUsd: 0, toolResults: [] }); yield { type: 'error', error: 'interrupted', kind: 'upstream' }; } });
+  try {
+    const first = fixture.service.create(fixture.session, { message: 'deadline' }); await terminal(fixture.service, first.id);
+    fixture.store.runs.update(first, { deadlineAt: Date.now() - 1 });
+    assert.throws(() => fixture.service.resume(first.id, 'default'), (e: any) => e.code === 'DEADLINE_EXCEEDED');
+    const second = fixture.service.create(fixture.session, { message: 'turns' }); await terminal(fixture.service, second.id);
+    fixture.store.runs.update(second, { maxTurns: 1 });
+    assert.throws(() => fixture.service.resume(second.id, 'default'), (e: any) => e.code === 'TURN_LIMIT_REACHED');
+    assert.equal(executions, 2); assert.equal(fixture.service.get(first.id, 'default').status, 'interrupted');
+  } finally { await fixture.service.shutdown(); fixture.store.close(); }
+});
+test('resume keeps original total turns and structured timeout reason across database state', async () => {
+  let attempt = 0; const limits: (number | undefined)[] = [];
+  const fixture = setup({ approveApproval: () => false, async *run(options) { attempt++; limits.push(options.maxTurns); if (attempt === 1) { options.onCheckpoint?.(2, options.messages, { costUsd: 0, toolResults: [] }); yield { type: 'error', error: '请求超时', kind: 'transient', code: 'REQUEST_TIMEOUT', stage: 'model' }; } else yield done; } });
+  try {
+    const run = fixture.service.create(fixture.session, { message: 'work' }); await terminal(fixture.service, run.id);
+    assert.equal(fixture.service.get(run.id, 'default').problem?.code, 'REQUEST_TIMEOUT');
+    const finished = terminal(fixture.service, run.id); fixture.service.resume(run.id, 'default'); await finished;
+    assert.deepEqual(limits, [30, 27]); assert.equal(fixture.service.get(run.id, 'default').status, 'completed');
+  } finally { await fixture.service.shutdown(); fixture.store.close(); }
 });

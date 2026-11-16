@@ -1,4 +1,5 @@
 import type { ChatComposerController } from '../../hooks/useChatComposer';
+import AttachmentControls from './AttachmentControls';
 import { Children, useId, useState, type ReactNode } from 'react';
 import { money } from '../../voice';
 import {
@@ -145,7 +146,8 @@ export default function ChatComposer({
       <div className="min-w-0">
         <Popover open={commandsVisible} onOpenChange={composer.setCmdOpen}>
         <PopoverAnchor asChild>
-        <form className="w-full" onSubmit={(event) => { event.preventDefault(); if (hasModels) composer.submit(); }}>
+        <form className="w-full" onDragOver={event => { if (event.dataTransfer.types.includes('Files')) event.preventDefault(); }} onDrop={event => { if (event.dataTransfer.files.length) { event.preventDefault(); void composer.uploadFiles(Array.from(event.dataTransfer.files)); } }} onSubmit={(event) => { event.preventDefault(); if (hasModels) composer.submit(); }}>
+        <AttachmentControls composer={composer} />
         <InputGroup>
           <InputGroupTextarea
             ref={composer.inputRef}

@@ -1,5 +1,6 @@
 import WorkspacePermissions from './WorkspacePermissions';
 import GettingStarted from './GettingStarted';
+import DocumentSettings from './DocumentSettings';
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useCallback, useEffect, useState } from 'react';
 import { configApi, getMutationToken, getTenantId, metaApi, providersApi, rulesApi, securityApi, setMutationToken, setTenantId, statsApi, type SecurityPosture } from '../api';
@@ -899,6 +900,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
       <ScrollArea className="min-h-0 min-w-0 flex-1"><div className="mx-auto w-full max-w-4xl p-4 md:p-6">
         <TabsContent value="general" className="flex flex-col gap-3">
           <GettingStarted providers={providers} onModels={() => setTab('providers')} onChanged={onChanged} onStart={onStartTask} />
+          <DocumentSettings />
           <GeneralSection theme={theme} onThemeChange={onThemeChange} brand={brand} onBrandChange={onBrandChange} />
         </TabsContent>
         <TabsContent value="providers" className="flex flex-col gap-3">

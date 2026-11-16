@@ -10,7 +10,7 @@
 //
 // 可选页头状态：nav.status 指向一个返回 { text, detail?, connected? } 的端点，
 // 本组件通用轮询并展示——插件不需要为了"在页头显示状态"而让前端为它写组件。
-import { Component, useCallback, useEffect, useState } from 'react';
+import { Component, useCallback, useEffect, useRef, useState } from 'react';
 import type { PluginNavItem } from '../types';
 import { getMutationToken, navApi } from '../api';
 import DOMPurify from 'dompurify';
@@ -25,6 +25,7 @@ import { Spinner } from '@/components/ui/spinner';
 
 interface Props {
   item: PluginNavItem;
+  onSelectSession?: (id: string) => void;
 }
 
 /** 信任等级明示（SEC-05）：三种渲染形态的隔离语义直接展示在页头，不依赖用户记忆 */
@@ -65,15 +66,23 @@ interface StatusPayload {
   connected?: boolean;
 }
 
-export default function PluginTabView({ item }: Props) {
+export default function PluginTabView({ item, onSelectSession }: Props) {
   return (
     <PluginPageBoundary pluginId={item.pluginId}>
-      <PluginTabBody item={item} />
+      <PluginTabBody item={item} onSelectSession={onSelectSession} />
     </PluginPageBoundary>
   );
 }
 
-function PluginTabBody({ item }: Props) {
+function PluginTabBody({ item, onSelectSession }: Props) {
+  const frame = useRef<HTMLIFrameElement>(null);
+  useEffect(() => {
+    const navigate = (event: MessageEvent) => {
+      if (event.origin === location.origin && event.source === frame.current?.contentWindow && event.data?.type === 'maharness:open-session' && typeof event.data.sessionId === 'string') onSelectSession?.(event.data.sessionId);
+    };
+    window.addEventListener('message', navigate);
+    return () => window.removeEventListener('message', navigate);
+  }, [onSelectSession]);
   const [status, setStatus] = useState<StatusPayload | null>(null);
   const [panel, setPanel] = useState<{ title: string; html: string } | null>(null);
   const [panelError, setPanelError] = useState<string | null>(null);
@@ -152,6 +161,7 @@ function PluginTabBody({ item }: Props) {
         <PluginModuleView item={item} />
       ) : item.mode === 'iframe' ? (
         <iframe
+          ref={frame}
           key={reloadKey}
           src={src}
           title={item.label}

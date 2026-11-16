@@ -1,4 +1,4 @@
-import { expect, test, type Page, type PageAddInitScriptOptions } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { createRequire } from 'node:module';
 import { readFileSync } from 'node:fs';
 
@@ -9,42 +9,26 @@ const state = {
   v: 1, tasks: [{ id: 'task-a', title: '整理界面', prio: 2, due: today, start: '', done: false, pid: 'proj-a', createdAt: 1, updatedAt: 1, doneAt: null, rolls: 0, repeat: '', pomo: 1, subs: [{ t: '核对列宽', d: false }], tags: ['设计'], link: '', note: '', status: 'doing', est: 2 }], notes: [{ id: 'note-a', text: '把复盘做成图', tags: ['方法'], createdAt: 1, updatedAt: 1, _s: true }], projects: [{ id: 'proj-a', name: '界面重构', stage: '收尾', next: '跑验收', blocker: '', status: 'active', updatedAt: 1 }], diary: { [today]: '交付工作台' }, diaryTs: { [today]: 1 }, tomb: {}, bin: [], meta: { sample: false, itemsAtExport: 0, lastExport: null, lastOpen: today, created: 1, pomoLog: { [today]: 1 } },
 };
 
-async function setup(page: Page, { theme = 'light', lang = 'zh', width = 1440, directory = false } = {}) {
+async function setup(page: Page, { theme = 'light', lang = 'zh', width = 1440 } = {}) {
   await page.setViewportSize({ width, height: 900 });
-  await page.addInitScript(([saved, theme, lang, directory]) => {
-    localStorage.clear();
-    localStorage.setItem('pd_workbench_v1', saved);
+  let snapshot = { revision: 1, data: structuredClone(state) };
+  await page.route('**/api/plugins/workbench/wb/data', route => {
+    if (route.request().method() === 'PUT') {
+      const incoming = route.request().postDataJSON();
+      if (incoming.revision !== snapshot.revision) return route.fulfill({status:409,json:{error:'工作台已变化'}});
+      snapshot = {revision:snapshot.revision+1,data:incoming.data};
+    }
+    return route.fulfill({json:snapshot});
+  });
+  await page.addInitScript(({theme}) => {
     localStorage.setItem('maharness-theme', theme);
     localStorage.setItem('maharness-brand', 'moss');
-    if (directory) {
-      const writes: string[] = [];
-      const file = { name: 'workbench-data.json', text: '', exists: false };
-      const directoryHandle = {
-        kind: 'directory', name: '验收文件夹',
-        queryPermission: () => Promise.resolve('granted'),
-        requestPermission: () => Promise.resolve('granted'),
-        getFileHandle: async (name: string, options: { create?: boolean } = {}) => {
-          if (name !== file.name) { if (!options.create) throw Object.assign(new Error('missing'), { name: 'NotFoundError' }); file.name = name; file.exists = true; }
-          return {
-            createWritable: async () => ({ write: async (data: string) => { file.text = data; file.exists = true; }, close: async () => { file.exists = true; } }),
-            getFile: async () => { if (!file.exists) throw Object.assign(new Error('missing'), { name: 'NotFoundError' }); return new Blob([file.text], { type: 'application/json' }); },
-          };
-        },
-        getDirectoryHandle: async () => ({
-          getFileHandle: async (name: string, options: { create?: boolean } = {}) => { if (!options.create) throw Object.assign(new Error('missing'), { name: 'NotFoundError' }); return { createWritable: async () => ({ write: async (data: string) => { file.text = data; }, close: async () => {} }) }; },
-          keys: async function* () {},
-        }),
-        keys: async function* () { yield file.name; },
-        toJSON: () => null,
-      };
-      Object.defineProperty(window, 'showDirectoryPicker', { value: () => Promise.resolve(directoryHandle) });
-      Object.defineProperty(window, '__workbenchFile', { get: () => file.text });
-      Object.defineProperty(window, '__workbenchWrites', { get: () => writes });
-    }
-  }, [JSON.stringify(state), theme, lang, directory] as unknown as PageAddInitScriptOptions['arg']);
+  }, {theme});
   await page.goto(lang === 'en' ? '/workbench.html?lang=en' : '/workbench.html');
   await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
   await expect(page.getByTestId('workbench-view')).toBeVisible();
+  await expect(page.getByRole('button',{name:'应用存储',exact:true})).toBeVisible();
+  return () => snapshot.data;
 }
 
 async function checkAccessibility(page: Page) {
@@ -58,12 +42,7 @@ async function checkAccessibility(page: Page) {
 }
 
 test('工作台记录、搜索、撤销和导入导出可用', async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as { __saves: string[] }).__saves = [];
-    const original = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = (key, value) => { if (key === 'pd_workbench_v1') (window as unknown as { __saves: string[] }).__saves.push(value); return original(key, value); };
-  });
-  await setup(page);
+  const saved = await setup(page);
   await expect(page.getByText('示例数据', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '任务', exact: true }).click();
   await expect(page.getByTestId('workbench-task')).toContainText('整理界面');
@@ -80,10 +59,9 @@ test('工作台记录、搜索、撤销和导入导出可用', async ({ page }) 
   await page.getByRole('button', { name: '复制报告' }).click();
   await expect(page.locator('[data-sonner-toast]')).toContainText('报告已复制');
   await page.getByRole('button', { name: '数据与备份', exact: true }).click();
-  await expect(page.getByTestId('workbench-view')).toContainText('浏览器即时保存');
+  await expect(page.getByTestId('workbench-view')).toContainText('数据保存于应用存储');
   await page.getByRole('button', { name: '导出 JSON' }).click();
-  await expect.poll(() => page.evaluate(() => localStorage.getItem('pd_workbench_v1') && JSON.parse(localStorage.getItem('pd_workbench_v1')!).meta.lastExport)).toBeTruthy();
-  expect(await page.evaluate(() => (window as unknown as { __saves: string[] }).__saves.length)).toBeGreaterThan(0);
+  await expect.poll(() => saved().meta.lastExport).toBeTruthy();
   await checkAccessibility(page);
 });
 
@@ -109,20 +87,17 @@ test('全局搜索、快捷键、双语和响应式布局可用', async ({ page 
   await page.screenshot({ path: testInfo.outputPath('mobile.png') });
 });
 
-test('连接文件夹后同步、吸收远端和冲突合并', async ({ page }) => {
-  await page.addInitScript(() => {
-    (window as unknown as { __saves: string[] }).__saves = [];
-    const original = localStorage.setItem.bind(localStorage);
-    localStorage.setItem = (key, value) => { if (key === 'pd_workbench_v1') (window as unknown as { __saves: string[] }).__saves.push(value); return original(key, value); };
-  });
-  await setup(page, { directory: true });
-  await page.getByRole('button', { name: '数据与备份', exact: true }).click();
-  await page.getByRole('button', { name: '连接文件夹' }).click();
-  await expect(page.getByTestId('workbench-view').getByText('验收文件夹', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '立即同步' })).toBeEnabled();
-  await page.getByRole('button', { name: '立即同步' }).click();
-  await expect.poll(async () => (await page.evaluate(() => (window as unknown as { __workbenchFile: string }).__workbenchFile))).toContain('整理界面');
-  expect(await page.evaluate(() => (window as unknown as { __saves: string[] }).__saves.length)).toBeGreaterThan(0);
+test('浏览器历史数据经确认导入应用存储，原备份保留', async ({ page }) => {
+  const saved = await setup(page);
+  const incoming = {...structuredClone(state),tasks:[{...state.tasks[0],id:'legacy-extra',title:'浏览器历史事项'}]};
+  await page.evaluate(data=>localStorage.setItem('pd_workbench_v1',JSON.stringify(data)),incoming);
+  await page.getByRole('button',{name:'数据与备份',exact:true}).click();
+  await page.getByRole('button',{name:'导入浏览器历史',exact:true}).click();
+  await expect(page.getByRole('alertdialog')).toContainText('1 个事项');
+  expect(saved().tasks.some(task=>task.id==='legacy-extra')).toBe(false);
+  await page.getByRole('button',{name:'确认',exact:true}).click();
+  await expect.poll(()=>saved().tasks.some(task=>task.id==='legacy-extra')).toBeTruthy();
+  expect(await page.evaluate(()=>JSON.parse(localStorage.getItem('pd_workbench_v1')!).tasks[0].title)).toBe('浏览器历史事项');
   await checkAccessibility(page);
 });
 

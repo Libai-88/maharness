@@ -144,6 +144,28 @@ describe('文档读取', () => {
       assert.match(result.error, /OCR 未配置/);
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
+  it('OCR 进程超时与主动取消均返回失败并结束子进程', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-ocr-cancel-'));
+    try {
+      const script = join(root, 'wait.mjs'); writeFileSync(script, 'setInterval(() => {}, 1000);'); writeFileSync(join(root, 'scan.png'), 'x');
+      const tools = loadTools({ 'document.ocr': { command: process.execPath, args: [script, '{file}'], timeoutMs: 1000 } });
+      const timedOut = await tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root });
+      assert.equal(timedOut.ok, false); assert.match(timedOut.error, /超时/);
+      const controller = new AbortController(); const pending = tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root, signal: controller.signal });
+      const timer = setTimeout(() => controller.abort(), 100);
+      const cancelled = await pending; clearTimeout(timer); assert.equal(cancelled.ok, false); assert.match(cancelled.error, /取消/);
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+  it('OCR 保留失败时的部分输出，文件名不经 shell 解释', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-ocr-output-'));
+    try {
+      const script = join(root, 'ocr.mjs'); writeFileSync(script, 'console.log(process.argv[2]); process.exit(1);');
+      const name = 'scan & whoami.png'; writeFileSync(join(root, name), 'x');
+      const tools = loadTools({ 'document.ocr': { command: process.execPath, args: [script, '{file}'] } });
+      const result = await tools.get('ocr_image')!.handler({ path: name }, { sandboxRoot: root });
+      assert.equal(result.ok, false); assert.equal(result.data.partial, true); assert.equal(result.data.text, join(root, name));
+    } finally { rmSync(root, { recursive: true, force: true }); }
+  });
 
   it('ocr_pdf 先渲染页面再逐页 OCR，并清理临时目录', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-document-'));

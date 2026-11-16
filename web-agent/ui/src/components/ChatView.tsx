@@ -1,3 +1,4 @@
+import type { Material, MaterialRef } from '../material-api';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ApprovalItem, ChatMessage, CheckpointInfo, PlanState, TodoCard } from '../types';
 import { buildChatTimeline } from '../chat/model';
@@ -35,10 +36,12 @@ import {
 } from '@/components/ui/trace';
 
 interface Props {
+  initialMaterial?: { material: Material; quote?: string };
+  onMaterialAttached?: () => void;
   runControls?: import('react').ReactNode;
   messages: ChatMessage[];
   streaming: boolean;
-  onSend: (text: string) => void;
+  onSend: (text: string, materials?: MaterialRef[]) => void;
   pendingInference?: { objective: string; rationale: string; confidence: number } | null;
   onConfirmInference?: (objective: string, acceptance: string) => void;
   onStop: () => void;
@@ -69,6 +72,8 @@ interface Props {
 }
 
 export default function ChatView({
+  initialMaterial,
+  onMaterialAttached,
   runControls,
   messages,
   streaming,
@@ -113,6 +118,7 @@ export default function ChatView({
     sessionKey,
     pendingInference,
   });
+  useEffect(() => { if (initialMaterial) { composer.addMaterial(initialMaterial.material, initialMaterial.quote); onMaterialAttached?.(); } }, [initialMaterial, composer.addMaterial, onMaterialAttached]);
 
   useEffect(() => {
     if (!approvals.length) return;
@@ -213,6 +219,7 @@ export default function ChatView({
         timeline={timeline}
         hasModels={hasModels}
         onSend={onSend}
+        onDraft={composer.setInput}
         canResend={!streaming}
         onResend={resend}
         modelTag={modelTag}

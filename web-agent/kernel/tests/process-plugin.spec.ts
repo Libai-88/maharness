@@ -44,12 +44,31 @@ const execution = {
 };
 
 describe('插件进程执行边界', () => {
+  test('non-cooperative cancellation settles only after the child process exits', async t => {
+    const f=setup({stubborn:{manifest:execution,entry:`export default {id:'stubborn',name:'stubborn',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},async handler(args){if(!args.wait)return {ok:true,data:{pid:process.pid}};ctx.bus.emit({type:'stubborn.entered',ts:Date.now()});await new Promise(()=>{});return {ok:true}}}})}}`}});
+    t.after(f.cleanup);await f.kernel.plugins.loadAll();
+    const tool=toolOf(f.kernel,'proc_pid')!;const ctx={turn:0,sandboxRoot:f.rootDir,cache:f.kernel.cache,trace:f.kernel.trace} as ToolContext;
+    const pid=((await tool.handler({},ctx)).data as {pid:number}).pid;
+    const ac=new AbortController();let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve});
+    const off=f.kernel.bus.on('stubborn.entered',()=>entered());
+    const pending=tool.handler({wait:true},{...ctx,signal:ac.signal});await started;off();
+    ac.abort();const result=await pending;
+    assert.equal(result.ok,false);assert.equal(result.failure?.outcome,'unknown');
+    assert.throws(()=>process.kill(pid,0));
+  });
   test('process mode rejects composite tools whose invocation callback cannot cross IPC', async (t) => {
     const f = setup({ composite: { manifest: execution, entry: `export default {id:'composite',name:'composite',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',description:'composite',parameters:{type:'object'},outputSchema:{type:'object'},permissions:[],sideEffect:'read',invokesTools:true,async handler(_args,tctx){return tctx.invoke('read_file',{});}}});}};` } });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
     assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED')));
+  });
+
+  test('process mode rejects dynamic deadlines instead of silently dropping the resolver', async t => {
+    const f = setup({ dynamic: { manifest: execution, entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},executionTimeoutMs:()=>2000,async handler(){return {ok:true}}}})}}` } });
+    t.after(f.cleanup); await f.kernel.plugins.loadAll();
+    assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
+    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('executionTimeoutMs')));
   });
 
   test('filesystem=storage 只允许插件存储目录，越界读取被运行时拒绝', async (t) => {

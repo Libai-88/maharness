@@ -25,7 +25,7 @@ test('custom tools retain long observations and a single runtime instruction acr
   const workspace = mkdtempSync(join(tmpdir(), 'mh-input-recovery-'));
   const kernel = new Kernel(workspace);
   const database = join(workspace, 'runs.db');
-  let store = new Store(database); let calls = 0; let reads = 0; let maxTurns = 1;
+  let store = new Store(database); let calls = 0; let reads = 0; const maxTurns = 4;
   const observations: LLMMessage[][] = [];
   const tool: ToolDef = { name: 'read_long', description: 'Read a long observation', version: '2.0.0', permissions: [], sideEffect: 'read', parameters: { type: 'object' }, outputSchema: { type: 'object', required: ['text'] }, async handler() { reads++; return { ok: true, data: { text: 'a'.repeat(6000) + 'TAIL_PROOF' } }; } };
   const provider: ProviderDef = { id: 'mock', label: 'mock', defaultModel: 'mock', prices: { in: 0, out: 0 }, async *chat(history, options) {
@@ -51,14 +51,20 @@ test('custom tools retain long observations and a single runtime instruction acr
     const run = service.create(session, { message: 'Read the tail.' }); await terminal(service, run.id);
     assert.equal(service.get(run.id, 'default').status, 'interrupted');
     for (let index = 0; index < 2; index++) {
-      await service.shutdown(); store.close(); store = new Store(database); service = new RunService(environment());
-      service.resume(run.id, 'default');
-      if (!index) service.supplement(run.id, 'default', 'Preserve the tail.', 'tail');
-      else maxTurns = 3;
+      await service.shutdown(); store.close(); store = new Store(database);
+      service = new RunService(environment());
+      if (!index) {
+        service.resume(run.id, 'default');
+        service.supplement(run.id, 'default', 'Preserve the tail.', 'tail');
+      } else {
+        const resumed = store.runs.get(run.id, 'default')!;
+        store.runs.update(resumed, { status: 'interrupted' });
+        service.resume(run.id, 'default');
+      }
       await terminal(service, run.id);
     }
-    assert.equal(service.get(run.id, 'default').status, 'completed', service.get(run.id, 'default').error); assert.equal(reads, 1); assert.equal(calls, 3);
-    assert.equal(service.get(run.id, 'default').tokensIn, 30);
+    assert.equal(service.get(run.id, 'default').status, 'completed', service.get(run.id, 'default').error); assert.equal(reads, 1); assert.equal(calls, 5);
+    assert.equal(service.get(run.id, 'default').tokensIn, 40);
     const inputs = store.runs.modelInputs(run.id);
     assert.equal(new Set(inputs.map(input => input.diagnostics.attemptId)).size, 3);
     assert.ok(inputs.every(input => input.diagnostics.fingerprint === describeModelInput(input.messages, input.tools).fingerprint));

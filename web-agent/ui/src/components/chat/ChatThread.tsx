@@ -22,6 +22,7 @@ interface Props {
   timeline: ChatTimelineItem[];
   hasModels: boolean;
   onSend: (text: string) => void;
+  onDraft?: (text: string) => void;
   canResend: boolean;
   onResend: (text: string) => void;
   modelTag: string;
@@ -39,6 +40,7 @@ export default function ChatThread({
   timeline,
   hasModels,
   onSend,
+  onDraft,
   canResend,
   onResend,
   modelTag,
@@ -64,16 +66,16 @@ export default function ChatThread({
                       <EmptyMedia variant="icon"><BrandMark size={52} /></EmptyMedia>
                       <EmptyTitle>{greet}，我是 {AGENT_NAME}</EmptyTitle>
                       <EmptyDescription>
-                        想聊什么、想让我做什么，直接说就行。
+                        导入文件，说出你想完成的办公或学习任务。
                         <br />
-                        要找文件、跑命令、上网查资料，喊我一声。
+                        查看资料、整理表格、制作文档，也能运行轻量自动化。
                       </EmptyDescription>
                     </EmptyHeader>
                     <EmptyContent>
                       {hasModels ? (
                         <div className="flex flex-wrap justify-center gap-2">
-                          {['起草一份技术方案', '追踪插件重载信号', '整理本周代码审查'].map((suggestion) => (
-                            <Button key={suggestion} variant="outline" size="sm" onClick={() => onSend(suggestion)}>{suggestion}</Button>
+                          {['总结文件并标注来源', '整理表格并生成汇总', '把资料制作成汇报演示', '读懂并对比论文', '批量整理工作区文件'].map((suggestion) => (
+                            <Button key={suggestion} variant="outline" size="sm" onClick={() => (onDraft ?? onSend)(suggestion)}>{suggestion}</Button>
                           ))}
                         </div>
                       ) : (

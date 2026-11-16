@@ -21,6 +21,7 @@ import { registerSessionRoutes } from './sessions';
 import { registerChatRoutes } from './chat';
 import { registerWorkspaceRoutes } from './workspaces';
 import { registerFileRoutes } from './files';
+import { registerMaterialRoutes } from './materials';
 import { registerGitRoutes } from './git';
 import { registerConfigRoutes } from './config';
 import { registerPluginRoutes } from './plugins';
@@ -36,6 +37,7 @@ import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
 import { RunService } from '../run-service';
+import { registerItemRoutes } from './items';
 import { registerRunRoutes } from './runs';
 import { getRunner } from './shared';
 import { tenantSandboxRoot } from '../tenant-workspace';
@@ -96,6 +98,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     activeRunCount: () => activeRunCount(),
   };
   const runs = new RunService({
+    projectRoot: kernel.rootDir,
     plugins: kernel.plugins.resolveService('service:task-plugins') as import('../../kernel/task-plugins').TaskPluginService | undefined,
     store, runner: () => getRunner(kernel),
     tools: () => kernel.plugins.capabilities('tool').map(capability => capability.tool),
@@ -130,6 +133,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   });
   runs.attachMaintenance(setMaintenanceModelScope(runs.maintenanceScope()));
   registerRunRoutes(app, deps, runs);
+  registerItemRoutes(app, deps, runs);
   scheduler?.attach(runs);
 
   // ---------- 健康检查（M4 前置：bin 脚本据此校验进程身份/版本；无鉴权阻碍，只读无害） ----------
@@ -167,6 +171,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerChatRoutes(app, deps, runs);
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）
+  registerMaterialRoutes(app, deps);
   registerGitRoutes(app, deps);        // Git
   registerConfigRoutes(app, deps);     // 运行时配置 + 元信息
   registerPluginRoutes(app, deps);     // 插件管理 + 能力注册表

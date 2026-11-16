@@ -1,7 +1,7 @@
 import type { ToolDef, ToolResult } from './types';
 
-/** 子进程可序列化的工具描述：函数字段（handler/assessApproval）不跨界。 */
-export type ProcessToolDescriptor = Omit<ToolDef, 'handler' | 'assessApproval'>;
+/** 子进程可序列化的工具描述：函数字段不跨界。 */
+export type ProcessToolDescriptor = Omit<ToolDef, 'handler' | 'assessApproval' | 'executionTimeoutMs'>;
 
 export interface ProcessCallContext {
   runId?: string;

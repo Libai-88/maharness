@@ -375,6 +375,7 @@ export async function fetchDoc(
   signal?: AbortSignal,
   maxBytes = FETCH_MAX_BYTES,
   deps: { resolveAddresses?: (hostname: string) => Promise<ResolvedAddress[]> } = {},
+  accept = 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8',
 ): Promise<FetchedDoc> {
   let current = url;
   let hops = 0;
@@ -402,7 +403,7 @@ export async function fetchDoc(
     if (signal) signals.push(signal);
     try {
       const res = await undiciFetch(u, {
-        headers: { 'User-Agent': DDG_UA, Accept: 'text/html,application/xhtml+xml,text/plain,application/json;q=0.9,*/*;q=0.8' },
+        headers: { 'User-Agent': DDG_UA, Accept: accept },
         redirect: 'manual',
         signal: AbortSignal.any(signals),
         dispatcher,
@@ -418,6 +419,7 @@ export async function fetchDoc(
       }
       if (!res.ok) {
         await res.body?.cancel().catch(() => { /* 忽略 */ });
+        if (res.status === 429) throw new Error(`文献服务请求限流，请稍后重试（Retry-After: ${res.headers.get('retry-after') ?? '未提供'}）`);
         throw new Error(`HTTP ${res.status}`);
       }
       const cl = Number(res.headers.get('content-length') ?? '0');

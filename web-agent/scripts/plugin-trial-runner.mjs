@@ -1,5 +1,6 @@
 import { join } from 'node:path';
 import { Kernel } from '../kernel/index.ts';
+import { capabilityName, CAPABILITY_IDENTIFIERS } from '../kernel/capability-identity.ts';
 
 // 职责：正式回归支撑脚本——kernel/tests/plugin-trial.spec.ts 经 runPluginTrial
 // 调用，属于 npm test 自动化覆盖，不是诊断脚本。
@@ -21,10 +22,11 @@ try {
   const id = process.env.MH_TRIAL_ID;
   const inst = id ? kernel.plugins.get(id) : undefined;
   const caps = inst ? kernel.plugins.capabilities('tool').map(() => 'tool') : [];
+  const registered = inst ? Object.keys(CAPABILITY_IDENTIFIERS).flatMap(kind => kernel.plugins.capabilities(kind).filter(cap => inst.caps.includes(cap)).map(cap => ({ kind, name: capabilityName(cap) }))) : [];
   const diagnostic = id ? kernel.plugins.diagnostics().find((d) => d.id === id) : undefined;
   process.stdout.write(JSON.stringify({
     ok: inst?.state === 'started', state: inst?.state ?? 'error',
-    caps, error: inst?.error ?? diagnostic?.message ?? '插件试运行加载失败',
+    caps, registered, error: inst?.state === 'started' ? undefined : inst?.error ?? diagnostic?.message ?? '插件试运行加载失败',
   }));
 } finally {
   await kernel.stop();

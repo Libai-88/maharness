@@ -72,13 +72,16 @@ export class ToolExecutor {
           if (claim.state === 'pending') return { ok: false, error: '操作执行结果未知，禁止自动重放', failure: { code: 'EFFECT_OUTCOME_UNKNOWN', retryable: false, outcome: 'unknown' } };
           this.effectStarted = true;
         }
+        const timeoutMs = tool.executionTimeoutMs?.(options.args) ?? tool.timeoutMs ?? (tool.invokesTools ? 0 : options.timeoutMs);
+        if (!Number.isFinite(timeoutMs) || timeoutMs < 0) throw new Error('TOOL_TIMEOUT_INVALID');
         handlerStarted = true;
         const handler = Promise.resolve().then(() => tool.handler(options.args, { ...tctx, approved, approvalId, policyApproved: options.policyApproved === true, signal: ac.signal,
-          invoke: tctx.invoke ? (name, args) => tctx.invoke!(name, args, ac.signal) : undefined }));
+          invoke: tctx.invoke ? (name, args) => tctx.invoke!(name, args, ac.signal) : undefined,
+          delegate: tctx.delegate ? (request, signal) => tctx.delegate!(request, signal ? AbortSignal.any([ac.signal, signal]) : ac.signal) : undefined }));
         const execution = handler.finally(() => { handlerSettled = true; cleanup(); });
         attemptResult = await withToolTimeout(
           execution,
-          tool.timeoutMs ?? (tool.invokesTools ? 0 : options.timeoutMs),
+          timeoutMs,
           () => ac.abort(),
         );
       } catch (err) {

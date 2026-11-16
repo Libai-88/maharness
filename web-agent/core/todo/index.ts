@@ -13,6 +13,8 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type { Plugin, ToolContext } from '../../kernel/types';
+import { PersonalItems } from './items';
+import { registerItemTools } from './item-tools';
 
 export type TodoStatus = 'todo' | 'doing' | 'done' | 'blocked';
 export type TodoPriority = 'low' | 'medium' | 'high' | 'urgent';
@@ -43,6 +45,8 @@ export default {
   name: '待办看板',
   version: '0.1.0',
   onLoad(ctx) {
+    const items = new PersonalItems(ctx.paths.data, (tenantId, id) => ctx.bus.emit({ type: 'items.updated', data: { tenantId, id }, ts: Date.now() }), ctx.kernel?.tenantQuota);
+    registerItemTools(ctx, items);
     // 数据目录跟随 Kernel 的 dataDir 覆盖（AGENT_DATA_DIR/测试隔离），不写死源码树 data/
     const dataFile = join(ctx.paths.data, 'todo.json');
     // ---- 数据源：内存 + 落盘（data/todo.json，跨重启保留） ----

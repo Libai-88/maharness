@@ -1,12 +1,13 @@
 import type { Page, Route } from '@playwright/test';
 import type { RunInfo } from '../src/run-api';
+import type { Material } from '../src/material-api';
 
-type Fixture = { runs: Map<string, RunInfo>; events: Map<string, string>; handler?: (route: Route) => unknown; creates: number; subscriptions: number };
+type Fixture = { runs: Map<string, RunInfo>; events: Map<string, string>; materials: Map<string, Material>; handler?: (route: Route) => unknown; creates: number; subscriptions: number };
 const fixtures = new WeakMap<Page, Fixture>();
 
 export async function installRunMocks(page: Page) {
   const existing = fixtures.get(page); if (existing) return existing;
-  const fixture: Fixture = { runs: new Map(), events: new Map(), creates: 0, subscriptions: 0 };
+  const fixture: Fixture = { runs: new Map(), events: new Map(), materials: new Map(), creates: 0, subscriptions: 0 };
   fixtures.set(page, fixture);
   await page.route('**/api/v2/**', async route => {
     const request = route.request(); const url = new URL(request.url()); const parts = url.pathname.split('/');
@@ -20,8 +21,9 @@ export async function installRunMocks(page: Page) {
         const value = Reflect.get(target, property); return typeof value === 'function' ? value.bind(target) : value;
       } }));
       if (response?.status && response.status >= 400) return route.fulfill(response);
-      const body = request.postDataJSON() as { message: string };
+      const body = request.postDataJSON() as { message: string; materials?: { id: string; version: string }[] };
       const run: RunInfo = { id: `fixture-${fixture.creates}`, sessionId: id, objective: body.message, providerId: 'e2e-provider', model: 'e2e-model', status: 'running', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: Date.now(), updatedAt: Date.now(), authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+      if (body.materials?.length) run.materials = body.materials.flatMap(ref => fixture.materials.has(ref.id) ? [fixture.materials.get(ref.id)!] : []);
       const blocks = String(response?.body ?? '').trim().split(/\n\s*\n/).filter(Boolean);
       const numbered: string[] = [];
       for (const block of blocks) {

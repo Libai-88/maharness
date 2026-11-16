@@ -1,6 +1,7 @@
 import type { Express, Request, Response, NextFunction } from 'express';
 import type { RunService } from '../run-service';
 import { RunError } from '../run-service';
+import { MaterialError } from '../materials';
 import { RUN_TERMINAL } from '../../kernel/run';
 import type { RouteDeps } from './shared';
 import { tenantIdOf } from './shared';
@@ -23,7 +24,7 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
   const changes = new FrameworkChanges(deps.kernel.rootDir);
   const wrap = (fn: (req: Request, res: Response) => unknown) => (req: Request, res: Response, next: NextFunction) => {
     const fail = (error: unknown) => {
-      if (error instanceof RunError) res.status(error.status).json({ error: error.message, code: error.code });
+      if (error instanceof RunError || error instanceof MaterialError) res.status(error.status).json({ error: error.message, code: error.code });
       else next(error);
     };
     try { Promise.resolve(fn(req, res)).catch(fail); } catch (error) { fail(error); }
@@ -90,6 +91,7 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
     if (body.budgetPolicy !== undefined && !['advisory', 'enforce'].includes(body.budgetPolicy)) throw new RunError(400, 'INVALID_INPUT', '费用策略无效');
     const record = service.create(session, {
       message: text(body.message, '消息'), provider: body.provider === undefined ? undefined : text(body.provider, '供应商'),
+      materials: body.materials,
       model: body.model === undefined ? undefined : text(body.model, '模型'),
       budgetPolicy: body.budgetPolicy, requestKey: req.get('Idempotency-Key'), budgetUsd: explicitNumber(body.budgetUsd, '费用上限'),
       deadlineAt: explicitNumber(body.deadlineAt, '截止时间'),

@@ -1,6 +1,6 @@
 {
   "id": "document",
-  "name": "文档读取",
+  "name": "文件处理",
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
@@ -18,10 +18,20 @@
       "tool": [
         "read_document",
         "ocr_image",
-        "ocr_pdf"
+        "ocr_pdf",
+        "read_document_content",
+        "create_document",
+        "patch_document",
+        "begin_document_draft",
+        "read_document_draft",
+        "update_document_draft",
+        "finalize_document_draft"
       ],
       "persona": [
         "document-rules"
+      ],
+      "service": [
+        "document"
       ]
     }
   },

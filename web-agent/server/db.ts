@@ -15,6 +15,7 @@ import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secr
 import { decryptPurposeSecret, encryptPurposeSecret, isPurposeEncrypted, PURPOSE_SECRET_PREFIX } from '../kernel/secret-box';
 import type { SecretKeyInfo } from './secrets';
 import { RUN_SCHEMA, RunRepository } from './run-store';
+import { MATERIAL_SCHEMA, MaterialRepository } from './materials';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
@@ -122,6 +123,7 @@ export const DEFAULT_PERSONA = {
 export class Store {
   private db: Database.Database;
   readonly runs: RunRepository;
+  readonly materials: MaterialRepository;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -153,6 +155,7 @@ export class Store {
       throw err;
     }
     this.runs = new RunRepository(this.db);
+    this.materials = new MaterialRepository(this.db);
   }
 
   /** 当前数据库 schema 版本（PRAGMA user_version） */
@@ -211,6 +214,7 @@ export class Store {
       this.db.transaction(() => {
         this.createBaselineSchema();
         this.db.exec(RUN_SCHEMA);
+        this.db.exec(MATERIAL_SCHEMA);
         this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
       })();
       return;
@@ -389,10 +393,11 @@ export class Store {
       for (const row of rows) { const record = JSON.parse(row.record); if (record.budgetUsd !== undefined && record.budgetPolicy === undefined) { record.budgetPolicy = 'enforce'; db.prepare('UPDATE runs_v2 SET record=? WHERE id=?').run(JSON.stringify(record), row.id); } }
     } },
     { from: 6, to: 7, run: db => { db.exec(RUN_SCHEMA); } },
+    { from: 7, to: 8, run: db => { db.exec(MATERIAL_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 7;
+  static readonly DB_SCHEMA_VERSION = 8;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 
@@ -1052,7 +1057,7 @@ export class Store {
       for (const id of list) {
         const runs = this.db.prepare('SELECT id FROM runs_v2 WHERE session_id=?').all(id) as { id: string }[];
         for (const run of runs) {
-          for (const table of ['run_history_v2', 'run_model_inputs_v2', 'run_tool_calls_v2', 'run_events_v2', 'run_checkpoints_v2', 'run_messages_v2']) this.db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(run.id);
+          for (const table of ['run_history_v2', 'run_model_inputs_v2', 'run_tool_calls_v2', 'run_events_v2', 'run_checkpoints_v2', 'run_messages_v2', 'run_materials_v1']) this.db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(run.id);
           this.db.prepare('DELETE FROM run_budget_reservations_v2 WHERE run_id=? OR parent_id=?').run(run.id, run.id);
           this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id=?').run(run.id);
         }

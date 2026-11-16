@@ -44,6 +44,8 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 工具定义必须包含名称、版本、用途、输入 schema、输出 schema、副作用类型与权限声明。调用上下文携带任务身份、工作区、有效授权、取消信号和剩余预算。
 
+可信宿主工具可通过 executionTimeoutMs(args) 返回本次执行期限；process 工具使用静态 timeoutMs，拒绝跨进程传递动态期限函数。
+
 | 结果字段 | 契约 |
 | --- | --- |
 | ok / data | 成功标记与结构化数据 |
@@ -55,7 +57,7 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 输出与 schema 不符时返回 TOOL_OUTPUT_SCHEMA。已发生的变更保留 applied 事实。副作用结果未知时不自动重放，恢复接口拒绝继续；用户核对实际结果后可发起明确的新任务。
 
-只读且声明幂等的工具可按策略重试瞬态错误。写入和外部副作用不因普通网络错误重放。工具超时与取消会传递中止信号；不响应信号的处理器结束前继续占用物理槽位。长命令的等待超时可返回仍在运行，终止状态与进程输出通过命令接口读取。
+只读且声明幂等的工具可按策略重试瞬态错误。写入和外部副作用不因普通网络错误重放。工具超时与取消会传递中止信号，委派调用将该信号传递给对应子任务；不响应信号的处理器结束前继续占用物理槽位。process 插件先收到协作中止信号，1 秒内未完成则请求终止子进程，并等待实际退出。长命令的等待超时返回当前状态；command_cancel 返回 stopping 时仅表示已请求停止。command_output 的 nextOffset 小于 length 时可继续分页，outputLimited 表示存储上限造成的截断。
 
 长工具结果保存后支持通过 recall_tool_result 分页读取。读取工具是运行能力，自定义工具集合也包含该入口；同名冲突返回 TOOL_DEFINITION_CONFLICT。托管任务按任务与租户隔离结果，恢复后引用继续有效。文件编辑可通过预期版本或内容匹配检测冲突；并行写入经过写锁。
 
@@ -69,11 +71,11 @@ completed 与机器验收分别记录。没有显式验收条件或验收记录�
 
 上下文容量按模型窗口与输出预留计算。压缩保留明确约束并记录来源范围；原始材料仍可读取。必需输入超过容量时返回 CONTEXT_CAPACITY，供用户更换模型或缩减任务。
 
-授权工具 schema 能装入目录预算时直接提供完整工具集，同时提供 discover_tools、enable_tools 和 release_tools，支持运行中能力变化与按需释放。目录预算为 4096 tokens 与可用输入容量 10% 中的较小值；更大的集合优先提供常用工具，其余通过 discover_tools 和 enable_tools 按需加载。完整结果读取工具与恢复后仍获授权的已启用工具始终保留，不因目录预算而静默删除；模型窗口仍构成输入硬边界。工具顺序稳定，不按任务关键词重排。
+授权工具 schema 能装入目录预算且没有显式释放项时，直接提供完整工具集。更大的集合提供 discover_tools、enable_tools 和 release_tools，优先加载声明 discovery.initial 的工具；未声明时沿用常用工具集合。discover_tools 的 query 可省略以分页读取索引，检索包含工具用途、插件标识与关键词；详情包含版本与完整契约。目录预算为 4096 tokens 与可用输入容量 10% 中的较小值，并按实际管理工具 schema 估算预留。完整结果读取工具与恢复后仍获授权的已启用工具始终保留，不因目录预算而静默删除；显式释放项通过断点 releasedTools 保留，可重新启用。能力变化在模型调用边界刷新；小目录的新工具直接可用。模型窗口仍构成输入硬边界。工具顺序稳定，不按任务关键词重排。
 
 L1 相似答案缓存默认关闭。L2 工具缓存保留状态指纹和作用域，Provider 原生前缀缓存按实际输入复用。备用提供商在设置的备用线路中显式启用并保存顺序。
 
-任务视图和运行轨迹入口提供任务状态、子任务、产物、工具执行记录、完整结果分页和模型输入。每次模型调用记录实际提供商、模型、消息、工具 schema、执行尝试标识、恢复断点和输入指纹。diagnostics.messageTokens、toolTokens 与 sources 为本地估算分项，不代表提供商计费用量；历史记录缺失时显示未记录。输入详情沿用任务认证与租户边界，完整内容不写入普通日志。
+任务视图和运行轨迹入口提供任务状态、子任务、产物、工具执行记录、完整结果分页和模型输入。机器验收独立显示通过、部分通过、未通过或尚未验证；工具记录显示结构化错误码、已知副作用状态和重试声明，未知结果标明禁止自动重放。每次模型调用记录实际提供商、模型、消息、工具 schema、执行尝试标识、恢复断点和输入指纹。diagnostics.messageTokens、toolTokens 与 sources 为本地估算分项，不代表提供商计费用量；历史记录缺失时显示未记录。输入详情沿用任务认证与租户边界，完整内容不写入普通日志。
 
 ## 模型调用与费用
 
@@ -182,7 +184,7 @@ v2 相对参考循环的成功率下降不得超过 5 个百分点，相对旧�
 
 create_plugin 接收 id 和 source，或 files 与完整 v2 manifest，产生 staged 候选；enable_plugin 验证并激活。工具权限不得超过授权；直接宿主文件、进程和网络访问声明被拒绝，业务操作通过统一工具代理调用。完整类型插件仍是可信 JavaScript，静态检查不是代码安全隔离。
 
-plugin_status 返回版本、哈希、能力、文件索引和工作区可用插件；sdk=true 按需读取 SDK 接口与示例，id、path、offset、limit 支持按范围读取源码。invoke_plugin 显式调用 command、role 或 provider；角色通过统一子任务入口执行，供应商经统一模型账本执行且不切换当前模型。persona 通过源码读取按需使用，context 作为临时参考材料参与后续模型输入。
+plugin_status 返回版本、哈希、实际注册能力、文件索引和工作区可用插件；sdk=true 按需读取 SDK 接口，example 按九类能力或 composition 返回完整源码与 manifest，id、path、offset、limit 支持按范围读取源码。公共类型入口为 kernel/plugin-sdk。自动 manifest 推断按能力种类读取 name、id、mount 或 event；动态注册需要显式 manifest。类型错误返回阶段、错误码、文件、行列与消息。invoke_plugin 显式调用 command、role 或 provider；command 默认执行期限 30 秒，可通过 CommandDef.timeoutMs 声明，handler 第二参数接收 signal；role/provider 为 240 秒。角色通过统一子任务入口执行，取消与失败保留为失败结果；供应商经统一模型账本执行且不切换当前模型。persona 通过源码读取按需使用，context 作为临时参考材料参与后续模型输入。
 
 GET /api/v2/runs/:id/plugins 返回插件清单和任务授权快照。POST /api/v2/runs/:id/plugins/:pluginId/save 由用户管理员提交确定 hash，将已验证版本保存到该租户、该工作区。staged 或 error 版本不能保存。GET /api/v2/runs/:id/plugins/:pluginId/api/:mount 仅能访问活动任务插件的相应 API；其他 HTTP 方法沿用相同认证与权限检查。诊断中的 panel 入口要求 api:panel 声明并净化 HTML。
 

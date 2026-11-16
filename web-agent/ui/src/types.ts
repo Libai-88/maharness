@@ -413,6 +413,20 @@ export function isSubagentTool(name: string): boolean {
 /** 工具 → 会话头活动状态（像朋友的微信签名：让用户知道 agent 正在忙什么） */
 export function toolActivityLabel(name: string): string {
   switch (name) {
+    case 'read_document':
+    case 'read_document_content':
+      return '正在读取资料…';
+    case 'ocr_image':
+    case 'ocr_pdf':
+      return '正在识别文字…';
+    case 'create_document':
+      return '正在生成文件…';
+    case 'patch_document':
+      return '正在修改并另存文件…';
+    case 'search_papers':
+      return '正在检索文献…';
+    case 'verify_reference':
+      return '正在核验题录…';
     case 'list_dir':
     case 'glob':
       return '正在翻文件…';

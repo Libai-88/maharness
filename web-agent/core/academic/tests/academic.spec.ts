@@ -9,8 +9,9 @@ describe('学术智能体插件', () => {
       register(value: any) { if (value.kind === 'persona') personas.push(value.persona); },
       logger: { info() {}, warn() {} },
     } as never);
-    assert.equal(personas.length, 1);
-    assert.equal(personas[0].id, 'ars-routing');
-    assert.match(personas[0].content, /deep-research/);
+    assert.equal(personas.length, 2);
+    assert.equal(personas[0].id, 'academic-light');
+    assert.equal(personas[1].id, 'ars-routing');
+    assert.match(personas[1].content, /deep-research/);
   });
 });

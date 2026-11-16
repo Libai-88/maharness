@@ -49,6 +49,7 @@ export class TaskStoppedError extends Error {
 /** 是否"取消类"错误：用户主动停止、AbortController 掐断、连接因取消而断 */
 export function isAbortError(error: unknown): boolean {
   if (!error) return false;
+  if (['REQUEST_TIMEOUT', 'STREAM_INTERRUPTED'].includes((error as { code?: string }).code ?? '')) return false;
   if (error instanceof TaskStoppedError) return true;
   const name = error instanceof Error ? error.name : '';
   const msg = error instanceof Error ? error.message : String(error);
@@ -79,6 +80,7 @@ export interface ProviderCircuitConfig {
 }
 
 function isTransientFailure(error: unknown): boolean {
+  if (['REQUEST_TIMEOUT', 'STREAM_INTERRUPTED'].includes((error as { code?: string })?.code ?? '')) return true;
   if (error instanceof LLMHttpError) return error.status === 408 || error.status === 429 || error.status >= 500;
   const message = error instanceof Error ? error.message : String(error ?? '');
   return /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|连接.*超时|连接.*断/i.test(message);

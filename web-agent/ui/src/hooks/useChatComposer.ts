@@ -1,10 +1,12 @@
+import { materialApi, type Material, type MaterialRef } from '../material-api';
+import { toast } from 'sonner';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { commandsApi } from '../api';
 import type { ChatMessage, CommandInfo } from '../types';
 import { AGENT_NAME } from '../voice';
 
 interface Options {
-  onSend: (text: string) => void;
+  onSend: (text: string, materials?: MaterialRef[]) => void;
   onStop: () => void;
   streaming: boolean;
   sessionKey?: string;
@@ -21,6 +23,23 @@ export function useChatComposer({
   pendingInference,
 }: Options) {
   const [input, setInput] = useState('');
+  const [materials, setMaterials] = useState<Material[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const uploadLock = useRef(false);
+  const generation = useRef(0);
+  useEffect(() => { generation.current++; setMaterials([]); }, [sessionKey]);
+  const addMaterial = useCallback((material: Material, quote?: string) => {
+    setMaterials(previous => previous.some(item => item.id === material.id) ? previous : previous.length < 10 ? [...previous, material] : previous);
+    if (quote) setInput(previous => `${previous}${previous ? '\n\n' : ''}引用资料：\n${quote}`);
+  }, []);
+  const uploadFiles = useCallback(async (files: File[]) => {
+    if (uploadLock.current || !sessionKey) return;
+    if (files.length + materials.length > 10) { toast.error('单次任务最多附加 10 个文件'); return; }
+    uploadLock.current = true; setUploading(true); const current = generation.current;
+    try { for (const file of files) { const material = await materialApi.upload(file); if (generation.current === current) addMaterial(material); } }
+    catch (error) { toast.error(String(error)); }
+    finally { uploadLock.current = false; setUploading(false); }
+  }, [sessionKey, materials.length, addMaterial]);
   const [inferenceAcceptance, setInferenceAcceptance] = useState('');
   const [commands, setCommands] = useState<CommandInfo[]>([]);
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -56,7 +75,7 @@ export function useChatComposer({
 
   const submit = useCallback((textOverride?: string) => {
     const text = (textOverride ?? input).trim();
-    if (!text || streaming || !sessionKey) return;
+    if (!text || streaming || uploading || !sessionKey) return;
     const full = quote ? `【引用 ${quote.author}】\n${quote.text}\n\n${text}` : text;
     if (textOverride === undefined && text) {
       setInputHist((previous) => [text, ...previous].slice(0, 30));
@@ -66,8 +85,9 @@ export function useChatComposer({
     setQuote(null);
     setCmdOpen(false);
     setEmojiOpen(false);
-    onSend(full);
-  }, [input, onSend, quote, streaming, sessionKey]);
+    onSend(full, materials.map(({ id, version }) => ({ id, version })));
+    setMaterials([]);
+  }, [input, onSend, quote, streaming, sessionKey, materials, uploading]);
 
   const quoteMessage = useCallback((message: ChatMessage) => {
     setQuote({
@@ -149,7 +169,8 @@ export function useChatComposer({
   }, [applyCommand, cmdIdx, cmdOpen, emojiOpen, input, inputHist, matched, onStop, streaming, submit]);
 
   return {
-    canSubmit: !!sessionKey && !!input.trim() && !streaming,
+    canSubmit: !!sessionKey && !!input.trim() && !streaming && !uploading,
+    materials, setMaterials, addMaterial, uploadFiles, uploading,
     input,
     setInput,
     inferenceAcceptance,

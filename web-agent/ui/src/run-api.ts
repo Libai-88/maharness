@@ -1,7 +1,9 @@
+import type { Material, MaterialRef } from './material-api';
 import { api, authHeaders, type ChatHandlers, type ErrorKind } from './api';
 
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
 export interface RunInfo {
+  materials?: Material[];
   id: string; sessionId: string; parentId?: string; objective: string; status: RunStatus;
   providerId: string; model: string; cost: number; tokensIn: number; tokensOut: number;
   budgetPolicy?: 'advisory' | 'enforce'; billingNotice?: string; billingAcknowledgedAt?: number;
@@ -9,24 +11,25 @@ export interface RunInfo {
   eventCursor?: number;
   budgetUsd?: number; deadlineAt?: number;
   answer?: string; error?: string; verification?: unknown; createdAt: number; updatedAt: number;
+  problem?: { code: string; stage: string; hint: string };
   authorization: { workspace: string; profile: 'standard' | 'developer'; readOnly: boolean; revision: number };
 }
-export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
-export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number }
+export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number } }
+export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number; finishReason?: string; errorCode?: string }
 export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
-export interface RunTool { id: string; name: string; status: string; argsSummary: string }
+export interface RunTool { id: string; name: string; status: string; argsSummary: string; failure?: { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown' } }
 export interface PluginGrant { enabled: boolean; permissions: string[]; dependencies: string[] }
 export interface TaskPluginInfo { id: string; version: string; hash: string; scope: string; owner: string; state: string; error?: string; files: string[]; manifest: { name: string; requires?: string[]; permissions: { capabilities: Record<string, string[]> } } }
 export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number; pluginDevelopment?: PluginGrant; allowedPluginDependencies?: string[] }
 export const activeRun = (run: RunInfo) => ['queued', 'running', 'waiting_approval', 'stopping'].includes(run.status);
-export const runLabels: Record<RunStatus, string> = { queued: '排队中', running: '执行中', waiting_approval: '等待审批', stopping: '停止中', interrupted: '可恢复', completed: '已结束', failed: '失败', cancelled: '已取消' };
+export const runLabels: Record<RunStatus, string> = { queued: '排队中', running: '执行中', waiting_approval: '等待审批', stopping: '停止中', interrupted: '已中断', completed: '执行完成', failed: '失败', cancelled: '已取消' };
 export const runsApi = {
   plugins: (id: string) => api<{ plugins: TaskPluginInfo[]; grant: PluginGrant }>(`/api/v2/runs/${id}/plugins`),
   savePlugin: (id: string, plugin: TaskPluginInfo) => api(`/api/v2/runs/${id}/plugins/${encodeURIComponent(plugin.id)}/save`, { method: 'POST', body: JSON.stringify({ hash: plugin.hash }) }),
   setPluginDevelopment: (grant: PluginGrant, revision: number) => api<WorkspacePermission>('/api/v2/workspace/plugin-development', { method: 'PUT', body: JSON.stringify({ ...grant, revision }) }),
   list: (sessionId?: string) => api<RunInfo[]>(`/api/v2/runs${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   get: (id: string) => api<RunInfo>(`/api/v2/runs/${id}`),
-  create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId }) }),
+  create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string, materials?: MaterialRef[]) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId, materials }) }),
   supplement: (id: string, message: string) => api(`/api/v2/runs/${id}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message }) }),
   cancel: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST' }),
   resume: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/resume`, { method: 'POST' }),
@@ -97,7 +100,7 @@ export async function subscribeRun(id: string, h: ChatHandlers, signal?: AbortSi
       const run = await runsApi.get(id); h.onRun?.(run);
       if (!activeRun(run)) {
         if (!doneSeen && run.status === 'completed') h.onDone({ content: run.answer ?? '', usage: { input: run.tokensIn, output: run.tokensOut }, cost: run.cost });
-        else if (run.status !== 'completed') h.onError(run.error ?? runLabels[run.status], run.status === 'cancelled' ? 'aborted' : run.status === 'interrupted' ? 'max-turns' : 'upstream');
+        else if (run.status !== 'completed') h.onError(run.error ?? runLabels[run.status], run.status === 'cancelled' ? 'aborted' : run.problem?.code === 'DEADLINE_EXCEEDED' ? 'deadline' : run.problem?.code === 'REQUEST_TIMEOUT' || run.problem?.code === 'STREAM_INTERRUPTED' ? 'transient' : 'upstream');
         h.onEnd?.(); return;
       }
     } catch (error) {
@@ -114,11 +117,11 @@ export async function subscribeRun(id: string, h: ChatHandlers, signal?: AbortSi
   }
 }
 
-export async function streamChat(session: string, body: { message?: string; model?: string; provider?: string; resume?: boolean; frameworkChangeId?: string }, h: ChatHandlers, signal?: AbortSignal) {
+export async function streamChat(session: string, body: { message?: string; model?: string; provider?: string; resume?: boolean; frameworkChangeId?: string; materials?: MaterialRef[] }, h: ChatHandlers, signal?: AbortSignal) {
   try {
     const record = body.resume
       ? await runsApi.resume((await runsApi.list(session)).find(run => !run.parentId && run.status === 'interrupted')?.id ?? '')
-      : (await runsApi.create(session, body.message ?? '', body.model, body.provider, body.frameworkChangeId)).run;
+      : (await runsApi.create(session, body.message ?? '', body.model, body.provider, body.frameworkChangeId, body.materials)).run;
     h.onRun?.(record);
     await subscribeRun(record.id, h, signal, record.eventCursor ?? 0);
   } catch (error) { if (!signal?.aborted) h.onError(error instanceof Error ? error.message : String(error)); }

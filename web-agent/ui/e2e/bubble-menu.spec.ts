@@ -540,7 +540,7 @@ test('旧断点不会自动恢复或显示可执行恢复入口', async ({ page 
   await page.route('**/api/sessions/*/checkpoint', route => route.fulfill({ json: { exists: true, legacy: true, resumable: false, turn: 2 } }));
   await setup(page);
   await expect(page.getByTestId('resume-banner')).toHaveCount(0);
-  await expect(page.getByRole('button', { name: '恢复任务', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: '继续任务', exact: true })).toHaveCount(0);
 });
 
 test.describe('输入区活感', () => {

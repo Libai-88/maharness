@@ -1,3 +1,4 @@
+import type { MaterialRef } from './material-api';
 import { activeRun, runsApi, type RunInfo } from './run-api';
 import { subscribeRun } from './api';
 // ui/src/App.tsx —— 应用状态协调器
@@ -318,7 +319,7 @@ export default function App() {
         setSessions([created]);
         initialId = created.id;
       } else {
-        initialId = ss[0].id;
+        initialId = ss.find(session => session.id === new URLSearchParams(location.search).get('session'))?.id ?? ss[0].id;
       }
       setActiveId(initialId);
     } catch (err) {
@@ -328,6 +329,9 @@ export default function App() {
   }
 
   const selectSession = useCallback(async (id: string) => {
+    setActiveTab('chat');
+    setSettingsOpen(false);
+    if (id === activeIdRef.current) return;
     abortRef.current?.abort();
     setStreaming(false); setCurrentRun(null);
     setActiveId(id);
@@ -616,7 +620,7 @@ export default function App() {
     },
   }), [activeId, queueStreamText, flushStreamBuffer, clearTraceSteps]);
 
-  const send = useCallback(async (text: string, frameworkChangeId?: string) => {
+  const send = useCallback(async (text: string, frameworkChangeId?: string, materials?: MaterialRef[]) => {
     if (!activeId || !text.trim() || streaming) return;
     setPendingInference(null);
 
@@ -655,7 +659,7 @@ export default function App() {
     abortRef.current = ac;
 
     // provider 一并上送：两个 provider 有同名模型时，服务端按 provider 优先解析才不会答错人
-    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '', frameworkChangeId }, makeStreamHandlers(assistantMsg.id), ac.signal);
+    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '', frameworkChangeId, materials }, makeStreamHandlers(assistantMsg.id), ac.signal);
 
     try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
   }, [activeId, sel, streaming, createSession, makeStreamHandlers]);
@@ -893,7 +897,7 @@ export default function App() {
       onToggleSettings={toggleSettings}
       onSetSessionMode={(mode) => void setSessionMode(mode)}
       onSelectModel={(id) => void selectModel(id)}
-      onSend={send}
+      onSend={(text, materials) => { void send(text, undefined, materials); }}
       onStop={stop}
       onResume={() => void resumeTask()}
       onApproval={respondApproval}

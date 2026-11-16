@@ -18,13 +18,22 @@
       "tool": [
         "todo_add",
         "todo_update",
-        "todo_list"
+        "todo_list",
+        "item_list",
+        "item_get",
+        "item_create",
+        "item_update",
+        "item_complete"
       ],
       "persona": [
-        "todo-rules"
+        "todo-rules",
+        "personal-items-rules"
       ],
       "api": [
         "board"
+      ],
+      "service": [
+        "personal-items"
       ]
     }
   },

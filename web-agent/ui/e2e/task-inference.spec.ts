@@ -38,7 +38,7 @@ test('开放式目标直接执行，不强制推断验收或额外确认', async
   await input.fill('请整理项目报告'); await input.press('Enter');
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('报告已完成');
   await expect(page.getByTestId('task-confirm-card')).toHaveCount(0);
-  await expect(page.getByTestId('run-controls')).toContainText('结果尚未验证');
+  await expect(page.getByTestId('run-controls')).toContainText('尚未验证');
   expect(fixture.creates).toBe(1);
   expect(JSON.parse(requestBodies[0])).not.toHaveProperty('acceptance');
 });

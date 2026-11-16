@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createToolCatalog, refreshToolCatalog } from '../tool-discovery';
+import { createToolCatalog, refreshToolCatalog, releasedToolNames, toolCatalogBudget } from '../tool-discovery';
 import type { ToolContext, ToolDef } from '../types';
 
 test('discovery exposes only run-authorized tools and activation stays scoped to that run', async () => {
@@ -21,7 +21,7 @@ test('discovery exposes only run-authorized tools and activation stays scoped to
 
 test('small authorized tool sets are directly usable without discovery round trips', () => {
   const tool: ToolDef = { name: 'append_record', version: '2.0.0', permissions: ['workspace.write'], parameters: { type: 'object' }, outputSchema: {}, description: 'Record an order', sideEffect: 'write', handler: async () => ({ ok: true }) };
-  assert.equal(createToolCatalog([tool]).some(item => item.name === 'discover_tools'), true);
+  assert.deepEqual(createToolCatalog([tool]).map(item => item.name), [tool.name]);
   assert.ok(createToolCatalog([tool]).some(item => item.name === tool.name));
   assert.equal(createToolCatalog([]).some(item => item.name === tool.name), false);
 });
@@ -47,7 +47,7 @@ test('schema volume controls discovery; restored and observation readers remain 
 test('refresh discovers new capabilities, retains explicit release and removes withdrawn tools', async () => {
   const tool: ToolDef = { name: 'initial', description: 'initial', version: '2.0.0', permissions: [], parameters: {}, outputSchema: {}, sideEffect: 'none', handler: async () => ({ ok: true }) };
   const fresh = { ...tool, name: 'new_plugin_tool' };
-  const active = createToolCatalog([tool]);
+  const active = createToolCatalog([tool], [tool.name], 1);
   const issued = [...active];
   await active.find(tool => tool.name === 'release_tools')!.handler({ names: ['initial'] }, {} as ToolContext);
   refreshToolCatalog(active, [tool, fresh], 2048);
@@ -68,4 +68,31 @@ test('discovery supports exact names and Chinese descriptions', async () => {
     const result = await discover.handler({ query }, {} as ToolContext);
     assert.equal((result.data as { tools: ToolDef[] }).tools[0].name, tool.name);
   }
+});
+
+test('small catalogs expose new capabilities directly and retain explicit releases through restore', async () => {
+  const make = (name: string): ToolDef => ({ name, description: name, version: '2.0.0', permissions: [], sideEffect: 'read', parameters: {}, outputSchema: {}, handler: async () => ({ ok: true }) });
+  const tools = [make('a'), make('b')];
+  const active = createToolCatalog([tools[0]]);
+  refreshToolCatalog(active, tools, 4096);
+  assert.deepEqual(active.map(tool => tool.name), ['a', 'b']);
+  const large = createToolCatalog(tools, ['a'], 1);
+  await large.find(tool => tool.name === 'release_tools')!.handler({ names: ['a'] }, {} as ToolContext);
+  const restored = createToolCatalog(tools, [], 4096, releasedToolNames(large));
+  assert.equal(restored.some(tool => tool.name === 'a'), false);
+  assert.equal(restored.some(tool => tool.name === 'b'), true);
+  await restored.find(tool => tool.name === 'enable_tools')!.handler({ names: ['a'] }, {} as ToolContext);
+  refreshToolCatalog(restored, tools, 4096);
+  assert.deepEqual(restored.map(tool => tool.name), ['a', 'b']);
+  assert.deepEqual(createToolCatalog([]), []);
+  assert.equal(toolCatalogBudget(1000), 85);
+});
+
+test('plugin discovery metadata is searchable without changing authorization or schema order', async () => {
+  const tool: ToolDef = { name: 'lookup', description: 'lookup', version: '2.0.0', permissions: [], sideEffect: 'read', parameters: {}, outputSchema: {}, discovery: { initial: true, pluginId: 'cells', pluginVersion: '1.0.0', keywords: ['细胞'] }, handler: async () => ({ ok: true }) };
+  const active = createToolCatalog([tool], [], 0);
+  const result = await active.find(tool => tool.name === 'discover_tools')!.handler({ query: '细胞' }, {} as ToolContext);
+  assert.equal((result.data as { tools: ToolDef[] }).tools[0].discovery?.pluginId, 'cells');
+  const snapshot = () => JSON.stringify(createToolCatalog([tool], [], 0).map(({ name, description, parameters }) => ({ name, description, parameters })));
+  assert.equal(snapshot(), snapshot());
 });

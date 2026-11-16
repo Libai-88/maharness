@@ -251,3 +251,18 @@ describe('AgentRunner Provider 重试策略', () => {
     assert.ok(events.includes('error'));
   });
 });
+
+test('two truncated tool batches never execute writes or report assistant completion', async () => {
+  let writes = 0;
+  const source: ProviderDef = { id: 'length-fixture', label: 'test', defaultModel: 'm', async *chat() { yield { type: 'tool_call', toolCall: { id: 'incomplete', type: 'function', function: { name: 'write_test', arguments: '{}' } } }; yield { type: 'done', reason: 'length' }; } };
+  const events = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({ provider: source, model: 'm', traceId: 'length', messages: [{ role: 'user', content: 'write long document' }], maxTurns: 4, tools: [{ version: '1.0.0', permissions: [], outputSchema: {}, name: 'write_test', description: 'write', parameters: { type: 'object' }, sideEffect: 'write', async handler() { writes++; return { ok: true }; } }] })) events.push(event);
+  assert.equal(writes, 0); assert.equal(events.some(e => e.type === 'assistant_done'), false); assert.ok(events.some(e => e.type === 'error' && e.code === 'OUTPUT_TRUNCATED'));
+});
+test('truncated prose continues without losing the saved prefix', async () => {
+  let calls = 0;
+  const source: ProviderDef = { id: 'prose-fixture', label: 'test', defaultModel: 'm', async *chat() { calls++; yield { type: 'delta', text: calls === 1 ? 'first portion. ' : 'last portion.' }; yield { type: 'done', reason: calls === 1 ? 'length' : 'stop' }; } };
+  const events = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({ provider: source, model: 'm', traceId: 'prose', messages: [{ role: 'user', content: 'continue prose' }], tools: [] })) events.push(event);
+  const done = events.find(e => e.type === 'assistant_done'); assert.ok(done && done.content === 'first portion. last portion.'); assert.equal(calls, 2);
+});

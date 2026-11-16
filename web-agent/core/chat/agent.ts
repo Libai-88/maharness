@@ -24,7 +24,7 @@ import { shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { sanitizeToolHistory } from './policy';
-import { createToolCatalog, refreshToolCatalog } from '../../kernel/tool-discovery';
+import { createToolCatalog, refreshToolCatalog, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
 import { ToolExecutor, abortableDelay } from './tool-executor';
 import { assessToolApproval } from './tool-approval';
 import { historyTools } from '../../kernel/history-tools';
@@ -143,7 +143,7 @@ export class AgentRunner {
       await this.emitHook(type, data);
       if (!opts.scopedBus) return;
       const safety = { blocked: data.blocked, blockReason: data.blockReason, forceApproval: data.forceApproval, forceApprovalReason: data.forceApprovalReason, policyApproved: data.policyApproved, args: JSON.stringify(data.tool?.args) };
-      const scoped: AgentHookCtx = { ...data, tools: data.tools.map(({ handler: _handler, assessApproval: _assess, ...tool }) => ({ ...structuredClone(tool), handler: async () => ({ ok: false, error: '使用 ToolContext.invoke 调用宿主工具' }) })) };
+      const scoped: AgentHookCtx = { ...data, tools: data.tools.map(({ handler: _handler, assessApproval: _assess, executionTimeoutMs: _timeout, ...tool }) => ({ ...structuredClone(tool), handler: async () => ({ ok: false, error: '使用 ToolContext.invoke 调用宿主工具' }) })) };
       await opts.scopedBus.waterfall(type, scoped, async () => {});
       Object.assign(data, { history: scoped.history, tool: scoped.tool, result: scoped.result, content: scoped.content, reasoning: scoped.reasoning });
       data.blocked = safety.blocked || scoped.blocked;
@@ -169,7 +169,7 @@ export class AgentRunner {
       availableTools.push(tool);
     }
     const toolDefs = opts.runId ? createToolCatalog(availableTools.map(annotateToolDef), opts.restoredEnabledTools,
-      Math.min(4096, Math.floor((opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)) * 0.85 * 0.1))) : availableTools.map(annotateToolDef);
+      toolCatalogBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)), opts.restoredReleasedTools) : availableTools.map(annotateToolDef);
     const sandboxRoot = opts.sandboxRoot ?? this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const hookMeta = {
       sandboxRoot, runId: opts.runId,
@@ -260,12 +260,17 @@ export class AgentRunner {
     const deadlineAt = taskContract?.deadlineAt;
     const deadlineExpired = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
 
+    let truncationsWithoutSave = 0;
+    let continuedAnswer = '';
+    for (let i = history.length - 1; i >= 0 && history[i]!.role !== 'tool'; i--) {
+      if (history[i]!.context?.source === 'response-fragment') continuedAnswer = (history[i]!.content ?? '') + continuedAnswer;
+    }
     for (let turn = 0; turn < maxTurns; turn++) {
       await opts.capabilityBoundary?.();
       if (opts.resolveTools && turn > 0) {
         const fresh = opts.resolveTools();
         const staticTools = availableTools.filter(tool => ['recall_tool_result', 'search_history', 'read_history'].includes(tool.name));
-        refreshToolCatalog(toolDefs, [...fresh, ...staticTools.filter(tool => !fresh.some(item => item.name === tool.name))].map(annotateToolDef), 4096);
+        refreshToolCatalog(toolDefs, [...fresh, ...staticTools.filter(tool => !fresh.some(item => item.name === tool.name))].map(annotateToolDef), toolCatalogBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)));
       }
       setModelCallTurn((opts.turnOffset ?? 0) + turn);
       if (deadlineExpired()) {
@@ -451,6 +456,7 @@ export class AgentRunner {
       let reasoning = '';
       let usage: { input: number; output: number; cachedInput?: number; missInput?: number; estimated?: boolean; incomplete?: boolean } | undefined;
       let collected: ToolCall[] = [];
+      let ending: Extract<LLMChunk, { type: 'done' }> | undefined;
       let pendingStream: { type: 'delta' | 'reasoning'; text: string }[] = [];
       // 流式思考标签分流：`think 类标签（think/thinking/thought/reasoning）` 等块内文本实时走 reasoning 通道（UI 思考卡即时可见，
       // 正文不再先漏屏再收敛）；跨 chunk 的标签碎片由状态机缓冲
@@ -473,8 +479,9 @@ export class AgentRunner {
           reasoning += chunk.text;
           pendingStream.push({ type: 'reasoning', text: chunk.text });
         } else if (chunk.type === 'tool_call') collected.push(chunk.toolCall);
+        else if (chunk.type === 'done') ending = chunk;
         else if (chunk.type === 'usage') {
-          usage = { input: chunk.input, output: chunk.output, cachedInput: chunk.cachedInput, missInput: chunk.missInput, estimated: chunk.estimated };
+          usage = { input: chunk.input, output: chunk.output, cachedInput: chunk.cachedInput, missInput: chunk.missInput, estimated: chunk.estimated, incomplete: chunk.incomplete };
         }
         return pendingStream;
       };
@@ -519,6 +526,7 @@ export class AgentRunner {
               reasoning = '';
               usage = undefined;
               collected = [];
+              ending = undefined;
               resetStreamState();
               yield { type: 'retry', reason: 'attempt', detail: '这条线路刚才没接上，再试一次' };
             }
@@ -611,7 +619,8 @@ export class AgentRunner {
         syncHistory();
         const errorKind = aborted ? 'aborted' : classified.category === 'auth' || classified.category === 'parameter'
           || classified.category === 'business' || classified.category === 'transient' ? classified.category : 'upstream';
-        yield { type: 'error', error: errMsg, kind: errorKind };
+        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { toolResults: runStats.toolResults, costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) });
+        yield { type: 'error', error: errMsg, kind: errorKind, code: aborted ? 'ABORTED' : classified.code, stage: 'model' };
         return;
       }
       const tIn = usage?.input ?? 0;
@@ -640,6 +649,27 @@ export class AgentRunner {
         tokensIn: tIn, tokensOut: tOut, tokensCached: usage?.cachedInput, cost,
         ...(usage?.cachedInput != null ? { cacheLayer: 'L3' as const } : {}),
       });
+
+      if (ending?.reason === 'length') {
+        truncationsWithoutSave++;
+        if (!ending.toolCallsTruncated && text) {
+          continuedAnswer += text;
+          history.push({ role: 'assistant', content: text, context: { id: `fragment:${traceId}:${(opts.turnOffset ?? 0) + turn}`, source: 'response-fragment', scope: 'run', trust: 'reference', retention: 'required' } });
+        }
+        history.push({ role: 'user', content: ending.toolCallsTruncated
+          ? '上次工具参数达到输出上限，未执行任何工具。请提交更小的完整调用；长文档可分段保存草稿，勿重发整篇大参数。'
+          : '上次正文达到输出上限，内容尚未完成。请从断点继续，不重复已有内容；长文档可先分段保存草稿。',
+          context: { id: `integrity:${traceId}:${(opts.turnOffset ?? 0) + turn}`, source: 'response-integrity', scope: 'run', trust: 'core', retention: 'required' } });
+        syncHistory();
+        opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { ...runStats, costUsd: restoredCost + totalCost });
+        if (truncationsWithoutSave >= 2) {
+          yield { type: 'error', error: '连续两次输出达到上限且未保存新内容，任务已中断。已保存的草稿可检查和下载。', kind: 'upstream', code: 'OUTPUT_TRUNCATED', stage: 'model' };
+          return;
+        }
+        yield { type: 'retry', reason: 'attempt', detail: '内容尚未完成，正在接续；工具参数将拆小后重新提交' };
+        continue;
+      }
+      if (continuedAnswer && !collected.length) { text = continuedAnswer + text; continuedAnswer = ''; }
 
       // ---- 文本清洗：剥离混在正文中的思考标签（流式分流器的最终兜底，
       //      覆盖未走 splitter 的路径：缓存回放/异常流） ----
@@ -801,7 +831,7 @@ export class AgentRunner {
           history.push({
             role: 'tool',
             tool_call_id: tc.id,
-            content: JSON.stringify({ ok: false, error: invalidMessage, kind: 'invalid_arguments' }),
+            content: JSON.stringify({ ok: false, error: invalidMessage, kind: 'invalid_arguments', failure: { code: argsError ? 'TOOL_ARGS_JSON' : 'TOOL_ARGS_SCHEMA', retryable: false, outcome: 'not_started' }, action: '按错误字段提交完整有效参数；长内容可分段保存。' }),
           });
           yield { type: 'tool_result', id: tc.id, name: tool.name, summary: invalidMessage, ok: false };
           continue;
@@ -844,7 +874,7 @@ export class AgentRunner {
         opts.onCheckpoint?.(
           (opts.turnOffset ?? 0) + turn,
           [...history],
-          { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name) },
+          { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) },
           {
             phase: 'tool_pending',
             pendingTool: {
@@ -866,7 +896,7 @@ export class AgentRunner {
         //    声明该字段，此处局部扩展——run_subagent/run_parallel 据此给子循环设 costBudget）
         const tenantQuota = this.kernel.tenantQuota;
         const tctx: ToolContext = {
-          delegate: opts.delegate ? request => opts.delegate!({ ...request, parentStepId: tStep.id }) : undefined,
+          delegate: opts.delegate ? (request, signal) => opts.delegate!({ ...request, parentStepId: tStep.id }, signal ?? opts.signal) : undefined,
           results: opts.toolJournal,
           runId: opts.runId, parentRunId: opts.parentRunId, authorization: opts.authorization,
           traceId,
@@ -1017,6 +1047,7 @@ export class AgentRunner {
         if (effectKey && executor.effectStarted && opts.effectJournal && finalResult.failure?.outcome !== 'unknown') opts.effectJournal.complete(effectKey, finalResult);
         opts.toolJournal?.finish(resultId, finalResult);
 
+        if (finalResult.ok && finalResult.evidence?.some(e => e.artifact)) { truncationsWithoutSave = 0; continuedAnswer = ''; }
         // ---- C5 子代理成本并入熔断核算：run_subagent/run_parallel 在 data 中回传 ----
         // subagentCost 时并入本任务累计——下一轮成本熔断判定自然覆盖子代理开销，
         // assistant_done 的 cost（→ 会话累计成本 sessionCost）同样包含之。
@@ -1082,7 +1113,7 @@ export class AgentRunner {
       opts.onCheckpoint?.(
         (opts.turnOffset ?? 0) + turn,
         history,
-        { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name) },
+        { toolResults: runStats.toolResults.map((result) => ({ ...result })), costUsd: restoredCost + totalCost, enabledTools: toolDefs.map(tool => tool.name), releasedTools: releasedToolNames(toolDefs) },
         { phase: 'turn_end' },
       );
     }

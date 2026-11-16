@@ -6,7 +6,7 @@ import type { LLMMessage, ToolResult } from '../kernel/types';
 import { resultPage } from '../kernel/tool-journal';
 
 export interface ModelToolCheck { status: 'confirmed' | 'not_confirmed'; checkedAt: number; fingerprint: string; reason?: string }
-export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number }
+export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { version?: string; format?: string; sources?: unknown[]; status?: 'draft' | 'final'; draftId?: string; draftVersion?: string; previousVersion?: string; count?: number } }
 export const RUN_SCHEMA = `
   CREATE TABLE IF NOT EXISTS run_plugins_v2 (run_id TEXT PRIMARY KEY, bindings TEXT NOT NULL);
   CREATE TABLE IF NOT EXISTS workspace_plugins_v2 (tenant_id TEXT NOT NULL, workspace TEXT NOT NULL, plugin_id TEXT NOT NULL, binding TEXT NOT NULL, PRIMARY KEY(tenant_id,workspace,plugin_id));
@@ -126,7 +126,7 @@ export class RunRepository {
     for (const evidence of result.ok ? result.evidence ?? [] : []) {
       if (!evidence.artifact || !evidence.ref) continue;
       const existing = this.artifacts(runId).find(item => item.ref === evidence.ref);
-      const artifact: RunArtifact = { id: existing?.id ?? randomUUID(), runId, callId: id, kind: evidence.kind, label: evidence.label, ref: evidence.ref, createdAt: Date.now() };
+      const artifact: RunArtifact = { id: existing?.id ?? randomUUID(), runId, callId: id, kind: evidence.kind, label: evidence.label, ref: evidence.ref, createdAt: Date.now(), ...(evidence.value && typeof evidence.value === 'object' ? { metadata: evidence.value as RunArtifact['metadata'] } : {}) };
       this.db.prepare('INSERT OR REPLACE INTO run_artifacts_v2 VALUES(?,?,?,?)').run(artifact.id, runId, artifact.ref, JSON.stringify(artifact));
     }
     this.db.prepare('UPDATE run_tool_calls_v2 SET status=?,finished_at=?,result=? WHERE run_id=? AND call_id=?').run(result.failure?.outcome === 'unknown' ? 'unknown' : result.ok ? 'succeeded' : 'failed', Date.now(), JSON.stringify(result), runId, id);
@@ -136,7 +136,8 @@ export class RunRepository {
     return row?.result ? resultPage(id, row.result, offset, limit) : undefined;
   }
   toolCalls(runId: string) {
-    return this.db.prepare('SELECT call_id AS id,name,args_summary AS argsSummary,status,started_at AS startedAt,finished_at AS finishedAt FROM run_tool_calls_v2 WHERE run_id=? ORDER BY rowid').all(runId);
+    const rows = this.db.prepare("SELECT call_id AS id,name,args_summary AS argsSummary,status,started_at AS startedAt,finished_at AS finishedAt,json_extract(result,'$.failure') AS failure FROM run_tool_calls_v2 WHERE run_id=? ORDER BY rowid").all(runId) as { id: string; name: string; argsSummary: string; status: string; startedAt: number; finishedAt: number | null; failure: string | null }[];
+    return rows.map(({ failure, ...row }) => ({ ...row, ...(failure ? { failure: JSON.parse(failure) as NonNullable<ToolResult['failure']> } : {}) }));
   }
   transaction<T>(work: () => T): T { return this.db.transaction(work)(); }
   children(parentId: string, tenantId: string): RunRecord[] {

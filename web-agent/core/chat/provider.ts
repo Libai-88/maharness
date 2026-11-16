@@ -1,4 +1,5 @@
 import { callEmbedding } from '../../kernel/model-call';
+import { ModelResponseError, normalizeFinishReason } from '../../kernel/model-response';
 /**
  * core/chat/provider.ts —— 多 Provider LLM 客户端（全部自研）
  * 统一走 OpenAI 兼容接口（/chat/completions），原生 fetch + SSE 流式解析，零 SDK 依赖。
@@ -209,9 +210,11 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     priceSource: priceGuessed ? 'unknown' : cfg.inputPrice !== undefined && cfg.outputPrice !== undefined ? 'configured' : 'catalog',
     outputLimitGuaranteed: true,
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
+      const requestSignal = providerRequestSignal(opts.signal, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
+      try {
       const protocol = cfg.protocol ?? 'openai';
       if (protocol === 'anthropic') {
-        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, opts, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
+        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, { ...opts, signal: requestSignal }, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
         return;
       }
       if (process.env.TRACE_LLM_BODY === 'on') {
@@ -246,7 +249,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
           Authorization: `Bearer ${cfg.apiKey}`,
         },
         body: JSON.stringify(body),
-        signal: providerRequestSignal(opts.signal, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS),
+        signal: requestSignal,
       });
       if (!res.ok) {
         const text = await res.text().catch(() => '');
@@ -263,6 +266,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       // M7：记录是否收到 usage / 累积输出文本（usage 缺失时估算计费用的）
       let usageSeen = false;
       let outText = '';
+      let rawReason: string | undefined;
 
       const flushToolCalls = function* (): Generator<LLMChunk> {
         for (const tc of toolAcc.values()) {
@@ -295,6 +299,8 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
               const json = JSON.parse(payload);
               if (typeof json.model === 'string') yield { type: 'model', model: json.model };
               const delta = json.choices?.[0]?.delta;
+              if (typeof json.choices?.[0]?.finish_reason === 'string') rawReason = json.choices[0].finish_reason;
+              outText += (delta?.content ?? '') + (delta?.reasoning_content ?? delta?.reasoning ?? '');
               if (delta?.content) yield { type: 'delta', text: delta.content };
               // 推理模型思考过程：DeepSeek 系 reasoning_content / OpenAI o1 系 reasoning
               const reasoning = delta?.reasoning_content ?? delta?.reasoning;
@@ -306,6 +312,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
                   if (tc.id) acc.id = tc.id;
                   if (tc.function?.name) acc.name += tc.function.name;
                   if (tc.function?.arguments) acc.args += tc.function.arguments;
+                  outText += tc.function?.arguments ?? '';
                   toolAcc.set(idx, acc);
                 }
               }
@@ -331,7 +338,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
       // M7 断流半包：流正常结束但未收到 [DONE] 标记 → 视为错误抛出（半截响应不可信，
       // 进入重试链——重试状态由执行器 C1 重置，前端作废残段重新累积）
       if (!finished) {
-        throw new Error(`LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
+        throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
       }
       yield* flushToolCalls();
       // M7 usage 缺失：按 token 估算计费 + console.warn（成本记 0 会让成本熔断失效——
@@ -342,7 +349,14 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
         console.warn(`[provider:${cfg.id}] 流结束但 usage 缺失，按估算计费（in≈${estIn}, out≈${estOut} tokens）`);
         yield { type: 'usage', input: estIn, output: estOut, estimated: true };
       }
-      yield { type: 'done' };
+      yield { type: 'done', reason: normalizeFinishReason(rawReason), rawReason };
+      } catch (error) {
+        if (!opts.signal?.aborted && requestSignal.aborted) {
+          throw new ModelResponseError('REQUEST_TIMEOUT', '模型请求超时，已保存的内容保留，可重试或继续任务');
+        }
+        if (!opts.signal?.aborted && error instanceof Error && error.name === 'AbortError') throw new ModelResponseError('STREAM_INTERRUPTED', '模型连接异常中断，已保存的内容保留');
+        throw error;
+      }
     },
   };
 }
@@ -381,6 +395,7 @@ async function* anthropicStream(
   const decoder = new TextDecoder();
   const st = createAnthropicState();
   let buf = '';
+  let outText = '';
   try {
     while (!st.finished) {
       const { done, value } = await reader.read();
@@ -396,6 +411,8 @@ async function* anthropicStream(
         let json: Record<string, unknown>;
         try { json = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
         if (json.type === 'message_start' && typeof (json.message as { model?: unknown })?.model === 'string') yield { type: 'model', model: (json.message as { model: string }).model };
+        const delta = json.delta as { text?: string; thinking?: string; partial_json?: string } | undefined;
+        outText += delta?.text ?? delta?.thinking ?? delta?.partial_json ?? '';
         for (const chunk of reduceAnthropicEvent(json, st)) yield chunk;
         if (st.errored) throw new Error(`Anthropic 流错误 [${providerId}]: ${st.errored}`);
         if (st.finished) break;
@@ -405,16 +422,16 @@ async function* anthropicStream(
     await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
     reader.releaseLock();
   }
-  if (!st.finished) throw new Error(`LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);
+  if (!st.finished) throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);
   const usage = usageChunks(st);
   if (usage.input === 0 && usage.output === 0) {
     const estIn = messages.reduce((total, m) => total + estimateTokens(m.content ?? ''), 0);
     console.warn(`[provider:${providerId}] Anthropic 流未回报 usage，按估算计费（in≈${estIn}）`);
-    yield { type: 'usage', input: estIn, output: 0, estimated: true };
+    yield { type: 'usage', input: estIn, output: estimateTokens(outText), estimated: true };
   } else {
     yield usage;
   }
-  yield { type: 'done' };
+  yield { type: 'done', reason: normalizeFinishReason(st.stopReason), rawReason: st.stopReason };
 }
 
 export interface EmbeddingService {

@@ -107,6 +107,19 @@ after(async () => {
 });
 
 describe('A6-b 变更类端点的可选 token 门', () => {
+  test('事项接口的创建、更新和执行沿用凭据门', async () => {
+    const missing = await fetch(`${base}/api/items`, {method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({title:'鉴权检查'})});
+    assert.equal(missing.status,401);
+    const created = await fetch(`${base}/api/items`, {method:'POST',headers:{'Content-Type':'application/json',[MUTATION_TOKEN_HEADER]:'unit-test-token'},body:JSON.stringify({title:'鉴权检查'})});
+    assert.equal(created.status,201);
+    const {item} = await created.json() as {item:{id:string;revision:number}};
+    for (const [path,method] of [[`/api/items/${item.id}`,'PATCH'],[`/api/items/${item.id}/execute`,'POST']]) {
+      const rejected=await fetch(base+path,{method,headers:{'Content-Type':'application/json','Idempotency-Key':'unauthorized'},body:JSON.stringify({revision:item.revision})});
+      assert.equal(rejected.status,401);
+    }
+    assert.equal((await fetch(`${base}/api/items/${item.id}`)).status,200);
+  });
+
   test('API 错误使用版本化稳定外壳并保留既有文案', async () => {
     const missing = await fetch(`${base}/api/workspaces/not-found`);
     const missingBody = await jsonOf<{ schemaVersion: number; ok: boolean; code: string; error: string }>(missing);

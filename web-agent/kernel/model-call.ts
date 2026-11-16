@@ -2,6 +2,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { ChatOptions, LLMChunk, LLMMessage, ProviderDef } from './types';
 import { countMessageTokens, estimateTokens } from './tokens';
+import { ModelResponseError, type FinishReason } from './model-response';
 
 export type ModelPurpose = 'agent' | 'compaction' | 'vision' | 'mcp_sampling' | 'embedding' | 'connection_check';
 export interface ModelCallRecord {
@@ -11,7 +12,7 @@ export interface ModelCallRecord {
   inputEstimate: number; outputLimit: number; input?: number; output?: number;
   usageStatus: 'reported' | 'estimated' | 'unknown'; cost?: number; reservedCost?: number;
   priceSource: 'configured' | 'catalog' | 'unknown'; priceIn?: number; priceOut?: number;
-  error?: string;
+  error?: string; errorCode?: string; finishReason?: FinishReason; rawFinishReason?: string;
 }
 export interface ModelCallScope {
   turn?: number; runId: string; rootId?: string; parentRunId?: string; signal: AbortSignal;
@@ -78,6 +79,8 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
     scope?.admit?.(record);
     scope?.start(record); started = true;
     scope?.input?.(record, messages, options.tools, provider.tokenizer);
+    const calls: Extract<LLMChunk, { type: 'tool_call' }>[] = [];
+    let ending: Extract<LLMChunk, { type: 'done' }> | undefined;
     for await (const chunk of provider.chat(messages, { ...options, maxTokens: outputLimit, signal })) {
       if (chunk.type === 'usage') {
         const validInput = Number.isSafeInteger(chunk.input) && chunk.input >= 0;
@@ -86,12 +89,21 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
         record.usageStatus = chunk.incomplete || !validInput || !validOutput ? 'unknown' : chunk.estimated ? 'estimated' : 'reported';
       }
       if (chunk.type === 'model') record.actualModel = chunk.model;
+      if (chunk.type === 'tool_call') { calls.push(chunk); continue; }
+      if (chunk.type === 'done') { ending = chunk; record.finishReason = chunk.reason; record.rawFinishReason = chunk.rawReason; continue; }
       yield chunk;
     }
+    signal?.throwIfAborted();
+    ending ??= { type: 'done', reason: 'unknown' };
+    if (ending.reason === 'blocked') throw new ModelResponseError('OUTPUT_BLOCKED', '模型输出被上游内容策略阻断');
+    if (ending.reason === 'length') record.errorCode = 'OUTPUT_TRUNCATED';
+    if (ending.reason !== 'length') for (const call of calls) yield call;
+    yield { ...ending, ...(ending.reason === 'length' ? { toolCallsTruncated: calls.length > 0 } : {}) };
     record.status = 'completed';
   } catch (error) {
     record.status = signal?.aborted ? 'cancelled' : 'failed';
     record.error = error instanceof Error ? error.message : String(error);
+    record.errorCode = (error as { code?: string })?.code;
     throw error;
   } finally {
     release?.();

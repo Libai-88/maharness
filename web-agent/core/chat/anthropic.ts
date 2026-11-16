@@ -117,6 +117,7 @@ export function buildBody(model: string, messages: LLMMessage[], opts: { maxToke
 
 /** 流解析累加器（每个请求一份） */
 export interface AnthropicStreamState {
+  stopReason?: string;
   tools: Map<number, { id: string; name: string; json: string }>;
   usage: { input: number; output: number; cachedInput: number; creation: number };
   inputReported?: boolean; outputReported?: boolean;
@@ -172,6 +173,8 @@ export function reduceEvent(json: Record<string, unknown>, st: AnthropicStreamSt
     return out;
   }
   if (type === 'message_delta') {
+    const delta = json.delta as { stop_reason?: string } | undefined;
+    if (typeof delta?.stop_reason === 'string') st.stopReason = delta.stop_reason;
     const u = (json.usage ?? {}) as Record<string, unknown>;
     if (typeof u.output_tokens === 'number') { st.usage.output = u.output_tokens; st.outputReported = true; }
     return out;

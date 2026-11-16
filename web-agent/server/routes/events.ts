@@ -16,7 +16,7 @@ import { auditSseLifecycle } from '../security-policy';
 // parallel.progress：并行小队的分头进度——不让它进白名单，用户就只能干等一条
 // 4 分钟超时后的结果（"小队在干嘛"完全没有回声）。
 const SSE_EVENT_TYPES = new Set([
-  'trace.step', 'plan.updated', 'todo.updated', 'workbench.updated',
+  'trace.step', 'plan.updated', 'todo.updated', 'workbench.updated', 'items.updated',
   'approval.requested', 'provider.error', 'provider.ok', 'parallel.progress',
 ]);
 /** SSE 单连接待发缓冲上限：write 返回 false（内核缓冲满）且超过该值 → 销毁连接（慢客户端背压保护） */
@@ -35,7 +35,7 @@ export function sseEventVisible(
   const sessionId = typeof d.sessionId === 'string' ? d.sessionId : undefined;
   if (sessionId) return sessionTenant(sessionId) === tenantId;
   if (type === 'trace.step' || type === 'plan.updated' || type === 'todo.updated'
-    || type === 'workbench.updated' || type === 'approval.requested') {
+    || type === 'workbench.updated' || type === 'items.updated' || type === 'approval.requested') {
     return tenantId === 'default';
   }
   return true;

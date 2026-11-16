@@ -3,6 +3,23 @@ import assert from 'node:assert/strict';
 import { reviewPluginRuntimeSource, reviewPluginSource, reviewPluginWrite } from '../plugin-review';
 
 describe('插件静态审查', () => {
+  test('capability identifiers use structural fields instead of nearby display names', () => {
+    const result = reviewPluginSource(`
+      // kind:'role', name:'misleading'
+      ctx.register({role:{name:'Display Name',id:'review-id'},kind:'role'});
+      ctx.register({kind:'api',api:{mount:'panel'}});
+      ctx.register({kind:'listener',event:'data.ready',listener:()=>{}});
+      ctx.register({kind:'service',service:{id:'prices'}});
+    `);
+    assert.deepEqual(result.capabilities, [{kind:'role',name:'review-id'},{kind:'api',name:'panel'},{kind:'listener',name:'data.ready'},{kind:'service',name:'prices'}]);
+    assert.equal(result.capabilityInferenceComplete, true);
+    assert.equal(reviewPluginSource('ctx.register(capability)').capabilityInferenceComplete, false);
+    assert.equal(reviewPluginSource("ctx.register({kind:'role',role:{id:dynamic,name:'Display'}})").capabilityInferenceComplete, false);
+    assert.equal(reviewPluginSource("ctx.register({kind:'role',role:{id:'review',...dynamic}})").capabilityInferenceComplete, false);
+    const unrelated = reviewPluginSource("const data={kind:'role',role:{id:dynamic}}; const file={kind:'file'}; ctx.register({kind:'service',service:{id:'prices'}})");
+    assert.equal(unrelated.capabilityInferenceComplete, true);
+    assert.deepEqual(unrelated.capabilities, [{kind:'service',name:'prices'}]);
+  });
   test('安全的 ctx.register 插件通过并提取能力', () => {
     const r = reviewPluginSource("ctx.register({ kind: 'tool', tool: { name: 'safe_read' } });", {
       capabilities: { tool: ['safe_read'] },

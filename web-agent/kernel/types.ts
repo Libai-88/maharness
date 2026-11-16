@@ -452,6 +452,8 @@ export interface PersonaDef {
 // ---------- 工具 ----------
 
 export interface ToolDef {
+  /** Discovery hints never grant execution permissions. */
+  discovery?: { initial?: boolean; keywords?: string[]; pluginId?: string; pluginVersion?: string };
   /** Composite handlers orchestrate through ToolContext.invoke; leaf calls own physical leases. */
   invokesTools?: boolean;
   version: string;
@@ -476,6 +478,7 @@ export interface ToolDef {
   output?: string;
   /** 独立超时（毫秒）：重工具（如 run_subagent 内部多轮）需要比默认 30s 更长的执行窗口 */
   timeoutMs?: number;
+  executionTimeoutMs?(args: unknown): number;
   /** 工具副作用契约：仅幂等工具允许执行器对瞬时失败自动重试。默认不重试。 */
   idempotent?: boolean;
   /** 副作用分类：read/none 不进入恢复账本（恢复时重新观察）；write/external/irreversible 进入账本。 */
@@ -563,7 +566,7 @@ export interface ToolContext {
   /** Invoke an authorized tool through the host executor, never its raw handler. */
   invoke?: (name: string, args: unknown, signal?: AbortSignal) => Promise<ToolResult>;
   runSignal?: AbortSignal;
-  delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
+  delegate?: (request: import('./run').ChildRunRequest, signal?: AbortSignal) => Promise<import('./run').ChildRunResult>;
   results?: Pick<import('./tool-journal').ToolExecutionJournal, 'read'>;
   runId?: string;
   parentRunId?: string;
@@ -599,7 +602,8 @@ export interface ToolContext {
 export interface CommandDef {
   name: string;
   description: string;
-  handler(args: string[]): Promise<string> | string;
+  timeoutMs?: number;
+  handler(args: string[], context?: { signal?: AbortSignal }): Promise<string> | string;
 }
 
 // ---------- LLM Provider（v1 内置 OpenAI 兼容，预留多实现） ----------
@@ -698,7 +702,7 @@ export type LLMChunk =
       missInput?: number;
     }
   | { type: 'model'; model: string }
-  | { type: 'done' };
+  | { type: 'done'; reason?: import('./model-response').FinishReason; rawReason?: string; toolCallsTruncated?: boolean };
 
 export interface ChatOptions {
   model: string;

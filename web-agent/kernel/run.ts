@@ -5,10 +5,12 @@ export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' |
 export type PermissionProfile = 'standard' | 'developer';
 export interface RunAuthorization { workspace: string; profile: PermissionProfile; readOnly: boolean; revision: number; frameworkChangeId?: string; pluginDevelopment?: import('./task-plugins').PluginDevelopmentGrant; }
 export interface RunRecord {
+  materials?: import('./material').Material[];
   id: string; sessionId: string; tenantId: string; parentId?: string; rootId: string; depth: number;
   objective: string; providerId: string; model: string; status: RunStatus; authorization: RunAuthorization;
   createdAt: number; updatedAt: number; cost: number; tokensIn: number; tokensOut: number;
   answer?: string; error?: string; verification?: unknown; budgetUsd?: number; deadlineAt?: number;
+  problem?: { code: string; stage: string; hint: string };
   parentStepId?: string;
   principalRole?: 'admin' | 'member' | 'readonly';
   acceptance?: import('./task-verifier').TaskCriterion[];
@@ -23,7 +25,7 @@ export interface RunRecord {
   usageStatus?: 'reported' | 'estimated' | 'unknown';
 }
 export interface RunEvent { runId: string; seq: number; type: string; data: Record<string, unknown>; createdAt: number; }
-export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
+export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
 export interface ManagedExecution { runChild(options: RunOptions, parentId: string): AsyncGenerator<AgentEvent>; }
 export interface ChildRunRequest { parentStepId?: string; objective: string; tools?: 'read' | 'all'; plugins?: string[]; instructions?: string; maxTurns?: number; budgetUsd?: number; }
 export interface ChildRunResult { runId: string; traceId: string; answer: string; toolCalls: number; cost: number; tokensIn: number; tokensOut: number; error?: string; cancelled: boolean; }

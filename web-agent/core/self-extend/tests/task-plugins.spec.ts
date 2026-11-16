@@ -10,6 +10,7 @@ import { ToolExecutor } from '../../chat/tool-executor';
 import type { TaskPluginBinding } from '../../../kernel/task-plugins';
 import type { RunRecord } from '../../../kernel/run';
 import type { ToolContext, PluginManifest } from '../../../kernel/types';
+import { taskPluginExamples } from '../examples';
 
 const ROOT = fileURLToPath(new URL('../../../', import.meta.url));
 function fixture() {
@@ -24,6 +25,77 @@ function fixture() {
 const context = {} as ToolContext;
 const source = (id: string, value: number) => `export default { id: '${id}', name: 'Counter', version: '1.0.0', onLoad(ctx: import('../../kernel/types').PluginContext) { ctx.register({kind: 'tool', tool: {name: 'count_words', version:'2.0.0', permissions: [], description:'Count words', parameters: {type:'object'}, outputSchema: {type:'object'}, sideEffect:'none', async handler() {return {ok:true,data:{count:${value}}};} }}); } };`;
 const manifest = (id: string): PluginManifest => ({ apiVersion: 2, id, name: id, version: '1.0.0', entry: 'index.ts', permissions: { capabilities: { tool: ['count_words'] } } });
+
+test('every on-demand SDK example compiles, registers its actual identifier and releases', async () => {
+  const f = fixture(); const session = await f.service.open(f.run('sdk-examples'));
+  const call = (name: string, args: unknown, ctx = context) => session.tools().find(tool => tool.name === name)!.handler(args, ctx);
+  try {
+    for (const example of taskPluginExamples) {
+      const reference = await call('plugin_status', { example: example.id });
+      assert.deepEqual(reference.data, example);
+      const staged = await call('create_plugin', { id: example.manifest.id, source: example.source });
+      assert.equal(staged.ok, true, `${example.id}: ${staged.error}`);
+      const enabled = await call('enable_plugin', { id: example.manifest.id });
+      assert.equal(enabled.ok, true, `${example.id}: ${enabled.error}`);
+      assert.deepEqual((enabled.data as { registered: unknown }).registered, [{kind:example.kind,name:example.name}]);
+      if (example.id === 'tool') assert.equal((await call('sum_values', { numbers: [12,13,17] })).ok, true);
+      if (example.id === 'command') assert.deepEqual((await call('invoke_plugin', {kind:'command',name:'upper',args:['ready']})).data, {output:'READY'});
+      if (example.id === 'composition') {
+        let calls = 0;
+        assert.equal((await call('read_note', {}, { ...context, invoke: async name => { calls++; assert.equal(name,'read_file'); return {ok:true,data:{text:'note'}}; } })).ok, true);
+        assert.equal(calls,1);
+      }
+      assert.equal((await call('disable_plugin', { id: example.manifest.id })).ok, true);
+      await session.boundary();
+      assert.equal(session.capabilities(example.kind).length, 0);
+    }
+  } finally { await session.dispose(); await f.close(); }
+});
+
+test('plugin branch validation, child failures and throwing handlers preserve execution outcomes', async () => {
+  const f = fixture(); const run = f.run('branch-errors'); run.authorization.pluginDevelopment!.permissions.push('delegate','network');
+  const session = await f.service.open(run);
+  const call = (name: string, args: unknown, ctx = context) => session.tools().find(tool => tool.name === name)!.handler(args, ctx);
+  try {
+    for (const kind of ['role','provider']) {
+      const example = taskPluginExamples.find(item => item.id === kind)!;
+      assert.equal((await call('create_plugin',{id:example.manifest.id,source:example.source})).ok,true);
+      assert.equal((await call('enable_plugin',{id:example.manifest.id})).ok,true);
+      const invalid = await call('invoke_plugin',{kind,name:example.name});
+      assert.equal(invalid.failure?.code,'PLUGIN_ARGS_INVALID');
+      assert.equal(invalid.failure?.outcome,'not_started');
+    }
+    const failed = await call('invoke_plugin',{kind:'role',name:'review',objective:'check'}, {...context,delegate:async()=>({runId:'child',traceId:'child',answer:'',cost:0,tokensIn:0,tokensOut:0,toolCalls:0,error:'failed',cancelled:false})});
+    assert.equal(failed.ok,false); assert.equal(failed.failure?.code,'PLUGIN_CHILD_FAILED');
+    const dynamic = await call('create_plugin',{id:'dynamic',source:"const id='review';export default {id:'dynamic',name:'dynamic',version:'1.0.0',onLoad(ctx:import('../../kernel/plugin-sdk').PluginContext){ctx.register({kind:'role',role:{id,name:'Review',description:'r',systemPrompt:'r'}})}}"});
+    assert.equal(dynamic.failure?.code,'PLUGIN_MANIFEST_REQUIRED');
+    const broken = taskPluginExamples[0];
+    assert.equal((await call('create_plugin',{id:broken.manifest.id,source:broken.source.replace('numbers.reduce((a,b)=>a+b,0)','numbers.noSuchMethod()')})).ok,true);
+    const activation = await call('enable_plugin',{id:broken.manifest.id});
+    assert.equal(activation.ok,false);
+    assert.equal((activation.data as { diagnostics: { stage: string; line: number }[] }).diagnostics[0].stage,'types');
+    assert.equal((activation.data as { diagnostics: { line: number }[] }).diagnostics[0].line,1);
+  } finally { await session.dispose(); await f.close(); }
+});
+
+test('a long command does not lock status or unload its in-flight version', async () => {
+  const f = fixture(); const session = await f.service.open(f.run('command-pin'));
+  const call = (name: string, args: unknown) => session.tools().find(tool => tool.name === name)!.handler(args, context);
+  let release!: () => void;
+  (globalThis as any).__mhCommandWait = new Promise<void>(resolve => { release=resolve; });
+  try {
+    const source = `export default {id:'waiting',name:'waiting',version:'1.0.0',onLoad(ctx:import('../../kernel/plugin-sdk').PluginContext){ctx.register({kind:'command',command:{name:'wait',description:'wait',async handler(){await (globalThis as any).__mhCommandWait;return ctx.storage.read('value')??'alive'}}});ctx.resources!.defer(()=>{(globalThis as any).__mhCommandDisposed=true})}}`;
+    assert.equal((await call('create_plugin',{id:'waiting',source})).ok,true);
+    const activation=await call('enable_plugin',{id:'waiting'});assert.equal(activation.ok,true,activation.error);
+    (globalThis as any).__mhCommandDisposed=false;
+    const pending=call('invoke_plugin',{kind:'command',name:'wait'});
+    assert.equal((await call('plugin_status',{})).ok,true);
+    assert.equal((await call('disable_plugin',{id:'waiting'})).ok,true);
+    await session.boundary(); assert.equal((globalThis as any).__mhCommandDisposed,false);
+    release(); assert.equal((await pending).ok,true);
+    await session.boundary(); assert.equal((globalThis as any).__mhCommandDisposed,true);
+  } finally { release(); delete (globalThis as any).__mhCommandWait; delete (globalThis as any).__mhCommandDisposed; await session.dispose(); await f.close(); }
+});
 
 test('plugin role delegation uses the child-run deadline and executes once', async () => {
   const f = fixture(); const run = f.run('role-deadline');

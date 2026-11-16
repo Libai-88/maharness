@@ -307,7 +307,7 @@ describe('Anthropic 原生端点端到端', () => {
       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
       const p = createProvider({ id: `timeout-${protocol}`, baseUrl: base, apiKey: 'k', model: 'm', protocol, requestTimeoutMs: 40 });
       try {
-        await assert.rejects(() => collect(p, [user('timeout')], 'm'), /timeout|timed out/i);
+        await assert.rejects(() => collect(p, [user('timeout')], 'm'), (error: unknown) => (error as { code?: string }).code === 'REQUEST_TIMEOUT');
         const deadline = Date.now() + 2_000;
         while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
         assert.equal(closed, true, `${protocol} 超时后应关闭服务端流`);

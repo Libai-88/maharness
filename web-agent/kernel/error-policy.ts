@@ -34,6 +34,9 @@ function isAbort(error: unknown): boolean {
 /** 统一错误分类裁判。分类只依赖稳定状态码/错误信号，原始 cause 始终保留。 */
 export function classifyError(error: unknown): ClassifiedError {
   const message = messageOf(error);
+  const code = (error as { code?: string } | null)?.code;
+  if (code === 'REQUEST_TIMEOUT' || code === 'STREAM_INTERRUPTED') return { category: 'transient', code, retryable: true, retryDelayMs: 1200, message, cause: error };
+  if (code === 'OUTPUT_BLOCKED') return { category: 'business', code, retryable: false, retryDelayMs: 0, message, cause: error };
   if (isAbort(error)) return { category: 'aborted', code: 'ABORTED', retryable: false, retryDelayMs: 0, message, cause: error };
   const status = statusOf(error);
   if (status !== undefined) {

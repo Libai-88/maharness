@@ -1,5 +1,7 @@
 /** 静态插件审查：在现场插件进入 loader 前拦截明显的越权实现。 */
 import { isAbsolute, join, relative } from 'node:path';
+import ts from 'typescript';
+import { CAPABILITY_IDENTIFIERS } from './capability-identity';
 
 export interface PluginReviewIssue {
   code: 'native-process' | 'raw-filesystem' | 'dynamic-code' | 'secret-access' | 'network-egress' | 'missing-permissions' | 'dependency-policy';
@@ -11,6 +13,7 @@ export interface PluginReviewResult {
   highRisk: boolean;
   issues: PluginReviewIssue[];
   capabilities: { kind: string; name: string }[];
+  capabilityInferenceComplete: boolean;
   dependencies: string[];
 }
 
@@ -55,14 +58,30 @@ function importSpecifiers(source: string): string[] {
 }
 
 /** 从常见 ctx.register 形状提取能力，供权限审查报告使用。 */
-function capabilitiesOf(source: string): { kind: string; name: string }[] {
+function capabilitiesOf(source: string): { capabilities: { kind: string; name: string }[]; complete: boolean } {
   const out: { kind: string; name: string }[] = [];
-  const re = /kind\s*:\s*['"]([a-z]+)['"][\s\S]{0,700}?name\s*:\s*['"]([A-Za-z0-9_.-]+)['"]/g;
-  for (const m of source.matchAll(re)) {
-    const item = { kind: m[1], name: m[2] };
-    if (!out.some((x) => x.kind === item.kind && x.name === item.name)) out.push(item);
-  }
-  return out;
+  let complete = true;
+  const tree = ts.createSourceFile('plugin.ts', source, ts.ScriptTarget.Latest, true);
+  const property = (node: ts.ObjectLiteralExpression, name: string) => node.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === name)?.initializer;
+  const visit = (node: ts.Node): void => {
+    if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'register') {
+      const registration = node.arguments[0];
+      if (!registration || !ts.isObjectLiteralExpression(registration)) { complete = false; ts.forEachChild(node, visit); return; }
+      const kind = property(registration, 'kind');
+      if (kind && ts.isStringLiteral(kind) && Object.hasOwn(CAPABILITY_IDENTIFIERS, kind.text)) {
+        const key = kind.text as keyof typeof CAPABILITY_IDENTIFIERS;
+        const def = key === 'listener' ? registration : property(registration, key);
+        const value = def && ts.isObjectLiteralExpression(def) ? property(def, CAPABILITY_IDENTIFIERS[key]) : undefined;
+        if (registration.properties.some(ts.isSpreadAssignment) || def && ts.isObjectLiteralExpression(def) && def.properties.some(ts.isSpreadAssignment)) complete = false;
+        if (value && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) {
+          if (!out.some(item => item.kind === key && item.name === value.text)) out.push({ kind: key, name: value.text });
+        } else complete = false;
+      } else complete = false;
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(tree);
+  return { capabilities: out, complete };
 }
 
 export function reviewPluginSource(
@@ -72,7 +91,7 @@ export function reviewPluginSource(
 ): PluginReviewResult {
   const issues: PluginReviewIssue[] = [];
   for (const [code, pattern, message] of RULES) if (pattern.test(source)) issues.push({ code, message });
-  const capabilities = capabilitiesOf(source);
+  const { capabilities, complete } = capabilitiesOf(source);
   const dependencies = importSpecifiers(source).filter((specifier) => !specifier.startsWith('.') && !specifier.startsWith('/'));
   const allowed = new Set((options.allowedDependencies ?? []).map((name) => name.trim()).filter(Boolean));
   for (const dependency of dependencies) {
@@ -96,7 +115,7 @@ export function reviewPluginSource(
   return {
     ok: issues.length === 0,
     highRisk: issues.some((i) => i.code !== 'missing-permissions' && i.code !== 'dependency-policy'),
-    issues, capabilities, dependencies,
+    issues, capabilities, capabilityInferenceComplete: complete, dependencies,
   };
 }
 

@@ -263,7 +263,7 @@ export default {
                 const task = tasks.find(candidate => candidate.id === id)!;
                 if (task.dependsOn.some(dependency => !byId.get(dependency)?.ok)) return { taskId: id, objective: task.objective, ok: false, error: '依赖任务未成功', cost: 0 };
                 try {
-                  const result = await tctx.delegate!({ objective: composeDependencyContext(task, byId), tools: task.tools === 'all' ? 'all' : 'read', instructions: PARALLEL_SYSTEM_PROMPT, maxTurns: 12, budgetUsd: shares[task.index], plugins: task.plugins });
+                  const result = await tctx.delegate!({ objective: composeDependencyContext(task, byId), tools: task.tools === 'all' ? 'all' : 'read', instructions: PARALLEL_SYSTEM_PROMPT, maxTurns: 12, budgetUsd: shares[task.index], plugins: task.plugins }, tctx.signal);
                   return { ...result, taskId: id, objective: task.objective, ok: !result.error };
                 } catch (error) { return { taskId: id, objective: task.objective, ok: false, error: error instanceof Error ? error.message : String(error), cost: 0 }; }
               }));

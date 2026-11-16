@@ -43,6 +43,7 @@ async function setup(page: Page) {
     else if (path === '/api/providers/test') data = { ok: true, latencyMs: 28 };
     else if (path === '/api/providers/design/tool-check') data = { status: 'confirmed', checkedAt: Date.now() };
     else if (path === '/api/v2/workspace/permissions') data = { profile: 'standard', revision: 0, workspace: 'D:/workspace' };
+    else if (path === '/api/items') data = { items: [], projects: [] };
     else if (path === '/api/v2/runs') data = [];
     else if (path === '/api/providers/design') data = { ...provider, ...body };
     else if (path === '/api/config') {
@@ -82,6 +83,42 @@ async function openSettings(page: Page, tab?: string) {
   if (tab) await page.getByRole('tab', { name: tab, exact: true }).click();
 }
 
+test('侧边栏选择当前或其他会话会退出功能页及设置，保留会话内容', async ({ page }) => {
+  await setup(page);
+  await page.route('**/api/sessions/*/messages', route => route.fulfill({ json: [{ id: 'saved-message', role: 'user', content: '已保存的会话内容', ts: 1 }] }));
+  await page.reload();
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+  await expect(input).toBeVisible();
+  await expect(page.getByText('已保存的会话内容', { exact: true })).toBeVisible();
+  const sessions = page.locator('[data-sidebar="menu-button"][data-size="lg"]');
+  await page.getByRole('button', { name: '文件', exact: true }).click();
+  await sessions.first().click();
+  await expect(input).toBeVisible();
+  await expect(page.getByText('已保存的会话内容', { exact: true })).toBeVisible();
+  await openSettings(page);
+  await sessions.nth(1).click();
+  await expect(input).toBeVisible();
+  await expect(page.getByRole('tab', { name: '通用', exact: true })).toHaveCount(0);
+  await expect(page.getByText('已保存的会话内容', { exact: true })).toBeVisible();
+});
+
+test('功能页和设置的关闭按钮直接返回会话', async ({ page }) => {
+  await setup(page);
+  await page.route('**/api/nav', route => route.fulfill({ json: { items: [{ key: 'plugin:design-plugin', pluginId: 'design-plugin', pluginName: '示例插件', label: '扩展页面', icon: null, order: 1, mode: 'panel', url: '/api/plugins/design-plugin/panel', moduleUrl: null, statusUrl: null, statusIntervalMs: 0 }] } }));
+  await page.reload();
+  const input = page.getByRole('textbox', { name: '消息', exact: true });
+  await expect(input).toBeVisible();
+  for (const name of ['运行记录', '文件', '插件', '统计', '扩展页面']) {
+    await page.getByRole('button', { name, exact: true }).click();
+    await page.getByRole('button', { name: '关闭页面，返回会话', exact: true }).click();
+    await expect(input).toBeVisible();
+  }
+  await page.getByRole('button', { name: '文件', exact: true }).click();
+  await openSettings(page);
+  await page.getByRole('button', { name: '关闭设置', exact: true }).click();
+  await expect(input).toBeVisible();
+});
+
 async function checkAccessibility(page: Page) {
   await expect.poll(() => page.locator('[data-sonner-toast][data-removed="false"]').evaluateAll((elements) => elements.every((element) => getComputedStyle(element).opacity === '1'))).toBe(true);
   await page.addScriptTag({ content: axeSource });
@@ -100,6 +137,7 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
   await page.route('**/api/v2/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
+    if (path.endsWith('/tools')) return route.fulfill({ json: [{ id: 'unknown-call', name: 'command_start', status: 'unknown', argsSummary: 'command', failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'unknown' } }] });
     if (path.endsWith('/model-calls')) return route.fulfill({ json: [{ id: 'vision-call', purpose: 'vision', providerId: 'design', model: 'design-model', status: 'completed', usageStatus: 'unknown', priceSource: 'unknown', inputEstimate: 12 }] });
     if (path.endsWith('/inputs')) return route.fulfill({ json: [
       { id: 'new-input', turn: 1, providerId: 'design', model: 'design-model', createdAt: 0, messages: [{ role: 'user', content: '核对材料' }], tools: [{ name: 'read_file' }], diagnostics: { messageTokens: 12, toolTokens: 5, sources: [{ source: 'user', tokens: 12 }], fingerprint: 'f'.repeat(64), attemptId: 'attempt-2', resumedFromTurn: 0 } },
@@ -107,8 +145,8 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
     ] });
     return route.fulfill({ json: [] });
   });
-  if (!await page.getByRole('button', { name: '任务', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
-  await page.getByRole('button', { name: '任务', exact: true }).click();
+  if (!await page.getByRole('button', { name: '运行记录', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await page.getByRole('button', { name: '运行记录', exact: true }).click();
   await page.getByRole('button', { name: '诊断与子任务' }).click();
   const panel = page.getByTestId('run-diagnostics');
   await expect(panel).toContainText('用量不完整');
@@ -116,6 +154,9 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
   await expect(panel).toContainText('费用待核对');
   await expect(panel).toContainText('请在任务结束后核对');
   await expect(panel).toContainText('操作结果未知');
+  await expect(panel).toContainText('机器验收 · 尚未验证');
+  await expect(panel).toContainText('结果未知，禁止自动重放');
+  await expect(panel).toContainText('错误码：TOOL_INTERRUPTED · 副作用：未知 · 不可自动重试');
   await panel.locator('summary').filter({ hasText: '第 2 轮' }).click();
   await expect(panel.getByText(/本地估算：消息 12 tokens/)).toBeVisible();
   await expect(panel.getByText(/执行尝试：attempt-2/)).toContainText('恢复断点：第 1 轮');
@@ -123,6 +164,16 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
   await expect(panel.getByText('输入分项：未记录')).toBeVisible();
   await checkAccessibility(page);
   await page.screenshot({ path: `test-results/strengthening-diagnostics-${width}.png`, fullPage: true });
+});
+
+for (const [type, label] of [['task_verified', '机器验收通过'], ['task_partial', '机器验收部分通过'], ['task_failed', '机器验收未通过']]) test(`执行完成独立显示${label}`, async ({ page }) => {
+  await setup(page);
+  const run = { id: 'verified-run', sessionId: 'design-0', objective: '核对产物', model: 'design-model', providerId: 'design', status: 'completed', verification: { type }, cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+  await page.route('**/api/v2/**', route => route.fulfill({ json: new URL(route.request().url()).pathname === '/api/v2/runs' ? [run] : [] }));
+  await page.getByRole('button', { name: '运行记录', exact: true }).click();
+  await page.getByRole('button', { name: '诊断与子任务' }).click();
+  await expect(page.getByTestId('run-diagnostics')).toContainText(`机器验收 · ${label}`);
+  await expect(page.getByTestId('run-diagnostics')).toContainText('执行完成');
 });
 
 test('设置主题与品牌选择即时生效并保留偏好', async ({ page }) => {
@@ -173,8 +224,8 @@ for (const width of [1440, 390]) test(`任务插件版本、保存与净化面�
     if (path.endsWith('/api/panel')) return route.fulfill({ json: { title: '结果面板', html: '<p>value=29</p><script>window.pluginUnsafe=true</script><img src=x onerror="window.pluginUnsafe=true">' } });
     return route.fulfill({ json: [] });
   });
-  if (!await page.getByRole('button', { name: '任务', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
-  await page.getByRole('button', { name: '任务', exact: true }).click(); await page.getByRole('button', { name: '诊断与子任务' }).click();
+  if (!await page.getByRole('button', { name: '运行记录', exact: true }).isVisible()) await page.getByRole('button', { name: 'Toggle Sidebar' }).click();
+  await page.getByRole('button', { name: '运行记录', exact: true }).click(); await page.getByRole('button', { name: '诊断与子任务' }).click();
   const panel = page.getByTestId('run-diagnostics'); await expect(panel).toContainText('abc123456789'); await expect(panel).toContainText('data-source');
   await panel.getByRole('button', { name: '查看面板' }).click(); await expect(panel).toContainText('value=29');
   expect(await page.evaluate(() => (window as unknown as { pluginUnsafe?: boolean }).pluginUnsafe)).toBeUndefined();

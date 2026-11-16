@@ -1,3 +1,6 @@
+import { lazy, Suspense } from 'react';
+import { materialApi, type Material } from '../material-api';
+const MaterialViewer = lazy(() => import('./MaterialViewer'));
 import FrameworkChangesPanel from './FrameworkChangesPanel';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, ChevronsUpDown, FileText, Folder, FolderOpen, GitBranch, Maximize2, Plus, RefreshCw, Upload, X } from 'lucide-react';
@@ -118,8 +121,9 @@ function GitPanel({ onOpen }: { onOpen: (path: string) => void }) {
   );
 }
 
-export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: string, message: string) => void }) {
+export default function FilesView({ onFrameworkTask, onUseMaterial }: { onFrameworkTask: (id: string, message: string) => void; onUseMaterial?: (material: Material, quote?: string) => void }) {
   const [current, setCurrent] = useState('');
+  const [material, setMaterial] = useState<Material>();
   const [workspaces, setWorkspaces] = useState<{ id: string; path: string }[]>([]);
   const [wsOpen, setWsOpen] = useState(false);
   const [newPath, setNewPath] = useState('');
@@ -145,7 +149,7 @@ export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: s
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
   }, []);
   useEffect(() => { void loadWorkspaces(); }, [loadWorkspaces]);
-  useEffect(() => { if (current) { fileRequest.current++; setPreview(null); setEditing(false); setSearch(''); setResults(null); setRoots(null); void loadRoot(); } }, [current, loadRoot]);
+  useEffect(() => { if (current) { fileRequest.current++; setMaterial(undefined); setPreview(null); setEditing(false); setSearch(''); setResults(null); setRoots(null); void loadRoot(); } }, [current, loadRoot]);
   useEffect(() => { if (editing) editRef.current?.focus(); }, [editing, fullscreen]);
   useEffect(() => {
     if (!search.trim()) { setResults(null); return; }
@@ -156,9 +160,10 @@ export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: s
   const openFile = async (path: string) => {
     const requestId = ++fileRequest.current;
     try {
+      if (/\.(pdf|docx|xlsx|csv|pptx|bib)$/i.test(path)) { const item = await materialApi.register(path); if (fileRequest.current !== requestId) return; setMaterial(item); setPreview({ path, text: '' }); setEditing(false); setExplorerOpen(false); setError(null); return; }
       const result = await fileApi.read(path);
       if (fileRequest.current !== requestId) return;
-      setPreview({ path, text: result.text }); setEditing(false); setExplorerOpen(false); setError(null);
+      setMaterial(undefined); setPreview({ path, text: result.text }); setEditing(false); setExplorerOpen(false); setError(null);
     } catch (err) { if (fileRequest.current === requestId) setError(err instanceof Error ? err.message : String(err)); }
   };
   const save = async () => {
@@ -168,7 +173,7 @@ export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: s
     catch (err) { setError(err instanceof Error ? err.message : String(err)); }
     finally { setSaving(false); }
   };
-  const closeFile = () => { fileRequest.current++; setPreview(null); setEditing(false); setFullscreen(false); };
+  const closeFile = () => { fileRequest.current++; setMaterial(undefined); setPreview(null); setEditing(false); setFullscreen(false); };
   const explorer = (
     <div className="flex h-full min-h-0 flex-col gap-3">
       <div className="px-3 pt-3">
@@ -210,10 +215,10 @@ export default function FilesView({ onFrameworkTask }: { onFrameworkTask: (id: s
             <AttachmentDescription title={preview?.path}>{preview?.path ?? '从左侧文件树选择文件'}</AttachmentDescription>
           </AttachmentContent>
         </Attachment>
-        {preview && <><Button variant="ghost" size="icon-sm" aria-label="在资源管理器中打开" onClick={() => { void fileApi.open(preview.path).catch((err) => toast.error(String(err))); }}><FolderOpen /></Button><Button variant="ghost" size="icon-sm" aria-label={fullscreen ? '退出全屏' : '全屏'} onClick={() => setFullscreen(!fullscreen)}><Maximize2 /></Button><Button variant="ghost" size="icon-sm" aria-label="关闭文件" onClick={closeFile}><X /></Button>{editing ? <><Button size="sm" disabled={saving || draft === preview.text} onClick={() => void save()}>{saving && <Spinner data-icon="inline-start" />}保存</Button><Button variant="outline" size="sm" onClick={() => setEditing(false)}>取消</Button></> : <Button variant="outline" size="sm" onClick={() => { setDraft(preview.text); setEditing(true); }}>编辑</Button>}</>}
+        {preview && <><Button variant="ghost" size="icon-sm" aria-label="在资源管理器中打开" onClick={() => { void fileApi.open(preview.path).catch((err) => toast.error(String(err))); }}><FolderOpen /></Button><Button variant="ghost" size="icon-sm" aria-label={fullscreen ? '退出全屏' : '全屏'} onClick={() => setFullscreen(!fullscreen)}><Maximize2 /></Button><Button variant="ghost" size="icon-sm" aria-label="关闭文件" onClick={closeFile}><X /></Button>{!material && !editing && <Button variant="outline" size="sm" onClick={() => void materialApi.register(preview.path).then(item => onUseMaterial?.(item)).catch(error => toast.error(String(error)))}>用此文件提问</Button>}{material ? null : editing ? <><Button size="sm" disabled={saving || draft === preview.text} onClick={() => void save()}>{saving && <Spinner data-icon="inline-start" />}保存</Button><Button variant="outline" size="sm" onClick={() => setEditing(false)}>取消</Button></> : <Button variant="outline" size="sm" onClick={() => { setDraft(preview.text); setEditing(true); }}>编辑</Button>}</>}
       </div>
-      {preview ? editing ? <Textarea ref={editRef} aria-label={`编辑 ${preview.path}`} className="m-4 min-h-0 w-auto flex-1 resize-none font-mono" value={draft} spellCheck={false} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 's') { event.preventDefault(); void save(); } }} /> : <CodeBlock className="m-4 min-h-0 flex-1"><CodeBlockHeader><CodeBlockTitle>{preview.path.split('/').pop()}</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton value={preview.text} /></CodeBlockActions></CodeBlockHeader><CodeBlockContent lineNumbers className="min-h-0 flex-1">{preview.text}</CodeBlockContent></CodeBlock> : <Empty className="flex-1"><EmptyHeader><EmptyMedia variant="icon"><FileText /></EmptyMedia><EmptyTitle>选择文件查看内容</EmptyTitle><EmptyDescription>{mobile ? '打开文件目录，选择文件进行预览或编辑。' : '在左侧文件树中点击任意文件。'}</EmptyDescription></EmptyHeader></Empty>}
-      <div className="flex flex-wrap items-center gap-3 border-t px-4 py-2 text-xs text-muted-foreground"><span>UTF-8</span>{preview && <><span>{preview.path.split('.').pop()?.toUpperCase()}</span><span>{(editing ? draft : preview.text).split('\n').length} 行</span>{editing && draft !== preview.text && <Badge variant="secondary">未保存</Badge>}</>}</div>
+      {material ? <Suspense fallback={<Spinner />}><MaterialViewer key={material.id} material={material} onUse={onUseMaterial} /></Suspense> : preview ? editing ? <Textarea ref={editRef} aria-label={`编辑 ${preview.path}`} className="m-4 min-h-0 w-auto flex-1 resize-none font-mono" value={draft} spellCheck={false} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === 's') { event.preventDefault(); void save(); } }} /> : <CodeBlock className="m-4 min-h-0 flex-1"><CodeBlockHeader><CodeBlockTitle>{preview.path.split('/').pop()}</CodeBlockTitle><CodeBlockActions><CodeBlockCopyButton value={preview.text} /></CodeBlockActions></CodeBlockHeader><CodeBlockContent lineNumbers className="min-h-0 flex-1">{preview.text}</CodeBlockContent></CodeBlock> : <Empty className="flex-1"><EmptyHeader><EmptyMedia variant="icon"><FileText /></EmptyMedia><EmptyTitle>选择文件查看内容</EmptyTitle><EmptyDescription>{mobile ? '打开文件目录，选择文件进行预览或编辑。' : '在左侧文件树中点击任意文件。'}</EmptyDescription></EmptyHeader></Empty>}
+      <div className="flex flex-wrap items-center gap-3 border-t px-4 py-2 text-xs text-muted-foreground"><span>{material ? '文件版本已记录' : 'UTF-8'}</span>{preview && !material && <><span>{preview.path.split('.').pop()?.toUpperCase()}</span><span>{(editing ? draft : preview.text).split('\n').length} 行</span>{editing && draft !== preview.text && <Badge variant="secondary">未保存</Badge>}</>}</div>
     </div>
   );
   return (

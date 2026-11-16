@@ -50,8 +50,8 @@ test('短问答由持久任务事件完成，回答结束与验收独立显示',
   await mockTaskEvents(page, route => route.fulfill({ body: done('短问答完成。') }));
   await sendTask(page, '介绍项目');
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('短问答完成。');
-  await expect(page.getByTestId('run-controls')).toContainText('已结束');
-  await expect(page.getByTestId('run-controls')).toContainText('结果尚未验证');
+  await expect(page.getByTestId('run-controls')).toContainText('执行完成');
+  await expect(page.getByTestId('run-controls')).toContainText('尚未验证');
   await expect(page.locator('.stream-cursor')).toHaveCount(0);
   expect(fixture.creates).toBe(1);
 });
@@ -102,9 +102,9 @@ test('中断任务只在用户操作后恢复，并从新事件游标继续', as
   const fixture = await setupTaskPage(page);
   await mockTaskEvents(page, route => route.fulfill({ body: frames([['start', { traceId: 'interrupted' }], ['error', { error: '执行轮数到达边界', kind: 'max-turns' }]]) }));
   await sendTask(page, '处理长任务');
-  await expect(page.getByRole('button', { name: '恢复任务', exact: true })).toBeVisible();
+  await expect(page.getByRole('button', { name: '继续任务', exact: true })).toBeVisible();
   const request = page.waitForRequest(request => request.url().endsWith('/resume'));
-  await page.getByRole('button', { name: '恢复任务', exact: true }).click();
+  await page.getByRole('button', { name: '继续任务', exact: true }).click();
   await request;
   await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('恢复后的答复。');
   expect(fixture.creates).toBe(1);

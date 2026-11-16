@@ -19,7 +19,12 @@
   "permissions": {
     "capabilities": {
       "persona": [
-        "ars-routing"
+        "ars-routing",
+        "academic-light"
+      ],
+      "tool": [
+        "search_papers",
+        "verify_reference"
       ]
     }
   },

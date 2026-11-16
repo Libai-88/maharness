@@ -325,7 +325,7 @@ const PROBE_DEFAULTS = [
 ];
 const PROBE_VER = 'v1';
 
-interface PsResult { code: number; stdout: string; stderr: string }
+interface PsResult { code: number; stdout: string; stderr: string; truncated?: boolean }
 
 /** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根） */
 export function runPowershell(command: string, timeoutMs: number, cwd: string, signal?: AbortSignal, isolated = false): Promise<PsResult> {
@@ -343,6 +343,7 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
     });
     let stdout = '';
     let stderr = '';
+    let truncated = false;
     let settled = false;
     let terminalError: Error | undefined;
     const cleanup = () => {
@@ -369,8 +370,8 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
       killTree();
     }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
-    ps.stdout.on('data', (d: Buffer) => { if (stdout.length < STREAM_CAP) stdout += d.toString('utf8').slice(0, STREAM_CAP - stdout.length); });
-    ps.stderr.on('data', (d: Buffer) => { if (stderr.length < STREAM_CAP) stderr += d.toString('utf8').slice(0, STREAM_CAP - stderr.length); });
+    ps.stdout.on('data', (d: Buffer) => { const text = d.toString('utf8'); truncated ||= text.length > STREAM_CAP - stdout.length; stdout += text.slice(0, Math.max(0, STREAM_CAP - stdout.length)); });
+    ps.stderr.on('data', (d: Buffer) => { const text = d.toString('utf8'); truncated ||= text.length > STREAM_CAP - stderr.length; stderr += text.slice(0, Math.max(0, STREAM_CAP - stderr.length)); });
     ps.on('error', (err) => {
       terminalError ??= err;
     });
@@ -379,7 +380,7 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
       settled = true;
       cleanup();
       if (terminalError) reject(terminalError);
-      else resolve({ code: code ?? -1, stdout, stderr });
+      else resolve({ code: code ?? -1, stdout, stderr, truncated });
     });
     if (signal?.aborted) onAbort();
   });
@@ -417,7 +418,7 @@ export default {
         sideEffect: 'irreversible',
         approval: true,
         limits: '命令超时 60s；只读命令免审批，写入/安装/删除类需用户审批',
-        output: '{stdout, stderr, exitCode}；exitCode=0 表示成功',
+        output: '{exitCode, output, truncated}；output 合并 stdout/stderr，exitCode=0 表示成功；非零退出可能已产生副作用',
         outputSchema: {
           type: 'object', required: ['exitCode', 'output', 'truncated'],
           properties: { exitCode: { type: 'integer' }, output: { type: 'string' }, truncated: { type: 'boolean' } },
@@ -467,14 +468,15 @@ export default {
 
           try {
             const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, tctx.signal, !!tctx.authorization?.frameworkChangeId);
-            const combined = (r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '')).slice(0, MAX_OUTPUT);
-            const truncated = combined.length >= MAX_OUTPUT;
+            const fullOutput = r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '');
+            const combined = fullOutput.slice(0, MAX_OUTPUT);
+            const truncated = !!r.truncated || fullOutput.length > MAX_OUTPUT;
             if (r.code === 0) {
               return { ok: true, data: { exitCode: r.code, output: combined, truncated } };
             }
-            return { ok: false, error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}` };
+            return { ok: false, error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}`, data: { exitCode: r.code, output: combined, truncated }, failure: { code: 'COMMAND_EXIT_NONZERO', retryable: false, outcome: 'unknown' } };
           } catch (err) {
-            return { ok: false, error: err instanceof Error ? err.message : String(err) };
+            return { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: tctx.signal?.aborted ? 'COMMAND_CANCELLED' : 'COMMAND_EXECUTION', retryable: false, outcome: 'unknown' } };
           }
         },
       },
@@ -549,9 +551,9 @@ export default {
     for (const action of ['start', 'output', 'wait', 'cancel'] as const) ctx.register({ kind: 'tool', tool: {
       name: `command_${action}`, version: '2.0.0', permissions: action === 'start' || action === 'cancel' ? ['process'] : [],
       sideEffect: action === 'start' || action === 'cancel' ? 'external' : 'read',
-      description: { start: '启动后台 PowerShell 命令，返回稳定命令 ID；任务取消时终止进程树。', output: '按字符范围读取后台命令完整输出与实际进程状态。', wait: '等待命令最多 10 秒；超时返回 running，不终止进程。', cancel: '取消当前任务的后台命令及进程树。' }[action],
-      parameters: { type: 'object', properties: { command: { type: 'string' }, id: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 16000 }, timeoutMs: { type: 'integer', minimum: 0, maximum: 10000 } }, required: action === 'start' ? ['command'] : ['id'] },
-      outputSchema: { type: 'object', required: ['id', 'status'], properties: { id: { type: 'string' }, status: { type: 'string' } } },
+      description: { start: '启动后台 PowerShell 命令，返回稳定命令 ID；启动成功不代表命令执行成功。任务取消时请求终止进程树。', output: '按字符范围读取后台命令输出与实际进程状态。nextOffset < length 时继续分页；outputLimited=true 表示输出达到存储上限。', wait: '等待命令最多 10 秒（默认 1 秒）；等待超时返回当前状态，不终止进程。', cancel: '请求取消当前任务的后台命令及进程树；stopping 表示尚未确认退出，继续查询状态。' }[action],
+      parameters: { type: 'object', properties: action === 'start' ? { command: { type: 'string', minLength: 1, description: '在任务工作区运行的 PowerShell 命令' } } : action === 'output' ? { id: { type: 'string' }, offset: { type: 'integer', minimum: 0, description: '字符偏移；默认 0，下一页使用 nextOffset' }, limit: { type: 'integer', minimum: 1, maximum: 16000, description: '读取字符数；默认 8000' } } : action === 'wait' ? { id: { type: 'string' }, timeoutMs: { type: 'integer', minimum: 0, maximum: 10000, description: '本次等待毫秒数；默认 1000' } } : { id: { type: 'string' } }, required: action === 'start' ? ['command'] : ['id'] },
+      outputSchema: { type: 'object', required: action === 'start' ? ['id', 'status'] : ['id', 'status', 'exitCode', 'output', 'offset', 'nextOffset', 'length', 'truncated', 'outputLimited'], properties: { id: { type: 'string' }, status: { type: 'string', enum: ['running', 'stopping', 'exited', 'cancelled', 'failed', 'interrupted'] }, ...(action === 'start' ? {} : { exitCode: { type: ['integer', 'null'] }, error: { type: 'string' }, output: { type: 'string' }, offset: { type: 'integer' }, nextOffset: { type: 'integer' }, length: { type: 'integer' }, truncated: { type: 'boolean' }, outputLimited: { type: 'boolean' } }) } },
       ...(action === 'start' ? { assessApproval: (args: unknown) => assessCommand(String((args as { command?: string }).command ?? '')) } : {}),
       async handler(args: { command?: string; id?: string; offset?: number; limit?: number; timeoutMs?: number }, tctx: ToolContext) {
         try {

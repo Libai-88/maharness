@@ -147,7 +147,7 @@ export default {
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
           const maxTurns = Math.max(1, Math.min(24, Math.floor(Number(args.maxTurns) || 12)));
           if (tctx.delegate) {
-            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT, plugins: args.plugins });
+            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT, plugins: args.plugins }, tctx.signal);
             return { ok: !result.error, ...(result.error ? { error: result.error } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }
 
@@ -307,7 +307,7 @@ export default {
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
           if (tctx.delegate) {
-            const result = await tctx.delegate({ objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`, tools: 'read', maxTurns: 8, instructions: REVIEWER_SYSTEM_PROMPT });
+            const result = await tctx.delegate({ objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`, tools: 'read', maxTurns: 8, instructions: REVIEWER_SYSTEM_PROMPT }, tctx.signal);
             const { parsed, ...review } = parseReview(result.answer);
             return { ok: !result.error && parsed, error: result.error ?? (parsed ? undefined : '审查输出不符合 JSON 契约'), data: { ...review, ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }

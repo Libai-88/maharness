@@ -2,7 +2,7 @@
 export const API_SCHEMA_VERSION = 1 as const;
 export const API_SCHEMA_HEADER = 'X-API-Schema-Version' as const;
 
-export type ApiResponseKind = 'object' | 'array' | 'sse' | 'empty';
+export type ApiResponseKind = 'object' | 'array' | 'sse' | 'empty' | 'binary';
 export type ApiJsonSchema = Record<string, unknown>;
 export interface ApiContractEntry {
   method: 'GET' | 'POST' | 'PATCH' | 'PUT' | 'DELETE';
@@ -13,6 +13,20 @@ export interface ApiContractEntry {
 }
 
 const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
+  { method: 'GET', path: '/api/items', response: 'object', description: '个人事项及关联运行' },
+  { method: 'POST', path: '/api/items', response: 'object', description: '创建个人事项' },
+  { method: 'GET', path: '/api/items/:id', response: 'object', description: '读取个人事项' },
+  { method: 'PATCH', path: '/api/items/:id', response: 'object', description: '按版本更新个人事项' },
+  { method: 'POST', path: '/api/items/:id/execute', response: 'object', description: '在专属会话执行事项' },
+  { method: 'POST', path: '/api/items/import-legacy/:id', response: 'object', description: '显式转入历史卡片' },
+  { method: 'GET', path: '/api/materials/capabilities', response: 'object', description: '文件处理与 OCR 能力状态' },
+  { method: 'PUT', path: '/api/document/ocr', response: 'object', description: '配置可选 OCR 引擎' },
+  { method: 'POST', path: '/api/materials/import', response: 'object', description: '导入受限二进制文件' },
+  { method: 'POST', path: '/api/materials/register', response: 'object', description: '登记工作区文件引用' },
+  { method: 'POST', path: '/api/materials/artifact', response: 'object', description: '登记任务产物引用' },
+  { method: 'GET', path: '/api/materials/:id', response: 'object', description: '读取文件引用' },
+  { method: 'GET', path: '/api/materials/:id/preview', response: 'object', description: '分页读取结构化文件内容' },
+  { method: 'GET', path: '/api/materials/:id/content', response: 'binary', description: '下载指定版本文件' },
   { method: 'GET', path: '/api/health', response: 'object', description: '进程存活与版本' },
   { method: 'GET', path: '/api/ready', response: 'object', description: '就绪检查' },
   { method: 'GET', path: '/api/storage', response: 'object', description: '存储容量状态' },
@@ -111,6 +125,7 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
 ];
 
 const SCHEMA_BY_ROUTE: Record<string, ApiJsonSchema> = {
+  'GET /api/materials/:id/content': { type: 'string', contentEncoding: 'binary' },
   'GET /api/health': { type: 'object', required: ['ok', 'version'], properties: { ok: { type: 'boolean' }, version: { type: 'string' } } },
   'GET /api/ready': {
     type: 'object',

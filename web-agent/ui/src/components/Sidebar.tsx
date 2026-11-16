@@ -44,7 +44,7 @@ export interface TabDef {
 
 export const BUILTIN_TABS: TabDef[] = [
   { key: 'chat', label: '会话', icon: <MessageCircle /> },
-  { key: 'runs', label: '任务', icon: <ListChecks /> },
+  { key: 'runs', label: '运行记录', icon: <ListChecks /> },
   { key: 'files', label: '文件', icon: <Folder /> },
   { key: 'plugins', label: '插件', icon: <Puzzle /> },
   { key: 'stats', label: '统计', icon: <ChartNoAxesCombined /> },

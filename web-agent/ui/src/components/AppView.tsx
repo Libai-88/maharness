@@ -1,3 +1,7 @@
+import { materialApi, type Material, type MaterialRef } from '../material-api';
+import { toast } from 'sonner';
+import RunFiles from './RunFiles';
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { RunInfo } from '../run-api';
 import RunControls from './RunControls';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
@@ -22,6 +26,7 @@ import ChatView from './ChatView';
 import TracePanel from './TracePanel';
 import PluginTabView from './PluginTabView';
 
+const MaterialViewer = lazy(() => import('./MaterialViewer'));
 const RunsView = lazy(() => import('./RunsView'));
 const FilesView = lazy(() => import('./FilesView'));
 const PluginsView = lazy(() => import('./PluginsView'));
@@ -83,7 +88,7 @@ interface Props {
   onToggleSettings: () => void;
   onSetSessionMode: (mode: string) => void;
   onSelectModel: (id: string) => void;
-  onSend: (text: string) => void;
+  onSend: (text: string, materials?: MaterialRef[]) => void;
   onStop: () => void;
   onResume: () => void;
   onApproval: (id: string, approved: boolean) => void;
@@ -110,6 +115,10 @@ export default function AppView(props: Props) {
     modelTag, pluginRunning, modeItems, pluginTabs, activePluginNav, pendingInference,
   } = props;
 
+  const [pendingFile, setPendingFile] = useState<{ material: Material; quote?: string }>();
+  const [viewing, setViewing] = useState<{ material: Material; block?: string; page?: number }>();
+  const useMaterial = (material: Material, quote?: string) => { setPendingFile({ material, quote }); setViewing(undefined); props.onActiveTabChange('chat'); };
+  useEffect(() => { const openSource = () => { const query = new URLSearchParams(location.hash.slice(1)); const id = query.get('material'); if (!id) return; void materialApi.get(id).then(material => { if (query.get('version') !== material.version) throw new Error('来源版本不匹配，请重新选择文件'); setViewing({ material, block: query.get('block') ?? undefined, page: Number(query.get('page')) || undefined }); }).catch(error => toast.error(String(error))); }; window.addEventListener('hashchange', openSource); openSource(); return () => window.removeEventListener('hashchange', openSource); }, []);
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const traceToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -207,7 +216,7 @@ export default function AppView(props: Props) {
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>
-                      {activeTab === 'runs' ? '任务' : activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
+                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
                     </BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
@@ -219,7 +228,7 @@ export default function AppView(props: Props) {
               <Button
                 variant="ghost"
                 size="icon-sm"
-                onClick={() => props.onSettingsOpenChange(false)}
+                onClick={() => props.onTab('chat')}
                 title="关闭设置"
                 aria-label="关闭设置"
               >
@@ -257,10 +266,21 @@ export default function AppView(props: Props) {
                 </Button>
               </>
             ) : (
-              <Badge variant="outline" title={liveState === 'down' ? sys.offline : '与后端的实时事件通道正常'}>
-                <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
-                {liveState === 'down' ? '重连中' : '实时'}
-              </Badge>
+              <>
+                <Badge variant="outline" title={liveState === 'down' ? sys.offline : '与后端的实时事件通道正常'}>
+                  <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
+                  {liveState === 'down' ? '重连中' : '实时'}
+                </Badge>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  onClick={() => props.onTab('chat')}
+                  title="关闭页面，返回会话"
+                  aria-label="关闭页面，返回会话"
+                >
+                  <X />
+                </Button>
+              </>
             )}
           </div>
         </header>
@@ -284,7 +304,9 @@ export default function AppView(props: Props) {
                 <div className="flex min-h-0 flex-1">
                   <div className="flex min-w-0 flex-1 flex-col">
                     <ChatView
-                      runControls={props.currentRun && <RunControls key={props.currentRun.id} run={props.currentRun} onChanged={props.onRunChanged} onResume={props.onResume} onNew={props.onNewTask} />}
+                      initialMaterial={pendingFile}
+                      onMaterialAttached={() => setPendingFile(undefined)}
+                      runControls={<>{props.currentRun && <RunControls key={props.currentRun.id} run={props.currentRun} onChanged={props.onRunChanged} onResume={props.onResume} onNew={props.onNewTask} />}<RunFiles sessionId={activeId ?? undefined} revision={props.currentRun?.updatedAt} onOpen={material => setViewing({ material })} />{props.currentRun?.materials?.length ? <div className="flex flex-wrap gap-2 px-4 py-2">{props.currentRun.materials.map(material => <Button key={material.id} variant="ghost" size="sm" onClick={() => setViewing({ material })}>{material.name}</Button>)}</div> : null}</>}
                       messages={messages}
                       streaming={streaming}
                       onSend={props.onSend}
@@ -347,11 +369,11 @@ export default function AppView(props: Props) {
               ) : activeTab === 'runs' ? (
                 <RunsView onSession={id => { props.onSelectSession(id); props.onActiveTabChange('chat'); }} />
               ) : activeTab === 'files' ? (
-                <FilesView onFrameworkTask={props.onFrameworkTask} />
+                <FilesView onFrameworkTask={props.onFrameworkTask} onUseMaterial={useMaterial} />
               ) : activeTab === 'plugins' ? (
                 <PluginsView plugins={plugins} diagnostics={pluginDiagnostics} onAction={props.onPluginAction} />
               ) : activePluginNav ? (
-                <PluginTabView key={activePluginNav.key} item={activePluginNav} />
+                <PluginTabView key={activePluginNav.key} item={activePluginNav} onSelectSession={props.onSelectSession} />
               ) : (
                 <StatsView />
               )}
@@ -359,6 +381,7 @@ export default function AppView(props: Props) {
         </Suspense>
       </SidebarInset>
 
+      <Dialog open={Boolean(viewing)} onOpenChange={open => { if (!open) { setViewing(undefined); history.replaceState(null, '', location.pathname + location.search); } }}><DialogContent className="flex h-[90dvh] max-w-5xl flex-col sm:max-w-5xl"><DialogHeader><DialogTitle>{viewing?.material.name ?? '文件预览'}</DialogTitle></DialogHeader>{viewing && <Suspense fallback={<Spinner />}><MaterialViewer material={viewing.material} focusBlock={viewing.block} page={viewing.page} onUse={useMaterial} /></Suspense>}</DialogContent></Dialog>
       <Toaster
         theme={theme}
         position="bottom-right"

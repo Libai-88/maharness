@@ -36,6 +36,7 @@ import { validateAgainstSchema } from './validate';
 import { reviewPluginRuntimeSource } from './plugin-review';
 import { pluginLockEntryOf, readPluginLock, verifyPluginLock } from './plugin-lock';
 import { ProcessPluginHost } from './plugin-process';
+import { capabilityName } from './capability-identity';
 import type {
   Capability, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike, ToolDef,
 } from './types';
@@ -109,19 +110,6 @@ function validateManifestCompatibility(manifest: PluginManifest): void {
   }
 }
 
-function capabilityName(cap: Capability): string {
-  switch (cap.kind) {
-    case 'tool': return cap.tool.name;
-    case 'listener': return cap.event;
-    case 'command': return cap.command.name;
-    case 'provider': return cap.provider.id;
-    case 'service': return cap.service.id;
-    case 'persona': return cap.persona.id;
-    case 'context': return cap.context.id;
-    case 'role': return cap.role.id;
-    case 'api': return cap.api.mount;
-  }
-}
 
 function validatePermissions(manifest: PluginManifest): void {
   if (manifest.permissions === undefined) throw new Error(`插件 ${manifest.id} 必须声明 permissions.capabilities`);

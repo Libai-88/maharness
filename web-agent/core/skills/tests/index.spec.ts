@@ -82,7 +82,7 @@ describe('技能契约索引', () => {
     };
     skillsPlugin.onLoad(ctx as never);
     const builtin = service?.list().filter((s) => s.source === 'builtin') ?? [];
-    assert.equal(builtin.length, 5);
+    assert.equal(builtin.length, 9);
     assert.ok(builtin.every((s) => !s.contractWarnings), JSON.stringify(builtin));
     skillsPlugin.onStop?.();
   });

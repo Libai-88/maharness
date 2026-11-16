@@ -27,7 +27,7 @@ describe('API-01 v1 contract registry', () => {
     const { readFile } = await import('node:fs/promises');
     const routeFiles = [
       '../routes/index.ts', '../routes/approvals.ts', '../routes/chat.ts', '../routes/commands.ts',
-      '../routes/config.ts', '../routes/evolve.ts', '../routes/files.ts', '../routes/git.ts',
+      '../routes/items.ts', '../routes/config.ts', '../routes/evolve.ts', '../routes/files.ts', '../routes/git.ts', '../routes/materials.ts',
       '../routes/personas.ts', '../routes/plugins.ts', '../routes/providers.ts', '../routes/rules.ts',
       '../routes/sessions.ts', '../routes/skills.ts', '../routes/stats.ts', '../routes/trace.ts',
       '../routes/workspaces.ts',

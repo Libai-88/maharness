@@ -41,12 +41,13 @@ function Navigation({ view, navigate, search }: { view: string; navigate: (view:
   return <Sidebar collapsible="icon">
     <SidebarHeader><SidebarMenu><SidebarMenuItem><SidebarMenuButton size="lg" onClick={() => navigate('focus')} tooltip={L('办公工作台', 'Workbench')}><BriefcaseBusiness /><span className="font-medium">{L('办公工作台', 'Workbench')}</span></SidebarMenuButton></SidebarMenuItem><SidebarMenuItem><SidebarMenuButton onClick={search} tooltip={L('搜索', 'Search')}><Search /><span>{L('搜索', 'Search')}</span><Kbd className="ml-auto">⌘ K</Kbd></SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarHeader>
     <SidebarContent><SidebarGroup><SidebarGroupContent><SidebarMenu>{navigation.map(item => <SidebarMenuItem key={item.id}><SidebarMenuButton isActive={view === item.id} onClick={() => { navigate(item.id); setOpenMobile(false); }} tooltip={item.title}><item.icon /><span>{item.title}</span></SidebarMenuButton></SidebarMenuItem>)}</SidebarMenu></SidebarGroupContent></SidebarGroup></SidebarContent>
-    <SidebarFooter><SidebarMenu><SidebarMenuItem><SidebarMenuButton onClick={() => { navigate('backup'); setOpenMobile(false); }} tooltip={connection.name || L('浏览器存储', 'Browser storage')}><Database /><span>{connection.active ? connection.name : connection.denied ? L('同步需授权', 'Reconnect folder') : L('浏览器存储', 'Browser storage')}</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarFooter><SidebarRail />
+    <SidebarFooter><SidebarMenu><SidebarMenuItem><SidebarMenuButton onClick={() => { navigate('backup'); setOpenMobile(false); }} tooltip={connection.name || L('浏览器存储', 'Browser storage')}><Database /><span>{connection.active ? connection.name : L('存储未连接', 'Storage disconnected')}</span></SidebarMenuButton></SidebarMenuItem></SidebarMenu></SidebarFooter><SidebarRail />
   </Sidebar>;
 }
 interface Clock { end: number; phase: 'work' | 'break'; task: string }
 export default function Workbench() {
-  const { data, connection } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const { data: storedData, connection } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const data = { ...storedData, tasks: storedData.tasks.filter(task => task.lifecycle !== 'archived') };
   const [view, setView] = useState('focus'), [prefs, setPreferences] = useState(readPreferences);
   const [editor, setEditor] = useState<Editor | null>(null), [search, setSearch] = useState(false), [help, setHelp] = useState(false), [pomoOpen, setPomoOpen] = useState(false);
   const [confirmation, setConfirmation] = useState<{ title: string; description: string; action: () => void } | null>(null);

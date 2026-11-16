@@ -10,8 +10,10 @@ import type { RunRecord } from '../../kernel/run';
 import type { Capability, KernelLike, PluginManifest, ToolDef, ToolResult, ToolContext, LLMMessage } from '../../kernel/types';
 import { callModel } from '../../kernel/model-call';
 import { taskPluginSDK } from './sdk';
+import { taskPluginExamples } from './examples';
 import type { TaskPluginBinding, TaskPluginPersistence, TaskPluginService, TaskPluginSession } from '../../kernel/task-plugins';
 import { pluginFilePath } from '../../kernel/plugin-files';
+import { capabilityName, CAPABILITY_IDENTIFIERS } from '../../kernel/capability-identity';
 
 const kinds = ['tool', 'service', 'context', 'listener', 'command', 'role', 'provider', 'persona', 'api'];
 const reserved = /^(service:)?(runner|chat|task-plugins|authorization|approvals?|secrets?|budget|cache|trace|runs?|persistence|model-call|scheduler|provider-gateway|tool-executor|config)$/;
@@ -54,13 +56,31 @@ class Session implements TaskPluginSession {
   private closed = false;
   private disposal?: Promise<void>;
   private chain: Promise<unknown> = Promise.resolve();
+  private calls = new Map<PluginLoader, Set<Promise<unknown>>>();
   private readonly config: Config;
   constructor(private kernel: KernelLike, private run: RunRecord, private store: TaskPluginPersistence, private onClose: () => void) {
     this.bindings = store.get(run.id);
     this.config = new Config(this.bus, { 'sandboxRoot': run.authorization.workspace, 'plugins.allowedDependencies': run.authorization.pluginDevelopment?.dependencies ?? [] });
   }
   revision() { return this.version; }
-  async boundary(): Promise<void> { const retired = this.retired.splice(0); for (const loader of retired) await loader.dispose(); }
+  async boundary(): Promise<void> {
+    const retired = this.retired.splice(0);
+    for (const loader of retired) {
+      if (this.calls.get(loader)?.size) this.retired.push(loader);
+      else await loader.dispose();
+    }
+  }
+  private using<T>(loaders: PluginLoader[], fn: () => Promise<T>): Promise<T> {
+    if (this.closed) return Promise.reject(new Error('PLUGIN_SESSION_CLOSED'));
+    const call = Promise.resolve().then(fn).finally(() => {
+      for (const loader of loaders) { const calls = this.calls.get(loader); calls?.delete(call); if (!calls?.size) this.calls.delete(loader); }
+    });
+    for (const loader of loaders) { const calls = this.calls.get(loader) ?? new Set(); calls.add(call); this.calls.set(loader, calls); }
+    return call;
+  }
+  private registrations(loader: PluginLoader) {
+    return (Object.keys(CAPABILITY_IDENTIFIERS) as Capability['kind'][]).flatMap(kind => loader.capabilities(kind).map(cap => ({ kind, name: capabilityName(cap) })));
+  }
   private event(type: string, data: Record<string, unknown>) { this.store.event(this.run.id, type, { ...data, revision: this.version }); }
   private persist() { this.store.put(this.run.id, this.bindings); }
   private assertGrant(manifest?: PluginManifest) {
@@ -117,7 +137,14 @@ class Session implements TaskPluginSession {
     const { default: ts } = await import('typescript');
     const program = ts.createProgram(Object.keys(binding.files).filter(name => /\.[cm]?tsx?$/.test(name)).map(name => join(directory, name)), { noEmit: true, strict: true, skipLibCheck: true, target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler, allowImportingTsExtensions: true, esModuleInterop: true });
     const diagnostics = ts.getPreEmitDiagnostics(program).filter(item => item.category === ts.DiagnosticCategory.Error && item.file && !relative(directory, item.file.fileName).startsWith('..'));
-    if (diagnostics.length) throw new Error('PLUGIN_TYPE_ERROR: ' + diagnostics.map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')).join('\n').slice(0, 8000));
+    if (diagnostics.length) {
+      const error = new Error('PLUGIN_TYPE_ERROR: ' + diagnostics.map(item => ts.flattenDiagnosticMessageText(item.messageText, '\n')).join('\n').slice(0, 8000));
+      Object.assign(error, { diagnostics: diagnostics.slice(0, 30).map(item => {
+        const position = item.file?.getLineAndCharacterOfPosition(item.start ?? 0);
+        return { stage: 'types', code: item.code, file: item.file ? relative(directory, item.file.fileName).replaceAll('\\', '/') : undefined, line: position ? position.line + 1 : undefined, column: position ? position.character + 1 : undefined, message: ts.flattenDiagnosticMessageText(item.messageText, '\n') };
+      }) });
+      throw error;
+    }
     const dependencies = new Set<string>();
     const collect = (id: string) => { if (dependencies.has(id)) return; dependencies.add(id); for (const dep of this.active.get(id)?.binding.manifest.requires ?? []) collect(dep); };
     for (const dep of binding.manifest.requires ?? []) collect(dep);
@@ -172,17 +199,28 @@ class Session implements TaskPluginSession {
     } catch (error) { await loader.dispose(); throw error; }
   }
   tools(): ToolDef[] {
-    return [...this.capabilities('tool').map(cap => cap.tool), ...this.lifecycleTools()];
+    const dependencies = [...this.active.values()].map(item => item.loader);
+    return [...[...this.active.values()].flatMap(({ loader, binding }) => loader.capabilities('tool').map(({ tool }) => ({ ...tool,
+      discovery: { ...tool.discovery, pluginId: binding.id, pluginVersion: binding.version },
+      handler: (args: unknown, ctx: ToolContext) => this.using(dependencies, () => tool.handler(args, ctx)),
+    }))), ...this.lifecycleTools()];
   }
   private lifecycleTools(): ToolDef[] {
     const tool = (name: string, description: string, properties: Record<string, unknown>, required: string[], handler: (args: any, ctx: ToolContext) => Promise<ToolResult>, read = false): ToolDef => ({
       name, description, version: '2.0.0', permissions: read ? ['workspace.read'] : ['workspace.read', 'workspace.write'], sideEffect: read ? 'read' : 'write',
       parameters: { type: 'object', properties, required }, outputSchema: { type: 'object' },
-      handler: (args, ctx) => this.locked(async () => { try { if (!read) this.assertGrant(); return await handler(args, ctx); } catch (error) { const message = error instanceof Error ? error.message : String(error); return failure(/^[A-Z_]+/.exec(message)?.[0] ?? 'PLUGIN_OPERATION_FAILED', message); } }),
+      handler: (args, ctx) => {
+        const execute = async () => {
+          try { if (this.closed) throw new Error('PLUGIN_SESSION_CLOSED'); if (ctx.signal?.aborted) return failure('PLUGIN_CALL_CANCELLED', '调用已取消'); if (!read) this.assertGrant(); return await handler(args, ctx); }
+          catch (error) { const message = error instanceof Error ? error.message : String(error); return failure(/^[A-Z_]+/.exec(message)?.[0] ?? 'PLUGIN_OPERATION_FAILED', message, name === 'invoke_plugin' ? 'unknown' : 'not_started'); }
+        };
+        return name === 'invoke_plugin' ? this.using([...this.active.values()].map(item => item.loader), execute) : read ? execute() : this.locked(execute);
+      },
     });
     const id = { type: 'string', pattern: '^[a-z0-9][a-z0-9-]{0,31}$' };
     return [
-      tool('plugin_status', '查看任务和工作区插件、版本、能力与开发授权。sdk=true 读取编写接口和完整最小示例；id/path 读取插件源码。均支持 offset/limit 字符范围。', { sdk: { type: 'boolean' }, id, path: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 16000 } }, [], async args => {
+      tool('plugin_status', '查看任务和工作区插件、版本、能力与开发授权。sdk=true 读取编写接口和完整最小示例；id/path 读取插件源码。均支持 offset/limit 字符范围。', { sdk: { type: 'boolean' }, example: { type: 'string', enum: taskPluginExamples.map(item => item.id), description: '读取单类完整可编译示例及 manifest' }, id, path: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 16000 } }, [], async args => {
+        if (args.example) { const example = taskPluginExamples.find(item => item.id === args.example); return example ? { ok: true, data: example } : failure('PLUGIN_EXAMPLE_NOT_FOUND', '示例不存在'); }
         if (args.sdk) { const offset = args.offset ?? 0, limit = args.limit ?? 8000; return { ok: true, data: { content: taskPluginSDK.slice(offset, offset + limit), total: taskPluginSDK.length, nextOffset: offset + limit < taskPluginSDK.length ? offset + limit : undefined } }; }
         const saved = this.store.workspace(this.run.tenantId, this.run.authorization.workspace);
         if (args.path) {
@@ -192,25 +230,29 @@ class Session implements TaskPluginSession {
           const offset = args.offset ?? 0, limit = args.limit ?? 4000;
           return { ok: true, data: { id: binding!.id, hash: binding!.hash, path: args.path, content: content.slice(offset, offset + limit), total: content.length, nextOffset: offset + limit < content.length ? offset + limit : undefined } };
         }
-        return { ok: true, data: { revision: this.version, sdk: { tool: 'plugin_status', args: { sdk: true } }, grant: this.run.authorization.pluginDevelopment, plugins: this.bindings.map(({ files, ...binding }) => ({ ...binding, files: Object.keys(files) })), available: saved.map(({ files, ...binding }) => ({ ...binding, files: Object.keys(files) })) } };
+        return { ok: true, data: { revision: this.version, sdk: { tool: 'plugin_status', args: { sdk: true } }, examples: taskPluginExamples.map(({ id, kind, name }) => ({ id, kind, name })), registered: [...this.active].map(([id, item]) => ({ id, capabilities: this.registrations(item.loader) })), grant: this.run.authorization.pluginDevelopment, plugins: this.bindings.map(({ files, ...binding }) => ({ ...binding, files: Object.keys(files) })), available: saved.map(({ files, ...binding }) => ({ ...binding, files: Object.keys(files) })) } };
       }, true),
       { ...tool('invoke_plugin', '显式调用任务插件的 command、role 或 provider。role 创建子任务；provider 仅执行本次请求，不改变当前模型。服务与事件在插件中通过 ctx.inject/ctx.on/ctx.bus 组合。', {
-        kind: { type: 'string', enum: ['command', 'role', 'provider'] }, name: { type: 'string' }, args: { type: 'array', items: { type: 'string' } }, objective: { type: 'string' }, model: { type: 'string' }, messages: { type: 'array', items: { type: 'object', properties: { role: { type: 'string', enum: ['user', 'assistant'] }, content: { type: 'string' } }, required: ['role', 'content'], additionalProperties: false } }, maxTokens: { type: 'integer', minimum: 1, maximum: 8192 },
+        kind: { type: 'string', enum: ['command', 'role', 'provider'] }, name: { type: 'string', minLength: 1 }, args: { type: 'array', items: { type: 'string' } }, objective: { type: 'string', minLength: 1, description: 'kind=role 时必填：子任务目标' }, model: { type: 'string', minLength: 1, description: 'kind=provider 时必填：模型 ID' }, messages: { type: 'array', minItems: 1, description: 'kind=provider 时必填：本次请求消息', items: { type: 'object', properties: { role: { type: 'string', enum: ['user', 'assistant'] }, content: { type: 'string' } }, required: ['role', 'content'], additionalProperties: false } }, maxTokens: { type: 'integer', minimum: 1, maximum: 8192 },
       }, ['kind', 'name'], async (args, ctx) => {
         if (args.kind === 'command') {
           const command = this.capabilities('command').find(cap => cap.command.name === args.name)?.command;
           if (!command) return failure('PLUGIN_CAPABILITY_NOT_FOUND', '命令不存在');
-          return { ok: true, data: { output: await command.handler(args.args ?? []) } };
+          return { ok: true, data: { output: await command.handler(args.args ?? [], { signal: ctx.signal }) } };
         }
         if (args.kind === 'role') {
           if (!this.run.authorization.pluginDevelopment?.permissions.includes('delegate')) return failure('PLUGIN_PERMISSION_NOT_AUTHORIZED', '插件开发授权不包含委派');
           const role = this.capabilities('role').find(cap => cap.role.id === args.name)?.role;
-          if (!role || !args.objective || !ctx.delegate) return failure('PLUGIN_CAPABILITY_NOT_FOUND', '角色、目标或委派服务不可用');
-          return { ok: true, data: await ctx.delegate({ objective: args.objective, instructions: role.systemPrompt, tools: role.tools === 'all' ? 'all' : 'read' }) };
+          if (typeof args.objective !== 'string' || !args.objective.trim()) return failure('PLUGIN_ARGS_INVALID', 'role 调用必须提供非空 objective');
+          if (!role) return failure('PLUGIN_CAPABILITY_NOT_FOUND', '角色不存在');
+          if (!ctx.delegate) return failure('PLUGIN_SERVICE_UNAVAILABLE', '委派服务不可用');
+          const result = await ctx.delegate({ objective: args.objective, instructions: role.systemPrompt, tools: role.tools === 'all' ? 'all' : 'read' }, ctx.signal);
+          return result.error || result.cancelled ? { ...failure(result.cancelled ? 'PLUGIN_CHILD_CANCELLED' : 'PLUGIN_CHILD_FAILED', result.error ?? '子任务已取消', 'unknown'), data: result } : { ok: true, data: result };
         }
         const provider = this.capabilities('provider').find(cap => cap.provider.id === args.name)?.provider;
         if (!this.run.authorization.pluginDevelopment?.permissions.includes('network')) return failure('PLUGIN_PERMISSION_NOT_AUTHORIZED', '插件开发授权不包含模型网络请求');
-        if (!provider || !args.model || !args.messages?.length) return failure('PLUGIN_CAPABILITY_NOT_FOUND', '供应商、模型或输入不可用');
+        if (typeof args.model !== 'string' || !args.model.trim() || !Array.isArray(args.messages) || !args.messages.length) return failure('PLUGIN_ARGS_INVALID', 'provider 调用必须提供 model 和非空 messages');
+        if (!provider) return failure('PLUGIN_CAPABILITY_NOT_FOUND', '供应商不存在');
         let content = ''; let usage: { input: number; output: number } | undefined;
         for await (const chunk of callModel(provider, args.messages as LLMMessage[], { model: args.model, maxTokens: args.maxTokens ?? 2048, signal: ctx.signal })) {
           if (chunk.type === 'delta') content += chunk.text;
@@ -218,8 +260,11 @@ class Session implements TaskPluginSession {
           if (chunk.type === 'tool_call') return failure('PLUGIN_PROVIDER_TOOL_CALL_UNSUPPORTED', '此显式请求未授予工具，供应商返回了工具调用');
         }
         return { ok: true, data: { content, usage } };
-      }), delegates: true, timeoutMs: 240_000 },
-      tool('create_plugin', '创建或更新任务插件候选版本。source 为默认导出 {id,name,version,onLoad(ctx)} 的完整 TypeScript，或传 files 和 v2 manifest。plugin_status({sdk:true}) 提供接口与示例；enable_plugin 验证并激活。', { id, name: { type: 'string' }, source: { type: 'string' }, files: { type: 'object', additionalProperties: { type: 'string' } }, manifest: { type: 'object' } }, ['id'], async args => {
+      }), delegates: true, timeoutMs: 240_000, executionTimeoutMs: args => {
+        const call = args as { kind: string; name: string };
+        return call.kind === 'command' ? this.capabilities('command').find(cap => cap.command.name === call.name)?.command.timeoutMs ?? 30_000 : 240_000;
+      } },
+      tool('create_plugin', '创建或更新任务插件候选版本。source 为默认导出 {id,name,version,onLoad(ctx)} 的完整 TypeScript，或传 files 和 v2 manifest。plugin_status({sdk:true}) 提供接口，plugin_status({example:"tool"}) 提供完整示例；enable_plugin 验证并激活。', { id, name: { type: 'string' }, source: { type: 'string' }, files: { type: 'object', additionalProperties: { type: 'string' } }, manifest: { type: 'object' } }, ['id'], async args => {
         if (!validId.test(args.id)) throw new Error('PLUGIN_ID_INVALID');
         const files: Record<string, string> = args.files ?? (typeof args.source === 'string' ? { 'index.ts': args.source } : {});
         if (!Object.keys(files).length || Object.values(files).some(content => typeof content !== 'string') || JSON.stringify(files).length > 500_000) throw new Error('PLUGIN_FILES_INVALID');
@@ -236,7 +281,7 @@ class Session implements TaskPluginSession {
               specifier = node.arguments[0].text;
             }
             if (specifier?.startsWith('.') || specifier?.startsWith('/') || specifier?.includes('\\')) {
-              const sdkType = typeOnly && /^\.\.\/\.\.\/kernel\/(types|loop|run|task-plugins)(\.ts)?$/.test(specifier!);
+              const sdkType = typeOnly && /^\.\.\/\.\.\/kernel\/(plugin-sdk|types|loop|run|task-plugins)(\.ts)?$/.test(specifier!);
               const local = relative(resolve('/plugin'), resolve('/plugin', dirname(name), specifier!)).replaceAll('\\', '/');
               if (!sdkType && (local.startsWith('..') || ![local, local + '.ts', local + '.js', local + '/index.ts'].some(path => path in files))) throw new Error('PLUGIN_IMPORT_PATH_NOT_ALLOWED: ' + specifier);
             }
@@ -246,6 +291,7 @@ class Session implements TaskPluginSession {
         }
         const review = reviewPluginSource(Object.values(files).join('\n'), undefined, { allowedDependencies: this.run.authorization.pluginDevelopment!.dependencies });
         if (!review.ok) throw new Error('PLUGIN_SOURCE_REJECTED: ' + review.issues.map(item => item.message).join('; '));
+        if (!args.manifest && !review.capabilityInferenceComplete) throw new Error('PLUGIN_MANIFEST_REQUIRED: 动态能力声明需要显式 manifest；能力授权不会自动推断');
         const permissions: Record<string, string[]> = {};
         for (const cap of review.capabilities) (permissions[cap.kind] ??= []).push(cap.name);
         const manifest: PluginManifest = args.manifest ?? { apiVersion: 2, id: args.id, name: args.name ?? args.id, version: '0.1.0', entry: 'index.ts', permissions: { capabilities: permissions, dependencies: review.dependencies } };
@@ -270,9 +316,9 @@ class Session implements TaskPluginSession {
         }
         if (!binding) throw new Error('PLUGIN_VERSION_NOT_FOUND');
         if (this.active.get(binding.id)?.binding.hash === binding.hash) return { ok: true, data: { id: binding.id, hash: binding.hash, state: 'active' } };
-        try { await this.activate(binding); } catch (error) { binding.state = 'error'; binding.error = String(error); this.persist(); this.event('plugin_error', { id: binding.id, hash: binding.hash, error: binding.error }); return failure('PLUGIN_ACTIVATION_FAILED', binding.error, /PLUGIN_(TYPE_ERROR|DEPENDENCY_|PERMISSION_|VERSION_|DEVELOPMENT_|FILE_PATH)/.test(binding.error) ? 'not_started' : 'unknown'); }
+        try { await this.activate(binding); } catch (error) { binding.state = 'error'; binding.error = String(error); this.persist(); this.event('plugin_error', { id: binding.id, hash: binding.hash, error: binding.error }); return { ...failure('PLUGIN_ACTIVATION_FAILED', binding.error, /PLUGIN_(TYPE_ERROR|DEPENDENCY_|PERMISSION_|VERSION_|DEVELOPMENT_|FILE_PATH)/.test(binding.error) ? 'not_started' : 'unknown'), data: { diagnostics: (error as { diagnostics?: unknown }).diagnostics ?? [{ stage: 'activation', code: /^[A-Z_]+/.exec(error instanceof Error ? error.message : String(error))?.[0] ?? 'PLUGIN_ACTIVATION_FAILED', message: binding.error }] } }; }
         this.bindings = this.bindings.filter(item => item.id !== binding!.id || item.hash === binding!.hash); this.persist();
-        return { ok: true, data: { id: binding.id, hash: binding.hash, state: binding.state, revision: this.version, capabilities: this.active.get(binding.id)!.loader.list().map(item => item.manifest.permissions.capabilities) } };
+        return { ok: true, data: { id: binding.id, hash: binding.hash, state: binding.state, revision: this.version, capabilities: this.active.get(binding.id)!.loader.list().map(item => item.manifest.permissions.capabilities), registered: this.registrations(this.active.get(binding.id)!.loader) } };
       }),
       tool('disable_plugin', '释放当前任务的插件能力；已发出的调用保留原版本。', { id }, ['id'], async args => {
         if ([...this.active.values()].some(item => item.binding.manifest.requires?.includes(args.id))) throw new Error('PLUGIN_HAS_ACTIVE_DEPENDENTS');
@@ -285,6 +331,7 @@ class Session implements TaskPluginSession {
   dispose(): Promise<void> { return this.disposal ??= this.close(); }
   private async close(): Promise<void> {
     this.closed = true; await this.chain;
+    await Promise.allSettled([...this.calls.values()].flatMap(calls => [...calls]));
     for (const { loader } of [...this.active.values()].reverse()) await loader.dispose();
     for (const loader of this.retired) await loader.dispose();
     this.active.clear(); this.retired = []; this.onClose();

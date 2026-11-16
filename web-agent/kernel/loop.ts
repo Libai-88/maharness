@@ -66,7 +66,7 @@ export type AgentEvent =
    *  reason 让人话提示能对上现实：同线路重试 / 换线路 / 叙述化纠偏，三者观感不同。 */
   | { type: 'retry'; reason: 'attempt' | 'failover' | 'narration'; detail?: string }
   /** kind 让前端能区分"用户自己按了停止"与"真出错了"——aborted 不该画成红色报错 */
-  | { type: 'error'; error: string; kind?: 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'auth' | 'parameter' | 'business' | 'transient' };
+  | { type: 'error'; error: string; code?: string; stage?: string; kind?: 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'auth' | 'parameter' | 'business' | 'transient' };
 
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
@@ -79,7 +79,7 @@ export interface RunOptions {
   runId?: string;
   modelCallsManaged?: boolean;
   toolJournal?: import('./tool-journal').ToolExecutionJournal;
-  delegate?: (request: import('./run').ChildRunRequest) => Promise<import('./run').ChildRunResult>;
+  delegate?: (request: import('./run').ChildRunRequest, signal?: AbortSignal) => Promise<import('./run').ChildRunResult>;
   acquireExecution?: (signal?: AbortSignal) => Promise<() => void>;
   availableBudget?: () => number | undefined;
   historyArchive?: { save?(messages: LLMMessage[]): void; search(query: string, offset?: number, limit?: number): unknown[]; read(id: string, offset?: number, limit?: number): import('./tool-journal').ToolResultPage | undefined };
@@ -95,6 +95,7 @@ export interface RunOptions {
   /** 本逻辑任务在已完成 checkpoint 轮次的累计费用；不计入本次 run 账单。 */
   restoredCostUsd?: number;
   restoredEnabledTools?: string[];
+  restoredReleasedTools?: string[];
   provider: ProviderDef;
   model: string;
   messages: LLMMessage[];    // 会话历史（含最新用户消息）
@@ -149,7 +150,7 @@ export interface RunOptions {
   onCheckpoint?: (
     turn: number,
     history: LLMMessage[],
-    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[] },
+    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[] },
     step?: {
       phase: 'turn_end' | 'tool_pending';
       pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string; effectKey?: string; resultId?: string };

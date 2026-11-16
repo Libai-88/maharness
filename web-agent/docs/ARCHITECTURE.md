@@ -44,7 +44,7 @@ React 界面 / HTTP API
 
 任务插件支持 tool、service、context、listener、command、role、provider、persona、api。注册表、服务解析、事件、配置和私有存储按任务隔离。服务可通过 ctx.inject 组合；依赖用 manifest.requires 声明并按活动版本拓扑加载。子任务只继承明确选择的插件及其依赖闭包，并拥有独立实例。
 
-TaskPlugins 通过 kernel/task-plugins.ts 的持久化适配器保存源码与 manifest 哈希。create_plugin 创建候选；enable_plugin 执行源码、manifest、类型与独立进程试运行验证，再激活版本。验证失败保留活动旧版。替换和停用的实例在已发出批次结束后的模型边界释放。
+TaskPlugins 通过 kernel/task-plugins.ts 的持久化适配器保存源码与 manifest 哈希。create_plugin 创建候选；enable_plugin 执行源码、manifest、类型与独立进程试运行验证，再激活版本。验证失败保留活动旧版。业务调用持有能力与依赖的实例版本；替换和停用的实例在在途处理器实际结束后的模型边界释放。状态读取和业务调用不占用生命周期变更串行锁。
 
 任务结束释放实例；进程中断保留源码绑定供用户恢复。只有显式保存的 validated、active 或 stopped 版本可成为工作区插件，保存必须匹配哈希。保存源码不会自动全局安装或为未来任务启用。
 

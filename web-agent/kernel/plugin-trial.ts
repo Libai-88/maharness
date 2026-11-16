@@ -23,6 +23,7 @@ export interface PluginTrialResult {
   ok: boolean;
   state?: string;
   caps?: string[];
+  registered?: { kind: string; name: string }[];
   error?: string;
 }
 

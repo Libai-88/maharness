@@ -1,0 +1,125 @@
+# 办公与学习工作台
+
+maharness 是面向日常办公与学习的 AI 工作台，能直接处理文件、资料和轻量自动化任务，并通过插件持续扩展。底层采用 AI 原生 Agent 操作系统架构：内核管理执行、资源、权限、状态和扩展契约，文件格式与学术方法由插件和按需读取的技能提供。
+
+## 日常使用
+
+1. 在聊天输入区添加或拖入文件，也可选择当前工作区中的文件。
+2. 输入自然语言要求，例如“解释这份资料并标注来源”或“把第二段的截止日期改为下周五，另存文档”。空会话中的示例可编辑后发送。
+3. 检查任务过程、来源链接和结果文件。PDF 可跳转原页；Office 文件提供内容预览。
+4. 从结果卡片预览、下载文件，或将文件作为下一项任务的输入。
+
+默认使用当前工作区。上传副本位于 `imports/<materialId>/`，文档工具生成的文件位于 `outputs/<runId>/`。同名文件使用独立路径，不覆盖原件。轻量自动化沿用现有文件与命令工具、审批和取消机制。
+
+## 文件能力
+
+| 格式 | 读取与预览 | 交付与修改 |
+| --- | --- | --- |
+| PDF | 本地 PDF.js 原页、分页正文、检测到的表格和页来源 | 摘要、问答、提取，结果可创建为 Markdown、DOCX、XLSX |
+| DOCX | 标题、普通段落、列表文字和表格 | 创建常规文档；按内容块修改普通段落或表格中的单段文字，另存 DOCX |
+| XLSX | 工作表、非空单元格、公式和缓存值 | 创建表格；修改现有普通数值、文本、布尔和日期单元格，另存 XLSX |
+| CSV | 引号、逗号、换行单元格和行预览 | 创建、整理及按行列修改，另存 CSV |
+| PPTX | 幻灯片顺序、文本、表格、包内 PNG/JPEG 图片 | 创建基础汇报；修改普通单段文本框或表格文字，另存 PPTX |
+| Markdown / TXT / JSON / BibTeX | 文本内容预览 | Markdown 生成；其他文本沿用工作区文件工具 |
+
+单文件上限为 20 MB，单项任务最多附加 10 个文件。Office 预览为内容预览，不提供推测的 Word 页码或原版式还原。表格和正文预览有范围与长度限制，长资料按块继续读取。
+
+定点修改需要来源 SHA-256 版本、目标定位和预期原文或原值。版本变化、原文不匹配、歧义或不支持的结构会返回具体错误。域、修订、内容控件、复杂对象、合并单元格、富文本、链接及公式单元格不在定点修改范围内。可读取相关内容后创建结果文件。日期新值使用 `YYYY-MM-DD` 或 UTC ISO 时间，保留原有单元格格式。
+
+XLSX 不提供公式计算引擎；公式显示已有缓存值，修改后标记需要重算。DOC、XLS、PPT、加密包、宏和数字签名文件不支持编辑。PDF 不支持页面编辑。
+
+## 论文与学习资料
+
+四个轻量技能按任务读取：`paper-reading`、`paper-comparison`、`paper-discovery`、`reference-checking`。普通阅读和对比直接执行；系统综述、正式评审和完整研究流程使用现有 ARS 技能包。
+
+公开文献发现使用 Crossref 题录检索及现有联网搜索。DOI 核验使用 DOI 内容协商，逐字段展示标题、作者顺序、年份、期刊与 DOI 的差异。结果包含来源、检索时间和核验状态，并可导出 BibTeX。多候选需要选择，无法取得题录表示未核验；题录匹配不等于论文结论已核验。只有摘要时，判断限于摘要。检索不保证付费全文或全部数据库覆盖，本地阅读不依赖联网成功。
+
+## 可选 OCR
+
+设置中的“文件与资料处理”显示文件、联网和 OCR 状态。OCR 使用本机已有的外部引擎，不自动下载程序或模型。
+
+- 图片命令为本机可执行文件，将文本写到标准输出；参数不经过 shell 解释，`{file}` 替换为图片路径。
+- 扫描 PDF 另需页面渲染命令，`{input}` 为 PDF 路径，`{outDir}` 为临时图片目录。
+- 参数填写为 JSON 字符串数组。配置保存后，附加图片或扫描 PDF，并要求“识别这个文件中的文字”进行试识别。
+
+“已配置”表示命令配置存在，实际运行仍受本机程序、语言模型和权限影响。执行支持超时与取消，PDF 临时目录在结束后清理。
+
+## 文件与插件契约
+
+`MaterialRef` 为 `{ id, version }`。服务端登记文件的工作区、租户、相对路径、名称、格式、大小和 SHA-256。客户端引用不能指定任意读取路径；解析时重新校验工作区边界、保护路径、大小和实际内容版本。
+
+Run 创建参数可附加 `materials`。引用参与幂等指纹，保存到任务记录和检查点；恢复前重新验证。历史任务不传该字段时行为不变。数据库 schema 8 通过已有迁移备份和事务机制增加文件登记及任务关联表。
+
+| 接口 | 行为 |
+| --- | --- |
+| `POST /api/materials/import?name=文件名` | `application/octet-stream` 二进制上传 |
+| `POST /api/materials/register` | `{ path }` 登记工作区文件 |
+| `POST /api/materials/artifact` | `{ runId, artifactId }` 登记本任务的文件产物 |
+| `GET /api/materials/:id` | 读取当前工作区的登记信息 |
+| `GET /api/materials/:id/preview?version=...&offset=0&limit=60&block=...` | 读取分页内容或聚焦来源块 |
+| `GET /api/materials/:id/content?version=...` | 受控下载指定版本 |
+| `GET /api/materials/capabilities` | 文件、联网、OCR 状态和大小限制 |
+| `PUT /api/document/ocr` | 管理员保存可选 OCR 命令配置 |
+
+预览与 Agent 工具共用 `service:document`，由 `document` 插件注册。`read_document_content` 返回版本、来源锚点、范围和限制；`create_document` 接收结构化内容；`patch_document` 接收版本、定位、预期原文和新内容，返回另存文件与实际修改摘要。`read_document`、`ocr_image` 和 `ocr_pdf` 保留兼容调用。
+
+来源链接为 `#material=<id>&version=<sha256>&block=<encodedBlockId>`，PDF 可附加 `&page=2`。DOCX/PPTX 普通文字定位使用包成员及内容块序号；XLSX 使用工作表 ID 与单元格地址；CSV 修改定位为 `row:行号:列号`，均从 1 开始。来源版本变化后必须重新读取。
+
+文件产物沿用 RunArtifact，可选元数据包括 `format`、`version` 和 `sources`。文档工具先校验生成文件，再通过临时文件发布为唯一结果路径；取消或失败不登记成功产物。Office 局部修改保留未修改包成员的解压内容，不保证 ZIP 容器二进制一致。
+
+文档解析与生成通过受限并发和可终止的隔离执行器运行。PDF 原生依赖使用独立进程，其余格式使用工作线程。Office 包限制条目数、单部件和总解压体积，拒绝 XML 外部实体；预览不主动加载文档外部资源。材料正文始终是不可信资料，不能提升为系统指令。
+
+## 针对性验收
+
+```powershell
+npm run eval:workbench
+npm --prefix ui run e2e -- e2e/file-workbench.spec.ts
+npm run build
+npm run plugin:lock:verify
+npm run skill:lock:verify
+```
+
+`eval:workbench` 在 `evals/reports/workbench/` 生成八个任务的样本、确定性断言、相关测试结果与源码指纹。联网题录使用固定响应回放，模型请求数和费用为零，不代表真实模型自主执行结果。
+
+兼容 Office 应用检查可使用已有 LibreOffice：
+
+```powershell
+npx tsx scripts/workbench-office.ts <报告中的samples目录> <本机soffice可执行文件>
+```
+
+该检查打开 DOCX、XLSX、PPTX 样本并导出 PDF，核对内容，单独记录结果；基本版式通过导出页检查。自动检查、界面验收、兼容应用检查与真实模型验收分别记录。
+
+## 长文档、草稿与继续任务
+
+Markdown、DOCX、PPTX 支持按章节或幻灯片分段保存。模型可根据任务选择一次创建或使用草稿工具；用户直接描述内容与交付要求即可。
+
+成功保存的草稿有独立文件和版本，可在任务文件卡片中预览、下载。卡片区分“草稿”和“最终文件”，同一草稿默认展示最新快照。快照是不可变文件，选中旧版本继续处理时仍绑定该版本。
+
+请求超时、连接中断、输出达到上限和用户停止分别显示。输出截断的工具参数不会执行；模型可拆小参数后重新提交。连续两次截断且未保存新内容时，任务中断并保留已有草稿。
+
+“继续任务”沿用原任务的检查点、累计费用、轮数和截止时间。恢复前检查来源版本、权限及剩余额度；结果未知的写入不会自动重放。截止时间已过、轮数或预算耗尽时，可先检查和下载草稿，再明确发起新任务。用户停止后不自动恢复。
+
+草稿接口：
+
+| 工具 | 输入与结果 |
+| --- | --- |
+| `begin_document_draft` | `format`、可选 `name/title/sources`；返回 `draftId/runId/version`。`fromDraft` 接收确切的 `runId/draftId/version`，在当前任务创建独立副本。 |
+| `read_document_draft` | `draftId`、可选 `version`；默认返回内容清单。`partId` 或 `offset/limit` 按需读取正文。 |
+| `update_document_draft` | `draftId/version/operationId/parts`；新 ID 追加、已有 ID 原位替换，返回新草稿版本及下载文件。 |
+| `finalize_document_draft` | `draftId/version`；校验文件结构和来源后发布最终文件，空稿拒绝。 |
+
+Markdown 内容块为 `section`；DOCX 为 `paragraph` 或 `table`；PPTX 为 `slide`。内容块使用稳定 ID。DOCX 段落与表格保持提交顺序；幻灯片保持内容块顺序。每次更新最多 64 KiB、200 个内容块；单个草稿最多 10,000 块、状态及生成文件分别最多 20 MB。草稿快照和状态均计入存储配额。
+
+更新采用预期版本检查。相同 `operationId` 和参数重试返回已保存结果；操作 ID 对应不同参数时拒绝。状态位于 `outputs/<runId>/.drafts/<draftId>/`，下载快照和最终文件位于任务输出目录。草稿版本与文件版本分别表达：草稿工具的 `version` 为内容状态版本，产物元数据的 `version` 为文件 SHA-256，`draftVersion` 关联草稿状态。
+
+克隆保留父草稿的来源约束，新增来源与原来源合并；传入空来源列表不能解除原来源的版本校验。来源变化时，需要重新读取资料并开始新草稿。
+
+Run 的可选 `problem` 包含错误代码、阶段和操作提示。产物可选元数据包含 `status: draft/final`、`draftId`、`draftVersion`、`previousVersion` 和 `count`。历史任务与产物可以缺少这些字段。最终发布校验不等同于内容质量或人工验收通过。
+
+长内容真实模型验收：
+
+```powershell
+npm run eval:long-content:live
+```
+
+使用当前已配置模型路由执行两次长篇笔记、多章节 DOCX、十二页 PPTX 和草稿中断恢复。每项最多 24 次请求、24 轮、15 分钟；全批最多 100 次请求和 1,000,000 Token 保守计账，并受既有费用预算约束。`EVAL_CASES=11,12,13,14,15` 可选择场景，非零登记价格需要 `EVAL_BUDGET_USD`。先运行 `npm run build`；恢复场景使用已有 Playwright Chromium，在隔离本地验收服务中操作实际 Run/文件路由及构建后的界面，模型响应与文件结果不使用回放。人工验收单独记录。
