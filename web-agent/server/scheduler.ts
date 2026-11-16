@@ -1,25 +1,11 @@
 /** User-authorized scheduled recovery uses the durable task runtime. */
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { dirname } from 'node:path';
+import { existsSync, readFileSync, renameSync } from 'node:fs';
 import type { Store } from './db';
 import type { RunService } from './run-service';
 import type { AutomationService } from './automations';
+import type { ScheduleJob } from './schedule-store';
 
-export type ScheduleState = 'pending' | 'running' | 'done' | 'failed';
-
-export interface ScheduleJob {
-  id: string;
-  sessionId: string;
-  runId?: string;
-  principalRole?: 'admin' | 'member' | 'readonly';
-  tenantId: string;
-  dueAt: number;
-  state: ScheduleState;
-  attempts: number;
-  createdAt: number;
-  updatedAt: number;
-  lastError?: string;
-}
+export type { ScheduleJob, ScheduleState } from './schedule-store';
 
 interface ScheduleFile {
   version: 1;
@@ -28,26 +14,28 @@ interface ScheduleFile {
 
 const MAX_JOBS = 200;
 
-function loadJobs(file: string): ScheduleJob[] {
+function loadLegacyJobs(file?: string): ScheduleJob[] {
   try {
-    if (!existsSync(file)) return [];
+    if (!file || !existsSync(file)) return [];
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as ScheduleFile;
     if (parsed?.version !== 1 || !Array.isArray(parsed.jobs)) return [];
-    return parsed.jobs.filter((job) => job && typeof job.id === 'string' && typeof job.sessionId === 'string');
+    return parsed.jobs.filter((job) => job && typeof job.id === 'string' && typeof job.sessionId === 'string')
+      .map(job => ({
+        ...job,
+        tenantId: job.tenantId || 'default',
+        state: ['pending', 'running', 'done', 'failed'].includes(job.state) ? job.state : 'failed',
+      }));
   } catch { return []; }
 }
 
-function saveJobs(file: string, jobs: ScheduleJob[]): void {
+function archiveLegacyJobs(file?: string): void {
+  if (!file || !existsSync(file)) return;
   try {
-    mkdirSync(dirname(file), { recursive: true });
-    const tmp = `${file}.tmp`;
-    writeFileSync(tmp, JSON.stringify({ version: 1, jobs: jobs.slice(0, MAX_JOBS) }, null, 2), 'utf8');
-    renameSync(tmp, file);
-  } catch { /* 调度持久化失败不阻断主服务；下一次 tick 仍会尝试内存态作业 */ }
+    renameSync(file, `${file}.migrated`);
+  } catch { /* The database import is idempotent; a stale source file is harmless. */ }
 }
 
 export class Scheduler {
-  private jobs: ScheduleJob[];
   private timer?: NodeJS.Timeout;
   private stopped = false;
   private readonly running = new Set<string>();
@@ -62,10 +50,10 @@ export class Scheduler {
       now?: () => number;
     },
   ) {
-    this.jobs = loadJobs(opts.file);
-    for (const job of this.jobs) if (job.state === 'pending' || job.state === 'running') {
-      job.state = 'failed'; job.lastError = '服务已重启，请核对任务后手动恢复';
-    }
+    const legacy = loadLegacyJobs(opts.file);
+    for (const job of legacy) store.schedules.insert(job);
+    if (legacy.length) archiveLegacyJobs(opts.file);
+    store.schedules.failInterrupted(this.now(), '服务已重启，请核对任务后手动恢复');
   }
   attach(service: Pick<RunService, 'get' | 'resume'>): void { this.service = service; }
   attachAutomations(service: AutomationService): void { this.automations = service; }
@@ -85,9 +73,7 @@ export class Scheduler {
   }
 
   list(tenantId?: string): ScheduleJob[] {
-    return this.jobs
-      .filter((job) => !tenantId || job.tenantId === tenantId)
-      .sort((a, b) => a.dueAt - b.dueAt);
+    return this.store.schedules.list(tenantId);
   }
 
   schedule(input: { sessionId: string; tenantId: string; dueAt: number; runId?: string; principalRole?: ScheduleJob['principalRole'] }): ScheduleJob {
@@ -103,19 +89,18 @@ export class Scheduler {
       createdAt: now,
       updatedAt: now,
     };
-    this.jobs.unshift(job);
+    this.store.schedules.insert(job);
     this.prune();
-    this.persist();
     return job;
   }
 
   cancel(id: string, tenantId?: string): boolean {
-    const job = this.jobs.find((item) => item.id === id && (!tenantId || item.tenantId === tenantId));
+    const job = this.store.schedules.get(id, tenantId);
     if (!job || job.state === 'running' || job.state === 'done') return false;
     job.state = 'failed';
     job.lastError = 'cancelled';
     job.updatedAt = this.now();
-    this.persist();
+    this.store.schedules.update(job);
     return true;
   }
 
@@ -123,7 +108,7 @@ export class Scheduler {
     if (this.stopped) return;
     const now = this.now();
     await this.automations?.tick(now);
-    const due = this.jobs.filter((job) => job.state === 'pending' && job.dueAt <= now && !this.running.has(job.id));
+    const due = this.store.schedules.list().filter((job) => job.state === 'pending' && job.dueAt <= now && !this.running.has(job.id));
     await Promise.all(due.map((job) => this.run(job)));
   }
 
@@ -131,7 +116,7 @@ export class Scheduler {
     this.running.add(job.id);
     job.state = 'running';
     job.updatedAt = this.now();
-    this.persist();
+    this.store.schedules.update(job);
     try {
       if (!this.store.getSession(job.sessionId, job.tenantId)) {
         job.state = 'failed';
@@ -155,22 +140,12 @@ export class Scheduler {
       job.updatedAt = this.now();
       this.running.delete(job.id);
       this.prune();
-      this.persist();
+      this.store.schedules.update(job);
     }
   }
 
   private prune(): void {
-    if (this.jobs.length <= MAX_JOBS) return;
-    const active = this.jobs.filter((job) => job.state === 'pending' || job.state === 'running');
-    const finished = this.jobs
-      .filter((job) => job.state === 'done' || job.state === 'failed')
-      .sort((a, b) => b.updatedAt - a.updatedAt)
-      .slice(0, Math.max(0, MAX_JOBS - active.length));
-    this.jobs = [...active, ...finished];
-  }
-
-  private persist(): void {
-    saveJobs(this.opts.file, this.jobs);
+    this.store.schedules.prune(MAX_JOBS);
   }
 
   private now(): number {

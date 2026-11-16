@@ -96,7 +96,7 @@ ctx.resources 的定时器、延迟和清理函数随实例释放。EffectScope 
 
 用户明确要求的一次性预约可直接创建。周期、文件和 URL 监控首次必须由用户确认；模型不能自行设置确认状态。修改提示词、触发器、资料版本或模型会使自动化重新进入待确认状态。自动化 Run 沿用权限交集、审批、预算、检查点和产物机制，无人值守遇到审批时进入 `waiting_approval`。
 
-文件触发忽略生成目录；URL 触发仅访问公开地址，并复用 SSRF、超时、取消、ETag 与内容哈希边界。新 `/api/automations` 接口与 `automation_*` 工具提供定义、启停、执行与历史；旧 `/api/schedules` 保持兼容。
+文件触发忽略生成目录；URL 触发仅访问公开地址，并复用 SSRF、超时、取消、ETag 与内容哈希边界。新 `/api/automations` 接口与 `automation_*` 工具提供定义、启停、执行与历史；旧 `/api/schedules` 保持兼容，其续跑计划与自动化定义一同存入 SQLite，旧 `schedules.json` 首次启动时导入并归档。
 
 ## 数据与验证
 

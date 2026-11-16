@@ -1,16 +1,49 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import type { Capability, PluginContext, ToolDef } from '../../../kernel/types';
+import { PersonalItems } from '../../../core/todo/items';
 import { mergeData, mergeDiary, mergeMeta, type Note, type Project, type Task } from '../model';
-import { workbenchTenantAllowed } from '../index';
+import workbench from '../index';
 
 const t = (id: string, updatedAt: number, extra: Partial<Task> = {}): Task =>
   ({ id, title: id, prio: 3, due: '', start: '', done: false, pid: '', createdAt: updatedAt, doneAt: null, rolls: 0, repeat: '', pomo: 0, subs: [], tags: [], link: '', note: '', status: 'todo', est: 0, updatedAt, ...extra });
 
 describe('workbench 桥合并', () => {
-  it('工作台租户门只允许 default', () => {
-    assert.equal(workbenchTenantAllowed(undefined), true);
-    assert.equal(workbenchTenantAllowed('default'), true);
-    assert.equal(workbenchTenantAllowed('team-a'), false);
+  it('工作台兼容工具与桥接接口读取调用方租户的数据', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-workbench-tenant-'));
+    try {
+      const items = new PersonalItems(root);
+      items.create('default', { title: '默认租户' });
+      items.create('team-a', { title: '团队事项' });
+      const tools = new Map<string, ToolDef>();
+      let api: Extract<Capability, { kind: 'api' }>['api'] | undefined;
+      const ctx = {
+        kernel: { plugins: { resolveService: () => items } },
+        register: (capability: Capability) => {
+          if (capability.kind === 'tool') tools.set(capability.tool.name, capability.tool);
+          if (capability.kind === 'api') api = capability.api;
+          return () => {};
+        },
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      } as unknown as PluginContext;
+      workbench.onLoad(ctx);
+      const result = await tools.get('workbench_today')!.handler({}, {
+        tenantId: 'team-a', sessionId: 'session-a',
+      } as never) as { ok: boolean; data?: { tasks: { title: string }[] } };
+      assert.equal(result.ok, true);
+      assert.deepEqual(result.data?.tasks.map(item => item.title), ['团队事项']);
+      let workspace: { data: { tasks: { title: string }[] } } | undefined;
+      api!.router({ method: 'GET', path: '/data', tenantId: 'team-a' } as never, {
+        json: (value: typeof workspace) => { workspace = value; },
+        status: () => ({ json: () => {} }),
+      } as never);
+      assert.deepEqual(workspace?.data.tasks.map(item => item.title), ['团队事项']);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('LWW：updatedAt 大者胜出', () => {

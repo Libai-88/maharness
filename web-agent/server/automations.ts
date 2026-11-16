@@ -246,13 +246,14 @@ export class AutomationRepository {
       const latest = this.get(item.tenantId, item.id);
       if (!latest || latest.nextDueAt !== dueAt || latest.revision !== item.revision
         || latest.state !== 'active' || latest.approval !== 'confirmed') return undefined;
-      const occurrence = this.beginOccurrence({
-        automationId: item.id, tenantId: item.tenantId, occurrenceKey: triggerOccurrenceKey(item.trigger, dueAt),
-        dueAt, reason: 'schedule', now,
+      const occurrenceKey = triggerOccurrenceKey(item.trigger, dueAt);
+      const existed = !!this.db.prepare(`SELECT 1 FROM automation_occurrences_v3
+        WHERE tenant_id=? AND automation_id=? AND occurrence_key=?`).get(item.tenantId, item.id, occurrenceKey);
+      const occurrence = existed ? undefined : this.beginOccurrence({
+        automationId: item.id, tenantId: item.tenantId, occurrenceKey, dueAt, reason: 'schedule', now,
       });
-      if (!occurrence) return undefined;
       this.update({
-        ...latest, nextDueAt, lastTriggeredAt: now,
+        ...latest, nextDueAt, lastTriggeredAt: latest.lastTriggeredAt ?? now,
         state: latest.trigger.type === 'once' ? 'completed' : latest.state,
         revision: latest.revision + 1, updatedAt: now,
       }, latest.revision);

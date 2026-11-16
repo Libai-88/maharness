@@ -294,7 +294,7 @@ describe('自动化定义、确认与版本边界', () => {
     const session = store.createSession('fixture-model', 'fixture');
     store.close();
     const raw = new Database(file);
-    raw.exec('DROP TABLE automation_occurrences_v3; DROP TABLE automation_trigger_baselines_v3; DROP TABLE automations_v3; PRAGMA user_version=8');
+    raw.exec('DROP TABLE scheduled_recovery_jobs_v3; DROP TABLE automation_occurrences_v3; DROP TABLE automation_trigger_baselines_v3; DROP TABLE automations_v3; PRAGMA user_version=8');
     raw.close();
     store = new Store(file);
     try {
@@ -303,6 +303,7 @@ describe('自动化定义、确认与版本边界', () => {
       assert.doesNotThrow(() => store.automations.list('default'));
       assert.doesNotThrow(() => store.automations.occurrences('default'));
       assert.equal(store.automations.baseline('default', 'none'), undefined);
+      assert.deepEqual(store.schedules.list('default'), []);
     } finally { store.close(); }
   });
 });
@@ -450,7 +451,7 @@ describe('自动化计划与触发', () => {
     }
   });
 
-  test('重启后同一到期时间不会被重复创建', async () => {
+  test('重启后既有 occurrence 只推进计划且不会重复创建', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-automation-reopen-'));
     roots.push(root);
     const file = join(root, 'agent.db');
@@ -459,7 +460,10 @@ describe('自动化计划与触发', () => {
     store.upsertProvider({ id: 'fixture', label: 'Fixture', baseUrl: 'https://example.test/v1', apiKey: '', model: 'fixture-model' });
     let service = new AutomationService(store, () => root, () => now);
     const item = service.create('default', { name: '一次', prompt: '执行', trigger: { type: 'once', at: now + 1_000 } }, 'user');
-    await service.tick(item.nextDueAt);
+    store.automations.beginOccurrence({
+      automationId: item.id, tenantId: 'default', occurrenceKey: `once:${item.nextDueAt!}`,
+      dueAt: item.nextDueAt!, reason: 'schedule', now,
+    });
     assert.equal(store.automations.occurrences('default', item.id).length, 1);
     store.close();
 
@@ -468,6 +472,8 @@ describe('自动化计划与触发', () => {
     try {
       await service.tick(item.nextDueAt);
       assert.equal(store.automations.occurrences('default', item.id).length, 1);
+      assert.equal(service.get('default', item.id).nextDueAt, undefined);
+      assert.equal(service.get('default', item.id).state, 'completed');
     } finally { store.close(); }
   });
 

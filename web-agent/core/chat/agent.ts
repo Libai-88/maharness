@@ -143,7 +143,7 @@ export class AgentRunner {
       await this.emitHook(type, data);
       if (!opts.scopedBus) return;
       const safety = { blocked: data.blocked, blockReason: data.blockReason, forceApproval: data.forceApproval, forceApprovalReason: data.forceApprovalReason, policyApproved: data.policyApproved, args: JSON.stringify(data.tool?.args) };
-      const scoped: AgentHookCtx = { ...data, tools: data.tools.map(({ handler: _handler, assessApproval: _assess, executionTimeoutMs: _timeout, ...tool }) => ({ ...structuredClone(tool), handler: async () => ({ ok: false, error: '使用 ToolContext.invoke 调用宿主工具' }) })) };
+      const scoped: AgentHookCtx = { ...data, tools: data.tools.map(({ handler: _handler, assessApproval: _assess, executionTimeoutMs: _timeout, classifySideEffect: _classify, ...tool }) => ({ ...structuredClone(tool), handler: async () => ({ ok: false, error: '使用 ToolContext.invoke 调用宿主工具' }) })) };
       await opts.scopedBus.waterfall(type, scoped, async () => {});
       Object.assign(data, { history: scoped.history, tool: scoped.tool, result: scoped.result, content: scoped.content, reasoning: scoped.reasoning });
       data.blocked = safety.blocked || scoped.blocked;

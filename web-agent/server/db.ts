@@ -17,6 +17,7 @@ import type { SecretKeyInfo } from './secrets';
 import { RUN_SCHEMA, RunRepository } from './run-store';
 import { MATERIAL_SCHEMA, MaterialRepository } from './materials';
 import { AUTOMATION_SCHEMA, AutomationRepository } from './automations';
+import { RECOVERY_SCHEDULE_SCHEMA, ScheduleRepository } from './schedule-store';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
@@ -126,6 +127,7 @@ export class Store {
   readonly runs: RunRepository;
   readonly materials: MaterialRepository;
   readonly automations: AutomationRepository;
+  readonly schedules: ScheduleRepository;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -159,6 +161,7 @@ export class Store {
     this.runs = new RunRepository(this.db);
     this.materials = new MaterialRepository(this.db);
     this.automations = new AutomationRepository(this.db);
+    this.schedules = new ScheduleRepository(this.db);
   }
 
   /** 当前数据库 schema 版本（PRAGMA user_version） */
@@ -219,6 +222,7 @@ export class Store {
         this.db.exec(RUN_SCHEMA);
         this.db.exec(MATERIAL_SCHEMA);
         this.db.exec(AUTOMATION_SCHEMA);
+        this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
         this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
       })();
       return;
@@ -398,7 +402,7 @@ export class Store {
     } },
     { from: 6, to: 7, run: db => { db.exec(RUN_SCHEMA); } },
     { from: 7, to: 8, run: db => { db.exec(MATERIAL_SCHEMA); } },
-    { from: 8, to: 9, run: db => { db.exec(AUTOMATION_SCHEMA); } },
+    { from: 8, to: 9, run: db => { db.exec(AUTOMATION_SCHEMA); db.exec(RECOVERY_SCHEDULE_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
@@ -494,6 +498,8 @@ export class Store {
       decided_at INTEGER, decision TEXT, reason TEXT
     )`);
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_approval_requests_tenant ON approval_requests(tenant_id, created_at)');
+    // Additive schema-9 compatibility for databases created before recovery schedules moved to SQLite.
+    this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
     const tenantCols = this.db.prepare('PRAGMA table_info(tenants)').all() as { name: string }[];
     if (!tenantCols.some((c) => c.name === 'max_sessions')) {
       this.db.exec('ALTER TABLE tenants ADD COLUMN max_sessions INTEGER NOT NULL DEFAULT 0');
