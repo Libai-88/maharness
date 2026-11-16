@@ -62,6 +62,38 @@ describe('loadPromptRules', () => {
     assert.ok(r.text.length < 300, `文本应受预算约束，实际 ${r.text.length}`);
   });
 
+  it('maxChars 预算包含规则标题与分隔符', () => {
+    const localData = mkdtempSync(join(tmpdir(), 'mh-rules-budget-data-'));
+    const localProject = mkdtempSync(join(tmpdir(), 'mh-rules-budget-project-'));
+    try {
+      writeFileSync(join(localProject, 'AGENTS.md'), '规'.repeat(450));
+      const result = loadPromptRules({ dataDir: localData, projectRoot: localProject, maxChars: 450 });
+      assert.equal(result.truncated, true);
+      assert.ok(result.text.length <= 450, `规则上下文应不超过预算，实际 ${result.text.length}`);
+      assert.match(result.text, /该规则文件已按预算截断/);
+    } finally {
+      rmSync(localData, { recursive: true, force: true });
+      rmSync(localProject, { recursive: true, force: true });
+    }
+  });
+
+  it('未进入上下文的规则不会因重复内容被误报为生效', () => {
+    const localData = mkdtempSync(join(tmpdir(), 'mh-rules-budget-duplicate-data-'));
+    const localProject = mkdtempSync(join(tmpdir(), 'mh-rules-budget-duplicate-project-'));
+    try {
+      const duplicate = '规'.repeat(450);
+      mkdirSync(join(localData, 'rules'), { recursive: true });
+      writeFileSync(join(localData, 'rules', 'global.md'), duplicate);
+      writeFileSync(join(localProject, 'AGENTS.md'), duplicate);
+      const result = loadPromptRules({ dataDir: localData, projectRoot: localProject, maxChars: 30 });
+      assert.equal(result.text, '');
+      assert.deepEqual(result.resolution.applied, []);
+    } finally {
+      rmSync(localData, { recursive: true, force: true });
+      rmSync(localProject, { recursive: true, force: true });
+    }
+  });
+
   it('签名随内容变化（供插件惰性重载）', () => {
     const a = rulesSignature(loadPromptRules({ dataDir, projectRoot }).sources);
     writeFileSync(join(projectRoot, 'CLAUDE.md'), '新增一条规则');

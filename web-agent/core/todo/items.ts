@@ -24,6 +24,10 @@ function bounded(value: unknown, max: number, label: string) {
   if (typeof value !== 'string' || value.length > max) return fail('INVALID_ITEM', `${label}格式或长度无效`);
   return value.trim();
 }
+function workbenchText(value: unknown, max: number, label: string) {
+  if (typeof value !== 'string' || value.length > max) return fail('INVALID_WORKBENCH', `${label}格式或长度无效`);
+  return value.trim();
+}
 function validDate(value: string) { return /^\d{4}-\d{2}-\d{2}$/.test(value) && Number.isFinite(Date.parse(value + 'T00:00:00Z')) && new Date(value + 'T00:00:00Z').toISOString().slice(0, 10) === value; }
 
 /** Plugin-owned database; every call closes its connection, including failed migrations. */
@@ -128,12 +132,12 @@ export class PersonalItems {
     if (new Set(item.materials.map(ref => ref.id)).size !== item.materials.length) fail('INVALID_MATERIALS', '不能重复关联相同文件');
   }
   private validateNote(note: Note) {
-    note.text = bounded(note.text, 1200, '笔记');
+    note.text = workbenchText(note.text, 1200, '笔记');
     if (!note.text) fail('INVALID_WORKBENCH', '笔记不能为空');
-    if (note.tags.length > 12 || note.tags.some(tag => !tag.trim() || tag.length > 100)) fail('INVALID_WORKBENCH', '笔记标签无效');
+    if (!Array.isArray(note.tags) || note.tags.length > 12 || note.tags.some(tag => typeof tag !== 'string' || !tag.trim() || tag.length > 100)) fail('INVALID_WORKBENCH', '笔记标签无效');
   }
   private validateProject(project: Project) {
-    project.name = bounded(project.name, 200, '项目名称');
+    project.name = workbenchText(project.name, 200, '项目名称');
     if (!project.name) fail('INVALID_WORKBENCH', '项目名称不能为空');
     for (const [key, value] of [['阶段', project.stage], ['下一步', project.next], ['阻塞项', project.blocker]] as const)
       if (typeof value !== 'string' || value.length > 1000) fail('INVALID_WORKBENCH', `${key}格式或长度无效`);

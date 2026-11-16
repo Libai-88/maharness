@@ -382,17 +382,17 @@ async function executeCase(caseId: number, name: string): Promise<void> {
         systemPrompt: systemPrompt(),
         ...(rules ? {
           ruleResolution: rules.resolution,
-          contextMessages: rules.text ? [{
+          contextMessages: rules.segments.map(segment => ({
             role: 'user' as const,
-            content: rules.text,
+            content: segment.text,
             context: {
-              id: 'v3-live-rules',
-              source: rules.sources.filter(item => item.exists).map(item => item.file).join(';'),
+              id: segment.descriptor.id,
+              source: segment.descriptor.label,
               scope: 'workspace' as const,
               trust: 'user' as const,
               retention: 'required' as const,
             },
-          }] : [],
+          })),
         } : {}),
       }),
     });

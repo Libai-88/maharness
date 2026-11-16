@@ -78,6 +78,14 @@ test('version conflict and invalid edits preserve the saved item',()=>{
     assert.equal(f.items.get('default',item.id).note,'已整理');
   }finally{f.clean();}
 });
+test('workbench validation failures use a retryable stable code',()=>{
+  const f=fixture();try {
+    assert.throws(()=>f.items.createNote('a',{text:'记'.repeat(1201)}),code('INVALID_WORKBENCH'));
+    assert.throws(()=>f.items.createProject('a',{name:'项'.repeat(201)}),code('INVALID_WORKBENCH'));
+    assert.deepEqual(f.items.workspace('a').data.notes,[]);
+    assert.deepEqual(f.items.workspace('a').data.projects,[]);
+  }finally{f.clean();}
+});
 test('run evidence moves the matching item to review; edits protect newer requests',()=>{
   const f=fixture();try {
     const item=f.items.create('a',{title:'整理资料'});

@@ -139,6 +139,9 @@ function stripFrontMatter(md: string): string {
   return after.slice(end.index + end[0].length).replace(/^\r?\n/, '').trim();
 }
 
+const renderRuleSegment = (scope: 'global' | 'project', label: string, text: string) =>
+  `【${scope === 'project' ? '项目规则' : '全局规则'}·${label}】\n${text}`;
+
 /**
  * 加载提示规则。maxChars 为总预算（超出按「项目优先于全局」反向裁剪）。
  * now 用于测试注入。
@@ -178,30 +181,36 @@ export function loadPromptRules(opts: {
   const ordered = [...collected.filter(c => c.scope === 'project'), ...collected.filter(c => c.scope === 'global')];
   const kept: typeof ordered = [];
   const consideredFiles = new Set<string>();
-  const seenHashes = new Set<string>();
+  const selectedHashes = new Map<string, string>();
   for (const c of ordered) {
-    if (seenHashes.has(c.source.contentHash)) {
+    const winnerFile = selectedHashes.get(c.source.contentHash);
+    if (winnerFile) {
       // Keep the source active so resolution can report the duplicate and its winner.
-      consideredFiles.add(c.source.file);
+      if (consideredFiles.has(winnerFile)) consideredFiles.add(c.source.file);
       continue;
     }
-    seenHashes.add(c.source.contentHash);
-    if (c.text.length <= budget) {
+    selectedHashes.set(c.source.contentHash, c.source.file);
+    const separatorLength = kept.length ? 2 : 0;
+    const renderedLength = renderRuleSegment(c.scope, c.label, c.text).length;
+    if (separatorLength + renderedLength <= budget) {
       kept.push(c);
       consideredFiles.add(c.source.file);
-      budget -= c.text.length;
+      budget -= separatorLength + renderedLength;
       continue;
     }
-    if (budget > 400) {
-      kept.push({ ...c, text: `${c.text.slice(0, budget)}\n…（该规则文件已按预算截断）` });
+    const marker = '\n…（该规则文件已按预算截断）';
+    const available = budget - separatorLength - renderRuleSegment(c.scope, c.label, '').length - marker.length;
+    if (available > 400) {
+      const segment = { ...c, text: `${c.text.slice(0, available)}${marker}` };
+      kept.push(segment);
       consideredFiles.add(c.source.file);
       truncated = true;
-      budget = 0;
+      budget -= separatorLength + renderRuleSegment(segment.scope, segment.label, segment.text).length;
     }
     else truncated = true;
   }
   const text = kept
-    .map(c => `【${c.scope === 'project' ? '项目规则' : '全局规则'}·${c.label}】\n${c.text}`)
+    .map(c => renderRuleSegment(c.scope, c.label, c.text))
     .join('\n\n');
   const descriptors = sources.map(source => ({
     id: `rules:${source.scope}:${source.label}:${source.contentHash.slice(0, 8)}`,
@@ -216,7 +225,7 @@ export function loadPromptRules(opts: {
   return {
     text,
     segments: kept.map(segment => ({
-      text: `【${segment.scope === 'project' ? '项目规则' : '全局规则'}·${segment.label}】\n${segment.text}`,
+      text: renderRuleSegment(segment.scope, segment.label, segment.text),
       descriptor: descriptors.find(descriptor => descriptor.id === `rules:${segment.scope}:${segment.label}:${segment.source.contentHash.slice(0, 8)}`)!,
     })),
     sources,

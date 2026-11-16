@@ -76,6 +76,9 @@ describe('workbench 桥合并', () => {
 
       const project = await call('workbench_add_project', { name: '发布计划', stage: '设计' });
       assert.equal(project.ok, true);
+      const invalidProject = await call('workbench_add_project', { name: '项'.repeat(201) });
+      assert.equal(invalidProject.failure.code, 'INVALID_WORKBENCH');
+      assert.equal(invalidProject.failure.retryable, true);
       const emptyProject = await call('workbench_update_project', {
         id: project.data.id, updatedAt: project.data.updatedAt,
       });
@@ -92,6 +95,9 @@ describe('workbench 桥合并', () => {
 
       const note = await call('workbench_add_note', { text: '初稿', tags: ['发布'] });
       assert.equal(note.ok, true);
+      const invalidNote = await call('workbench_add_note', { text: '记'.repeat(1201) });
+      assert.equal(invalidNote.failure.code, 'INVALID_WORKBENCH');
+      assert.equal(invalidNote.failure.retryable, true);
       const emptyNote = await call('workbench_update_note', {
         id: note.data.id, updatedAt: note.data.updatedAt,
       });
