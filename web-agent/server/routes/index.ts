@@ -138,7 +138,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
             projectRoot: record.authorization.workspace,
             maxChars: Math.max(1000, kernel.config.get<number>('rules.maxChars', 12_000)),
           })
-        : { text: '', sources: [], resolution: { schemaVersion: 1 as const, applied: [], ignored: [], conflicts: [] } };
+        : { text: '', segments: [], sources: [], resolution: { schemaVersion: 1 as const, applied: [], ignored: [], conflicts: [] } };
       const userContext = chat.getUserContext?.() ?? [];
       const instructionDescriptor = {
         id: `user-instruction:${record.id}`,
@@ -171,7 +171,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         contextMessages: [
           runtimeClockContext(),
           ...userContext,
-          ...(rules.text ? [{ role: 'user' as const, content: rules.text, context: { id: 'workspace-rules', source: rules.sources.filter(source => source.exists).map(source => source.file).join(';'), scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } }] : []),
+          ...rules.segments.map(segment => ({ role: 'user' as const, content: segment.text, context: { id: segment.descriptor.id, source: segment.descriptor.label, scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } })),
           { role: 'system', content: `工作区: ${record.authorization.workspace}\n授权: ${record.authorization.profile}${record.authorization.readOnly ? '；变更需要审批' : ''}`, context: { id: 'authorization', source: 'runtime-authorization', scope: 'runtime', trust: 'core', retention: 'required' } },
         ],
         maxTurns: kernel.config.get<number>('agent.maxTurns', 30),

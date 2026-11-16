@@ -25,6 +25,24 @@ export interface WorkbenchAutomation {
   trigger: Record<string, unknown>;
 }
 
+export interface WorkbenchProject {
+  id: string;
+  name: string;
+  stage: string;
+  next: string;
+  blocker: string;
+  status: 'active' | 'blocked' | 'done';
+  updatedAt: number;
+}
+
+export interface WorkbenchNote {
+  id: string;
+  text: string;
+  tags: string[];
+  createdAt: number;
+  updatedAt: number;
+}
+
 export interface WorkbenchSummary {
   schemaVersion: 1;
   today: string;
@@ -36,8 +54,8 @@ export interface WorkbenchSummary {
   automations: WorkbenchAutomation[];
   recentRuns: RunInfo[];
   artifacts: RunArtifact[];
-  projects: { id: string; name: string; desc?: string }[];
-  notes: { id: string; title?: string; content?: string; updatedAt?: number }[];
+  projects: WorkbenchProject[];
+  notes: WorkbenchNote[];
   metrics: {
     schemaVersion: 1;
     firstTaskSuccessRate: number | null;

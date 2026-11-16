@@ -64,6 +64,8 @@ export interface RuleSource {
 export interface PromptRulesResult {
   /** 已按顺序拼装的规则正文（含来源标题）；无规则时为空串 */
   text: string;
+  /** 按原始文件拆分后的上下文，避免全局与项目规则在模型侧失去来源边界。 */
+  segments: { text: string; descriptor: RuleDescriptor }[];
   sources: RuleSource[];
   truncated: boolean;
   resolution: RuleResolution;
@@ -201,20 +203,25 @@ export function loadPromptRules(opts: {
   const text = kept
     .map(c => `【${c.scope === 'project' ? '项目规则' : '全局规则'}·${c.label}】\n${c.text}`)
     .join('\n\n');
+  const descriptors = sources.map(source => ({
+    id: `rules:${source.scope}:${source.label}:${source.contentHash.slice(0, 8)}`,
+    label: source.label,
+    source: source.scope === 'project' ? 'project' as const : 'user' as const,
+    scope: 'workspace' as const,
+    priority: source.priority,
+    trust: source.trust,
+    contentHash: source.contentHash,
+    active: source.exists && consideredFiles.has(source.file),
+  }));
   return {
     text,
+    segments: kept.map(segment => ({
+      text: `【${segment.scope === 'project' ? '项目规则' : '全局规则'}·${segment.label}】\n${segment.text}`,
+      descriptor: descriptors.find(descriptor => descriptor.id === `rules:${segment.scope}:${segment.label}:${segment.source.contentHash.slice(0, 8)}`)!,
+    })),
     sources,
     truncated,
-    resolution: resolveRuleDescriptors(sources.map(source => ({
-      id: `rules:${source.scope}:${source.label}:${source.contentHash.slice(0, 8)}`,
-      label: source.label,
-      source: source.scope === 'project' ? 'project' : 'user',
-      scope: 'workspace',
-      priority: source.priority,
-      trust: source.trust,
-      contentHash: source.contentHash,
-      active: source.exists && consideredFiles.has(source.file),
-    }))),
+    resolution: resolveRuleDescriptors(descriptors),
     editable: {
       scope: 'project',
       defaultFile: join(root, 'AGENTS.md'),

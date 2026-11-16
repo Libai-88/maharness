@@ -64,6 +64,11 @@ export interface AutomationOccurrence {
   updatedAt: number;
 }
 
+export interface AutomationRunSummary extends AutomationOccurrence {
+  run?: RunRecord;
+  runMissing?: boolean;
+}
+
 interface TriggerBaseline {
   value?: string;
   etag?: string;
@@ -346,6 +351,11 @@ function zonedParts(timestamp: number, timeZone: string): ZonedParts {
   };
 }
 
+/**
+ * Resolve local wall-clock time with deterministic DST policy: gaps shift
+ * forward by the skipped interval (for example 02:30 to 03:30); overlaps use
+ * the earlier occurrence.
+ */
 function localToUtc(parts: Omit<ZonedParts, 'weekday'>, timeZone: string): number {
   const target = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
   let guess = target;
@@ -714,7 +724,7 @@ export class AutomationService {
     return this.execute(item, occurrence);
   }
 
-  occurrences(tenantId: string, id?: string): (AutomationOccurrence & { run?: RunRecord; runMissing?: boolean })[] {
+  occurrences(tenantId: string, id?: string): AutomationRunSummary[] {
     return this.store.automations.occurrences(tenantId, id).map(occurrence => {
       if (!occurrence.runId || !this.runs) return occurrence;
       try { return { ...occurrence, run: this.runs.get(occurrence.runId, tenantId) }; }
@@ -724,15 +734,19 @@ export class AutomationService {
 
   async tick(now = this.now()): Promise<void> {
     for (const item of this.store.automations.due(now)) {
-      const dueAt = item.nextDueAt!;
-      const next = nextTriggerTime(item.trigger, dueAt);
-      const occurrence = this.store.automations.claimDue(item, next, now);
-      if (!occurrence) continue;
-      if (now - dueAt > 24 * 60 * 60_000) {
-        this.store.automations.finishOccurrence(occurrence.id, 'skipped', undefined, '已超过 24 小时补跑窗口', now);
-        continue;
+      let current: AutomationDefinition | undefined = item;
+      while (current?.nextDueAt !== undefined && current.nextDueAt <= now) {
+        const dueAt = current.nextDueAt;
+        const occurrence = this.store.automations.claimDue(current, nextTriggerTime(current.trigger, dueAt), now);
+        if (!occurrence) break;
+        if (now - dueAt > 24 * 60 * 60_000) {
+          this.store.automations.finishOccurrence(occurrence.id, 'skipped', undefined, '已超过 24 小时补跑窗口', now);
+          current = this.get(current.tenantId, current.id);
+          continue;
+        }
+        this.execute(current, occurrence, now);
+        break;
       }
-      this.execute(item, occurrence, now);
     }
     for (const item of this.store.automations.triggerPolled()) {
       if (this.checking.has(item.id)) continue;

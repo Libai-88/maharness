@@ -42,6 +42,14 @@ describe('loadPromptRules', () => {
     assert.ok(r.text.includes('本项目禁止修改 kernel/ 目录。'));
   });
 
+  it('全局、AGENTS 与项目规则按来源拆成独立上下文', () => {
+    const r = loadPromptRules({ dataDir, projectRoot });
+    assert.ok(r.segments.length >= 3);
+    assert.ok(['tone.md', 'AGENTS.md', '.maharness/rules/tests.md'].every(label =>
+      r.segments.some(segment => segment.descriptor.label === label)));
+    assert.equal(r.segments.every(segment => !segment.text.includes('全局规则·tone.md\n【项目规则')), true);
+  });
+
   it('sources 记录不存在文件（供 UI 显示候选）', () => {
     const r = loadPromptRules({ dataDir, projectRoot });
     assert.ok(r.sources.some(s => s.scope === 'project' && !s.exists));

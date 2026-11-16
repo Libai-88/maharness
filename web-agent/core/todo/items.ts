@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import { blank, mergeState, normalize, nextDue, taskDefaults, type Task, type WorkbenchState } from '../../plugins/workbench/model';
+import { blank, mergeState, normalize, nextDue, taskDefaults, type Note, type Project, type Task, type WorkbenchState } from '../../plugins/workbench/model';
 import type { MaterialRef } from '../../kernel/material';
 
 export class ItemError extends Error {
@@ -126,6 +126,70 @@ export class PersonalItems {
     if (!['todo', 'review', 'done', 'archived'].includes(item.lifecycle) || ![1,2,3,4].includes(item.prio) || !['', 'daily','weekdays','weekly','monthly'].includes(item.repeat)) fail('INVALID_ITEM', '状态、优先级或重复规则无效');
     if (!Array.isArray(item.materials) || item.materials.length > 10 || item.materials.some(ref => !ref || typeof ref.id !== 'string' || !ref.id || ref.id.length > 200 || typeof ref.version !== 'string' || !/^[a-f0-9]{64}$/.test(ref.version))) fail('INVALID_MATERIALS', '资料引用无效');
     if (new Set(item.materials.map(ref => ref.id)).size !== item.materials.length) fail('INVALID_MATERIALS', '不能重复关联相同文件');
+  }
+  private validateNote(note: Note) {
+    note.text = bounded(note.text, 1200, '笔记');
+    if (!note.text) fail('INVALID_WORKBENCH', '笔记不能为空');
+    if (note.tags.length > 12 || note.tags.some(tag => !tag.trim() || tag.length > 100)) fail('INVALID_WORKBENCH', '笔记标签无效');
+  }
+  private validateProject(project: Project) {
+    project.name = bounded(project.name, 200, '项目名称');
+    if (!project.name) fail('INVALID_WORKBENCH', '项目名称不能为空');
+    for (const [key, value] of [['阶段', project.stage], ['下一步', project.next], ['阻塞项', project.blocker]] as const)
+      if (typeof value !== 'string' || value.length > 1000) fail('INVALID_WORKBENCH', `${key}格式或长度无效`);
+    if (!['active', 'blocked', 'done'].includes(project.status)) fail('INVALID_WORKBENCH', '项目状态无效');
+  }
+  createNote(tenant: string, args: Record<string, any>) {
+    const now = Date.now();
+    return this.mutate(tenant, state => {
+      const note: Note = {
+        id: randomUUID(), text: String(args.text ?? ''), tags: Array.isArray(args.tags) ? args.tags.map((tag: unknown) => String(tag).trim()).filter(Boolean).slice(0, 12) : [],
+        createdAt: now, updatedAt: now,
+      };
+      this.validateNote(note); state.notes.unshift(note); return note;
+    });
+  }
+  updateNote(tenant: string, id: string, expectedUpdatedAt: number, patch: Record<string, unknown>) {
+    if (patch.text === undefined && patch.tags === undefined) fail('INVALID_WORKBENCH', '笔记更新需要新内容');
+    return this.mutate(tenant, state => {
+      const index = state.notes.findIndex(note => note.id === id);
+      if (index < 0) fail('ITEM_NOT_FOUND', '笔记不存在', 404);
+      const old = state.notes[index]!;
+      if (old.updatedAt !== expectedUpdatedAt) fail('VERSION_CONFLICT', '笔记已变化，请重新读取后修改', 409);
+      const note: Note = {
+        ...old,
+        ...(patch.text !== undefined ? { text: String(patch.text) } : {}),
+        ...(patch.tags !== undefined ? { tags: Array.isArray(patch.tags) ? patch.tags.map(tag => String(tag).trim()).filter(Boolean).slice(0, 12) : [] } : {}),
+        updatedAt: Math.max(Date.now(), old.updatedAt + 1),
+      };
+      this.validateNote(note); state.notes[index] = note; return note;
+    });
+  }
+  createProject(tenant: string, args: Record<string, any>) {
+    const now = Date.now();
+    return this.mutate(tenant, state => {
+      const project: Project = {
+        id: randomUUID(), name: String(args.name ?? ''), stage: String(args.stage ?? ''), next: String(args.next ?? ''),
+        blocker: String(args.blocker ?? ''), status: String(args.status ?? 'active'),
+        updatedAt: now,
+      };
+      this.validateProject(project); state.projects.unshift(project); return project;
+    });
+  }
+  updateProject(tenant: string, id: string, expectedUpdatedAt: number, patch: Record<string, unknown>) {
+    if (!['name', 'stage', 'next', 'blocker', 'status'].some(key => patch[key] !== undefined)) fail('INVALID_WORKBENCH', '项目更新需要新内容');
+    return this.mutate(tenant, state => {
+      const index = state.projects.findIndex(project => project.id === id);
+      if (index < 0) fail('ITEM_NOT_FOUND', '项目不存在', 404);
+      const old = state.projects[index]!;
+      if (old.updatedAt !== expectedUpdatedAt) fail('VERSION_CONFLICT', '项目已变化，请重新读取后修改', 409);
+      const project: Project = {
+        ...old,
+        ...Object.fromEntries(Object.entries(patch).filter(([key, value]) => ['name', 'stage', 'next', 'blocker', 'status'].includes(key) && value !== undefined)),
+        updatedAt: Math.max(Date.now(), old.updatedAt + 1),
+      };
+      this.validateProject(project); state.projects[index] = project; return project;
+    });
   }
   create(tenant: string, args: Record<string, any>, sourceSessionId?: string) {
     if (!args || typeof args !== 'object' || Array.isArray(args)) fail('INVALID_ITEM', '事项格式无效');

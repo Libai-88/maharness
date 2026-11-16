@@ -57,6 +57,62 @@ describe('workbench 桥合并', () => {
     }
   });
 
+  it('兼容工具可显式更新项目和笔记，拒绝过期版本并保持租户隔离', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-workbench-records-'));
+    try {
+      const items = new PersonalItems(root);
+      const tools = new Map<string, ToolDef>();
+      const ctx = {
+        kernel: { plugins: { resolveService: () => items } },
+        register: (capability: Capability) => {
+          if (capability.kind === 'tool') tools.set(capability.tool.name, capability.tool);
+          return () => {};
+        },
+        logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
+      } as unknown as PluginContext;
+      workbench.onLoad(ctx);
+      const call = (name: string, args: Record<string, unknown>, tenantId = 'team-a') =>
+        tools.get(name)!.handler(args, { tenantId, sessionId: 'session-a' } as never) as Promise<any>;
+
+      const project = await call('workbench_add_project', { name: '发布计划', stage: '设计' });
+      assert.equal(project.ok, true);
+      const emptyProject = await call('workbench_update_project', {
+        id: project.data.id, updatedAt: project.data.updatedAt,
+      });
+      assert.equal(emptyProject.failure.code, 'INVALID_WORKBENCH');
+      const staleProject = await call('workbench_update_project', {
+        id: project.data.id, updatedAt: 1, stage: '发布',
+      });
+      assert.equal(staleProject.ok, false);
+      assert.equal(staleProject.failure.code, 'VERSION_CONFLICT');
+      const changedProject = await call('workbench_update_project', {
+        id: project.data.id, updatedAt: project.data.updatedAt, stage: '发布', status: 'active',
+      });
+      assert.equal(changedProject.data.stage, '发布');
+
+      const note = await call('workbench_add_note', { text: '初稿', tags: ['发布'] });
+      assert.equal(note.ok, true);
+      const emptyNote = await call('workbench_update_note', {
+        id: note.data.id, updatedAt: note.data.updatedAt,
+      });
+      assert.equal(emptyNote.failure.code, 'INVALID_WORKBENCH');
+      const changedNote = await call('workbench_update_note', {
+        id: note.data.id, updatedAt: note.data.updatedAt, text: '终稿',
+      });
+      assert.equal(changedNote.data.text, '终稿');
+
+      const visible = await call('workbench_today', {});
+      assert.equal(visible.data.projects[0].stage, '发布');
+      assert.equal(visible.data.notes[0].text, '终稿');
+      assert.equal(visible.data.revision > 0, true);
+      const otherTenant = await call('workbench_today', {}, 'team-b');
+      assert.deepEqual(otherTenant.data.projects, []);
+      assert.deepEqual(otherTenant.data.notes, []);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
   it('LWW：updatedAt 大者胜出', () => {
     const local = { tasks: [t('a', 100, { title: '旧' })], notes: [], projects: [], tomb: {} };
     const remote = { tasks: [t('a', 200, { title: '新' })], notes: [], projects: [], tomb: {} };

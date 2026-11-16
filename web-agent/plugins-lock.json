@@ -17,11 +17,11 @@
           ]
         }
       },
-      "updatedAt": 1794842536085
+      "updatedAt": 1794846116146
     },
     "workbench": {
-      "version": "0.3.0",
-      "integrity": "df012946ee",
+      "version": "0.4.0",
+      "integrity": "cbdab7baa5",
       "compatibility": {
         "api": {
           "min": "3.0.0",
@@ -38,6 +38,9 @@
             "workbench_add_task",
             "workbench_update_task",
             "workbench_add_note",
+            "workbench_update_note",
+            "workbench_add_project",
+            "workbench_update_project",
             "workbench_diary"
           ],
           "api": [
@@ -45,7 +48,7 @@
           ]
         }
       },
-      "updatedAt": 1794842536086
+      "updatedAt": 1794846116147
     }
   }
 }

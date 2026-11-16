@@ -21,6 +21,8 @@ export interface AutomationOccurrence {
   runMissing?: boolean;
 }
 
+export type AutomationRunSummary = AutomationOccurrence;
+
 export interface Automation extends WorkbenchAutomation {
   workspace: string;
   createdBy: 'user' | 'agent';

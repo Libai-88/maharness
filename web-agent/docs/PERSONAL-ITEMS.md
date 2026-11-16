@@ -13,6 +13,8 @@
 
 直接说“记下周五交周报”“把复习安排改到下周二”，模型可通过 `item_*` 工具保存。额外推断的事项先作为建议，用户采纳后保存。`todo_*` 维护当前会话的执行步骤。
 
+“新建项目”“更新项目阶段”“记一条笔记”及“修改这条笔记”分别使用 `workbench_add_project`、`workbench_update_project`、`workbench_add_note` 和 `workbench_update_note`。项目和笔记更新携带读取时得到的 `updatedAt`；过期版本返回冲突，不覆盖较新的内容。
+
 日期留空表示未排期；具体时间使用 IANA 时区。日期时间记录个人安排，不触发提醒或自动执行。现有续跑计划独立管理。
 
 事项支持标题、说明、优先级、项目、日期、时间、重复规则和最多 10 个文件。单文件上限 20 MB，文件访问沿用工作区和租户边界。模型仅在用户明确要求时记录或更新事项；推断出的后续安排先在聊天中作为建议，用户确认后才持久化。
@@ -42,6 +44,8 @@
 - `item_create`：明确安排；`operationId` 用于重试去重。
 - `item_update`：按 revision 修改、归档或重新打开。
 - `item_complete`：用户明确要求完成时调用。
+
+兼容工作台工具保持独立入口并转调同一 `PersonalItems` 服务：`workbench_today`、`workbench_add_task`、`workbench_update_task`、`workbench_add_project`、`workbench_update_project`、`workbench_add_note`、`workbench_update_note` 和 `workbench_diary`。
 
 HTTP 接口：`GET/POST /api/items`、`GET/PATCH /api/items/:id`、`POST /api/items/:id/execute`、`POST /api/items/import-legacy/:id`。执行需 `Idempotency-Key`，写操作沿用现有凭据门。`items.updated` 事件按租户过滤。
 

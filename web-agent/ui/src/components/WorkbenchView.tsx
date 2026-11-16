@@ -162,7 +162,7 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
           </Card>
           <Card>
             <CardHeader><CardTitle>笔记</CardTitle><CardDescription>最近记录的想法与资料。</CardDescription></CardHeader>
-            <CardContent className="flex flex-col gap-2">{summary!.notes.slice(0, 6).map(note => <div key={note.id} className="flex items-start gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="line-clamp-2 text-sm">{note.title || note.content || '未命名笔记'}</span></div>)}{!summary!.notes.length && <p className="text-sm text-muted-foreground">暂无笔记，可在完整工作台中记录。</p>}</CardContent>
+            <CardContent className="flex flex-col gap-2">{summary!.notes.slice(0, 6).map(note => <div key={note.id} className="flex items-start gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="line-clamp-2 text-sm">{note.text || '未命名笔记'}</span></div>)}{!summary!.notes.length && <p className="text-sm text-muted-foreground">暂无笔记，可在完整工作台中记录。</p>}</CardContent>
           </Card>
         </div>
 

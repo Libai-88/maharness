@@ -376,13 +376,40 @@ describe('自动化计划与触发', () => {
     const f = setup(start);
     try {
       f.store.upsertProvider({ id: 'fixture', label: 'Fixture', baseUrl: 'https://example.test/v1', apiKey: '', model: 'fixture-model' });
-      const item = f.service.create('default', { name: '日报', prompt: '整理', trigger: { type: 'schedule', recurrence: 'daily', time: '09:00', timeZone: 'UTC', startAt: start + 3_600_000 } }, 'user');
+      const item = f.service.create('default', {
+        name: '月报', prompt: '整理',
+        trigger: { type: 'schedule', recurrence: 'monthly', dayOfMonth: 1, time: '01:00', timeZone: 'UTC', startAt: start + 3_600_000 },
+      }, 'user');
       f.service.confirm('default', item.id, item.revision);
       f.setNow(start + 26 * 3_600_000);
       await f.service.tick(start + 26 * 3_600_000);
       const occurrence = f.store.automations.occurrences('default', item.id)[0];
       assert.equal(occurrence?.state, 'skipped'); assert.equal(occurrence?.runId, undefined);
       assert.equal(f.store.runs.list('default').length, 0);
+    } finally { f.store.close(); }
+  });
+
+  test('一次 tick 合并多段漏跑，只补跑 24 小时内最新一次', async () => {
+    const start = Date.UTC(2026, 2, 1, 12, 0, 0);
+    const f = setup(start);
+    try {
+      const item = f.service.create('default', {
+        name: '日报', prompt: '整理',
+        trigger: { type: 'schedule', recurrence: 'daily', time: '09:00', timeZone: 'UTC' },
+      }, 'user');
+      f.service.confirm('default', item.id, item.revision);
+      const now = Date.UTC(2026, 2, 5, 10, 0, 0);
+      await f.service.tick(now);
+
+      const history = f.store.automations.occurrences('default', item.id).sort((a, b) => a.dueAt - b.dueAt);
+      assert.deepEqual(history.map(entry => entry.state), ['skipped', 'skipped', 'skipped', 'running']);
+      assert.equal(history.at(-1)?.dueAt, Date.UTC(2026, 2, 5, 9, 0, 0));
+      assert.equal(f.store.runs.list('default').length, 1);
+
+      await f.service.tick(now);
+      assert.equal(f.store.automations.occurrences('default', item.id).length, 4);
+      assert.equal(f.store.runs.list('default').length, 1);
+      assert.equal(f.service.get('default', item.id).nextDueAt, Date.UTC(2026, 2, 6, 9, 0, 0));
     } finally { f.store.close(); }
   });
 
@@ -533,5 +560,26 @@ describe('周期计算', () => {
   test('IANA 时区跨 DST 仍按本地 09:00 计算', () => {
     const next = nextScheduleOccurrence(trigger({ timeZone: 'America/New_York' }), Date.UTC(2026, 2, 8, 5, 0));
     assert.equal(new Date(next).toISOString(), '2026-03-08T13:00:00.000Z');
+  });
+
+  test('DST 跳时缺口中的不存在时间确定性顺延到下一次有效本地时间', () => {
+    const next = nextScheduleOccurrence(
+      trigger({ time: '02:30', timeZone: 'America/New_York' }),
+      Date.UTC(2026, 2, 8, 6, 0),
+    );
+    assert.equal(new Date(next).toISOString(), '2026-03-08T07:30:00.000Z');
+  });
+
+  test('DST 回拨重复时间只运行当天第一次，不重复执行同一本地计划', () => {
+    const first = nextScheduleOccurrence(
+      trigger({ time: '01:30', timeZone: 'America/New_York' }),
+      Date.UTC(2026, 10, 1, 4, 0),
+    );
+    assert.equal(new Date(first).toISOString(), '2026-11-01T05:30:00.000Z');
+    const next = nextScheduleOccurrence(
+      trigger({ time: '01:30', timeZone: 'America/New_York' }),
+      first,
+    );
+    assert.equal(new Date(next).toISOString(), '2026-11-02T06:30:00.000Z');
   });
 });

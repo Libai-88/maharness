@@ -163,7 +163,8 @@ test('工作台新增事项后立即刷新聚合结果', async ({ page }) => {
   await page.route('**/api/workbench/summary*', route => route.fulfill({
     json: {
       schemaVersion: 1, today: new Date().toISOString().slice(0, 10), todayItems: items, overdue: [], upcoming: [], unscheduled: [],
-      pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [], notes: [],
+      pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [],
+      notes: [{ id: 'note-new', text: '模型写入的工作台笔记', tags: [], createdAt: 1, updatedAt: Date.now() }],
       metrics: { schemaVersion: 1, firstTaskSuccessRate: null, takeoverRate: null, recoveredAfterFailureRate: null, automaticRecoveryRate: null, invalidToolCalls: 0, duplicateToolCalls: 0, capabilitySelectionFailures: 0, durationMs: 0, modelCalls: 0, costUsd: 0 },
     },
   }));
@@ -173,6 +174,7 @@ test('工作台新增事项后立即刷新聚合结果', async ({ page }) => {
   await page.getByRole('button', { name: '添加', exact: true }).click();
 
   await expect(page.getByText('整理明天会议资料', { exact: true })).toBeVisible();
+  await expect(page.getByText('模型写入的工作台笔记', { exact: true })).toBeVisible();
   expect(posted).toMatchObject({ title: '整理明天会议资料' });
   expect(posted?.timeZone).toBeTruthy();
   expect(posted?.operationId).toBeTruthy();
