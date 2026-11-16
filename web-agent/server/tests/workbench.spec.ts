@@ -46,6 +46,12 @@ async function withServer(tenantId: string, inspect: (summary: Record<string, an
   store.runs.update(latestRun, { status: 'completed' });
   store.runs.startTool(latestRun.id, 'artifact-latest', 'write_file', JSON.stringify({ path: 'outputs/latest.txt' }));
   store.runs.finishTool(latestRun.id, 'artifact-latest', { ok: true, evidence: [{ artifact: true, kind: 'file', label: '最新产物', ref: 'outputs/latest.txt' }] });
+  for (let index = 0; index < 12; index++) {
+    store.runs.create({
+      ...run, id: `noise-${index}`, rootId: `noise-${index}`, status: 'completed',
+      objective: `空运行 ${index}`, cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 100, updatedAt: 100 + index,
+    });
+  }
   items.create(tenantId, { title: '核对周报', due: dateInTimeZone(Date.now(), 'Asia/Shanghai'), timeZone: 'Asia/Shanghai' });
   const app = express();
   app.use((req, _res, next) => { (req as typeof req & { tenantId?: string }).tenantId = tenantId; next(); });
@@ -108,6 +114,8 @@ describe('工作台聚合与本地体验指标', () => {
       assert.equal(summary.todayItems[0]?.title, '核对周报');
       assert.equal(summary.pendingAutomations.length, 1);
       assert.equal(summary.recentRuns[0]?.id, 'latest-run');
+      assert.equal(summary.recentRuns[1]?.id, 'completed-run');
+      assert.equal(summary.artifacts.length, 20);
       assert.equal(summary.artifacts[0]?.label, '最新产物');
       assert.equal(summary.metrics.firstTaskSuccessRate, 100);
       assert.equal(summary.metrics.invalidToolCalls, 1);

@@ -22,8 +22,9 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
     const rows = items.list(tenantId);
     const active = rows.filter(item => !['done', 'archived'].includes(item.lifecycle));
     const automations = deps.automations?.list(tenantId) ?? [];
-    const recentRuns = deps.store.runs.list(tenantId).slice(0, 12);
-    const artifacts = recentRuns
+    const allRuns = deps.store.runs.list(tenantId);
+    const recentRuns = [...allRuns].sort((a, b) => b.updatedAt - a.updatedAt || b.createdAt - a.createdAt).slice(0, 12);
+    const artifacts = allRuns
       .flatMap(run => deps.store.runs.artifacts(run.id))
       .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))
       .slice(0, 20);
