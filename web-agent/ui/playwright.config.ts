@@ -9,27 +9,35 @@ import { defineConfig } from '@playwright/test';
 // 会让 Node 在每个 webserver/worker 启动时发出冲突警告。
 delete process.env.NO_COLOR;
 
+const agentDataDir = path.join(os.tmpdir(), `maharness-e2e-${process.pid}`);
+process.env.AGENT_DATA_DIR = agentDataDir;
+const e2ePort = process.env.E2E_PORT ?? '3137';
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 45_000,
   expect: { timeout: 10_000 },
   fullyParallel: false,
   retries: 0,
-  reporter: [['list']],
+  reporter: [
+    ['list'],
+    ['json', { outputFile: 'test-results/playwright-results.json' }],
+  ],
   use: {
-    baseURL: 'http://localhost:3137',
+    baseURL: `http://localhost:${e2ePort}`,
     viewport: { width: 1440, height: 900 },
   },
   webServer: {
     command: 'npm start --prefix ..',
-    url: 'http://localhost:3137',
+    url: `http://localhost:${e2ePort}`,
     reuseExistingServer: false,
     timeout: 60_000,
     env: {
       ...process.env,
-      PORT: '3137',
+      PORT: e2ePort,
       AUTO_STOP_IDLE_MS: '0',
-      AGENT_DATA_DIR: path.join(os.tmpdir(), `maharness-e2e-${process.pid}`),
+      AGENT_DATA_DIR: agentDataDir,
+      AGENT_ALLOW_PRIVATE_URLS: '1',
     },
   },
 });

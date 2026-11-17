@@ -178,7 +178,9 @@ test('society restart resumes the same interrupted Run through real services', {
     assert.equal(resumed.id, runId);
     assert.equal(resumed.status, 'running');
     assert.equal(store.organization.getContract(contractId, 'default')?.status, 'active');
-    assert.equal(store.organization.getSocietySchedule(schedule.id, 'default')?.status, 'active');
+    const resumedSchedule = store.organization.getSocietySchedule(schedule.id, 'default');
+    assert.equal(resumedSchedule?.status, 'active');
+    assert.deepEqual(resumedSchedule?.selection, schedule.selection);
     assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'scheduled');
     assert.deepEqual(store.runs.list('default').map(run => run.id), [runId]);
 
@@ -186,6 +188,28 @@ test('society restart resumes the same interrupted Run through real services', {
     finishResumed.resolve();
     await completed;
     assert.equal(restartedRuns.get(runId, 'default').status, 'completed');
+    const accepted = restartedSociety.releaseTask(
+      task.id, 'default', 'completed', '人工核对恢复后的交付与来源',
+    );
+    assert.equal(accepted.task.status, 'completed');
+    assert.equal(store.organization.roleMemories('default', roleId, 20)
+      .some(memory => memory.kind === 'submission' && memory.scheduleId === schedule.id), true);
+    assert.equal(store.organization.roleMemories('default', roleId, 20)
+      .some(memory => memory.kind === 'delivery' && memory.scheduleId === schedule.id), true);
+
+    await restartedRuns.shutdown();
+    restartedRuns = undefined;
+    store.close();
+    store = new Store(database);
+    const reloadedSociety = new SocietyService({ store });
+    const persistedLife = reloadedSociety.roleLife('default', roleId);
+    assert.deepEqual(store.organization.getSocietySchedule(schedule.id, 'default')?.selection, schedule.selection);
+    assert.equal(persistedLife.memories.some(memory =>
+      memory.kind === 'submission' && memory.scheduleId === schedule.id
+    ), true);
+    assert.equal(persistedLife.memories.some(memory =>
+      memory.kind === 'delivery' && memory.scheduleId === schedule.id
+    ), true);
   } finally {
     finishResumed.resolve();
     await restartedRuns?.shutdown();

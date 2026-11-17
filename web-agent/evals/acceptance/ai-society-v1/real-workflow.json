@@ -1,0 +1,21 @@
+{
+  "kind": "browser-real-backend-workflow",
+  "backend": "maharness server/index.ts",
+  "database": "temporary SQLite",
+  "browser": "Playwright Chromium",
+  "provider": "deterministic OpenAI-compatible local HTTP transport",
+  "realModel": false,
+  "mockBoundary": "provider transport only; API, scheduler, RunService, persistence and UI are real",
+  "taskStatus": "completed",
+  "scheduleStatus": "completed",
+  "realRunCount": 1,
+  "providerCalls": 1,
+  "institutionVersion": 3,
+  "institutionBudgetUsd": 20,
+  "auditActions": [
+    "rollback",
+    "update",
+    "initialize"
+  ],
+  "screenshotSha256": "21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c"
+}

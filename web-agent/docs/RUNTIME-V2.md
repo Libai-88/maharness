@@ -192,7 +192,7 @@ advisory 任务在额度超出、价格未知或用量不完整时继续执行�
 
 ## AI 社会运行层
 
-`SocietyService` 提供独立于主 Agent 的机构调度。默认制度包含三个部门与四个持久角色；调度按制度版本、部门配额、福利容量、角色/任务预算和单角色净收益门槛选择 solo、team 或 queue。短团队释放后写入角色生命史与关系。制度更新和回滚创建新版本并保留审计。
+`SocietyService` 提供独立于主 Agent 的机构调度。默认制度包含三个部门与四个持久角色；调度按能力、记忆、工具、协作、履历和负载六因子排序，并同时检查制度版本、部门配额、福利容量、角色/任务预算和单角色净收益门槛。调度记录候选分数、阻断原因、最终角色和制度版本。连续失败和审批等待进入角色福利门禁。短团队释放后，契约终态先写 submission，人工验收后才写 delivery，失败或拒收写 failure。制度更新和回滚创建新版本并保留审计。
 
 社会接口为 `GET /api/organization/society`、`POST /api/organization/society/tasks`、`POST /api/organization/society/tick`、任务 approve/release、experiment、角色 life 和制度 update/rollback。`GET /api/workbench/summary` 聚合 `society`。边界见 [AI 社会运行层](AI-SOCIETY.md)，验收见 [AI 社会 v1 完整验收](AI-SOCIETY-ACCEPTANCE.md)。
 

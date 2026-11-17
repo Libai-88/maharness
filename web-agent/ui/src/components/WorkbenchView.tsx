@@ -22,6 +22,27 @@ interface Props {
   onOpenWorkbench: () => void;
 }
 
+const roleStateLabels = {
+  ready: '可调度',
+  busy: '工作中',
+  waiting: '等待授权',
+  resting: '休整中',
+} as const;
+
+const contextPressureLabels = {
+  unknown: '未知',
+  normal: '正常',
+  high: '偏高',
+} as const;
+
+function ratio(value: number): string {
+  return `${Math.round(value * 100)}%`;
+}
+
+function societyTime(value?: number): string {
+  return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知';
+}
+
 function ItemRow({ item, busy, onExecute }: { item: WorkbenchItem; busy: boolean; onExecute: () => void }) {
   return (
     <div className="flex items-start gap-3 rounded-lg border p-3">
@@ -398,6 +419,22 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
               </div>)}
             </div>
 
+            <details className="rounded-lg border p-3" data-testid="society-role-wellbeing">
+              <summary className="cursor-pointer text-sm font-medium">角色福利与调度状态</summary>
+              <div className="mt-3 grid gap-2 md:grid-cols-2">
+                {summary!.society.roleLife.map(life => {
+                  const role = summary!.society!.roles.find(item => item.id === life.roleId);
+                  const wellbeing = life.wellbeing;
+                  if (!wellbeing) return null;
+                  return <div key={life.roleId} className="rounded-md border p-2 text-xs" data-testid={`wellbeing-${life.roleId}`}>
+                    <div className="flex items-center justify-between gap-2"><span className="font-medium">{role?.name ?? life.roleId}</span><Badge variant={wellbeing.state === 'resting' || wellbeing.state === 'waiting' ? 'destructive' : 'outline'}>{roleStateLabels[wellbeing.state]}</Badge></div>
+                    <p className="mt-1 text-muted-foreground">负载 {wellbeing.activeAssignments} · 连续失败 {wellbeing.consecutiveFailures} · 审批等待 {wellbeing.waitingApproval} · 返工 {wellbeing.reworkAssignments}</p>
+                    <p className="mt-1 text-muted-foreground">上下文压力 {contextPressureLabels[wellbeing.contextPressure]}{wellbeing.lastFailureAt ? ` · 最近失败 ${societyTime(wellbeing.lastFailureAt)}` : ''}{wellbeing.failureBackoffUntil ? ` · 退避至 ${societyTime(wellbeing.failureBackoffUntil)}` : ''}</p>
+                  </div>;
+                })}
+              </div>
+            </details>
+
             {summary!.society.bottlenecks.length > 0 && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
               <p className="flex items-center gap-2 text-sm font-medium"><TriangleAlert className="size-4 text-destructive" />社会瓶颈</p>
               <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">{summary!.society.bottlenecks.map((item, index) => <p key={`${item.departmentId}:${item.kind}:${index}`}>{item.detail}</p>)}</div>
@@ -426,6 +463,20 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
                     <div className="flex items-center gap-2"><span className="min-w-0 flex-1 text-sm font-medium">{task?.objective ?? schedule.taskId}</span><Badge variant={schedule.mode === 'team' ? 'secondary' : 'outline'}>{schedule.mode === 'team' ? `团队 ${schedule.roleIds.length}` : '单角色'}</Badge></div>
                     <p className="mt-1 text-xs text-muted-foreground">{roleNames.join(' · ')} · 估算 ${schedule.estimates.teamCostUsd.toFixed(3)} · 净收益 ${schedule.estimates.teamNetBenefitUsd.toFixed(3)}</p>
                     <p className="mt-1 text-xs text-muted-foreground">{schedule.reason} · {schedule.runIds.length} 个真实 Run 正在推进</p>
+                    {schedule.selection && <details className="mt-2 rounded-md bg-muted/30 p-2 text-xs" data-testid={`society-selection-${schedule.id}`}>
+                      <summary className="cursor-pointer font-medium">角色选择依据 · 制度 v{schedule.selection.policyVersion}</summary>
+                      <p className="mt-1 text-muted-foreground">所需能力：{schedule.selection.requiredCapabilities.join(' · ') || '未识别'} · 权重：能力 {ratio(schedule.selection.weights.capability)} / 记忆 {ratio(schedule.selection.weights.memory)} / 工具 {ratio(schedule.selection.weights.tools)} / 协作 {ratio(schedule.selection.weights.collaboration)} / 履历 {ratio(schedule.selection.weights.history)} / 负载 {ratio(schedule.selection.weights.load)}</p>
+                      <div className="mt-2 flex flex-col gap-1">
+                        {schedule.selection.candidates.map(candidate => {
+                          const role = summary!.society!.roles.find(item => item.id === candidate.roleId);
+                          return <div key={candidate.roleId} className="rounded border bg-background/70 p-2">
+                            <div className="flex items-center gap-2"><span className="min-w-0 flex-1 font-medium">{role?.name ?? candidate.roleId}</span>{schedule.selection?.chosenRoleIds.includes(candidate.roleId) && <Badge>已选择</Badge>}{!candidate.eligible && <Badge variant="destructive">已阻断</Badge>}</div>
+                            <p className="mt-1 text-muted-foreground">能力 {ratio(candidate.capabilityFit)} · 记忆 {ratio(candidate.memoryRelevance)} · 工具 {ratio(candidate.toolReadiness)} · 协作 {ratio(candidate.collaborationHealth)} · 履历 {ratio(candidate.historyReliability)} · 负载 {ratio(candidate.loadBalance)}</p>
+                            {candidate.blockedReason && <p className="mt-1 text-destructive">{candidate.blockedReason}</p>}
+                          </div>;
+                        })}
+                      </div>
+                    </details>}
                   </div>;
                 })}
                 {awaitingSocietyAcceptance.map(schedule => {

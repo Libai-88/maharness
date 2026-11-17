@@ -6,9 +6,9 @@
 
 | 验收层 | 当前状态 | 证据范围 |
 | --- | --- | --- |
-| Deterministic 社会运行 | A1–H2 共 23 项完成核验：22 项通过，H1 部分通过 | 持久角色、制度/角色/评价标准版本、持久化 Run、契约 DAG、人工验收、福利、三级预算、配对净收益实验、缓存账本、失败熔断、租户隔离、无主 Agent 推进 |
+| Deterministic 社会运行 | A1–H2 共 23 项完成核验：22 项通过，H1 部分通过 | 持久角色、制度/角色/评价标准版本、持久化 Run、角色六因子选择、契约 DAG、人工验收、福利退避、三级预算、配对净收益、缓存账本、失败熔断、租户隔离、无主 Agent 推进 |
 | 定向自动测试 | 通过 | schema 7/8/9/10 到 14、组织、社会、调度器、自动化、材料、RunService、并行取消、Experience、Workbench、规则、token、缓存与上下文压力 |
-| 浏览器 UI contract（mock API） | 2/2 通过 | mock API 下的人类经营、审批、待验收状态、制度更新回滚、角色生命史、组织弹窗与 `Esc` 关闭接口契约 |
+| 浏览器经营闭环 | 3/3 通过 | 一条真实 `server/index.ts`、临时 SQLite、Scheduler、RunService 与浏览器闭环；两条 mock API UI contract。真实后端仅将模型传输替换为确定性本地 Provider |
 | 真实模型原始执行 | 1/9，未通过 | 单模型 9 样本，21 次模型调用；原始报告的门禁结果未达到通过标准 |
 | 真实模型轨迹回放 | 9/9，仅终结器回放通过 | 仅重载已持久化的 Run 终态并运行修复后的确定性终结器；没有发起第二次模型运行 |
 | Overall live gate | 未通过 | 真实模型原始执行为 1/9；轨迹回放不能替代新的模型实验或真实模型通过结论 |
@@ -21,10 +21,13 @@
 | --- | --- |
 | A1–H2 deterministic 报告 | [deterministic-report.json](../evals/acceptance/ai-society-v1/deterministic-report.json) |
 | 社会仪表盘截图 | [dashboard.png](../evals/acceptance/ai-society-v1/dashboard.png) |
+| 真实前后端经营回执 | [real-workflow.json](../evals/acceptance/ai-society-v1/real-workflow.json) · [real-workflow.png](../evals/acceptance/ai-society-v1/real-workflow.png) |
+| Playwright 脱敏结果 | [playwright-results.json](../evals/acceptance/ai-society-v1/playwright-results.json) |
 | 确定性社会测试 | [society.spec.ts](../server/tests/society.spec.ts) |
 | 组织契约与回执测试 | [organization.spec.ts](../server/tests/organization.spec.ts) |
 | 系统调度器测试 | [scheduler.spec.ts](../server/tests/scheduler.spec.ts) |
 | 浏览器经营闭环 | [society.spec.ts](../ui/e2e/society.spec.ts) |
+| 真实后端经营闭环 | [society-real-backend.spec.ts](../ui/e2e/society-real-backend.spec.ts) |
 | 组织视图与关闭行为 | [organization.spec.ts](../ui/e2e/organization.spec.ts) |
 | 真实模型与轨迹回放摘要 | [deterministic-report.json](../evals/acceptance/ai-society-v1/deterministic-report.json) 的 `liveModelEvidence` 字段与本文“真实模型门禁” |
 | 产品定位与架构 | [AI-SOCIETY.md](AI-SOCIETY.md) |
@@ -68,21 +71,21 @@
 | B1 持久成员 | 制度初始化 | 确定性通过 | 4 个基础持久角色均有 appointment 记忆 |
 | B2 制度调度 | tick 与契约数据 | 确定性通过 | 机构版本、部门、角色、福利、预算、净收益估算和 DAG 共同决定派工 |
 | B3 社会运行层 | 社会快照 | 确定性通过 | 部门、成员、协作网络、瓶颈、健康和资源状态可查询 |
-| C1 多目标优化 | 调度估算与健康快照 | 确定性通过 | 完成、声明质量与风险、运行时成本与福利和预算同时进入调度 |
-| C2 AI 福利 | 超载与上下文压力测试 | 确定性通过 | 角色并发满载或上下文达到窗口 80% 时不再派工，并记录具体原因 |
-| D1 人类经营 | mock API UI contract | UI contract 通过 | 人类可登记、审批、调度、验收、调整制度和回滚；不代表真实后端或模型执行 |
-| D2 社会仪表盘 | mock API 截图 | UI contract 通过 | 展示部门、角色、网络、瓶颈、福利、预算、执行进度和待验收交付 |
+| C1 多目标优化 | 六因子选择与健康快照 | 确定性通过 | 能力、记忆、工具、协作、履历和负载进入实际排序；阻断原因与权重随调度持久化 |
+| C2 AI 福利 | 并发、上下文、失败与审批测试 | 确定性通过 | 并发满载、上下文达到窗口 80%、连续两次失败退避或审批等待时不再派工，并记录具体原因 |
+| D1 人类经营 | 真实后端浏览器闭环 | 确定性通过 | 真实 API、Scheduler、RunService、临时 SQLite 和 Chromium 完成登记、审批、调度、Run 交付、人工验收及制度发布回滚；模型传输为确定性本地 Provider |
+| D2 社会仪表盘 | 真实后端截图与 UI contract | 确定性通过 | 展示部门、角色、网络、瓶颈、六因子选择、福利退避、三级预算、执行进度和待验收交付 |
 | E1 制度演化 | 制度、角色、评价标准版本与审计测试 | 确定性通过 | 三类对象独立发布、审计并回滚；AI 复盘冻结评价标准版本和哈希；mock API 覆盖相应界面 |
 | E2 可审计干预 | 高额审批与配额测试 | 确定性通过 | 高额任务等待人类，配额变化影响下一轮实际调度 |
 | F1 去掉主 Agent | 系统调度器测试 | 确定性通过 | 无聊天主 Agent 时仍创建并推进持久化社会 Run |
-| F2 跨任务生命 | 角色记忆与关系 | 确定性通过 | 雇佣、调度、交付、失败、协作关系和履历跨任务保留 |
-| F3 福利资源约束 | 福利与三级预算测试 | 确定性通过 | 超载、部门配额、社会预算和角色预算均能阻断派工 |
+| F2 跨任务生命 | 角色记忆与关系 | 确定性通过 | 调度写 submission，人工验收后才写 delivery；执行失败和拒收写 failure，记忆、关系和履历持久保留 |
+| F3 福利资源约束 | 福利与三级预算测试 | 确定性通过 | 超载、上下文压力、连续失败退避、审批休眠、部门配额、社会预算和角色预算均参与派工门禁 |
 | F4 制度版本化 | 更新、审计与回滚 | 确定性通过 | 制度可版本化发布、审计和回滚 |
 | G1 token 三级预算 | 社会快照与调度门禁 | 确定性通过 | 社会、部门、角色和任务预算可配置、继承和审计 |
 | G2 组队净收益 | 高低价值对比 | 确定性通过 | 单角色可完成时保持 solo；低净收益扩团被拒 |
 | G3 动态解散 | 契约交付与福利快照 | 确定性通过 | 短团队在契约结束后释放，角色回到空闲但生命史保留 |
 | G4 分层认知与共享记忆 | 调度与缓存账本 | 确定性通过 | decision/execution 层可审计，重复证据去重，Provider 报告的缓存 usage 才进入账本 |
-| G5 token 经济仪表盘 | 社会快照 | 确定性通过 | 部门、角色、任务预算、实际 token、缓存命中/未命中、cache-write 状态和 ROI 可见 |
+| G5 token 经济仪表盘 | 社会快照与工作台 | 确定性通过 | 部门、角色、任务预算、实际 token、缓存命中/未命中、cache-write 状态、ROI、六因子选择与福利阻断原因可见 |
 | G6 熔断回退 | 无进展与失败测试 | 确定性通过 | 低收益停止扩团；失败分支不能伪造完成；回退状态可追溯 |
 | H1 净收益实验 | `/experiments/:taskId` 与离线配对回放 | 部分通过 | 同一目标已能生成单角色与团队两条真实 Run，并按契约、产物、成本、token、耗时和风险持久化配对事实；负实测边际收益会阻止后续扩团。真实 Provider 上的 paired live A/B 尚未执行，发布级实测结论仍未知 |
 | H2 场景演练 | deterministic 报告 | 确定性通过 | 单角色、组队、拒绝扩团、预算阻断、失败熔断和无主 Agent 推进均通过确定性脚本 |
@@ -99,9 +102,9 @@ node --import tsx --test --test-concurrency=2 `
   server/tests/workbench.spec.ts `
   server/tests/experience.spec.ts
 npm run ui:build
-npm run e2e -- society.spec.ts organization.spec.ts
+npm run e2e -- society.spec.ts organization.spec.ts society-real-backend.spec.ts
 node --import tsx scripts/ai-society-acceptance.ts
 node --import tsx scripts/replay-organization-live.ts
 ```
 
-浏览器命令执行的是 mock API UI contract。真实模型复验必须使用新目录，生成新的 `report.json`；旧目录不可覆盖。报告需要分别记录原始结果和修复后轨迹回放，不能用回放替代新的模型实验。只有当新的原始执行结果达到门禁标准时，Overall live gate 才能更新为通过。
+浏览器命令同时运行 mock API UI contract 和真实前后端经营闭环。真实后端测试只替换模型传输，API、Scheduler、RunService、SQLite 与 UI 均使用生产实现；报告明确这不是真实模型证据。真实模型复验必须使用新目录，生成新的 `report.json`；旧目录不可覆盖。H1 还要求同一任务上的真实单角色/团队 paired A/B 通过双臂产物、完整 usage 和硬预算门禁。报告分别记录原始结果和修复后轨迹回放，不能用回放替代新的模型实验。

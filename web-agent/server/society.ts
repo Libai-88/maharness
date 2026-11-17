@@ -9,12 +9,14 @@ import {
   type InstitutionPolicies,
   type InstitutionVersion,
   type OrganizationRole,
+  type RoleSelectionScore,
   type SocialHealth,
   type SocietyDepartmentPolicy,
   type SocietyExperimentMeasurement,
   type SocietyPairedExperiment,
   type SocietySchedule,
   type SocietyScheduleAssignment,
+  type SocietyScheduleSelection,
   type SocietySnapshot,
   type SocietyTask,
   type SocietyTaskBranch,
@@ -237,6 +239,39 @@ function normalizePolicies(input: Partial<InstitutionPolicies>): InstitutionPoli
 function activeScheduleRoleIds(schedules: SocietySchedule[]): string[] {
   return schedules.filter(item => item.status === 'active').flatMap(item => item.roleIds);
 }
+
+const CAPABILITY_ALIASES: Record<string, string[]> = {
+  research: ['研究', '论文', '文献', '检索', '资料对比', '来源'],
+  reading: ['阅读', '精读', '读懂', '摘要'],
+  analysis: ['分析', '归纳', '对比'],
+  review: ['审校', '复核', '核验', '验收', '检查', '核对'],
+  quality: ['质量', '准确性', '错误'],
+  documents: ['文档', 'word', 'docx', 'pdf', '表格', 'xlsx', '演示', 'ppt'],
+  files: ['文件', '整理', '批量'],
+  automation: ['自动化', '批量处理', '定时'],
+  coordination: ['协调', '计划', '排期'],
+};
+
+const CAPABILITY_TOOL_HINTS: Record<string, string[]> = {
+  research: ['search', 'fetch', 'browser', 'web'],
+  reading: ['read', 'document', 'pdf'],
+  analysis: ['read', 'document', 'data', 'analysis'],
+  review: ['review', 'read', 'search'],
+  quality: ['review', 'read', 'search'],
+  documents: ['document', 'docx', 'xlsx', 'pptx', 'write'],
+  files: ['file', 'workspace', 'write'],
+  automation: ['automation', 'schedule', 'command', 'shell', 'write'],
+  coordination: ['plan', 'team', 'subagent', 'task'],
+};
+
+const ROLE_SELECTION_WEIGHTS = {
+  capability: 0.3,
+  memory: 0.15,
+  tools: 0.15,
+  collaboration: 0.1,
+  history: 0.15,
+  load: 0.15,
+} as const;
 
 export class SocietyService {
   private readonly organization: OrganizationService;
@@ -645,30 +680,132 @@ export class SocietyService {
       .filter(role => departmentIds.some(id => this.roleDepartment(role, id, departments)));
   }
 
-  private rankedRoles(task: SocietyTask, institution: InstitutionVersion, exclude: Set<string> = new Set()): OrganizationRole[] {
+  private requiredCapabilities(task: SocietyTask, institution: InstitutionVersion): string[] {
+    const departmentIds = new Set(task.branches.map(branch =>
+      branch.departmentId ?? task.departmentId ?? '',
+    ).filter(Boolean));
+    const departmentCapabilities = institution.policies.departments
+      .filter(department => departmentIds.has(department.id))
+      .flatMap(department => department.capabilities);
+    const text = [
+      task.objective,
+      ...task.acceptance,
+      ...task.branches.flatMap(branch => [
+        branch.objective,
+        ...branch.acceptance,
+        ...branch.expectedArtifacts,
+      ]),
+    ].join(' ').toLowerCase();
+    const matched = Object.entries(CAPABILITY_ALIASES)
+      .filter(([capability, aliases]) =>
+        text.includes(capability.toLowerCase())
+        || aliases.some(alias => text.includes(alias.toLowerCase())),
+      )
+      .map(([capability]) => capability);
+    return [...new Set(matched.length ? matched : departmentCapabilities)].slice(0, 8);
+  }
+
+  private taskNeedsWrite(task: SocietyTask): boolean {
+    const text = [
+      task.objective,
+      ...task.acceptance,
+      ...task.branches.flatMap(branch => [
+        branch.objective,
+        ...branch.expectedArtifacts,
+        ...branch.acceptance,
+      ]),
+    ].join(' ').toLowerCase();
+    return task.branches.some(branch => branch.expectedArtifacts.length > 0)
+      || /创建|生成|修改|导出|写入|整理|制作|转换|保存|create|generate|edit|write|export|convert|save/.test(text);
+  }
+
+  private rankRoles(task: SocietyTask, institution: InstitutionVersion): {
+    requiredCapabilities: string[];
+    candidates: RoleSelectionScore[];
+  } {
     const activeRoles = activeScheduleRoleIds(this.repository().societySchedules(task.tenantId, 1000));
     const organization = new OrganizationService({ store: this.options.store });
     const scorecards = organization.scorecards(task.tenantId);
     const evaluation = organization.ensureEvaluation(task.tenantId);
     const weights = evaluation.record.rankingWeights;
-    return this.eligibleRoles(task, institution)
-      .filter(role => !exclude.has(role.id))
-      .sort((left, right) => {
-        const leftLoad = activeRoles.filter(id => id === left.id).length;
-        const rightLoad = activeRoles.filter(id => id === right.id).length;
-        const leftScore = scorecards.find(item => item.roleId === left.id);
-        const rightScore = scorecards.find(item => item.roleId === right.id);
-        const reliable = (score?: typeof leftScore) =>
-          score && score.sampleSize >= evaluation.record.lowConfidenceSamples
-          ? (score.acceptanceRate ?? 0) * weights.acceptance
-            + (score.budgetCompliance ?? 0) * weights.budget
-            + (score.evidenceCompleteness ?? 0) * weights.evidence
-          : 0.5;
-        return leftLoad - rightLoad
-          || reliable(rightScore) - reliable(leftScore)
-          || Number(right.persistent) - Number(left.persistent)
-          || left.name.localeCompare(right.name);
-      });
+    const relations = this.repository().roleRelations(task.tenantId);
+    const requiredCapabilities = this.requiredCapabilities(task, institution);
+    const needsWrite = this.taskNeedsWrite(task);
+    const candidates = this.eligibleRoles(task, institution).map(role => {
+      const capabilityFit = requiredCapabilities.length
+        ? requiredCapabilities.filter(capability => role.capabilities.includes(capability)).length
+          / requiredCapabilities.length
+        : 0.5;
+      const memories = this.repository().roleMemories(task.tenantId, role.id, 20);
+      const memoryHits = requiredCapabilities.filter(capability => {
+        const terms = [capability, ...(CAPABILITY_ALIASES[capability] ?? [])];
+        return memories.some(memory => terms.some(term => memory.summary.toLowerCase().includes(term.toLowerCase())));
+      }).length;
+      const memoryRelevance = requiredCapabilities.length ? memoryHits / requiredCapabilities.length : 0;
+      const allowedTools = role.authority.allowedTools.map(tool => tool.toLowerCase());
+      const toolHints = [...new Set(requiredCapabilities.flatMap(capability =>
+        CAPABILITY_TOOL_HINTS[capability] ?? [],
+      ))];
+      const toolReadiness = allowedTools.length === 0
+        ? 1
+        : toolHints.length === 0
+          ? 0.5
+          : toolHints.filter(hint => allowedTools.some(tool => tool.includes(hint))).length / toolHints.length;
+      const roleRelations = relations.filter(relation =>
+        relation.fromRoleId === role.id || relation.toRoleId === role.id,
+      );
+      const collaborationHealth = roleRelations.length
+        ? roleRelations.reduce((sum, relation) => sum + relation.score, 0) / roleRelations.length
+        : 0.5;
+      const scorecard = scorecards.find(item => item.roleId === role.id);
+      const historyReliability = scorecard && scorecard.sampleSize >= evaluation.record.lowConfidenceSamples
+        ? (scorecard.acceptanceRate ?? 0) * weights.acceptance
+          + (scorecard.budgetCompliance ?? 0) * weights.budget
+          + (scorecard.evidenceCompleteness ?? 0) * weights.evidence
+        : 0.5;
+      const activeAssignments = activeRoles.filter(id => id === role.id).length;
+      const loadBalance = Math.max(0, 1 - activeAssignments
+        / Math.max(1, institution.policies.welfareMaxActiveAssignments));
+      const score = capabilityFit * ROLE_SELECTION_WEIGHTS.capability
+        + memoryRelevance * ROLE_SELECTION_WEIGHTS.memory
+        + toolReadiness * ROLE_SELECTION_WEIGHTS.tools
+        + collaborationHealth * ROLE_SELECTION_WEIGHTS.collaboration
+        + historyReliability * ROLE_SELECTION_WEIGHTS.history
+        + loadBalance * ROLE_SELECTION_WEIGHTS.load;
+      const blockedReason = needsWrite && role.authority.readOnly
+        ? '角色只读权限不覆盖写入任务'
+        : toolReadiness === 0
+          ? '角色工具权限不覆盖任务能力'
+          : undefined;
+      return {
+        roleId: role.id,
+        score: Math.round(score * 1000) / 1000,
+        capabilityFit: Math.round(capabilityFit * 1000) / 1000,
+        memoryRelevance: Math.round(memoryRelevance * 1000) / 1000,
+        toolReadiness: Math.round(toolReadiness * 1000) / 1000,
+        collaborationHealth: Math.round(collaborationHealth * 1000) / 1000,
+        historyReliability: Math.round(historyReliability * 1000) / 1000,
+        loadBalance: Math.round(loadBalance * 1000) / 1000,
+        activeAssignments,
+        eligible: !blockedReason,
+        reason: `能力=${capabilityFit.toFixed(2)} 记忆=${memoryRelevance.toFixed(2)} 工具=${toolReadiness.toFixed(2)} 协作=${collaborationHealth.toFixed(2)} 履历=${historyReliability.toFixed(2)} 负载=${loadBalance.toFixed(2)}`,
+        ...(blockedReason ? { blockedReason } : {}),
+      };
+    }).sort((left, right) =>
+      Number(right.eligible) - Number(left.eligible)
+      || right.score - left.score
+      || left.activeAssignments - right.activeAssignments
+      || left.roleId.localeCompare(right.roleId),
+    );
+    return { requiredCapabilities, candidates };
+  }
+
+  private rankedRoles(task: SocietyTask, institution: InstitutionVersion, exclude: Set<string> = new Set()): OrganizationRole[] {
+    const eligible = this.eligibleRoles(task, institution).filter(role => !exclude.has(role.id));
+    const eligibleIds = new Set(eligible.map(role => role.id));
+    return this.rankRoles(task, institution).candidates
+      .filter(score => score.eligible && eligibleIds.has(score.roleId))
+      .map(score => eligible.find(role => role.id === score.roleId)!);
   }
 
   private resourceUsage(task: SocietyTask, schedules: SocietySchedule[], institution: InstitutionVersion): {
@@ -848,19 +985,39 @@ export class SocietyService {
       if (!department) { this.queue(task, '部门不可用'); continue; }
       const schedules = this.repository().societySchedules(tenantId, 1000);
       const usage = this.resourceUsage(task, schedules, institution);
-      const roles = this.rankedRoles(task, institution);
+      const ranking = this.rankRoles(task, institution);
+      const roleById = new Map(this.eligibleRoles(task, institution).map(role => [role.id, role]));
+      const roles = ranking.candidates
+        .filter(score => score.eligible)
+        .map(score => roleById.get(score.roleId))
+        .filter((role): role is OrganizationRole => Boolean(role));
       const wellbeing = new OrganizationService({ store: this.options.store }).wellbeing(tenantId, projectId);
       const contextBlocked = new Set(wellbeing
         .filter(item => item.contextPressure === 'high')
         .map(item => item.roleId));
+      const failureBlocked = new Set(wellbeing
+        .filter(item => item.failureBackoffUntil !== undefined && item.failureBackoffUntil > Date.now())
+        .map(item => item.roleId));
+      const waitingBlocked = new Set(wellbeing
+        .filter(item => item.waitingApproval > 0)
+        .map(item => item.roleId));
       const available = roles.filter(role =>
         !usage.roleBudgetBlocked.has(role.id)
         && !contextBlocked.has(role.id)
+        && !failureBlocked.has(role.id)
+        && !waitingBlocked.has(role.id)
         && (usage.roleLoads.get(role.id) ?? 0) < institution.policies.welfareMaxActiveAssignments,
       );
       if (!available.length) {
-        this.queue(task, usage.roleBudgetBlocked.size
+        const permissionBlocked = ranking.candidates.filter(score => !score.eligible);
+        this.queue(task, permissionBlocked.length
+          ? permissionBlocked[0]!.blockedReason ?? '角色权限不覆盖任务能力'
+          : usage.roleBudgetBlocked.size
           ? '角色预算不足'
+          : failureBlocked.size
+            ? '角色连续失败，处于退避恢复期'
+            : waitingBlocked.size
+              ? '角色正在等待审批，保持休眠'
           : contextBlocked.size
             ? '角色上下文压力过高，等待压缩、拆分或回退单角色'
           : '角色负载达到福利上限');
@@ -947,6 +1104,29 @@ export class SocietyService {
           model: selected[0]!.modelPolicy.model,
           ...(selected[0]!.modelPolicy.providerId ? {} : { fallbackReason: '角色未固定模型，由运行时使用当前可用主模型' }),
         }];
+      const selectedIds = new Set(selected.map(role => role.id));
+      const selection: SocietyScheduleSelection = {
+        policyVersion: institution.version,
+        requiredCapabilities: ranking.requiredCapabilities,
+        weights: { ...ROLE_SELECTION_WEIGHTS },
+        chosenRoleIds: [...selectedIds],
+        candidates: ranking.candidates.map(candidate => {
+          const blockedReason = candidate.blockedReason
+            ?? (usage.roleBudgetBlocked.has(candidate.roleId) ? '角色预算不足' : undefined)
+            ?? (failureBlocked.has(candidate.roleId) ? '角色连续失败，处于退避恢复期' : undefined)
+            ?? (waitingBlocked.has(candidate.roleId) ? '角色正在等待审批，保持休眠' : undefined)
+            ?? (contextBlocked.has(candidate.roleId)
+              ? '角色上下文压力过高'
+              : (usage.roleLoads.get(candidate.roleId) ?? 0) >= institution.policies.welfareMaxActiveAssignments
+                ? '角色负载达到福利上限'
+                : undefined);
+          return {
+            ...candidate,
+            eligible: candidate.eligible && !blockedReason,
+            ...(blockedReason ? { blockedReason } : {}),
+          };
+        }),
+      };
       const requestedByDepartment = new Map<string, { active: number; usd: number; tokens: number }>();
       const branchBudgetUsd = task.maxBudgetUsd / Math.max(1, assignments.length);
       for (const assignment of assignments) {
@@ -1013,6 +1193,7 @@ export class SocietyService {
           id: `material:${material.id}:${material.version}`, kind: 'material',
           ref: material.id, version: material.version,
         })),
+        selection,
         reason: useTeam
           ? '独立分支净收益超过单角色门槛，建立短周期组织'
           : teamFallbackReason ?? '单角色即可完成或团队净收益不足，保持单角色执行',
@@ -1045,11 +1226,7 @@ export class SocietyService {
         executed = this.launchSchedule(task, schedule);
       } catch (error) {
         const reason = error instanceof Error ? error.message : String(error);
-        this.repository().updateSocietySchedule(schedule, { status: 'failed', reason, releasedAt: Date.now() });
-        this.repository().updateSocietyTask(task, {
-          status: 'failed', scheduleId: schedule.id, lastSchedulingReason: reason,
-        });
-        this.emit('organization.society.failed', { taskId: task.id, scheduleId: schedule.id, reason });
+        this.terminateSchedule(task, schedule, reason);
       }
       decisions.push(executed);
       this.emit('organization.society.scheduled', {
@@ -1174,6 +1351,16 @@ export class SocietyService {
   private terminateSchedule(task: SocietyTask, schedule: SocietySchedule, reason: string): void {
     this.stopWatching(schedule.runIds ?? []);
     const runIds = new Set(schedule.runIds ?? []);
+    const contracts = (schedule.contractIds ?? [])
+      .map(id => this.repository().getContract(id, task.tenantId))
+      .filter((item): item is AssignmentContract => !!item);
+    const evidence = contracts.flatMap(contract =>
+      contract.delivery?.evidence ?? contract.evidenceInputs,
+    ).filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
+    const roleIds = new Set([
+      ...schedule.roleIds,
+      ...contracts.map(contract => contract.roleId),
+    ]);
     for (const contractId of schedule.contractIds ?? []) {
       const contract = this.repository().getContract(contractId, task.tenantId);
       if (contract?.runId) runIds.add(contract.runId);
@@ -1191,6 +1378,16 @@ export class SocietyService {
     }
     const now = Date.now();
     this.repository().transaction(() => {
+      for (const roleId of roleIds) {
+        const recorded = this.repository().roleMemories(task.tenantId, roleId, 50)
+          .some(memory => memory.kind === 'failure' && memory.scheduleId === schedule.id);
+        if (!recorded) this.repository().appendRoleMemory({
+          id: randomUUID(), tenantId: task.tenantId, roleId, kind: 'failure',
+          summary: `任务执行失败：${reason}`.slice(0, 1000),
+          scheduleId: schedule.id, workOrderId: schedule.workOrderId,
+          evidence, createdAt: now,
+        });
+      }
       this.repository().updateSocietySchedule(schedule, {
         status: 'failed', releasedAt: now, reason: reason.slice(0, 500),
       });
@@ -1553,7 +1750,8 @@ export class SocietyService {
       });
       for (const contract of contracts) this.repository().appendRoleMemory({
         id: randomUUID(), tenantId, roleId: contract.roleId,
-        kind: 'delivery', summary: contract.delivery?.summary ?? contract.branchObjective,
+        kind: 'submission',
+        summary: `提交待验收：${contract.delivery?.summary ?? contract.branchObjective}`.slice(0, 1000),
         scheduleId: schedule.id, workOrderId: schedule.workOrderId,
         evidence: contract.delivery?.evidence ?? [], createdAt: now,
       });
@@ -1584,6 +1782,7 @@ export class SocietyService {
     const schedule = this.repository().getSocietySchedule(task.scheduleId, tenantId);
     if (!schedule) throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '任务调度不存在');
     const reason = bounded(summary, 1000, '释放原因');
+    const currentTask = task;
     if (outcome === 'completed') {
       if (task.status !== 'awaiting_acceptance' || schedule.status !== 'completed')
         throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '真实分工全部交付后才能完成人工验收');
@@ -1593,12 +1792,50 @@ export class SocietyService {
       if (!contracts.length || contracts.some(contract => contract.status !== 'delivered'
         || (contract.delivery?.unfinished.length ?? 1) > 0))
         throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '分工交付事实不完整，不能标记完成');
-      task = this.repository().updateSocietyTask(task, {
-        status: 'completed', lastSchedulingReason: `人类验收：${reason}`,
+      const now = Date.now();
+      this.repository().transaction(() => {
+        task = this.repository().updateSocietyTask(currentTask, {
+          status: 'completed', lastSchedulingReason: `人类验收：${reason}`,
+        });
+        for (const contract of contracts) this.repository().appendRoleMemory({
+          id: randomUUID(), tenantId,
+          roleId: contract.roleId, kind: 'delivery',
+          summary: `人工验收通过：${contract.delivery?.summary ?? contract.branchObjective}`.slice(0, 1000),
+          scheduleId: schedule.id, workOrderId: schedule.workOrderId,
+          evidence: contract.delivery?.evidence ?? [], createdAt: now,
+        });
       });
     } else if (task.status === 'awaiting_acceptance') {
-      task = this.repository().updateSocietyTask(task, {
-        status: 'failed', lastSchedulingReason: `人类拒绝验收：${reason}`,
+      const contracts = (schedule.contractIds ?? [])
+        .map(id => this.repository().getContract(id, tenantId))
+        .filter((item): item is AssignmentContract => !!item);
+      const evidence = contracts.flatMap(contract => contract.delivery?.evidence ?? [])
+        .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
+      const now = Date.now();
+      this.repository().transaction(() => {
+        task = this.repository().updateSocietyTask(currentTask, {
+          status: 'failed', lastSchedulingReason: `人类拒绝验收：${reason}`,
+        });
+        this.repository().updateSocietySchedule(schedule, {
+          status: 'failed', reason: `人类拒绝验收：${reason}`.slice(0, 500), releasedAt: now,
+        });
+        for (const contract of contracts) this.repository().appendRoleMemory({
+          id: randomUUID(), tenantId, roleId: contract.roleId, kind: 'failure',
+          summary: `人工拒绝验收：${reason}`.slice(0, 1000),
+          scheduleId: schedule.id, workOrderId: schedule.workOrderId,
+          evidence: contract.delivery?.evidence ?? contract.evidenceInputs, createdAt: now,
+        });
+        if (contracts.length > 1) {
+          for (const fromRoleId of contracts.map(contract => contract.roleId)) {
+            for (const toRoleId of contracts.map(contract => contract.roleId)) {
+              if (fromRoleId === toRoleId) continue;
+              this.repository().upsertRoleRelation({
+                id: randomUUID(), tenantId, fromRoleId, toRoleId,
+                kind: 'conflict', score: 0.2, evidence, updatedAt: now,
+              });
+            }
+          }
+        }
       });
     } else if (schedule.status === 'active') {
       this.failSchedule(task, schedule, `人类终止：${reason}`, false);

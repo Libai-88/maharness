@@ -11,7 +11,7 @@ import { ACTIVE_RUN_STATES } from './run-store';
 import { ExecutionPool } from '../kernel/execution-pool';
 import type { ChildRunRequest, ChildRunResult } from '../kernel/run';
 import type { TaskPluginService, TaskPluginSession, PluginDevelopmentGrant } from '../kernel/task-plugins';
-import type { OrganizationService } from './organization';
+import { taskCriteriaForContract, type OrganizationService } from './organization';
 import type {
   AssignmentContract,
   OrganizationRole,
@@ -254,10 +254,7 @@ export class RunService {
       budgetUsd: contract.budgetUsd,
       budgetTokens: contract.budgetTokens,
       budgetPolicy: 'enforce',
-      acceptance: [
-        ...contract.acceptance.map(item => ({ type: 'output_contains' as const, value: item.statement })),
-        ...(task.acceptance.length ? [{ type: 'output_contains' as const, value: task.acceptance.join(' ') }] : []),
-      ],
+      acceptance: taskCriteriaForContract(contract),
       origin: {
         kind: 'society', societyTaskId: task.id, scheduleId: schedule.id,
         assignmentContractId: contract.id,

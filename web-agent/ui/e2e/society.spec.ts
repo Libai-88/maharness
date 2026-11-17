@@ -144,7 +144,15 @@ async function setup(page: Page) {
             acceptanceRate: 1, reworkRate: null, budgetCompliance: 1, recoveryRate: null,
             evidenceCompleteness: 1, reviewConsistency: null, costUsd: 0.02,
           } : undefined,
-          wellbeing: { roleId: role.id, activeAssignments: 0, consecutiveFailures: 0, waitingApproval: 0, reworkAssignments: 0, contextPressure: 'normal', state: 'ready' },
+          wellbeing: {
+            roleId: role.id, activeAssignments: role.id === 'role-research' ? 1 : 0,
+            consecutiveFailures: role.id === 'role-research' ? 2 : 0,
+            waitingApproval: 0, reworkAssignments: 0,
+            contextPressure: role.id === 'role-research' ? 'high' : 'normal',
+            state: role.id === 'role-research' ? 'resting' : 'ready',
+            lastFailureAt: 1_800_000_000_000,
+            failureBackoffUntil: 1_800_000_900_000,
+          },
         })),
         tasks, schedules, institutionAudits: audits,
         evaluation: {
@@ -245,6 +253,25 @@ async function setup(page: Page) {
           institutionVersion, departmentId: task.departmentId ?? 'operations',
           mode: team ? 'team' as const : 'solo' as const,
           roleIds: team ? ['role-research', 'role-quality'] : ['role-research'],
+          selection: {
+            policyVersion: institutionVersion, requiredCapabilities: team ? ['research', 'quality'] : ['research'],
+            weights: { capability: 0.3, memory: 0.15, tools: 0.15, collaboration: 0.1, history: 0.15, load: 0.15 },
+            chosenRoleIds: team ? ['role-research', 'role-quality'] : ['role-research'],
+            candidates: [
+              {
+                roleId: 'role-research', score: 0.82, capabilityFit: 1, memoryRelevance: 0.5,
+                toolReadiness: 1, collaborationHealth: 0.9, historyReliability: 0.7,
+                loadBalance: 1, activeAssignments: 0, eligible: true,
+                reason: '能力、工具与协作匹配',
+              },
+              {
+                roleId: 'role-delivery', score: 0.2, capabilityFit: 0, memoryRelevance: 0,
+                toolReadiness: 0, collaborationHealth: 0.5, historyReliability: 0.5,
+                loadBalance: 1, activeAssignments: 0, eligible: false,
+                reason: '能力不匹配', blockedReason: '角色工具权限不覆盖任务能力',
+              },
+            ],
+          },
           runIds: task.branches.map((_, index) => `run-${task.id}-${index + 1}`),
           assignments: task.branches.map((branch, index) => ({
             roleId: team && index === 1 ? 'role-quality' : 'role-research',
@@ -364,6 +391,14 @@ test('人类经营 AI 社会闭环并留下可审计证据', async ({ page }) =>
   await expect(society.getByText('人类已批准高额任务，等待制度调度')).toBeVisible();
   await society.getByRole('button', { name: '运行制度调度' }).click();
   await expect(society.getByText('团队 2', { exact: true })).toBeVisible();
+  const humanSelection = society.getByTestId('society-selection-schedule-task-human');
+  await humanSelection.getByText('角色选择依据 · 制度 v1').click();
+  await expect(humanSelection.getByText(/能力 100% · 记忆 50% · 工具 100% · 协作 90% · 履历 70% · 负载 100%/)).toBeVisible();
+  await expect(humanSelection.getByText('角色工具权限不覆盖任务能力')).toBeVisible();
+  await society.getByText('角色福利与调度状态').click();
+  await expect(society.getByTestId('wellbeing-role-research')).toContainText('连续失败 2');
+  await expect(society.getByTestId('wellbeing-role-research')).toContainText('上下文压力 偏高');
+  await expect(society.getByTestId('wellbeing-role-research')).toContainText('退避至');
   await expect(society.getByRole('button', { name: '确认交付' })).toHaveCount(0);
   await society.getByRole('button', { name: '运行制度调度' }).click();
   await expect(society.getByText('待你验收', { exact: true }).first()).toBeVisible();

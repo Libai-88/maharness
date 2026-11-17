@@ -40,13 +40,22 @@ function addRun(store: Store): RunRecord {
   return store.runs.get(id, tenantId)!;
 }
 
-function addPersistentRole(store: Store, tenantId: string, name: string, capabilities: string[]): OrganizationRole {
+function addPersistentRole(
+  store: Store,
+  tenantId: string,
+  name: string,
+  capabilities: string[],
+  authority: { readOnly?: boolean; allowedTools?: string[] } = {},
+): OrganizationRole {
   const now = Date.now();
   return store.organization.createRole({
     id: randomUUID(), tenantId, projectId: '', name,
     responsibilities: ['执行可验收的独立分支'],
     capabilities,
-    authority: { workspace: '', readOnly: true, profile: 'standard', allowedTools: [] },
+    authority: {
+      workspace: '', readOnly: authority.readOnly ?? false, profile: 'standard',
+      allowedTools: authority.allowedTools ?? [],
+    },
     modelPolicy: { providerId: 'institution', model: 'runtime-selected' },
     persistent: true, employment: 'active', source: 'builtin', revision: 0,
     createdAt: now, updatedAt: now,
@@ -379,13 +388,132 @@ describe('AI society operation layer', () => {
       const run = tick.decisions[0]!.runIds[0]!;
       fixture.finish(run);
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
+      const beforeAcceptance = store.organization.roleMemories('default', tick.decisions[0]!.roleIds[0]!, 20);
+      assert.equal(beforeAcceptance.some(item => item.kind === 'submission'), true);
+      assert.equal(beforeAcceptance.some(item => item.kind === 'delivery'), false);
       const released = society.releaseTask(task.id, 'default', 'completed', '文件已整理并通过来源检查');
       assert.equal(released.task.status, 'completed');
       assert.equal(released.schedule.status, 'completed');
 
       const life = society.snapshot('default').roleLife.find(item => item.roleId === released.schedule.roleIds[0]);
       assert.equal(life?.memories.some(item => item.kind === 'schedule'), true);
+      assert.equal(life?.memories.some(item => item.kind === 'submission'), true);
       assert.equal(life?.memories.some(item => item.kind === 'delivery'), true);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('human rejection turns submitted work into a failure memory and marks the schedule failed', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      const task = society.createTask({
+        tenantId: 'default',
+        objective: '整理会议文件并列出未完成项',
+        valueUsd: 5,
+        maxBudgetUsd: 0.1,
+        departmentId: 'operations',
+      });
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      fixture.finish(schedule.runIds[0]);
+      assert.equal(store.organization.roleMemories('default', schedule.roleIds[0], 20)
+        .some(item => item.kind === 'submission' && item.scheduleId === schedule.id), true);
+      assert.equal(store.organization.roleMemories('default', schedule.roleIds[0], 20)
+        .some(item => item.kind === 'delivery'), false);
+
+      const rejected = society.releaseTask(task.id, 'default', 'failed', '来源缺失，验收不通过');
+      assert.equal(rejected.task.status, 'failed');
+      assert.equal(rejected.schedule.status, 'failed');
+      const memories = store.organization.roleMemories('default', schedule.roleIds[0], 20);
+      assert.equal(memories.some(item =>
+        item.kind === 'failure'
+        && item.scheduleId === schedule.id
+        && item.summary.includes('来源缺失')
+      ), true);
+      assert.equal(memories.some(item => item.kind === 'delivery'), false);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('role selection records capability, memory, tool, collaboration, history and load facts', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      for (const role of store.organization.listRoles('default', undefined, true)) {
+        if (role.capabilities.some(capability => ['research', 'reading', 'analysis'].includes(capability)))
+          fixture.organization.updateRole(
+            role.id, 'default', role.revision, { employment: 'paused' }, '隔离角色选择测试',
+          );
+      }
+      const capable = addPersistentRole(
+        store, 'default', '工具就绪研究员', ['research', 'reading', 'analysis', 'files'],
+        { allowedTools: ['read_document', 'web_search', 'workspace_file'] },
+      );
+      const incompatible = addPersistentRole(
+        store, 'default', '工具不匹配研究员', ['research', 'reading', 'analysis', 'files'],
+        { allowedTools: ['shell'] },
+      );
+      const task = society.createTask({
+        tenantId: 'default', objective: '阅读论文并检索文献，整理阅读笔记',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      });
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.mode, 'solo');
+      assert.equal(schedule.roleIds[0], capable.id);
+      assert.ok(schedule.selection);
+      assert.equal(schedule.selection.requiredCapabilities.includes('research'), true);
+      assert.equal(schedule.selection.requiredCapabilities.includes('reading'), true);
+      assert.equal(schedule.selection.chosenRoleIds[0], capable.id);
+      const selected = schedule.selection.candidates.find(item => item.roleId === capable.id)!;
+      const blocked = schedule.selection.candidates.find(item => item.roleId === incompatible.id)!;
+      assert.equal(selected.eligible, true);
+      assert.equal(selected.toolReadiness > 0, true);
+      assert.equal(blocked.eligible, false);
+      assert.match(blocked.blockedReason ?? '', /工具权限/);
+      assert.deepEqual(
+        Object.keys(schedule.selection.weights).sort(),
+        ['capability', 'collaboration', 'history', 'load', 'memory', 'tools'],
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('relevant role memory breaks an otherwise neutral selection tie', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      for (const role of store.organization.listRoles('default', undefined, true)) {
+        if (role.capabilities.includes('research'))
+          fixture.organization.updateRole(
+            role.id, 'default', role.revision, { employment: 'paused' }, '隔离记忆选择测试',
+          );
+      }
+      addPersistentRole(store, 'default', '研究员甲', ['research', 'reading', 'analysis']);
+      const experienced = addPersistentRole(
+        store, 'default', '研究员乙', ['research', 'reading', 'analysis'],
+      );
+      store.organization.appendRoleMemory({
+        id: randomUUID(), tenantId: 'default', roleId: experienced.id,
+        kind: 'lesson', summary: '论文阅读与文献来源分析复盘',
+        evidence: [{ id: 'prior-run', kind: 'run', ref: 'run-prior' }], createdAt: Date.now(),
+      });
+      const task = society.createTask({
+        tenantId: 'default', objective: '阅读论文并核对文献来源',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      });
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.roleIds[0], experienced.id);
+      const score = schedule.selection?.candidates.find(item => item.roleId === experienced.id);
+      assert.ok(score && score.memoryRelevance > 0);
+      assert.ok(score.score > 0.5);
     } finally {
       store.close();
     }
@@ -1189,9 +1317,59 @@ describe('AI society operation layer', () => {
       fixture.finish(schedule.runIds[0], 'default', 'failed');
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'failed');
       assert.equal(store.organization.getSocietySchedule(schedule.id, 'default')?.status, 'failed');
+      assert.equal(store.organization.roleMemories('default', schedule.roleIds[0], 20)
+        .some(item => item.kind === 'failure' && item.scheduleId === schedule.id), true);
       assert.throws(
         () => society.releaseTask(task.id, 'default', 'completed', '伪造完成'),
         (error: unknown) => error instanceof OrganizationError && error.code === 'SOCIETY_TASK_STATE',
+      );
+    } finally {
+      store.close();
+    }
+  });
+
+  test('two consecutive terminal failures put a role into an observable scheduling backoff', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      const first = society.createTask({
+        tenantId: 'default', objective: '第一次处理损坏资料',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'operations',
+      });
+      const firstSchedule = society.tick('default').decisions.find(item => item.taskId === first.id)!;
+      fixture.finish(firstSchedule.runIds[0], 'default', 'failed');
+      const failedRoleId = firstSchedule.roleIds[0]!;
+      for (const role of store.organization.listRoles('default', undefined, true)) {
+        if (role.id !== failedRoleId && role.employment === 'active') {
+          fixture.organization.updateRole(
+            role.id, 'default', role.revision, { employment: 'paused' }, '隔离连续失败退避测试',
+          );
+        }
+      }
+
+      const second = society.createTask({
+        tenantId: 'default', objective: '第二次处理损坏资料',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'operations',
+      });
+      const secondSchedule = society.tick('default').decisions.find(item => item.taskId === second.id)!;
+      assert.equal(secondSchedule.roleIds[0], failedRoleId);
+      fixture.finish(secondSchedule.runIds[0], 'default', 'failed');
+
+      const snapshot = fixture.organization.wellbeing('default')
+        .find(item => item.roleId === failedRoleId)!;
+      assert.equal(snapshot.consecutiveFailures, 2);
+      assert.ok((snapshot.failureBackoffUntil ?? 0) > Date.now());
+      assert.equal(snapshot.state, 'resting');
+
+      const third = society.createTask({
+        tenantId: 'default', objective: '第三次处理损坏资料',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'operations',
+      });
+      assert.equal(society.tick('default').decisions.some(item => item.taskId === third.id), false);
+      assert.match(
+        store.organization.getSocietyTask(third.id, 'default')?.lastSchedulingReason ?? '',
+        /连续失败.*退避/,
       );
     } finally {
       store.close();

@@ -96,6 +96,19 @@ export interface WorkReceiptView {
   updatedAt: number;
 }
 
+export interface SocietyRoleWellbeingView {
+  roleId: string;
+  activeAssignments: number;
+  consecutiveFailures: number;
+  waitingApproval: number;
+  reworkAssignments: number;
+  contextPressure: 'unknown' | 'normal' | 'high';
+  state: 'ready' | 'busy' | 'waiting' | 'resting';
+  lastFailureAt?: number;
+  failureBackoffUntil?: number;
+  updatedAt: number;
+}
+
 export interface WorkOrderView {
   id: string;
   projectId: string;
@@ -129,15 +142,7 @@ export interface WorkOrderView {
     usageKnown: boolean;
   };
   scorecards: OrganizationScorecardView[];
-  wellbeing: Array<{
-    roleId: string;
-    activeAssignments: number;
-    consecutiveFailures: number;
-    waitingApproval: number;
-    reworkAssignments: number;
-    contextPressure?: string;
-    state: string;
-  }>;
+  wellbeing: SocietyRoleWellbeingView[];
 }
 
 export interface OrganizationExceptionView {
@@ -401,10 +406,41 @@ export interface SocietyScheduleView {
     roi: number | null;
   };
   sharedMemoryRefs: Array<{ id: string; kind: string; ref: string; version?: string; hash?: string }>;
+  selection?: SocietyScheduleSelectionView;
   reason: string;
   status: 'active' | 'completed' | 'failed' | 'cancelled';
   createdAt: number;
   releasedAt?: number;
+}
+
+export interface RoleSelectionScoreView {
+  roleId: string;
+  score: number;
+  capabilityFit: number;
+  memoryRelevance: number;
+  toolReadiness: number;
+  collaborationHealth: number;
+  historyReliability: number;
+  loadBalance: number;
+  activeAssignments: number;
+  eligible: boolean;
+  reason: string;
+  blockedReason?: string;
+}
+
+export interface SocietyScheduleSelectionView {
+  policyVersion: number;
+  requiredCapabilities: string[];
+  weights: {
+    capability: number;
+    memory: number;
+    tools: number;
+    collaboration: number;
+    history: number;
+    load: number;
+  };
+  chosenRoleIds: string[];
+  candidates: RoleSelectionScoreView[];
 }
 
 export interface SocietyRoleLifeView {
@@ -414,7 +450,7 @@ export interface SocietyRoleLifeView {
   memories: Array<{
     id: string;
     roleId: string;
-    kind: 'appointment' | 'schedule' | 'delivery' | 'failure' | 'lesson' | 'growth';
+    kind: 'appointment' | 'schedule' | 'submission' | 'delivery' | 'failure' | 'lesson' | 'growth';
     summary: string;
     scheduleId?: string;
     evidence: Array<{ id: string; kind: string; ref: string }>;
@@ -429,7 +465,7 @@ export interface SocietyRoleLifeView {
     updatedAt: number;
   }>;
   scorecard?: OrganizationScorecardView;
-  wellbeing?: WorkOrderView['wellbeing'][number];
+  wellbeing?: SocietyRoleWellbeingView;
 }
 
 export interface SocietySnapshot {

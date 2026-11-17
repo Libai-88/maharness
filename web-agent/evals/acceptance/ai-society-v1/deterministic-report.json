@@ -1,7 +1,7 @@
 {
   "kind": "ai-society-deterministic-acceptance",
-  "schemaVersion": 3,
-  "generatedAt": "2026-11-17T19:45:43.638Z",
+  "schemaVersion": 4,
+  "generatedAt": "2026-11-17T20:43:46.877Z",
   "mode": "deterministic-real-runtime-fixture",
   "criteria": [
     {
@@ -54,6 +54,8 @@
       "domain": "多目标优化",
       "status": "passed",
       "evidence": [
+        "每个调度决策记录能力、记忆、工具、协作、履历和负载六项分数及权重。",
+        "能力索引=research/review，选中角色=2。",
         "调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。",
         "当前社会健康分数=93.92，预算利用率=0.004。"
       ]
@@ -73,8 +75,11 @@
       "domain": "人类经营者界面",
       "status": "passed",
       "evidence": [
-        "工作台提供目标、价值、预算、部门、审批、验收、制度调整与回滚操作。",
-        "浏览器 UI 契约测试覆盖经营流程；截图仅作展示：evals/acceptance/ai-society-v1/dashboard.png。"
+        "确定性服务测试覆盖高额审批、制度调度、终端交付、人工验收、制度发布和回滚落库。",
+        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":894,\"modifiedAt\":\"2026-11-17T20:43:46.512Z\",\"sha256\":\"76b486e376f885ddea6ebb7958b11c0f98b2229893900275140818ee8b2263fa\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-17T20:43:25.665Z\",\"duration\":6802.492,\"expected\":3,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
+        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":109813,\"modifiedAt\":\"2026-11-17T20:43:31.718Z\",\"sha256\":\"cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6\"}，与本次 Playwright 运行时间匹配=true。",
+        "mock UI 契约边界=mocked_api，page.route 数量=1。",
+        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":675,\"modifiedAt\":\"2026-11-17T20:43:31.519Z\",\"sha256\":\"2863656efc1e9dd81394a11e16a4b2ae29aedfbd3872b6e09a760b7baab374fa\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":124292,\"modifiedAt\":\"2026-11-17T20:43:31.517Z\",\"sha256\":\"21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"data\":{\"kind\":\"browser-real-backend-workflow\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, scheduler, RunService, persistence and UI are real\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"realRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"screenshotSha256\":\"21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c\"}}，最终边界=real_backend_with_deterministic_provider。"
       ]
     },
     {
@@ -82,8 +87,11 @@
       "domain": "社会仪表盘",
       "status": "passed",
       "evidence": [
-        "mock API 浏览器契约确认界面展示部门、角色、网络、瓶颈、福利、执行进度与待验收结果。",
-        "执行中的真实 Run 不显示验收按钮；只有 awaiting_acceptance 才允许人工确认交付。"
+        "真实服务、临时 SQLite、调度器、RunService 和浏览器组成经营闭环；Provider 使用确定性本地传输，真实模型未参与。",
+        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":894,\"modifiedAt\":\"2026-11-17T20:43:46.512Z\",\"sha256\":\"76b486e376f885ddea6ebb7958b11c0f98b2229893900275140818ee8b2263fa\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-17T20:43:25.665Z\",\"duration\":6802.492,\"expected\":3,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
+        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":109813,\"modifiedAt\":\"2026-11-17T20:43:31.718Z\",\"sha256\":\"cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6\"}，与本次 Playwright 运行时间匹配=true。",
+        "mock UI 契约边界=mocked_api，page.route 数量=1。",
+        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":675,\"modifiedAt\":\"2026-11-17T20:43:31.519Z\",\"sha256\":\"2863656efc1e9dd81394a11e16a4b2ae29aedfbd3872b6e09a760b7baab374fa\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":124292,\"modifiedAt\":\"2026-11-17T20:43:31.517Z\",\"sha256\":\"21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"data\":{\"kind\":\"browser-real-backend-workflow\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, scheduler, RunService, persistence and UI are real\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"realRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"screenshotSha256\":\"21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c\"}}，最终边界=real_backend_with_deterministic_provider。"
       ]
     },
     {
@@ -110,7 +118,7 @@
       "domain": "去掉主 Agent 仍运转",
       "status": "passed",
       "evidence": [
-        "无主 Agent 运行时创建 Run：dce7b6a4-9921-46dc-8b6e-7d7a79ebf73a, ea499caf-0bbb-487b-9e00-760ba0fe75e9。",
+        "无主 Agent 运行时创建 Run：8ebffdd3-a7cd-446e-8f64-22ec7da21d88, 65769790-a334-4444-9f56-443706cc38bf。",
         "运行来源均为 society，并由系统调度器而不是聊天调用链推进。"
       ]
     },
@@ -119,7 +127,7 @@
       "domain": "角色跨任务生命史",
       "status": "passed",
       "evidence": [
-        "团队完成后角色保留 schedule、delivery 和 appointment 记忆。",
+        "团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。",
         "当前协作网络包含 2 条有契约证据的关系。"
       ]
     },
@@ -205,7 +213,8 @@
         "声明估算边际净收益=11.996 USD。",
         "配对实测：单角色=0.02 USD，团队=-0.055 USD，边际=-0.075 USD。",
         "负边际结果显示在审计记录中，后续绑定该实验的任务被强制保持单角色。",
-        "仍未执行同一任务上的真实模型 paired live A/B，因此实际质量、时延与净收益在真实 Provider 上的复现性仍待门禁验证。"
+        "TODO：尚未执行同一任务上的真实模型 paired live A/B。",
+        "真实 Provider 的质量、时延、token、费用与净收益复现性仍未验证。"
       ]
     },
     {
@@ -228,25 +237,155 @@
     "fullyPassed": false
   },
   "sourceHashes": {
-    "scripts/ai-society-acceptance.ts": "3e0ef193e533cb2ecae83f79b36a4330d46ee77556eac4e39602d94ee4e6c2d1",
+    "scripts/ai-society-acceptance.ts": "9da9d57a92344c3893fd11fbe8f319824f4282ab30cc166e1557aac3d73715db",
     "server/db.ts": "023864d1363b53cec29b43218d40cb5738b6dc2564db81a3a7cc1a6fe1b4517f",
-    "server/society.ts": "b8cbb32b9d31ae8c8ce853cac8362558c26aa1d7d49e6512161d13952b98f748",
-    "server/organization.ts": "94aa7e3ed11146a9fbe6677fb01d3889cbbdfe0c47a0bd1cd636f42b56c1b645",
-    "server/organization-store.ts": "05dbdd94725e68bd8a5da269d46e14ee534238e8b55525026c906781e5ab1404",
-    "server/run-service.ts": "3b3874bad99979792e5d62f6b48d96bb139f39996bb9774c7db5e2b5720a221f",
+    "server/society.ts": "7bf528c42884d2a65f4dc05268b8472efd0bb15d81ee8b76036c4c3e053c3fea",
+    "server/organization.ts": "0962ad9a2fee2ac120b8cfd526d6cb6548cc68e004e2a01704d821833f774975",
+    "server/organization-store.ts": "5b2f8ab34add3527befb149ad2454793ea0acec688600ae8becdd96d43bcdebd",
+    "server/run-service.ts": "2ff3860b69b4457f93a12576664cd5bcb739b93b207ade330f6486d782010404",
     "kernel/model-call.ts": "a0e3de5dbaceaba9f1abff85d675b751223af205cfea3764bc66392328f5b222",
     "kernel/tests/model-call.spec.ts": "c6e2d7ae6961ae155833cf618f50d569540a786d0e476873050bc4c2013d47c2",
     "server/tests/organization.spec.ts": "eb4e80d2fa77a80eaaf87875c39535b45ed75ecd0f80218103c6adfcd29bf541",
-    "server/tests/society.spec.ts": "3a4c6e8d5487d66a2f70682356cb0f6656299d59bb115ade92caeec6cb0605bc",
-    "server/tests/society-restart.integration.spec.ts": "12b55807c6537a68b3585737ed23cd8faec1fd0126e5b8fe0209e3498afadd69",
-    "ui/e2e/society.spec.ts": "97aead2c60e0204e65191306d7e1017e22c93e1a79f8df5065db33735aecb868"
+    "server/tests/society.spec.ts": "bce8c805df529523e7853efba199fe6d58b84d02d13ac0e344906aba0ded342a",
+    "server/tests/society-restart.integration.spec.ts": "47b60e6f1a228dba2d6e44afa2ed69ee94d285035e70c91898dd6e6f2201c093",
+    "ui/e2e/society.spec.ts": "42f850e1eeee2b51707353e65a11fd5a644fa5f88e6dc83e495aa60e2570de84",
+    "ui/playwright.config.ts": "25c0de949138b2333e905033d8a94a056a80147cb315c64ffff9b8ac54a5ad30",
+    "ui/e2e/society-real-backend.spec.ts": "b7773b538224aed50a0e32da5c62129ebf27d3b085510983e5464783ff091aba",
+    "scripts/organization-paired-live.ts": "a999f25955ca3da60e72d1615488ec50c39519288562e68936297da83d78d694",
+    "evals/organization-paired-live.spec.ts": "7e12212f39823acde648306d8490cc88cd16b11cbd0f20a94a71b07618f40845"
   },
   "evidence": {
-    "realRuntime": "Each scheduled assignment creates a persisted Run with society origin, work-order, contract, role, token and cache facts.",
+    "realRuntime": "Production service classes create persisted Runs with society origin, work-order, contract, role, token and cache facts; execution uses a deterministic local runtime fixture.",
     "humanAcceptance": "Only awaiting_acceptance with all contracts delivered can enter completed.",
-    "uiE2e": "ui/e2e/society.spec.ts is a browser UI contract test with mocked APIs.",
-    "dashboard": "evals/acceptance/ai-society-v1/dashboard.png"
+    "browser": {
+      "backendBoundary": "real_backend_with_deterministic_provider",
+      "mockContract": {
+        "boundary": "mocked_api",
+        "pageRouteCount": 1
+      },
+      "realBackendWorkflow": {
+        "file": {
+          "ref": "evals/acceptance/ai-society-v1/real-workflow.json",
+          "status": "present",
+          "bytes": 675,
+          "modifiedAt": "2026-11-17T20:43:31.519Z",
+          "sha256": "2863656efc1e9dd81394a11e16a4b2ae29aedfbd3872b6e09a760b7baab374fa"
+        },
+        "screenshot": {
+          "ref": "evals/acceptance/ai-society-v1/real-workflow.png",
+          "status": "present",
+          "bytes": 124292,
+          "modifiedAt": "2026-11-17T20:43:31.517Z",
+          "sha256": "21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c"
+        },
+        "status": "passed",
+        "proven": true,
+        "freshForPlaywrightRun": true,
+        "sourceUsesLiveBackend": true,
+        "data": {
+          "kind": "browser-real-backend-workflow",
+          "backend": "maharness server/index.ts",
+          "database": "temporary SQLite",
+          "browser": "Playwright Chromium",
+          "provider": "deterministic OpenAI-compatible local HTTP transport",
+          "realModel": false,
+          "mockBoundary": "provider transport only; API, scheduler, RunService, persistence and UI are real",
+          "taskStatus": "completed",
+          "scheduleStatus": "completed",
+          "realRunCount": 1,
+          "providerCalls": 1,
+          "institutionVersion": 3,
+          "institutionBudgetUsd": 20,
+          "auditActions": [
+            "rollback",
+            "update",
+            "initialize"
+          ],
+          "screenshotSha256": "21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c"
+        }
+      },
+      "playwright": {
+        "ref": "ui/test-results/playwright-results.json",
+        "status": "passed",
+        "bytes": 17840,
+        "modifiedAt": "2026-11-17T20:43:32.473Z",
+        "sha256": "e6dd6aa46d6a7134305e9e631d933f200d8f14d4dbb9baa93e93251e1459e5e9",
+        "targetedSpec": true,
+        "targetedSpecs": {
+          "mockedContract": true,
+          "realBackend": true
+        },
+        "assertionsPassed": true,
+        "stats": {
+          "startTime": "2026-11-17T20:43:25.665Z",
+          "duration": 6802.492,
+          "expected": 3,
+          "skipped": 0,
+          "unexpected": 0,
+          "flaky": 0
+        },
+        "archiveData": {
+          "kind": "playwright-sanitized-evidence",
+          "sourceSha256": "e6dd6aa46d6a7134305e9e631d933f200d8f14d4dbb9baa93e93251e1459e5e9",
+          "targetFiles": [
+            "organization.spec.ts",
+            "society-real-backend.spec.ts",
+            "society.spec.ts"
+          ],
+          "specs": [
+            {
+              "file": "organization.spec.ts",
+              "title": "项目组织视图展示回执并完成暂停、改派、异常和关闭操作",
+              "passed": true
+            },
+            {
+              "file": "society-real-backend.spec.ts",
+              "title": "real backend经营闭环写入临时 SQLite 并可由浏览器验收",
+              "passed": true
+            },
+            {
+              "file": "society.spec.ts",
+              "title": "人类经营 AI 社会闭环并留下可审计证据",
+              "passed": true
+            }
+          ],
+          "stats": {
+            "startTime": "2026-11-17T20:43:25.665Z",
+            "duration": 6802.492,
+            "expected": 3,
+            "skipped": 0,
+            "unexpected": 0,
+            "flaky": 0
+          }
+        },
+        "archive": {
+          "ref": "evals/acceptance/ai-society-v1/playwright-results.json",
+          "status": "present",
+          "bytes": 894,
+          "modifiedAt": "2026-11-17T20:43:46.512Z",
+          "sha256": "76b486e376f885ddea6ebb7958b11c0f98b2229893900275140818ee8b2263fa"
+        }
+      },
+      "screenshot": {
+        "ref": "evals/acceptance/ai-society-v1/dashboard.png",
+        "status": "present",
+        "bytes": 109813,
+        "modifiedAt": "2026-11-17T20:43:31.718Z",
+        "sha256": "cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6",
+        "freshForPlaywrightRun": true
+      }
+    },
+    "pairedLive": {
+      "status": "unexecuted",
+      "reason": "No real paired report with complete usage and machine acceptance exists."
+    }
   },
+  "blockingGates": [
+    {
+      "id": "H1",
+      "reason": "真实 Provider 的质量、时延、token、费用与净收益复现性仍未验证。"
+    }
+  ],
   "liveModelEvidence": {
     "available": true,
     "model": "group/never-stuck",
@@ -284,10 +423,10 @@
     "billing": "The configured route declares a zero local price; supplier billing and cache savings remain unverified."
   },
   "limits": [
-    "This report validates deterministic runtime and browser behavior; it is not a real-model result.",
+    "This report validates deterministic service behavior; the original real-model gate remains 1/9 and replay is not model evidence.",
     "Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.",
     "福祉表示可观测运行负担，不表示主观感受、意识或法律人格。",
-    "H1 is a declared-estimate comparison, not a paired real-model A/B; actual quality gain, latency benefit and net benefit remain unverified.",
-    "The browser E2E uses mocked APIs and does not prove a live frontend-to-backend flow."
+    "The real-backend browser workflow uses a deterministic local Provider transport; it does not prove real-model quality or cost.",
+    "H1 remains partial until a real paired live A/B passes both arms, complete usage and hard-budget checks."
   ]
 }

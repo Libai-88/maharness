@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { currentPlanForSession } from '../core/goal-plan';
-import type { PermissionProfile, RunRecord } from '../kernel/run';
+import { RUN_TERMINAL, type PermissionProfile, type RunRecord } from '../kernel/run';
+import { validateTaskContract, type TaskCriterion } from '../kernel/task-verifier';
 import type { Store } from './db';
 import {
   OrganizationError,
@@ -140,6 +141,27 @@ function unfinishedForRun(run: RunRecord): string[] {
   if (verification?.status === 'partial') return failedChecks.length ? failedChecks : ['任务仅部分完成'];
   if (verification?.status === 'failed') return failedChecks.length ? failedChecks : ['任务验收失败'];
   return failedChecks;
+}
+
+export function taskCriteriaForContract(contract: AssignmentContract): TaskCriterion[] {
+  const parsed = contract.acceptance.flatMap(item => {
+    if (!item.verification?.trim().startsWith('{')) return [];
+    try {
+      const criterion = JSON.parse(item.verification) as TaskCriterion;
+      return validateTaskContract({ objective: contract.branchObjective, acceptance: [criterion] }).length
+        ? []
+        : [criterion];
+    } catch {
+      return [];
+    }
+  });
+  const artifacts = contract.expectedArtifacts
+    .filter(Boolean)
+    .map(path => ({ type: 'file_exists' as const, path }));
+  return [...parsed, ...artifacts]
+    .filter((item, index, all) =>
+      all.findIndex(candidate => JSON.stringify(candidate) === JSON.stringify(item)) === index,
+    );
 }
 
 function intersectTools(...groups: Array<string[] | undefined>): string[] {
@@ -944,6 +966,7 @@ export class OrganizationService {
       && requested.some(name => !scopedRole.authority.allowedTools.includes(name)))
       throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '分工契约不能扩大角色工具权限');
     child.toolNames = intersectTools(child.toolNames, requested, scopedRole.authority.allowedTools, parent.toolNames);
+    child.acceptance = taskCriteriaForContract(contract);
     child.workOrderId = workOrder.id;
     child.assignmentContractId = contract.id;
     child.organizationRoleId = role.id;
@@ -1225,32 +1248,59 @@ export class OrganizationService {
   wellbeing(tenantId: string, projectId?: string): RoleWellbeingSnapshot[] {
     const roles = this.repo.listRoles(tenantId, undefined, true)
       .filter(role => !projectId || role.projectId === '' || role.projectId === projectId);
-    const active = this.options.store.runs.active(tenantId);
     const orders = this.repo.listWorkOrders(tenantId, projectId, 200);
     const contracts = orders.flatMap(order => this.repo.contracts(order.id, tenantId));
+    const allRuns = this.options.store.runs.list(tenantId);
+    const now = Date.now();
+    const recentCutoff = now - 24 * 60 * 60 * 1000;
+    const backoffMs = 15 * 60 * 1000;
     return roles.map(role => {
-      const ownRuns = active.filter(run => run.organizationRoleId === role.id);
+      const roleRuns = allRuns.filter(run => run.organizationRoleId === role.id);
+      const ownRuns = roleRuns.filter(run => !RUN_TERMINAL.has(run.status));
       const ownContracts = contracts.filter(contract => contract.roleId === role.id && ['proposed', 'active'].includes(contract.status));
       const waiting = ownRuns.filter(run => run.status === 'waiting_approval').length;
-      const failures = ownRuns.filter(run => run.status === 'failed').length;
-      const contextRatios = ownRuns.flatMap(run => this.options.store.runs.modelCalls(run.id, 0, 500))
+      const recentTerminal = roleRuns
+        .filter(run => RUN_TERMINAL.has(run.status) && run.updatedAt >= recentCutoff)
+        .sort((left, right) => right.updatedAt - left.updatedAt);
+      let failures = 0;
+      for (const run of recentTerminal) {
+        if (run.status !== 'failed') break;
+        failures += 1;
+      }
+      const lastFailureAt = recentTerminal.find(run => run.status === 'failed')?.updatedAt;
+      const failureBackoffUntil = failures >= 2 && lastFailureAt
+        ? lastFailureAt + backoffMs : undefined;
+      const latestModelCall = roleRuns
+        .flatMap(run => this.options.store.runs.modelCalls(run.id, 0, 500))
         .filter(call => call.status === 'completed'
           && (call.purpose === 'agent' || call.purpose === 'vision')
           && Number.isSafeInteger(call.contextWindow)
           && call.contextWindow! > 0)
-        .map(call => call.inputEstimate / call.contextWindow!);
-      const contextPressure = contextRatios.length
-        ? Math.max(...contextRatios) >= 0.8 ? 'high' as const : 'normal' as const
+        .sort((left, right) => right.startedAt - left.startedAt)[0];
+      const contextRatio = latestModelCall
+        ? latestModelCall.inputEstimate / latestModelCall.contextWindow!
+        : undefined;
+      const contextPressure = contextRatio !== undefined
+        ? contextRatio >= 0.8 ? 'high' as const : 'normal' as const
         : 'unknown' as const;
+      const pendingContracts = ownContracts.filter(contract =>
+        !contract.runId || !ownRuns.some(run => run.id === contract.runId),
+      );
       return {
         roleId: role.id,
-        activeAssignments: ownRuns.length + ownContracts.length,
+        activeAssignments: ownRuns.length + pendingContracts.length,
         consecutiveFailures: failures,
         waitingApproval: waiting,
         reworkAssignments: ownContracts.filter(contract => contract.status === 'proposed').length,
         contextPressure,
-        state: waiting ? 'waiting' as const : ownRuns.length ? 'busy' as const : role.employment === 'paused' ? 'resting' as const : 'ready' as const,
-        updatedAt: Date.now(),
+        state: failureBackoffUntil && failureBackoffUntil > now
+          ? 'resting' as const
+          : waiting ? 'waiting' as const
+            : ownRuns.length ? 'busy' as const
+              : role.employment === 'paused' ? 'resting' as const : 'ready' as const,
+        ...(lastFailureAt ? { lastFailureAt } : {}),
+        ...(failureBackoffUntil ? { failureBackoffUntil } : {}),
+        updatedAt: now,
       };
     });
   }

@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { RunEvent, RunRecord } from '../kernel/run';
 import { Store } from '../server/db';
@@ -21,15 +28,308 @@ type Criterion = {
   evidence: string[];
 };
 
+type PlaywrightSuite = {
+  file?: string;
+  specs?: Array<{ file?: string; title?: string; ok?: boolean }>;
+  suites?: PlaywrightSuite[];
+};
+
+type PlaywrightJson = {
+  suites?: PlaywrightSuite[];
+  stats?: {
+    startTime?: string;
+    endTime?: string;
+    duration?: number;
+    expected?: number;
+    skipped?: number;
+    unexpected?: number;
+    flaky?: number;
+  };
+};
+
 type SocietyRuntime = Pick<SocietyService, 'snapshot' | 'releaseTask'>;
 
 const root = resolve(import.meta.dirname, '..');
 const output = resolve(root, 'evals/acceptance/ai-society-v1/deterministic-report.json');
 const dashboardRef = 'evals/acceptance/ai-society-v1/dashboard.png';
 const dashboard = resolve(root, dashboardRef);
+const playwrightInputPath = resolve(root, 'ui/test-results/playwright-results.json');
+const playwrightInputRef = 'ui/test-results/playwright-results.json';
+const playwrightArchiveRef = 'evals/acceptance/ai-society-v1/playwright-results.json';
+const playwrightArchivePath = resolve(root, playwrightArchiveRef);
+const realWorkflowRef = 'evals/acceptance/ai-society-v1/real-workflow.json';
+const realWorkflowPath = resolve(root, realWorkflowRef);
+const realWorkflowScreenshotRef = 'evals/acceptance/ai-society-v1/real-workflow.png';
+const realWorkflowScreenshotPath = resolve(root, realWorkflowScreenshotRef);
+const pairedLiveRoot = resolve(root, 'evals/reports/organization-paired-live');
 const liveReportPath = resolve(root, 'evals/reports/organization-live/20261117-social-os-v4/report.json');
 const replayReportPath = resolve(root, 'evals/replays/organization-live/20261118-safe-v4/reconciled.json');
 const criteria: Criterion[] = [];
+let browserProven = false;
+
+function sha256(path: string): string {
+  return createHash('sha256').update(readFileSync(path)).digest('hex');
+}
+
+function fileEvidence(ref: string, path: string) {
+  if (!existsSync(path)) return { ref, status: 'missing' as const };
+  const stat = statSync(path);
+  return {
+    ref,
+    status: 'present' as const,
+    bytes: stat.size,
+    modifiedAt: stat.mtime.toISOString(),
+    sha256: sha256(path),
+  };
+}
+
+function playwrightSuites(suites: PlaywrightSuite[] = []): PlaywrightSuite[] {
+  return suites.flatMap(suite => [suite, ...playwrightSuites(suite.suites)]);
+}
+
+function findFiles(directory: string, name: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
+    const path = resolve(directory, entry.name);
+    return entry.isDirectory()
+      ? findFiles(path, name)
+      : entry.isFile() && entry.name === name ? [path] : [];
+  });
+}
+
+function playwrightEvidence() {
+  const file = fileEvidence(playwrightInputRef, playwrightInputPath);
+  if (file.status === 'missing') return {
+    ...file,
+    status: 'missing' as const,
+    targetedSpec: false,
+    targetedSpecs: { mockedContract: false, realBackend: false },
+    assertionsPassed: false,
+    stats: undefined,
+  };
+  try {
+    const parsed = JSON.parse(readFileSync(playwrightInputPath, 'utf8')) as PlaywrightJson;
+    const stats = parsed.stats;
+    const suites = playwrightSuites(parsed.suites);
+    const files = suites
+      .flatMap(suite => [suite.file, ...(suite.specs?.map(spec => spec.file) ?? [])])
+      .filter((file): file is string => Boolean(file))
+      .map(file => file.replaceAll('\\', '/'));
+    const targetedSpecs = {
+      mockedContract: files.some(file => file.endsWith('society.spec.ts')),
+      realBackend: files.some(file => file.endsWith('society-real-backend.spec.ts')),
+    };
+    const targetedSpec = targetedSpecs.mockedContract || targetedSpecs.realBackend;
+    const assertionsPassed = Boolean(
+      targetedSpec
+      && stats?.startTime
+      && Number.isFinite(stats.duration)
+      && (stats.expected ?? 0) > 0
+      && stats.unexpected === 0
+      && stats.skipped === 0
+      && stats.flaky === 0,
+    );
+    return {
+      ...file,
+      status: assertionsPassed ? 'passed' as const : 'failed' as const,
+      targetedSpec,
+      targetedSpecs,
+      assertionsPassed,
+      stats,
+      archiveData: {
+        kind: 'playwright-sanitized-evidence',
+        sourceSha256: file.sha256,
+        targetFiles: [...new Set(files)],
+        specs: suites.flatMap(suite => (suite.specs ?? []).map(spec => ({
+          file: spec.file?.replaceAll('\\', '/'),
+          title: spec.title,
+          passed: spec.ok,
+        }))),
+        stats,
+      },
+    };
+  } catch (error) {
+    return {
+      ...file,
+      status: 'invalid' as const,
+      targetedSpec: false,
+      targetedSpecs: { mockedContract: false, realBackend: false },
+      assertionsPassed: false,
+      stats: undefined,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, runEnd: number) {
+  const file = fileEvidence(realWorkflowRef, realWorkflowPath);
+  const screenshot = fileEvidence(realWorkflowScreenshotRef, realWorkflowScreenshotPath);
+  if (file.status === 'missing' || screenshot.status === 'missing') return {
+    file,
+    screenshot,
+    status: 'missing' as const,
+    proven: false,
+  };
+  try {
+    const data = JSON.parse(readFileSync(realWorkflowPath, 'utf8')) as {
+      kind?: string;
+      backend?: string;
+      database?: string;
+      browser?: string;
+      provider?: string;
+      realModel?: boolean;
+      mockBoundary?: string;
+      taskStatus?: string;
+      scheduleStatus?: string;
+      realRunCount?: number;
+      providerCalls?: number;
+      institutionVersion?: number;
+      institutionBudgetUsd?: number;
+      auditActions?: string[];
+      screenshotSha256?: string;
+    };
+    const source = readFileSync(resolve(root, 'ui/e2e/society-real-backend.spec.ts'), 'utf8');
+    const sourceUsesLiveBackend = !/page\.route\(/.test(source);
+    const fresh = Number.isFinite(runStart)
+      && Number.isFinite(runEnd)
+      && Date.parse(file.modifiedAt!) >= runStart - 1_000
+      && Date.parse(file.modifiedAt!) <= runEnd + 2_000
+      && Date.parse(screenshot.modifiedAt!) >= runStart - 1_000
+      && Date.parse(screenshot.modifiedAt!) <= runEnd + 2_000;
+    const proven = Boolean(
+      isPlaywrightTarget
+      && sourceUsesLiveBackend
+      && fresh
+      && data.kind === 'browser-real-backend-workflow'
+      && data.backend === 'maharness server/index.ts'
+      && data.database === 'temporary SQLite'
+      && data.realModel === false
+      && data.taskStatus === 'completed'
+      && data.scheduleStatus === 'completed'
+      && (data.realRunCount ?? 0) > 0
+      && (data.providerCalls ?? 0) > 0
+      && (data.institutionVersion ?? 0) >= 3
+      && data.auditActions?.includes('update')
+      && data.auditActions.includes('rollback')
+      && screenshot.sha256 === data.screenshotSha256,
+    );
+    return {
+      file,
+      screenshot,
+      status: proven ? 'passed' as const : 'failed' as const,
+      proven,
+      freshForPlaywrightRun: fresh,
+      sourceUsesLiveBackend,
+      data,
+    };
+  } catch (error) {
+    return {
+      file,
+      screenshot,
+      status: 'invalid' as const,
+      proven: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+function latestPairedLive() {
+  if (!existsSync(pairedLiveRoot)) return undefined;
+  const reports = findFiles(pairedLiveRoot, 'report.json')
+    .map(path => {
+      try {
+        const data = JSON.parse(readFileSync(path, 'utf8')) as {
+          kind?: string;
+          createdAt?: string;
+          status?: string;
+          providerId?: string;
+          model?: string;
+          arms?: {
+            solo?: { status?: string; usageComplete?: boolean; budgetCompliant?: boolean };
+            team?: {
+              status?: string; usageComplete?: boolean; budgetCompliant?: boolean;
+              childRunIds?: string[]; contractIds?: string[];
+            };
+          };
+          comparison?: {
+            netBenefitUsd?: { solo?: number; team?: number; marginal?: number };
+          } | null;
+          [key: string]: unknown;
+        };
+        return { path, data };
+      } catch {
+        return undefined;
+      }
+    })
+    .filter((item): item is NonNullable<typeof item> =>
+      item?.data.kind === 'organization-paired-live')
+    .sort((left, right) =>
+      String(right.data.createdAt ?? '').localeCompare(String(left.data.createdAt ?? '')));
+  const latest = reports[0];
+  if (!latest) return undefined;
+  const data = latest.data;
+  const complete =
+    data.status === 'passed'
+    && data.arms?.solo?.status === 'completed'
+    && data.arms.solo.usageComplete === true
+    && data.arms.solo.budgetCompliant === true
+    && data.arms.team?.status === 'completed'
+    && data.arms.team.usageComplete === true
+    && data.arms.team.budgetCompliant === true
+    && (data.arms.team.childRunIds?.length ?? 0) === 2
+    && (data.arms.team.contractIds?.length ?? 0) === 2
+    && data.comparison?.netBenefitUsd !== undefined;
+  return {
+    ref: latest.path.slice(root.length + 1).replaceAll('\\', '/'),
+    createdAt: data.createdAt,
+    status: data.status,
+    providerId: data.providerId,
+    model: data.model,
+    complete,
+    sha256: sha256(latest.path),
+    comparison: data.comparison,
+  };
+}
+
+const dashboardEvidence = fileEvidence(dashboardRef, dashboard);
+const playwright = playwrightEvidence();
+if (playwright.status !== 'missing') {
+  mkdirSync(dirname(playwrightArchivePath), { recursive: true });
+  writeFileSync(
+    playwrightArchivePath,
+    JSON.stringify('archiveData' in playwright ? playwright.archiveData : {
+      kind: 'playwright-sanitized-evidence',
+      sourceSha256: playwright.sha256,
+      error: 'Playwright results could not be parsed.',
+    }, null, 2),
+    'utf8',
+  );
+}
+const playwrightArchive = fileEvidence(playwrightArchiveRef, playwrightArchivePath);
+const societyE2eSource = readFileSync(resolve(root, 'ui/e2e/society.spec.ts'), 'utf8');
+const mockRouteCount = (societyE2eSource.match(/page\.route\(/g) ?? []).length;
+const mockBrowserBoundary = /page\.route\(\s*['"]\*\*\/api\/\*\*/.test(societyE2eSource)
+  ? 'mocked_api' as const
+  : mockRouteCount > 0
+    ? 'mixed_api' as const
+    : 'live_backend' as const;
+const playwrightStart = Date.parse(playwright.stats?.startTime ?? '');
+const playwrightEnd = Number.isFinite(Date.parse(playwright.stats?.endTime ?? ''))
+  ? Date.parse(playwright.stats!.endTime!)
+  : playwrightStart + (playwright.stats?.duration ?? 0);
+const dashboardFresh = dashboardEvidence.status === 'present'
+  && Number.isFinite(playwrightStart)
+  && Number.isFinite(playwrightEnd)
+  && Date.parse(dashboardEvidence.modifiedAt) >= playwrightStart - 1_000
+  && Date.parse(dashboardEvidence.modifiedAt) <= playwrightEnd + 2_000;
+const realWorkflow = realWorkflowEvidence(
+  playwright.status === 'passed' && playwright.targetedSpecs.realBackend,
+  playwrightStart,
+  playwrightEnd,
+);
+const browserBackendBoundary = realWorkflow.proven
+  ? 'real_backend_with_deterministic_provider' as const
+  : mockBrowserBoundary;
+const pairedLive = latestPairedLive();
 
 const liveReport = existsSync(liveReportPath)
   ? JSON.parse(readFileSync(liveReportPath, 'utf8')) as {
@@ -98,7 +398,6 @@ function fixture(store: Store, tenantId = 'default') {
       workspace: process.cwd(),
       readOnly: false,
       profile: 'standard',
-      allowedTools: ['role_directory'],
     }),
   });
   const listeners = new Map<string, Set<(event: RunEvent) => void>>();
@@ -303,6 +602,19 @@ try {
     branches: teamBranches(),
   });
   assert.equal(store.runs.list('default').length, 0);
+  const teamExperiment = society.experiment(teamTask.id, 'default');
+  assert.equal(
+    teamExperiment.selected,
+    'team',
+    JSON.stringify({
+      economics: teamTask.economics,
+      branches: teamExperiment.task.branches,
+      estimate: teamExperiment.estimate,
+      selected: teamExperiment.selected,
+    }),
+  );
+  assert.match(teamExperiment.estimate.formula, /quality.*riskReduction.*estimatedCost.*coordinationCost/);
+  assert.ok(teamExperiment.estimate.marginalNetBenefitUsd > 0);
   const teamTick = society.tick('default');
   const teamSchedule = teamTick.decisions.find(item => item.taskId === teamTask.id);
   assert.equal(teamSchedule?.mode, 'team');
@@ -320,10 +632,6 @@ try {
   ]);
 
   assert.equal(teamSchedule?.contractIds.length, 2);
-  const teamExperiment = society.experiment(teamTask.id, 'default');
-  assert.equal(teamExperiment.selected, 'team');
-  assert.match(teamExperiment.estimate.formula, /quality.*riskReduction.*estimatedCost.*coordinationCost/);
-  assert.ok(teamExperiment.estimate.marginalNetBenefitUsd > 0);
 
   assert.throws(
     () => society.releaseTask(teamTask.id, 'default', 'completed', '提前伪造成功'),
@@ -336,7 +644,8 @@ try {
   const settledSchedule = postRun.schedules.find(item => item.id === teamSchedule?.id);
   assert.equal(settledSchedule?.status, 'completed');
   assert.equal(postRun.network.edges.length > 0, true);
-  assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'delivery')), true);
+  assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'submission')), true);
+  assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'delivery')), false);
   const teamLedger = postRun.economics.taskLedger.find(item => item.taskId === teamTask.id)!;
   assert.ok((teamLedger.actualTokens ?? 0) > 0);
   assert.equal(teamLedger.cachedInputTokens, 0);
@@ -358,11 +667,13 @@ try {
     '快照同时提供部门队列、并发、福利、瓶颈和健康度。',
   ]);
   pass('C1', '多目标优化', [
+    '每个调度决策记录能力、记忆、工具、协作、履历和负载六项分数及权重。',
+    `能力索引=${teamSchedule?.selection?.requiredCapabilities.join('/')}，选中角色=${teamSchedule?.selection?.chosenRoleIds.length}。`,
     '调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。',
     `当前社会健康分数=${postRun.health.score}，预算利用率=${postRun.health.budgetUtilization}。`,
   ]);
   pass('F2', '角色跨任务生命史', [
-    '团队完成后角色保留 schedule、delivery 和 appointment 记忆。',
+    '团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。',
     `当前协作网络包含 ${postRun.network.edges.length} 条有契约证据的关系。`,
   ]);
   pass('G3', '最小必要团队与动态解散', [
@@ -378,7 +689,12 @@ try {
     '全部 Run 同时报告缓存命中与未命中 token 时命中率为 0.5；任一 Run 缺字段时命中率恢复为 null。',
     `Provider 缓存节省=${postRun.economics.cacheSavingsUsd}；未知值保持 null。`,
   ]);
-  society.releaseTask(teamTask.id, 'default', 'completed', '人类确认真实分工、产物与证据后完成验收');
+  const acceptedTeam = society.releaseTask(
+    teamTask.id, 'default', 'completed', '人类确认真实分工、产物与证据后完成验收',
+  );
+  assert.equal(acceptedTeam.task.status, 'completed');
+  assert.equal(society.snapshot('default').roleLife
+    .some(item => item.memories.some(memory => memory.kind === 'delivery')), true);
 
   const paired = society.createPairedExperiment({
     tenantId: 'default',
@@ -416,13 +732,28 @@ try {
   const guardedSchedule = society.tick('default').decisions.find(item => item.taskId === guarded.id)!;
   assert.equal(guardedSchedule.mode, 'solo');
   assert.match(guardedSchedule.reason, /配对实测边际净收益.*未达到门槛/);
-  partial('H1', '多团队净收益实验', [
+  const pairedEvidence = [
     '确定性层已完成同一任务的单角色与团队真实 Run 配对，记录质量、产物覆盖、时延、风险、实际成本、token 与协调增量。',
     `声明估算边际净收益=${teamExperiment.estimate.marginalNetBenefitUsd} USD。`,
     `配对实测：单角色=${pairedResult.netBenefitUsd.solo} USD，团队=${pairedResult.netBenefitUsd.team} USD，边际=${pairedResult.netBenefitUsd.marginal} USD。`,
     '负边际结果显示在审计记录中，后续绑定该实验的任务被强制保持单角色。',
-    '仍未执行同一任务上的真实模型 paired live A/B，因此实际质量、时延与净收益在真实 Provider 上的复现性仍待门禁验证。',
-  ]);
+  ];
+  if (pairedLive?.complete) {
+    pass('H1', '多团队净收益实验', [
+      ...pairedEvidence,
+      `真实 paired live 已执行：${pairedLive.providerId}/${pairedLive.model}，报告=${pairedLive.ref}，哈希=${pairedLive.sha256}。`,
+      `真实单角色/团队/边际净收益=${JSON.stringify(pairedLive.comparison?.netBenefitUsd)}。`,
+      '两条臂均完成，usage 与硬预算完整；团队是否更优由实测边际结果决定。',
+    ]);
+  } else {
+    partial('H1', '多团队净收益实验', [
+      ...pairedEvidence,
+      pairedLive
+        ? `配对实验报告存在但未过门禁：状态=${pairedLive.status}，完整事实=${pairedLive.complete}，报告=${pairedLive.ref}。`
+        : 'TODO：尚未执行同一任务上的真实模型 paired live A/B。',
+      '真实 Provider 的质量、时延、token、费用与净收益复现性仍未验证。',
+    ]);
+  }
 
   const lowTask = society.createTask({
     tenantId: 'default',
@@ -657,15 +988,34 @@ try {
 
   assert.equal(store.organization.getSocietyTask(noGain.id, 'default')?.status, 'queued');
   assert.equal(store.organization.getSocietyTask(failureTask.id, 'default')?.status, 'failed');
-  assert.equal(existsSync(dashboard), true, '浏览器经营闭环必须先生成 dashboard.png');
-  pass('D1', '人类经营者界面', [
-    '工作台提供目标、价值、预算、部门、审批、验收、制度调整与回滚操作。',
-    `浏览器 UI 契约测试覆盖经营流程；截图仅作展示：${dashboardRef}。`,
-  ]);
-  pass('D2', '社会仪表盘', [
-    'mock API 浏览器契约确认界面展示部门、角色、网络、瓶颈、福利、执行进度与待验收结果。',
-    '执行中的真实 Run 不显示验收按钮；只有 awaiting_acceptance 才允许人工确认交付。',
-  ]);
+  const browserEvidence = [
+    `Playwright JSON=${playwrightInputRef}，归档=${JSON.stringify(playwrightArchive)}，状态=${playwright.status}，目标测试=${playwright.targetedSpec}，公开结果=${JSON.stringify(playwright.stats ?? {})}。`,
+    `截图=${JSON.stringify(dashboardEvidence)}，与本次 Playwright 运行时间匹配=${dashboardFresh}。`,
+    `mock UI 契约边界=${mockBrowserBoundary}，page.route 数量=${mockRouteCount}。`,
+    `真实后端浏览器证据=${JSON.stringify(realWorkflow)}，最终边界=${browserBackendBoundary}。`,
+  ];
+  browserProven = playwright.status === 'passed'
+    && (realWorkflow.proven || (dashboardFresh && mockBrowserBoundary === 'live_backend'));
+  const interfaceEvidence = [
+    '确定性服务测试覆盖高额审批、制度调度、终端交付、人工验收、制度发布和回滚落库。',
+    ...browserEvidence,
+  ];
+  if (browserProven) {
+    pass('D1', '人类经营者界面', interfaceEvidence);
+    pass('D2', '社会仪表盘', [
+      '真实服务、临时 SQLite、调度器、RunService 和浏览器组成经营闭环；Provider 使用确定性本地传输，真实模型未参与。',
+      ...browserEvidence,
+    ]);
+  } else {
+    partial('D1', '人类经营者界面', [
+      ...interfaceEvidence,
+      '浏览器经营流程尚未由未拦截 API 的真实前后端闭环证明。',
+    ]);
+    partial('D2', '社会仪表盘', [
+      '确定性快照与 UI 组件契约覆盖社会仪表盘字段，但浏览器端 API 被拦截；不能据此证明真实前端到后端链路。',
+      ...browserEvidence,
+    ]);
+  }
   pass('H2', '场景演练', [
     '单 Agent 可解不组队、高价值任务组队、低收益扩团被拒、失败不可伪造完成、团队失败回退单角色、无主 Agent 持久化 Run 推进均已执行。',
     `成功团队 Run=${teamSchedule?.runIds.length}，低价值任务模式=${lowSchedule?.mode}，失败任务终态=${failedTask?.status}。`,
@@ -684,7 +1034,7 @@ assert.deepEqual([...idOrder].sort(), [...expectedIds].sort());
 
 const report = {
   kind: 'ai-society-deterministic-acceptance',
-  schemaVersion: 3,
+  schemaVersion: 4,
   generatedAt: new Date().toISOString(),
   mode: 'deterministic-real-runtime-fixture',
   criteria: criteria.sort((left, right) => left.id.localeCompare(right.id)),
@@ -710,13 +1060,38 @@ const report = {
     'server/tests/society.spec.ts',
     'server/tests/society-restart.integration.spec.ts',
     'ui/e2e/society.spec.ts',
+    'ui/playwright.config.ts',
+    'ui/e2e/society-real-backend.spec.ts',
+    'scripts/organization-paired-live.ts',
+    'evals/organization-paired-live.spec.ts',
   ].map(path => [path, createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex')])),
   evidence: {
-    realRuntime: 'Each scheduled assignment creates a persisted Run with society origin, work-order, contract, role, token and cache facts.',
+    realRuntime: 'Production service classes create persisted Runs with society origin, work-order, contract, role, token and cache facts; execution uses a deterministic local runtime fixture.',
     humanAcceptance: 'Only awaiting_acceptance with all contracts delivered can enter completed.',
-    uiE2e: 'ui/e2e/society.spec.ts is a browser UI contract test with mocked APIs.',
-    dashboard: dashboardRef,
+    browser: {
+      backendBoundary: browserBackendBoundary,
+      mockContract: {
+        boundary: mockBrowserBoundary,
+        pageRouteCount: mockRouteCount,
+      },
+      realBackendWorkflow: realWorkflow,
+      playwright: {
+        ...playwright,
+        archive: playwrightArchive,
+      },
+      screenshot: {
+        ...dashboardEvidence,
+        freshForPlaywrightRun: dashboardFresh,
+      },
+    },
+    pairedLive: pairedLive ?? {
+      status: 'unexecuted',
+      reason: 'No real paired report with complete usage and machine acceptance exists.',
+    },
   },
+  blockingGates: criteria
+    .filter(item => item.status === 'partial')
+    .map(item => ({ id: item.id, reason: item.evidence.at(-1) })),
   liveModelEvidence: liveReport && replayReport ? {
     available: true,
     model: liveReport.requestedModel,
@@ -746,11 +1121,16 @@ const report = {
     billing: 'The configured route declares a zero local price; supplier billing and cache savings remain unverified.',
   } : { available: false },
   limits: [
-    'This report validates deterministic runtime and browser behavior; it is not a real-model result.',
+    'This report validates deterministic service behavior; the original real-model gate remains 1/9 and replay is not model evidence.',
     'Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.',
     '福祉表示可观测运行负担，不表示主观感受、意识或法律人格。',
-    'H1 is a declared-estimate comparison, not a paired real-model A/B; actual quality gain, latency benefit and net benefit remain unverified.',
-    'The browser E2E uses mocked APIs and does not prove a live frontend-to-backend flow.',
+    'The real-backend browser workflow uses a deterministic local Provider transport; it does not prove real-model quality or cost.',
+    ...(pairedLive?.complete
+      ? []
+      : ['H1 remains partial until a real paired live A/B passes both arms, complete usage and hard-budget checks.']),
+    ...(browserProven
+      ? []
+      : ['The browser evidence does not yet prove an un-intercepted frontend-to-backend operating flow.']),
   ],
 };
 

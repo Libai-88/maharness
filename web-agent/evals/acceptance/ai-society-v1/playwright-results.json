@@ -1,0 +1,34 @@
+{
+  "kind": "playwright-sanitized-evidence",
+  "sourceSha256": "e6dd6aa46d6a7134305e9e631d933f200d8f14d4dbb9baa93e93251e1459e5e9",
+  "targetFiles": [
+    "organization.spec.ts",
+    "society-real-backend.spec.ts",
+    "society.spec.ts"
+  ],
+  "specs": [
+    {
+      "file": "organization.spec.ts",
+      "title": "项目组织视图展示回执并完成暂停、改派、异常和关闭操作",
+      "passed": true
+    },
+    {
+      "file": "society-real-backend.spec.ts",
+      "title": "real backend经营闭环写入临时 SQLite 并可由浏览器验收",
+      "passed": true
+    },
+    {
+      "file": "society.spec.ts",
+      "title": "人类经营 AI 社会闭环并留下可审计证据",
+      "passed": true
+    }
+  ],
+  "stats": {
+    "startTime": "2026-11-17T20:43:25.665Z",
+    "duration": 6802.492,
+    "expected": 3,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

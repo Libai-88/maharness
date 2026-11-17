@@ -586,6 +586,36 @@ export interface SocietyScheduleAssignment {
   fallbackReason?: string;
 }
 
+export interface RoleSelectionScore {
+  roleId: string;
+  score: number;
+  capabilityFit: number;
+  memoryRelevance: number;
+  toolReadiness: number;
+  collaborationHealth: number;
+  historyReliability: number;
+  loadBalance: number;
+  activeAssignments: number;
+  eligible: boolean;
+  reason: string;
+  blockedReason?: string;
+}
+
+export interface SocietyScheduleSelection {
+  policyVersion: number;
+  requiredCapabilities: string[];
+  weights: {
+    capability: number;
+    memory: number;
+    tools: number;
+    collaboration: number;
+    history: number;
+    load: number;
+  };
+  chosenRoleIds: string[];
+  candidates: RoleSelectionScore[];
+}
+
 export interface SocietySchedule {
   id: string;
   tenantId: string;
@@ -617,6 +647,7 @@ export interface SocietySchedule {
     roi: number | null;
   };
   sharedMemoryRefs: EvidenceRef[];
+  selection?: SocietyScheduleSelection;
   reason: string;
   status: 'active' | 'completed' | 'failed' | 'cancelled';
   createdAt: number;
@@ -627,7 +658,7 @@ export interface SocietyRoleMemory {
   id: string;
   tenantId: string;
   roleId: string;
-  kind: 'appointment' | 'schedule' | 'delivery' | 'failure' | 'lesson' | 'growth';
+  kind: 'appointment' | 'schedule' | 'submission' | 'delivery' | 'failure' | 'lesson' | 'growth';
   summary: string;
   scheduleId?: string;
   workOrderId?: string;
@@ -782,6 +813,8 @@ export interface RoleWellbeingSnapshot {
   reworkAssignments: number;
   contextPressure: 'unknown' | 'normal' | 'high';
   state: 'ready' | 'busy' | 'waiting' | 'resting';
+  lastFailureAt?: number;
+  failureBackoffUntil?: number;
   updatedAt: number;
 }
 
