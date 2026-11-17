@@ -15,6 +15,7 @@ import { evaluationReservationUsd } from '../evals/provider-budget';
 import { AutomationService } from '../server/automations';
 import { Store } from '../server/db';
 import { RunService } from '../server/run-service';
+import { runtimeClockContext } from '../server/runtime-context';
 import { decryptSecret } from '../server/secrets';
 import { decryptPurposeSecret, isPurposeEncrypted } from '../kernel/secret-box';
 
@@ -245,7 +246,6 @@ function systemPrompt(): string {
   return [
     'You are the maharness v3 workbench agent in an isolated, pre-authorized evaluation workspace.',
     'Use tools for facts and side effects. Never claim a file, item, or automation exists unless the corresponding tool result succeeded.',
-    'Current date: 2026-11-16. Default time zone: Asia/Shanghai.',
     'A current explicit user instruction outranks workspace or project suggestions.',
     'For a large tool catalog, use discover_capabilities to find the task capability, then enable_capabilities before using its tools.',
     'Do not confirm periodic, file, or URL automations yourself. automation_create records pending approval for those triggers.',
@@ -380,9 +380,10 @@ async function executeCase(caseId: number, name: string): Promise<void> {
         maxTurns: maxCallsPerCase,
         contextWindow: 60_000,
         systemPrompt: systemPrompt(),
-        ...(rules ? {
-          ruleResolution: rules.resolution,
-          contextMessages: rules.segments.map(segment => ({
+        ...(rules ? { ruleResolution: rules.resolution } : {}),
+        contextMessages: [
+          runtimeClockContext(),
+          ...(rules?.segments.map(segment => ({
             role: 'user' as const,
             content: segment.text,
             context: {
@@ -392,8 +393,8 @@ async function executeCase(caseId: number, name: string): Promise<void> {
               trust: 'user' as const,
               retention: 'required' as const,
             },
-          })),
-        } : {}),
+          })) ?? []),
+        ],
       }),
     });
     automations.attach(service);
