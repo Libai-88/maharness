@@ -1,7 +1,7 @@
 {
   "kind": "ai-society-deterministic-acceptance",
   "schemaVersion": 3,
-  "generatedAt": "2026-11-17T19:17:35.476Z",
+  "generatedAt": "2026-11-17T19:45:43.638Z",
   "mode": "deterministic-real-runtime-fixture",
   "criteria": [
     {
@@ -64,7 +64,8 @@
       "status": "passed",
       "evidence": [
         "角色并发上限进入实际调度门禁。",
-        "超载时新任务不启动 Run，角色不会被无限占用。"
+        "超载时新任务不启动 Run，角色不会被无限占用。",
+        "Provider 上下文窗口进入福利快照；最近调用达到窗口 80% 时暂停向该角色分配新任务。"
       ]
     },
     {
@@ -109,7 +110,7 @@
       "domain": "去掉主 Agent 仍运转",
       "status": "passed",
       "evidence": [
-        "无主 Agent 运行时创建 Run：16b2025b-2d69-4d12-852d-e07667faecc9, 9ff430ff-4f1f-4b31-b465-83407222fbd7。",
+        "无主 Agent 运行时创建 Run：dce7b6a4-9921-46dc-8b6e-7d7a79ebf73a, ea499caf-0bbb-487b-9e00-760ba0fe75e9。",
         "运行来源均为 society，并由系统调度器而不是聊天调用链推进。"
       ]
     },
@@ -200,10 +201,11 @@
       "domain": "多团队净收益实验",
       "status": "partial",
       "evidence": [
-        "当前结果来自声明式估算，不是同一任务上单角色与团队的配对真实模型 A/B。",
-        "单角色净收益=99.92 USD。",
-        "团队净收益=111.916 USD。",
-        "边际净收益=11.996 USD；公式已冻结在调度事实中。"
+        "确定性层已完成同一任务的单角色与团队真实 Run 配对，记录质量、产物覆盖、时延、风险、实际成本、token 与协调增量。",
+        "声明估算边际净收益=11.996 USD。",
+        "配对实测：单角色=0.02 USD，团队=-0.055 USD，边际=-0.075 USD。",
+        "负边际结果显示在审计记录中，后续绑定该实验的任务被强制保持单角色。",
+        "仍未执行同一任务上的真实模型 paired live A/B，因此实际质量、时延与净收益在真实 Provider 上的复现性仍待门禁验证。"
       ]
     },
     {
@@ -226,14 +228,16 @@
     "fullyPassed": false
   },
   "sourceHashes": {
-    "scripts/ai-society-acceptance.ts": "a109f0a356af50874a3306516caceff5a924c7bc6b42e759ee378d5403c1a0b8",
+    "scripts/ai-society-acceptance.ts": "3e0ef193e533cb2ecae83f79b36a4330d46ee77556eac4e39602d94ee4e6c2d1",
     "server/db.ts": "023864d1363b53cec29b43218d40cb5738b6dc2564db81a3a7cc1a6fe1b4517f",
-    "server/society.ts": "ae7903f6953217b029ae8618a7ad415b4845b9347aebdfed1090dd982055ac06",
-    "server/organization.ts": "06ffcb91fb9d5f793e3cd5c28cc58c84798ad846ba05cf78a86a5c4924aec4f2",
-    "server/organization-store.ts": "b4c202087618281b1c52054d11d32a677fc854689b058a172f46ef1f73efb8eb",
+    "server/society.ts": "b8cbb32b9d31ae8c8ce853cac8362558c26aa1d7d49e6512161d13952b98f748",
+    "server/organization.ts": "94aa7e3ed11146a9fbe6677fb01d3889cbbdfe0c47a0bd1cd636f42b56c1b645",
+    "server/organization-store.ts": "05dbdd94725e68bd8a5da269d46e14ee534238e8b55525026c906781e5ab1404",
     "server/run-service.ts": "3b3874bad99979792e5d62f6b48d96bb139f39996bb9774c7db5e2b5720a221f",
+    "kernel/model-call.ts": "a0e3de5dbaceaba9f1abff85d675b751223af205cfea3764bc66392328f5b222",
+    "kernel/tests/model-call.spec.ts": "c6e2d7ae6961ae155833cf618f50d569540a786d0e476873050bc4c2013d47c2",
     "server/tests/organization.spec.ts": "eb4e80d2fa77a80eaaf87875c39535b45ed75ecd0f80218103c6adfcd29bf541",
-    "server/tests/society.spec.ts": "acb1966abd4004041f65eade197f1b9c30b22d95603d0286c082267b199a3c3e",
+    "server/tests/society.spec.ts": "3a4c6e8d5487d66a2f70682356cb0f6656299d59bb115ade92caeec6cb0605bc",
     "server/tests/society-restart.integration.spec.ts": "12b55807c6537a68b3585737ed23cd8faec1fd0126e5b8fe0209e3498afadd69",
     "ui/e2e/society.spec.ts": "97aead2c60e0204e65191306d7e1017e22c93e1a79f8df5065db33735aecb868"
   },

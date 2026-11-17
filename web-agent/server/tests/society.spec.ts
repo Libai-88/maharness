@@ -443,6 +443,62 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('paired solo and team Runs persist measured net benefit and block negative expansion', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
+      const pair = society.createPairedExperiment({
+        tenantId: 'default',
+        objective: '分别核对两份资料',
+        valueUsd: 0.1,
+        maxBudgetUsd: 0.08,
+        maxBudgetTokens: 2_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.2, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const schedules = society.tick('default').decisions;
+      const soloSchedule = schedules.find(item => item.taskId === pair.solo.id)!;
+      const teamSchedule = schedules.find(item => item.taskId === pair.team.id)!;
+      assert.equal(soloSchedule.mode, 'solo');
+      assert.equal(teamSchedule.mode, 'team');
+
+      fixture.finish(soloSchedule.runIds[0]!);
+      fixture.finish(teamSchedule.runIds[0]!);
+      fixture.finish(teamSchedule.runIds[1]!, 'default', 'failed', true);
+
+      const measured = society.measurePairedExperiment(pair.experiment.id, 'default');
+      assert.equal(measured.status, 'measured');
+      assert.ok(measured.measurements);
+      assert.ok(measured.netBenefitUsd);
+      assert.ok(measured.measurements.solo.completed);
+      assert.equal(measured.measurements.team.completed, false);
+      assert.ok(measured.netBenefitUsd.marginal < 0);
+      assert.equal(measured.measurements.team.coordinationCostUsd >= 0, true);
+      assert.equal(society.pairedExperiment(pair.experiment.id, 'default').status, 'measured');
+
+      const guarded = society.createTask({
+        tenantId: 'default',
+        objective: '复用负收益实验继续核对两份资料',
+        valueUsd: 100,
+        maxBudgetUsd: 0.08,
+        departmentId: 'knowledge',
+        evidenceExperimentId: pair.experiment.id,
+        economics: { qualityGain: 0.2, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const guardedSchedule = society.tick('default').decisions
+        .find(item => item.taskId === guarded.id)!;
+      assert.equal(guardedSchedule.mode, 'solo');
+      assert.match(guardedSchedule.reason, /配对实测边际净收益.*未达到门槛/);
+    } finally {
+      store.close();
+    }
+  });
+
   test('failed team work hands completed evidence to one coordinator fallback Run', () => {
     const store = new Store(':memory:');
     const fixture = societyRuntime(store);
@@ -875,6 +931,49 @@ describe('AI society operation layer', () => {
       assert.equal(workloadTick.decisions.some(item => item.taskId === first.id), true);
       assert.equal(workloadTick.decisions.some(item => item.taskId === second.id), false);
       assert.match(store.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '', /福利上限|角色预算不足/);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('high context pressure pauses new assignments until the active role recovers', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      const first = society.createTask({
+        tenantId: 'default', objective: '读取长上下文资料', valueUsd: 5,
+        maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      });
+      const firstSchedule = society.tick('default').decisions.find(item => item.taskId === first.id)!;
+      const firstRunId = firstSchedule.runIds[0]!;
+      const firstRun = store.runs.get(firstRunId, 'default')!;
+      const now = Date.now();
+      store.runs.startModelCall({
+        id: randomUUID(), runId: firstRunId, scope: 'run', purpose: 'agent',
+        providerId: firstRun.providerId, model: firstRun.model, status: 'running',
+        startedAt: now, inputEstimate: 850, outputLimit: 50,
+        contextWindow: 1_000, usageStatus: 'unknown', priceSource: 'unknown',
+      });
+      const callId = store.runs.modelCalls(firstRunId)[0]!.id;
+      store.runs.finishModelCall({
+        ...store.runs.modelCalls(firstRunId)[0]!, id: callId, status: 'completed',
+      });
+
+      const second = society.createTask({
+        tenantId: 'default', objective: '继续读取另一篇资料', valueUsd: 5,
+        maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      });
+      society.tick('default');
+
+      const wellbeing = fixture.organization.wellbeing('default')
+        .find(item => item.roleId === firstSchedule.roleIds[0]);
+      assert.equal(wellbeing?.contextPressure, 'high');
+      assert.equal(store.organization.getSocietyTask(second.id, 'default')?.status, 'queued');
+      assert.match(
+        store.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '',
+        /上下文压力过高/,
+      );
     } finally {
       store.close();
     }

@@ -11,6 +11,7 @@ export interface ModelCallRecord {
   startedAt: number; finishedAt?: number; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
   inputEstimate: number; outputLimit: number; input?: number; output?: number;
   inputUpperBound?: number; inputUpperBoundSource?: 'provider' | 'conservative';
+  contextWindow?: number;
   reservedTokens?: number;
   usageStatus: 'reported' | 'estimated' | 'unknown'; cost?: number; reservedCost?: number;
   cachedInput?: number; missInput?: number; cacheWriteTokens?: number; cachePrefixHash?: string;
@@ -58,6 +59,9 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
   const signal = scope ? options.signal ? AbortSignal.any([scope.signal, options.signal]) : scope.signal : options.signal;
   signal?.throwIfAborted();
   const modelPrice = provider.models?.find(model => model.modelId === options.model);
+  const contextWindow = modelPrice && Number.isSafeInteger(modelPrice.contextWindow) && modelPrice.contextWindow > 0
+    ? modelPrice.contextWindow
+    : undefined;
   const candidatePrice = provider.priceSource === 'unknown' ? undefined : modelPrice && modelPrice.source !== 'inferred' ? { in: modelPrice.priceIn, out: modelPrice.priceOut } : options.model === provider.defaultModel ? provider.prices : undefined;
   const price = candidatePrice && Number.isFinite(candidatePrice.in) && candidatePrice.in >= 0 && Number.isFinite(candidatePrice.out) && candidatePrice.out >= 0 ? candidatePrice : undefined;
   const outputLimit = options.maxTokens ?? 4096;
@@ -68,6 +72,7 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
     inputEstimate: countMessageTokens(messages, provider.tokenizer) + estimateTokens(JSON.stringify(options.tools?.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) ?? [])),
     outputLimit, usageStatus: 'unknown', priceSource: price ? provider.priceSource ?? 'configured' : 'unknown',
     priceIn: price?.in, priceOut: price?.out,
+    ...(contextWindow ? { contextWindow } : {}),
     ...(scope?.cachePrefixHash ? { cachePrefixHash: scope.cachePrefixHash } : {}),
   };
   const certifiedBound = provider.inputTokenUpperBound?.(messages, options);

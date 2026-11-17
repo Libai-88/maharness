@@ -324,12 +324,6 @@ try {
   assert.equal(teamExperiment.selected, 'team');
   assert.match(teamExperiment.estimate.formula, /quality.*riskReduction.*estimatedCost.*coordinationCost/);
   assert.ok(teamExperiment.estimate.marginalNetBenefitUsd > 0);
-  partial('H1', '多团队净收益实验', [
-    '当前结果来自声明式估算，不是同一任务上单角色与团队的配对真实模型 A/B。',
-    `单角色净收益=${teamExperiment.estimate.single.netBenefitUsd} USD。`,
-    `团队净收益=${teamExperiment.estimate.team.netBenefitUsd} USD。`,
-    `边际净收益=${teamExperiment.estimate.marginalNetBenefitUsd} USD；公式已冻结在调度事实中。`,
-  ]);
 
   assert.throws(
     () => society.releaseTask(teamTask.id, 'default', 'completed', '提前伪造成功'),
@@ -385,6 +379,50 @@ try {
     `Provider 缓存节省=${postRun.economics.cacheSavingsUsd}；未知值保持 null。`,
   ]);
   society.releaseTask(teamTask.id, 'default', 'completed', '人类确认真实分工、产物与证据后完成验收');
+
+  const paired = society.createPairedExperiment({
+    tenantId: 'default',
+    objective: '分别核对两份资料',
+    valueUsd: 0.1,
+    maxBudgetUsd: 0.08,
+    maxBudgetTokens: 2_000,
+    departmentId: 'knowledge',
+    economics: { qualityGain: 0.2, riskReduction: 0.02 },
+    branches: teamBranches(),
+  });
+  const pairedSchedules = society.tick('default').decisions;
+  const pairedSolo = pairedSchedules.find(item => item.taskId === paired.solo.id)!;
+  const pairedTeam = pairedSchedules.find(item => item.taskId === paired.team.id)!;
+  assert.equal(pairedSolo.mode, 'solo');
+  assert.equal(pairedTeam.mode, 'team');
+  finish(pairedSolo.runIds[0]!);
+  finish(pairedTeam.runIds[0]!);
+  finish(pairedTeam.runIds[1]!, 'failed', true);
+  const pairedResult = society.measurePairedExperiment(paired.experiment.id, 'default');
+  assert.equal(pairedResult.status, 'measured');
+  assert.ok(pairedResult.measurements);
+  assert.ok(pairedResult.netBenefitUsd);
+  assert.ok(pairedResult.netBenefitUsd.marginal < 0);
+  const guarded = society.createTask({
+    tenantId: 'default',
+    objective: '复用负收益实验继续核对两份资料',
+    valueUsd: 100,
+    maxBudgetUsd: 0.08,
+    departmentId: 'knowledge',
+    evidenceExperimentId: paired.experiment.id,
+    economics: { qualityGain: 0.2, riskReduction: 0.02 },
+    branches: teamBranches(),
+  });
+  const guardedSchedule = society.tick('default').decisions.find(item => item.taskId === guarded.id)!;
+  assert.equal(guardedSchedule.mode, 'solo');
+  assert.match(guardedSchedule.reason, /配对实测边际净收益.*未达到门槛/);
+  partial('H1', '多团队净收益实验', [
+    '确定性层已完成同一任务的单角色与团队真实 Run 配对，记录质量、产物覆盖、时延、风险、实际成本、token 与协调增量。',
+    `声明估算边际净收益=${teamExperiment.estimate.marginalNetBenefitUsd} USD。`,
+    `配对实测：单角色=${pairedResult.netBenefitUsd.solo} USD，团队=${pairedResult.netBenefitUsd.team} USD，边际=${pairedResult.netBenefitUsd.marginal} USD。`,
+    '负边际结果显示在审计记录中，后续绑定该实验的任务被强制保持单角色。',
+    '仍未执行同一任务上的真实模型 paired live A/B，因此实际质量、时延与净收益在真实 Provider 上的复现性仍待门禁验证。',
+  ]);
 
   const lowTask = society.createTask({
     tenantId: 'default',
@@ -585,9 +623,30 @@ try {
       welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '',
       /福利上限|角色预算不足/,
     );
+    const welfareRunId = welfareTick.decisions.find(item => item.taskId === first.id)!.runIds[0]!;
+    const welfareRun = welfareStore.runs.get(welfareRunId, 'default')!;
+    welfareStore.runs.startModelCall({
+      id: randomUUID(), runId: welfareRunId, scope: 'run', purpose: 'agent',
+      providerId: welfareRun.providerId, model: welfareRun.model, status: 'running',
+      startedAt: Date.now(), inputEstimate: 850, outputLimit: 50,
+      contextWindow: 1_000, usageStatus: 'unknown', priceSource: 'unknown',
+    });
+    const modelCallId = welfareStore.runs.modelCalls(welfareRunId)[0]!.id;
+    welfareStore.runs.finishModelCall({
+      ...welfareStore.runs.modelCalls(welfareRunId)[0]!, id: modelCallId, status: 'completed',
+    });
+    welfare.society.tick('default');
+    const pressuredRole = welfare.organization.wellbeing('default')
+      .find(item => item.roleId === welfareTick.decisions.find(decision => decision.taskId === first.id)?.roleIds[0]);
+    assert.equal(pressuredRole?.contextPressure, 'high');
+    assert.match(
+      welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '',
+      /上下文压力过高/,
+    );
     pass('C2', 'AI 社会成员福利', [
       '角色并发上限进入实际调度门禁。',
       '超载时新任务不启动 Run，角色不会被无限占用。',
+      'Provider 上下文窗口进入福利快照；最近调用达到窗口 80% 时暂停向该角色分配新任务。',
     ]);
     pass('F3', '调度受福利与资源约束', [
       '福利负载、部门并发、预算和角色可用性共同决定是否派工。',
@@ -645,6 +704,8 @@ const report = {
     'server/organization.ts',
     'server/organization-store.ts',
     'server/run-service.ts',
+    'kernel/model-call.ts',
+    'kernel/tests/model-call.spec.ts',
     'server/tests/organization.spec.ts',
     'server/tests/society.spec.ts',
     'server/tests/society-restart.integration.spec.ts',

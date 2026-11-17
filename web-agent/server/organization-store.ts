@@ -510,6 +510,8 @@ export interface SocietyTask {
     latencyBenefitUsd: number;
   };
   branches: SocietyTaskBranch[];
+  evidenceExperimentId?: string;
+  experiment?: SocietyTaskExperiment;
   approval: 'not_required' | 'pending' | 'approved' | 'rejected';
   status: 'queued' | 'waiting_approval' | 'scheduled' | 'awaiting_acceptance' | 'completed' | 'failed' | 'cancelled';
   scheduleId?: string;
@@ -517,6 +519,54 @@ export interface SocietyTask {
   createdAt: number;
   updatedAt: number;
   revision: number;
+}
+
+export interface SocietyExperimentMeasurement {
+  taskId: string;
+  scheduleId?: string;
+  runIds: string[];
+  status: SocietyTask['status'];
+  completed: boolean;
+  quality: number;
+  artifactCoverage: number;
+  latencyMs: number;
+  risk: number;
+  costUsd: number;
+  tokens: number;
+  coordinationCostUsd: number;
+  coordinationTokens: number;
+  usageKnown: boolean;
+}
+
+export interface SocietyPairedExperiment {
+  id: string;
+  tenantId: string;
+  projectId: string;
+  objective: string;
+  valueUsd: number;
+  status: 'running' | 'measured' | 'inconclusive';
+  soloTaskId: string;
+  teamTaskId: string;
+  measurements?: {
+    solo: SocietyExperimentMeasurement;
+    team: SocietyExperimentMeasurement;
+  };
+  netBenefitUsd?: {
+    solo: number;
+    team: number;
+    marginal: number;
+  };
+  formula: string;
+  reason: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SocietyTaskExperiment {
+  id: string;
+  variant: 'solo' | 'team';
+  peerTaskId: string;
+  snapshot: SocietyPairedExperiment;
 }
 
 export interface SocietyScheduleAssignment {
@@ -1313,7 +1363,7 @@ export class OrganizationRepository {
       before_hash AS beforeHash,after_hash AS afterHash,reason,created_at AS createdAt
       FROM organization_version_audits_v1
       WHERE tenant_id=? AND kind=? AND subject_id=?
-      ORDER BY created_at DESC LIMIT ?`).all(
+      ORDER BY created_at DESC, rowid DESC LIMIT ?`).all(
       tenantId, kind, subjectId, Math.max(1, Math.min(500, limit)),
     ) as OrganizationVersionAudit[];
     return rows;

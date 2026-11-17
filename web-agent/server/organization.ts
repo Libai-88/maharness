@@ -1233,13 +1233,22 @@ export class OrganizationService {
       const ownContracts = contracts.filter(contract => contract.roleId === role.id && ['proposed', 'active'].includes(contract.status));
       const waiting = ownRuns.filter(run => run.status === 'waiting_approval').length;
       const failures = ownRuns.filter(run => run.status === 'failed').length;
+      const contextRatios = ownRuns.flatMap(run => this.options.store.runs.modelCalls(run.id, 0, 500))
+        .filter(call => call.status === 'completed'
+          && (call.purpose === 'agent' || call.purpose === 'vision')
+          && Number.isSafeInteger(call.contextWindow)
+          && call.contextWindow! > 0)
+        .map(call => call.inputEstimate / call.contextWindow!);
+      const contextPressure = contextRatios.length
+        ? Math.max(...contextRatios) >= 0.8 ? 'high' as const : 'normal' as const
+        : 'unknown' as const;
       return {
         roleId: role.id,
         activeAssignments: ownRuns.length + ownContracts.length,
         consecutiveFailures: failures,
         waitingApproval: waiting,
         reworkAssignments: ownContracts.filter(contract => contract.status === 'proposed').length,
-        contextPressure: 'unknown' as const,
+        contextPressure,
         state: waiting ? 'waiting' as const : ownRuns.length ? 'busy' as const : role.employment === 'paused' ? 'resting' as const : 'ready' as const,
         updatedAt: Date.now(),
       };

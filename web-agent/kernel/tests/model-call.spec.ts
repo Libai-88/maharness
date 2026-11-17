@@ -41,6 +41,26 @@ test('all actual model attempts have independently attributed usage and model id
   assert.equal(f.rows[0].usageStatus, 'reported');
 });
 
+test('model calls retain a validated context window for welfare pressure accounting', async () => {
+  const known = fixture();
+  const withContext = provider();
+  withContext.models = [{
+    modelId: 'm', contextWindow: 1_000, maxOutput: 100, vision: false, tools: true,
+    reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'manual',
+  }];
+  await consume(inModelScope(callModel(withContext, [{ role: 'user', content: 'hi' }], { model: 'm' }), known.scope));
+  assert.equal(known.rows[0].contextWindow, 1_000);
+
+  const invalid = fixture();
+  const withoutContext = provider();
+  withoutContext.models = [{
+    modelId: 'm', contextWindow: 0, maxOutput: 100, vision: false, tools: true,
+    reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'manual',
+  }];
+  await consume(inModelScope(callModel(withoutContext, [{ role: 'user', content: 'hi' }], { model: 'm' }), invalid.scope));
+  assert.equal(invalid.rows[0].contextWindow, undefined);
+});
+
 test('missing and partial usage never settle as confirmed zero', async () => {
   const f = fixture();
   await consume(inModelScope(callModel(provider(false), [], { model: 'm' }), f.scope));

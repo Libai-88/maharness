@@ -11,6 +11,8 @@ import {
   type OrganizationRole,
   type SocialHealth,
   type SocietyDepartmentPolicy,
+  type SocietyExperimentMeasurement,
+  type SocietyPairedExperiment,
   type SocietySchedule,
   type SocietyScheduleAssignment,
   type SocietySnapshot,
@@ -64,6 +66,7 @@ export interface CreateSocietyTaskInput {
   priority?: number;
   departmentId?: string;
   economics?: Partial<NonNullable<SocietyTask['economics']>>;
+  evidenceExperimentId?: string;
   branches?: SocietyTaskBranch[];
 }
 
@@ -519,6 +522,11 @@ export class SocietyService {
   createTask(input: CreateSocietyTaskInput): SocietyTask {
     const institution = this.ensureInstitution(input.tenantId);
     const objective = bounded(input.objective, 2000, '任务目标');
+    if (input.evidenceExperimentId) {
+      const evidence = this.pairedExperiment(input.evidenceExperimentId, input.tenantId);
+      if (evidence.status !== 'measured')
+        throw new OrganizationError(409, 'SOCIETY_EXPERIMENT_INCOMPLETE', '配对净收益实验尚未完成');
+    }
     const departmentId = input.departmentId
       ? validDepartmentId(input.departmentId)
       : this.departmentForText(objective, institution.policies.departments).id;
@@ -580,6 +588,9 @@ export class SocietyService {
         },
       } : {}),
       branches,
+      ...(input.evidenceExperimentId
+        ? { evidenceExperimentId: bounded(input.evidenceExperimentId, 64, '实验证据 ID') }
+        : {}),
       approval: requiresApproval ? 'pending' : 'not_required',
       status: requiresApproval ? 'waiting_approval' : 'queued',
       lastSchedulingReason: requiresApproval ? '等待人类批准高额任务' : '等待制度调度',
@@ -838,13 +849,20 @@ export class SocietyService {
       const schedules = this.repository().societySchedules(tenantId, 1000);
       const usage = this.resourceUsage(task, schedules, institution);
       const roles = this.rankedRoles(task, institution);
+      const wellbeing = new OrganizationService({ store: this.options.store }).wellbeing(tenantId, projectId);
+      const contextBlocked = new Set(wellbeing
+        .filter(item => item.contextPressure === 'high')
+        .map(item => item.roleId));
       const available = roles.filter(role =>
         !usage.roleBudgetBlocked.has(role.id)
+        && !contextBlocked.has(role.id)
         && (usage.roleLoads.get(role.id) ?? 0) < institution.policies.welfareMaxActiveAssignments,
       );
       if (!available.length) {
         this.queue(task, usage.roleBudgetBlocked.size
           ? '角色预算不足'
+          : contextBlocked.size
+            ? '角色上下文压力过高，等待压缩、拆分或回退单角色'
           : '角色负载达到福利上限');
         continue;
       }
@@ -853,11 +871,25 @@ export class SocietyService {
       const independentBranches = task.branches.length >= 2
         && plannedArtifacts.size >= task.branches.length
         && task.branches.every(branch => branch.acceptance.length > 0);
+      const evidenceExperiment = task.evidenceExperimentId
+        ? this.pairedExperiment(task.evidenceExperimentId, task.tenantId)
+        : undefined;
+      const evidenceMarginal = evidenceExperiment?.status === 'measured'
+        ? evidenceExperiment.netBenefitUsd?.marginal
+        : undefined;
+      const evidenceFallbackReason = evidenceExperiment
+        ? evidenceMarginal === undefined
+          ? '配对净收益实验缺少可核对结果，保持单角色'
+          : evidenceMarginal < institution.policies.minNetBenefitUsd
+            ? `配对实测边际净收益 ${evidenceMarginal} USD 未达到门槛，保持单角色`
+            : undefined
+        : undefined;
       const teamEligible = independentBranches
         && available.length >= Math.min(2, task.branches.length)
+        && !evidenceFallbackReason
         && economics.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
         && economics.team.netBenefitUsd > economics.single.netBenefitUsd;
-      let teamFallbackReason: string | undefined;
+      let teamFallbackReason: string | undefined = evidenceFallbackReason;
       let teamRoles = teamEligible
         ? this.teamRolesForBranches(task, available, institution)
         : [];
@@ -1808,6 +1840,222 @@ export class SocietyService {
         : selected === 'solo' ? '团队净收益不足，保持单角色执行'
           : '两种方案净收益均不足，排队或等待人类重新估价',
     };
+  }
+
+  createPairedExperiment(input: CreateSocietyTaskInput): {
+    solo: SocietyTask;
+    team: SocietyTask;
+    experiment: SocietyPairedExperiment;
+  } {
+    if (!input.branches || input.branches.length < 2)
+      throw new OrganizationError(400, 'SOCIETY_EXPERIMENT_INVALID', '配对实验至少需要两个独立团队分支');
+    const institution = this.ensureInstitution(input.tenantId);
+    const objective = bounded(input.objective, 2000, '任务目标');
+    const departmentId = input.departmentId
+      ?? this.departmentForText(objective, institution.policies.departments).id;
+    const plannedArtifacts = [...new Set(input.branches.flatMap(branch => branch.expectedArtifacts ?? []) )];
+    const acceptance = [...new Set([
+      ...(input.acceptance ?? []),
+      ...input.branches.flatMap(branch => branch.acceptance ?? []),
+    ])];
+    let solo: SocietyTask | undefined;
+    try {
+      solo = this.createTask({
+        ...input,
+        departmentId,
+        branches: [{
+          objective,
+          acceptance,
+          expectedArtifacts: plannedArtifacts,
+          departmentId,
+        }],
+        economics: undefined,
+        evidenceExperimentId: undefined,
+      });
+      const team = this.createTask(input);
+      const now = Date.now();
+      const experiment: SocietyPairedExperiment = {
+        id: randomUUID(),
+        tenantId: input.tenantId,
+        projectId: input.projectId ?? '',
+        objective,
+        valueUsd: solo.valueUsd,
+        status: 'running',
+        soloTaskId: solo.id,
+        teamTaskId: team.id,
+        formula: 'net = value * completion * (1 - artifactRisk) + latencyBenefit - actualCost; unmeasured latencyBenefit stays zero',
+        reason: '等待单角色与团队两条真实 Run 结束',
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.repository().transaction(() => {
+        this.repository().updateSocietyTask(solo!, {
+          experiment: {
+            id: experiment.id, variant: 'solo', peerTaskId: team.id,
+            snapshot: structuredClone(experiment),
+          },
+        });
+        this.repository().updateSocietyTask(team, {
+          experiment: {
+            id: experiment.id, variant: 'team', peerTaskId: solo!.id,
+            snapshot: structuredClone(experiment),
+          },
+        });
+      });
+      this.emit('organization.society.experiment.updated', {
+        experimentId: experiment.id, status: experiment.status,
+        soloTaskId: solo.id, teamTaskId: team.id,
+      });
+      return {
+        solo: this.repository().getSocietyTask(solo.id, input.tenantId)!,
+        team: this.repository().getSocietyTask(team.id, input.tenantId)!,
+        experiment,
+      };
+    } catch (error) {
+      if (solo) this.repository().updateSocietyTask(solo, {
+        status: 'cancelled', lastSchedulingReason: '配对实验创建失败',
+      });
+      throw error;
+    }
+  }
+
+  pairedExperiment(experimentId: string, tenantId: string): SocietyPairedExperiment {
+    const matching = this.repository().societyTasks(tenantId, undefined, 1000)
+      .filter(task => task.experiment?.id === experimentId);
+    if (matching.length !== 2)
+      throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
+    return structuredClone(matching[0]!.experiment!.snapshot);
+  }
+
+  measurePairedExperiment(experimentId: string, tenantId: string): SocietyPairedExperiment {
+    const matching = this.repository().societyTasks(tenantId, undefined, 1000)
+      .filter(task => task.experiment?.id === experimentId);
+    const solo = matching.find(task => task.experiment?.variant === 'solo');
+    const team = matching.find(task => task.experiment?.variant === 'team');
+    if (!solo || !team)
+      throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
+    const soloMeasurement = this.experimentMeasurement(solo);
+    const teamMeasurement = this.experimentMeasurement(team);
+    const terminal = [soloMeasurement, teamMeasurement]
+      .every(item => ['awaiting_acceptance', 'completed', 'failed', 'cancelled'].includes(item.status));
+    if (!terminal) {
+      const reason = '单角色或团队 Run 尚未结束';
+      const running: SocietyPairedExperiment = {
+        ...solo.experiment!.snapshot,
+        status: 'running', reason, updatedAt: Date.now(),
+      };
+      this.persistExperiment(solo, team, running);
+      return structuredClone(running);
+    }
+    const usageKnown = soloMeasurement.usageKnown && teamMeasurement.usageKnown;
+    const net = (measurement: SocietyExperimentMeasurement): number =>
+      Math.round((solo.valueUsd * measurement.quality * (1 - measurement.risk) - measurement.costUsd) * 1e6) / 1e6;
+    const soloNet = net(soloMeasurement);
+    const teamNet = net(teamMeasurement);
+    const measured: SocietyPairedExperiment = {
+      ...solo.experiment!.snapshot,
+      status: usageKnown ? 'measured' : 'inconclusive',
+      measurements: {
+        solo: soloMeasurement,
+        team: {
+          ...teamMeasurement,
+          coordinationCostUsd: Math.max(0, Math.round((teamMeasurement.costUsd - soloMeasurement.costUsd) * 1e6) / 1e6),
+          coordinationTokens: Math.max(0, teamMeasurement.tokens - soloMeasurement.tokens),
+        },
+      },
+      netBenefitUsd: {
+        solo: soloNet,
+        team: teamNet,
+        marginal: Math.round((teamNet - soloNet) * 1e6) / 1e6,
+      },
+      reason: usageKnown
+        ? '两条真实 Run 的验收、产物、成本、耗时与风险事实均已记录'
+        : '两条真实 Run 已结束，但 Provider usage 不完整，净收益只能标记为不确定',
+      updatedAt: Date.now(),
+    };
+    this.persistExperiment(solo, team, measured);
+    this.emit('organization.society.experiment.updated', {
+      experimentId: measured.id,
+      status: measured.status,
+      marginalNetBenefitUsd: measured.netBenefitUsd?.marginal,
+    });
+    return structuredClone(measured);
+  }
+
+  private experimentMeasurement(task: SocietyTask): SocietyExperimentMeasurement {
+    const schedule = task.scheduleId
+      ? this.repository().getSocietySchedule(task.scheduleId, task.tenantId)
+      : this.repository().societySchedules(task.tenantId, 1000)
+        .find(item => item.taskId === task.id);
+    if (!schedule) {
+      return {
+        taskId: task.id, runIds: [], status: task.status, completed: false,
+        quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
+        costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
+        usageKnown: false,
+      };
+    }
+    const contracts = (schedule.contractIds ?? [])
+      .map(id => this.repository().getContract(id, task.tenantId))
+      .filter((contract): contract is AssignmentContract => !!contract);
+    const runIds = [...new Set([
+      ...(schedule.runIds ?? []),
+      ...contracts.flatMap(contract => contract.runId ? [contract.runId] : []),
+    ])];
+    const runs = runIds
+      .map(runId => this.options.store.runs.get(runId, task.tenantId))
+      .filter((run): run is RunRecord => !!run);
+    const terminal = runs.length > 0 && runs.every(run => RUN_TERMINAL.has(run.status));
+    if (!terminal || ['queued', 'waiting_approval', 'scheduled'].includes(task.status)) {
+      return {
+        taskId: task.id, scheduleId: schedule.id, runIds, status: task.status, completed: false,
+        quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
+        costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
+        usageKnown: false,
+      };
+    }
+    const completed = ['awaiting_acceptance', 'completed'].includes(task.status);
+    const completion = contracts.length
+      ? contracts.filter(contract => contract.status === 'delivered').length / contracts.length
+      : completed ? 1 : 0;
+    const expected = [...new Set(task.branches.flatMap(branch => branch.expectedArtifacts))];
+    const artifacts = runs.flatMap(run => this.options.store.runs.artifacts(run.id).map(item => item.ref.toLowerCase()));
+    const artifactCoverage = expected.length
+      ? expected.filter(ref => artifacts.some(artifact => artifact.includes(ref.toLowerCase()))).length / expected.length
+      : completion;
+    const startedAt = Math.min(task.createdAt, ...runs.map(run => run.createdAt));
+    const finishedAt = Math.max(task.updatedAt, ...runs.map(run => run.updatedAt));
+    return {
+      taskId: task.id,
+      scheduleId: schedule.id,
+      runIds,
+      status: task.status,
+      completed,
+      quality: Math.round(completion * 1e6) / 1e6,
+      artifactCoverage: Math.round(artifactCoverage * 1e6) / 1e6,
+      latencyMs: Math.max(0, finishedAt - startedAt),
+      risk: Math.round((1 - artifactCoverage) * 1e6) / 1e6,
+      costUsd: Math.round(runs.reduce((sum, run) => sum + run.cost, 0) * 1e6) / 1e6,
+      tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
+      coordinationCostUsd: 0,
+      coordinationTokens: 0,
+      usageKnown: runs.length > 0 && runs.every(run => run.usageStatus === 'reported'),
+    };
+  }
+
+  private persistExperiment(
+    solo: SocietyTask,
+    team: SocietyTask,
+    experiment: SocietyPairedExperiment,
+  ): void {
+    this.repository().transaction(() => {
+      this.repository().updateSocietyTask(solo, {
+        experiment: { ...solo.experiment!, snapshot: structuredClone(experiment) },
+      });
+      this.repository().updateSocietyTask(team, {
+        experiment: { ...team.experiment!, snapshot: structuredClone(experiment) },
+      });
+    });
   }
 
   roleLife(tenantId: string, roleId: string): SocietySnapshot['roleLife'][number] {
