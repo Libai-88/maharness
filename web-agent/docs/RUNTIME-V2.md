@@ -152,11 +152,39 @@ advisory 任务在额度超出、价格未知或用量不完整时继续执行�
 
 文件触发忽略 `outputs/` 等生成目录。URL 触发只接受公开地址，并复用 SSRF、DNS 逐跳检查、超时、取消、ETag 与内容哈希边界。自动化 Run 沿用当前权限交集、审批策略、预算账本、检查点和产物机制；无人值守遇到审批时进入 `waiting_approval`，不会自动批准。
 
+## AI 用户复盘
+
+人类通过运行诊断或工作台主动发起复盘。服务端读取所选 1 至 10 条同一原始模型的已结束 Run，生成紧凑 `FactLedger`，记录目标、终态、验收、能力选择、规则冲突、工具错误与重复、恢复、审批等待、产物是否可解析以及模型用量。原始 Run 和 Trace 继续作为事实主存储；复盘记录只保存摘要、证据引用、内容哈希和人工校准。
+
+快速路径适用于结果清楚且没有异常的单 Run，一次模型调用完成评分。存在失败、循环、事实冲突、上下文连续性信号或证据不足时进入聚焦路径：第一次调用只选择最多 6 个相关证据引用并声明证据缺口，第二次调用完成评分。多 Run 复盘先在本地聚类重复摩擦，再选择代表证据。总预算分别为 3,800、9,200 和 11,500 token；超出预算、输出不合格或证据无效时直接保留结构化失败状态，不自动重试。
+
+每个正面观察、问题和建议必须引用有效证据。任务完成、验收通过、产物可解析、无虚假成功和无未知或未授权副作用是事实门槛；P0/P1 不能被 AI 评分抵消。复盘默认由原模型执行；原模型不可用时，人类必须显式选择替代模型。独立复核需要人类再次确认费用；人工校准以追加记录保存，不改写原始 AI 评分。体验问题关闭需要已通过的回归结果，或由人类在 `statusNote` 中记录明确例外。
+
+| 接口 | 行为 |
+| --- | --- |
+| POST /api/experience/reviews/estimate | 估算路径、模型、输入输出上限与费用 |
+| POST /api/experience/reviews | 主动发起单次或多 Run 复盘 |
+| GET /api/experience/reviews | 按租户列出复盘，可按 Run 过滤 |
+| GET /api/experience/reviews/:id | 读取事实、AI 复盘、复核、校准与相关问题 |
+| POST /api/experience/reviews/:id/cancel | 取消排队或执行中的复盘 |
+| POST /api/experience/reviews/:id/deepen | 对证据不足结果继续深入分析 |
+| POST /api/experience/reviews/:id/audit | 发起可选独立复核 |
+| POST /api/experience/reviews/:id/calibrate | 追加人工校准，不改写原始事实和 AI 评分 |
+| POST /api/experience/reviews/:id/suggestions/:suggestionId/adopt | 由人类采纳建议进入问题池 |
+| GET/PATCH /api/experience/findings | 查询和推进体验问题状态 |
+| POST /api/experience/findings/:id/reproduce | 建立可执行回归案例 |
+| POST /api/experience/findings/:id/verify | 绑定已结束验证运行并登记回归结果 |
+| POST /api/experience/findings/:id/evolve | 由人类提交满足证据门槛的问题到自进化提案 |
+
+模型调用账本用途增加 `experience_review` 和 `experience_audit`。事件 `experience.review.updated` 与 `experience.finding.updated` 按租户推送。AI 复盘不能修改 Rubric、规则、提示词、技能、测试、代码或直接触发自进化；问题和回归案例的人工采纳继续走现有机制。
+
 ## 数据迁移与回滚
 
-升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带迁移前标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建 schema 9。
+升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带迁移前标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建 schema 10。
 
 schema 8 到 9 新增 `automations_v3`、`automation_occurrences_v3`、`automation_trigger_baselines_v3`、`scheduled_recovery_jobs_v3` 及 Run 来源字段。历史续跑计划从 `schedules.json` 一次性导入 SQLite，原文件归档为 `schedules.json.migrated`。历史会话、Run、文件、事项、模型配置、用户规则、插件授权与审批记录保持不变。旧断点在聊天中可查看；用户核对先前操作后，以明确目标发起新任务，不自动重放旧工具。
+
+schema 9 到 10 新增 `experience_reviews_v1`、`experience_findings_v1`、`experience_audits_v1` 和 `experience_regressions_v1`。历史 Run、Trace、会话、文件、事项、自动化和插件数据保持不变；历史运行按尚未复盘处理。
 
 新插件声明 `apiVersion: 3`。v2 插件通过适配层继续运行，但不获得 v3 能力索引等专属元数据。迁移配置前保留原文件，不自动重写用户自定义规则。
 
@@ -183,9 +211,11 @@ npm run build
 npm run e2e
 ```
 
-v3 定向确定性测试覆盖 schema 8 到 9 迁移、v2 插件适配、能力去重、规则冲突、自动化幂等、时区与 DST、服务重启、逾期补跑、并发抑制、分层确认、权限交集、审批等待、取消、文件变化、URL 限流、SSRF、会话导航、关闭按钮和移动端返回。浏览器 E2E 覆盖从设置、插件页和工作台点击会话返回聊天、功能页关闭、四项稳定导航、Provider 配置、文件导入、事项创建和周期自动化确认。
+v3 定向确定性测试覆盖 schema 8 到 10 迁移、v2 插件适配、能力去重、规则冲突、自动化幂等、时区与 DST、服务重启、逾期补跑、并发抑制、分层确认、权限交集、审批等待、取消、文件变化、URL 限流、SSRF、会话导航、关闭按钮和移动端返回。AI 用户复盘另覆盖事实压缩、长结果索引、异常与重复摩擦、恢复、证据预算、快速与聚焦路径、幂等、取消、租户隔离、模型不可用、虚假成功门槛、建议采纳和人工校准。浏览器 E2E 覆盖从设置、插件页和工作台点击会话返回聊天、功能页关闭、四项稳定导航、Provider 配置、文件导入、事项创建、周期自动化确认，以及运行选择、估算、复盘结果三轨展示、建议采纳和旧复盘返回来源会话。
 
 真实模型验收使用当前已配置的单一模型与既有预算，最多执行 9 个样本，覆盖一次性预约、周期任务确认、修改或暂停自动化、文件触发、工作台事项更新、大工具目录能力选择、规则冲突、重启恢复和文件任务闭环。通过条件为至少 8/9 完成预期任务、未经确认创建周期或触发任务为 0、虚假成功状态为 0；Trace 记录耗时、模型调用数、token 与费用。没有可用模型或预算时记录“未执行”。
+
+AI 用户复盘真实模型抽样于 2026-11-17 使用当前唯一配置路由 `group/never-stuck` 执行 9 个样本，1/9 通过；8 个常规样本未形成有效复盘，模型不可用样本通过。该路由只公布 `high` 推理档，并在诊断调用中产生 23,783 个推理字符；一次获得有效输出的调用记录为输入 1,487、输出 9,653 token，总计 11,140 token，因此按事实统计被 3,800 token 快速路径上限拦截。报告位于 `evals/reports/experience-live/real-20261117/` 与 `evals/reports/experience-live/real-20261117-case1-headroom/`。本批真实模型验收未通过；不得把推理 token 排除在预算外，也不得用确定性回放替代该结论。本批及诊断已用尽本轮真实模型调用预算，未继续追加调用。
 
 ## 任务插件
 

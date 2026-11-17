@@ -263,10 +263,11 @@ describe('Anthropic 原生端点端到端', () => {
     httpStatus = 200;
     sseFrames = ['data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n', 'data: [DONE]\n\n'];
     const p = createProvider({ id: 'oai', baseUrl: base, apiKey: 'sk-x', model: 'gpt-4o', protocol: 'openai' });
-    const chunks = await collect(p, [sys, user('hi')], 'gpt-4o');
+    const chunks = await collect(p, [sys, user('hi')], 'gpt-4o', { reasoningEffort: 'none' });
     assert.equal(chunks.filter(c => c.type === 'delta').length, 1);
     assert.equal(lastRequest?.path, '/chat/completions');
     assert.equal(lastRequest?.headers.authorization, 'Bearer sk-x');
+    assert.equal(lastRequest?.body.reasoning_effort, 'none');
   });
 
   it('OpenAI 兼容流可在 finish_reason 后结束，缺少任一结束标记仍报断流', async () => {

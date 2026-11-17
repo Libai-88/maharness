@@ -1,6 +1,7 @@
 import { api } from './api';
 import type { Material } from './material-api';
 import type { RunArtifact, RunInfo } from './run-api';
+import type { ExperienceFinding, ExperienceReviewStatus, ExperienceVerdict } from './experience-api';
 
 export interface WorkbenchItem {
   id: string;
@@ -68,6 +69,35 @@ export interface WorkbenchSummary {
     durationMs: number;
     modelCalls: number;
     costUsd: number;
+    experienceReviewCostUsd: number;
+    experienceReviewCount: number;
+  };
+  experience: {
+    schemaVersion: 1;
+    reviewCount: number;
+    negativeReviews: number;
+    averageScore: number | null;
+    undecidedFindings: number;
+    openFindings: number;
+    findings: ExperienceFinding[];
+    recentReviews: Array<{
+      id: string;
+      sourceRunIds: string[];
+      sessionId?: string;
+      status: ExperienceReviewStatus;
+      verdict: ExperienceVerdict;
+      path: 'fast' | 'focused';
+      providerId: string;
+      model: string;
+      originalProviderId: string;
+      originalModel: string;
+      crossModel: boolean;
+      score: number | null;
+      suggestionCount: number;
+      adoptedCount: number;
+      costUsd: number;
+      updatedAt: number;
+    }>;
   };
 }
 

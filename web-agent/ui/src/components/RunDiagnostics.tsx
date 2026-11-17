@@ -6,8 +6,9 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import DOMPurify from 'dompurify';
 import { api } from '../api';
+import ExperienceReviewPanel from './ExperienceReviewPanel';
 
-const purposeLabels: Record<string, string> = { agent: '主循环', compaction: '历史摘要', vision: '视觉分析', mcp_sampling: 'MCP 模型请求', embedding: '向量检索', connection_check: '连接检测' };
+const purposeLabels: Record<string, string> = { agent: '主循环', compaction: '历史摘要', vision: '视觉分析', mcp_sampling: 'MCP 模型请求', embedding: '向量检索', connection_check: '连接检测', experience_review: 'AI 使用复盘', experience_audit: '复盘独立复核' };
 const sourceLabels: Record<string, string> = { runtime: '运行时', user: '用户', project: '项目', skill: '技能', plugin: '插件', example: '示例' };
 const trustLabels: Record<string, string> = { core: '核心', user: '用户确认', reference: '参考' };
 interface Detail { children: RunInfo[]; tools: RunTool[]; inputs: ModelInput[]; artifacts: RunArtifact[] }
@@ -71,6 +72,7 @@ export default function RunDiagnostics({ run, onInspect }: { run: RunInfo; onIns
     {!detail && !error && <p role="status">正在读取…</p>}
     {run.billingNotice && <p role="status" className="text-sm">{run.billingNotice}</p>}
     <section aria-label="模型调用账本" className="flex flex-col gap-2"><h3 className="font-medium">模型调用与费用来源</h3>{calls.length === 0 && <p className="text-sm text-muted-foreground">尚无调用记录；历史任务可能未记录</p>}{calls.map(call => <p key={call.id} className="break-all text-xs">{purposeLabels[call.purpose] ?? call.purpose} · {call.providerId}/{call.actualModel ?? call.model} · {call.status}{call.finishReason ? ` · ${call.finishReason}` : ''}{call.errorCode ? ` · ${call.errorCode}` : ''} · 输入 {call.input ?? '未知'} / 输出 {call.output ?? '未知'} · {call.cost === undefined ? '费用待核对' : `$${call.cost.toFixed(6)}`} · 用量 {({ reported: '已报告', estimated: '估算', unknown: '未知' } as Record<string, string>)[call.usageStatus] ?? call.usageStatus} · 价格 {({ configured: '用户配置', catalog: '模型目录', unknown: '未知' } as Record<string, string>)[call.priceSource] ?? call.priceSource}</p>)}{calls.length > 0 && calls.length % 100 === 0 && <Button size="sm" variant="outline" onClick={() => void runsApi.calls(run.id, calls.length).then(rows => setCalls(previous => [...previous, ...rows]))}>读取更多调用</Button>}</section>
+    <ExperienceReviewPanel runIds={[run.id]} />
     {run.error && <p role="alert" className="break-words">{run.error}</p>}
     <details><summary className="cursor-pointer font-medium">机器验收 · {verificationLabel(run.verification)}</summary><pre className="mt-2 overflow-auto whitespace-pre-wrap break-all text-xs">{JSON.stringify(run.verification ?? '尚未验证', null, 2)}</pre></details>
     {detail && <>

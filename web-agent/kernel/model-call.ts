@@ -4,7 +4,7 @@ import type { ChatOptions, LLMChunk, LLMMessage, ProviderDef } from './types';
 import { countMessageTokens, estimateTokens } from './tokens';
 import { ModelResponseError, type FinishReason } from './model-response';
 
-export type ModelPurpose = 'agent' | 'compaction' | 'vision' | 'mcp_sampling' | 'embedding' | 'connection_check';
+export type ModelPurpose = 'agent' | 'compaction' | 'vision' | 'mcp_sampling' | 'embedding' | 'connection_check' | 'experience_review' | 'experience_audit';
 export interface ModelCallRecord {
   id: string; rootId?: string; runId?: string; parentRunId?: string; scope: 'run' | 'maintenance';
   turn?: number; purpose: ModelPurpose; providerId: string; model: string; actualModel?: string;

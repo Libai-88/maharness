@@ -35,6 +35,7 @@ import { registerTenantRoutes } from './tenants';
 import { registerScheduleRoutes } from './schedules';
 import { registerAutomationRoutes } from './automations';
 import { registerWorkbenchRoutes } from './workbench';
+import { registerExperienceRoutes } from './experience';
 import type { Scheduler } from '../scheduler';
 import { AutomationService } from '../automations';
 import { getChatService, SseConnectionLimiter } from './shared';
@@ -222,6 +223,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerScheduleRoutes(app, deps);   // 长任务到点续跑
   registerAutomationRoutes(app, deps);
   registerWorkbenchRoutes(app, deps);
+  registerExperienceRoutes(app, deps);
   registerChatRoutes(app, deps, runs);
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）

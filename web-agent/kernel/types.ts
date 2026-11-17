@@ -761,6 +761,8 @@ export interface ChatOptions {
   signal?: AbortSignal;
   maxTokens?: number;
   temperature?: number;
+  /** OpenAI 兼容推理模型的可选推理强度；不支持的适配器忽略。 */
+  reasoningEffort?: 'none' | 'low' | 'medium' | 'high';
   /** 请求 Provider 返回结构化 JSON；不支持该能力的适配器可忽略。 */
   responseFormat?: ResponseFormat;
 }

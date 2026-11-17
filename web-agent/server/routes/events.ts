@@ -18,6 +18,7 @@ import { auditSseLifecycle } from '../security-policy';
 const SSE_EVENT_TYPES = new Set([
   'trace.step', 'plan.updated', 'todo.updated', 'workbench.updated', 'items.updated',
   'approval.requested', 'provider.error', 'provider.ok', 'parallel.progress',
+  'experience.review.updated', 'experience.finding.updated',
 ]);
 /** SSE 单连接待发缓冲上限：write 返回 false（内核缓冲满）且超过该值 → 销毁连接（慢客户端背压保护） */
 const SSE_BACKPRESSURE_BYTES = 1_048_576;

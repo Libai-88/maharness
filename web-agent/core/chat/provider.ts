@@ -229,6 +229,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
         stream_options: { include_usage: true },
       };
       if (opts.maxTokens) body.max_tokens = opts.maxTokens;
+      if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
       if (opts.tools?.length) {
         body.tools = opts.tools.map((t: ToolDef) => ({
           type: 'function',

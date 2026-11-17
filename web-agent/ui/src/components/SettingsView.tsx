@@ -1,6 +1,7 @@
 import WorkspacePermissions from './WorkspacePermissions';
 import GettingStarted from './GettingStarted';
 import DocumentSettings from './DocumentSettings';
+import ExperienceSettings from './ExperienceSettings';
 // ui/src/components/SettingsView.tsx —— 设置面板（Screen 7/8/6）：导航 + Provider 配置 + 上下文管理 + 技能系统
 import { useCallback, useEffect, useState } from 'react';
 import { configApi, getMutationToken, getTenantId, metaApi, providersApi, rulesApi, securityApi, setMutationToken, setTenantId, statsApi, type SecurityPosture } from '../api';
@@ -936,6 +937,7 @@ export default function SettingsView({ providers, onChanged, theme, onThemeChang
         <TabsContent value="advanced" className="flex flex-col gap-3">
           <>
             <SettingsHeading title="高级" description="审计日志、本地存储与安全。" />
+            <ExperienceSettings onOpenRuns={onOpenRuns} />
             <Card><CardHeader><CardTitle>扩展与诊断</CardTitle><CardDescription>插件页面、运行记录和成本统计保留在高级入口。</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-2"><Button variant="outline" onClick={onOpenPlugins}>插件管理</Button>{pluginNav.filter(item => item.pluginId !== 'workbench').map(item => <Button key={item.key} variant="outline" onClick={() => onOpenPluginNav?.(item.key)}>{item.pluginName} · {item.label}</Button>)}<Button variant="outline" onClick={onOpenRuns}>运行记录</Button><Button variant="outline" onClick={onOpenStats}>缓存与成本</Button></CardContent></Card>
             <Card><CardHeader><CardTitle>审计与存储</CardTitle><CardDescription>打开本地数据、配置及工作区。</CardDescription></CardHeader><CardContent><FieldGroup>
               {[['traces', 'JSONL 审计日志', 'data/traces'], ['db', '数据存储', 'data/agent.db'], ['sandbox', '沙箱根目录', '文件工具与文件 API 的可访问范围'], ['config', '用户配置', 'config.json']].map(([kind, label, description]) => <Field key={kind} orientation="horizontal"><FieldContent><FieldTitle>{label}</FieldTitle><FieldDescription>{description}</FieldDescription></FieldContent><Button variant="outline" size="sm" aria-label={`打开${label}`} onClick={() => { void metaApi.open(kind).catch((error) => toast.error(String(error))); }}>打开</Button></Field>)}

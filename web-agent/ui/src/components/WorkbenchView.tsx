@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, CheckCircle2, Clock3, ExternalLink, FileText, FolderKanban, ListTodo, Play, Plus, RefreshCw, Sparkles } from 'lucide-react';
+import { AlertCircle, ArrowRight, Bot, CheckCircle2, Clock3, ExternalLink, FileText, FolderKanban, ListTodo, Play, Plus, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api';
 import { runLabels } from '../run-api';
 import { automationApi } from '../automation-api';
 import { workbenchApi, type WorkbenchItem, type WorkbenchSummary } from '../workbench-api';
 import { materialApi } from '../material-api';
+import { experienceApi, type ExperienceFinding, type FindingStatus } from '../experience-api';
 import { Badge } from './ui/badge';
 import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
@@ -42,6 +43,8 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
   const [error, setError] = useState('');
   const [quick, setQuick] = useState('');
   const [busy, setBusy] = useState<string | null>(null);
+  const [findingBusy, setFindingBusy] = useState<string | null>(null);
+  const [verification, setVerification] = useState<Record<string, { runId: string; summary: string; outcome: 'passed' | 'failed' }>>({});
 
   const load = useCallback(async () => {
     try {
@@ -95,6 +98,67 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
       toast.error(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setBusy(null);
+    }
+  };
+
+  const advanceFinding = async (finding: ExperienceFinding, status: FindingStatus) => {
+    setFindingBusy(finding.id);
+    try {
+      if (status === 'reproduced') await experienceApi.reproduceFinding(finding.id);
+      else await experienceApi.updateFinding(
+        finding.id,
+        status,
+        status === 'closed' ? '人工例外：人类在回归结果未标记通过的情况下确认关闭。' : undefined,
+      );
+      await load();
+      toast.success('体验问题状态已更新');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setFindingBusy(null);
+    }
+  };
+
+  const findingAction = (status: FindingStatus): { status: FindingStatus; label: string } | null => {
+    if (status === 'new' || status === 'reopened') return { status: 'triaged', label: '分诊' };
+    if (status === 'triaged') return { status: 'reproduced', label: '建立复现' };
+    if (status === 'reproduced') return { status: 'fixing', label: '开始修复' };
+    if (status === 'fixing') return { status: 'verifying', label: '进入验证' };
+    return null;
+  };
+
+  const verifyFinding = async (finding: ExperienceFinding) => {
+    const input = verification[finding.id];
+    if (!input?.runId.trim() || !input.summary.trim()) {
+      toast.error('填写验证运行 ID 和人工结论后再登记回归结果');
+      return;
+    }
+    setFindingBusy(finding.id);
+    try {
+      await experienceApi.verifyFinding(finding.id, {
+        outcome: input.outcome,
+        runId: input.runId.trim(),
+        summary: input.summary.trim(),
+      });
+      await load();
+      toast.success(input.outcome === 'passed' ? '回归通过，问题已关闭' : '回归失败，问题已重开');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setFindingBusy(null);
+    }
+  };
+
+  const evolveFinding = async (finding: ExperienceFinding) => {
+    setFindingBusy(finding.id);
+    try {
+      await experienceApi.evolveFinding(finding.id);
+      await load();
+      toast.success('已验证模式已提交到自进化提案');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setFindingBusy(null);
     }
   };
 
@@ -165,6 +229,51 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
             <CardContent className="flex flex-col gap-2">{summary!.notes.slice(0, 6).map(note => <div key={note.id} className="flex items-start gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="line-clamp-2 text-sm">{note.text || '未命名笔记'}</span></div>)}{!summary!.notes.length && <p className="text-sm text-muted-foreground">暂无笔记，可在完整工作台中记录。</p>}</CardContent>
           </Card>
         </div>
+
+        <Card>
+          <CardHeader><CardTitle>AI 用户整体体验</CardTitle><CardDescription>只来自你主动触发的本机复盘；事实、AI 评分和人工校准分开保存。</CardDescription></CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            <div className="grid gap-3 text-sm sm:grid-cols-2 lg:grid-cols-4">
+              <div><p className="text-xs text-muted-foreground">平均体验分</p><p className="mt-1 font-medium">{summary!.experience.averageScore === null ? '暂无数据' : `${summary!.experience.averageScore}/5`}</p></div>
+              <div><p className="text-xs text-muted-foreground">负向复盘</p><p className="mt-1 font-medium">{summary!.experience.negativeReviews} / {summary!.experience.reviewCount}</p></div>
+              <div><p className="text-xs text-muted-foreground">待分诊问题</p><p className="mt-1 font-medium">{summary!.experience.undecidedFindings}</p></div>
+              <div><p className="text-xs text-muted-foreground">开放问题</p><p className="mt-1 font-medium">{summary!.experience.openFindings}</p></div>
+            </div>
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">最近复盘</p>
+                {summary!.experience.recentReviews.map(review => {
+                  return <div key={review.id} className="flex items-center gap-2 rounded-md border p-2">
+                    <Bot className="size-4 shrink-0 text-muted-foreground" />
+                    <span className="min-w-0 flex-1 truncate text-sm">{review.originalProviderId} / {review.originalModel} · {review.path === 'fast' ? '快速' : '聚焦'} · {review.suggestionCount} 条建议</span>
+                    <Button size="sm" variant="ghost" disabled={!review.sessionId} onClick={() => review.sessionId && onSession(review.sessionId)}>打开会话</Button>
+                    <Badge variant={review.verdict === 'negative' ? 'destructive' : review.verdict === 'positive' ? 'secondary' : 'outline'}>{review.verdict}</Badge>
+                  </div>;
+                })}
+                {summary!.experience.recentReviews.length === 0 && <p className="text-sm text-muted-foreground">进入运行诊断，主动触发第一次 AI 使用复盘。</p>}
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">体验问题池</p>
+                {summary!.experience.findings.slice(0, 4).map(finding => {
+                  const action = findingAction(finding.status);
+                  const occurrences = finding.occurrences ?? finding.reviewIds?.length ?? 1;
+                  const verificationInput = verification[finding.id] ?? { runId: '', summary: '', outcome: 'passed' as const };
+                  return <div key={finding.id} className="rounded-md border p-2">
+                    <div className="flex items-center gap-2"><ShieldAlert className="size-4 shrink-0 text-muted-foreground" /><span className="min-w-0 flex-1"><span className="block truncate text-sm">{finding.title}</span><span className="text-xs text-muted-foreground">{finding.severity} · {finding.status} · 出现 {occurrences} 次</span></span>{action && <Button size="sm" variant="outline" disabled={findingBusy === finding.id} onClick={() => void advanceFinding(finding, action.status)}>{action.label}</Button>}</div>
+                    {finding.status === 'verifying' && <div className="mt-2 grid gap-2 sm:grid-cols-[1fr_auto_auto]">
+                      <Input aria-label={`验证运行 ID ${finding.id}`} placeholder="绑定一个已结束的验证 Run ID" value={verificationInput.runId} onChange={event => setVerification(values => ({ ...values, [finding.id]: { ...verificationInput, runId: event.target.value } }))} />
+                      <Input aria-label={`回归结论 ${finding.id}`} placeholder="人工核对结论" value={verificationInput.summary} onChange={event => setVerification(values => ({ ...values, [finding.id]: { ...verificationInput, summary: event.target.value } }))} />
+                      <div className="flex gap-1"><select aria-label={`回归结果 ${finding.id}`} className="rounded-md border bg-background px-2 text-xs" value={verificationInput.outcome} onChange={event => setVerification(values => ({ ...values, [finding.id]: { ...verificationInput, outcome: event.target.value as 'passed' | 'failed' } }))}><option value="passed">通过</option><option value="failed">失败</option></select><Button size="sm" disabled={findingBusy === finding.id} onClick={() => void verifyFinding(finding)}>登记</Button></div>
+                    </div>}
+                    {finding.status === 'closed' && !finding.evolutionProposalId && (occurrences >= 2 || finding.severity === 'P0' || finding.severity === 'P1') && <div className="mt-2 flex justify-end"><Button size="sm" variant="outline" disabled={findingBusy === finding.id} onClick={() => void evolveFinding(finding)}>提交自进化</Button></div>}
+                    {finding.evolutionProposalId && <p className="mt-2 text-xs text-muted-foreground">自进化提案：{finding.evolutionProposalId}</p>}
+                  </div>;
+                })}
+                {summary!.experience.findings.length === 0 && <p className="text-sm text-muted-foreground">采纳复盘建议后，问题会出现在这里。</p>}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card>
           <CardHeader><CardTitle>本地体验指标</CardTitle><CardDescription>指标只来自当前租户的本地运行记录，不上传。</CardDescription></CardHeader>

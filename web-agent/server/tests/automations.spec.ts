@@ -310,7 +310,7 @@ describe('自动化定义、确认与版本边界', () => {
     raw.close();
     store = new Store(file);
     try {
-      assert.equal(store.schemaVersion, 9);
+      assert.equal(store.schemaVersion, 10);
       assert.equal(store.getSession(session.id, 'default')?.id, session.id);
       assert.doesNotThrow(() => store.automations.list('default'));
       assert.doesNotThrow(() => store.automations.occurrences('default'));

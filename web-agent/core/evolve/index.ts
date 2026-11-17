@@ -172,6 +172,37 @@ export default {
       '',
     ].join('\n');
 
+    function proposeFromFinding(input: {
+      name: string; description: string; reason: string; findingId: string; severity: string;
+      evidenceRefs: string[]; sourceRunIds: string[]; regressionId?: string;
+    }, tenantId = 'default'): ProposalMeta | undefined {
+      const name = input.name.replace(/[^\w.\u4e00-\u9fa5-]/g, '').slice(0, 60);
+      if (!name) return undefined;
+      const description = input.description.trim().slice(0, 300);
+      const reason = input.reason.trim().slice(0, 300);
+      const body = [
+        `# ${name}`, '',
+        '## 何时使用', '',
+        `当任务再次出现以下体验摩擦时使用：${description}`, '',
+        '## 执行要求', '',
+        '1. 先确认当前用户目标、授权工作区和工具能力，不沿用旧运行中的过时状态。',
+        `2. 按本技能处理该 ${input.severity} 体验问题；采纳前由人类补全可执行步骤，模型不得自行将提案视为已修复。`,
+        '3. 完成前核对运行事实、产物可用性、来源定位和实际副作用。', '',
+        '## 回归要求', '',
+        `- 体验问题：${input.findingId}`,
+        ...(input.regressionId ? [`- 回归案例：${input.regressionId}`] : []),
+        `- 来源运行：${input.sourceRunIds.join(', ') || '未记录'}`,
+        `- 证据：${input.evidenceRefs.join(', ') || '未记录'}`, '',
+        '## 禁止事项', '',
+        '- 不自动批准副作用、不篡改事实、不把本提案当作已采纳规则。',
+        '- 未经过回归或人工验证，不宣称问题已经修复。',
+        '',
+      ].join('\n');
+      return upsert(['AI用户体验', input.severity], name, description, reason, body, description,
+        JSON.stringify({ findingId: input.findingId, sourceRunIds: input.sourceRunIds, evidenceRefs: input.evidenceRefs, regressionId: input.regressionId }),
+        tenantId) ?? undefined;
+    }
+
     function onRunFinished(summary: AgentRunSummary): void {
       if (!enabled || !auto) return;
       const tenantId = summary.tenantId ?? 'default';
@@ -282,6 +313,7 @@ export default {
         instance: {
           list: (tenantId?: string) => loadProposals(tenantId),
           toolStats: () => state.toolStats,
+          proposeFromFinding,
           /** 采纳：写入 data/skills/<name>/SKILL.md 并标记 accepted（skills 插件 user 源生效） */
           accept(id: string, tenantId = 'default'): { ok: boolean; error?: string; name?: string } {
             const file = proposalFile(id);

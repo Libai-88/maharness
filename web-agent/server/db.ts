@@ -18,6 +18,7 @@ import { RUN_SCHEMA, RunRepository } from './run-store';
 import { MATERIAL_SCHEMA, MaterialRepository } from './materials';
 import { AUTOMATION_SCHEMA, AutomationRepository } from './automations';
 import { RECOVERY_SCHEDULE_SCHEMA, ScheduleRepository } from './schedule-store';
+import { EXPERIENCE_SCHEMA, ExperienceRepository } from './experience-store';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
@@ -128,6 +129,7 @@ export class Store {
   readonly materials: MaterialRepository;
   readonly automations: AutomationRepository;
   readonly schedules: ScheduleRepository;
+  readonly experience: ExperienceRepository;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -162,6 +164,8 @@ export class Store {
     this.materials = new MaterialRepository(this.db);
     this.automations = new AutomationRepository(this.db);
     this.schedules = new ScheduleRepository(this.db);
+    this.experience = new ExperienceRepository(this.db);
+    this.experience.interruptRunning();
   }
 
   /** 当前数据库 schema 版本（PRAGMA user_version） */
@@ -223,6 +227,7 @@ export class Store {
         this.db.exec(MATERIAL_SCHEMA);
         this.db.exec(AUTOMATION_SCHEMA);
         this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
+        this.db.exec(EXPERIENCE_SCHEMA);
         this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
       })();
       return;
@@ -403,10 +408,11 @@ export class Store {
     { from: 6, to: 7, run: db => { db.exec(RUN_SCHEMA); } },
     { from: 7, to: 8, run: db => { db.exec(MATERIAL_SCHEMA); } },
     { from: 8, to: 9, run: db => { db.exec(AUTOMATION_SCHEMA); db.exec(RECOVERY_SCHEDULE_SCHEMA); } },
+    { from: 9, to: 10, run: db => { db.exec(EXPERIENCE_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 9;
+  static readonly DB_SCHEMA_VERSION = 10;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 

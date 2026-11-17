@@ -1,6 +1,7 @@
 import type { Express } from 'express';
 import type { PersonalItems } from '../../core/todo/items';
 import { tenantIdOf, type RouteDeps } from './shared';
+import { reviewScore } from '../experience';
 
 export function dateInTimeZone(now: number, timeZone = 'UTC'): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
@@ -30,6 +31,7 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
       .slice(0, 20);
     const workspace = items.workspace(tenantId).data;
     const metrics = workbenchMetrics(deps, tenantId);
+    const experience = experienceSummary(deps, tenantId);
     res.json({
       schemaVersion: 1,
       today,
@@ -44,6 +46,7 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
       projects: workspace.projects ?? [],
       notes: (workspace.notes ?? []).slice(0, 8),
       metrics,
+      experience,
     });
   });
 }
@@ -93,6 +96,7 @@ function workbenchMetrics(deps: RouteDeps, tenantId: string) {
   const recovered = allRuns.flatMap(run => deps.store.runs.events(run.id).filter(event => event.type === 'tool_recovered')).length;
   const failedToolCalls = calls.filter(call => call.status === 'failed' || call.status === 'unknown').length;
   const modelCalls = allRuns.reduce((sum, run) => sum + deps.store.runs.modelCalls(run.id).length, 0);
+  const reviews = deps.store.experience.listReviews(tenantId, 100);
   return {
     schemaVersion: 1,
     firstTaskSuccessRate: percent(firstTaskSuccesses, firstTaskRuns),
@@ -106,5 +110,43 @@ function workbenchMetrics(deps: RouteDeps, tenantId: string) {
       .reduce((sum, run) => sum + Math.max(0, run.updatedAt - run.createdAt), 0),
     modelCalls,
     costUsd: Math.round(allRuns.reduce((sum, run) => sum + run.cost, 0) * 1e6) / 1e6,
+    experienceReviewCostUsd: Math.round(reviews.reduce((sum, review) => sum + review.budget.costUsd, 0) * 1e6) / 1e6,
+    experienceReviewCount: reviews.length,
+  };
+}
+
+function experienceSummary(deps: RouteDeps, tenantId: string) {
+  const reviews = deps.store.experience.listReviews(tenantId, 100);
+  const findings = deps.store.experience.findings(tenantId, undefined, 500);
+  const scores = reviews.map(reviewScore).flatMap(score => score === null ? [] : [score]);
+  return {
+    schemaVersion: 1,
+    reviewCount: reviews.length,
+    negativeReviews: reviews.filter(review => review.verdict === 'negative').length,
+    averageScore: scores.length ? Math.round(scores.reduce((sum, score) => sum + score, 0) / scores.length * 10) / 10 : null,
+    undecidedFindings: findings.filter(finding => finding.status === 'new' || finding.status === 'triaged').length,
+    openFindings: findings.filter(finding => !['closed', 'wont_fix'].includes(finding.status)).length,
+    findings: findings.slice(0, 8),
+    recentReviews: reviews.slice(0, 6).map(review => ({
+      id: review.id,
+      sourceRunIds: review.sourceRunIds,
+      sessionId: review.sourceRunIds.flatMap(runId => {
+        const run = deps.store.runs.get(runId, tenantId);
+        return run ? [run.sessionId] : [];
+      })[0],
+      status: review.status,
+      verdict: review.verdict,
+      path: review.path,
+      providerId: review.providerId,
+      model: review.model,
+      originalProviderId: review.originalProviderId,
+      originalModel: review.originalModel,
+      crossModel: review.crossModel,
+      score: reviewScore(review),
+      suggestionCount: review.suggestions.length,
+      adoptedCount: review.suggestions.filter(suggestion => suggestion.adoptedFindingId).length,
+      costUsd: review.budget.costUsd,
+      updatedAt: review.updatedAt,
+    })),
   };
 }
