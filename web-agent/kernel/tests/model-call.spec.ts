@@ -8,6 +8,7 @@ import { Store } from '../../server/db';
 import { compactHistory } from '../../core/chat/compact';
 import { normalizeUsage } from '../../core/chat/provider';
 import { isUserMessage } from '../context';
+import type { RunRecord } from '../run';
 import type { ProviderDef } from '../types';
 
 const provider = (usage = true): ProviderDef => ({
@@ -45,9 +46,69 @@ test('missing and partial usage never settle as confirmed zero', async () => {
   await consume(inModelScope(callModel(provider(false), [], { model: 'm' }), f.scope));
   assert.equal(f.rows[0].cost, undefined);
   assert.equal(f.rows[0].input, undefined);
+  assert.equal(f.rows[0].cachedInput, undefined);
+  assert.equal(f.rows[0].missInput, undefined);
+  assert.equal(f.rows[0].cacheWriteTokens, undefined);
   assert.equal(f.rows[0].usageStatus, 'unknown');
   assert.equal(normalizeUsage({ prompt_tokens: 1 }).incomplete, true);
   assert.equal(normalizeUsage({ prompt_tokens: 0, completion_tokens: 0 }).incomplete, undefined);
+});
+
+test('hard token admission gets a deterministic payload bound without adapter certification', async () => {
+  const f = fixture();
+  f.scope.cachePrefixHash = 'prefix-hash';
+  const image = `data:image/png;base64,${'A'.repeat(4096)}`;
+  const tool = { name: 'read_file', description: 'read a file', parameters: { type: 'object' } } as never;
+  await consume(inModelScope(callModel(provider(false), [
+    { role: 'user', content: 'inspect', images: [image] },
+  ], { model: 'm', tools: [tool] }), f.scope));
+  const row = f.rows[0];
+  assert.equal(row.inputUpperBoundSource, 'conservative');
+  assert.ok((row.inputUpperBound ?? 0) >= Buffer.byteLength(image, 'utf8'));
+  assert.equal(row.reservedTokens, (row.inputUpperBound ?? 0) + (row.outputLimit ?? 0));
+  assert.equal(row.cachePrefixHash, 'prefix-hash');
+});
+
+test('adapter-certified token bound wins; invalid certification falls back to conservative framing', async () => {
+  const certified = fixture();
+  const providerWithBound = provider(false);
+  providerWithBound.inputTokenUpperBound = () => 321;
+  await consume(inModelScope(callModel(providerWithBound, [], { model: 'm' }), certified.scope));
+  assert.equal(certified.rows[0].inputUpperBound, 321);
+  assert.equal(certified.rows[0].inputUpperBoundSource, 'provider');
+  assert.equal(certified.rows[0].reservedTokens, 321 + 4096);
+
+  const fallback = fixture();
+  const providerWithInvalidBound = provider(false);
+  providerWithInvalidBound.inputTokenUpperBound = () => -1;
+  await consume(inModelScope(callModel(providerWithInvalidBound, [{ role: 'user', content: 'bounded' }], { model: 'm' }), fallback.scope));
+  assert.equal(fallback.rows[0].inputUpperBoundSource, 'conservative');
+  assert.ok((fallback.rows[0].inputUpperBound ?? 0) >= Buffer.byteLength('bounded', 'utf8'));
+});
+
+test('provider cache usage is persisted only when values are valid', async () => {
+  const f = fixture();
+  const p = provider(false);
+  p.chat = async function* () {
+    yield { type: 'usage', input: 100, output: 20, cachedInput: 40, missInput: 60, cacheWrite: 7 };
+    yield { type: 'done' };
+  };
+  await consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope));
+  assert.deepEqual(
+    [f.rows[0].cachedInput, f.rows[0].missInput, f.rows[0].cacheWriteTokens],
+    [40, 60, 7],
+  );
+
+  const invalid = fixture();
+  const invalidProvider = provider(false);
+  invalidProvider.chat = async function* () {
+    yield { type: 'usage', input: 100, output: 20, cachedInput: 101, missInput: -1, cacheWrite: 1.5 };
+    yield { type: 'done' };
+  };
+  await consume(inModelScope(callModel(invalidProvider, [], { model: 'm' }), invalid.scope));
+  assert.equal(invalid.rows[0].cachedInput, undefined);
+  assert.equal(invalid.rows[0].missInput, undefined);
+  assert.equal(invalid.rows[0].cacheWriteTokens, undefined);
 });
 
 test('unknown pricing remains unknown even with complete usage', async () => {
@@ -57,13 +118,16 @@ test('unknown pricing remains unknown even with complete usage', async () => {
   assert.equal(f.rows[0].usageStatus, 'reported');
 });
 
-test('hard admission rejects an uncertified bound before invoking the provider', async () => {
+test('hard admission uses the conservative bound when an adapter cannot certify one', async () => {
   const f = fixture(); let invoked = false;
   const p = provider(); p.chat = async function* () { invoked = true; };
-  f.scope.admit = row => { if (row.reservedCost === undefined) throw new ModelAdmissionError('bound unknown'); };
-  await assert.rejects(consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope)), ModelAdmissionError);
-  assert.equal(invoked, false);
-  assert.equal(f.rows.length, 0);
+  f.scope.admit = row => {
+    assert.equal(row.inputUpperBoundSource, 'conservative');
+    assert.ok((row.reservedCost ?? 0) > 0);
+  };
+  await consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope));
+  assert.equal(invoked, true);
+  assert.equal(f.rows.length, 1);
 });
 
 test('explicit zero pricing permits a zero-cost hard reservation', async () => {
@@ -73,16 +137,21 @@ test('explicit zero pricing permits a zero-cost hard reservation', async () => {
   assert.equal(f.rows[0].cost, 0);
 });
 
-test('invalid prices and certified bounds cannot authorize a hard-budget request', async () => {
+test('invalid certified bounds fall back conservatively; invalid prices remain unknown', async () => {
   for (const invalid of [NaN, Infinity, -1, 0.5]) {
-    const f = fixture(); const p = provider(); let invoked = false;
+    const f = fixture(); const p = provider();
     p.inputTokenUpperBound = () => invalid;
-    p.chat = async function* () { invoked = true; };
-    f.scope.admit = row => { if (row.reservedCost === undefined) throw new ModelAdmissionError('bound unknown'); };
-    await assert.rejects(consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope)), ModelAdmissionError);
-    assert.equal(invoked, false);
+    f.scope.admit = row => {
+      assert.equal(row.inputUpperBoundSource, 'conservative');
+      assert.ok((row.reservedCost ?? 0) > 0);
+    };
+    await consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope));
   }
   const f = fixture(); const p = provider(); p.prices = { in: NaN, out: 1 };
+  f.scope.admit = row => {
+    assert.equal(row.inputUpperBoundSource, 'conservative');
+    assert.equal(row.reservedCost, undefined);
+  };
   await consume(inModelScope(callModel(p, [], { model: 'm' }), f.scope));
   assert.equal(f.rows[0].priceSource, 'unknown');
   assert.equal(f.rows[0].cost, undefined);
@@ -120,6 +189,35 @@ test('ledger settlement is idempotent and restart preserves unknown executions',
     assert.equal(store.runs.finishModelCall({ ...row, status: 'completed' }), false);
     assert.equal(store.runs.modelCalls('another-run').length, 0);
   } finally { store.close(); }
+});
+
+test('token reservations count only unresolved ledger calls', () => {
+  const store = new Store(':memory:');
+  try {
+    const now = Date.now();
+    const run: RunRecord = {
+      id: 'r', sessionId: 's', tenantId: 'default', rootId: 'r', depth: 0,
+      objective: 'bounded task', providerId: 'p', model: 'm', status: 'running',
+      authorization: { workspace: process.cwd(), profile: 'standard', readOnly: false, revision: 1 },
+      createdAt: now, updatedAt: now, cost: 0, tokensIn: 0, tokensOut: 0,
+      budgetTokens: 1_000, budgetPolicy: 'enforce',
+    };
+    store.runs.create(run);
+    const base: ModelCallRecord = {
+      id: 'call', runId: 'r', scope: 'run', purpose: 'agent', providerId: 'p', model: 'm',
+      status: 'running', startedAt: now, inputEstimate: 100, inputUpperBound: 100,
+      inputUpperBoundSource: 'provider', outputLimit: 20, reservedTokens: 120,
+      usageStatus: 'unknown', priceSource: 'unknown',
+    };
+    store.runs.startModelCall(base);
+    assert.equal(store.runs.modelTokenReservations(run), 120);
+    store.runs.finishModelCall({
+      ...base, status: 'completed', input: 90, output: 20, usageStatus: 'reported',
+    });
+    assert.equal(store.runs.modelTokenReservations(run), 0);
+  } finally {
+    store.close();
+  }
 });
 
 test('user intent is determined by provenance even when text matches an old prefix', () => {

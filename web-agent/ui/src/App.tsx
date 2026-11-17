@@ -168,7 +168,7 @@ export default function App() {
       }
     };
     const onEscape = (event: KeyboardEvent) => {
-      if (event.key !== 'Escape') return;
+      if (event.key !== 'Escape' || event.defaultPrevented) return;
       const target = event.target as HTMLElement | null;
       if (target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')) return;
       if (activeTab !== 'chat' || settingsOpen) {

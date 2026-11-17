@@ -535,6 +535,15 @@ export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
 export interface PlanState {
   objective: string;
   steps: { title: string; status: StepStatus; note?: string }[];
+  workItems?: Array<{
+    id: string;
+    objective: string;
+    expectedArtifacts: string[];
+    acceptance: string[];
+    dependsOn: string[];
+    evidenceRefs: string[];
+    estimatedTokens: number;
+  }>;
   current: number;
   completed: boolean;
   createdAt: number;

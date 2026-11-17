@@ -15,6 +15,8 @@ import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
 import type { Scheduler } from '../scheduler';
 import type { AutomationService } from '../automations';
+import type { OrganizationService } from '../organization';
+import type { SocietyService } from '../society';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Response } from 'express';
@@ -34,6 +36,8 @@ export interface RouteDeps {
   activeRunCount?: () => number;
   scheduler?: Scheduler;
   automations?: AutomationService;
+  organization?: OrganizationService;
+  society?: SocietyService;
 }
 
 export const DEFAULT_TENANT = 'default';

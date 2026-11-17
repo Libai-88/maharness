@@ -105,6 +105,8 @@ export interface CapabilityDescriptor {
   name: string;
   description: string;
   tools: string[];
+  /** Explicit arbitration priority for providers of the same capability id. */
+  priority?: number;
   aliases?: string[];
   inputs?: string[];
   outputs?: string[];
@@ -113,11 +115,18 @@ export interface CapabilityDescriptor {
   examples?: string[];
 }
 
+export interface CapabilityConflict {
+  capabilityId: string;
+  shadowedBy: string;
+  reason?: 'priority' | 'task_fit' | 'version' | 'plugin_id';
+  candidates?: { pluginId: string; priority: number; version?: string }[];
+}
+
 export interface CapabilityResolution {
   selected: string[];
   tools: string[];
   reason: string;
-  conflicts: { capabilityId: string; shadowedBy: string }[];
+  conflicts: CapabilityConflict[];
 }
 
 export interface RuleDescriptor {
@@ -621,6 +630,10 @@ export interface ToolContext {
   results?: Pick<import('./tool-journal').ToolExecutionJournal, 'read'>;
   runId?: string;
   parentRunId?: string;
+  workOrderId?: string;
+  assignmentContractId?: string;
+  organizationRoleId?: string;
+  teamCycleId?: string;
   authorization?: import('./run').RunAuthorization;
   remainingBudget?: number;
   traceId?: string;
@@ -751,6 +764,8 @@ export type LLMChunk =
       cachedInput?: number;
       /** 本次请求中未命中缓存的输入 token（真实命中率 = cachedInput/(cachedInput+missInput)） */
       missInput?: number;
+      /** Provider 明确报告的缓存写入 token。该值仅供参考，不重复计入 input/cost。 */
+      cacheWrite?: number;
     }
   | { type: 'model'; model: string }
   | { type: 'done'; reason?: import('./model-response').FinishReason; rawReason?: string; toolCallsTruncated?: boolean };

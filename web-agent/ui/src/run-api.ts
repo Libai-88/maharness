@@ -18,9 +18,11 @@ export interface RunInfo {
   answer?: string; error?: string; verification?: unknown; createdAt: number; updatedAt: number;
   problem?: { code: string; stage: string; hint: string };
   authorization: { workspace: string; profile: 'standard' | 'developer'; readOnly: boolean; revision: number };
-  capabilityResolution?: { selected: string[]; tools: string[]; reason: string; conflicts: { capabilityId: string; shadowedBy: string }[] };
+  capabilityResolution?: { selected: string[]; tools: string[]; reason: string; conflicts: { capabilityId: string; shadowedBy: string; reason?: string; candidates?: { pluginId: string; priority: number; version?: string }[] }[] };
   ruleResolution?: { schemaVersion: 1; applied: RuleDescriptor[]; ignored: RuleDescriptor[]; conflicts: { left: string; right: string; reason: string; winner: string }[] };
-  origin?: { kind: 'automation'; automationId: string; occurrenceId: string };
+  origin?:
+    | { kind: 'automation'; automationId: string; occurrenceId: string }
+    | { kind: 'society'; societyTaskId: string; scheduleId: string; assignmentContractId: string };
 }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number } }
 export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number; finishReason?: string; errorCode?: string }

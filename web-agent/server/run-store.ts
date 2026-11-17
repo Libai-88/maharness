@@ -34,6 +34,9 @@ export const RUN_SCHEMA = `
   CREATE TABLE IF NOT EXISTS run_budget_reservations_v2 (
     run_id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, amount REAL NOT NULL
   );
+  CREATE TABLE IF NOT EXISTS run_token_reservations_v2 (
+    run_id TEXT PRIMARY KEY, parent_id TEXT NOT NULL, amount INTEGER NOT NULL
+  );
   CREATE TABLE IF NOT EXISTS run_tool_calls_v2 (
     run_id TEXT NOT NULL, call_id TEXT NOT NULL, name TEXT NOT NULL, args_summary TEXT NOT NULL,
     status TEXT NOT NULL, started_at INTEGER NOT NULL, finished_at INTEGER, result TEXT,
@@ -99,6 +102,19 @@ export class RunRepository {
       .all(run.id, run.tenantId, run.tenantId) as { record: string }[];
     return rows.map(row => JSON.parse(row.record) as ModelCallRecord).reduce((sum, call) => sum + Math.max(0, (call.reservedCost ?? 0) - (call.cost ?? 0)), 0);
   }
+  modelTokenReservations(run: RunRecord): number {
+    const rows = this.db.prepare(`WITH RECURSIVE descendants(id) AS (
+      SELECT id FROM runs_v2 WHERE id=? AND tenant_id=?
+      UNION ALL SELECT r.id FROM runs_v2 r JOIN descendants d ON r.parent_id=d.id WHERE r.tenant_id=?
+    ) SELECT c.record FROM run_model_calls_v2 c JOIN descendants d ON d.id=c.run_id
+      WHERE json_extract(c.record,'$.status')='running' OR json_extract(c.record,'$.usageStatus')!='reported'`)
+      .all(run.id, run.tenantId, run.tenantId) as { record: string }[];
+    return rows.map(row => JSON.parse(row.record) as ModelCallRecord)
+      .reduce((sum, call) => {
+        const reserved = Number.isSafeInteger(call.reservedTokens) && call.reservedTokens! >= 0 ? call.reservedTokens! : 0;
+        return sum + Math.max(0, reserved - ((call.input ?? 0) + (call.output ?? 0)));
+      }, 0);
+  }
   acknowledgeBilling(run: RunRecord): RunRecord {
     this.update(run, { billingAcknowledgedAt: Date.now(), billingNotice: undefined }, 'billing_acknowledged', {});
     return run;
@@ -160,6 +176,14 @@ export class RunRepository {
     const { reserved } = this.db.prepare('SELECT COALESCE(SUM(amount),0) AS reserved FROM run_budget_reservations_v2 WHERE parent_id=?').get(record.id) as { reserved: number };
     return Math.max(0, current.budgetUsd! - current.cost - reserved);
   }
+  availableTokenBudget(record: RunRecord): number | undefined {
+    if (record.budgetTokens === undefined) return undefined;
+    const current = this.get(record.id, record.tenantId)!;
+    const budget = current?.budgetTokens;
+    if (budget === undefined) return undefined;
+    const { reserved } = this.db.prepare('SELECT COALESCE(SUM(amount),0) AS reserved FROM run_token_reservations_v2 WHERE parent_id=?').get(record.id) as { reserved: number };
+    return Math.max(0, budget - current.tokensIn - current.tokensOut - reserved);
+  }
   reserveChild(parent: RunRecord, childId: string, requested?: number): number | undefined {
     return this.transaction(() => {
       const available = this.availableBudget(parent);
@@ -169,15 +193,42 @@ export class RunRepository {
       return amount;
     });
   }
-  releaseChild(childId: string): void { this.db.prepare('DELETE FROM run_budget_reservations_v2 WHERE run_id=?').run(childId); }
-  accountAncestors(child: RunRecord, delta: { cost: number; tokensIn: number; tokensOut: number }): RunEvent[] {
+  reserveChildTokens(parent: RunRecord, childId: string, requested?: number): number | undefined {
+    return this.transaction(() => {
+      const available = this.availableTokenBudget(parent);
+      if (requested !== undefined && (!Number.isSafeInteger(requested) || requested < 0))
+        throw new Error('任务 token 预算必须是非负安全整数');
+      const amount = requested;
+      if (amount !== undefined && available !== undefined && amount > available)
+        throw new Error('任务剩余 token 预算不足');
+      this.db.prepare('INSERT INTO run_token_reservations_v2 VALUES(?,?,?)').run(childId, parent.id, amount ?? 0);
+      return amount;
+    });
+  }
+  releaseChild(childId: string): void {
+    this.db.prepare('DELETE FROM run_budget_reservations_v2 WHERE run_id=?').run(childId);
+    this.db.prepare('DELETE FROM run_token_reservations_v2 WHERE run_id=?').run(childId);
+  }
+  accountAncestors(child: RunRecord, delta: {
+    cost: number; tokensIn: number; tokensOut: number;
+    tokensCached?: number; tokensCacheMiss?: number; cacheWriteTokens?: number;
+  }): RunEvent[] {
     const events: RunEvent[] = [];
+    const tokenDelta = delta.tokensIn + delta.tokensOut;
     let current = child;
     while (current.parentId) {
       this.db.prepare('UPDATE run_budget_reservations_v2 SET amount=MAX(0,amount-?) WHERE run_id=?').run(delta.cost, current.id);
+      this.db.prepare('UPDATE run_token_reservations_v2 SET amount=MAX(0,amount-?) WHERE run_id=?').run(tokenDelta, current.id);
       const parent = this.get(current.parentId, child.tenantId);
       if (!parent) throw new Error('Parent task missing');
-      events.push(this.update(parent, { cost: parent.cost + delta.cost, tokensIn: parent.tokensIn + delta.tokensIn, tokensOut: parent.tokensOut + delta.tokensOut }, 'usage', { sourceRunId: child.id, ...delta }));
+      events.push(this.update(parent, {
+        cost: parent.cost + delta.cost,
+        tokensIn: parent.tokensIn + delta.tokensIn,
+        tokensOut: parent.tokensOut + delta.tokensOut,
+        ...(delta.tokensCached !== undefined ? { tokensCached: (parent.tokensCached ?? 0) + delta.tokensCached } : {}),
+        ...(delta.tokensCacheMiss !== undefined ? { tokensCacheMiss: (parent.tokensCacheMiss ?? 0) + delta.tokensCacheMiss } : {}),
+        ...(delta.cacheWriteTokens !== undefined ? { cacheWriteTokens: (parent.cacheWriteTokens ?? 0) + delta.cacheWriteTokens } : {}),
+      }, 'usage', { sourceRunId: child.id, ...delta }));
       current = parent;
     }
     return events;
@@ -209,6 +260,8 @@ export class RunRepository {
   }
   update(record: RunRecord, patch: Partial<RunRecord>, type = 'state', data?: Record<string, unknown>): RunEvent {
     return this.db.transaction(() => {
+      const stored = this.get(record.id, record.tenantId);
+      if (stored && stored !== record) Object.assign(record, stored);
       Object.assign(record, patch, { updatedAt: Date.now() });
       this.db.prepare('UPDATE runs_v2 SET status=?,record=? WHERE id=?').run(record.status, JSON.stringify(record), record.id);
       return this.append(record.id, type, data ?? { status: record.status });

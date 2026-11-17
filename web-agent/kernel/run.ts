@@ -9,6 +9,9 @@ export interface RunRecord {
   id: string; sessionId: string; tenantId: string; parentId?: string; rootId: string; depth: number;
   objective: string; providerId: string; model: string; status: RunStatus; authorization: RunAuthorization;
   createdAt: number; updatedAt: number; cost: number; tokensIn: number; tokensOut: number;
+  tokensCached?: number; tokensCacheMiss?: number; cacheWriteTokens?: number;
+  /** Absolute model-token ceiling for this run, including descendants. */
+  budgetTokens?: number;
   answer?: string; error?: string; verification?: unknown; budgetUsd?: number; deadlineAt?: number;
   problem?: { code: string; stage: string; hint: string };
   parentStepId?: string;
@@ -25,12 +28,31 @@ export interface RunRecord {
   usageStatus?: 'reported' | 'estimated' | 'unknown';
   capabilityResolution?: import('./types').CapabilityResolution;
   ruleResolution?: import('./types').RuleResolution;
-  origin?: { kind: 'automation'; automationId: string; occurrenceId: string };
+  origin?:
+    | { kind: 'automation'; automationId: string; occurrenceId: string }
+    | { kind: 'society'; societyTaskId: string; scheduleId: string; assignmentContractId: string };
+  workOrderId?: string;
+  assignmentContractId?: string;
+  organizationRoleId?: string;
+  teamCycleId?: string;
+  cachePrefixHash?: string;
+  fallbackReason?: string;
 }
 export interface RunEvent { runId: string; seq: number; type: string; data: Record<string, unknown>; createdAt: number; }
-export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: { capabilityId: string; shadowedBy: string }[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
+export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: import('./types').CapabilityConflict[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
 export interface ManagedExecution { runChild(options: RunOptions, parentId: string): AsyncGenerator<AgentEvent>; }
-export interface ChildRunRequest { parentStepId?: string; objective: string; tools?: 'read' | 'all'; plugins?: string[]; instructions?: string; maxTurns?: number; budgetUsd?: number; }
+export interface ChildRunRequest {
+  parentStepId?: string;
+  objective: string;
+  tools?: 'read' | 'all';
+  plugins?: string[];
+  instructions?: string;
+  maxTurns?: number;
+  budgetUsd?: number;
+  budgetTokens?: number;
+  assignmentContractId?: string;
+  allowedTools?: string[];
+}
 export interface ChildRunResult { runId: string; traceId: string; answer: string; toolCalls: number; cost: number; tokensIn: number; tokensOut: number; error?: string; cancelled: boolean; }
 export interface ToolFailure { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown'; }
 export interface PersistedToolCall { id: string; runId: string; name: string; result?: ToolResult; }

@@ -9,4 +9,6 @@
 - 实现与使用文档：[web-agent/](web-agent/)
 - 文件、Office 与学习工作流：[办公与学习工作台](web-agent/docs/WORKBENCH.md)
 - 架构设计：[docs/ARCHITECTURE.md](web-agent/docs/ARCHITECTURE.md)
+- AI 劳动组织：[AI-ORGANIZATION.md](web-agent/docs/AI-ORGANIZATION.md)
+- AI 社会运行层与完整验收：[AI-SOCIETY.md](web-agent/docs/AI-SOCIETY.md) · [验收证据](web-agent/docs/AI-SOCIETY-ACCEPTANCE.md)
 - 学术智能体（ARS 技能包融合，上游零修改）：[docs/ARS-学术智能体融合.md](web-agent/docs/ARS-学术智能体融合.md)

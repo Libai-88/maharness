@@ -27,17 +27,28 @@ import type {
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
  *  - DeepSeek：prompt_cache_hit_tokens + prompt_cache_miss_tokens（和 = prompt_tokens）
  *  - OpenAI / 智谱：prompt_tokens_details.cached_tokens（命中）；miss = prompt - cached
- *  - Anthropic：cache_read_input_tokens（命中读取）；miss ≈ input_tokens - cache_read
+ *  - Anthropic：input_tokens 不含缓存读写；cache_read + cache_creation 分别映射为命中与写入
  *  不识别任何字段（provider 不支持缓存）时返回 undefined，调用方按「无反馈」处理。 */
 export function normalizeUsage(raw: Record<string, unknown>): {
-  input: number; output: number; cachedInput?: number; missInput?: number; incomplete?: boolean;
+  input: number; output: number; cachedInput?: number; missInput?: number; cacheWrite?: number; incomplete?: boolean;
 } {
-  const input = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0;
+  let input = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0;
   const output = Number(raw.completion_tokens ?? raw.output_tokens ?? 0) || 0;
   const details = raw.prompt_tokens_details as Record<string, unknown> | undefined;
   let cachedInput: number | undefined;
   let missInput: number | undefined;
-  if (typeof raw.prompt_cache_hit_tokens === 'number') {
+  let cacheWrite: number | undefined;
+  const anthropicCache = raw.prompt_tokens === undefined
+    && (typeof raw.cache_read_input_tokens === 'number' || typeof raw.cache_creation_input_tokens === 'number');
+  if (anthropicCache) {
+    // Anthropic 的 input_tokens 只含普通未缓存输入。总输入必须加上缓存读写，
+    // 但费用按这个总数只计算一次；cacheWrite 仅用于诊断，不能再次计费。
+    const uncached = input;
+    cachedInput = typeof raw.cache_read_input_tokens === 'number' ? raw.cache_read_input_tokens : undefined;
+    cacheWrite = typeof raw.cache_creation_input_tokens === 'number' ? raw.cache_creation_input_tokens : undefined;
+    input = uncached + (cachedInput ?? 0) + (cacheWrite ?? 0);
+    missInput = uncached + (cacheWrite ?? 0);
+  } else if (typeof raw.prompt_cache_hit_tokens === 'number') {
     // DeepSeek 风格：命中 + 未命中 = 全部输入
     cachedInput = raw.prompt_cache_hit_tokens;
     missInput = typeof raw.prompt_cache_miss_tokens === 'number'
@@ -47,12 +58,11 @@ export function normalizeUsage(raw: Record<string, unknown>): {
     // OpenAI / 智谱 风格：cached_tokens 单独报告，未命中 = 总输入 - 命中
     cachedInput = details.cached_tokens;
     missInput = Math.max(0, input - cachedInput);
-  } else if (typeof raw.cache_read_input_tokens === 'number') {
-    // Anthropic 风格：cache_read 为命中读取，其余 input 为未命中
-    cachedInput = raw.cache_read_input_tokens;
-    missInput = Math.max(0, input - cachedInput);
   }
-  return { input, output, cachedInput, missInput, ...(!Number.isFinite(raw.prompt_tokens ?? raw.input_tokens) || !Number.isFinite(raw.completion_tokens ?? raw.output_tokens) ? { incomplete: true } : {}) };
+  return {
+    input, output, cachedInput, missInput, cacheWrite,
+    ...(!Number.isFinite(raw.prompt_tokens ?? raw.input_tokens) || !Number.isFinite(raw.completion_tokens ?? raw.output_tokens) ? { incomplete: true } : {}),
+  };
 }
 
 export interface ProviderConfig {
@@ -326,6 +336,7 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
                   output: u.output,
                   cachedInput: u.cachedInput,
                   missInput: u.missInput,
+                  cacheWrite: u.cacheWrite,
                   ...(u.incomplete ? { incomplete: true } : {}),
                 };
               }

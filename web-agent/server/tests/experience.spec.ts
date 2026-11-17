@@ -7,6 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../db';
 import { buildCachedFactLedger, buildEvidenceIndex, buildFactLedger, ExperienceError, ExperienceService } from '../experience';
+import { OrganizationService } from '../organization';
 import { setMaintenanceModelScope, type ModelCallRecord } from '../../kernel/model-call';
 import type { RunRecord } from '../../kernel/run';
 import type { ProviderDef } from '../../kernel/types';
@@ -49,9 +50,9 @@ function addRun(store: Store, input: {
   return store.runs.get(id, tenantId)!;
 }
 
-function finalOutput(refs: string[], score = 5): string {
+function finalOutput(refs: string[], score = 5, dimensions: string[] = DIMENSIONS): string {
   return JSON.stringify({
-    scores: DIMENSIONS.map(id => ({ id, score, reason: '事实与证据支持该判断。', evidenceRefs: refs.slice(0, 1) })),
+    scores: dimensions.map(id => ({ id, score, reason: '事实与证据支持该判断。', evidenceRefs: refs.slice(0, 1) })),
     observations: [{ kind: 'positive', summary: '任务结果可直接检查。', evidenceRefs: refs.slice(0, 1) }],
     suggestions: [{
       title: '保留当前结果反馈', detail: '继续在结果旁展示可核对来源。', category: 'result-feedback',
@@ -68,14 +69,17 @@ function reviewProvider(options: {
   hold?: boolean;
   score?: number;
   seen?: string[][];
+  maxTokens?: number[];
   usage?: { input: number; output: number };
   duplicatePlanRefs?: boolean;
+  modelMaxOutput?: number;
+  planGap?: boolean;
 } = {}): ProviderDef & { calls: () => number } {
   let calls = 0;
   return {
     id: 'fixture', label: 'Fixture', defaultModel: 'fixture-model', priceSource: 'configured',
     models: [{
-      modelId: 'fixture-model', contextWindow: 32_000, maxOutput: 4_096,
+      modelId: 'fixture-model', contextWindow: 32_000, maxOutput: options.modelMaxOutput ?? 4_096,
       vision: false, tools: false, reasoning: false, priceIn: 1, priceOut: 2,
       enabled: true, source: 'manual',
     }],
@@ -83,6 +87,7 @@ function reviewProvider(options: {
     async *chat(messages, chatOptions) {
       calls++;
       options.seen?.push(messages.map(message => message.content ?? ''));
+      options.maxTokens?.push(chatOptions.maxTokens ?? -1);
       if (options.hold) {
         await new Promise<void>(resolve => {
           if (chatOptions.signal?.aborted) resolve();
@@ -93,19 +98,27 @@ function reviewProvider(options: {
         mode?: string;
         evidence?: Array<{ ref: string }>;
         evidenceIndex?: Array<{ id: string }>;
+        rubric?: string[];
       };
       if (payload.mode === 'evidence_plan') {
         const refs = (payload.evidenceIndex ?? []).slice(0, 6).map(item => item.id);
         yield { type: 'delta', text: JSON.stringify({
-          evidenceRefs: options.duplicatePlanRefs && refs[0] ? [refs[0], refs[0], ...refs.slice(1)] : refs,
-          evidenceGaps: [],
-          hypotheses: ['检查产物和验收事实'],
+          evidenceRefs: options.planGap ? [] : options.duplicatePlanRefs && refs[0] ? [refs[0], refs[0], ...refs.slice(1)] : refs,
+          evidenceGaps: options.planGap ? ['缺少可核验的验收证据'] : [],
+          hypotheses: options.planGap ? [] : ['检查产物和验收事实'],
         }) };
       } else if (options.malformed) {
         yield { type: 'delta', text: 'not json' };
       } else {
         const refs = (payload.evidence ?? []).map(item => item.ref);
-        yield { type: 'delta', text: finalOutput(refs.length ? refs : (payload.evidenceIndex ?? []).map(item => item.id), options.score ?? 5) };
+        yield {
+          type: 'delta',
+          text: finalOutput(
+            refs.length ? refs : (payload.evidenceIndex ?? []).map(item => item.id),
+            options.score ?? 5,
+            payload.rubric,
+          ),
+        };
       }
       yield { type: 'usage', input: options.usage?.input ?? 100, output: options.usage?.output ?? 50 };
       yield { type: 'done' };
@@ -123,7 +136,7 @@ function services(store: Store, provider: ProviderDef) {
 }
 
 describe('AI 用户复盘', () => {
-  test('schema 9 升级到 10 并建立体验表', () => {
+  test('schema 9 升级到 14 并建立体验、组织、版本与社会表', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-experience-migration-'));
     const file = join(root, 'review.db');
     try {
@@ -140,10 +153,187 @@ describe('AI 用户复盘', () => {
       raw.close();
       const migrated = new Store(file);
       try {
-        assert.equal(migrated.schemaVersion, 10);
+        assert.equal(migrated.schemaVersion, 14);
         assert.deepEqual(migrated.experience.listReviews('default'), []);
       } finally { migrated.close(); }
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+
+  test('review freezes the active evaluation version and uses its token budgets', async () => {
+    const store = new Store(':memory:');
+    const provider = reviewProvider({ hold: true });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      const run = addRun(store);
+      const estimate = experience.estimate({ runIds: [run.id] }, 'default');
+      assert.equal(estimate.evaluationVersion, initial.version);
+      assert.equal(estimate.evaluationHash, initial.hash);
+
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      assert.equal(review.evaluationVersion, initial.version);
+      assert.equal(review.evaluationHash, initial.hash);
+      assert.equal(review.evaluationPolicy?.review.fast.total, 3_800);
+
+      const updated = organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          fast: { input: 2_500, output: 700, total: 3_200 },
+        },
+      }, '收紧快速复盘预算');
+      assert.equal(updated.version, initial.version + 1);
+      assert.equal(store.experience.review(review.id, 'default')?.evaluationHash, initial.hash);
+      assert.equal(experience.estimate({ runIds: [run.id] }, 'default').totalTokenLimit, 3_200);
+
+      experience.cancel(review.id, 'default');
+      await experience.settled(review.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('review freezes the actual rubric dimensions and prompt content', async () => {
+    const store = new Store(':memory:');
+    const seen: string[][] = [];
+    const provider = reviewProvider({ seen });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          rubricVersion: 'custom-review-v2',
+          dimensions: ['speed', 'trust'],
+          systemPrompt: 'CUSTOM RUBRIC PROMPT',
+        },
+      }, '替换复盘 Rubric');
+      const run = addRun(store, {
+        verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
+      });
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+
+      const finished = experience.review(review.id, 'default');
+      assert.equal(finished.status, 'completed');
+      assert.equal(finished.rubricVersion, 'custom-review-v2');
+      assert.match(finished.rubricHash ?? '', /^[0-9a-f]{64}$/);
+      assert.deepEqual(finished.dimensions.map(item => item.id), ['speed', 'trust']);
+      assert.match(seen[0]?.[0] ?? '', /CUSTOM RUBRIC PROMPT/);
+      const input = JSON.parse(seen[0]?.at(-1) ?? '{}') as { rubric?: string[] };
+      assert.deepEqual(input.rubric, ['speed', 'trust']);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('fast review sends the frozen custom output cap', async () => {
+    const store = new Store(':memory:');
+    const maxTokens: number[] = [];
+    const provider = reviewProvider({ maxTokens });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          fast: { input: 3_000, output: 500, total: 3_500 },
+        },
+      }, '设置快速复盘输出预算');
+      const run = addRun(store, {
+        verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
+      });
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+
+      const finished = experience.review(review.id, 'default');
+      assert.equal(finished.status, 'completed');
+      assert.equal(finished.budget.outputTokenLimit, 500);
+      assert.deepEqual(maxTokens, [500]);
+    } finally { store.close(); }
+  });
+
+  test('focused review uses the remaining frozen output on plan and final calls', async () => {
+    const store = new Store(':memory:');
+    const maxTokens: number[] = [];
+    const provider = reviewProvider({ maxTokens });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          focused: { input: 8_000, output: 1_400, total: 9_400 },
+        },
+      }, '设置聚焦复盘输出预算');
+      const run = addRun(store, {
+        verification: { status: 'failed', objective: '失败', checks: [{ ok: false, reason: '未产出' }], evidence: [] },
+      });
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+
+      const finished = experience.review(review.id, 'default');
+      assert.equal(finished.status, 'completed');
+      assert.equal(finished.budget.outputTokenLimit, 1_400);
+      assert.deepEqual(maxTokens, [1_400, 1_350]);
+    } finally { store.close(); }
+  });
+
+  test('provider output ceiling lowers but never inflates the frozen review cap', async () => {
+    const store = new Store(':memory:');
+    const maxTokens: number[] = [];
+    const provider = reviewProvider({ maxTokens, modelMaxOutput: 400 });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          fast: { input: 3_000, output: 500, total: 3_500 },
+        },
+      }, '设置快速复盘输出预算');
+      const run = addRun(store, {
+        verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
+      });
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+
+      assert.equal(experience.review(review.id, 'default').status, 'completed');
+      assert.deepEqual(maxTokens, [400]);
+    } finally { store.close(); }
+  });
+
+  test('deepen adds the frozen custom focused budgets', async () => {
+    const store = new Store(':memory:');
+    const provider = reviewProvider({ planGap: true });
+    const { experience } = services(store, provider);
+    try {
+      const organization = new OrganizationService({ store });
+      const initial = organization.ensureEvaluation('default');
+      organization.updateEvaluation('default', {
+        review: {
+          ...initial.record.review,
+          focused: { input: 7_000, output: 900, total: 7_900 },
+        },
+      }, '设置聚焦复盘预算');
+      const run = addRun(store, {
+        verification: { status: 'failed', objective: '失败', checks: [{ ok: false, reason: '未产出' }], evidence: [] },
+      });
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+      assert.equal(experience.review(review.id, 'default').status, 'insufficient_evidence');
+
+      const deepened = experience.deepen(review.id, 'default');
+      assert.equal(deepened.budget.inputTokenLimit, 14_000);
+      assert.equal(deepened.budget.outputTokenLimit, 1_800);
+      assert.equal(deepened.budget.totalTokenLimit, 15_800);
+      experience.cancel(review.id, 'default');
+      await experience.settled(review.id);
+    } finally { store.close(); }
   });
 
   test('事实账本压缩长结果、聚合同类异常并拦截虚假成功与未知副作用', () => {
@@ -223,6 +413,72 @@ describe('AI 用户复盘', () => {
       assert.equal(cache.size, 4);
       assert.equal(changed.generatedAt, 300);
       assert.equal(changed.totals.recoveries, 1);
+
+      const providerChanged = buildCachedFactLedger(store, 'default', [{ ...run, providerId: 'other-provider' }], 325, cache);
+      const ruleChanged = buildCachedFactLedger(store, 'default', [{
+        ...run,
+        ruleResolution: { schemaVersion: 1, applied: [], ignored: [], conflicts: [] },
+      }], 350, cache);
+      const materialChanged = buildCachedFactLedger(store, 'default', [{
+        ...run,
+        materials: [{
+          id: 'material-a', version: 'v2', tenantId: 'default', workspace: run.authorization.workspace,
+          path: 'material-a.txt', name: 'material-a.txt', format: 'txt', size: 1, createdAt: 1,
+        }],
+      }], 375, cache);
+      assert.equal(providerChanged.generatedAt, 325);
+      assert.equal(ruleChanged.generatedAt, 350);
+      assert.equal(materialChanged.generatedAt, 375);
+      assert.equal(cache.size, 7);
+    } finally { store.close(); }
+  });
+
+  test('事实账本保留团队契约、回退原因、证据引用和缓存前缀', () => {
+    const store = new Store(':memory:');
+    try {
+      const root = addRun(store, { objective: '请组织团队并行分析两份资料' });
+      store.runs.update(root, { budgetUsd: 0.1, budgetPolicy: 'enforce' });
+      const organization = new OrganizationService({ store });
+      organization.createForRun(root);
+      const team = organization.createTeam(root, {
+        teamEstimateUsd: 0.08,
+        assignments: [
+          {
+            objective: '分析资料 A', expectedArtifacts: ['analysis-a.md'], acceptance: ['结论可核验'],
+            evidenceInputs: [{ id: 'material:a:v1', kind: 'material', ref: 'a', version: 'v1' }], budgetUsd: 0.04,
+          },
+          {
+            objective: '分析资料 B', expectedArtifacts: ['analysis-b.md'], acceptance: ['结论可核验'],
+            evidenceInputs: [{ id: 'material:b:v1', kind: 'material', ref: 'b', version: 'v1' }], budgetUsd: 0.04,
+          },
+        ],
+      });
+      const contract = team.contracts[0]!;
+      const now = Date.now();
+      const child: RunRecord = {
+        ...root, id: randomUUID(), parentId: root.id, rootId: root.id, depth: 1,
+        objective: contract.branchObjective, status: 'queued', cost: 0, tokensIn: 0, tokensOut: 0,
+        createdAt: now, updatedAt: now, assignmentContractId: contract.id,
+        teamCycleId: team.teamCycle.id, organizationRoleId: contract.roleId,
+        cachePrefixHash: '0123456789abcdef0123456789abcdef',
+      };
+      store.runs.create(child);
+      organization.prepareDelegation(root, child, {
+        objective: child.objective, assignmentContractId: contract.id,
+      });
+      store.runs.update(child, { status: 'completed', answer: '分支完成' });
+      store.runs.update(root, { fallbackReason: 'ROLLBACK_TO_SOLO' });
+
+      const facts = buildFactLedger(store, 'default', [root, store.runs.get(child.id, 'default')!]);
+      const childFacts = facts.runs.find(item => item.id === child.id)?.team;
+      const rootFacts = facts.runs.find(item => item.id === root.id)?.team;
+      assert.equal(childFacts?.contractId, contract.id);
+      assert.equal(childFacts?.teamCycleId, team.teamCycle.id);
+      assert.deepEqual(childFacts?.expectedArtifacts, ['analysis-a.md']);
+      assert.deepEqual(childFacts?.evidenceRefs, ['material:a:v1']);
+      assert.equal(childFacts?.cachePrefixHash, '0123456789abcdef01234567');
+      assert.equal(rootFacts?.fallbackReason, 'ROLLBACK_TO_SOLO');
+      assert.ok(estimateTokens(JSON.stringify(facts)) <= 1_200);
     } finally { store.close(); }
   });
 

@@ -31,6 +31,29 @@ export function countMessageTokens(messages: PrefixMessage[], tokenizer?: Tokeni
   }, 0);
 }
 
+/**
+ * Deterministic ceiling for the complete request payload. A BPE token consumes
+ * at least one UTF-8 byte, so byte length plus explicit protocol framing is a
+ * conservative bound when an adapter cannot certify a native count.
+ */
+export function deterministicInputTokenUpperBound(
+  messages: readonly unknown[],
+  tools: readonly unknown[] = [],
+  responseFormat?: unknown,
+): number {
+  const serializedBytes = (values: readonly unknown[]): number => values.reduce<number>((sum, value) => {
+    try {
+      return sum + Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+    } catch {
+      return sum + Number.MAX_SAFE_INTEGER;
+    }
+  }, 0);
+  const bytes = serializedBytes([...messages, ...tools, ...(responseFormat === undefined ? [] : [responseFormat])]);
+  const framing = messages.length * 64 + tools.length * 64 + (responseFormat === undefined ? 0 : 64);
+  const bound = bytes + framing;
+  return Number.isSafeInteger(bound) && bound >= 0 ? bound : Number.MAX_SAFE_INTEGER;
+}
+
 export interface TokenBudgetAllocation {
   total: number;
   system: number;

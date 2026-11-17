@@ -92,4 +92,17 @@ describe('到点续跑调度器', () => {
     assert.equal(scheduler.cancel(job.id), true); await scheduler.tick();
     assert.equal(scheduler.list()[0]?.state, 'failed'); store.close();
   });
+
+  test('系统调度周期会推进无主 Agent 的社会任务', async () => {
+    const { store, file } = setup();
+    let ticks = 0;
+    const scheduler = new Scheduler(store, { file, now: () => 1_000 });
+    scheduler.attachSociety({ tickAll: () => {
+      ticks++;
+      return { tenants: 0, decisions: [], queued: 0, waitingApproval: 0, failed: [] };
+    } });
+    await scheduler.tick();
+    assert.equal(ticks, 1);
+    store.close();
+  });
 });

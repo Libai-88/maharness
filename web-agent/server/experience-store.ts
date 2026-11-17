@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+export { REVIEW_RUBRIC_VERSION } from './review-rubric';
 
 export const EXPERIENCE_SCHEMA = `
   CREATE TABLE IF NOT EXISTS experience_reviews_v1 (
@@ -53,8 +54,6 @@ export const EXPERIENCE_SCHEMA = `
     ON experience_regressions_v1(tenant_id, finding_id, created_at DESC);
 `;
 
-export const REVIEW_RUBRIC_VERSION = 'ai-user-review-v1';
-
 export type ReviewStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled' | 'insufficient_evidence';
 export type ReviewPath = 'fast' | 'focused';
 export type ReviewVerdict = 'positive' | 'neutral' | 'negative' | 'insufficient_evidence';
@@ -91,6 +90,18 @@ export interface FactRun {
   invalidArtifacts: number;
   capabilities: string[];
   conflicts: number;
+  team?: {
+    workOrderId: string;
+    teamCycleId?: string;
+    roleId?: string;
+    contractId?: string;
+    contractStatus?: string;
+    expectedArtifacts: string[];
+    unfinished: string[];
+    evidenceRefs: string[];
+    cachePrefixHash?: string;
+    fallbackReason?: string;
+  };
 }
 
 export interface FactLedger {
@@ -172,7 +183,7 @@ export interface ReviewSuggestion {
   id: string;
   title: string;
   detail: string;
-  category: 'capability' | 'tool-contract' | 'result-feedback' | 'state' | 'recovery' | 'context' | 'authorization' | 'performance' | 'artifact';
+  category: 'capability' | 'tool-contract' | 'result-feedback' | 'state' | 'recovery' | 'context' | 'authorization' | 'performance' | 'artifact' | 'organization';
   impact: 'high' | 'medium' | 'low';
   confidence: number;
   evidenceRefs: string[];
@@ -204,6 +215,10 @@ export interface AIUserReview {
   originalModel: string;
   crossModel: boolean;
   rubricVersion: string;
+  rubricHash?: string;
+  evaluationVersion?: number;
+  evaluationHash?: string;
+  evaluationPolicy?: import('./organization-store').EvaluationPolicy;
   verdict: ReviewVerdict;
   dimensions: ReviewDimensionScore[];
   observations: ReviewObservation[];
@@ -282,6 +297,8 @@ export interface AIUserReviewEstimate {
   requiresExplicitModel: boolean;
   scope: 'run' | 'multi_run';
   path: ReviewPath;
+  evaluationVersion: number;
+  evaluationHash: string;
   inputTokenLimit: number;
   outputTokenLimit: number;
   totalTokenLimit: number;

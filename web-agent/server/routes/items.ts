@@ -80,7 +80,7 @@ export function registerItemRoutes(app: Express, deps: RouteDeps, runs: RunServi
     const message=`${item.title}\n\n${item.note}\n\n事项版本：${item.revision}。按本次请求交付结果，完成后由用户检查。安排：${item.due||'未排期'} ${item.dueTime||''} ${item.timeZone}。此安排不构成运行强制截止时间。`;
     const intentRevision = items.executionIntent(tenant,id,key,item.revision)!;
     if (intentRevision !== item.revision) throw new ItemError(409,'VERSION_CONFLICT','请为更新后的事项重新发起执行');
-    const run=runs.create(session,{message,materials:item.materials,provider:provider.id,model:session.model||provider.defaultModel,requestKey:`item:${id}:${key}`,principalRole:(req as any).apiRole});
+    const run=runs.create(session,{message,materials:item.materials,provider:provider.id,model:session.model||provider.defaultModel,requestKey:`item:${id}:${key}`,principalRole:(req as any).apiRole,projectId:item.pid||undefined});
     items.attach(tenant,id,run.id,item.revision);
     watchReview(tenant,id,run.id,item.revision);
     res.status(202).json({run,sessionId:session.id});

@@ -15,3 +15,5 @@ plugins/*@*/
 
 # eval 运行报告（每次运行生成；基线在 evals/baseline.json）
 evals/reports/
+# 真实轨迹回放副本包含 SQLite、迁移备份与本地路径，只保留摘要证据
+evals/replays/

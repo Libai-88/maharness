@@ -61,6 +61,26 @@ function enableForMock(provider: ProviderDef, nextNames: () => string[]) {
   return state;
 }
 
+function teamAssignments(prefix: string, count: number, budgetUsd = 0.02) {
+  return Array.from({ length: count }, (_, index) => ({
+    objective: `${prefix}-${index + 1}`,
+    expectedArtifacts: [`${prefix}-${index + 1}.md`],
+    acceptance: [`${prefix}-${index + 1} 可检查`],
+    budgetUsd,
+    allowedTools: ['read_file'],
+  }));
+}
+
+function activeTeamContractIds(providerId: string, count: number): string[] {
+  const root = started!.store.runs.active('default')
+    .find(run => !run.parentId && run.providerId === providerId);
+  assert.ok(root?.teamCycleId);
+  const cycle = started!.store.organization.getTeamCycle(root.teamCycleId!, 'default');
+  const ids = cycle?.assignmentIds.slice(0, count) ?? [];
+  assert.equal(ids.length, count);
+  return ids;
+}
+
 before(async () => {
   started = await startServer();
   started.store.upsertProvider({
@@ -558,25 +578,35 @@ describe('GET /api/providers/:id/diagnose', () => {
     let peakActive = 0;
     chat.providers = [{
       id: 'parallel-load-provider', label: 'Parallel Load Provider', defaultModel: 'parallel-load-model',
+      prices: { in: 1, out: 2 }, priceSource: 'configured', outputLimitGuaranteed: true,
       models: [{ modelId: 'parallel-load-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
       async *chat() {
         const call = ++calls;
         if (call === 1) {
           yield { type: 'tool_call', toolCall: {
-            id: 'parallel-load-call', type: 'function',
+            id: 'parallel-team-create', type: 'function',
             function: {
-              name: 'run_parallel',
-              arguments: JSON.stringify({ tasks: [
-                { objective: 'parallel-load-child-A-20261031' },
-                { objective: 'parallel-load-child-B-20261031' },
-                { objective: 'parallel-load-child-C-20261031' },
-                { objective: 'parallel-load-child-D-20261031' },
-              ] }),
+              name: 'team_create',
+              arguments: JSON.stringify({ assignments: teamAssignments('parallel-load-child', 4, 0.2) }),
             },
           } };
           return;
         }
-        if (call <= 5) {
+        if (call === 2) {
+          const teamContracts = activeTeamContractIds('parallel-load-provider', 4);
+          yield { type: 'tool_call', toolCall: {
+            id: 'parallel-load-call', type: 'function',
+            function: {
+              name: 'run_parallel',
+              arguments: JSON.stringify({ tasks: teamContracts.map((contractId, index) => ({
+                contractId,
+                objective: `parallel-load-child-${index + 1}`,
+              })) }),
+            },
+          } };
+          return;
+        }
+        if (call <= 6) {
           active++;
           peakActive = Math.max(peakActive, active);
           await new Promise((resolve) => setTimeout(resolve, 35));
@@ -591,7 +621,10 @@ describe('GET /api/providers/:id/diagnose', () => {
         yield { type: 'done' };
       },
     }];
-    const enabled = enableForMock(chat.providers[0], () => calls === 0 ? ['run_parallel'] : []);
+    const enabled = enableForMock(
+      chat.providers[0],
+      () => calls === 0 ? ['team_create'] : calls === 1 ? ['run_parallel'] : [],
+    );
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     const parallelEvents: { phase?: string; detail?: { cost?: number; tokensIn?: number; tokensOut?: number } }[] = [];
@@ -600,14 +633,18 @@ describe('GET /api/providers/:id/diagnose', () => {
     const session = started.store.createSession('parallel-load-model', 'parallel-load-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '执行四项独立的并行负载回归并汇总结果' }),
+      body: JSON.stringify({
+        message: '组织团队并行执行四项独立负载回归并汇总结果',
+        budgetUsd: 0.8,
+        budgetPolicy: 'enforce',
+      }),
     });
     assert.equal(response.status, 200);
     const sse = await response.text();
     offProgress();
     assert.match(sse, /event: tool_result\ndata: .*"name":"run_parallel"/);
     assert.match(sse, /event: done\ndata:/);
-    assert.equal(calls, 6, '应包含主线路首轮、四个并行子任务和最终汇总轮');
+    assert.equal(calls, 7, '应包含团队建约、并行委派、四个并行子任务和最终汇总轮');
     assert.equal(active, 0, 'Provider 负载结束后无活动请求');
     assert.equal(peakActive, 4, '四个并行子任务应同时运行但不超过批次上限');
     const parentRun = started.store.runs.list('default', session.id).find(run => !run.parentId)!;
@@ -625,9 +662,10 @@ describe('GET /api/providers/:id/diagnose', () => {
     const traceResponse = await fetch(`${base}/api/trace?session_id=${encodeURIComponent(session.id)}&type=llm_call&limit=50`);
     assert.equal(traceResponse.status, 200);
     const trace = await traceResponse.json() as { steps: Array<{ traceId: string; status: string; parentId?: string; name?: string }> };
-    assert.equal(trace.steps.length, 6 + enabled.calls);
+    assert.equal(trace.steps.length, 7 + enabled.calls);
     assert.ok(trace.steps.every((step) => step.status === 'done'));
-    assert.equal(trace.steps.filter((step) => step.traceId === traceId).length, 2 + enabled.calls, '主 run 应有工具启用、首轮和汇总轮');
+    assert.equal(trace.steps.filter((step) => step.traceId === traceId).length, 3 + enabled.calls,
+      '主 run 应包含工具启用、团队建约、并行委派和汇总轮');
     assert.equal(trace.steps.filter((step) => step.traceId !== traceId && step.parentId).length, 4, '四个子 run 的 Provider 步骤均应挂到并行工具父步骤');
     const toolResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=tool_call&name=run_parallel`);
     const toolTrace = await toolResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
@@ -893,27 +931,61 @@ describe('GET /api/providers/:id/diagnose', () => {
     let calls = 0;
     chat.providers = [{
       id: 'trace-link-provider', label: 'Trace Link Provider', defaultModel: 'trace-link-model',
+      prices: { in: 1, out: 2 }, priceSource: 'configured', outputLimitGuaranteed: true,
+      models: [{ modelId: 'trace-link-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
       async *chat() {
         calls++;
         if (calls === 1) {
           yield { type: 'tool_call', toolCall: {
-            id: 'delegate-trace-child', type: 'function',
-            function: { name: 'run_subagent', arguments: JSON.stringify({ objective: '读取 trace 因果链测试文件', tools: 'read' }) },
+            id: 'enable-trace-team', type: 'function',
+            function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
           } };
           return;
         }
         if (calls === 2) {
+          yield { type: 'tool_call', toolCall: {
+            id: 'trace-team-create', type: 'function',
+            function: {
+              name: 'team_create',
+              arguments: JSON.stringify({ assignments: teamAssignments('trace-link-child', 2, 0.2) }),
+            },
+          } };
+          return;
+        }
+        if (calls === 3) {
+          yield { type: 'tool_call', toolCall: {
+            id: 'enable-trace-subagent', type: 'function',
+            function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['run_subagent'] }) },
+          } };
+          return;
+        }
+        if (calls === 4) {
+          const [contractId] = activeTeamContractIds('trace-link-provider', 1);
+          assert.ok(contractId);
+          yield { type: 'tool_call', toolCall: {
+            id: 'delegate-trace-child', type: 'function',
+            function: {
+              name: 'run_subagent',
+              arguments: JSON.stringify({
+                objective: '读取 trace 因果链测试文件',
+                tools: 'read',
+                contractId,
+              }),
+            },
+          } };
+          return;
+        }
+        if (calls === 5) {
           yield { type: 'tool_call', toolCall: {
             id: 'read-trace-child-fixture', type: 'function',
             function: { name: 'read_file', arguments: JSON.stringify({ path: 'subagent-trace-fixture.txt' }) },
           } };
           return;
         }
-        yield { type: 'delta', text: calls === 3 ? '子代理读取完成' : '主任务完成' };
+        yield { type: 'delta', text: calls === 6 ? '子代理读取完成' : '主任务完成' };
         yield { type: 'done' };
       },
     }];
-    enableForMock(chat.providers[0], () => calls === 0 ? ['run_subagent'] : calls === 1 ? ['read_file'] : []);
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
@@ -922,13 +994,17 @@ describe('GET /api/providers/:id/diagnose', () => {
     const session = started.store.createSession('trace-link-model', 'trace-link-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
       method: 'POST', headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: '通过子代理读取测试文件' }),
+      body: JSON.stringify({
+        message: '组织团队并行，通过子代理读取测试文件',
+        budgetUsd: 0.8,
+        budgetPolicy: 'enforce',
+      }),
     });
     assert.equal(response.status, 200);
     const sse = await response.text();
-    assert.match(sse, /event: tool_result\ndata: .*"name":"run_subagent"/);
+    assert.match(sse, /event: tool_result\ndata: .*"name":"run_subagent"/, sse);
     assert.match(sse, /event: done\ndata:/);
-    assert.equal(calls, 4, '主代理委派、子代理工具调用与两个 run 的最终答复均已执行');
+    assert.equal(calls, 7, '工具启用、团队建约、主代理委派、子代理读取与两个 run 的最终答复均已执行');
 
     const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);

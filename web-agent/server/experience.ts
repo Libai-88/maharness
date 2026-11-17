@@ -5,8 +5,14 @@ import type { LLMMessage, ProviderDef } from '../kernel/types';
 import { RUN_TERMINAL, type RunRecord } from '../kernel/run';
 import { countMessageTokens, estimateTokens } from '../kernel/tokens';
 import type { Store } from './db';
+import { OrganizationService } from './organization';
+import type { EvaluationVersion } from './organization-store';
 import {
+  REVIEW_DIMENSIONS,
   REVIEW_RUBRIC_VERSION,
+  REVIEW_SYSTEM_PROMPT,
+} from './review-rubric';
+import {
   type AIUserReview,
   type AIUserReviewEstimate,
   type AIUserReviewRequest,
@@ -41,22 +47,9 @@ const MULTI_TOTAL_LIMIT = 11_500;
 const FACT_LEDGER_TOKEN_LIMIT = 1_200;
 const EVIDENCE_SLICE_TOKEN_LIMIT = 600;
 
-const DIMENSIONS = [
-  'capability_discovery',
-  'tool_contract_clarity',
-  'result_actionability',
-  'state_credibility',
-  'error_recovery',
-  'execution_efficiency',
-  'context_continuity',
-  'authorization_control',
-  'result_usability',
-  'reuse_intention',
-] as const;
-
 const SUGGESTION_CATEGORIES = new Set<ReviewSuggestion['category']>([
   'capability', 'tool-contract', 'result-feedback', 'state', 'recovery',
-  'context', 'authorization', 'performance', 'artifact',
+  'context', 'authorization', 'performance', 'artifact', 'organization',
 ]);
 
 const FINDING_TRANSITIONS: Record<FindingStatus, readonly FindingStatus[]> = {
@@ -69,17 +62,6 @@ const FINDING_TRANSITIONS: Record<FindingStatus, readonly FindingStatus[]> = {
   wont_fix: ['reopened'],
   reopened: ['triaged', 'fixing', 'wont_fix'],
 };
-
-const REVIEW_SYSTEM_PROMPT = [
-  '你是刚刚完成任务的同一个模型，现在以“AI 用户”身份对自己的可审计工作历程做一次售后复盘。',
-  '评价对象是 maharness 的能力发现、工具契约、状态反馈、错误恢复、效率、上下文、授权和结果可用性。',
-  '只根据提供的事实账本和证据判断，不读取或猜测私有推理链。事实轨道高于你的主观评分。',
-  'P0/P1、虚假成功、未知或未授权副作用不能被好评抵消。无证据时写入 evidenceGaps。',
-  '每个正面观察、摩擦和建议必须引用至少一个有效 evidenceRef。不要编造文件、调用、页面或用户行为。',
-  '控制输出长度：只输出一个 JSON 对象；维度理由不超过 24 个汉字，观察最多 4 条，建议最多 3 条，建议正文不超过 60 个汉字。',
-  '不要复述事实账本，不要解释 JSON 格式，不要在 JSON 前后添加文字。',
-  '输出严格 JSON，不要 Markdown。',
-].join('\n');
 
 export class ExperienceError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) {
@@ -105,6 +87,7 @@ interface ResolvedSelection {
   runs: RunRecord[];
   facts: FactLedger;
   path: ReviewPath;
+  evaluation: EvaluationVersion;
   budget: Pick<ReviewBudget, 'inputTokenLimit' | 'outputTokenLimit' | 'totalTokenLimit'>;
 }
 
@@ -140,7 +123,26 @@ function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
-const REVIEW_RUBRIC_HASH = stableHash({ version: REVIEW_RUBRIC_VERSION, dimensions: DIMENSIONS });
+interface ReviewRubric {
+  version: string;
+  dimensions: string[];
+  systemPrompt: string;
+  hash: string;
+}
+
+function rubricFromPolicy(policy?: EvaluationVersion['record']): ReviewRubric {
+  const version = policy?.review.rubricVersion ?? REVIEW_RUBRIC_VERSION;
+  const dimensions = policy?.review.dimensions?.length
+    ? [...policy.review.dimensions]
+    : [...REVIEW_DIMENSIONS];
+  const systemPrompt = policy?.review.systemPrompt ?? REVIEW_SYSTEM_PROMPT;
+  return {
+    version,
+    dimensions,
+    systemPrompt,
+    hash: stableHash({ version, dimensions, systemPrompt }),
+  };
+}
 
 function severityRank(value: FindingSeverity): number {
   return ({ P0: 0, P1: 1, P2: 2, P3: 3 } as const)[value];
@@ -246,13 +248,21 @@ function loadFactSources(store: Store, runs: RunRecord[]) {
 }
 
 export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[], now = Date.now()): FactLedger {
-  return buildFactLedgerFromSources(tenantId, loadFactSources(store, runs), now);
+  return buildFactLedgerFromSources(
+    store,
+    tenantId,
+    loadFactSources(store, runs),
+    now,
+    REVIEW_RUBRIC_VERSION,
+  );
 }
 
 function buildFactLedgerFromSources(
+  store: Store,
   tenantId: string,
   sources: ReturnType<typeof loadFactSources>,
   now: number,
+  rubricVersion: string,
 ): FactLedger {
   const anomalies = new Map<string, FactAnomaly>();
   const facts: FactRun[] = [];
@@ -347,6 +357,8 @@ function buildFactLedgerFromSources(
       });
     }
     const conflicts = run.capabilityResolution?.conflicts.length ?? 0;
+    const contract = store.organization.contractsForRun(run.id, tenantId)[0];
+    const workOrder = store.organization.workOrderByRun(run.rootId, tenantId);
     const durationMs = Math.max(0, run.updatedAt - run.createdAt);
     toolTotal += calls.length;
     failedTotal += failedTools;
@@ -378,6 +390,19 @@ function buildFactLedgerFromSources(
       invalidArtifacts,
       capabilities: (run.capabilityResolution?.selected ?? []).slice(0, 16),
       conflicts,
+      ...(workOrder ? {
+        team: {
+          workOrderId: workOrder.id,
+          ...(run.teamCycleId ? { teamCycleId: run.teamCycleId } : {}),
+          ...(run.organizationRoleId ? { roleId: run.organizationRoleId } : {}),
+          ...(contract ? { contractId: contract.id, contractStatus: contract.status } : {}),
+          expectedArtifacts: (contract?.expectedArtifacts ?? []).slice(0, 6),
+          unfinished: (contract?.delivery?.unfinished ?? []).slice(0, 6),
+          evidenceRefs: (contract?.delivery?.evidence ?? contract?.evidenceInputs ?? []).map(item => item.id).slice(0, 8),
+          ...(run.cachePrefixHash ? { cachePrefixHash: run.cachePrefixHash.slice(0, 24) } : {}),
+          ...(run.fallbackReason ? { fallbackReason: run.fallbackReason } : {}),
+        },
+      } : {}),
     });
   }
 
@@ -385,7 +410,7 @@ function buildFactLedgerFromSources(
     .sort((a, b) => severityRank(a.severity) - severityRank(b.severity) || a.code.localeCompare(b.code));
   const ledger: FactLedger = {
     schemaVersion: 1,
-    rubricVersion: REVIEW_RUBRIC_VERSION,
+    rubricVersion,
     tenantId,
     providerId: sources[0]?.run.providerId ?? '',
     model: sources[0]?.run.model ?? '',
@@ -426,12 +451,13 @@ export function buildCachedFactLedger(
   runs: RunRecord[],
   now: number,
   cache: Map<string, FactLedger>,
+  rubric = rubricFromPolicy(),
 ): FactLedger {
   const sources = loadFactSources(store, runs);
   const key = stableHash({
     tenantId,
-    rubricVersion: REVIEW_RUBRIC_VERSION,
-    rubricHash: REVIEW_RUBRIC_HASH,
+    rubricVersion: rubric.version,
+    rubricHash: rubric.hash,
     runs: sources.map(source => ({
       id: source.run.id,
       record: source.run,
@@ -439,6 +465,8 @@ export function buildCachedFactLedger(
       tools: source.calls,
       modelCalls: source.modelCalls,
       artifacts: source.artifacts,
+      contracts: store.organization.contractsForRun(source.run.id, tenantId),
+      workOrder: store.organization.workOrderByRun(source.run.rootId, tenantId),
     })),
   });
   const cached = cache.get(key);
@@ -448,7 +476,7 @@ export function buildCachedFactLedger(
     cache.set(key, reused);
     return reused;
   }
-  const ledger = buildFactLedgerFromSources(tenantId, sources, now);
+  const ledger = buildFactLedgerFromSources(store, tenantId, sources, now, rubric.version);
   cache.set(key, ledger);
   if (cache.size > 32) cache.delete(cache.keys().next().value!);
   return ledger;
@@ -626,11 +654,24 @@ function hasFocusedSignal(facts: FactLedger, factsIncomplete: boolean): boolean 
   return factsIncomplete || facts.runIds.length > 1 || facts.anomalies.length > 0 || ledgerGateFailed(facts);
 }
 
-function budgetFor(runs: number, focused: boolean): Pick<ReviewBudget, 'inputTokenLimit' | 'outputTokenLimit' | 'totalTokenLimit'> {
-  if (runs > 1) return { inputTokenLimit: MULTI_INPUT_LIMIT, outputTokenLimit: MULTI_OUTPUT_LIMIT, totalTokenLimit: MULTI_TOTAL_LIMIT };
-  return focused
-    ? { inputTokenLimit: FOCUSED_INPUT_LIMIT, outputTokenLimit: FOCUSED_OUTPUT_LIMIT, totalTokenLimit: FOCUSED_TOTAL_LIMIT }
-    : { inputTokenLimit: FAST_INPUT_LIMIT, outputTokenLimit: FAST_OUTPUT_LIMIT, totalTokenLimit: FAST_TOTAL_LIMIT };
+function budgetFor(
+  runs: number,
+  focused: boolean,
+  evaluation: EvaluationVersion,
+): Pick<ReviewBudget, 'inputTokenLimit' | 'outputTokenLimit' | 'totalTokenLimit'> {
+  const configured = runs > 1
+    ? evaluation.record.review.multi
+    : focused ? evaluation.record.review.focused : evaluation.record.review.fast;
+  const fallback = runs > 1
+    ? { inputTokenLimit: MULTI_INPUT_LIMIT, outputTokenLimit: MULTI_OUTPUT_LIMIT, totalTokenLimit: MULTI_TOTAL_LIMIT }
+    : focused
+      ? { inputTokenLimit: FOCUSED_INPUT_LIMIT, outputTokenLimit: FOCUSED_OUTPUT_LIMIT, totalTokenLimit: FOCUSED_TOTAL_LIMIT }
+      : { inputTokenLimit: FAST_INPUT_LIMIT, outputTokenLimit: FAST_OUTPUT_LIMIT, totalTokenLimit: FAST_TOTAL_LIMIT };
+  return {
+    inputTokenLimit: configured?.input ?? fallback.inputTokenLimit,
+    outputTokenLimit: configured?.output ?? fallback.outputTokenLimit,
+    totalTokenLimit: configured?.total ?? fallback.totalTokenLimit,
+  };
 }
 
 function scoreOf(review: AIUserReview): number | null {
@@ -664,6 +705,8 @@ export class ExperienceService {
       requiresExplicitModel: !available || selection.crossModel,
       scope: selection.scope,
       path: selection.path,
+      evaluationVersion: selection.evaluation.version,
+      evaluationHash: selection.evaluation.hash,
       inputTokenLimit: selection.budget.inputTokenLimit,
       outputTokenLimit: selection.budget.outputTokenLimit,
       totalTokenLimit: selection.budget.totalTokenLimit,
@@ -675,12 +718,15 @@ export class ExperienceService {
 
   create(request: AIUserReviewRequest, tenantId: string): AIUserReview {
     const selection = this.resolve(request, tenantId, true, false);
+    const rubric = rubricFromPolicy(selection.evaluation.record);
     const requestFingerprint = stableHash({
       runIds: selection.runs.map(run => run.id),
       providerId: selection.provider.id,
       model: selection.model,
-      rubricVersion: REVIEW_RUBRIC_VERSION,
-      rubricHash: REVIEW_RUBRIC_HASH,
+      rubricVersion: rubric.version,
+      rubricHash: rubric.hash,
+      evaluationVersion: selection.evaluation.version,
+      evaluationHash: selection.evaluation.hash,
     });
     const key = request.requestKey?.trim() || undefined;
     if (key) {
@@ -709,7 +755,11 @@ export class ExperienceService {
       originalProviderId: selection.originalProviderId,
       originalModel: selection.originalModel,
       crossModel: selection.crossModel,
-      rubricVersion: REVIEW_RUBRIC_VERSION,
+      rubricVersion: rubric.version,
+      rubricHash: rubric.hash,
+      evaluationVersion: selection.evaluation.version,
+      evaluationHash: selection.evaluation.hash,
+      evaluationPolicy: selection.evaluation.record,
       verdict: 'neutral',
       dimensions: [],
       observations: [],
@@ -762,13 +812,14 @@ export class ExperienceService {
   deepen(id: string, tenantId: string): AIUserReview {
     const review = this.review(id, tenantId);
     if (review.status !== 'insufficient_evidence') throw new ExperienceError(409, 'REVIEW_NOT_DEEPENABLE', '只有证据不足的复盘可以继续深入分析');
+    const focused = review.evaluationPolicy?.review?.focused;
     review.status = 'queued';
     review.path = 'focused';
     review.error = undefined;
     review.evidenceGaps = [];
-    review.budget.inputTokenLimit += FOCUSED_INPUT_LIMIT;
-    review.budget.outputTokenLimit += FOCUSED_OUTPUT_LIMIT;
-    review.budget.totalTokenLimit += FOCUSED_TOTAL_LIMIT;
+    review.budget.inputTokenLimit += focused?.input ?? FOCUSED_INPUT_LIMIT;
+    review.budget.outputTokenLimit += focused?.output ?? FOCUSED_OUTPUT_LIMIT;
+    review.budget.totalTokenLimit += focused?.total ?? FOCUSED_TOTAL_LIMIT;
     review.updatedAt = this.now();
     const provider = providerFor(this.deps.providers(), review.providerId, review.model);
     if (!provider) throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型不可用；请显式选择替代模型后重新发起复盘');
@@ -835,13 +886,14 @@ export class ExperienceService {
     const summary = typeof input.summary === 'string' ? input.summary.trim() : '';
     if (!summary || summary.length > 2_000) throw new ExperienceError(400, 'INVALID_CALIBRATION', '人工校准摘要不能为空且不能超过 2000 字');
     const verdict = input.verdict === 'agree' || input.verdict === 'disagree' ? input.verdict : 'inconclusive';
+    const rubric = rubricFromPolicy(review.evaluationPolicy);
     const dimensions = Array.isArray(input.dimensions)
       ? input.dimensions.flatMap(item => {
           if (!isRecord(item) || typeof item.id !== 'string' || typeof item.reason !== 'string') return [];
           const score = item.score === null ? null : Number(item.score);
           if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5)) return [];
           return [{ id: item.id, score: score as ReviewDimensionScore['score'], reason: item.reason.slice(0, 1_000), evidenceRefs: uniqueStrings(item.evidenceRefs).filter(ref => review.evidenceIndex.some(evidence => evidence.id === ref)) }];
-        }).slice(0, DIMENSIONS.length)
+        }).slice(0, rubric.dimensions.length)
       : undefined;
     const audit: ReviewAudit = {
       id: randomUUID(), tenantId, reviewId: id, source: 'human', kind: 'calibration',
@@ -1112,7 +1164,15 @@ export class ExperienceService {
       if (requireModel || requestedProvider) throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
       throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
     }
-    const rawFacts = buildCachedFactLedger(this.deps.store, tenantId, selected, this.now(), this.factCache);
+    const evaluation = new OrganizationService({ store: this.deps.store }).ensureEvaluation(tenantId);
+    const rawFacts = buildCachedFactLedger(
+      this.deps.store,
+      tenantId,
+      selected,
+      this.now(),
+      this.factCache,
+      rubricFromPolicy(evaluation.record),
+    );
     const focused = hasFocusedSignal(rawFacts, rawFacts.truncated === true);
     const facts = selected.length > 1 ? clusterMultiRunFacts(rawFacts) : rawFacts;
     return {
@@ -1125,7 +1185,8 @@ export class ExperienceService {
       runs: selected,
       facts,
       path: focused ? 'focused' : 'fast',
-      budget: budgetFor(selected.length, focused),
+      evaluation,
+      budget: budgetFor(selected.length, focused, evaluation),
     };
   }
 
@@ -1204,14 +1265,15 @@ export class ExperienceService {
     const messages = this.reviewMessages(review, evidence, undefined, false);
     const available = this.remainingInput(review);
     if (countMessageTokens(messages, provider.tokenizer) > available) throw this.insufficient('快速复盘输入超过预算');
-    const result = await this.invoke(provider, model, messages, FAST_OUTPUT_LIMIT, 'experience_review', signal);
+    const result = await this.invokeReview(review, provider, model, messages, signal);
     this.account(review, result);
     return this.parseStructured(result.text, review, true);
   }
 
   private async focusedPlan(review: AIUserReview, provider: ProviderDef, model: string, signal: AbortSignal): Promise<EvidencePlan> {
+    const rubric = rubricFromPolicy(review.evaluationPolicy);
     const messages: LLMMessage[] = [
-      { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+      { role: 'system', content: rubric.systemPrompt },
       { role: 'user', content: JSON.stringify({
         mode: 'evidence_plan',
         facts: review.facts,
@@ -1224,7 +1286,7 @@ export class ExperienceService {
     const allocation = review.scope === 'multi_run' ? 3_000 : 2_500;
     const available = Math.min(this.remainingInput(review, allocation), allocation);
     if (countMessageTokens(messages, provider.tokenizer) > available) throw this.insufficient('事实索引超过证据规划预算');
-    const result = await this.invoke(provider, model, messages, 250, 'experience_review', signal);
+    const result = await this.invokeReview(review, provider, model, messages, signal);
     this.account(review, result);
     const parsed = parseJsonObject(result.text);
     return {
@@ -1252,25 +1314,25 @@ export class ExperienceService {
   }
 
   private async runFocusedFinal(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[], signal: AbortSignal): Promise<StructuredReview> {
-    const outputLimit = Math.min(950, Math.max(250, review.budget.outputTokenLimit - review.budget.outputTokens));
-    const result = await this.invoke(provider, model, messages, outputLimit, 'experience_review', signal);
+    const result = await this.invokeReview(review, provider, model, messages, signal);
     this.account(review, result);
     return this.parseStructured(result.text, review, false);
   }
 
   private reviewMessages(review: AIUserReview, evidence: EvidenceSlice[], hypotheses: string[] | undefined, focused: boolean): LLMMessage[] {
+    const rubric = rubricFromPolicy(review.evaluationPolicy);
     return [
-      { role: 'system', content: REVIEW_SYSTEM_PROMPT },
+      { role: 'system', content: rubric.systemPrompt },
       { role: 'user', content: JSON.stringify({
         kind: 'review_input',
         facts: review.facts,
         evidence,
         ...(hypotheses?.length ? { hypotheses } : {}),
-        rubric: DIMENSIONS,
+        rubric: rubric.dimensions,
         ...(focused ? { priorStep: '已根据异常和冲突主动取证；现在完成评分。' } : { priorStep: '事实清楚时直接复盘。' }),
-        outputLimits: 'scores 恰好 10 项；observations 最多 4 项；suggestions 最多 3 项；不输出额外键或解释。',
+        outputLimits: `scores 恰好 ${rubric.dimensions.length} 项；observations 最多 4 项；suggestions 最多 3 项；不输出额外键或解释。`,
         output: {
-          scores: DIMENSIONS.map(id => ({ id, score: '1..5 或 null', reason: 'string', evidenceRefs: ['valid evidence id'] })),
+          scores: rubric.dimensions.map(id => ({ id, score: '1..5 或 null', reason: 'string', evidenceRefs: ['valid evidence id'] })),
           observations: [{ kind: 'positive|friction', summary: 'string', cost: 'optional', evidenceRefs: ['valid evidence id'] }],
           suggestions: [{ title: 'string', detail: 'string', category: [...SUGGESTION_CATEGORIES], impact: 'high|medium|low', confidence: '0..1', evidenceRefs: ['valid evidence id'] }],
           reuseIntent: '1..5 或 null',
@@ -1284,7 +1346,7 @@ export class ExperienceService {
   private parseStructured(text: string, review: AIUserReview, fast: boolean): StructuredReview {
     const parsed = parseJsonObject(text);
     const valid = new Set(review.evidenceIndex.map(item => item.id));
-    const dimensions = DIMENSIONS.map(id => {
+    const dimensions = rubricFromPolicy(review.evaluationPolicy).dimensions.map(id => {
       const raw = Array.isArray(parsed.scores) ? parsed.scores.find(item => isRecord(item) && item.id === id) : undefined;
       if (!isRecord(raw)) throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', `复盘缺少维度 ${id}`);
       const score = raw.score === null ? null : Number(raw.score);
@@ -1338,7 +1400,12 @@ export class ExperienceService {
     const scores = review.dimensions.flatMap(item => item.score === null ? [] : [item.score]);
     const average = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
     const factGateFailed = ledgerGateFailed(review.facts) || critical;
-    review.selfEvaluationBias = factGateFailed && average >= 3.5 && review.reuseIntent !== null && review.reuseIntent >= 4
+    const policy = review.evaluationPolicy?.review;
+    const positiveAverage = policy?.positiveMinAverage ?? 3.5;
+    const positiveReuse = policy?.positiveMinReuse ?? 4;
+    const positiveDimension = policy?.positiveMinDimension ?? 3;
+    review.selfEvaluationBias = factGateFailed && average >= positiveAverage
+      && review.reuseIntent !== null && review.reuseIntent >= positiveReuse
       ? {
           detected: true,
           reason: `事实门槛未通过，AI 主观平均 ${Math.round(average * 10) / 10}/5，再次使用意愿 ${review.reuseIntent}/5。`,
@@ -1346,7 +1413,8 @@ export class ExperienceService {
       : undefined;
     if (factGateFailed || review.reuseIntent !== null && review.reuseIntent <= 2) {
       review.verdict = 'negative';
-    } else if (!scores.length || scores.some(score => score < 3) || average < 3.5 || review.reuseIntent === null || review.reuseIntent < 4) {
+    } else if (!scores.length || scores.some(score => score < positiveDimension)
+      || average < positiveAverage || review.reuseIntent === null || review.reuseIntent < positiveReuse) {
       review.verdict = 'neutral';
     } else {
       review.verdict = 'positive';
@@ -1379,6 +1447,23 @@ export class ExperienceService {
   private remainingInput(review: AIUserReview, preferred?: number): number {
     const remaining = Math.max(0, review.budget.inputTokenLimit - review.budget.inputTokens);
     return preferred === undefined ? remaining : Math.min(remaining, preferred);
+  }
+
+  private reviewMaxTokens(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[]): number {
+    const inputTokens = countMessageTokens(messages, provider.tokenizer);
+    const remainingOutput = review.budget.outputTokenLimit - review.budget.outputTokens;
+    const remainingTotal = review.budget.totalTokenLimit
+      - review.budget.inputTokens
+      - review.budget.outputTokens
+      - inputTokens;
+    const protocolCap = provider.models?.find(item => item.modelId === model)?.maxOutput;
+    const limits = [remainingOutput, remainingTotal];
+    if (protocolCap !== undefined && Number.isSafeInteger(protocolCap) && protocolCap > 0) limits.push(protocolCap);
+    const maxTokens = Math.min(...limits);
+    if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
+      throw this.insufficient('复盘 token 预算不足以发起下一次模型调用');
+    }
+    return maxTokens;
   }
 
   private pickEvidence(review: AIUserReview, requested: string[], limit: number, tokenBudget: number): EvidenceSlice[] {
@@ -1498,6 +1583,11 @@ export class ExperienceService {
       costUsd: cost.costUsd ?? 0,
       costSource: cost.costSource,
     };
+  }
+
+  private async invokeReview(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[], signal: AbortSignal): Promise<InvocationResult> {
+    const maxTokens = this.reviewMaxTokens(review, provider, model, messages);
+    return this.invoke(provider, model, messages, maxTokens, 'experience_review', signal);
   }
 
   private insufficient(reason: string): ExperienceError {

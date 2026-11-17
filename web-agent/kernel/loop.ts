@@ -26,6 +26,10 @@ export interface AgentHookCtx {
   turn: number;
   model: string;
   sessionId?: string;
+  workOrderId?: string;
+  assignmentContractId?: string;
+  organizationRoleId?: string;
+  teamCycleId?: string;
   tenantId?: string;
   sandboxRoot?: string;
   runId?: string;
@@ -112,6 +116,10 @@ export interface RunOptions {
   scope?: string;
   /** 当前会话 ID：透传给工具（ToolContext.sessionId），工具可把状态挂到具体会话 */
   sessionId?: string;
+  workOrderId?: string;
+  assignmentContractId?: string;
+  organizationRoleId?: string;
+  teamCycleId?: string;
   /** 当前租户：透传给工具，用于缓存与数据作用域。缺省按 default 处理。 */
   tenantId?: string;
   /** 当前 principal 角色：DB token 的 admin/member/readonly；缺省视为本机管理员。 */
@@ -151,7 +159,7 @@ export interface RunOptions {
   onCheckpoint?: (
     turn: number,
     history: LLMMessage[],
-    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: { capabilityId: string; shadowedBy: string }[] },
+    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: import('./types').CapabilityConflict[] },
     step?: {
       phase: 'turn_end' | 'tool_pending';
       pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string; effectKey?: string; resultId?: string };

@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useState } from 'react';
-import { AlertCircle, ArrowRight, Bot, CheckCircle2, Clock3, ExternalLink, FileText, FolderKanban, ListTodo, Play, Plus, RefreshCw, ShieldAlert, Sparkles } from 'lucide-react';
+import { Activity, AlertCircle, ArrowRight, Bot, Building2, CheckCircle2, CircleDollarSign, Clock3, ExternalLink, FileText, FolderKanban, Gauge, ListTodo, Play, Plus, RefreshCw, ShieldAlert, Sparkles, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
 import { api } from '../api';
 import { runLabels } from '../run-api';
 import { automationApi } from '../automation-api';
-import { workbenchApi, type WorkbenchItem, type WorkbenchSummary } from '../workbench-api';
+import { workbenchApi, type WorkbenchItem, type WorkbenchProject, type WorkbenchSummary } from '../workbench-api';
 import { materialApi } from '../material-api';
 import { experienceApi, type ExperienceFinding, type FindingStatus } from '../experience-api';
 import { Badge } from './ui/badge';
@@ -14,6 +14,7 @@ import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from './ui/empty';
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
+import { OrganizationDialog } from './OrganizationDialog';
 
 interface Props {
   onSession: (id: string) => void;
@@ -45,6 +46,17 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
   const [busy, setBusy] = useState<string | null>(null);
   const [findingBusy, setFindingBusy] = useState<string | null>(null);
   const [verification, setVerification] = useState<Record<string, { runId: string; summary: string; outcome: 'passed' | 'failed' }>>({});
+  const [organizationProject, setOrganizationProject] = useState<WorkbenchProject | null>(null);
+  const [societyObjective, setSocietyObjective] = useState('');
+  const [societyValueUsd, setSocietyValueUsd] = useState('5');
+  const [societyBudgetUsd, setSocietyBudgetUsd] = useState('0.10');
+  const [societyDepartmentId, setSocietyDepartmentId] = useState('');
+  const [institutionBudget, setInstitutionBudget] = useState('');
+  const [welfareLimit, setWelfareLimit] = useState('');
+  const [evaluationLow, setEvaluationLow] = useState('');
+  const [evaluationMedium, setEvaluationMedium] = useState('');
+  const [evaluationHigh, setEvaluationHigh] = useState('');
+  const [departmentQuotas, setDepartmentQuotas] = useState<Record<string, string>>({});
 
   const load = useCallback(async () => {
     try {
@@ -56,6 +68,16 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
   }, []);
 
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    if (!summary?.society) return;
+    setInstitutionBudget(String(summary.society.institution.policies.societyBudgetUsd));
+    setWelfareLimit(String(summary.society.institution.policies.welfareMaxActiveAssignments));
+    setEvaluationLow(String(summary.society.evaluation.record.lowConfidenceSamples));
+    setEvaluationMedium(String(summary.society.evaluation.record.mediumConfidenceSamples));
+    setEvaluationHigh(String(summary.society.evaluation.record.highConfidenceSamples));
+    setDepartmentQuotas(Object.fromEntries(summary.society.departments.map(item => [item.id, String(item.quotaUsd)])));
+    setSocietyDepartmentId(current => current || summary.society?.departments.find(item => item.enabled)?.id || '');
+  }, [summary?.society]);
 
   const addItem = async () => {
     const title = quick.trim();
@@ -162,6 +184,154 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
     }
   };
 
+  const createSocietyTask = async () => {
+    const objective = societyObjective.trim();
+    const valueUsd = Number(societyValueUsd);
+    const maxBudgetUsd = Number(societyBudgetUsd);
+    if (!objective || !Number.isFinite(valueUsd) || valueUsd <= 0 || !Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0) {
+      toast.error('填写目标、任务价值与正数预算');
+      return;
+    }
+    setBusy('society:create');
+    try {
+      await workbenchApi.societyTask({
+        objective, valueUsd, maxBudgetUsd,
+        departmentId: societyDepartmentId || undefined,
+      });
+      setSocietyObjective('');
+      await load();
+      toast.success('社会任务已登记');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const tickSociety = async () => {
+    setBusy('society:tick');
+    try {
+      const result = await workbenchApi.tickSociety();
+      await load();
+      toast.success(`制度调度完成：${result.decisions.length} 项进入执行，${result.queued} 项排队`);
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateInstitution = async () => {
+    const society = summary?.society;
+    if (!society) return;
+    const budget = Number(institutionBudget);
+    const welfare = Number(welfareLimit);
+    const departments = society.departments.map(department => {
+      const quotaUsd = Number(departmentQuotas[department.id]);
+      return { ...department, quotaUsd };
+    });
+    if (!Number.isFinite(budget) || budget < 0 || !Number.isSafeInteger(welfare) || welfare < 1
+      || departments.some(department => !Number.isFinite(department.quotaUsd) || department.quotaUsd < 0)) {
+      toast.error('检查社会预算、福利并发和部门配额');
+      return;
+    }
+    setBusy('society:institution');
+    try {
+      await workbenchApi.updateInstitution(
+        { societyBudgetUsd: budget, welfareMaxActiveAssignments: welfare, departments },
+        '人类在工作台调整社会预算、部门配额与角色福利负载',
+      );
+      await load();
+      toast.success('制度新版本已生效并写入审计');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rollbackInstitution = async () => {
+    const society = summary?.society;
+    if (!society || society.institution.version <= 1) return;
+    if (!window.confirm(`回滚到制度 v${society.institution.version - 1}？当前版本会保留在审计记录中。`)) return;
+    setBusy('society:rollback');
+    try {
+      await workbenchApi.rollbackInstitution(society.institution.version - 1, '人类在工作台回滚制度');
+      await load();
+      toast.success('制度已回滚并生成新版本');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const updateEvaluation = async () => {
+    const low = Number(evaluationLow);
+    const medium = Number(evaluationMedium);
+    const high = Number(evaluationHigh);
+    if (!Number.isSafeInteger(low) || !Number.isSafeInteger(medium) || !Number.isSafeInteger(high)
+      || low < 2 || medium <= low || high <= medium) {
+      toast.error('评价样本门槛必须为递增整数：低 < 中 < 高');
+      return;
+    }
+    setBusy('society:evaluation');
+    try {
+      await workbenchApi.updateEvaluation(
+        { lowConfidenceSamples: low, mediumConfidenceSamples: medium, highConfidenceSamples: high },
+        '人类在工作台调整角色履历置信门槛',
+      );
+      await load();
+      toast.success('评价标准新版本已生效并写入审计');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const rollbackEvaluation = async () => {
+    const evaluation = summary?.society?.evaluation;
+    if (!evaluation || evaluation.version <= 1) return;
+    if (!window.confirm(`回滚到评价标准 v${evaluation.version - 1}？当前版本会保留在审计记录中。`)) return;
+    setBusy('society:evaluation-rollback');
+    try {
+      await workbenchApi.rollbackEvaluation(evaluation.version - 1, '人类在工作台回滚评价标准');
+      await load();
+      toast.success('评价标准已回滚并生成新版本');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const approveSocietyTask = async (id: string, approved: boolean) => {
+    setBusy(`society:approve:${id}`);
+    try {
+      await workbenchApi.approveSocietyTask(id, approved);
+      await load();
+      toast.success(approved ? '高额任务已批准，等待制度调度' : '高额任务已拒绝');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const releaseSocietyTask = async (taskId: string) => {
+    setBusy(`society:release:${taskId}`);
+    try {
+      await workbenchApi.releaseSocietyTask(taskId, 'completed', '人类确认交付完成，释放短周期角色');
+      await load();
+      toast.success('任务已释放，角色履历与关系已更新');
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   if (!summary && !error) {
     return <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 p-4 md:p-6"><Skeleton className="h-28" /><Skeleton className="h-60" /><Skeleton className="h-44" /></div>;
   }
@@ -171,6 +341,22 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
   }
 
   const allItems = [...summary!.overdue, ...summary!.todayItems, ...summary!.upcoming, ...summary!.unscheduled];
+  const activeSocietySchedules = summary!.society?.schedules.filter(item => item.status === 'active') ?? [];
+  const awaitingSocietyAcceptance = summary!.society?.schedules.filter(schedule => {
+    const task = summary!.society?.tasks.find(item => item.id === schedule.taskId);
+    return schedule.status === 'completed' && task?.status === 'awaiting_acceptance';
+  }) ?? [];
+  const recentSocietySchedules = summary!.society?.schedules.filter(schedule => {
+    const task = summary!.society?.tasks.find(item => item.id === schedule.taskId);
+    return schedule.status === 'completed' && task?.status !== 'awaiting_acceptance';
+  }) ?? [];
+  const organization = summary!.organization ?? {
+    workOrders: [],
+    roles: [],
+    receipts: [],
+    exceptions: [],
+    proposals: [],
+  };
   return (
     <ScrollArea className="min-h-0 flex-1">
       <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6" data-testid="workbench-home">
@@ -178,6 +364,151 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
           <div><p className="text-xs font-medium text-muted-foreground">{summary!.today}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">今天从这里继续</h1><p className="mt-1 text-sm text-muted-foreground">事项、自动化、最近结果和可继续处理的任务集中在这里。</p></div>
           <div className="flex gap-2"><Button variant="outline" onClick={() => void load()}><RefreshCw data-icon="inline-start" />刷新</Button><Button variant="outline" onClick={onOpenWorkbench}><ExternalLink data-icon="inline-start" />完整工作台</Button></div>
         </header>
+
+        {summary!.society ? <Card data-testid="society-console">
+          <CardHeader>
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div><CardTitle className="flex items-center gap-2"><Building2 />maharness 社会运行</CardTitle><CardDescription>人类确定目标、价值、预算和制度；角色组织按制度调度，主 Agent 参与受理，但不驱动这一轮社会运行。</CardDescription></div>
+              <div className="flex items-center gap-2"><Badge variant={summary!.society.bottlenecks.length ? 'destructive' : 'secondary'}>{summary!.society.bottlenecks.length ? `${summary!.society.bottlenecks.length} 个瓶颈` : '运行平稳'}</Badge><Button disabled={busy === 'society:tick'} onClick={() => void tickSociety()}>{busy === 'society:tick' ? <RefreshCw className="animate-spin" /> : <Play />}运行制度调度</Button></div>
+            </div>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-5">
+            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><Activity className="size-3.5" />社会健康</p><p className="mt-1 font-medium">{summary!.society.health.score === null ? '暂无数据' : `${summary!.society.health.score}/100`}</p></div>
+              <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><Gauge className="size-3.5" />福利负载</p><p className="mt-1 font-medium">{summary!.society.health.welfare === null ? '未知' : `${Math.round(summary!.society.health.welfare * 100)}% 可用`}</p></div>
+              <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><CircleDollarSign className="size-3.5" />社会预算</p><p className="mt-1 font-medium">${summary!.society.economics.societyReservedUsd.toFixed(2)} 预留 · ${summary!.society.economics.societySpentUsd.toFixed(2)} 已结算 / ${summary!.society.economics.societyBudgetUsd.toFixed(2)}</p></div>
+              <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><Clock3 className="size-3.5" />处置队列</p><p className="mt-1 font-medium">{summary!.society.scheduling.queue.length} 排队 · {summary!.society.scheduling.waitingApproval.length} 待批 · {summary!.society.schedules.filter(item => item.status === 'active').length} 执行中</p></div>
+            </div>
+
+            <form className="grid gap-2 rounded-lg border bg-muted/20 p-3 lg:grid-cols-[1fr_110px_110px_150px_auto]" onSubmit={event => { event.preventDefault(); void createSocietyTask(); }}>
+              <Input aria-label="社会任务目标" placeholder="交给社会运行层，例如：对比三份资料并标出来源差异" value={societyObjective} onChange={event => setSocietyObjective(event.target.value)} />
+              <Input aria-label="任务价值" type="number" min="0.01" step="0.01" value={societyValueUsd} onChange={event => setSocietyValueUsd(event.target.value)} title="预期业务价值（USD）" />
+              <Input aria-label="任务预算" type="number" min="0.01" step="0.01" value={societyBudgetUsd} onChange={event => setSocietyBudgetUsd(event.target.value)} title="任务最高预算（USD）" />
+              <select aria-label="承接部门" className="rounded-md border bg-background px-2 text-sm" value={societyDepartmentId} onChange={event => setSocietyDepartmentId(event.target.value)}>
+                {summary!.society.departments.filter(item => item.enabled).map(department => <option key={department.id} value={department.id}>{department.name}</option>)}
+              </select>
+              <Button disabled={!societyObjective.trim() || busy === 'society:create'}>{busy === 'society:create' ? <RefreshCw className="animate-spin" /> : <Plus />}登记任务</Button>
+            </form>
+
+            <div className="grid gap-3 lg:grid-cols-3">
+              {summary!.society.departments.map(department => <div key={department.id} className="rounded-lg border p-3">
+                <div className="flex items-center justify-between gap-2"><span className="text-sm font-medium">{department.name}</span><Badge variant="outline">{department.enabled ? '运行中' : '停用'}</Badge></div>
+                <p className="mt-1 text-xs text-muted-foreground">{department.charter}</p>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs"><span>{department.queued} 排队</span><span>{department.active}/{department.maxConcurrent} 并发</span><span>${department.quotaRemainingUsd.toFixed(2)} 可用</span></div>
+              </div>)}
+            </div>
+
+            {summary!.society.bottlenecks.length > 0 && <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3">
+              <p className="flex items-center gap-2 text-sm font-medium"><TriangleAlert className="size-4 text-destructive" />社会瓶颈</p>
+              <div className="mt-2 flex flex-col gap-1 text-xs text-muted-foreground">{summary!.society.bottlenecks.map((item, index) => <p key={`${item.departmentId}:${item.kind}:${index}`}>{item.detail}</p>)}</div>
+            </div>}
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">需要人类处置</p>
+                {summary!.society.scheduling.waitingApproval.map(task => <div key={task.id} className="rounded-md border border-amber-500/30 p-3">
+                  <p className="text-sm font-medium">{task.objective}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">预算 ${task.maxBudgetUsd.toFixed(2)} · 价值 ${task.valueUsd.toFixed(2)} · {task.lastSchedulingReason}</p>
+                  <div className="mt-2 flex gap-2"><Button size="sm" disabled={busy === `society:approve:${task.id}`} onClick={() => void approveSocietyTask(task.id, true)}>批准</Button><Button size="sm" variant="outline" disabled={busy === `society:approve:${task.id}`} onClick={() => void approveSocietyTask(task.id, false)}>拒绝</Button></div>
+                </div>)}
+                {summary!.society.scheduling.queue.map(task => <div key={task.id} className="rounded-md border p-3">
+                  <p className="text-sm font-medium">{task.objective}</p>
+                  <p className="mt-1 text-xs text-muted-foreground">{task.lastSchedulingReason ?? '等待制度调度'} · ${task.maxBudgetUsd.toFixed(2)}</p>
+                </div>)}
+                {!summary!.society.scheduling.waitingApproval.length && !summary!.society.scheduling.queue.length && <p className="text-sm text-muted-foreground">当前没有排队或待批任务。</p>}
+              </div>
+              <div className="flex flex-col gap-2">
+                <p className="text-sm font-medium">执行进度与人工验收</p>
+                {activeSocietySchedules.map(schedule => {
+                  const task = summary!.society!.tasks.find(item => item.id === schedule.taskId);
+                  const roleNames = schedule.roleIds.map(roleId => summary!.society!.roles.find(role => role.id === roleId)?.name ?? roleId);
+                  return <div key={schedule.id} className="rounded-md border p-3">
+                    <div className="flex items-center gap-2"><span className="min-w-0 flex-1 text-sm font-medium">{task?.objective ?? schedule.taskId}</span><Badge variant={schedule.mode === 'team' ? 'secondary' : 'outline'}>{schedule.mode === 'team' ? `团队 ${schedule.roleIds.length}` : '单角色'}</Badge></div>
+                    <p className="mt-1 text-xs text-muted-foreground">{roleNames.join(' · ')} · 估算 ${schedule.estimates.teamCostUsd.toFixed(3)} · 净收益 ${schedule.estimates.teamNetBenefitUsd.toFixed(3)}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">{schedule.reason} · {schedule.runIds.length} 个真实 Run 正在推进</p>
+                  </div>;
+                })}
+                {awaitingSocietyAcceptance.map(schedule => {
+                  const task = summary!.society!.tasks.find(item => item.id === schedule.taskId);
+                  const roleNames = schedule.roleIds.map(roleId => summary!.society!.roles.find(role => role.id === roleId)?.name ?? roleId);
+                  return <div key={`accept:${schedule.id}`} className="rounded-md border border-emerald-600/30 bg-emerald-500/5 p-3">
+                    <div className="flex items-center gap-2"><span className="min-w-0 flex-1 text-sm font-medium">{task?.objective ?? schedule.taskId}</span><Badge>待你验收</Badge></div>
+                    <p className="mt-1 text-xs text-muted-foreground">{roleNames.join(' · ')} · 真实分工已全部交付 · {schedule.runIds.length} 个 Run</p>
+                    <Button className="mt-2" size="sm" disabled={busy === `society:release:${schedule.taskId}`} onClick={() => void releaseSocietyTask(schedule.taskId)}>确认交付</Button>
+                  </div>;
+                })}
+                {!activeSocietySchedules.length && !awaitingSocietyAcceptance.length && <p className="text-sm text-muted-foreground">当前没有执行中或待验收的任务。</p>}
+                {recentSocietySchedules.slice(0, 3).map(schedule => {
+                  const task = summary!.society!.tasks.find(item => item.id === schedule.taskId);
+                  return <div key={`completed:${schedule.id}`} className="rounded-md border bg-muted/20 p-2 text-xs">
+                    <p className="font-medium">{task?.objective ?? schedule.taskId}</p>
+                    <p className="mt-1 text-muted-foreground">{task?.lastSchedulingReason ?? '短周期团队已释放'}</p>
+                  </div>;
+                })}
+              </div>
+            </div>
+
+            <details className="rounded-lg border p-3">
+              <summary className="cursor-pointer text-sm font-medium">制度版本、配额与审计</summary>
+              <div className="mt-3 grid gap-3 md:grid-cols-2" data-testid="institution-versions">
+                <div className="flex flex-col gap-2">
+                  <label className="text-xs text-muted-foreground">社会总预算<input aria-label="制度社会总预算" className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="0" step="0.01" value={institutionBudget} onChange={event => setInstitutionBudget(event.target.value)} /></label>
+                  <label className="text-xs text-muted-foreground">单角色并发上限<input aria-label="制度福利并发上限" className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="1" step="1" value={welfareLimit} onChange={event => setWelfareLimit(event.target.value)} /></label>
+                  {summary!.society.departments.map(department => <label key={department.id} className="text-xs text-muted-foreground">{department.name}配额<input aria-label={`${department.name}制度配额`} className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="0" step="0.01" value={departmentQuotas[department.id] ?? ''} onChange={event => setDepartmentQuotas(values => ({ ...values, [department.id]: event.target.value }))} /></label>)}
+                  <div className="flex gap-2"><Button size="sm" disabled={busy === 'society:institution'} onClick={() => void updateInstitution()}>发布制度 v{summary!.society.institution.version + 1}</Button><Button size="sm" variant="outline" disabled={summary!.society.institution.version <= 1 || busy === 'society:rollback'} onClick={() => void rollbackInstitution()}>回滚上一版</Button></div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-md border p-2"><p className="text-sm font-medium">当前 v{summary!.society.institution.version}</p><p className="mt-1 text-xs text-muted-foreground">{summary!.society.institution.reason} · {summary!.society.institution.createdBy}</p></div>
+                  {summary!.society.institutionAudits.slice(0, 6).map(audit => <div key={audit.id} className="rounded-md border p-2 text-xs"><p className="font-medium">v{audit.toVersion} · {audit.action === 'rollback' ? `回滚自 v${audit.fromVersion}` : audit.action === 'update' ? `升级自 v${audit.fromVersion}` : '初始化'}</p><p className="mt-1 text-muted-foreground">{audit.reason} · {audit.actor}</p></div>)}
+                  <div className="grid grid-cols-3 gap-2 text-xs"><span>{summary!.society.network.nodes.length} 成员</span><span>{summary!.society.network.edges.length} 协作关系</span><span>{summary!.society.economics.compression.reusedRefs} 条共享资料复用</span></div>
+                  <p className="text-xs text-muted-foreground">缓存命中率：{summary!.society.economics.cacheUsageStatus === 'known' && summary!.society.economics.cacheHitRate !== null ? `${Math.round(summary!.society.economics.cacheHitRate * 100)}%` : '未知'} · 命中 {summary!.society.economics.cachedInputTokens ?? 0} / 未命中 {summary!.society.economics.cacheMissInputTokens ?? 0} · 写入 {summary!.society.economics.cacheWriteUsageStatus === 'known' ? summary!.society.economics.cacheWriteTokens ?? 0 : '未知'} · 缓存节省：{summary!.society.economics.cacheSavingsUsd === null ? '未知' : `$${summary!.society.economics.cacheSavingsUsd.toFixed(4)}`}</p>
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 rounded-lg border p-3 md:grid-cols-2" data-testid="evaluation-versions">
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">评价标准与置信门槛</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <label className="text-xs text-muted-foreground">低置信样本<input aria-label="评价标准低置信样本" className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="2" step="1" value={evaluationLow} onChange={event => setEvaluationLow(event.target.value)} /></label>
+                    <label className="text-xs text-muted-foreground">中置信样本<input aria-label="评价标准中置信样本" className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="3" step="1" value={evaluationMedium} onChange={event => setEvaluationMedium(event.target.value)} /></label>
+                    <label className="text-xs text-muted-foreground">高置信样本<input aria-label="评价标准高置信样本" className="mt-1 h-9 w-full rounded-md border bg-background px-3 text-sm text-foreground" type="number" min="4" step="1" value={evaluationHigh} onChange={event => setEvaluationHigh(event.target.value)} /></label>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <Button size="sm" disabled={busy === 'society:evaluation'} onClick={() => void updateEvaluation()}>发布评价 v{summary!.society.evaluation.version + 1}</Button>
+                    <Button size="sm" variant="outline" disabled={summary!.society.evaluation.version <= 1 || busy === 'society:evaluation-rollback'} onClick={() => void rollbackEvaluation()}>回滚上一版</Button>
+                  </div>
+                </div>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-md border p-2"><p className="text-sm font-medium">当前评价 v{summary!.society.evaluation.version}</p><p className="mt-1 break-all text-xs text-muted-foreground">{summary!.society.evaluation.reason} · {summary!.society.evaluation.hash.slice(0, 16)}</p></div>
+                  {summary!.society.evaluationAudits.slice(0, 4).map(audit => <div key={audit.id} className="rounded-md border p-2 text-xs"><p className="font-medium">v{audit.toVersion} · {audit.action === 'rollback' ? `回滚自 v${audit.fromVersion}` : audit.action === 'update' ? `升级自 v${audit.fromVersion}` : '初始化'}</p><p className="mt-1 text-muted-foreground">{audit.reason} · {audit.actor}</p></div>)}
+                </div>
+              </div>
+              <div className="mt-4 grid gap-3 lg:grid-cols-2">
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">角色 token 账本</p>
+                  {summary!.society.economics.roleBudgets.map(row => {
+                    const role = summary!.society!.roles.find(item => item.id === row.roleId);
+                    return <div key={row.roleId} className="rounded-md border p-2 text-xs">
+                      <p className="font-medium">{role?.name ?? row.roleId}</p>
+                      <p className="mt-1 text-muted-foreground">{row.tokens}{row.budgetLimitTokens === undefined ? ' token' : ` / ${row.budgetLimitTokens} token`} · {row.activeAssignments} 个分工 · ${row.costUsd.toFixed(4)} USD</p>
+                    </div>;
+                  })}
+                </div>
+                <div className="flex flex-col gap-2">
+                  <p className="text-sm font-medium">任务 token 账本与估算 ROI</p>
+                  {summary!.society.economics.taskLedger.map(row => {
+                    const task = summary!.society!.tasks.find(item => item.id === row.taskId);
+                    const schedule = summary!.society!.schedules.find(item => item.taskId === row.taskId);
+                    return <div key={row.taskId} className="rounded-md border p-2 text-xs">
+                      <p className="font-medium">{task?.objective ?? row.taskId}</p>
+                      <p className="mt-1 text-muted-foreground">{row.actualTokens} / {row.maxBudgetTokens} token · ${row.actualCostUsd.toFixed(4)} / ${row.maxBudgetUsd.toFixed(2)} · {row.status}</p>
+                      <p className="mt-1 text-muted-foreground">缓存命中 {row.cacheUsageStatus === 'known' ? row.cachedInputTokens ?? 0 : '未知'} / 未命中 {row.cacheUsageStatus === 'known' ? row.cacheMissInputTokens ?? 0 : '未知'} · 写入 {row.cacheWriteUsageStatus === 'known' ? row.cacheWriteTokens ?? 0 : '未知'} · 声明估算 ROI {schedule?.estimates.roi === null || schedule?.estimates.roi === undefined ? '未知' : schedule.estimates.roi}</p>
+                    </div>;
+                  })}
+                </div>
+              </div>
+            </details>
+          </CardContent>
+        </Card> : <Card><CardHeader><CardTitle>社会运行层暂不可用</CardTitle><CardDescription>事项、文件、自动化和既有组织交付仍可继续使用。</CardDescription></CardHeader></Card>}
 
         <div className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
           <Card>
@@ -222,7 +553,7 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
           </Card>
           <Card>
             <CardHeader><CardTitle>项目</CardTitle><CardDescription>当前工作区中的项目。</CardDescription></CardHeader>
-            <CardContent className="flex flex-col gap-2">{summary!.projects.slice(0, 6).map(project => <div key={project.id} className="flex items-center gap-2"><FolderKanban className="size-4 text-muted-foreground" /><span className="truncate text-sm">{project.name}</span></div>)}{!summary!.projects.length && <p className="text-sm text-muted-foreground">暂无项目，可在完整工作台中创建。</p>}</CardContent>
+            <CardContent className="flex flex-col gap-2">{summary!.projects.slice(0, 6).map(project => <button key={project.id} type="button" className="flex items-center gap-2 rounded-md p-2 text-left hover:bg-muted" onClick={() => setOrganizationProject(project)}><FolderKanban className="size-4 text-muted-foreground" /><span className="truncate text-sm">{project.name}</span><ArrowRight className="ml-auto size-4 text-muted-foreground" /></button>)}{!summary!.projects.length && <p className="text-sm text-muted-foreground">暂无项目，可在完整工作台中创建。</p>}</CardContent>
           </Card>
           <Card>
             <CardHeader><CardTitle>笔记</CardTitle><CardDescription>最近记录的想法与资料。</CardDescription></CardHeader>
@@ -284,7 +615,37 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
             <div><p className="text-xs text-muted-foreground">累计耗时、模型调用与费用</p><p className="mt-1 font-medium">{Math.round(summary!.metrics.durationMs / 1000)} 秒 · {summary!.metrics.modelCalls} 次 · ${summary!.metrics.costUsd.toFixed(4)}</p></div>
           </CardContent>
         </Card>
+        {organization.receipts.length > 0 || organization.exceptions.length > 0 ? <Card>
+          <CardHeader><CardTitle>组织交付</CardTitle><CardDescription>最近工作回执与需要你裁决的异常。</CardDescription></CardHeader>
+          <CardContent className="grid gap-4 lg:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">最近工作回执</p>
+              {organization.receipts.slice(0, 5).map(receipt => {
+                const order = organization.workOrders.find(item => item.id === receipt.workOrderId);
+                return <button key={receipt.id} type="button" className="rounded-md border p-2 text-left hover:bg-muted" onClick={() => order && onSession(order.sessionId)}>
+                  <span className="block truncate text-sm">{receipt.answer || '产物已交付'}</span>
+                  <span className="mt-1 block text-xs text-muted-foreground">{receipt.status} · ${receipt.costUsd.toFixed(4)} · {receipt.artifacts.length} 个产物{receipt.unfinished.length ? ` · ${receipt.unfinished.length} 项未完成` : ''}</span>
+                </button>;
+              })}
+              {!organization.receipts.length && <p className="text-sm text-muted-foreground">完成任务后会生成责任链与费用回执。</p>}
+            </div>
+            <div className="flex flex-col gap-2">
+              <p className="text-sm font-medium">待裁决异常</p>
+              {organization.exceptions.filter(item => !['resolved', 'dismissed'].includes(item.status)).slice(0, 5).map(item => <div key={item.id} className="rounded-md border border-destructive/30 p-2"><span className="block text-sm">{item.summary}</span><span className="mt-1 block text-xs text-muted-foreground">{item.kind} · {item.status}</span></div>)}
+              {!organization.exceptions.some(item => !['resolved', 'dismissed'].includes(item.status)) && <p className="text-sm text-muted-foreground">没有待裁决异常。</p>}
+            </div>
+          </CardContent>
+        </Card> : null}
       </main>
+      {organizationProject && <OrganizationDialog
+        project={organizationProject}
+        workOrders={organization.workOrders}
+        roleDirectory={organization.roles}
+        proposals={organization.proposals}
+        onClose={() => setOrganizationProject(null)}
+        onSession={onSession}
+        reload={load}
+      />}
     </ScrollArea>
   );
 }

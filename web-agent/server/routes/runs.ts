@@ -94,10 +94,12 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
       materials: body.materials,
       model: body.model === undefined ? undefined : text(body.model, '模型'),
       budgetPolicy: body.budgetPolicy, requestKey: req.get('Idempotency-Key'), budgetUsd: explicitNumber(body.budgetUsd, '费用上限'),
+      budgetTokens: body.budgetTokens === undefined ? undefined : Math.trunc(explicitNumber(body.budgetTokens, 'token 上限')!),
       deadlineAt: explicitNumber(body.deadlineAt, '截止时间'),
       acceptance,
       principalRole: (req as Request & { apiRole?: 'admin' | 'member' | 'readonly' }).apiRole,
       frameworkChange,
+      projectId: body.projectId === undefined ? undefined : text(body.projectId, '项目'),
     });
     res.status(202).json({ runId: record.id, run: record });
   }));

@@ -1,7 +1,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import type { ChatOptions, LLMChunk, LLMMessage, ProviderDef } from './types';
-import { countMessageTokens, estimateTokens } from './tokens';
+import { countMessageTokens, deterministicInputTokenUpperBound, estimateTokens } from './tokens';
 import { ModelResponseError, type FinishReason } from './model-response';
 
 export type ModelPurpose = 'agent' | 'compaction' | 'vision' | 'mcp_sampling' | 'embedding' | 'connection_check' | 'experience_review' | 'experience_audit';
@@ -10,12 +10,16 @@ export interface ModelCallRecord {
   turn?: number; purpose: ModelPurpose; providerId: string; model: string; actualModel?: string;
   startedAt: number; finishedAt?: number; status: 'running' | 'completed' | 'failed' | 'cancelled' | 'unknown';
   inputEstimate: number; outputLimit: number; input?: number; output?: number;
+  inputUpperBound?: number; inputUpperBoundSource?: 'provider' | 'conservative';
+  reservedTokens?: number;
   usageStatus: 'reported' | 'estimated' | 'unknown'; cost?: number; reservedCost?: number;
+  cachedInput?: number; missInput?: number; cacheWriteTokens?: number; cachePrefixHash?: string;
   priceSource: 'configured' | 'catalog' | 'unknown'; priceIn?: number; priceOut?: number;
   error?: string; errorCode?: string; finishReason?: FinishReason; rawFinishReason?: string;
 }
 export interface ModelCallScope {
   turn?: number; runId: string; rootId?: string; parentRunId?: string; signal: AbortSignal;
+  cachePrefixHash?: string;
   acquire(signal?: AbortSignal): Promise<() => void>;
   start(record: ModelCallRecord): void;
   finish(record: ModelCallRecord): void;
@@ -64,11 +68,18 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
     inputEstimate: countMessageTokens(messages, provider.tokenizer) + estimateTokens(JSON.stringify(options.tools?.map(t => ({ name: t.name, description: t.description, parameters: t.parameters })) ?? [])),
     outputLimit, usageStatus: 'unknown', priceSource: price ? provider.priceSource ?? 'configured' : 'unknown',
     priceIn: price?.in, priceOut: price?.out,
+    ...(scope?.cachePrefixHash ? { cachePrefixHash: scope.cachePrefixHash } : {}),
   };
-  // Without an adapter-certified bound, an estimate must never authorize a hard cap.
-  const inputUpperBound = provider.inputTokenUpperBound?.(messages, options);
-  if (price && (price.in === 0 || inputUpperBound !== undefined && Number.isSafeInteger(inputUpperBound) && inputUpperBound >= 0) && provider.outputLimitGuaranteed) {
-    const reserved = ((inputUpperBound ?? record.inputEstimate) * price.in + outputLimit * price.out) / 1e6;
+  const certifiedBound = provider.inputTokenUpperBound?.(messages, options);
+  const certified = certifiedBound !== undefined && Number.isSafeInteger(certifiedBound) && certifiedBound >= 0;
+  const inputUpperBound = certified ? certifiedBound! : deterministicInputTokenUpperBound(messages, options.tools ?? [], options.responseFormat);
+  record.inputUpperBound = inputUpperBound;
+  record.inputUpperBoundSource = certified ? 'provider' : 'conservative';
+  record.reservedTokens = inputUpperBound <= Number.MAX_SAFE_INTEGER - outputLimit
+    ? inputUpperBound + outputLimit
+    : Number.MAX_SAFE_INTEGER;
+  if (price && provider.outputLimitGuaranteed) {
+    const reserved = (inputUpperBound * price.in + outputLimit * price.out) / 1e6;
     if (Number.isFinite(reserved) && reserved >= 0) record.reservedCost = reserved;
   }
   let release: (() => void) | undefined;
@@ -86,6 +97,12 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
         const validInput = Number.isSafeInteger(chunk.input) && chunk.input >= 0;
         const validOutput = Number.isSafeInteger(chunk.output) && chunk.output >= 0;
         record.input = validInput ? chunk.input : undefined; record.output = validOutput ? chunk.output : undefined;
+        record.cachedInput = validInput && chunk.cachedInput !== undefined && Number.isSafeInteger(chunk.cachedInput) && chunk.cachedInput >= 0 && chunk.cachedInput <= chunk.input
+          ? chunk.cachedInput : undefined;
+        record.missInput = validInput && chunk.missInput !== undefined && Number.isSafeInteger(chunk.missInput) && chunk.missInput >= 0 && chunk.missInput <= chunk.input
+          ? chunk.missInput : undefined;
+        record.cacheWriteTokens = chunk.cacheWrite !== undefined && Number.isSafeInteger(chunk.cacheWrite) && chunk.cacheWrite >= 0
+          ? chunk.cacheWrite : undefined;
         record.usageStatus = chunk.incomplete || !validInput || !validOutput ? 'unknown' : chunk.estimated ? 'estimated' : 'reported';
       }
       if (chunk.type === 'model') record.actualModel = chunk.model;

@@ -1,6 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { allocateTokenBudget } from '../tokens';
+import { allocateTokenBudget, deterministicInputTokenUpperBound } from '../tokens';
 
 describe('allocateTokenBudget', () => {
   test('分项总和稳定等于总预算，剩余额度归历史', () => {
@@ -21,4 +21,18 @@ describe('allocateTokenBudget', () => {
     assert.equal(budget.history, 0);
     assert.equal(budget.system + budget.task + budget.history + budget.tools + budget.memory + budget.output, 10);
   });
+});
+
+test('deterministic input ceiling includes message, tool, image and response framing', () => {
+  const payload = {
+    messages: [{ role: 'user', content: 'hello', images: ['data:image/png;base64,AAAA'] }],
+    tools: [{ name: 'read_file', description: 'read', parameters: { type: 'object' } }],
+    responseFormat: { type: 'json_object' },
+  };
+  const rawBytes = Buffer.byteLength(JSON.stringify(payload.messages[0]), 'utf8')
+    + Buffer.byteLength(JSON.stringify(payload.tools[0]), 'utf8')
+    + Buffer.byteLength(JSON.stringify(payload.responseFormat), 'utf8');
+  const bound = deterministicInputTokenUpperBound(payload.messages, payload.tools, payload.responseFormat);
+  assert.ok(bound >= rawBytes);
+  assert.equal(bound, rawBytes + 128 + 64);
 });

@@ -83,6 +83,8 @@ export interface AIUserReview {
   originalModel: string;
   crossModel: boolean;
   rubricVersion: string;
+  evaluationVersion?: number;
+  evaluationHash?: string;
   verdict: ExperienceVerdict;
   dimensions: ReviewDimensionScore[];
   observations: ReviewObservation[];
@@ -164,6 +166,8 @@ export interface AIUserReviewEstimate {
   requiresExplicitModel: boolean;
   scope: 'run' | 'multi_run';
   path: 'fast' | 'focused';
+  evaluationVersion: number;
+  evaluationHash: string;
   inputTokenLimit: number;
   outputTokenLimit: number;
   totalTokenLimit: number;

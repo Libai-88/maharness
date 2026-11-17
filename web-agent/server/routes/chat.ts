@@ -30,7 +30,11 @@ export function registerChatRoutes(app: Express, deps: RouteDeps, service: RunSe
         if (/\uFFFD|[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(body.message)) throw new RunError(400, 'INVALID_ENCODING', '消息包含无法识别的编码字符');
         if (body.model !== undefined && (typeof body.model !== 'string' || !body.model.trim()) || body.provider !== undefined && (typeof body.provider !== 'string' || !body.provider.trim())) throw new RunError(400, 'INVALID_MODEL', '模型与供应商标识必须为有效文本');
         if (body.systemPrompt !== undefined) throw new RunError(400, 'UNSUPPORTED_OVERRIDE', '请通过用户规则配置提示词');
-        run = service.create(session, { message: body.message, model: body.model, provider: body.provider, principalRole: role, requestKey: req.get('Idempotency-Key') });
+        run = service.create(session, {
+          message: body.message, model: body.model, provider: body.provider,
+          principalRole: role, requestKey: req.get('Idempotency-Key'),
+          budgetPolicy: body.budgetPolicy, budgetUsd: body.budgetUsd,
+        });
       }
       streamRunEvents(req, res, run, deps, service);
     } catch (error) {

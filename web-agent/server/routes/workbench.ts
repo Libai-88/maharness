@@ -32,6 +32,7 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
     const workspace = items.workspace(tenantId).data;
     const metrics = workbenchMetrics(deps, tenantId);
     const experience = experienceSummary(deps, tenantId);
+    const organization = organizationSummary(deps, tenantId);
     res.json({
       schemaVersion: 1,
       today,
@@ -47,8 +48,51 @@ export function registerWorkbenchRoutes(app: Express, deps: RouteDeps): void {
       notes: (workspace.notes ?? []).slice(0, 8),
       metrics,
       experience,
+      organization,
+      society: deps.society?.snapshot(tenantId) ?? null,
     });
   });
+}
+
+function organizationSummary(deps: RouteDeps, tenantId: string) {
+  const service = deps.organization;
+  if (!service) {
+    return {
+      schemaVersion: 1 as const,
+      workOrders: [],
+      roles: [],
+      scorecards: [],
+      wellbeing: [],
+      receipts: [],
+      exceptions: [],
+      proposals: [],
+    };
+  }
+  const orders = deps.store.organization.listWorkOrders(tenantId, undefined, 20);
+  const workOrders = orders.map(order => {
+    const detail = service.detail(order.id, tenantId);
+    return {
+      ...order,
+      contracts: detail.contracts,
+      teamCycles: detail.teamCycles,
+      roles: detail.roles,
+      receipt: detail.receipt,
+      exceptions: detail.exceptions,
+      economics: detail.economics,
+      scorecards: detail.scorecards,
+      wellbeing: detail.wellbeing,
+    };
+  });
+  return {
+    schemaVersion: 1 as const,
+    workOrders,
+    roles: deps.store.organization.listRoles(tenantId, undefined, true),
+    scorecards: service.scorecards(tenantId),
+    wellbeing: service.wellbeing(tenantId),
+    receipts: deps.store.organization.receipts(tenantId, 20),
+    exceptions: deps.store.organization.exceptions(tenantId, undefined, 50),
+    proposals: deps.store.organization.proposals(tenantId),
+  };
 }
 
 function percent(numerator: number, denominator: number): number | null {

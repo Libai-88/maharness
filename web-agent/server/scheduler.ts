@@ -3,6 +3,7 @@ import { existsSync, readFileSync, renameSync } from 'node:fs';
 import type { Store } from './db';
 import type { RunService } from './run-service';
 import type { AutomationService } from './automations';
+import type { SocietyService } from './society';
 import type { ScheduleJob } from './schedule-store';
 
 export type { ScheduleJob, ScheduleState } from './schedule-store';
@@ -41,6 +42,7 @@ export class Scheduler {
   private readonly running = new Set<string>();
   private service?: Pick<RunService, 'get' | 'resume'>;
   private automations?: AutomationService;
+  private society?: Pick<SocietyService, 'tickAll'>;
 
   constructor(
     private readonly store: Store,
@@ -57,6 +59,7 @@ export class Scheduler {
   }
   attach(service: Pick<RunService, 'get' | 'resume'>): void { this.service = service; }
   attachAutomations(service: AutomationService): void { this.automations = service; }
+  attachSociety(service: Pick<SocietyService, 'tickAll'>): void { this.society = service; }
 
   start(): void {
     if (this.timer || this.stopped) return;
@@ -108,6 +111,7 @@ export class Scheduler {
     if (this.stopped) return;
     const now = this.now();
     await this.automations?.tick(now);
+    this.society?.tickAll();
     const due = this.store.schedules.list().filter((job) => job.state === 'pending' && job.dueAt <= now && !this.running.has(job.id));
     await Promise.all(due.map((job) => this.run(job)));
   }

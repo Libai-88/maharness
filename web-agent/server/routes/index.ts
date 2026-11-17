@@ -36,6 +36,8 @@ import { registerScheduleRoutes } from './schedules';
 import { registerAutomationRoutes } from './automations';
 import { registerWorkbenchRoutes } from './workbench';
 import { registerExperienceRoutes } from './experience';
+import { registerOrganizationRoutes } from './organization';
+import { SocietyService } from '../society';
 import type { Scheduler } from '../scheduler';
 import { AutomationService } from '../automations';
 import { getChatService, SseConnectionLimiter } from './shared';
@@ -49,6 +51,8 @@ import { tenantSandboxRoot } from '../tenant-workspace';
 import { beginRun, endRun } from '../index';
 import { loadPromptRules, personaRuleDescriptor, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
 import { runtimeClockContext } from '../runtime-context';
+import { OrganizationService } from '../organization';
+import { organizationTools } from '../organization-tools';
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -107,11 +111,35 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     },
   );
   const automationTools = automations.tools();
+  let runtimeToolNames: () => string[] = () => [];
+  const organization = new OrganizationService({
+    store,
+    emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
+    runtimeAuthority: tenant => {
+      const workspace = tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant);
+      return {
+        workspace,
+        readOnly: false,
+        profile: store.runs.permission(tenant, workspace).profile,
+        allowedTools: runtimeToolNames(),
+      };
+    },
+  });
+  const society = new SocietyService({
+    store,
+    emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
+    organization,
+  });
+  const orgTools = organizationTools(organization, store);
+  const runTools = () => [...kernel.plugins.capabilities('tool').map(capability => capability.tool), ...automationTools, ...orgTools];
+  runtimeToolNames = () => runTools().map(tool => tool.name);
 
   const deps = {
     kernel, store, tracker,
     ...(scheduler ? { scheduler } : {}),
     automations,
+    organization,
+    society,
     sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
     activeRunCount: () => activeRunCount(),
   };
@@ -119,9 +147,10 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     projectRoot: kernel.rootDir,
     plugins: kernel.plugins.resolveService('service:task-plugins') as import('../../kernel/task-plugins').TaskPluginService | undefined,
     store, runner: () => getRunner(kernel),
-    tools: () => [...kernel.plugins.capabilities('tool').map(capability => capability.tool), ...automationTools],
+    tools: runTools,
     maxDepth: kernel.config.get<number>('agent.maxDelegationDepth', 4),
     executionSlots: kernel.config.get<number>('agent.executionSlots', 16),
+    organization,
     workspace: tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
     provider: (session, selected) => {
       const providers = getChatService(kernel)?.providers ?? [];
@@ -166,7 +195,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
       return {
         provider, model: record.model, messages: [], traceId: record.id,
         ruleResolution,
-        tools: [...kernel.plugins.tools(), ...automationTools],
+        tools: runTools(),
         contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
         systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
         contextMessages: [
@@ -182,10 +211,12 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     },
     activity: active => active ? beginRun() : endRun(),
   });
+  society.attachRunService(runs);
   runs.attachMaintenance(setMaintenanceModelScope(runs.maintenanceScope()));
   registerRunRoutes(app, deps, runs);
   registerItemRoutes(app, deps, runs);
   scheduler?.attach(runs);
+  if (scheduler) scheduler.attachSociety(society);
   automations.attach(runs);
   scheduler?.attachAutomations(automations);
 
@@ -224,6 +255,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
   registerAutomationRoutes(app, deps);
   registerWorkbenchRoutes(app, deps);
   registerExperienceRoutes(app, deps);
+  registerOrganizationRoutes(app, { ...deps, organization, society }, runs);
   registerChatRoutes(app, deps, runs);
   registerWorkspaceRoutes(app, deps);  // 工作区
   registerFileRoutes(app, deps);       // 文件 API（沙箱内）

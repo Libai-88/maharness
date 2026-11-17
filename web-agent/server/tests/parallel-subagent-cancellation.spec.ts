@@ -39,28 +39,73 @@ interface CancelFixture {
   stats(): { calls: number; active: number; peakActive: number };
 }
 
-/** 首轮发出委派工具调用；每个子任务的 LLM 流挂起直到 abort 才抛出取消错误。 */
+/** 先按需加载组织能力并建立契约，再委派；子任务流挂起直到 abort。 */
 function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', childCount: number): CancelFixture {
   let calls = 0;
   let active = 0;
-  let enables = 0;
   let peakActive = 0;
   const childSignals: AbortSignal[] = [];
   const provider: ProviderDef = {
     id: `cancel-${toolName}-provider`, label: 'Cancel Fixture', defaultModel: 'cancel-model',
+    priceSource: 'configured', prices: { in: 0, out: 0 }, outputLimitGuaranteed: true,
+    models: [{
+      modelId: 'cancel-model', contextWindow: 32_000, maxOutput: 4_096,
+      vision: false, tools: true, reasoning: false, priceIn: 0, priceOut: 0,
+      enabled: true, source: 'manual',
+    }],
     async *chat(_messages: LLMMessage[], opts: ChatOptions) {
-      if (calls === 0 && !opts.tools?.some(tool => tool.name === toolName)) {
-        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
-        enables++;
-        yield { type: 'tool_call', toolCall: { id: `enable-${enables}`, type: 'function', function: { name: 'enable_tools', arguments: JSON.stringify({ names: [toolName] }) } } };
-        yield { type: 'usage', input: 0, output: 0 }; yield { type: 'done' };
-        return;
-      }
       const call = ++calls;
       if (call === 1) {
+        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
+        yield { type: 'tool_call', toolCall: {
+          id: `enable-team-${call}`, type: 'function',
+          function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
+        } };
+        return;
+      }
+      if (call === 2) {
+        assert.ok(opts.tools?.some(tool => tool.name === 'team_create'));
+        assert.ok(!opts.tools?.some(tool => tool.name === toolName));
+        const assignments = Array.from({ length: Math.max(2, childCount) }, (_, index) => ({
+          roleName: `取消测试角色 ${index + 1}`,
+          objective: `独立取消测试分支 ${index + 1}`,
+          expectedArtifacts: [`cancel-branch-${index + 1}.md`],
+          acceptance: [`分支 ${index + 1} 可独立验收`],
+          budgetUsd: 0.1,
+        }));
+        yield {
+          type: 'tool_call',
+          toolCall: {
+            id: `team-call-${call}`, type: 'function',
+            function: { name: 'team_create', arguments: JSON.stringify({
+              assignments, teamEstimateUsd: Math.max(2, childCount) * 0.1, reason: '取消传播测试',
+            }) },
+          },
+        };
+        return;
+      }
+      if (call === 3) {
+        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
+        yield { type: 'tool_call', toolCall: {
+          id: `enable-delegation-${call}`, type: 'function',
+          function: { name: 'enable_tools', arguments: JSON.stringify({ names: [toolName] }) },
+        } };
+        return;
+      }
+      if (call === 4) {
+        assert.ok(opts.tools?.some(tool => tool.name === toolName));
+        assert.ok(started);
+        const root = started.store.runs.active('default')
+          .find(run => !run.parentId && run.providerId === provider.id);
+        assert.ok(root?.workOrderId);
+        const contracts = started.store.organization.contracts(root.workOrderId, 'default')
+          .filter(contract => contract.status === 'proposed');
+        assert.ok(contracts.length >= Math.max(2, childCount));
         const childArgs = toolName === 'run_subagent'
-          ? JSON.stringify({ objective: 'cancel-child-20261031' })
-          : JSON.stringify({ tasks: Array.from({ length: childCount }, (_, i) => ({ objective: `cancel-child-${i}-20261031` })) });
+          ? JSON.stringify({ objective: 'cancel-child-20261031', contractId: contracts[0]!.id })
+          : JSON.stringify({ tasks: Array.from({ length: childCount }, (_, i) => ({
+              objective: `cancel-child-${i}-20261031`, contractId: contracts[i]!.id,
+            })) });
         yield { type: 'tool_call', toolCall: { id: `cancel-call-${call}`, type: 'function', function: { name: toolName, arguments: childArgs } } };
         return;
       }
@@ -87,7 +132,7 @@ function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', chil
 async function startChat(sessionId: string, message: string): Promise<Response> {
   const response = await fetch(`${base}/api/sessions/${sessionId}/chat`, {
     method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, budgetUsd: 0.4, budgetPolicy: 'enforce' }),
   });
   assert.equal(response.status, 200);
   return response;
@@ -145,7 +190,7 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     }
     off();
     assert.equal(fixture.stats().peakActive, 4);
-    assert.equal(fixture.stats().calls, 5, '取消后父循环不得再发起新一轮模型调用');
+    assert.equal(fixture.stats().calls, 8, '取消后父循环不得再发起新一轮模型调用');
     for (const child of started.store.runs.children(run.id, 'default')) assert.equal(child.status, 'cancelled');
   });
 
@@ -154,7 +199,7 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     const fixture = makeCancellableProvider('run_subagent', 1);
     (started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] }).providers = [fixture.provider];
     const session = started.store.createSession('cancel-model', 'cancel-run_subagent-provider');
-    const response = await startChat(session.id, '委派子代理侦查');
+    const response = await startChat(session.id, '请组织团队并行委派子代理侦查');
     const reader = response.body!.getReader();
     const enteredAt = Date.now();
     while (fixture.childSignals.length < 1) { assert.ok(Date.now() - enteredAt < 5000, '子代理应在 5 秒内启动'); await new Promise((r) => setTimeout(r, 10)); }
@@ -167,6 +212,6 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
       assert.ok(Date.now() - abortTs < 5000, '取消后 5 秒内子代理流必须回收');
       await new Promise((r) => setTimeout(r, 20));
     }
-    assert.equal(fixture.stats().calls, 2, '取消后父循环不得再发起新一轮模型调用');
+    assert.equal(fixture.stats().calls, 5, '取消后父循环不得再发起新一轮模型调用');
   });
 });

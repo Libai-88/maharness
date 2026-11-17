@@ -38,6 +38,7 @@
     "eval:workbench": "tsx scripts/workbench-eval.ts",
     "eval:workbench:live": "tsx scripts/workbench-live.ts",
     "eval:experience:live": "tsx scripts/experience-live.ts",
+    "eval:organization:live": "tsx scripts/organization-live.ts",
     "eval:v3:live": "tsx scripts/v3-live.ts",
     "eval:long-content:live": "tsx scripts/workbench-live.ts --long-content",
     "eval:live": "tsx scripts/eval-live.ts",

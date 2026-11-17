@@ -1,7 +1,7 @@
 import type { CapabilityDescriptor, ToolDef } from './types';
 import { estimateTokens } from './tokens';
 
-const DEFAULT_TOOLS = new Set(['list_dir', 'read_file', 'glob', 'grep', 'write_file', 'edit_file', 'delete_file', 'command_start', 'command_output', 'command_wait', 'command_cancel', 'powershell_execute', 'web_search', 'web_fetch', 'recall_tool_result', 'search_history', 'read_history', 'run_subagent', 'run_parallel', 'run_review']);
+const DEFAULT_TOOLS = new Set(['list_dir', 'read_file', 'glob', 'grep', 'write_file', 'edit_file', 'delete_file', 'command_start', 'command_output', 'command_wait', 'command_cancel', 'powershell_execute', 'web_search', 'web_fetch', 'recall_tool_result', 'search_history', 'read_history']);
 const REQUIRED_TOOLS = new Set(['recall_tool_result']);
 export const CATALOG_MANAGER_TOOLS = new Set(['discover_tools', 'enable_tools', 'release_tools', 'discover_capabilities', 'enable_capabilities']);
 const MANAGERS = CATALOG_MANAGER_TOOLS;

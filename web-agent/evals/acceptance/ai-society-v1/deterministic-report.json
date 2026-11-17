@@ -1,0 +1,289 @@
+{
+  "kind": "ai-society-deterministic-acceptance",
+  "schemaVersion": 3,
+  "generatedAt": "2026-11-17T19:17:35.476Z",
+  "mode": "deterministic-real-runtime-fixture",
+  "criteria": [
+    {
+      "id": "A1",
+      "domain": "产品定位",
+      "status": "passed",
+      "evidence": [
+        "架构文档明确 OS 层与社会运行层共同构成产品本体，主 Agent 只是人类入口与协调器。",
+        "默认制度 v1 包含 3 个部门和 4 个持久角色。"
+      ]
+    },
+    {
+      "id": "A2",
+      "domain": "与多代理框架区分",
+      "status": "passed",
+      "evidence": [
+        "社会运行由独立 SocietyService 与系统调度器推进，不依赖主 Agent 调用链。",
+        "角色在任务结束后保留身份、履历、关系和福利状态。"
+      ]
+    },
+    {
+      "id": "B1",
+      "domain": "持久社会成员",
+      "status": "passed",
+      "evidence": [
+        "持久角色 4 个，均有 appointment 生命史。",
+        "角色记录包含岗位、权限、模型策略、聘用状态和修订号。"
+      ]
+    },
+    {
+      "id": "B2",
+      "domain": "制度调度而非硬派活",
+      "status": "passed",
+      "evidence": [
+        "机构 v1 作出 team 决策，角色 2 个。",
+        "系统 tick 在无主 Agent 调用时创建了 2 个真实社会 Run 和 2 份分工契约。"
+      ]
+    },
+    {
+      "id": "B3",
+      "domain": "部门与社会运行层",
+      "status": "passed",
+      "evidence": [
+        "3 个部门、5 个成员和 2 条协作关系进入社会快照。",
+        "快照同时提供部门队列、并发、福利、瓶颈和健康度。"
+      ]
+    },
+    {
+      "id": "C1",
+      "domain": "多目标优化",
+      "status": "passed",
+      "evidence": [
+        "调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。",
+        "当前社会健康分数=93.92，预算利用率=0.004。"
+      ]
+    },
+    {
+      "id": "C2",
+      "domain": "AI 社会成员福利",
+      "status": "passed",
+      "evidence": [
+        "角色并发上限进入实际调度门禁。",
+        "超载时新任务不启动 Run，角色不会被无限占用。"
+      ]
+    },
+    {
+      "id": "D1",
+      "domain": "人类经营者界面",
+      "status": "passed",
+      "evidence": [
+        "工作台提供目标、价值、预算、部门、审批、验收、制度调整与回滚操作。",
+        "浏览器 UI 契约测试覆盖经营流程；截图仅作展示：evals/acceptance/ai-society-v1/dashboard.png。"
+      ]
+    },
+    {
+      "id": "D2",
+      "domain": "社会仪表盘",
+      "status": "passed",
+      "evidence": [
+        "mock API 浏览器契约确认界面展示部门、角色、网络、瓶颈、福利、执行进度与待验收结果。",
+        "执行中的真实 Run 不显示验收按钮；只有 awaiting_acceptance 才允许人工确认交付。"
+      ]
+    },
+    {
+      "id": "E1",
+      "domain": "制度版本化演化",
+      "status": "passed",
+      "evidence": [
+        "制度更新和回滚均创建新 active 版本，旧版本保留；哈希、来源、前后版本和原因可审计。",
+        "角色独立发布 v2 并回滚为 active v3，历史版本和审计保持可查。",
+        "评价标准独立发布 v2 并回滚为 active v3，AI 复盘可冻结完整策略版本和哈希。"
+      ]
+    },
+    {
+      "id": "E2",
+      "domain": "可审计与可干预",
+      "status": "passed",
+      "evidence": [
+        "模型不能批准自身高额任务；人类批准后才进入调度。",
+        "人类调整部门配额后，调度被事实门禁阻断并记录具体原因。"
+      ]
+    },
+    {
+      "id": "F1",
+      "domain": "去掉主 Agent 仍运转",
+      "status": "passed",
+      "evidence": [
+        "无主 Agent 运行时创建 Run：16b2025b-2d69-4d12-852d-e07667faecc9, 9ff430ff-4f1f-4b31-b465-83407222fbd7。",
+        "运行来源均为 society，并由系统调度器而不是聊天调用链推进。"
+      ]
+    },
+    {
+      "id": "F2",
+      "domain": "角色跨任务生命史",
+      "status": "passed",
+      "evidence": [
+        "团队完成后角色保留 schedule、delivery 和 appointment 记忆。",
+        "当前协作网络包含 2 条有契约证据的关系。"
+      ]
+    },
+    {
+      "id": "F3",
+      "domain": "调度受福利与资源约束",
+      "status": "passed",
+      "evidence": [
+        "福利负载、部门并发、预算和角色可用性共同决定是否派工。"
+      ]
+    },
+    {
+      "id": "F4",
+      "domain": "制度可版本化演化",
+      "status": "passed",
+      "evidence": [
+        "制度从 v1 更新到 v2，再以 v3 发布回滚。",
+        "历史版本、策略哈希和审计记录保持可查。"
+      ]
+    },
+    {
+      "id": "G1",
+      "domain": "token 三级预算",
+      "status": "passed",
+      "evidence": [
+        "社会预算=20 USD / 2000000 token。",
+        "部门配额、角色账本和任务预算均进入同一快照与调度门禁。"
+      ]
+    },
+    {
+      "id": "G2",
+      "domain": "组队净收益阈值",
+      "status": "passed",
+      "evidence": [
+        "同一双分支结构在低价值时保持单角色，没有误组队。",
+        "更低收益任务进入排队：单角色净收益不足，等待人类重新估价或缩小预算。",
+        "组队决策要求团队净收益高于单角色并跨过制度门槛。"
+      ]
+    },
+    {
+      "id": "G3",
+      "domain": "最小必要团队与动态解散",
+      "status": "passed",
+      "evidence": [
+        "团队 Run 数=2，全部真实契约交付后调度释放。",
+        "角色处于空闲状态，但身份、记忆和关系继续保留。"
+      ]
+    },
+    {
+      "id": "G4",
+      "domain": "分层认知与共享记忆",
+      "status": "passed",
+      "evidence": [
+        "调度作业持久化 decision 与 execution 认知层及各自路由策略。",
+        "重复材料引用按稳定 EvidenceRef 去重；fixture 不伪造 Provider cache usage。"
+      ]
+    },
+    {
+      "id": "G5",
+      "domain": "token 社会仪表盘与调度市场",
+      "status": "passed",
+      "evidence": [
+        "社会、部门和角色预算可见；团队实际 token=1020。",
+        "全部 Run 同时报告缓存命中与未命中 token 时命中率为 0.5；任一 Run 缺字段时命中率恢复为 null。",
+        "Provider 缓存节省=null；未知值保持 null。"
+      ]
+    },
+    {
+      "id": "G6",
+      "domain": "熔断与回退",
+      "status": "passed",
+      "evidence": [
+        "低收益扩团被阻止，任务保留可重新估价状态。",
+        "团队分支失败后创建单角色协调契约，保留已完成证据并以 ROLLBACK_TO_SOLO 继续。"
+      ]
+    },
+    {
+      "id": "H1",
+      "domain": "多团队净收益实验",
+      "status": "partial",
+      "evidence": [
+        "当前结果来自声明式估算，不是同一任务上单角色与团队的配对真实模型 A/B。",
+        "单角色净收益=99.92 USD。",
+        "团队净收益=111.916 USD。",
+        "边际净收益=11.996 USD；公式已冻结在调度事实中。"
+      ]
+    },
+    {
+      "id": "H2",
+      "domain": "场景演练",
+      "status": "passed",
+      "evidence": [
+        "单 Agent 可解不组队、高价值任务组队、低收益扩团被拒、失败不可伪造完成、团队失败回退单角色、无主 Agent 持久化 Run 推进均已执行。",
+        "成功团队 Run=2，低价值任务模式=solo，失败任务终态=failed。"
+      ]
+    }
+  ],
+  "summary": {
+    "total": 23,
+    "passed": 22,
+    "partial": 1,
+    "failed": 0,
+    "aToFPassed": true,
+    "gToHPassed": false,
+    "fullyPassed": false
+  },
+  "sourceHashes": {
+    "scripts/ai-society-acceptance.ts": "a109f0a356af50874a3306516caceff5a924c7bc6b42e759ee378d5403c1a0b8",
+    "server/db.ts": "023864d1363b53cec29b43218d40cb5738b6dc2564db81a3a7cc1a6fe1b4517f",
+    "server/society.ts": "ae7903f6953217b029ae8618a7ad415b4845b9347aebdfed1090dd982055ac06",
+    "server/organization.ts": "06ffcb91fb9d5f793e3cd5c28cc58c84798ad846ba05cf78a86a5c4924aec4f2",
+    "server/organization-store.ts": "b4c202087618281b1c52054d11d32a677fc854689b058a172f46ef1f73efb8eb",
+    "server/run-service.ts": "3b3874bad99979792e5d62f6b48d96bb139f39996bb9774c7db5e2b5720a221f",
+    "server/tests/organization.spec.ts": "eb4e80d2fa77a80eaaf87875c39535b45ed75ecd0f80218103c6adfcd29bf541",
+    "server/tests/society.spec.ts": "acb1966abd4004041f65eade197f1b9c30b22d95603d0286c082267b199a3c3e",
+    "server/tests/society-restart.integration.spec.ts": "12b55807c6537a68b3585737ed23cd8faec1fd0126e5b8fe0209e3498afadd69",
+    "ui/e2e/society.spec.ts": "97aead2c60e0204e65191306d7e1017e22c93e1a79f8df5065db33735aecb868"
+  },
+  "evidence": {
+    "realRuntime": "Each scheduled assignment creates a persisted Run with society origin, work-order, contract, role, token and cache facts.",
+    "humanAcceptance": "Only awaiting_acceptance with all contracts delivered can enter completed.",
+    "uiE2e": "ui/e2e/society.spec.ts is a browser UI contract test with mocked APIs.",
+    "dashboard": "evals/acceptance/ai-society-v1/dashboard.png"
+  },
+  "liveModelEvidence": {
+    "available": true,
+    "model": "group/never-stuck",
+    "rawRun": {
+      "createdAt": "2026-11-17T15:34:57.138Z",
+      "expected": 9,
+      "observed": 9,
+      "passed": 1,
+      "allPassed": false,
+      "calls": 21,
+      "tokensIn": 36605,
+      "tokensOut": 9475,
+      "configuredCostUsd": 0,
+      "usageComplete": true,
+      "elapsedMs": 98581
+    },
+    "traceReplay": {
+      "createdAt": "2026-11-17T17:34:08.237Z",
+      "sourceReportHash": "346f91fb2ae78324fa53395e5a900308b0b66cbe5bec80978201da6b61178dc4",
+      "rawPassed": 1,
+      "reconciledPassed": 9,
+      "total": 9,
+      "callsModels": false,
+      "semantics": "Reloads persisted outputs and terminal facts through the corrected deterministic finalizer."
+    },
+    "providerCache": {
+      "hitMissStatus": "known",
+      "writeStatus": "unknown",
+      "cachedInputTokens": 6144,
+      "missInputTokens": 30461,
+      "cacheWriteTokens": null,
+      "cacheSavingsUsd": null,
+      "source": "run_model_calls_v2.record"
+    },
+    "billing": "The configured route declares a zero local price; supplier billing and cache savings remain unverified."
+  },
+  "limits": [
+    "This report validates deterministic runtime and browser behavior; it is not a real-model result.",
+    "Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.",
+    "福祉表示可观测运行负担，不表示主观感受、意识或法律人格。",
+    "H1 is a declared-estimate comparison, not a paired real-model A/B; actual quality gain, latency benefit and net benefit remain unverified.",
+    "The browser E2E uses mocked APIs and does not prove a live frontend-to-backend flow."
+  ]
+}

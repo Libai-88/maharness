@@ -2,10 +2,20 @@ import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from '
 import { dirname } from 'node:path';
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
+export interface PlanWorkItem {
+  id: string;
+  objective: string;
+  expectedArtifacts: string[];
+  acceptance: string[];
+  dependsOn: string[];
+  evidenceRefs: string[];
+  estimatedTokens: number;
+}
 
 export interface PlanState {
   objective: string;
   steps: { title: string; status: StepStatus; note?: string; blockedReason?: string; updatedAt?: number }[];
+  workItems?: PlanWorkItem[];
   current: number;
   completed: boolean;
   createdAt: number;
@@ -32,10 +42,25 @@ function normalizePlan(value: unknown): PlanState | null {
       ...(Number.isFinite(item.updatedAt) ? { updatedAt: Number(item.updatedAt) } : {}),
     }];
   });
+  const workItems = Array.isArray(raw.workItems) ? raw.workItems.flatMap((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+    const item = value as Record<string, unknown>;
+    if (typeof item.id !== 'string' || typeof item.objective !== 'string') return [];
+    return [{
+      id: item.id,
+      objective: item.objective,
+      expectedArtifacts: Array.isArray(item.expectedArtifacts) ? item.expectedArtifacts.filter((entry): entry is string => typeof entry === 'string') : [],
+      acceptance: Array.isArray(item.acceptance) ? item.acceptance.filter((entry): entry is string => typeof entry === 'string') : [],
+      dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.filter((entry): entry is string => typeof entry === 'string') : [],
+      evidenceRefs: Array.isArray(item.evidenceRefs) ? item.evidenceRefs.filter((entry): entry is string => typeof entry === 'string') : [],
+      estimatedTokens: Number.isFinite(item.estimatedTokens) ? Math.max(0, Math.trunc(Number(item.estimatedTokens))) : 0,
+    }];
+  }) : [];
   if (steps.length === 0 && raw.steps.length > 0) return null;
   return {
     objective: raw.objective,
     steps,
+    ...(workItems.length ? { workItems } : {}),
     current: Number.isFinite(raw.current) ? Math.max(0, Math.trunc(Number(raw.current))) : 0,
     completed: raw.completed === true,
     createdAt: Number.isFinite(raw.createdAt) ? Number(raw.createdAt) : Date.now(),

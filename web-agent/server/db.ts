@@ -19,6 +19,8 @@ import { MATERIAL_SCHEMA, MaterialRepository } from './materials';
 import { AUTOMATION_SCHEMA, AutomationRepository } from './automations';
 import { RECOVERY_SCHEDULE_SCHEMA, ScheduleRepository } from './schedule-store';
 import { EXPERIENCE_SCHEMA, ExperienceRepository } from './experience-store';
+import { ORGANIZATION_SCHEMA, OrganizationRepository, roleGovernance, type OrganizationRole } from './organization-store';
+import { REVIEW_DIMENSIONS, REVIEW_RUBRIC_VERSION, REVIEW_SYSTEM_PROMPT } from './review-rubric';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
@@ -130,6 +132,7 @@ export class Store {
   readonly automations: AutomationRepository;
   readonly schedules: ScheduleRepository;
   readonly experience: ExperienceRepository;
+  readonly organization: OrganizationRepository;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -165,6 +168,7 @@ export class Store {
     this.automations = new AutomationRepository(this.db);
     this.schedules = new ScheduleRepository(this.db);
     this.experience = new ExperienceRepository(this.db);
+    this.organization = new OrganizationRepository(this.db);
     this.experience.interruptRunning();
   }
 
@@ -228,6 +232,7 @@ export class Store {
         this.db.exec(AUTOMATION_SCHEMA);
         this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
         this.db.exec(EXPERIENCE_SCHEMA);
+        this.db.exec(ORGANIZATION_SCHEMA);
         this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
       })();
       return;
@@ -409,10 +414,94 @@ export class Store {
     { from: 7, to: 8, run: db => { db.exec(MATERIAL_SCHEMA); } },
     { from: 8, to: 9, run: db => { db.exec(AUTOMATION_SCHEMA); db.exec(RECOVERY_SCHEDULE_SCHEMA); } },
     { from: 9, to: 10, run: db => { db.exec(EXPERIENCE_SCHEMA); } },
+    { from: 10, to: 11, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
+    { from: 11, to: 12, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
+    { from: 12, to: 13, run: db => {
+      const scheduleColumns = db.prepare('PRAGMA table_info(organization_society_schedules_v1)').all() as { name: string }[];
+      if (!scheduleColumns.some(column => column.name === 'work_order_id'))
+        db.exec('ALTER TABLE organization_society_schedules_v1 ADD COLUMN work_order_id TEXT');
+      db.exec(`
+        DROP INDEX IF EXISTS organization_work_orders_tenant;
+        DROP INDEX IF EXISTS organization_work_orders_project;
+        ALTER TABLE organization_work_orders_v1 RENAME TO organization_work_orders_v12;
+      `);
+      db.exec(ORGANIZATION_SCHEMA);
+      db.exec(`
+        INSERT INTO organization_work_orders_v1
+          (id,tenant_id,project_id,session_id,root_run_id,origin_kind,origin_id,status,operation_key,record,created_at,updated_at)
+        SELECT id,tenant_id,project_id,session_id,root_run_id,'run',root_run_id,status,operation_key,record,created_at,updated_at
+        FROM organization_work_orders_v12;
+        DROP TABLE organization_work_orders_v12;
+      `);
+    } },
+    { from: 13, to: 14, run: db => {
+      db.exec(ORGANIZATION_SCHEMA);
+      const insertVersion = db.prepare(`INSERT OR IGNORE INTO organization_versions_v1
+        (id,tenant_id,kind,subject_id,version,status,record,hash,created_by,reason,created_at)
+        VALUES(?,?,?,?,?,?,?,?,?,?,?)`);
+      const insertAudit = db.prepare(`INSERT INTO organization_version_audits_v1
+        (id,tenant_id,kind,subject_id,version,action,actor,from_version,to_version,
+         before_hash,after_hash,reason,created_at)
+        SELECT ?,?,?,?,?,'initialize',?,NULL,1,NULL,?,?,?
+        WHERE NOT EXISTS (
+          SELECT 1 FROM organization_version_audits_v1
+          WHERE tenant_id=? AND kind=? AND subject_id=? AND version=1
+        )`);
+      const roles = db.prepare('SELECT tenant_id,record,created_at FROM organization_roles_v1').all() as
+        Array<{ tenant_id: string; record: string; created_at: number }>;
+      for (const role of roles) {
+        const parsed = JSON.parse(role.record) as OrganizationRole;
+        const governance = JSON.stringify(roleGovernance(parsed));
+        const hash = createHash('sha256').update(governance).digest('hex');
+        const actor = parsed.source === 'human' ? 'human' : 'maharness';
+        insertVersion.run(
+          randomUUID(), role.tenant_id, 'role', parsed.id, 1, 'active',
+          governance, hash, actor, '迁移当前角色为 v1', role.created_at,
+        );
+        insertAudit.run(
+          randomUUID(), role.tenant_id, 'role', parsed.id, 1, actor, hash, '迁移当前角色为 v1', role.created_at,
+          role.tenant_id, 'role', parsed.id,
+        );
+      }
+      const tenants = db.prepare(`SELECT id FROM tenants
+        UNION SELECT DISTINCT tenant_id FROM organization_roles_v1`).all() as Array<{ id: string }>;
+      for (const tenant of tenants) {
+        const policy = {
+          schemaVersion: 1,
+          lowConfidenceSamples: 3,
+          mediumConfidenceSamples: 10,
+          highConfidenceSamples: 30,
+          rankingWeights: { acceptance: 0.5, budget: 0.3, evidence: 0.2 },
+          review: {
+            rubricVersion: REVIEW_RUBRIC_VERSION,
+            dimensions: [...REVIEW_DIMENSIONS],
+            systemPrompt: REVIEW_SYSTEM_PROMPT,
+            fast: { input: 3_000, output: 800, total: 3_800 },
+            focused: { input: 8_000, output: 1_200, total: 9_200 },
+            multi: { input: 10_000, output: 1_500, total: 11_500 },
+            positiveMinAverage: 3.5,
+            positiveMinReuse: 4,
+            positiveMinDimension: 3,
+          },
+          formula: 'role metrics come from contract and Run facts; review verdict cannot override fact gates',
+        };
+        const json = JSON.stringify(policy);
+        const hash = createHash('sha256').update(json).digest('hex');
+        const now = Date.now();
+        insertVersion.run(
+          randomUUID(), tenant.id, 'evaluation', 'default', 1, 'active',
+          json, hash, 'maharness', '初始化评价标准', now,
+        );
+        insertAudit.run(
+          randomUUID(), tenant.id, 'evaluation', 'default', 1, 'maharness',
+          hash, '初始化评价标准', now, tenant.id, 'evaluation', 'default',
+        );
+      }
+    } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 10;
+  static readonly DB_SCHEMA_VERSION = 14;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 
@@ -506,6 +595,15 @@ export class Store {
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_approval_requests_tenant ON approval_requests(tenant_id, created_at)');
     // Additive schema-9 compatibility for databases created before recovery schedules moved to SQLite.
     this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
+    if (this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='organization_versions_v1'").get()) {
+      this.db.exec(`UPDATE organization_versions_v1 AS current SET status='superseded'
+        WHERE current.status='active' AND current.version < (
+          SELECT MAX(candidate.version) FROM organization_versions_v1 AS candidate
+          WHERE candidate.tenant_id=current.tenant_id AND candidate.kind=current.kind
+            AND candidate.subject_id=current.subject_id AND candidate.status='active'
+        )`);
+    }
+    this.db.exec(ORGANIZATION_SCHEMA);
     const tenantCols = this.db.prepare('PRAGMA table_info(tenants)').all() as { name: string }[];
     if (!tenantCols.some((c) => c.name === 'max_sessions')) {
       this.db.exec('ALTER TABLE tenants ADD COLUMN max_sessions INTEGER NOT NULL DEFAULT 0');

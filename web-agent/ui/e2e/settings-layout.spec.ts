@@ -166,6 +166,11 @@ test('工作台新增事项后立即刷新聚合结果', async ({ page }) => {
       pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [],
       notes: [{ id: 'note-new', text: '模型写入的工作台笔记', tags: [], createdAt: 1, updatedAt: Date.now() }],
       metrics: { schemaVersion: 1, firstTaskSuccessRate: null, takeoverRate: null, recoveredAfterFailureRate: null, automaticRecoveryRate: null, invalidToolCalls: 0, duplicateToolCalls: 0, capabilitySelectionFailures: 0, durationMs: 0, modelCalls: 0, costUsd: 0 },
+      experience: {
+        schemaVersion: 1, reviewCount: 0, negativeReviews: 0, averageScore: null,
+        undecidedFindings: 0, openFindings: 0, findings: [], recentReviews: [],
+      },
+      society: null,
     },
   }));
 
@@ -234,7 +239,7 @@ async function checkAccessibility(page: Page) {
 for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复来源，兼容历史记录 ${width}`, async ({ page }) => {
   await page.setViewportSize({ width, height: 900 });
   await setup(page);
-  const run = { billingNotice: '部分模型调用的用量或价格尚未确认，请在任务结束后核对。', id: 'diagnostic-run', sessionId: 'design-0', objective: '核对恢复后的材料', model: 'design-model', providerId: 'design', status: 'interrupted', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, usageStatus: 'unknown', error: '操作结果未知，禁止自动重放', authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 } };
+  const run = { billingNotice: '部分模型调用的用量或价格尚未确认，请在任务结束后核对。', id: 'diagnostic-run', sessionId: 'design-0', objective: '核对恢复后的材料', model: 'design-model', providerId: 'design', status: 'interrupted', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 0, updatedAt: 0, usageStatus: 'unknown', error: '操作结果未知，禁止自动重放', authorization: { workspace: 'fixture', profile: 'standard', readOnly: false, revision: 0 }, origin: { kind: 'society', societyTaskId: 'society-task-1', scheduleId: 'schedule-1', assignmentContractId: 'contract-1' } };
   await page.route('**/api/v2/**', route => {
     const path = new URL(route.request().url()).pathname;
     if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
@@ -254,6 +259,7 @@ for (const width of [1440, 390]) test(`任务诊断展示输入分项和恢复�
   await expect(panel).toContainText('费用待核对');
   await expect(panel).toContainText('请在任务结束后核对');
   await expect(panel).toContainText('操作结果未知');
+  await expect(panel).toContainText('来源：AI 社会任务 society-task-1 · 调度 schedule-1 · 分工 contract-1');
   await expect(panel).toContainText('机器验收 · 尚未验证');
   await expect(panel).toContainText('结果未知，禁止自动重放');
   await expect(panel).toContainText('错误码：TOOL_INTERRUPTED · 副作用：未知 · 不可自动重试');

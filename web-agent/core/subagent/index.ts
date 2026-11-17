@@ -138,16 +138,24 @@ export default {
             tools: { type: 'string', enum: ['read', 'all'], description: '工具白名单：read=只读（默认），all=全部工具' },
             maxTurns: { type: 'integer', minimum: 1, maximum: 24, description: '最大轮数（默认 12）' },
             plugins: { type: 'array', items: { type: 'string' }, description: '显式继承的父任务活动插件 ID；需要 tools=all 和写入授权' },
+            contractId: { type: 'string', description: '团队模式下由 team_create 返回的分工契约 ID' },
           },
           required: ['objective'],
         },
-        async handler(args: { objective?: string; tools?: string; maxTurns?: number; plugins?: string[] }, tctx: ToolContext) {
+        async handler(args: { objective?: string; tools?: string; maxTurns?: number; plugins?: string[]; contractId?: string }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
           const maxTurns = Math.max(1, Math.min(24, Math.floor(Number(args.maxTurns) || 12)));
           if (tctx.delegate) {
-            const result = await tctx.delegate({ objective, tools: args.tools === 'all' ? 'all' : 'read', maxTurns, instructions: SUB_SYSTEM_PROMPT, plugins: args.plugins }, tctx.signal);
+            const result = await tctx.delegate({
+              objective,
+              tools: args.tools === 'all' ? 'all' : 'read',
+              maxTurns,
+              instructions: SUB_SYSTEM_PROMPT,
+              plugins: args.plugins,
+              ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
+            }, tctx.signal);
             return { ok: !result.error, ...(result.error ? { error: result.error } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }
 
@@ -299,15 +307,22 @@ export default {
           properties: {
             target: { type: 'string', description: '要审查的产出内容或说明（≤2000 字符；涉及文件时给出路径，审查者会自己读取核验）' },
             criteria: { type: 'string', description: '可选：审查标准（默认：正确性与需求符合度）' },
+            contractId: { type: 'string', description: '团队模式下由 team_create 返回的分工契约 ID' },
           },
           required: ['target'],
         },
-        async handler(args: { target?: string; criteria?: string }, tctx: ToolContext) {
+        async handler(args: { target?: string; criteria?: string; contractId?: string }, tctx: ToolContext) {
           const target = String(args.target ?? '').trim();
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
           if (tctx.delegate) {
-            const result = await tctx.delegate({ objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`, tools: 'read', maxTurns: 8, instructions: REVIEWER_SYSTEM_PROMPT }, tctx.signal);
+            const result = await tctx.delegate({
+              objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`,
+              tools: 'read',
+              maxTurns: 8,
+              instructions: REVIEWER_SYSTEM_PROMPT,
+              ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
+            }, tctx.signal);
             const { parsed, ...review } = parseReview(result.answer);
             return { ok: !result.error && parsed, error: result.error ?? (parsed ? undefined : '审查输出不符合 JSON 契约'), data: { ...review, ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }

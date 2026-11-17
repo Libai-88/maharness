@@ -9,6 +9,7 @@ import type { ProviderDef } from '../../kernel/types';
 import { Store } from '../db';
 import { OrganizationService } from '../organization';
 import { RunService } from '../run-service';
+import { Scheduler } from '../scheduler';
 import { SocietyService } from '../society';
 
 function deferred() {
@@ -143,8 +144,12 @@ test('society restart resumes the same interrupted Run through real services', {
     assert.ok(schedule, 'society task was not scheduled');
     const runId = schedule.runIds[0];
     const contractId = schedule.contractIds[0];
+    const roleId = schedule.roleIds[0];
     assert.ok(runId, 'society schedule did not start a Run');
     assert.ok(contractId, 'society Run has no assignment contract');
+    assert.ok(roleId, 'society schedule did not select a role');
+    assert.equal(organization.roleHistory(roleId, 'default').versions.length, 1,
+      'runtime workspace/session binding must not create a governance version');
 
     await firstEntered.promise;
     assert.equal(firstRuns.get(runId, 'default').status, 'running');
@@ -161,9 +166,12 @@ test('society restart resumes the same interrupted Run through real services', {
     restartedRuns = new RunService(environment(store, restartedOrganization));
     const restartedSociety = new SocietyService({ store, organization: restartedOrganization });
     restartedSociety.attachRunService(restartedRuns);
+    assert.equal(restartedOrganization.roleHistory(roleId, 'default').versions.length, 1,
+      'restart must preserve the governance version history');
 
-    const tick = restartedSociety.tickAll();
-    assert.deepEqual(tick.failed, []);
+    const scheduler = new Scheduler(store, { file: join(root, 'schedules.db'), now: () => Date.now() });
+    scheduler.attachSociety(restartedSociety);
+    await scheduler.tick();
     await resumedEntered.promise;
 
     const resumed = restartedRuns.get(runId, 'default');

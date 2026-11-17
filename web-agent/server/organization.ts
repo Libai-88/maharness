@@ -1,0 +1,1449 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { currentPlanForSession } from '../core/goal-plan';
+import type { PermissionProfile, RunRecord } from '../kernel/run';
+import type { Store } from './db';
+import {
+  OrganizationError,
+  type AssignmentContract,
+  type AssignmentDelivery,
+  type EvaluationPolicy,
+  type EvaluationVersion,
+  type EvidenceRef,
+  type ExceptionCase,
+  type InstitutionProposal,
+  type OrganizationRole,
+  type OrganizationRoleGovernance,
+  type OrganizationVersionAudit,
+  type RoleVersion,
+  type RoleScorecard,
+  type RoleWellbeingSnapshot,
+  type SocietySchedule,
+  type SocietyTask,
+  type TeamCycle,
+  type TeamEconomics,
+  type WorkLedgerEntry,
+  type WorkOrder,
+  type WorkReceipt,
+} from './organization-store';
+import { REVIEW_DIMENSIONS, REVIEW_RUBRIC_VERSION, REVIEW_SYSTEM_PROMPT } from './review-rubric';
+
+export interface AssignmentDraft {
+  roleId?: string;
+  roleName?: string;
+  objective: string;
+  expectedArtifacts: string[];
+  acceptance: string[];
+  evidenceInputs?: EvidenceRef[];
+  dependsOn?: string[];
+  budgetUsd: number;
+  allowedTools?: string[];
+}
+
+export interface TeamCreateInput {
+  assignments: AssignmentDraft[];
+  singleAgentEstimateUsd?: number;
+  teamEstimateUsd?: number;
+  reason?: string;
+}
+
+export interface SocietyExecutionPlan {
+  workOrder: WorkOrder;
+  teamCycle?: TeamCycle;
+  roles: OrganizationRole[];
+  contracts: AssignmentContract[];
+}
+
+export interface OrganizationDetail {
+  workOrder: WorkOrder;
+  teamCycles: TeamCycle[];
+  roles: OrganizationRole[];
+  contracts: AssignmentContract[];
+  ledger: WorkLedgerEntry[];
+  receipt?: WorkReceipt;
+  exceptions: ExceptionCase[];
+  economics: TeamEconomics;
+  scorecards: RoleScorecard[];
+  wellbeing: RoleWellbeingSnapshot[];
+}
+
+export interface OrganizationServiceOptions {
+  store: Store;
+  emit?: (type: string, data: Record<string, unknown>) => void;
+  runtimeAuthority?: (tenantId: string) => {
+    workspace: string;
+    readOnly: boolean;
+    profile: PermissionProfile;
+    allowedTools?: string[];
+  };
+}
+
+const TEAM_TOOL_NAMES = new Set(['run_subagent', 'run_parallel', 'run_review', 'work_contract_deliver', 'raise_exception']);
+const ORGANIZATION_ADVANCED_TOOLS = new Set(['team_create', 'work_contract_create', 'role_scorecard']);
+const TEAM_REQUEST = /(团队|小组|多人协作|多个角色|并行|分工|派给|交给.*代理|agent\s*(team|群|组)|subagents?|parallel)/i;
+const NEGATED_TEAM_REQUEST = /(?:不要|不用|无需|不需要|别|禁止|不得|暂不)[^，,。！？!?；;\n]{0,16}(?:团队|小组|多个角色|并行|分工|派给|代理|subagents?|parallel)/i;
+
+function explicitTeamRequest(text: string): boolean {
+  return text.split(/[，,。！？!?；;\n]+/).some(clause => TEAM_REQUEST.test(clause) && !NEGATED_TEAM_REQUEST.test(clause));
+}
+
+function bounded(text: string, max: number, label: string): string {
+  const value = text.trim();
+  if (!value) throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `${label}不能为空`);
+  if (value.length > max) throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `${label}过长（最多 ${max} 字）`);
+  return value;
+}
+
+function evidenceOf(runIds: string[], store: Store, tenantId: string): EvidenceRef[] {
+  const evidence: EvidenceRef[] = [];
+  for (const runId of runIds) {
+    const run = store.runs.get(runId, tenantId);
+    if (!run) continue;
+    evidence.push({
+      id: `goal:${run.id}`,
+      kind: 'goal',
+      ref: run.id,
+      hash: createHash('sha256').update(run.objective).digest('hex').slice(0, 16),
+    });
+    for (const artifact of store.runs.artifacts(run.id)) {
+      evidence.push({
+        id: `artifact:${artifact.id}`,
+        kind: 'artifact',
+        ref: artifact.ref,
+        version: artifact.metadata?.version,
+        hash: artifact.metadata?.version,
+      });
+    }
+  }
+  return evidence;
+}
+
+function cachePrefixHash(input: {
+  tenantId: string;
+  workspace: string;
+  projectId: string;
+  providerId: string;
+  model: string;
+  workOrderId: string;
+  materialVersions: { id: string; version: string }[];
+  ruleHash?: string;
+  toolVersions?: string[];
+}): string {
+  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
+}
+
+function unfinishedForRun(run: RunRecord): string[] {
+  const verification = run.verification as { status?: string; checks?: { ok?: boolean; reason?: string }[] } | undefined;
+  const failedChecks = verification?.checks
+    ?.filter(check => check.ok === false)
+    .flatMap(check => check.reason ? [check.reason] : ['验收条件未通过']) ?? [];
+  if (run.status !== 'completed') return [run.error ?? `任务未完成：${run.status}`];
+  if (verification?.status === 'partial') return failedChecks.length ? failedChecks : ['任务仅部分完成'];
+  if (verification?.status === 'failed') return failedChecks.length ? failedChecks : ['任务验收失败'];
+  return failedChecks;
+}
+
+function intersectTools(...groups: Array<string[] | undefined>): string[] {
+  const constrained = groups.filter((group): group is string[] => !!group?.length);
+  if (!constrained.length) return [];
+  return [...new Set(constrained[0]!)].filter(name => constrained.slice(1).every(group => group.includes(name)));
+}
+
+function narrowProfile(left: PermissionProfile, right: PermissionProfile): PermissionProfile {
+  return left === 'developer' && right === 'developer' ? 'developer' : 'standard';
+}
+
+const DEFAULT_EVALUATION_POLICY: EvaluationPolicy = {
+  schemaVersion: 1,
+  lowConfidenceSamples: 3,
+  mediumConfidenceSamples: 10,
+  highConfidenceSamples: 30,
+  rankingWeights: { acceptance: 0.5, budget: 0.3, evidence: 0.2 },
+  review: {
+    rubricVersion: REVIEW_RUBRIC_VERSION,
+    dimensions: [...REVIEW_DIMENSIONS],
+    systemPrompt: REVIEW_SYSTEM_PROMPT,
+    fast: { input: 3_000, output: 800, total: 3_800 },
+    focused: { input: 8_000, output: 1_200, total: 9_200 },
+    multi: { input: 10_000, output: 1_500, total: 11_500 },
+    positiveMinAverage: 3.5,
+    positiveMinReuse: 4,
+    positiveMinDimension: 3,
+  },
+  formula: 'role metrics come from contract and Run facts; review verdict cannot override fact gates',
+};
+
+function normalizeEvaluationPolicy(input: Partial<EvaluationPolicy>): EvaluationPolicy {
+  const merged = {
+    ...DEFAULT_EVALUATION_POLICY,
+    ...input,
+    rankingWeights: { ...DEFAULT_EVALUATION_POLICY.rankingWeights, ...input.rankingWeights },
+    review: {
+      ...DEFAULT_EVALUATION_POLICY.review,
+      ...input.review,
+      fast: { ...DEFAULT_EVALUATION_POLICY.review.fast, ...input.review?.fast },
+      focused: { ...DEFAULT_EVALUATION_POLICY.review.focused, ...input.review?.focused },
+      multi: { ...DEFAULT_EVALUATION_POLICY.review.multi, ...input.review?.multi },
+    },
+  };
+  const integer = (value: unknown, label: string, min = 1, max = 100_000): number => {
+    const parsed = Number(value);
+    if (!Number.isSafeInteger(parsed) || parsed < min || parsed > max)
+      throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', `${label}必须在 ${min} 到 ${max} 之间`);
+    return parsed;
+  };
+  const low = integer(merged.lowConfidenceSamples, '低置信度样本门槛', 2, 10_000);
+  const medium = integer(merged.mediumConfidenceSamples, '中置信度样本门槛', low + 1, 10_000);
+  const high = integer(merged.highConfidenceSamples, '高置信度样本门槛', medium + 1, 100_000);
+  const weights = Object.fromEntries(Object.entries(merged.rankingWeights).map(([key, value]) => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < 0 || parsed > 1)
+      throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', '角色排序权重必须在 0 到 1 之间');
+    return [key, parsed];
+  })) as EvaluationPolicy['rankingWeights'];
+  const weightTotal = weights.acceptance + weights.budget + weights.evidence;
+  if (weightTotal <= 0)
+    throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', '角色排序权重之和必须大于 0');
+  const rubricDimensions = [...new Set((merged.review.dimensions ?? DEFAULT_EVALUATION_POLICY.review.dimensions)
+    .map(item => bounded(String(item), 80, '复盘维度')))].slice(0, 20);
+  if (!rubricDimensions.length)
+    throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', '复盘 Rubric 至少需要一个维度');
+  const limit = (value: unknown, label: string, max: number): number => integer(value, label, 1, max);
+  const budget = (value: EvaluationPolicy['review']['fast'], label: string) => {
+    const inputTokens = limit(value.input, `${label}输入 token 上限`, 100_000);
+    const outputTokens = limit(value.output, `${label}输出 token 上限`, 100_000);
+    const total = limit(value.total, `${label}总 token 上限`, 200_000);
+    if (total < inputTokens + outputTokens)
+      throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', `${label}总 token 上限不能小于输入与输出之和`);
+    return { input: inputTokens, output: outputTokens, total };
+  };
+  const decimal = (value: unknown, label: string, min: number, max: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed) || parsed < min || parsed > max)
+      throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', `${label}必须在 ${min} 到 ${max} 之间`);
+    return Math.round(parsed * 100) / 100;
+  };
+  return {
+    schemaVersion: 1,
+    lowConfidenceSamples: low,
+    mediumConfidenceSamples: medium,
+    highConfidenceSamples: high,
+    rankingWeights: {
+      acceptance: weights.acceptance / weightTotal,
+      budget: weights.budget / weightTotal,
+      evidence: weights.evidence / weightTotal,
+    },
+    review: {
+      rubricVersion: bounded(merged.review.rubricVersion, 100, '复盘 Rubric 版本'),
+      dimensions: rubricDimensions,
+      systemPrompt: bounded(merged.review.systemPrompt ?? DEFAULT_EVALUATION_POLICY.review.systemPrompt, 4_000, '复盘提示词'),
+      fast: budget(merged.review.fast, '快速复盘'),
+      focused: budget(merged.review.focused, '聚焦复盘'),
+      multi: budget(merged.review.multi, '多 Run 复盘'),
+      positiveMinAverage: decimal(merged.review.positiveMinAverage, '正面平均分门槛', 1, 5),
+      positiveMinReuse: integer(merged.review.positiveMinReuse, '再次使用意愿门槛', 1, 5),
+      positiveMinDimension: integer(merged.review.positiveMinDimension, '单个维度最低分', 1, 5),
+    },
+    formula: bounded(merged.formula, 1_000, '评价公式'),
+  };
+}
+
+function validateSocietyDependencies(contracts: AssignmentContract[]): void {
+  const byId = new Map(contracts.map(contract => [contract.id, contract]));
+  for (const contract of contracts) {
+    if (contract.dependsOn.some(id => !byId.has(id) || id === contract.id))
+      throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', '社会分工依赖引用无效');
+  }
+  const state = new Map<string, 0 | 1 | 2>();
+  const visit = (contract: AssignmentContract): void => {
+    const mark = state.get(contract.id) ?? 0;
+    if (mark === 1) throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', '社会分工依赖存在循环');
+    if (mark === 2) return;
+    state.set(contract.id, 1);
+    for (const dependencyId of contract.dependsOn) visit(byId.get(dependencyId)!);
+    state.set(contract.id, 2);
+  };
+  for (const contract of contracts) visit(contract);
+}
+
+function rootAnswer(workOrder: WorkOrder, run: RunRecord, contracts: AssignmentContract[]): string {
+  if ((!workOrder.rootRunId || workOrder.rootRunId === run.id) && run.answer?.trim()) return run.answer;
+  return contracts.flatMap(contract => contract.delivery?.summary ? [contract.delivery.summary] : []).join('\n\n');
+}
+
+export class OrganizationService {
+  private readonly repo;
+
+  constructor(private readonly options: OrganizationServiceOptions) {
+    this.repo = options.store.organization;
+  }
+
+  private emit(type: string, data: Record<string, unknown>): void {
+    this.options.emit?.(type, data);
+  }
+
+  ensureEvaluation(tenantId: string): EvaluationVersion {
+    const active = this.repo.activeOrganizationVersion<EvaluationPolicy>('evaluation', tenantId, 'default');
+    if (active) {
+      const policy = normalizeEvaluationPolicy(active.record);
+      if (JSON.stringify(policy) === JSON.stringify(active.record)) return active;
+      const now = Date.now();
+      const version: EvaluationVersion = {
+        id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default',
+        version: active.version + 1, status: 'active', record: policy,
+        hash: createHash('sha256').update(JSON.stringify(policy)).digest('hex'),
+        createdBy: 'maharness', reason: '补齐冻结复盘 Rubric', createdAt: now,
+      };
+      this.repo.transaction(() => {
+        this.repo.supersedeOrganizationVersions(tenantId, 'evaluation', 'default', version.version);
+        this.repo.createOrganizationVersion(version);
+        this.repo.appendOrganizationVersionAudit({
+          id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: version.version,
+          action: 'update', actor: 'maharness', fromVersion: active.version, toVersion: version.version,
+          beforeHash: active.hash, afterHash: version.hash, reason: version.reason, createdAt: now,
+        });
+      });
+      return version;
+    }
+    const policy = normalizeEvaluationPolicy(DEFAULT_EVALUATION_POLICY);
+    const now = Date.now();
+    const hash = createHash('sha256').update(JSON.stringify(policy)).digest('hex');
+    const version: EvaluationVersion = {
+      id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: 1,
+      status: 'active', record: policy, hash, createdBy: 'maharness',
+      reason: '初始化评价标准', createdAt: now,
+    };
+    this.repo.transaction(() => {
+      this.repo.createOrganizationVersion(version);
+      this.repo.appendOrganizationVersionAudit({
+        id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: 1,
+        action: 'initialize', actor: 'maharness', toVersion: 1, afterHash: hash,
+        reason: version.reason, createdAt: now,
+      });
+    });
+    return version;
+  }
+
+  evaluationHistory(tenantId: string): {
+    active: EvaluationVersion;
+    versions: EvaluationVersion[];
+    audits: OrganizationVersionAudit[];
+  } {
+    const active = this.ensureEvaluation(tenantId);
+    return {
+      active,
+      versions: this.repo.organizationVersions<EvaluationPolicy>('evaluation', tenantId, 'default', 100),
+      audits: this.repo.organizationVersionAudits('evaluation', tenantId, 'default', 100),
+    };
+  }
+
+  updateEvaluation(tenantId: string, input: Partial<EvaluationPolicy>, reason: string): EvaluationVersion {
+    const current = this.ensureEvaluation(tenantId);
+    const policy = normalizeEvaluationPolicy({ ...current.record, ...input });
+    const version: EvaluationVersion = {
+      id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default',
+      version: current.version + 1, status: 'active', record: policy,
+      hash: createHash('sha256').update(JSON.stringify(policy)).digest('hex'),
+      createdBy: 'human', reason: bounded(reason, 500, '评价标准变更原因'), createdAt: Date.now(),
+    };
+    this.repo.transaction(() => {
+      this.repo.supersedeOrganizationVersions(tenantId, 'evaluation', 'default', version.version);
+      this.repo.createOrganizationVersion(version);
+      this.repo.appendOrganizationVersionAudit({
+        id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: version.version,
+        action: 'update', actor: 'human', fromVersion: current.version, toVersion: version.version,
+        beforeHash: current.hash, afterHash: version.hash, reason: version.reason, createdAt: version.createdAt,
+      });
+    });
+    this.emit('organization.evaluation.updated', { version: version.version, hash: version.hash });
+    return version;
+  }
+
+  rollbackEvaluation(tenantId: string, targetVersion: number, reason: string): EvaluationVersion {
+    const current = this.ensureEvaluation(tenantId);
+    const target = this.repo.organizationVersions<EvaluationPolicy>('evaluation', tenantId, 'default', 500)
+      .find(item => item.version === targetVersion);
+    if (!target) throw new OrganizationError(404, 'EVALUATION_VERSION_NOT_FOUND', '评价标准版本不存在');
+    if (target.status === 'active') return current;
+    const policy = normalizeEvaluationPolicy(target.record);
+    const version: EvaluationVersion = {
+      id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default',
+      version: current.version + 1, status: 'active', record: policy,
+      hash: createHash('sha256').update(JSON.stringify(policy)).digest('hex'),
+      createdBy: 'human', reason: `回滚至 v${targetVersion}：${bounded(reason, 450, '评价标准回滚原因')}`,
+      createdAt: Date.now(),
+    };
+    this.repo.transaction(() => {
+      this.repo.supersedeOrganizationVersions(tenantId, 'evaluation', 'default', version.version);
+      this.repo.createOrganizationVersion(version);
+      this.repo.appendOrganizationVersionAudit({
+        id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: version.version,
+        action: 'rollback', actor: 'human', fromVersion: current.version, toVersion: version.version,
+        beforeHash: current.hash, afterHash: version.hash, reason: version.reason, createdAt: version.createdAt,
+      });
+    });
+    this.emit('organization.evaluation.updated', { version: version.version, rollbackTo: targetVersion });
+    return version;
+  }
+
+  roleHistory(id: string, tenantId: string): {
+    role: OrganizationRole;
+    versions: RoleVersion[];
+    audits: OrganizationVersionAudit[];
+  } {
+    const role = this.repo.getRole(id, tenantId);
+    if (!role) throw new OrganizationError(404, 'ROLE_NOT_FOUND', '角色不存在');
+    return {
+      role,
+      versions: this.repo.organizationVersions<OrganizationRoleGovernance>('role', tenantId, id, 100),
+      audits: this.repo.organizationVersionAudits('role', tenantId, id, 100),
+    };
+  }
+
+  updateRole(
+    id: string,
+    tenantId: string,
+    revision: number,
+    patch: Partial<Pick<OrganizationRole,
+      'projectId' | 'name' | 'responsibilities' | 'capabilities' | 'modelPolicy' |
+      'budgetLimitUsd' | 'budgetLimitTokens' | 'persistent' | 'employment'>>,
+    reason: string,
+  ): OrganizationRole {
+    const role = this.repo.getRole(id, tenantId);
+    if (!role) throw new OrganizationError(404, 'ROLE_NOT_FOUND', '角色不存在');
+    const normalized: typeof patch = {};
+    if (patch.projectId !== undefined) normalized.projectId = String(patch.projectId).trim().slice(0, 300);
+    if (patch.name !== undefined) normalized.name = bounded(String(patch.name), 80, '角色名称');
+    if (patch.responsibilities !== undefined)
+      normalized.responsibilities = [...new Set(patch.responsibilities.map(item =>
+        bounded(String(item), 300, '角色职责')))].slice(0, 20);
+    if (patch.capabilities !== undefined)
+      normalized.capabilities = [...new Set(patch.capabilities.map(item =>
+        bounded(String(item), 80, '角色能力')))].slice(0, 30);
+    if (patch.modelPolicy !== undefined) {
+      const providerId = String(patch.modelPolicy.providerId ?? '').trim();
+      const model = String(patch.modelPolicy.model ?? '').trim();
+      if (!providerId || !model)
+        throw new OrganizationError(400, 'EVALUATION_POLICY_INVALID', '角色模型策略不能为空');
+      normalized.modelPolicy = { providerId: providerId.slice(0, 200), model: model.slice(0, 200) };
+    }
+    for (const field of ['budgetLimitUsd', 'budgetLimitTokens'] as const) {
+      if (patch[field] === undefined) continue;
+      const value = Number(patch[field]);
+      if (!Number.isFinite(value) || value < 0)
+        throw new OrganizationError(400, 'ROLE_CONFIG_INVALID', '角色预算上限必须是非负数');
+      normalized[field] = value;
+    }
+    if (patch.persistent !== undefined) normalized.persistent = Boolean(patch.persistent);
+    if (patch.employment !== undefined) {
+      if (patch.employment !== 'active' && patch.employment !== 'paused')
+        throw new OrganizationError(400, 'ROLE_CONFIG_INVALID', '角色岗位状态无效');
+      normalized.employment = patch.employment;
+    }
+    const updated = this.repo.updateRole(role, normalized, revision, {
+      actor: 'human', reason: bounded(reason, 500, '角色变更原因'),
+    });
+    this.emit('organization.role.updated', { roleId: id, revision: updated.revision });
+    return updated;
+  }
+
+  rollbackRole(id: string, tenantId: string, targetVersion: number, reason: string): OrganizationRole {
+    const role = this.repo.getRole(id, tenantId);
+    if (!role) throw new OrganizationError(404, 'ROLE_NOT_FOUND', '角色不存在');
+    const currentVersion = this.repo.activeOrganizationVersion<OrganizationRoleGovernance>('role', tenantId, id);
+    if (!currentVersion) throw new OrganizationError(409, 'ROLE_VERSION_MISSING', '角色没有可回滚的版本历史');
+    if (currentVersion.version === targetVersion) return role;
+    const target = this.repo.organizationVersions<OrganizationRoleGovernance>('role', tenantId, id, 500)
+      .find(item => item.version === targetVersion);
+    if (!target) throw new OrganizationError(404, 'ROLE_VERSION_NOT_FOUND', '角色版本不存在');
+    const snapshot = target.record;
+    const updated = this.repo.updateRole(role, {
+      projectId: snapshot.projectId,
+      name: snapshot.name,
+      responsibilities: snapshot.responsibilities,
+      capabilities: snapshot.capabilities,
+      modelPolicy: snapshot.modelPolicy,
+      budgetLimitUsd: snapshot.budgetLimitUsd,
+      budgetLimitTokens: snapshot.budgetLimitTokens,
+      persistent: snapshot.persistent,
+      employment: snapshot.employment,
+    }, role.revision, {
+      actor: 'human', action: 'rollback', fromVersion: currentVersion.version,
+      reason: `回滚至 v${targetVersion}：${bounded(reason, 450, '角色回滚原因')}`,
+    });
+    this.emit('organization.role.updated', { roleId: id, revision: updated.revision, rollbackTo: targetVersion });
+    return updated;
+  }
+
+  private bindRuntimeAuthority(role: OrganizationRole): OrganizationRole {
+    const runtime = this.options.runtimeAuthority?.(role.tenantId);
+    const workspace = role.authority.workspace || runtime?.workspace || '';
+    if (!workspace)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色没有可执行的工作区权限');
+    if (role.authority.workspace && runtime?.workspace && role.authority.workspace !== runtime.workspace)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色工作区权限与当前运行时不匹配');
+    const authority = {
+      workspace,
+      readOnly: role.authority.readOnly || (runtime?.readOnly ?? false),
+      profile: runtime ? narrowProfile(role.authority.profile, runtime.profile) : role.authority.profile,
+      allowedTools: intersectTools(role.authority.allowedTools, runtime?.allowedTools),
+    };
+    if (JSON.stringify(authority) === JSON.stringify(role.authority)) return role;
+    return this.repo.updateRole(role, { authority }, role.revision, { trackVersion: false });
+  }
+
+  private scopeRunToRole(run: RunRecord, role: OrganizationRole): OrganizationRole {
+    const current = this.repo.getRole(role.id, run.tenantId) ?? role;
+    if (current.authority.workspace && current.authority.workspace !== run.authorization.workspace)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色工作区权限与任务工作区不一致');
+    const authority = {
+      ...current.authority,
+      workspace: run.authorization.workspace,
+    };
+    const scoped = JSON.stringify(authority) === JSON.stringify(current.authority)
+      ? current
+      : this.repo.updateRole(current, { authority }, current.revision, { trackVersion: false });
+    run.authorization = {
+      ...run.authorization,
+      readOnly: run.authorization.readOnly || scoped.authority.readOnly,
+      profile: narrowProfile(run.authorization.profile, scoped.authority.profile),
+    };
+    if (scoped.authority.allowedTools.length)
+      run.toolNames = intersectTools(run.toolNames, scoped.authority.allowedTools);
+    return scoped;
+  }
+
+  createForRun(run: RunRecord, projectId = ''): WorkOrder {
+    const soloRole = this.repo.ensureSoloRole(
+      run.tenantId, run.providerId, run.model, run.authorization, projectId,
+    );
+    const workOrder = this.repo.createWorkOrder({
+      tenantId: run.tenantId,
+      projectId,
+      sessionId: run.sessionId,
+      rootRunId: run.id,
+      objective: run.objective,
+      acceptance: run.acceptance?.map((item, index) => ({
+        id: `acceptance-${index + 1}`,
+        statement: item.type === 'output_contains' ? item.value
+          : item.type === 'output_matches' ? item.pattern
+          : item.type === 'tool_succeeded' ? item.name
+          : item.type === 'tool_evidence' ? item.name
+          : item.type === 'file_exists' || item.type === 'file_contains' ? item.path
+          : '任务验收条件',
+        verification: item.type,
+      })),
+      budgetUsd: run.budgetUsd,
+      budgetTokens: run.budgetTokens,
+      budgetPolicy: run.budgetPolicy,
+      deadlineAt: run.deadlineAt,
+      materials: run.materials,
+      authorization: run.authorization,
+      operationKey: run.requestFingerprint,
+    });
+    const existing = this.repo.contracts(workOrder.id, run.tenantId).find(contract => contract.runId === run.id);
+    if (!existing) {
+      const now = Date.now();
+      const contract: AssignmentContract = {
+        id: randomUUID(),
+        tenantId: run.tenantId,
+        workOrderId: workOrder.id,
+        roleId: soloRole.id,
+        runId: run.id,
+        branchObjective: run.objective,
+        expectedArtifacts: [],
+        acceptance: workOrder.acceptance,
+        evidenceInputs: workOrder.materials.map(material => ({
+          id: `material:${material.id}:${material.version}`,
+          kind: 'material',
+          ref: material.id,
+          version: material.version,
+        })),
+        dependsOn: [],
+        budgetUsd: run.budgetUsd,
+        deadlineAt: run.deadlineAt,
+        allowedTools: run.toolNames ?? [],
+        status: 'active',
+        revision: 0,
+        createdAt: now,
+        updatedAt: now,
+      };
+      this.repo.createContract(contract);
+      this.repo.appendLedger({
+        id: randomUUID(),
+        tenantId: run.tenantId,
+        workOrderId: workOrder.id,
+        contractId: contract.id,
+        type: 'accepted',
+        actorId: soloRole.id,
+        summary: '单角色工作契约已建立',
+        evidence: [],
+        createdAt: now,
+      });
+    }
+    run.workOrderId = workOrder.id;
+    run.assignmentContractId = existing?.id ?? this.repo.contracts(workOrder.id, run.tenantId).find(contract => contract.runId === run.id)?.id;
+    run.organizationRoleId = soloRole.id;
+    run.cachePrefixHash = cachePrefixHash({
+      tenantId: run.tenantId,
+      workspace: run.authorization.workspace,
+      projectId: workOrder.projectId,
+      providerId: run.providerId,
+      model: run.model,
+      workOrderId: workOrder.id,
+      materialVersions: workOrder.materials,
+      ruleHash: createHash('sha256').update(JSON.stringify(run.ruleResolution ?? null)).digest('hex').slice(0, 24),
+    });
+    this.emit('work.order.updated', { workOrderId: workOrder.id, status: workOrder.status });
+    return workOrder;
+  }
+
+  createSocietyExecution(task: SocietyTask, schedule: SocietySchedule): SocietyExecutionPlan {
+    const roles = schedule.assignments.map(assignment => {
+      const role = this.repo.getRole(assignment.roleId, schedule.tenantId);
+      if (!role || role.employment !== 'active')
+        throw new OrganizationError(409, 'ROLE_AUTHORITY_EXCEEDED', `社会角色不可用：${assignment.roleId}`);
+      return this.bindRuntimeAuthority(role);
+    });
+    const primary = roles[0];
+    if (!primary) throw new OrganizationError(409, 'ROLE_NOT_FOUND', '社会任务没有可执行角色');
+    const operationKey = `society-task:${task.id}`;
+    const workOrder = this.repo.createWorkOrder({
+      tenantId: task.tenantId,
+      projectId: task.projectId,
+      originKind: 'society-task',
+      originId: task.id,
+      objective: task.objective,
+      acceptance: task.acceptance.map((statement, index) => ({
+        id: `acceptance-${index + 1}`,
+        statement,
+        verification: 'society-task',
+      })),
+      budgetUsd: task.maxBudgetUsd,
+      budgetTokens: task.maxBudgetTokens,
+      budgetPolicy: 'enforce',
+      materials: task.materials.map(({ id, version }) => ({
+        id, version, path: '', name: '', format: '', size: 0, createdAt: Date.now(),
+        tenantId: task.tenantId, workspace: primary.authority.workspace,
+      })),
+      authorization: { ...primary.authority, revision: 0 },
+      creator: 'maharness',
+      operationKey,
+    });
+    const scheduledContractIds = new Set(schedule.contractIds ?? []);
+    const existing = this.repo.contracts(workOrder.id, task.tenantId)
+      .filter(contract => !scheduledContractIds.size || scheduledContractIds.has(contract.id));
+    if (existing.length) {
+      return {
+        workOrder,
+        teamCycle: this.repo.listTeamCycles(workOrder.id, task.tenantId).at(-1),
+        roles,
+        contracts: existing,
+      };
+    }
+    const now = Date.now();
+    const teamCycle: TeamCycle | undefined = schedule.mode === 'team' ? {
+      id: randomUUID(), tenantId: task.tenantId, workOrderId: workOrder.id,
+      assignmentIds: [], soloEstimateUsd: schedule.estimates.soloCostUsd,
+      teamEstimateUsd: schedule.estimates.teamCostUsd, hardBudget: true,
+      reason: schedule.reason, status: 'planned', revision: 0, createdAt: now, updatedAt: now,
+    } : undefined;
+    const contracts = schedule.assignments.map((assignment, index): AssignmentContract => {
+      const role = roles[index];
+      const budgetUsd = assignment.cognitiveTier === 'utility'
+        ? 0
+        : task.maxBudgetUsd / schedule.assignments.length;
+      return {
+        id: randomUUID(), tenantId: task.tenantId, workOrderId: workOrder.id,
+        teamCycleId: teamCycle?.id, roleId: role.id, departmentId: assignment.departmentId,
+        branchObjective: assignment.branchObjective,
+        expectedArtifacts: assignment.expectedArtifacts,
+        acceptance: assignment.acceptance.map((statement, acceptanceIndex) => ({
+          id: `acceptance-${acceptanceIndex + 1}`, statement,
+        })),
+        evidenceInputs: schedule.sharedMemoryRefs,
+        dependsOn: [],
+        budgetUsd,
+        budgetTokens: assignment.budgetTokens,
+        deadlineAt: workOrder.deadlineAt,
+        allowedTools: role.authority.allowedTools,
+        status: 'proposed', revision: 0, createdAt: now, updatedAt: now,
+      };
+    });
+    for (let index = 0; index < contracts.length; index += 1) {
+      const contract = contracts[index]!;
+      contract.dependsOn = [...new Set(schedule.assignments[index]!.dependsOn)].map(reference => {
+        const match = /^(?:assignment|branch)-(\d+)$/.exec(reference);
+        const numeric = match ? Number(match[1]) - 1 : /^\d+$/.test(reference) ? Number(reference) : -1;
+        const dependency = contracts[numeric];
+        if (!dependency || dependency.id === contract.id)
+          throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `社会分工依赖引用无效：${reference}`);
+        return dependency.id;
+      });
+    }
+    validateSocietyDependencies(contracts);
+    if (teamCycle) teamCycle.assignmentIds = contracts.map(contract => contract.id);
+    this.repo.transaction(() => {
+      if (teamCycle) this.repo.createTeamCycle(teamCycle);
+      for (const contract of contracts) this.repo.createContract(contract);
+      for (const contract of contracts) this.repo.appendLedger({
+        id: randomUUID(), tenantId: task.tenantId, workOrderId: workOrder.id,
+        contractId: contract.id, type: 'commitment', actorId: contract.roleId,
+        summary: contract.branchObjective, evidence: contract.evidenceInputs, createdAt: now,
+      });
+    });
+    return { workOrder, teamCycle, roles, contracts };
+  }
+
+  prepareSocietyRun(run: RunRecord, contractId: string): AssignmentContract {
+    const contract = this.repo.getContract(contractId, run.tenantId);
+    if (!contract) throw new OrganizationError(404, 'WORK_CONTRACT_INVALID', '社会分工契约不存在');
+    if (contract.status !== 'proposed')
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '社会分工契约已被占用或关闭');
+    if (contract.roleId !== run.organizationRoleId || contract.workOrderId !== run.workOrderId)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色或工作单与分工契约不一致');
+    const dependencies = contract.dependsOn.map(id => this.repo.getContract(id, run.tenantId));
+    if (dependencies.some(item => !item || item.status !== 'delivered' || (item.delivery?.unfinished.length ?? 1) > 0))
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '分工依赖尚未成功交付');
+    const role = this.repo.getRole(contract.roleId, run.tenantId);
+    if (!role || role.employment !== 'active')
+      throw new OrganizationError(409, 'ROLE_AUTHORITY_EXCEEDED', '社会分工角色不可用');
+    const scopedRole = this.scopeRunToRole(run, role);
+    const requestedTools = intersectTools(contract.allowedTools, scopedRole.authority.allowedTools);
+    if (contract.allowedTools.length && scopedRole.authority.allowedTools.length
+      && requestedTools.length !== new Set(contract.allowedTools).size)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '社会合同扩大了角色工具权限');
+    if (contract.allowedTools.length) run.toolNames = requestedTools;
+    else if (scopedRole.authority.allowedTools.length)
+      run.toolNames = intersectTools(run.toolNames, scopedRole.authority.allowedTools);
+    run.cachePrefixHash = cachePrefixHash({
+      tenantId: run.tenantId,
+      workspace: run.authorization.workspace,
+      projectId: this.repo.getWorkOrder(contract.workOrderId, run.tenantId)?.projectId ?? '',
+      providerId: run.providerId,
+      model: run.model,
+      workOrderId: contract.workOrderId,
+      materialVersions: [...(this.repo.getWorkOrder(contract.workOrderId, run.tenantId)?.materials ?? [])]
+        .sort((left, right) => left.id.localeCompare(right.id)),
+      ruleHash: createHash('sha256').update(JSON.stringify(run.ruleResolution ?? null)).digest('hex').slice(0, 24),
+      toolVersions: [...new Set(run.toolNames ?? [])].sort(),
+    });
+    const updated = this.repo.updateContract(contract, { runId: run.id, status: 'active' }, contract.revision);
+    if (contract.teamCycleId) {
+      const cycle = this.repo.getTeamCycle(contract.teamCycleId, run.tenantId);
+      if (cycle?.status === 'planned') this.repo.updateTeamCycle(cycle, { status: 'running' });
+    }
+    this.repo.appendLedger({
+      id: randomUUID(), tenantId: run.tenantId, workOrderId: contract.workOrderId,
+      contractId: contract.id, type: 'started', actorId: contract.roleId,
+      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: Date.now(),
+    });
+    this.emit('work.contract.updated', { workOrderId: contract.workOrderId, contractId: contract.id, status: 'active', runId: run.id });
+    return updated;
+  }
+
+  workOrderForRun(run: RunRecord): WorkOrder {
+    const order = run.workOrderId ? this.repo.getWorkOrder(run.workOrderId, run.tenantId)
+      : this.repo.workOrderByRun(run.rootId, run.tenantId) ?? this.repo.workOrderByRun(run.id, run.tenantId);
+    if (!order) throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '任务没有关联工作单');
+    return order;
+  }
+
+  isTeamTool(name: string): boolean {
+    return TEAM_TOOL_NAMES.has(name);
+  }
+
+  teamEligible(run: RunRecord): boolean {
+    if (run.parentId || run.depth > 0 || run.origin?.kind === 'society') return false;
+    const cycle = run.teamCycleId ? this.repo.getTeamCycle(run.teamCycleId, run.tenantId) : undefined;
+    return !!cycle && ['planned', 'running'].includes(cycle.status);
+  }
+
+  teamPlanningEligible(run: RunRecord): boolean {
+    if (run.origin?.kind === 'society') return false;
+    if (run.parentId || run.teamCycleId || explicitTeamRequest(run.objective)) return !run.parentId && !run.teamCycleId;
+    if (run.budgetPolicy !== 'enforce' || run.budgetUsd === undefined) return false;
+    const workItems = currentPlanForSession(run.tenantId, run.sessionId)?.workItems ?? [];
+    return workItems.length >= 2 && workItems.length <= 5 && workItems.filter(item => item.dependsOn.length === 0).length >= 2;
+  }
+
+  authorizeTools(run: RunRecord, tools: import('../kernel/types').ToolDef[]): import('../kernel/types').ToolDef[] {
+    const team = this.teamEligible(run);
+    const planning = !team && this.teamPlanningEligible(run);
+    const role = run.organizationRoleId ? this.repo.getRole(run.organizationRoleId, run.tenantId) : undefined;
+    const allowedNames = intersectTools(run.toolNames, role?.authority.allowedTools);
+    return tools.filter(tool => !TEAM_TOOL_NAMES.has(tool.name) || team)
+      .filter(tool => !ORGANIZATION_ADVANCED_TOOLS.has(tool.name) || planning)
+      .filter(tool => !allowedNames.length || allowedNames.includes(tool.name));
+  }
+
+  createTeam(run: RunRecord, input: TeamCreateInput): { teamCycle: TeamCycle; contracts: AssignmentContract[]; economics: TeamEconomics } {
+    if (run.origin?.kind === 'society')
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '社会分工不能再次创建团队');
+    if (run.parentId) throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '只有主任务可以组织团队');
+    const workOrder = this.workOrderForRun(run);
+    if (workOrder.status !== 'active') throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '工作单当前不可组队');
+    if (input.assignments.length < 2 || input.assignments.length > 5)
+      throw new OrganizationError(400, 'TEAM_NOT_ELIGIBLE', '团队需要 2 至 5 个可独立验收的分工契约');
+    if (this.repo.listTeamCycles(workOrder.id, run.tenantId).some(cycle => !['completed', 'cancelled', 'dissolved'].includes(cycle.status)))
+      throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '当前工作单已有组织周期');
+    if (workOrder.budgetPolicy !== 'enforce' || workOrder.budgetUsd === undefined)
+      throw new OrganizationError(409, 'TEAM_BUDGET_INSUFFICIENT', '自动组队必须设置硬预算');
+
+    const objectives = new Set<string>();
+    const artifacts = new Set<string>();
+    const roots: string[] = [];
+    const drafts = input.assignments.map((draft, index) => {
+      const objective = bounded(draft.objective, 800, `分工 ${index + 1} 的目标`);
+      if (objectives.has(objective.toLowerCase())) throw new OrganizationError(400, 'ASSIGNMENT_OVERLAP', '分工目标重复');
+      objectives.add(objective.toLowerCase());
+      const expectedArtifacts = [...new Set(draft.expectedArtifacts.map(item => bounded(item, 200, '预期产物')))];
+      if (!expectedArtifacts.length) throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `分工 ${index + 1} 缺少预期产物`);
+      for (const artifact of expectedArtifacts) {
+        if (artifacts.has(artifact.toLowerCase())) throw new OrganizationError(400, 'ASSIGNMENT_OVERLAP', `产物范围重叠：${artifact}`);
+        artifacts.add(artifact.toLowerCase());
+      }
+      const acceptance = [...new Set(draft.acceptance.map(item => bounded(item, 300, '验收条件')))];
+      if (!acceptance.length) throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `分工 ${index + 1} 缺少验收条件`);
+      if (!Number.isFinite(draft.budgetUsd) || draft.budgetUsd <= 0)
+        throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', `分工 ${index + 1} 必须设置正数硬预算`);
+      const dependsOn = [...new Set(draft.dependsOn ?? [])];
+      if (!dependsOn.length) roots.push(objective);
+      return { ...draft, objective, expectedArtifacts, acceptance, dependsOn };
+    });
+    if (roots.length < 2) throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '至少需要两个互不依赖的独立分支');
+    const ids = new Set(drafts.map((_, index) => `assignment-${index + 1}`));
+    for (const draft of drafts) {
+      if (draft.dependsOn.some(id => !ids.has(id) || id === `assignment-${drafts.indexOf(draft) + 1}`))
+        throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', '分工依赖引用无效');
+    }
+    const teamEstimateUsd = input.teamEstimateUsd ?? drafts.reduce((sum, item) => sum + item.budgetUsd, 0);
+    if (!Number.isFinite(teamEstimateUsd) || teamEstimateUsd <= 0)
+      throw new OrganizationError(400, 'INVALID_BUDGET', '团队费用估算无效');
+    const available = this.options.store.runs.availableBudget(run);
+    if (available === undefined || teamEstimateUsd > available + 1e-10 || drafts.some(item => item.budgetUsd > available! + 1e-10))
+      throw new OrganizationError(409, 'TEAM_BUDGET_INSUFFICIENT', '团队估算超过主任务可用硬预算');
+    const humanRequested = explicitTeamRequest(run.objective);
+    if (!humanRequested) {
+      if (input.singleAgentEstimateUsd === undefined)
+        throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '自动组队缺少单角色费用基线');
+      if (teamEstimateUsd > input.singleAgentEstimateUsd + 1e-10)
+        throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '团队估算高于单角色方案，继续由单角色执行');
+    }
+
+    const now = Date.now();
+    const cycle: TeamCycle = {
+      id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
+      assignmentIds: [], soloEstimateUsd: input.singleAgentEstimateUsd ?? teamEstimateUsd,
+      teamEstimateUsd, hardBudget: true,
+      reason: input.reason?.trim() || (humanRequested ? '人类明确要求组织执行' : '独立分支且成本不高于单角色方案'),
+      status: 'planned', revision: 0, createdAt: now, updatedAt: now,
+    };
+    const contracts: AssignmentContract[] = drafts.map((draft, index) => {
+      const role = this.resolveRole(run, workOrder, draft, index);
+      const requestedTools = draft.allowedTools ?? role.authority.allowedTools;
+      if (run.toolNames && requestedTools.some(name => !run.toolNames!.includes(name)))
+        throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色不能获得父任务之外的工具权限');
+      if (role.authority.allowedTools.length
+        && requestedTools.some(name => !role.authority.allowedTools.includes(name)))
+        throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '分工不能扩大角色工具权限');
+      return {
+        id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
+        teamCycleId: cycle.id, roleId: role.id, branchObjective: draft.objective,
+        expectedArtifacts: draft.expectedArtifacts,
+        acceptance: draft.acceptance.map((statement, acceptanceIndex) => ({ id: `acceptance-${acceptanceIndex + 1}`, statement })),
+        evidenceInputs: draft.evidenceInputs ?? [],
+        dependsOn: draft.dependsOn,
+        budgetUsd: draft.budgetUsd, deadlineAt: workOrder.deadlineAt,
+        allowedTools: intersectTools(requestedTools, role.authority.allowedTools, run.toolNames),
+        status: 'proposed' as const, revision: 0, createdAt: now, updatedAt: now,
+      };
+    });
+    for (const contract of contracts) {
+      contract.dependsOn = contract.dependsOn.map(id => {
+        const target = Number(id.replace('assignment-', '')) - 1;
+        return contracts[target]?.id ?? id;
+      });
+    }
+    validateSocietyDependencies(contracts);
+    cycle.assignmentIds = contracts.map(contract => contract.id);
+    this.repo.transaction(() => {
+      this.repo.createTeamCycle(cycle);
+      for (const contract of contracts) this.repo.createContract(contract);
+      for (const contract of contracts) this.repo.appendLedger({
+        id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
+        contractId: contract.id, type: 'commitment', actorId: contract.roleId,
+        summary: contract.branchObjective, evidence: contract.evidenceInputs, createdAt: Date.now(),
+      });
+      this.options.store.runs.update(run, { teamCycleId: cycle.id }, 'team_created', {
+        teamCycleId: cycle.id, assignments: contracts.map(contract => contract.id), teamEstimateUsd,
+      });
+    });
+    const economics = this.economics(workOrder.id, run.tenantId);
+    this.emit('work.contract.updated', { workOrderId: workOrder.id, teamCycleId: cycle.id, contracts: contracts.length });
+    this.emit('organization.updated', { workOrderId: workOrder.id, teamCycleId: cycle.id });
+    return { teamCycle: cycle, contracts, economics };
+  }
+
+  private resolveRole(run: RunRecord, workOrder: WorkOrder, draft: AssignmentDraft, index: number): OrganizationRole {
+    if (draft.roleId) {
+      const role = this.repo.getRole(draft.roleId, run.tenantId);
+      if (!role || role.employment !== 'active') throw new OrganizationError(404, 'ROLE_NOT_FOUND', `角色不存在或不可用：${draft.roleId}`);
+      if (role.projectId && role.projectId !== workOrder.projectId)
+        throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色不属于当前项目');
+      return this.scopeRunToRole(run, role);
+    }
+    const name = bounded(draft.roleName ?? `临时角色 ${index + 1}`, 80, '角色名称');
+    const now = Date.now();
+    const role: OrganizationRole = {
+      id: randomUUID(), tenantId: run.tenantId, projectId: workOrder.projectId,
+      name, responsibilities: [draft.objective], capabilities: draft.expectedArtifacts,
+      authority: {
+        workspace: run.authorization.workspace,
+        readOnly: run.authorization.readOnly,
+        profile: run.authorization.profile,
+        allowedTools: draft.allowedTools ?? [],
+      },
+      modelPolicy: { providerId: run.providerId, model: run.model },
+      persistent: false, employment: 'active', source: 'project',
+      revision: 0, createdAt: now, updatedAt: now,
+    };
+    this.repo.createRole(role);
+    return role;
+  }
+
+  prepareDelegation(parent: RunRecord, child: RunRecord, request: import('../kernel/run').ChildRunRequest): AssignmentContract {
+    if (parent.origin?.kind === 'society')
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '社会分工不能再次委派角色');
+    if (parent.parentId || parent.depth > 0)
+      throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '团队分支不能继续委派角色');
+    const workOrder = this.workOrderForRun(parent);
+    if (!parent.teamCycleId) throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '任务没有获准组织执行');
+    const cycle = this.repo.getTeamCycle(parent.teamCycleId, parent.tenantId);
+    if (!cycle || cycle.workOrderId !== workOrder.id)
+      throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '团队周期无效');
+    if (!request.assignmentContractId)
+      throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', '每个委派必须指定分工契约');
+    const contract = this.repo.getContract(request.assignmentContractId, parent.tenantId);
+    if (!contract || contract.workOrderId !== workOrder.id || contract.teamCycleId !== cycle.id)
+      throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '分工契约不属于当前工作单');
+    if (contract.status !== 'proposed')
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '分工契约已被占用或关闭');
+    const role = this.repo.getRole(contract.roleId, parent.tenantId);
+    if (!role || role.employment !== 'active')
+      throw new OrganizationError(409, 'ROLE_AUTHORITY_EXCEEDED', '分工角色不可用');
+    const dependencies = contract.dependsOn.map(id => this.repo.getContract(id, parent.tenantId));
+    if (dependencies.some(item => !item || item.status !== 'delivered' || (item.delivery?.unfinished.length ?? 1) > 0))
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '分工依赖尚未成功交付');
+    const scopedRole = this.scopeRunToRole(child, role);
+    if (request.tools === 'all' && scopedRole.authority.readOnly)
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '角色只允许只读操作');
+    const requested = [...new Set(request.allowedTools ?? contract.allowedTools)];
+    if (requested.length && parent.toolNames && requested.some(name => !parent.toolNames!.includes(name)))
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '分工契约不能扩大父任务工具权限');
+    if (requested.length && scopedRole.authority.allowedTools.length
+      && requested.some(name => !scopedRole.authority.allowedTools.includes(name)))
+      throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '分工契约不能扩大角色工具权限');
+    child.toolNames = intersectTools(child.toolNames, requested, scopedRole.authority.allowedTools, parent.toolNames);
+    child.workOrderId = workOrder.id;
+    child.assignmentContractId = contract.id;
+    child.organizationRoleId = role.id;
+    child.teamCycleId = cycle.id;
+    child.cachePrefixHash = cachePrefixHash({
+      tenantId: parent.tenantId, workspace: parent.authorization.workspace,
+      projectId: workOrder.projectId, providerId: child.providerId, model: child.model,
+      workOrderId: workOrder.id, materialVersions: workOrder.materials,
+      ruleHash: createHash('sha256').update(JSON.stringify(parent.ruleResolution ?? null)).digest('hex').slice(0, 24),
+      toolVersions: [...requested].sort(),
+    });
+    this.repo.updateContract(contract, {
+      runId: child.id, status: 'active',
+      ...(child.toolNames.length ? { allowedTools: child.toolNames } : {}),
+    }, contract.revision);
+    this.repo.appendLedger({
+      id: randomUUID(), tenantId: child.tenantId, workOrderId: workOrder.id,
+      contractId: contract.id, type: 'started', actorId: role.id,
+      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: Date.now(),
+    });
+    return contract;
+  }
+
+  deliver(runId: string, tenantId: string, input: {
+    summary: string;
+    artifacts?: string[];
+    evidence?: EvidenceRef[];
+    unfinished?: string[];
+  }): AssignmentContract {
+    const contracts = this.repo.contractsForRun(runId, tenantId);
+    const contract = contracts.find(item => item.status === 'active') ?? contracts[0];
+    if (!contract) throw new OrganizationError(404, 'WORK_CONTRACT_INVALID', '任务没有分工契约');
+    const run = this.options.store.runs.get(runId, tenantId);
+    if (!run || !['completed', 'failed', 'cancelled', 'interrupted'].includes(run.status))
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '任务结束后才能交付契约');
+    const artifacts = [...new Set((input.artifacts?.length ? input.artifacts : this.options.store.runs.artifacts(runId).map(item => item.ref)).filter(Boolean))];
+    const expected = new Set(contract.expectedArtifacts.map(item => item.toLowerCase()));
+    const missing = artifacts.length && expected.size
+      ? [...expected].filter(item => !artifacts.some(artifact => artifact.toLowerCase().includes(item)))
+      : [];
+    const delivery: AssignmentDelivery = {
+      summary: bounded(input.summary, 4000, '交付摘要'),
+      artifacts,
+      evidence: [...(input.evidence ?? []), ...evidenceOf([runId], this.options.store, tenantId)]
+        .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index),
+      unfinished: [...new Set([...(input.unfinished ?? []), ...missing, ...unfinishedForRun(run)])],
+      costUsd: run.cost,
+      usageKnown: run.usageStatus === 'reported',
+    };
+    const status: AssignmentContract['status'] = run.status === 'completed' && delivery.unfinished.length === 0
+      ? 'delivered'
+      : run.status === 'cancelled' || run.status === 'interrupted' ? 'cancelled' : 'failed';
+    const updated = this.repo.updateContract(contract, { status, delivery }, contract.revision);
+    this.repo.appendLedger({
+      id: randomUUID(), tenantId, workOrderId: contract.workOrderId, contractId: contract.id,
+      type: status === 'delivered' ? 'delivered' : 'exception', actorId: contract.roleId, summary: delivery.summary,
+      evidence: delivery.evidence, createdAt: Date.now(),
+    });
+    this.emit('work.contract.updated', { contractId: contract.id, status: updated.status });
+    return updated;
+  }
+
+  private finalizeContract(run: RunRecord, contract: AssignmentContract): AssignmentContract {
+    if (!['active', 'proposed'].includes(contract.status)) return contract;
+    const artifacts = this.options.store.runs.artifacts(run.id).map(item => item.ref);
+    const missing = contract.expectedArtifacts.filter(expected =>
+      !artifacts.some(artifact => artifact.toLowerCase().includes(expected.toLowerCase())),
+    );
+    const delivery: AssignmentDelivery = {
+      summary: (run.answer ?? run.error ?? `任务状态：${run.status}`).slice(0, 4000),
+      artifacts,
+      evidence: evidenceOf([run.id], this.options.store, run.tenantId),
+      unfinished: [...new Set([...unfinishedForRun(run), ...missing.map(item => `缺少预期产物：${item}`)])],
+      costUsd: run.cost,
+      usageKnown: run.usageStatus === 'reported',
+    };
+    const status: AssignmentContract['status'] = run.status === 'completed' && delivery.unfinished.length === 0
+      ? 'delivered'
+      : run.status === 'cancelled' || run.status === 'interrupted' ? 'cancelled' : 'failed';
+    const updated = this.repo.updateContract(contract, { delivery, status }, contract.revision);
+    this.repo.appendLedger({
+      id: randomUUID(), tenantId: run.tenantId, workOrderId: contract.workOrderId,
+      contractId: contract.id, type: status === 'delivered' ? 'delivered' : 'exception',
+      actorId: contract.roleId, summary: delivery.summary,
+      evidence: delivery.evidence, createdAt: Date.now(),
+    });
+    this.emit('work.contract.updated', { workOrderId: contract.workOrderId, contractId: contract.id, status });
+    return updated;
+  }
+
+  finalizeRun(run: RunRecord): WorkReceipt | undefined {
+    const contract = run.assignmentContractId
+      ? this.repo.getContract(run.assignmentContractId, run.tenantId)
+      : this.repo.contractsForRun(run.id, run.tenantId)[0];
+    if (contract && contract.runId === run.id) this.finalizeContract(run, contract);
+
+    const workOrder = run.workOrderId
+      ? this.repo.getWorkOrder(run.workOrderId, run.tenantId)
+      : this.repo.workOrderByRun(run.rootId, run.tenantId) ?? this.repo.workOrderByRun(run.id, run.tenantId);
+    if (!workOrder) return undefined;
+    if (run.parentId && workOrder.rootRunId !== run.id) return undefined;
+
+    let contracts = this.repo.contracts(workOrder.id, run.tenantId);
+    const incomplete = contracts.some(item => ['proposed', 'active'].includes(item.status));
+    const closingRootRun = workOrder.originKind === 'run' && workOrder.rootRunId === run.id;
+    if (incomplete && !closingRootRun) return undefined;
+    contracts = contracts.map(item => this.repo.getContract(item.id, run.tenantId) ?? item);
+    const runs = [...new Map(contracts.flatMap(item =>
+      item.runId ? [[item.runId, this.options.store.runs.get(item.runId, run.tenantId)] as const] : [],
+    ).filter((entry): entry is [string, RunRecord] => !!entry[1])).values()];
+    const delivered = contracts.filter(item => item.status === 'delivered');
+    const unfinished = contracts.flatMap(item => item.delivery?.unfinished ?? (
+      item.status === 'delivered' ? [] : [`组织分支未完成：${item.branchObjective}`]
+    ));
+    const completed = contracts.length > 0 && delivered.length === contracts.length
+      && delivered.every(item => (item.delivery?.unfinished.length ?? 1) === 0);
+    const status: WorkOrder['status'] = completed
+      ? 'completed'
+      : delivered.length ? 'partial'
+        : contracts.length && contracts.every(item => ['cancelled', 'collapsed'].includes(item.status))
+          ? 'cancelled' : 'failed';
+    for (const cycle of this.repo.listTeamCycles(workOrder.id, run.tenantId)) {
+      const members = contracts.filter(item => item.teamCycleId === cycle.id);
+      if (!members.length) continue;
+      const cycleDelivered = members.filter(item => item.status === 'delivered');
+      const cycleComplete = cycleDelivered.length === members.length
+        && cycleDelivered.every(item => (item.delivery?.unfinished.length ?? 1) === 0);
+      const collapsed = run.fallbackReason === 'ROLLBACK_TO_SOLO';
+      const cycleStatus: TeamCycle['status'] = cycleComplete
+        ? 'completed'
+        : cycleDelivered.length || collapsed ? 'partial'
+          : members.every(item => ['cancelled', 'collapsed'].includes(item.status)) ? 'cancelled' : 'failed';
+      if (cycle.status !== cycleStatus) this.repo.updateTeamCycle(cycle, { status: cycleStatus });
+    }
+    const artifacts = [...new Set(contracts.flatMap(item => item.delivery?.artifacts ?? []))];
+    const evidence = contracts.flatMap(item => item.delivery?.evidence ?? [])
+      .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
+    const tokensIn = runs.reduce((sum, item) => sum + item.tokensIn, 0);
+    const tokensOut = runs.reduce((sum, item) => sum + item.tokensOut, 0);
+    const costUsd = runs.reduce((sum, item) => sum + item.cost, 0);
+    const usageKnown = runs.length > 0 && runs.every(item => item.usageStatus === 'reported');
+    const previous = this.repo.receipt(workOrder.id, run.tenantId);
+    const receipt: WorkReceipt = {
+      id: previous?.id ?? randomUUID(),
+      tenantId: run.tenantId, workOrderId: workOrder.id, status,
+      answer: rootAnswer(workOrder, run, contracts),
+      artifacts,
+      sources: evidence.filter(item => item.kind === 'artifact'),
+      contributors: contracts.map(item => ({
+        roleId: item.roleId, contractId: item.id,
+        summary: item.delivery?.summary ?? item.branchObjective,
+      })),
+      costUsd,
+      tokensIn,
+      tokensOut,
+      tokensCached: runs.reduce((sum, item) => sum + (item.tokensCached ?? 0), 0),
+      tokensCacheMiss: runs.reduce((sum, item) => sum + (item.tokensCacheMiss ?? 0), 0),
+      cacheWriteTokens: runs.reduce((sum, item) => sum + (item.cacheWriteTokens ?? 0), 0),
+      budgetTokens: workOrder.budgetTokens,
+      tokenCompliance: workOrder.budgetTokens === undefined ? null : tokensIn + tokensOut <= workOrder.budgetTokens,
+      cacheSavingsUsd: undefined,
+      unfinished: [...new Set(unfinished)],
+      exceptions: this.repo.exceptions(run.tenantId)
+        .filter(item => item.workOrderId === workOrder.id && !['resolved', 'dismissed'].includes(item.status))
+        .map(item => item.summary),
+      humanAcceptedAt: previous?.humanAcceptedAt,
+      usageKnown,
+      createdAt: previous?.createdAt ?? Date.now(),
+      updatedAt: Date.now(),
+    };
+    if (workOrder.status !== status) this.repo.updateWorkOrder(workOrder, { status }, workOrder.revision);
+    this.repo.saveReceipt(receipt);
+    if (!previous || previous.status !== status) {
+      this.repo.appendLedger({
+        id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
+        type: 'closed', actorId: run.organizationRoleId ?? 'maharness',
+        summary: `工作单${status === 'completed' ? '完成' : `结束：${status}`}`,
+        evidence: receipt.sources, createdAt: Date.now(),
+      });
+    }
+    this.emit('work.order.updated', { workOrderId: workOrder.id, status, receiptId: receipt.id });
+    return receipt;
+  }
+
+  economics(workOrderId: string, tenantId: string): TeamEconomics {
+    const order = this.repo.getWorkOrder(workOrderId, tenantId);
+    if (!order) throw new OrganizationError(404, 'WORK_ORDER_NOT_FOUND', '工作单不存在');
+    const cycles = this.repo.listTeamCycles(workOrderId, tenantId);
+    const contracts = this.repo.contracts(workOrderId, tenantId);
+    const runs = contracts.flatMap(contract => contract.runId ? [this.options.store.runs.get(contract.runId, tenantId)].filter((run): run is RunRecord => !!run) : []);
+    const actualCostUsd = runs.reduce((sum, run) => sum + run.cost, 0);
+    const actualTokens = runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0);
+    const cachedInputTokens = runs.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0);
+    const tokensCacheMiss = runs.reduce((sum, run) => sum + (run.tokensCacheMiss ?? 0), 0);
+    const cacheWriteTokens = runs.reduce((sum, run) => sum + (run.cacheWriteTokens ?? 0), 0);
+    const usageKnown = runs.every(run => run.usageStatus === 'reported');
+    const current = cycles.at(-1);
+    const readSignatures = new Map<string, number>();
+    let duplicateEvidenceReads = 0;
+    for (const run of runs) {
+      for (const call of this.options.store.runs.toolCalls(run.id)) {
+        if (call.sideEffect !== 'read' || !['succeeded', 'failed', 'unknown'].includes(call.status)) continue;
+        const signature = `${call.name}\0${call.argsSummary}`;
+        const seen = readSignatures.get(signature) ?? 0;
+        if (seen > 0) duplicateEvidenceReads++;
+        readSignatures.set(signature, seen + 1);
+      }
+    }
+    const coordinationRounds = contracts.reduce((sum, contract) => sum + Math.max(0, contract.dependsOn.length), 0);
+    return {
+      workOrderId,
+      singleAgentEstimateUsd: current?.soloEstimateUsd ?? null,
+      teamEstimateUsd: current?.teamEstimateUsd ?? 0,
+      actualCostUsd,
+      singleAgentEstimateTokens: current?.assignmentIds.length === 1 ? actualTokens : null,
+      teamEstimateTokens: Math.max(0, order.budgetTokens ?? actualTokens),
+      actualTokens,
+      cachedInputTokens,
+      tokensCacheMiss,
+      cacheWriteTokens,
+      cacheSavingsUsd: null,
+      duplicateEvidenceReads,
+      coordinationRounds,
+      roi: usageKnown && current?.soloEstimateUsd && actualCostUsd <= current.soloEstimateUsd
+        ? Math.round((current.soloEstimateUsd - actualCostUsd) / current.soloEstimateUsd * 1000) / 1000
+        : null,
+      usageKnown,
+    };
+  }
+
+  scorecards(tenantId: string): RoleScorecard[] {
+    const evaluation = this.ensureEvaluation(tenantId);
+    const roles = this.repo.listRoles(tenantId, undefined, true);
+    const orders = this.repo.listWorkOrders(tenantId, undefined, 500);
+    const contracts = orders.flatMap(order => this.repo.contracts(order.id, tenantId));
+    return roles.map(role => {
+      const own = contracts.filter(contract => contract.roleId === role.id);
+      const terminal = own.filter(contract => ['delivered', 'failed', 'cancelled', 'collapsed'].includes(contract.status));
+      const delivered = terminal.filter(contract => contract.status === 'delivered');
+      const withDelivery = own.filter(contract => !!contract.delivery);
+      const runs = own.flatMap(contract => contract.runId ? [this.options.store.runs.get(contract.runId, tenantId)].filter((run): run is RunRecord => !!run) : []);
+      const evidenceComplete = withDelivery.filter(contract => (contract.delivery?.evidence.length ?? 0) > 0).length;
+      const budgetChecks = own.flatMap(contract => {
+        const run = contract.runId ? this.options.store.runs.get(contract.runId, tenantId) : undefined;
+        return run && contract.budgetUsd !== undefined ? [{ run, budget: contract.budgetUsd }] : [];
+      });
+      const withinBudget = budgetChecks.filter(item => item.run.cost <= item.budget + 1e-10).length;
+      const tokenBudgetChecks = own.flatMap(contract => {
+        const run = contract.runId ? this.options.store.runs.get(contract.runId, tenantId) : undefined;
+        return run && run.budgetTokens !== undefined ? [run.tokensIn + run.tokensOut <= run.budgetTokens] : [];
+      });
+      const recovered = runs.filter(run => this.options.store.runs.events(run.id).some(event => event.type === 'tool_recovered')).length;
+      const sampleSize = terminal.length;
+      return {
+        roleId: role.id, tenantId, sampleSize,
+        evaluationVersion: evaluation.version,
+        evaluationHash: evaluation.hash,
+        confidence: sampleSize < evaluation.record.lowConfidenceSamples
+          ? 'insufficient'
+          : sampleSize < evaluation.record.mediumConfidenceSamples
+            ? 'low'
+            : sampleSize < evaluation.record.highConfidenceSamples ? 'medium' : 'high',
+        completionRate: sampleSize ? delivered.length / sampleSize : null,
+        acceptanceRate: delivered.length ? delivered.filter(contract => contract.delivery?.unfinished.length === 0).length / delivered.length : null,
+        reworkRate: sampleSize >= 2 ? Math.max(0, own.length - sampleSize) / own.length : null,
+        budgetCompliance: budgetChecks.length ? withinBudget / budgetChecks.length : null,
+        recoveryRate: runs.length ? recovered / runs.length : null,
+        evidenceCompleteness: withDelivery.length ? evidenceComplete / withDelivery.length : null,
+        reviewConsistency: null,
+        costUsd: runs.reduce((sum, run) => sum + run.cost, 0),
+        tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
+        cachedInputTokens: runs.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0),
+        tokenBudgetCompliance: tokenBudgetChecks.length ? tokenBudgetChecks.filter(Boolean).length / tokenBudgetChecks.length : null,
+        updatedAt: Date.now(),
+      };
+    });
+  }
+
+  wellbeing(tenantId: string, projectId?: string): RoleWellbeingSnapshot[] {
+    const roles = this.repo.listRoles(tenantId, undefined, true)
+      .filter(role => !projectId || role.projectId === '' || role.projectId === projectId);
+    const active = this.options.store.runs.active(tenantId);
+    const orders = this.repo.listWorkOrders(tenantId, projectId, 200);
+    const contracts = orders.flatMap(order => this.repo.contracts(order.id, tenantId));
+    return roles.map(role => {
+      const ownRuns = active.filter(run => run.organizationRoleId === role.id);
+      const ownContracts = contracts.filter(contract => contract.roleId === role.id && ['proposed', 'active'].includes(contract.status));
+      const waiting = ownRuns.filter(run => run.status === 'waiting_approval').length;
+      const failures = ownRuns.filter(run => run.status === 'failed').length;
+      return {
+        roleId: role.id,
+        activeAssignments: ownRuns.length + ownContracts.length,
+        consecutiveFailures: failures,
+        waitingApproval: waiting,
+        reworkAssignments: ownContracts.filter(contract => contract.status === 'proposed').length,
+        contextPressure: 'unknown' as const,
+        state: waiting ? 'waiting' as const : ownRuns.length ? 'busy' as const : role.employment === 'paused' ? 'resting' as const : 'ready' as const,
+        updatedAt: Date.now(),
+      };
+    });
+  }
+
+  raiseException(input: {
+    tenantId: string;
+    workOrderId: string;
+    contractId?: string;
+    kind: ExceptionCase['kind'];
+    summary: string;
+    facts: string[];
+    evidence?: EvidenceRef[];
+    createdBy?: 'maharness' | 'ai';
+  }): ExceptionCase {
+    const order = this.repo.getWorkOrder(input.workOrderId, input.tenantId);
+    if (!order) throw new OrganizationError(404, 'WORK_ORDER_NOT_FOUND', '工作单不存在');
+    if (input.contractId && !this.repo.getContract(input.contractId, input.tenantId))
+      throw new OrganizationError(404, 'WORK_CONTRACT_INVALID', '分工契约不存在');
+    const requiresHuman = ['budget', 'authority', 'opinion-conflict'].includes(input.kind)
+      || input.kind === 'ambiguity' && !order.acceptance.length;
+    const now = Date.now();
+    const record: ExceptionCase = {
+      id: randomUUID(), tenantId: input.tenantId, workOrderId: input.workOrderId,
+      contractId: input.contractId, kind: input.kind,
+      summary: bounded(input.summary, 2000, '异常摘要'),
+      facts: input.facts.map(item => bounded(item, 1000, '异常事实')).slice(0, 20),
+      evidence: input.evidence ?? [], createdBy: input.createdBy ?? 'ai',
+      factRuling: requiresHuman ? '运行事实已记录，决定超出模型权限' : '运行事实可判定，允许沿现有权限自动恢复',
+      requiresHuman,
+      recovery: requiresHuman ? '等待人类决定权限、费用或价值取舍' : '按权限和预算重新执行或标记跳过',
+      status: requiresHuman ? 'waiting_human' : 'auto_resolved',
+      createdAt: now, updatedAt: now,
+    };
+    this.repo.createException(record);
+    this.repo.appendLedger({
+      id: randomUUID(), tenantId: record.tenantId, workOrderId: record.workOrderId,
+      contractId: record.contractId, type: 'exception', actorId: record.createdBy,
+      summary: record.summary, evidence: record.evidence, createdAt: now,
+    });
+    this.emit('work.exception.updated', { exceptionId: record.id, status: record.status });
+    return record;
+  }
+
+  resolveException(id: string, tenantId: string, decision: string): ExceptionCase {
+    const record = this.repo.getException(id, tenantId);
+    if (!record) throw new OrganizationError(404, 'EXCEPTION_NOT_FOUND', '异常不存在');
+    if (record.status === 'resolved' || record.status === 'dismissed') return record;
+    return this.repo.updateException(record, { status: 'resolved', humanDecision: bounded(decision, 2000, '人工决定') });
+  }
+
+  detail(id: string, tenantId: string): OrganizationDetail {
+    const workOrder = this.repo.getWorkOrder(id, tenantId);
+    if (!workOrder) throw new OrganizationError(404, 'WORK_ORDER_NOT_FOUND', '工作单不存在');
+    const contracts = this.repo.contracts(id, tenantId);
+    const roles = [...new Set(contracts.map(contract => contract.roleId))]
+      .flatMap(roleId => {
+        const role = this.repo.getRole(roleId, tenantId);
+        return role ? [role] : [];
+      });
+    return {
+      workOrder,
+      teamCycles: this.repo.listTeamCycles(id, tenantId),
+      roles,
+      contracts,
+      ledger: this.repo.ledger(id, tenantId),
+      receipt: this.repo.receipt(id, tenantId),
+      exceptions: this.repo.exceptions(tenantId).filter(item => item.workOrderId === id),
+      economics: this.economics(id, tenantId),
+      scorecards: this.scorecards(tenantId).filter(item => roles.some(role => role.id === item.roleId)),
+      wellbeing: this.wellbeing(tenantId).filter(item => roles.some(role => role.id === item.roleId)),
+    };
+  }
+
+  setTeamState(id: string, tenantId: string, action: 'pause' | 'resume' | 'dissolve'): { teamCycle: TeamCycle; runIds: string[] } {
+    const cycle = this.repo.getTeamCycle(id, tenantId);
+    if (!cycle) throw new OrganizationError(404, 'TEAM_NOT_FOUND', '团队周期不存在');
+    if (action === 'resume' && !['paused', 'dissolved'].includes(cycle.status))
+      throw new OrganizationError(409, 'TEAM_NOT_PAUSED', '团队当前无需恢复');
+    if (action !== 'resume' && ['completed', 'cancelled', 'dissolved'].includes(cycle.status))
+      throw new OrganizationError(409, 'TEAM_CLOSED', '团队已结束');
+    const status = action === 'pause' ? 'paused' : action === 'resume' ? 'running' : 'dissolved';
+    this.repo.updateTeamCycle(cycle, { status });
+    const contracts = this.repo.contracts(cycle.workOrderId, tenantId).filter(contract => contract.teamCycleId === id);
+    const runIds = contracts.flatMap(contract => contract.runId && ['active', 'proposed'].includes(contract.status) ? [contract.runId] : []);
+    if (action === 'dissolve') {
+      for (const contract of contracts.filter(item => item.status === 'proposed')) {
+        this.repo.updateContract(contract, { status: 'cancelled' }, contract.revision);
+      }
+    }
+    this.emit('organization.updated', { teamCycleId: id, status });
+    return { teamCycle: cycle, runIds };
+  }
+
+  collapseToSolo(run: RunRecord, reason: string): TeamCycle | undefined {
+    if (!run.teamCycleId) return undefined;
+    const cycle = this.repo.getTeamCycle(run.teamCycleId, run.tenantId);
+    if (!cycle || ['completed', 'cancelled', 'dissolved'].includes(cycle.status)) return undefined;
+    const contracts = this.repo.contracts(cycle.workOrderId, run.tenantId).filter(contract => contract.teamCycleId === cycle.id);
+    const runs = contracts.flatMap(contract => {
+      const child = contract.runId ? this.options.store.runs.get(contract.runId, run.tenantId) : undefined;
+      return child ? [child] : [];
+    });
+    const failed = contracts.filter(contract => ['failed', 'cancelled'].includes(contract.status)).length;
+    const deliveredArtifacts = contracts.flatMap(contract => contract.delivery?.artifacts ?? []);
+    const readSignatures = new Set<string>();
+    let duplicateReads = 0;
+    let rounds = 0;
+    for (const child of runs) {
+      const calls = this.options.store.runs.toolCalls(child.id);
+      rounds += Math.max(calls.length, this.options.store.runs.modelCalls(child.id).length);
+      for (const call of calls) {
+        if (call.sideEffect !== 'read' || !['succeeded', 'failed', 'unknown'].includes(call.status)) continue;
+        const signature = `${call.name}\0${call.argsSummary}`;
+        if (readSignatures.has(signature)) duplicateReads++;
+        readSignatures.add(signature);
+      }
+    }
+    const workTerminal = contracts.every(contract =>
+      ['delivered', 'failed', 'cancelled', 'collapsed'].includes(contract.status));
+    const actualCost = runs.reduce((sum, child) => sum + child.cost, 0);
+    const usageKnown = runs.length > 0 && runs.every(child => child.usageStatus === 'reported');
+    const triggers = [
+      failed >= 2 ? '连续两个分支失败' : '',
+      failed > 0 && duplicateReads > 0 ? `重复读取同一证据 ${duplicateReads} 次` : '',
+      workTerminal && deliveredArtifacts.length === 0 && rounds >= 2 ? '两轮协作未产生有效产物' : '',
+      usageKnown && actualCost > cycle.teamEstimateUsd && deliveredArtifacts.length === 0
+        ? `团队费用已超过预估 ${actualCost.toFixed(6)} USD`
+        : '',
+    ].filter(Boolean);
+    if (!triggers.length) return cycle;
+    const collapseReason = triggers.join('；');
+    this.repo.transaction(() => {
+      for (const contract of contracts.filter(item => item.status === 'proposed'))
+        this.repo.updateContract(contract, { status: 'collapsed' }, contract.revision);
+      this.repo.updateTeamCycle(cycle, { status: 'partial' });
+      this.options.store.runs.update(run, { fallbackReason: 'ROLLBACK_TO_SOLO' }, 'team_collapsed', {
+        teamCycleId: cycle.id,
+        reason: bounded(`${collapseReason}；${reason}`, 500, '回退原因'),
+        retainedContracts: contracts.filter(item => item.status === 'delivered').map(item => item.id),
+      });
+      this.repo.appendLedger({
+        id: randomUUID(), tenantId: run.tenantId, workOrderId: cycle.workOrderId,
+        type: 'exception', actorId: 'maharness',
+        summary: bounded(`团队连续无有效进展，回退单角色：${collapseReason}；${reason}`, 2000, '回退摘要'),
+        evidence: [], createdAt: Date.now(),
+      });
+    });
+    this.emit('organization.updated', { teamCycleId: cycle.id, status: cycle.status, fallbackReason: 'ROLLBACK_TO_SOLO' });
+    return cycle;
+  }
+
+  confirmPersistentRole(id: string, tenantId: string): OrganizationRole {
+    const role = this.repo.getRole(id, tenantId);
+    if (!role) throw new OrganizationError(404, 'ROLE_NOT_FOUND', '角色不存在');
+    if (role.persistent) return role;
+    return this.repo.updateRole(role, {
+      projectId: '',
+      persistent: true,
+      source: 'human',
+    }, role.revision);
+  }
+
+  reassign(id: string, tenantId: string, contractId: string, roleId: string): AssignmentContract {
+    const cycle = this.repo.getTeamCycle(id, tenantId);
+    if (!cycle) throw new OrganizationError(404, 'TEAM_NOT_FOUND', '团队周期不存在');
+    const contract = this.repo.getContract(contractId, tenantId);
+    if (!contract || contract.teamCycleId !== id) throw new OrganizationError(404, 'WORK_CONTRACT_INVALID', '分工契约不存在');
+    if (!['proposed', 'failed'].includes(contract.status))
+      throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '运行中的契约不能直接改派；请先中止该分支');
+    const role = this.repo.getRole(roleId, tenantId);
+    if (!role || role.employment !== 'active') throw new OrganizationError(404, 'ROLE_NOT_FOUND', '目标角色不可用');
+    return this.repo.updateContract(contract, { roleId: role.id, status: 'proposed', runId: undefined, delivery: undefined }, contract.revision);
+  }
+
+  createProposal(input: {
+    tenantId: string;
+    workOrderId: string;
+    category: InstitutionProposal['category'];
+    title: string;
+    detail: string;
+    evidence?: EvidenceRef[];
+    impact?: InstitutionProposal['impact'];
+  }): InstitutionProposal {
+    if (!this.repo.getWorkOrder(input.workOrderId, input.tenantId))
+      throw new OrganizationError(404, 'WORK_ORDER_NOT_FOUND', '工作单不存在');
+    const now = Date.now();
+    const record: InstitutionProposal = {
+      id: randomUUID(), tenantId: input.tenantId, workOrderId: input.workOrderId,
+      category: input.category, title: bounded(input.title, 200, '提案标题'),
+      detail: bounded(input.detail, 4000, '提案内容'), evidence: input.evidence ?? [],
+      impact: input.impact ?? 'medium', status: 'pending', createdAt: now, updatedAt: now,
+    };
+    return this.repo.createProposal(record);
+  }
+
+  decideProposal(id: string, tenantId: string, accepted: boolean, decision: string): InstitutionProposal {
+    const record = this.repo.proposals(tenantId).find(item => item.id === id);
+    if (!record) throw new OrganizationError(404, 'PROPOSAL_NOT_FOUND', '制度提案不存在');
+    return this.repo.updateProposal(record, accepted ? 'accepted' : 'rejected', bounded(decision, 2000, '人工决定'));
+  }
+}
+
+export function isOrganizationError(error: unknown): error is OrganizationError {
+  return error instanceof OrganizationError;
+}
