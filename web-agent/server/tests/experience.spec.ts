@@ -6,7 +6,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../db';
-import { buildFactLedger, ExperienceError, ExperienceService } from '../experience';
+import { buildCachedFactLedger, buildEvidenceIndex, buildFactLedger, ExperienceError, ExperienceService } from '../experience';
 import { setMaintenanceModelScope, type ModelCallRecord } from '../../kernel/model-call';
 import type { RunRecord } from '../../kernel/run';
 import type { ProviderDef } from '../../kernel/types';
@@ -63,7 +63,14 @@ function finalOutput(refs: string[], score = 5): string {
   });
 }
 
-function reviewProvider(options: { malformed?: boolean; hold?: boolean; score?: number; seen?: string[][] } = {}): ProviderDef & { calls: () => number } {
+function reviewProvider(options: {
+  malformed?: boolean;
+  hold?: boolean;
+  score?: number;
+  seen?: string[][];
+  usage?: { input: number; output: number };
+  duplicatePlanRefs?: boolean;
+} = {}): ProviderDef & { calls: () => number } {
   let calls = 0;
   return {
     id: 'fixture', label: 'Fixture', defaultModel: 'fixture-model', priceSource: 'configured',
@@ -88,8 +95,9 @@ function reviewProvider(options: { malformed?: boolean; hold?: boolean; score?: 
         evidenceIndex?: Array<{ id: string }>;
       };
       if (payload.mode === 'evidence_plan') {
+        const refs = (payload.evidenceIndex ?? []).slice(0, 6).map(item => item.id);
         yield { type: 'delta', text: JSON.stringify({
-          evidenceRefs: (payload.evidenceIndex ?? []).slice(0, 6).map(item => item.id),
+          evidenceRefs: options.duplicatePlanRefs && refs[0] ? [refs[0], refs[0], ...refs.slice(1)] : refs,
           evidenceGaps: [],
           hypotheses: ['检查产物和验收事实'],
         }) };
@@ -99,7 +107,7 @@ function reviewProvider(options: { malformed?: boolean; hold?: boolean; score?: 
         const refs = (payload.evidence ?? []).map(item => item.ref);
         yield { type: 'delta', text: finalOutput(refs.length ? refs : (payload.evidenceIndex ?? []).map(item => item.id), options.score ?? 5) };
       }
-      yield { type: 'usage', input: 100, output: 50 };
+      yield { type: 'usage', input: options.usage?.input ?? 100, output: options.usage?.output ?? 50 };
       yield { type: 'done' };
     },
   };
@@ -146,21 +154,75 @@ describe('AI 用户复盘', () => {
       });
       store.runs.startTool(run.id, 'a', 'read_file', 'same.txt', { sideEffect: 'read' });
       store.runs.finishTool(run.id, 'a', { ok: true, data: { text: 'x'.repeat(20_000) } });
-      store.runs.startTool(run.id, 'b', 'read_file', 'same.txt', { sideEffect: 'read' });
+      store.runs.startTool(run.id, 'b', 'read_file', 'same.txt', { version: '1.2.3', sideEffect: 'read' });
       store.runs.finishTool(run.id, 'b', { ok: true, data: { text: 'x'.repeat(20_000) } });
       store.runs.startTool(run.id, 'c', 'write_file', 'out.txt', { sideEffect: 'write' });
       store.runs.finishTool(run.id, 'c', {
         ok: false, error: 'unknown',
         failure: { code: 'WRITE_INTERRUPTED', retryable: false, outcome: 'unknown' },
       });
+      const modelCall: ModelCallRecord = {
+        id: 'model-failed', runId: run.id, scope: 'run', purpose: 'agent',
+        providerId: 'fixture', model: 'fixture-model', startedAt: Date.now(),
+        status: 'running', inputEstimate: 400, outputLimit: 800, usageStatus: 'unknown', priceSource: 'configured',
+      };
+      store.runs.startModelCall(modelCall);
+      store.runs.finishModelCall({
+        ...modelCall, status: 'failed', finishedAt: Date.now(), input: 321, output: 45,
+        cost: 0.000411, usageStatus: 'reported', errorCode: 'UPSTREAM_FAILED',
+      });
       const facts = buildFactLedger(store, 'default', [run]);
       assert.equal(facts.gates.noFalseSuccess, false);
       assert.equal(facts.gates.noUnknownSideEffects, false);
       assert.equal(facts.totals.duplicateTools, 1);
+      assert.equal(facts.runs[0]!.modelInputTokens, 321);
+      assert.equal(facts.runs[0]!.modelOutputTokens, 45);
+      assert.equal(facts.runs[0]!.modelCostUsd, 0.000411);
+      assert.equal(facts.runs[0]!.modelFailures, 1);
+      assert.deepEqual(facts.runs[0]!.modelPurposes, ['agent']);
+      assert.deepEqual(facts.runs[0]!.toolVersions, ['1.2.3']);
+      assert.equal(facts.totals.modelInputTokens, 321);
+      assert.equal(facts.totals.modelOutputTokens, 45);
+      assert.equal(facts.totals.modelCostUsd, 0.000411);
+      assert.equal(facts.totals.modelFailures, 1);
       assert.equal(facts.anomalies.some(item => item.code === 'FALSE_SUCCESS' && item.severity === 'P0'), true);
       assert.equal(facts.anomalies.some(item => item.code === 'UNKNOWN_SIDE_EFFECT' && item.severity === 'P0'), true);
+      const longResult = buildEvidenceIndex([run], store).find(item => item.id === `run:${run.id}:tool:b`);
+      assert.equal(longResult?.reason, 'long_result');
+      assert.equal(longResult?.resultRef, 'b');
+      assert.equal(longResult?.truncated, true);
+      assert.ok((longResult?.size ?? 0) > 20_000);
       assert.ok(estimateTokens(JSON.stringify(facts)) <= 1_200);
       assert.doesNotMatch(JSON.stringify(facts), /x{1000}/);
+    } finally { store.close(); }
+  });
+
+  test('事实账本按租户、工作区、规则版本和源内容哈希复用，源事实变化后失效', () => {
+    const store = new Store(':memory:');
+    try {
+      const run = addRun(store);
+      const cache = new Map();
+      const first = buildCachedFactLedger(store, 'default', [run], 100, cache);
+      const reused = buildCachedFactLedger(store, 'default', [run], 200, cache);
+      assert.equal(cache.size, 1);
+      assert.equal(first.generatedAt, 100);
+      assert.equal(reused.generatedAt, 200);
+      assert.deepEqual(reused.totals, first.totals);
+
+      const otherTenant = buildCachedFactLedger(store, 'tenant-b', [run], 250, cache);
+      assert.equal(cache.size, 2);
+      assert.equal(otherTenant.tenantId, 'tenant-b');
+      const otherWorkspace = buildCachedFactLedger(store, 'default', [{
+        ...run, authorization: { ...run.authorization, workspace: `${run.authorization.workspace}-other` },
+      }], 275, cache);
+      assert.equal(cache.size, 3);
+      assert.equal(otherWorkspace.generatedAt, 275);
+
+      store.runs.append(run.id, 'tool_recovered', { name: 'read_file', outcome: 'not_started' });
+      const changed = buildCachedFactLedger(store, 'default', [run], 300, cache);
+      assert.equal(cache.size, 4);
+      assert.equal(changed.generatedAt, 300);
+      assert.equal(changed.totals.recoveries, 1);
     } finally { store.close(); }
   });
 
@@ -282,7 +344,7 @@ describe('AI 用户复盘', () => {
   test('聚焦路径实际执行证据规划和结论两步模型调用', async () => {
     const store = new Store(':memory:');
     const seen: string[][] = [];
-    const provider = reviewProvider({ seen });
+    const provider = reviewProvider({ seen, duplicatePlanRefs: true });
     const { experience } = services(store, provider);
     try {
       const run = addRun(store, {
@@ -299,6 +361,9 @@ describe('AI 用户复盘', () => {
       assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 9_200);
       assert.match(seen[0]!.join('\n'), /evidence_plan/);
       assert.match(seen[1]!.join('\n'), /review_input/);
+      const finalInput = JSON.parse(seen[1]!.at(-1)!) as { evidence: Array<{ ref: string }> };
+      const refs = finalInput.evidence.map(item => item.ref);
+      assert.equal(new Set(refs).size, refs.length);
       assert.equal(finished.dimensions.every(item => item.evidenceRefs.length > 0), true);
     } finally { store.close(); }
   });
@@ -317,6 +382,8 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.status, 'completed');
       assert.equal(finished.dimensions.every(item => item.score === 5), true);
       assert.equal(finished.verdict, 'negative');
+      assert.equal(finished.selfEvaluationBias?.detected, true);
+      assert.match(finished.selfEvaluationBias?.reason ?? '', /事实门槛未通过.*5\/5/);
       assert.equal(finished.facts.anomalies.some(item => item.severity === 'P0'), true);
     } finally { store.close(); }
   });
@@ -381,6 +448,25 @@ describe('AI 用户复盘', () => {
       assert.match(finished.error ?? '', /JSON/);
       assert.equal(provider.calls(), 1);
       assert.equal(finished.calls, 1);
+    } finally { store.close(); }
+  });
+
+  test('实测 token 超过总预算时终止并保留结构化失败状态', async () => {
+    const store = new Store(':memory:');
+    const provider = reviewProvider({ usage: { input: 3_000, output: 900 } });
+    const { experience } = services(store, provider);
+    try {
+      const run = addRun(store);
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+      const finished = experience.review(review.id, 'default');
+      assert.equal(finished.status, 'failed');
+      assert.equal(finished.calls, 1);
+      assert.equal(provider.calls(), 1);
+      assert.equal(finished.budget.inputTokens, 3_000);
+      assert.equal(finished.budget.outputTokens, 900);
+      assert.equal(finished.completedAt, undefined);
+      assert.match(finished.error ?? '', /3900 token.*3800 token.*输入 3000，输出 900/);
     } finally { store.close(); }
   });
 
@@ -536,6 +622,7 @@ describe('AI 用户复盘', () => {
       assert.equal(reproduced.finding.status, 'reproduced');
       assert.equal(reproduced.regression.status, 'ready');
       const before = JSON.stringify(experience.review(review.id, 'default').dimensions);
+      const factsBefore = JSON.stringify(experience.review(review.id, 'default').facts);
       experience.updateFinding(finding.id, 'default', 'fixing');
       experience.updateFinding(finding.id, 'default', 'verifying');
       assert.throws(
@@ -554,6 +641,7 @@ describe('AI 用户复盘', () => {
       });
       assert.equal(calibration.source, 'human');
       assert.equal(JSON.stringify(experience.review(review.id, 'default').dimensions), before);
+      assert.equal(JSON.stringify(experience.review(review.id, 'default').facts), factsBefore);
       assert.equal(experience.audits(review.id, 'default').filter(item => item.source === 'human').length, 1);
     } finally { store.close(); }
   });

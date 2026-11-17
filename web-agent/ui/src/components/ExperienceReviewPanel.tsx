@@ -256,10 +256,12 @@ export default function ExperienceReviewPanel({ runIds }: { runIds: string[] }) 
           </div>
           {current.facts.anomalies.length > 0 && <div className="mt-2 flex flex-col gap-1">{current.facts.anomalies.map((item, index) => <p key={`${item.code}:${index}`} className="break-words text-xs"><Badge variant={item.severity === 'P0' || item.severity === 'P1' ? 'destructive' : 'outline'}>{item.severity}</Badge> <span className="ml-2">{item.summary}{item.occurrences > 1 ? ` · 出现 ${item.occurrences} 次` : ''}</span></p>)}</div>}
           <p className="mt-2 text-xs text-muted-foreground">工具 {current.facts.totals.toolCalls} 次 · 模型 {current.facts.totals.modelCalls} 次 · 失败 {current.facts.totals.failedTools} · 重复 {current.facts.totals.duplicateTools} · 审批等待 {current.facts.totals.approvalWaits} · 产物 {current.facts.totals.artifacts}{current.facts.omittedRuns ? ` · 另有 ${current.facts.omittedRuns} 条运行计入汇总` : ''}</p>
+          <p className="mt-1 text-xs text-muted-foreground">模型输入 {current.facts.totals.modelInputTokens ?? 0} · 输出 {current.facts.totals.modelOutputTokens ?? 0} token · 成本 ${(current.facts.totals.modelCostUsd ?? 0).toFixed(6)} · 调用失败 {current.facts.totals.modelFailures ?? 0}</p>
         </div>
 
         <div>
           <p className="mb-2 flex items-center gap-2 text-sm font-medium"><Bot className="size-4" />AI 用户复盘</p>
+          {current.selfEvaluationBias?.detected && <p className="mb-2 text-xs text-destructive">自评偏差：{current.selfEvaluationBias.reason}</p>}
           <div className="grid gap-2 md:grid-cols-2">{current.dimensions.map(dimension => <ScoreRow key={dimension.id} dimension={dimension} />)}</div>
           {current.observations.length > 0 && <div className="mt-3 flex flex-col gap-1">{current.observations.map((item, index) => <p key={index} className="text-sm"><span className={item.kind === 'positive' ? 'text-emerald-700 dark:text-emerald-400' : 'text-amber-700 dark:text-amber-400'}>{item.kind === 'positive' ? '正向' : '摩擦'}</span> · {item.summary}{item.cost ? ` · ${item.cost}` : ''}</p>)}</div>}
           {current.evidenceGaps.length > 0 && <p className="mt-2 text-xs text-muted-foreground">证据缺口：{current.evidenceGaps.join('；')}</p>}

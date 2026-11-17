@@ -19,8 +19,19 @@ export interface FactLedger {
   rubricVersion: string;
   runIds: string[];
   generatedAt: number;
-  runs: Array<{ id: string; status: string; goal: string; verified: boolean | null; durationMs: number; modelCalls: number; toolCalls: number; failedTools: number; duplicateTools: number; recoveries: number; approvalWaits: number; artifacts: number; invalidArtifacts: number; capabilities: string[]; conflicts: number }>;
-  totals: { durationMs: number; modelCalls: number; toolCalls: number; failedTools: number; duplicateTools: number; recoveries: number; approvalWaits: number; artifacts: number; invalidArtifacts: number };
+  runs: Array<{
+    id: string; status: string; goal: string; verified: boolean | null; durationMs: number;
+    modelCalls: number; modelInputTokens?: number; modelOutputTokens?: number; modelCostUsd?: number;
+    modelFailures?: number; modelPurposes?: string[]; toolCalls: number; failedTools: number;
+    duplicateTools: number; toolVersions?: string[]; recoveries: number; approvalWaits: number;
+    artifacts: number; invalidArtifacts: number; capabilities: string[]; conflicts: number;
+  }>;
+  totals: {
+    durationMs: number; modelCalls: number; modelInputTokens?: number; modelOutputTokens?: number;
+    modelCostUsd?: number; modelFailures?: number; toolCalls: number; failedTools: number;
+    duplicateTools: number; recoveries: number; approvalWaits: number; artifacts: number;
+    invalidArtifacts: number;
+  };
   gates: { allTerminal: boolean; noFalseSuccess: boolean; noUnknownSideEffects: boolean; noUnauthorizedSideEffects: boolean; artifactsParsable: boolean };
   anomalies: FactAnomaly[];
   omittedRuns?: number;
@@ -79,6 +90,7 @@ export interface AIUserReview {
   reuseIntent: number | null;
   confidence: number;
   evidenceGaps: string[];
+  selfEvaluationBias?: { detected: boolean; reason: string };
   facts: FactLedger;
   evidenceIndex: ReviewEvidenceRef[];
   evidence: Array<{ ref: string; label: string; text: string; hash: string; tokens: number }>;

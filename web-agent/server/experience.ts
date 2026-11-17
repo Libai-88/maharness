@@ -140,6 +140,8 @@ function stableHash(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
+const REVIEW_RUBRIC_HASH = stableHash({ version: REVIEW_RUBRIC_VERSION, dimensions: DIMENSIONS });
+
 function severityRank(value: FindingSeverity): number {
   return ({ P0: 0, P1: 1, P2: 2, P3: 3 } as const)[value];
 }
@@ -233,7 +235,25 @@ function aggregateAnomaly(map: Map<string, FactAnomaly>, anomaly: Omit<FactAnoma
   map.set(key, { ...anomaly, evidenceRefs: [...new Set(anomaly.evidenceRefs)].slice(0, 12), occurrences: 1 });
 }
 
+function loadFactSources(store: Store, runs: RunRecord[]) {
+  return runs.map(run => ({
+    run,
+    events: store.runs.events(run.id),
+    calls: store.runs.toolCalls(run.id),
+    modelCalls: store.runs.modelCalls(run.id, 0, 100),
+    artifacts: store.runs.artifacts(run.id),
+  }));
+}
+
 export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[], now = Date.now()): FactLedger {
+  return buildFactLedgerFromSources(tenantId, loadFactSources(store, runs), now);
+}
+
+function buildFactLedgerFromSources(
+  tenantId: string,
+  sources: ReturnType<typeof loadFactSources>,
+  now: number,
+): FactLedger {
   const anomalies = new Map<string, FactAnomaly>();
   const facts: FactRun[] = [];
   let allTerminal = true;
@@ -246,15 +266,17 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
   let invalidArtifactTotal = 0;
   let modelCallTotal = 0;
 
-  for (const run of runs) {
+  for (const { run, events, calls, modelCalls, artifacts } of sources) {
     if (!terminal(run)) allTerminal = false;
-    const events = store.runs.events(run.id);
-    const calls = store.runs.toolCalls(run.id);
-    const modelCalls = store.runs.modelCalls(run.id, 0, 100);
-    const artifacts = store.runs.artifacts(run.id);
     const seen = new Set<string>();
     let duplicateTools = 0;
     let failedTools = 0;
+    let modelInputTokens = 0;
+    let modelOutputTokens = 0;
+    let modelCostUsd = 0;
+    let modelFailures = 0;
+    const modelPurposes = new Set<string>();
+    const toolVersions = new Set<string>();
     let invalidArtifacts = 0;
     let recoveries = 0;
     let approvalWaits = 0;
@@ -263,6 +285,7 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
     const eventRef = (seq: number) => `run:${run.id}:event:${seq}`;
     const artifactRef = (id: string) => `run:${run.id}:artifact:${id}`;
     for (const call of calls) {
+      if (call.version) toolVersions.add(call.version);
       const key = `${call.name}\u0000${call.argsSummary}`;
       if (seen.has(key)) {
         duplicateTools++;
@@ -286,6 +309,13 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
         }
         aggregateAnomaly(anomalies, { code: 'TOOL_FAILURE', severity: code.startsWith('P') ? 'P1' : 'P2', summary: `${call.name} 失败：${code}`, evidenceRefs: [ref] });
       }
+    }
+    for (const call of modelCalls) {
+      modelInputTokens += call.input ?? 0;
+      modelOutputTokens += call.output ?? 0;
+      modelCostUsd += call.cost ?? 0;
+      if (call.status !== 'completed') modelFailures++;
+      modelPurposes.add(call.purpose);
     }
     for (const event of events) {
       if (event.type === 'approval_required' || event.type === 'state' && event.data.status === 'waiting_approval') approvalWaits++;
@@ -333,9 +363,15 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
       verified: verification ? verification === 'passed' || verification === 'done' : null,
       durationMs,
       modelCalls: modelCalls.length,
+      modelInputTokens,
+      modelOutputTokens,
+      modelCostUsd: Math.round(modelCostUsd * 1e6) / 1e6,
+      modelFailures,
+      modelPurposes: [...modelPurposes].slice(0, 4),
       toolCalls: calls.length,
       failedTools,
       duplicateTools,
+      toolVersions: [...toolVersions].slice(0, 4),
       recoveries,
       approvalWaits,
       artifacts: artifacts.length,
@@ -351,14 +387,18 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
     schemaVersion: 1,
     rubricVersion: REVIEW_RUBRIC_VERSION,
     tenantId,
-    providerId: runs[0]?.providerId ?? '',
-    model: runs[0]?.model ?? '',
-    runIds: runs.map(run => run.id),
+    providerId: sources[0]?.run.providerId ?? '',
+    model: sources[0]?.run.model ?? '',
+    runIds: sources.map(source => source.run.id),
     generatedAt: now,
     runs: facts,
     totals: {
       durationMs: facts.reduce((sum, run) => sum + run.durationMs, 0),
       modelCalls: modelCallTotal,
+      modelInputTokens: facts.reduce((sum, run) => sum + run.modelInputTokens, 0),
+      modelOutputTokens: facts.reduce((sum, run) => sum + run.modelOutputTokens, 0),
+      modelCostUsd: Math.round(facts.reduce((sum, run) => sum + run.modelCostUsd, 0) * 1e6) / 1e6,
+      modelFailures: facts.reduce((sum, run) => sum + run.modelFailures, 0),
       toolCalls: toolTotal,
       failedTools: failedTotal,
       duplicateTools: duplicateTotal,
@@ -380,10 +420,49 @@ export function buildFactLedger(store: Store, tenantId: string, runs: RunRecord[
   return compactFactLedger(ledger);
 }
 
+export function buildCachedFactLedger(
+  store: Store,
+  tenantId: string,
+  runs: RunRecord[],
+  now: number,
+  cache: Map<string, FactLedger>,
+): FactLedger {
+  const sources = loadFactSources(store, runs);
+  const key = stableHash({
+    tenantId,
+    rubricVersion: REVIEW_RUBRIC_VERSION,
+    rubricHash: REVIEW_RUBRIC_HASH,
+    runs: sources.map(source => ({
+      id: source.run.id,
+      record: source.run,
+      events: source.events,
+      tools: source.calls,
+      modelCalls: source.modelCalls,
+      artifacts: source.artifacts,
+    })),
+  });
+  const cached = cache.get(key);
+  if (cached) {
+    const reused = { ...cached, generatedAt: now };
+    cache.delete(key);
+    cache.set(key, reused);
+    return reused;
+  }
+  const ledger = buildFactLedgerFromSources(tenantId, sources, now);
+  cache.set(key, ledger);
+  if (cache.size > 32) cache.delete(cache.keys().next().value!);
+  return ledger;
+}
+
 function compactFactLedger(input: FactLedger): FactLedger {
   const ledger: FactLedger = {
     ...input,
-    runs: input.runs.map(run => ({ ...run, capabilities: run.capabilities.slice(0, 12) })),
+    runs: input.runs.map(run => ({
+      ...run,
+      capabilities: run.capabilities.slice(0, 12),
+      modelPurposes: run.modelPurposes.slice(0, 4),
+      toolVersions: run.toolVersions.slice(0, 4),
+    })),
     anomalies: input.anomalies.slice(0, 20).map(anomaly => ({
       ...anomaly,
       summary: trimToTokens(anomaly.summary, 60),
@@ -407,6 +486,8 @@ function compactFactLedger(input: FactLedger): FactLedger {
           ...run,
           goal: trimToTokens(run.goal, goalCap),
           capabilities: run.capabilities.slice(0, capabilityCap),
+          modelPurposes: run.modelPurposes.slice(0, capabilityCap),
+          toolVersions: run.toolVersions.slice(0, capabilityCap),
         }));
         if (estimateTokens(JSON.stringify(ledger)) <= FACT_LEDGER_TOKEN_LIMIT) return ledger;
       }
@@ -416,6 +497,8 @@ function compactFactLedger(input: FactLedger): FactLedger {
     ...run,
     goal: trimToTokens(run.goal, 12),
     capabilities: [],
+    modelPurposes: run.modelPurposes.slice(0, 1),
+    toolVersions: run.toolVersions.slice(0, 1),
   }));
   ledger.omittedRuns = Math.max(0, input.runs.length - ledger.runs.length);
   if (estimateTokens(JSON.stringify(ledger)) <= FACT_LEDGER_TOKEN_LIMIT) return ledger;
@@ -427,9 +510,15 @@ function compactFactLedger(input: FactLedger): FactLedger {
     verified: run.verified,
     durationMs: run.durationMs,
     modelCalls: run.modelCalls,
+    modelInputTokens: run.modelInputTokens,
+    modelOutputTokens: run.modelOutputTokens,
+    modelCostUsd: run.modelCostUsd,
+    modelFailures: run.modelFailures,
+    modelPurposes: [],
     toolCalls: run.toolCalls,
     failedTools: run.failedTools,
     duplicateTools: run.duplicateTools,
+    toolVersions: [],
     recoveries: run.recoveries,
     approvalWaits: run.approvalWaits,
     artifacts: run.artifacts,
@@ -486,8 +575,19 @@ export function buildEvidenceIndex(runs: RunRecord[], store: Store): ReviewEvide
     for (const event of events.filter(item => /error|failed|partial|approval|recover|artifact|state/.test(item.type)).slice(-12)) {
       push({ id: `run:${run.id}:event:${event.seq}`, kind: 'event', runId: run.id, label: `${event.type} · #${event.seq}`, size: jsonText(event.data).length });
     }
-    for (const call of store.runs.toolCalls(run.id).filter(item => item.status !== 'succeeded' || item.sideEffect && item.sideEffect !== 'none' && item.sideEffect !== 'read').slice(-16)) {
-      push({ id: `run:${run.id}:tool:${call.id}`, kind: 'tool', runId: run.id, label: `${call.name} · ${call.status}`, size: call.argsSummary.length + (call.failure ? 120 : 0) });
+    for (const call of store.runs.toolCalls(run.id).slice(-24)) {
+      const page = store.runs.readTool(run.id, call.id);
+      const longResult = !!page && page.length > 4_000;
+      if (call.status === 'succeeded' && (!call.sideEffect || call.sideEffect === 'none' || call.sideEffect === 'read') && !longResult) continue;
+      push({
+        id: `run:${run.id}:tool:${call.id}`,
+        kind: 'tool',
+        runId: run.id,
+        label: longResult ? `${call.name} · 长结果 ${page.length} 字符` : `${call.name} · ${call.status}`,
+        ...(longResult ? { reason: 'long_result' } : {}),
+        size: page?.length ?? call.argsSummary.length + (call.failure ? 120 : 0),
+        ...(longResult ? { resultRef: call.id, truncated: page.truncated } : {}),
+      });
     }
     for (const call of store.runs.modelCalls(run.id, 0, 100).filter(item => item.status !== 'completed' || item.errorCode).slice(-8)) {
       push({ id: `run:${run.id}:model:${call.id}`, kind: 'model', runId: run.id, label: `${call.purpose} · ${call.status}`, size: 200 });
@@ -503,6 +603,7 @@ function compactEvidenceIndex(index: ReviewEvidenceRef[], facts: FactLedger): Re
   const anomalyRefs = new Set(facts.anomalies.flatMap(item => item.evidenceRefs));
   const rank = (item: ReviewEvidenceRef) => {
     if (anomalyRefs.has(item.id)) return 0;
+    if (item.reason === 'long_result') return 1;
     if (item.kind === 'verification') return 1;
     if (item.kind === 'artifact') return 2;
     if (item.kind === 'capability' || item.kind === 'rule') return 3;
@@ -540,6 +641,7 @@ function scoreOf(review: AIUserReview): number | null {
 export class ExperienceService {
   private readonly active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private readonly evidenceCache = new Map<string, EvidenceSlice>();
+  private readonly factCache = new Map<string, FactLedger>();
   private readonly now: () => number;
 
   constructor(private readonly deps: ExperienceDeps) {
@@ -578,6 +680,7 @@ export class ExperienceService {
       providerId: selection.provider.id,
       model: selection.model,
       rubricVersion: REVIEW_RUBRIC_VERSION,
+      rubricHash: REVIEW_RUBRIC_HASH,
     });
     const key = request.requestKey?.trim() || undefined;
     if (key) {
@@ -1009,7 +1112,7 @@ export class ExperienceService {
       if (requireModel || requestedProvider) throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
       throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
     }
-    const rawFacts = buildFactLedger(this.deps.store, tenantId, selected, this.now());
+    const rawFacts = buildCachedFactLedger(this.deps.store, tenantId, selected, this.now(), this.factCache);
     const focused = hasFocusedSignal(rawFacts, rawFacts.truncated === true);
     const facts = selected.length > 1 ? clusterMultiRunFacts(rawFacts) : rawFacts;
     return {
@@ -1234,7 +1337,14 @@ export class ExperienceService {
     const critical = review.facts.anomalies.some(item => item.severity === 'P0' || item.severity === 'P1');
     const scores = review.dimensions.flatMap(item => item.score === null ? [] : [item.score]);
     const average = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
-    if (ledgerGateFailed(review.facts) || critical || review.reuseIntent !== null && review.reuseIntent <= 2) {
+    const factGateFailed = ledgerGateFailed(review.facts) || critical;
+    review.selfEvaluationBias = factGateFailed && average >= 3.5 && review.reuseIntent !== null && review.reuseIntent >= 4
+      ? {
+          detected: true,
+          reason: `事实门槛未通过，AI 主观平均 ${Math.round(average * 10) / 10}/5，再次使用意愿 ${review.reuseIntent}/5。`,
+        }
+      : undefined;
+    if (factGateFailed || review.reuseIntent !== null && review.reuseIntent <= 2) {
       review.verdict = 'negative';
     } else if (!scores.length || scores.some(score => score < 3) || average < 3.5 || review.reuseIntent === null || review.reuseIntent < 4) {
       review.verdict = 'neutral';
@@ -1315,7 +1425,11 @@ export class ExperienceService {
       const id = tail.slice(5);
       const call = this.deps.store.runs.toolCalls(run.id).find(item => item.id === id);
       const page = this.deps.store.runs.readTool(run.id, id);
-      value = call ? { ...call, resultExcerpt: page?.content?.slice(0, 3_000), nextOffset: page?.nextOffset } : undefined;
+      value = call ? {
+        ...call,
+        resultExcerpt: page?.content?.slice(0, 3_000),
+        result: page ? { length: page.length, offset: page.offset, nextOffset: page.nextOffset, truncated: page.truncated } : undefined,
+      } : undefined;
     } else if (tail.startsWith('artifact:')) {
       value = this.deps.store.runs.artifacts(run.id).find(item => item.id === tail.slice(9));
     } else if (tail.startsWith('model:')) {
@@ -1325,13 +1439,18 @@ export class ExperienceService {
     const raw = jsonText(value);
     const cacheKey = stableHash({ id: index.id, raw });
     const cached = this.evidenceCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+      this.evidenceCache.delete(cacheKey);
+      this.evidenceCache.set(cacheKey, cached);
+      return cached;
+    }
     const text = trimToTokens(raw, EVIDENCE_SLICE_TOKEN_LIMIT, provider?.tokenizer);
     const slice: EvidenceSlice = {
       ref: index.id, label: index.label, text, hash: stableHash(text),
       tokens: provider?.tokenizer?.countText ? provider.tokenizer.countText(text) : estimateTokens(text),
     };
     this.evidenceCache.set(cacheKey, slice);
+    if (this.evidenceCache.size > 256) this.evidenceCache.delete(this.evidenceCache.keys().next().value!);
     return slice;
   }
 

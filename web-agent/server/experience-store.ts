@@ -76,9 +76,15 @@ export interface FactRun {
   verified: boolean | null;
   durationMs: number;
   modelCalls: number;
+  modelInputTokens: number;
+  modelOutputTokens: number;
+  modelCostUsd: number;
+  modelFailures: number;
+  modelPurposes: string[];
   toolCalls: number;
   failedTools: number;
   duplicateTools: number;
+  toolVersions: string[];
   recoveries: number;
   approvalWaits: number;
   artifacts: number;
@@ -99,6 +105,10 @@ export interface FactLedger {
   totals: {
     durationMs: number;
     modelCalls: number;
+    modelInputTokens: number;
+    modelOutputTokens: number;
+    modelCostUsd: number;
+    modelFailures: number;
     toolCalls: number;
     failedTools: number;
     duplicateTools: number;
@@ -126,6 +136,8 @@ export interface ReviewEvidenceRef {
   label: string;
   reason?: string;
   size?: number;
+  resultRef?: string;
+  truncated?: boolean;
 }
 
 export interface EvidenceSlice {
@@ -199,6 +211,7 @@ export interface AIUserReview {
   reuseIntent: 1 | 2 | 3 | 4 | 5 | null;
   confidence: number;
   evidenceGaps: string[];
+  selfEvaluationBias?: { detected: boolean; reason: string };
   facts: FactLedger;
   evidenceIndex: ReviewEvidenceRef[];
   evidence: EvidenceSlice[];
