@@ -63,7 +63,8 @@ const realWorkflowPath = resolve(root, realWorkflowRef);
 const realWorkflowScreenshotRef = 'evals/acceptance/ai-society-v1/real-workflow.png';
 const realWorkflowScreenshotPath = resolve(root, realWorkflowScreenshotRef);
 const pairedLiveRoot = resolve(root, 'evals/reports/organization-paired-live');
-const liveReportPath = resolve(root, 'evals/reports/organization-live/20261117-social-os-v4/report.json');
+const liveReportRef = 'evals/reports/organization-live/20261118-social-os-v6/report.json';
+const liveReportPath = resolve(root, liveReportRef);
 const replayReportPath = resolve(root, 'evals/replays/organization-live/20261118-safe-v4/reconciled.json');
 const criteria: Criterion[] = [];
 let browserProven = false;
@@ -422,6 +423,12 @@ const liveReport = existsSync(liveReportPath)
       calls: number;
       tokensIn: number;
       tokensOut: number;
+      cacheUsageStatus: 'known' | 'unknown';
+      cacheWriteUsageStatus: 'known' | 'unknown';
+      reportedCachedTokens: number | null;
+      reportedCacheMissTokens: number | null;
+      reportedCacheWriteTokens: number | null;
+      cacheSavingsUsd: number | null;
       configuredCostUsd: number | null;
       usageComplete: boolean;
       elapsedMs: number;
@@ -1201,10 +1208,12 @@ const report = {
   blockingGates: criteria
     .filter(item => item.status === 'partial')
     .map(item => ({ id: item.id, reason: item.evidence.at(-1) })),
-  liveModelEvidence: liveReport && replayReport ? {
+  liveModelEvidence: liveReport ? {
     available: true,
     model: liveReport.requestedModel,
     rawRun: {
+      reportRef: liveReportRef,
+      reportHash: sha256(liveReportPath),
       createdAt: liveReport.createdAt,
       expected: liveReport.expected,
       observed: liveReport.observed,
@@ -1217,20 +1226,32 @@ const report = {
       usageComplete: liveReport.usageComplete,
       elapsedMs: liveReport.elapsedMs,
     },
-    traceReplay: {
-      createdAt: replayReport.createdAt,
-      sourceReportHash: replayReport.sourceReportHash,
-      rawPassed: replayReport.rawPassed,
-      reconciledPassed: replayReport.reconciledPassed,
-      total: replayReport.total,
-      callsModels: false,
-      semantics: 'Reloads persisted outputs and terminal facts through the corrected deterministic finalizer.',
+    ...(replayReport ? {
+      historicalTraceReplay: {
+        createdAt: replayReport.createdAt,
+        sourceReportHash: replayReport.sourceReportHash,
+        rawPassed: replayReport.rawPassed,
+        reconciledPassed: replayReport.reconciledPassed,
+        total: replayReport.total,
+        callsModels: false,
+        semantics: 'Reloads persisted outputs and terminal facts through the corrected deterministic finalizer.',
+      },
+    } : {}),
+    providerCache: {
+      hitMissStatus: liveReport.cacheUsageStatus,
+      writeStatus: liveReport.cacheWriteUsageStatus,
+      cachedInputTokens: liveReport.reportedCachedTokens,
+      missInputTokens: liveReport.reportedCacheMissTokens,
+      cacheWriteTokens: liveReport.reportedCacheWriteTokens,
+      cacheSavingsUsd: liveReport.cacheSavingsUsd,
+      source: 'organization-live report receipts',
     },
-    providerCache: replayReport.providerCacheUsage,
     billing: 'The configured route declares a zero local price; supplier billing and cache savings remain unverified.',
   } : { available: false },
   limits: [
-    'This report validates deterministic service behavior; the original real-model gate remains 1/9 and replay is not model evidence.',
+    liveReport?.allPassed
+      ? `The current real-model gate passed ${liveReport.passed}/${liveReport.observed}; historical trace replay remains separate evidence.`
+      : `The current real-model gate is ${liveReport?.passed ?? 0}/${liveReport?.expected ?? 0}; trace replay is not model evidence.`,
     'Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.',
     '福祉表示可观测运行负担，不表示主观感受、意识或法律人格。',
     'The real-backend browser workflow uses a deterministic local Provider transport; it does not prove real-model quality or cost.',
