@@ -51,17 +51,30 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       const restored = new Database(path); assert.equal(restored.pragma('user_version', { simple: true }), 4); restored.close();
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
-  test('v2 迁移备份配置与插件清单，并能连续推进 schema 版本', () => {
+  test('没有租户表的 v1 旧库可连续升级并备份配置与插件清单', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-v2-backup-'));
     const dbFile = join(root, 'agent.db');
     try {
       const initial = new Store(dbFile); const session = initial.createSession('model'); initial.close();
-      const raw = new Database(dbFile); raw.pragma('user_version = 1'); raw.close();
+      const raw = new Database(dbFile);
+      raw.exec('DROP TABLE tenants; DROP INDEX idx_sessions_tenant; ALTER TABLE sessions DROP COLUMN tenant_id');
+      raw.pragma('user_version = 1');
+      raw.close();
       const configFile = join(root, 'config.json'); writeFileSync(configFile, JSON.stringify({ customRule: 'preserve' }));
       const plugins = join(root, 'plugins'); mkdirSync(join(plugins, 'custom'), { recursive: true });
       writeFileSync(join(plugins, 'custom', 'plugin.json'), JSON.stringify({ id: 'custom', customField: 42 }));
       const migrated = new Store(dbFile, { migrationSources: { configFile, pluginDirs: [plugins] } });
-      assert.equal(migrated.schemaVersion, Store.DB_SCHEMA_VERSION); assert.equal(migrated.listSessions()[0].id, session.id); migrated.close();
+      try {
+        assert.equal(migrated.schemaVersion, Store.DB_SCHEMA_VERSION);
+        assert.deepEqual(migrated.integrityCheck(), []);
+        assert.equal(migrated.listSessions()[0].id, session.id);
+        assert.equal(migrated.getTenant('default')?.id, 'default');
+      } finally { migrated.close(); }
+      const upgraded = new Database(dbFile, { readonly: true });
+      try {
+        assert.deepEqual(upgraded.prepare(`SELECT status FROM organization_versions_v1
+          WHERE tenant_id='default' AND kind='evaluation' AND subject_id='default'`).get(), { status: 'active' });
+      } finally { upgraded.close(); }
       assert.ok(readdirSync(root).some(file => file.endsWith('.config.json')));
       assert.ok(readdirSync(root).some(file => file.endsWith('.plugins.json')));
     } finally { rmSync(root, { recursive: true, force: true }); }

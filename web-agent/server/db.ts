@@ -125,6 +125,18 @@ export const DEFAULT_PERSONA = {
   content: '',
 };
 
+function ensureTenants(db: Database.Database): void {
+  db.exec(`CREATE TABLE IF NOT EXISTS tenants (
+    id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
+    max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
+    max_storage_bytes INTEGER NOT NULL DEFAULT 0,
+    max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
+    created_at INTEGER NOT NULL
+  )`);
+  db.prepare('INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (?,?,?)')
+    .run('default', 'Default', Date.now());
+}
+
 export class Store {
   private db: Database.Database;
   readonly runs: RunRepository;
@@ -264,13 +276,6 @@ export class Store {
         created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC);
-      CREATE TABLE IF NOT EXISTS tenants (
-        id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
-        max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
-        max_storage_bytes INTEGER NOT NULL DEFAULT 0,
-        max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL
-      );
       CREATE TABLE IF NOT EXISTS api_tokens (
         id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, role TEXT NOT NULL,
         token_hash TEXT NOT NULL UNIQUE, label TEXT,
@@ -435,6 +440,8 @@ export class Store {
       `);
     } },
     { from: 13, to: 14, run: db => {
+      // Pre-tenant databases reach this step before the startup column migrations.
+      ensureTenants(db);
       db.exec(ORGANIZATION_SCHEMA);
       const insertVersion = db.prepare(`INSERT OR IGNORE INTO organization_versions_v1
         (id,tenant_id,kind,subject_id,version,status,record,hash,created_by,reason,created_at)
@@ -575,13 +582,7 @@ export class Store {
       this.db.exec("ALTER TABLE sessions ADD COLUMN tenant_id TEXT NOT NULL DEFAULT 'default'");
     }
     this.db.exec('CREATE INDEX IF NOT EXISTS idx_sessions_tenant ON sessions(tenant_id, updated_at DESC)');
-    this.db.exec(`CREATE TABLE IF NOT EXISTS tenants (
-      id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
-      max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
-      max_storage_bytes INTEGER NOT NULL DEFAULT 0,
-      max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    )`);
+    ensureTenants(this.db);
     this.db.exec(`CREATE TABLE IF NOT EXISTS api_tokens (
       id TEXT PRIMARY KEY, tenant_id TEXT NOT NULL, role TEXT NOT NULL,
       token_hash TEXT NOT NULL UNIQUE, label TEXT,
@@ -621,8 +622,6 @@ export class Store {
     if (!tenantCols.some((c) => c.name === 'max_tool_calls_per_minute')) {
       this.db.exec('ALTER TABLE tenants ADD COLUMN max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0');
     }
-    this.db.prepare('INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (?,?,?)')
-      .run('default', 'Default', Date.now());
     // 凭据迁移：带主密钥首次启动时，已存在的明文 api_key 自动加密落库（幂等）
     if (this.secretKey) {
       const plainRows = this.db.prepare('SELECT id, api_key AS apiKey FROM providers').all() as { id: string; apiKey: string }[];
