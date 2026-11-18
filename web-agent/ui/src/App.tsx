@@ -47,6 +47,7 @@ import AppView from './components/AppView';
 function preloadSecondaryViews() {
   void import('./components/FilesView');
   void import('./components/WorkbenchView');
+  void import('./components/SocietyView');
   void import('./components/AutomationsView');
   void import('./components/PluginsView');
   void import('./components/StatsView');
@@ -743,7 +744,7 @@ export default function App() {
     const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
     setMessages(previous => [...previous.map(m => ({ ...m, streaming: false })), { id: `u-${Date.now()}`, role: 'user', content: message, ts: Date.now() }, assistantMsg]);
     const ac = new AbortController(); abortRef.current = ac;
-    await streamChat(run.sessionId, { message, model: sel?.model, provider: sel?.provider }, makeStreamHandlers(assistantMsg.id), ac.signal);
+    await streamChat(run.sessionId, { message, model: sel?.model, provider: sel?.provider, reworkOfRunId: activeRun(run) ? undefined : run.id }, makeStreamHandlers(assistantMsg.id), ac.signal);
   }, [sel, makeStreamHandlers]);
 
   const handlerRef = useRef(makeStreamHandlers);

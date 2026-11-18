@@ -169,7 +169,13 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
             maxChars: Math.max(1000, kernel.config.get<number>('rules.maxChars', 12_000)),
           })
         : { text: '', segments: [], sources: [], resolution: { schemaVersion: 1 as const, applied: [], ignored: [], conflicts: [] } };
-      const userContext = chat.getUserContext?.() ?? [];
+      const documentPath = /^(?:请)?(?:阅读|读取)\s*[`“"]?([\w./\\-]+\.(?:docx|xlsx|pptx|pdf|csv))(?=[`”"\s，,。]|$)/i.exec(record.objective)?.[1];
+      const simpleObservation = !record.parentId && !record.materials?.length && !record.acceptance?.length
+        && (documentPath || /^(?:请)?(?:查看当前工作区根目录|按文件名找到工作区内|搜索工作区文本文件)/.test(record.objective))
+        && !/写入|创建|删除|修改|执行|分工|并行/.test(record.objective);
+      const userContext = (chat.getUserContext?.() ?? []).filter(message => !simpleObservation
+        || !/^(?:plugin-persona|skill-guidance):/.test(message.context?.source ?? '')
+        || ['tools-fs-rules', ...(documentPath ? ['document-rules'] : [])].includes(message.context?.id ?? ''));
       const instructionDescriptor = {
         id: `user-instruction:${record.id}`,
         label: '当前用户指令',
@@ -197,7 +203,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
         ruleResolution,
         tools: runTools(),
         contextWindow: Math.min(kernel.config.get<number>('context.maxTokens', 60_000), provider.models?.find(model => model.modelId === record.model)?.contextWindow ?? Number.POSITIVE_INFINITY),
-        systemPrompt: chat.getRuntimePrompt?.() ?? chat.getSystemPrompt(),
+        systemPrompt: `${chat.getRuntimePrompt?.() ?? chat.getSystemPrompt()}${simpleObservation && documentPath ? '\n这项任务已给出文档相对路径，先直接调用 read_document_content，路径不存在时再定位。' : ''}`,
         contextMessages: [
           runtimeClockContext(),
           ...userContext,

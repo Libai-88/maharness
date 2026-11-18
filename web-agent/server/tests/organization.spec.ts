@@ -267,7 +267,7 @@ describe('AI labor organization', () => {
     }
   });
 
-  test('solo work creates one contract and team tools stay hidden', () => {
+  test('solo work creates one contract and delegation requires a team contract', () => {
     const store = new Store(':memory:');
     const organization = new OrganizationService({ store });
     try {
@@ -292,6 +292,33 @@ describe('AI labor organization', () => {
     } finally {
       store.close();
     }
+  });
+
+  test('persistent branch roles preserve coordinator authority and enforce child authority', () => {
+    const store = new Store(':memory:');
+    const organization = new OrganizationService({ store });
+    try {
+      const run = addRun(store, { objective: '请两个角色分别并行分析独立资料' });
+      store.runs.update(run, { authorization: { ...run.authorization, profile: 'developer' } });
+      organization.createForRun(run);
+      const before = structuredClone(run.authorization);
+      const reader = addRole(store, { workspace: run.authorization.workspace, readOnly: true, profile: 'standard', allowedTools: ['read_file'] });
+      const writer = addRole(store, { workspace: run.authorization.workspace, allowedTools: ['write_file'] });
+      const team = organization.createTeam(run, { assignments: [
+        { roleId: reader.id, objective: '读取A', expectedArtifacts: ['a.md'], acceptance: ['内容准确'], allowedTools: ['read_file'] },
+        { roleId: writer.id, objective: '交付B', expectedArtifacts: ['b.md'], acceptance: ['文件存在'], allowedTools: ['write_file'] },
+      ] });
+      assert.deepEqual(run.authorization, before);
+      assert.equal(run.toolNames, undefined);
+      assert.equal(store.runs.get(run.id, 'default')!.toolNames, undefined);
+      assert.ok(organization.authorizeTools(run, [tool('run_parallel')]).some(item => item.name === 'run_parallel'));
+      assert.deepEqual(team.contracts.map(contract => contract.allowedTools), [['read_file'], ['write_file']]);
+      const child = addChild(store, run, '读取A');
+      organization.prepareDelegation(run, child, { objective: child.objective, assignmentContractId: team.contracts[0].id });
+      assert.equal(child.authorization.readOnly, true);
+      assert.equal(child.authorization.profile, 'standard');
+      assert.deepEqual(child.toolNames, ['read_file']);
+    } finally { store.close(); }
   });
 
   test('root Run returns a partial work receipt when planned branches never start', () => {
@@ -428,7 +455,7 @@ describe('AI labor organization', () => {
     }
   });
 
-  test('team cost gate ignores caller claims and requires configured pricing', () => {
+  test('team estimates ignore caller claims and unknown pricing remains optional', () => {
     const store = new Store(':memory:');
     const organization = new OrganizationService({ store });
     try {
@@ -448,13 +475,8 @@ describe('AI labor organization', () => {
           acceptance: ['内容可核对'], budgetUsd: 0.02,
         },
       ];
-      assert.throws(() => organization.createTeam(run, {
-        assignments,
-        singleAgentEstimateUsd: 1,
-        teamEstimateUsd: 0.000001,
-      }), (error: unknown) => error instanceof OrganizationError
-        && error.code === 'TEAM_NOT_ELIGIBLE'
-        && /团队估算高于单角色方案/.test(error.message));
+      const automatic = organization.createTeam(run, { assignments, singleAgentEstimateUsd: 1, teamEstimateUsd: 0.000001 });
+      assert.ok(automatic.teamCycle.teamEstimateUsd! > 0.000001);
 
       const humanRun = addRun(store, {
         objective: '请组织团队并行整理两批资料',
@@ -467,8 +489,8 @@ describe('AI labor organization', () => {
         singleAgentEstimateUsd: 0.000001,
         teamEstimateUsd: 0.000001,
       });
-      assert.ok(team.teamCycle.teamEstimateUsd > 0.000001);
-      assert.ok(team.teamCycle.soloEstimateUsd > 0.000001);
+      assert.ok(team.teamCycle.teamEstimateUsd! > 0.000001);
+      assert.ok(team.teamCycle.soloEstimateUsd! > 0.000001);
 
       store.upsertProvider({
         id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
@@ -480,10 +502,13 @@ describe('AI labor organization', () => {
         budgetPolicy: 'enforce',
       });
       organization.createForRun(missingPriceRun);
-      assert.throws(() => organization.createTeam(missingPriceRun, { assignments }),
-        (error: unknown) => error instanceof OrganizationError
-          && error.code === 'TEAM_NOT_ELIGIBLE'
-          && /价格未配置/.test(error.message));
+      const unknown = organization.createTeam(missingPriceRun, { assignments: assignments.map(({ budgetUsd: _budget, ...draft }) => draft) });
+      assert.equal(unknown.teamCycle.teamEstimateUsd, undefined);
+      assert.equal(unknown.contracts[0].budgetUsd, 0.1);
+      const ordinary = addRun(store, { objective: '请组织团队并行处理两份独立资料' });
+      organization.createForRun(ordinary);
+      assert.equal(organization.teamPlanningEligible(ordinary), true);
+      assert.equal(organization.createTeam(ordinary, { assignments: assignments.map(({ budgetUsd: _budget, ...draft }) => draft) }).teamCycle.hardBudget, false);
     } finally {
       store.close();
     }
@@ -639,6 +664,9 @@ describe('AI labor organization', () => {
       const result = await options!.delegate!({ objective: '执行第一个分支', assignmentContractId: first.id });
       assert.equal(result.error, undefined);
       const child = store.runs.children(run.id, 'default')[0];
+      assert.equal(child.status, 'completed');
+      assert.equal(child.answer, '分支完成');
+      assert.deepEqual(store.organization.getContract(first.id, 'default')?.coordinatorArtifacts, ['analysis-a.md']);
       assert.equal(child.budgetUsd, 0.02);
       assert.equal(child.budgetTokens, 400);
       assert.deepEqual(child.toolNames, ['read_file']);

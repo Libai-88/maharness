@@ -113,7 +113,7 @@ interface EvidenceReport {
   [key: string]: unknown;
 }
 
-const evidenceDir = resolve(process.cwd(), '../evals/acceptance/ai-society-v1');
+const evidenceDir = resolve(process.cwd(), 'test-results/ai-society-v1');
 const scenarioReports: EvidenceReport[] = [];
 const screenshotHashes: Record<string, string> = {};
 
@@ -242,8 +242,7 @@ async function handleProviderRequest(request: IncomingMessage, response: ServerR
       ?.filter(message => message.role === 'user' && typeof message.content === 'string')
       .map(message => message.content as string) ?? [];
     const artifactPaths = objectives
-      .map(objective => objective.match(/\[artifact: ([^\]\n]+)\]/)?.[1])
-      .filter((candidate): candidate is string => !!candidate)
+      .flatMap(objective => [...objective.matchAll(/\[artifact: ([^\]\n]+)\]/g)].map(match => match[1]!))
       .filter((candidate, index, all) => all.indexOf(candidate) === index);
     const writtenPaths = new Set(payload.messages?.flatMap(message =>
       message.role === 'assistant'
@@ -270,7 +269,7 @@ async function handleProviderRequest(request: IncomingMessage, response: ServerR
         return;
       }
     }
-    if (supportsWrite && !called('write_file')) {
+    if (supportsWrite) {
       if (path) {
         sendProviderToolCall(
           response,
@@ -424,9 +423,9 @@ async function refreshWorkbench(page: Page): Promise<void> {
       return false;
     }
   });
-  await page.getByRole('button', { name: '刷新' }).first().click();
+  await page.getByTestId('society-observations').getByRole('button', { name: '刷新', exact: true }).click();
   expect((await responsePromise).ok()).toBeTruthy();
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await expect(page.getByTestId('society-home')).toBeVisible();
 }
 
 async function openDetails(details: Locator): Promise<void> {
@@ -526,16 +525,16 @@ test.beforeEach(() => {
 });
 
 test('真实后端经营闭环写入临时 SQLite 并可由浏览器验收', async ({ page, request }, testInfo) => {
-  await page.goto('/?view=workbench');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await page.goto('/?view=society');
+  await expect(page.getByTestId('society-home')).toBeVisible();
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
   const society = page.getByTestId('society-console');
   await expect(society).toBeVisible();
 
   const objective = `真实后端会议纪要 ${Date.now()}`;
-  await society.getByLabel('社会任务目标').fill(objective);
-  await society.getByLabel('任务价值').fill('20');
-  await society.getByLabel('任务预算').fill('10');
-  await society.getByRole('button', { name: '登记任务' }).click();
+  const submitted = await request.post('/api/organization/society/tasks', { data: { objective, acceptance: ['会议纪要可核对'], valueUsd: 20, maxBudgetUsd: 10 } });
+  expect(submitted.status(), await submitted.text()).toBe(201);
+  await refreshWorkbench(page);
 
   await expect(society.getByText(objective, { exact: true }).first()).toBeVisible();
   await society.getByRole('button', { name: '批准', exact: true }).first().click();
@@ -595,6 +594,99 @@ test('真实后端经营闭环写入临时 SQLite 并可由浏览器验收', asy
     body: JSON.stringify(report, null, 2),
     contentType: 'application/json',
   });
+});
+
+test('对话交付在 AI 社会可下载，刷新和返工沿用原工作单', async ({ page, request }) => {
+  const marker = `对话交付 ${Date.now()}`;
+  const path = `outputs/society-e2e-chat-${Date.now()}/result.md`;
+  await page.goto('/?view=chat');
+  await page.getByPlaceholder(/跟 maharness 说点什么/).fill(`${marker}，写入约定文件 [artifact: ${path}]`);
+  const created = page.waitForResponse(response => response.request().method() === 'POST' && /\/api\/v2\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname));
+  await page.getByTestId('send-btn').click();
+  const { runId, run } = await (await created).json() as { runId: string; run: { workOrderId: string } };
+  await expect.poll(async () => (await request.get(`/api/v2/runs/${runId}`)).json().then(value => value.status)).toBe('completed');
+
+  await page.goto('/?view=society');
+  const openRun = () => page.getByRole('button', { name: new RegExp(marker) }).click();
+  await openRun();
+  const details = page.getByTestId('society-task-detail');
+  const downloaded = page.waitForEvent('download');
+  await details.getByRole('button', { name: '下载', exact: true }).click();
+  expect((await downloaded).suggestedFilename()).toBe('result.md');
+  await page.reload();
+  await openRun();
+  expect((await readRuns(request)).filter(item => item.id === runId)).toHaveLength(1);
+
+  await details.getByRole('button', { name: '返工', exact: true }).click();
+  await details.getByLabel('返工要求').fill('保留原文件，只在答复中补一条说明');
+  const submitted = page.waitForResponse(response => response.request().method() === 'POST' && /\/api\/v2\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname));
+  await details.getByRole('button', { name: '提交返工' }).click();
+  const rework = await (await submitted).json();
+  expect(rework.run).toMatchObject({ workOrderId: run.workOrderId, reworkOfRunId: runId });
+  expect(rework.runId).not.toBe(runId);
+  await expect(details).toContainText('保留原文件，只在答复中补一条说明');
+});
+
+test('AI 社会断线补读，停止和继续保留补充及已写入产物', async ({ page, request }) => {
+  const marker = `任务暂停 ${Date.now()}`;
+  const path = `outputs/society-e2e-pause-${Date.now()}/result.md`;
+  providerSuccessDelayMs = 4_000;
+  try {
+    const session = await (await request.post('/api/sessions', { data: { model: '' } })).json();
+    await page.goto(`/?view=chat&session=${encodeURIComponent(session.id)}`);
+    await page.getByPlaceholder(/跟 maharness 说点什么/).fill(`${marker}，写入约定文件 [artifact: ${path}]`);
+    const created = page.waitForResponse(response => response.request().method() === 'POST' && /\/api\/v2\/sessions\/[^/]+\/runs$/.test(new URL(response.url()).pathname));
+    await page.getByTestId('send-btn').click();
+    const { runId } = await (await created).json() as { runId: string };
+    let offline = true;
+    await page.route('**/api/events**', route => offline ? route.abort() : route.continue());
+    await page.goto('/?view=society');
+    await expect(page.getByText('连接断开，正在重连')).toBeVisible();
+    offline = false;
+    await expect(page.getByText('实时连接', { exact: true })).toBeVisible();
+    const openRun = () => page.getByTestId('society-home').getByRole('button', { name: new RegExp(marker) }).click();
+    await openRun();
+    const details = page.getByTestId('society-task-detail');
+    await expect(details.getByRole('button', { name: '下载', exact: true })).toBeVisible();
+    await details.getByRole('button', { name: '补充或新建任务' }).click();
+    await details.getByLabel('当前任务要求').fill('保留已写入文件');
+    await details.getByRole('button', { name: '补充当前任务' }).click();
+    await expect(details.getByText(/补充要求(?:待送达|已送达)/)).toBeVisible();
+    await details.getByRole('button', { name: '停止任务' }).click();
+    await expect(details.getByRole('button', { name: '继续任务' })).toBeVisible();
+    await page.reload();
+    await openRun();
+    providerSuccessDelayMs = 0;
+    await details.getByRole('button', { name: '继续任务' }).click();
+    await expect(details.getByText(/补充要求已送达/)).toBeVisible();
+    await expect.poll(async () => (await request.get(`/api/v2/runs/${runId}`)).json().then(value => value.status)).toBe('completed');
+    const tools = await (await request.get(`/api/v2/runs/${runId}/tools`)).json();
+    expect(tools.filter((tool: { name: string }) => tool.name === 'write_file')).toHaveLength(1);
+    expect((await readRuns(request)).filter(item => item.id === runId)).toHaveLength(1);
+  } finally { providerSuccessDelayMs = 0; }
+});
+
+test('AI 社会沿用真实工具审批，刷新等待期间不执行写入', async ({ page, request }) => {
+  const marker = `审批交付 ${Date.now()}`;
+  const path = `outputs/society-e2e-approval-${Date.now()}/.env`;
+  const session = await (await request.post('/api/sessions', { data: { model: '' } })).json();
+  const response = await request.post(`/api/v2/sessions/${session.id}/runs`, { data: { message: `${marker}，写入测试内容 [artifact: ${path}]` } });
+  expect(response.ok()).toBeTruthy();
+  const { runId } = await response.json();
+  await expect.poll(async () => (await request.get(`/api/v2/runs/${runId}`)).json().then(value => value.status)).toBe('waiting_approval');
+  await page.goto('/?view=society');
+  const openRun = () => page.getByTestId('society-home').getByRole('button', { name: new RegExp(marker) }).click();
+  await openRun();
+  const details = page.getByTestId('society-task-detail');
+  await expect(details.getByRole('button', { name: '批准', exact: true })).toBeVisible();
+  expect((await request.get(`/api/v2/runs/${runId}/artifacts`).then(result => result.json()))).toHaveLength(0);
+  await page.reload();
+  await openRun();
+  await details.getByRole('button', { name: '批准', exact: true }).click();
+  await expect.poll(async () => (await request.get(`/api/v2/runs/${runId}`)).json().then(value => value.status)).toBe('completed');
+  const tools = await (await request.get(`/api/v2/runs/${runId}/tools`)).json();
+  expect(tools.filter((tool: { name: string; status: string }) => tool.name === 'write_file' && tool.status === 'succeeded')).toHaveLength(1);
+  expect((await readRuns(request)).filter(item => item.id === runId)).toHaveLength(1);
 });
 
 test('生产 Scheduler 自动推进真实团队并展示网络、六因子、福利、瓶颈与 token 缓存', {
@@ -662,8 +754,9 @@ test('生产 Scheduler 自动推进真实团队并展示网络、六因子、福
   expect(activeScheduleSnapshot.contractIds).toHaveLength(2);
   expect(active.bottlenecks.length).toBeGreaterThan(0);
 
-  await page.goto('/?view=workbench');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await page.goto('/?view=society');
+  await expect(page.getByTestId('society-home')).toBeVisible();
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
   const society = page.getByTestId('society-console');
   await expect(society).toBeVisible();
   await refreshWorkbench(page);
@@ -830,8 +923,9 @@ test('真实 child Run 失败后由 RunService 与 SocietyService 回退单角�
   expect(fallback.fallbackRun.fallbackReason).toBe('ROLLBACK_TO_SOLO');
   expect(fallback.runs.some(item => item.status === 'failed' && item.id !== fallback.fallbackRun.id)).toBe(true);
 
-  await page.goto('/?view=workbench');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await page.goto('/?view=society');
+  await expect(page.getByTestId('society-home')).toBeVisible();
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
   const society = page.getByTestId('society-console');
   await expect(society).toBeVisible();
   await refreshWorkbench(page);

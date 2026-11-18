@@ -81,6 +81,7 @@ export interface WorkContractView {
 }
 
 export interface WorkReceiptView {
+  costStatus?: 'known' | 'partial' | 'unknown';
   id: string;
   workOrderId: string;
   status: string;
@@ -123,8 +124,8 @@ export interface WorkOrderView {
   teamCycles: Array<{
     id: string;
     assignmentIds: string[];
-    soloEstimateUsd: number;
-    teamEstimateUsd: number;
+    soloEstimateUsd?: number;
+    teamEstimateUsd?: number;
     status: string;
   }>;
   roles: OrganizationRoleView[];
@@ -132,8 +133,9 @@ export interface WorkOrderView {
   exceptions: OrganizationExceptionView[];
   economics: {
     singleAgentEstimateUsd: number | null;
-    teamEstimateUsd: number;
+    teamEstimateUsd: number | null;
     actualCostUsd: number;
+    costStatus?: 'known' | 'partial' | 'unknown';
     cacheSavingsUsd: number | null;
     duplicateEvidenceReads: number;
     coordinationRounds: number;

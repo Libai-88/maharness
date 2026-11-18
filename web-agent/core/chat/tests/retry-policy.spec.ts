@@ -88,6 +88,58 @@ test('known tool precondition failures remain observations and allow corrective 
   assert.equal(events.some(event => event.type === 'assistant_done' && event.content === '已改用准确原文重试'), true);
 });
 
+test('reasoning-only model responses retry and never complete with an empty answer', async () => {
+  let calls = 0;
+  const provider: ProviderDef = {
+    id: 'empty-response', label: 'test', defaultModel: 'm',
+    async *chat() {
+      calls++;
+      yield { type: 'reasoning', text: 'I should inspect the workspace.' };
+      yield { type: 'done' };
+    },
+  };
+  const events: AgentEvent[] = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({
+    provider, model: 'm', traceId: 'empty-response', messages: [{ role: 'user', content: '查看工作区文件' }], maxTurns: 3,
+  })) events.push(event);
+  assert.equal(calls, 2);
+  assert.equal(events.some(event => event.type === 'assistant_done'), false);
+  assert.equal(events.some(event => event.type === 'error' && event.code === 'EMPTY_RESPONSE'), true);
+});
+
+for (const length of [1999, 2000, 2001, 3999, 4000, 4001, 7999, 8000, 8001]) {
+  test(`tool result boundary ${length} preserves inline content and paging`, async () => {
+    let calls = 0;
+    let observation = '';
+    const envelope = { ok: true, data: { text: '' } };
+    const text = 'x'.repeat(length - JSON.stringify(envelope).length);
+    const result = { ok: true, data: { text } };
+    const provider: ProviderDef = { id: 'boundary', label: 'test', defaultModel: 'm', async *chat(messages) {
+      if (++calls === 1) yield { type: 'tool_call', toolCall: { id: 'read', type: 'function', function: { name: 'list_dir', arguments: '{}' } } };
+      else { observation = messages.findLast(message => message.role === 'tool')?.content ?? ''; yield { type: 'delta', text: '目录已查看' }; }
+      yield { type: 'done' };
+    } };
+    let reads = 0;
+    for await (const _event of new AgentRunner(kernel(), bus).run({ provider, model: 'm', traceId: `boundary-${length}`, messages: [{ role: 'user', content: '查看根目录' }], tools: [{ version: '1.0.0', permissions: [], outputSchema: {}, name: 'list_dir', description: 'list', parameters: {}, sideEffect: 'read', async handler() { reads++; return result; } }] })) {}
+    const parsed = JSON.parse(observation);
+    if (length <= 8000) { assert.deepEqual(parsed, result); assert.equal((parsed as { resultRef?: string }).resultRef, undefined); }
+    else { assert.equal(parsed.content, JSON.stringify(result).slice(0, 8000)); assert.equal(parsed.nextOffset, 8000); assert.ok(parsed.resultRef); }
+    assert.equal(calls, 2); assert.equal(reads, 1);
+  });
+}
+
+test('one empty response recovers into a valid answer', async () => {
+  let calls = 0;
+  const provider: ProviderDef = { id: 'recover-empty', label: 'test', defaultModel: 'm', async *chat() {
+    if (++calls === 1) yield { type: 'reasoning', text: 'thinking' };
+    else yield { type: 'delta', text: '结果已交付' };
+    yield { type: 'done' };
+  } };
+  const events = [];
+  for await (const event of new AgentRunner(kernel(), bus).run({ provider, model: 'm', traceId: 'recover-empty', messages: [{ role: 'user', content: '回答' }], tools: [] })) events.push(event);
+  assert.equal(calls, 2); assert.ok(events.some(event => event.type === 'assistant_done' && event.content === '结果已交付'));
+});
+
 test('call-specific read-only side effect lets a failed shell observation recover without an unknown-effect stop', async () => {
   let calls = 0;
   let sawNotStarted = false;

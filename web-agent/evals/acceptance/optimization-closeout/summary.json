@@ -1,0 +1,506 @@
+{
+  "kind": "maharness-four-batch-closeout",
+  "model": "group/never-stuck",
+  "evidenceMode": "fixed-nine-cases-with-targeted-retests",
+  "passed": 9,
+  "expected": 9,
+  "costUsd": null,
+  "priceSource": "unknown",
+  "comparisons": {
+    "directory": {
+      "tools": [
+        "list_dir"
+      ],
+      "baselineInputTokens": 13181,
+      "calls": 2,
+      "inputTokens": 8107
+    },
+    "collaboration": {
+      "inputTokens": 111201,
+      "elapsedMs": 57812,
+      "previousPassingCalls": 20,
+      "previousPassingElapsedMs": 70124,
+      "previousPassingInputTokens": 169422,
+      "calls": 14
+    }
+  },
+  "limitations": [
+    "Acceptance combines the latest passing evidence per affected scenario; the final revision did not rerun the whole live suite.",
+    "Live timings and token counts are single observations, not statistical performance estimates.",
+    "Collaboration still includes tool discovery and repeated reads.",
+    "Unknown model prices prevent a monetary cost comparison."
+  ],
+  "validatedOn": "2026-11-18",
+  "scope": [
+    "execution reliability",
+    "tool and model efficiency",
+    "unified execution facts and extension boundaries",
+    "conversation, workbench and society integration"
+  ],
+  "verification": {
+    "build": {
+      "includes": [
+        "frontend typecheck",
+        "frontend build",
+        "backend typecheck"
+      ],
+      "passed": true
+    },
+    "unitTests": {
+      "skipped": 1,
+      "failed": 0,
+      "passed": 1526,
+      "skipReason": "Optional download/network observation requires full Chromium and MAHARNESS_TEST_DOWNLOAD=1."
+    },
+    "security": {
+      "failed": 0,
+      "passed": 402
+    },
+    "deterministicReplay": {
+      "failed": 0,
+      "passed": 28
+    },
+    "optimization": {
+      "failed": 0,
+      "passed": 108
+    },
+    "browser": {
+      "passed": 133,
+      "failed": 0,
+      "skipped": 0,
+      "flaky": 0,
+      "workers": 1,
+      "mode": "full-suite"
+    },
+    "selftest": {
+      "passed": 90,
+      "failed": 0
+    },
+    "docFacts": {
+      "passed": true,
+      "fields": 6
+    },
+    "threatModel": {
+      "passed": true,
+      "version": "1.3"
+    },
+    "pluginManifests": {
+      "passed": 2,
+      "failed": 0
+    },
+    "pluginLock": {
+      "passed": true
+    },
+    "skillLock": {
+      "passed": true
+    },
+    "skillEval": {
+      "passed": 5,
+      "failed": 0
+    },
+    "localDocumentationLinks": {
+      "checked": 20,
+      "missing": 0
+    },
+    "pluginIndexIntegrity": {
+      "passed": true,
+      "plugins": 2
+    }
+  },
+  "samples": [
+    {
+      "id": 1,
+      "name": "目录查看",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 8107,
+      "tokensOut": 202,
+      "elapsedMs": 5590,
+      "toolSequence": [
+        "list_dir"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "一次 list_dir；列出 handbook.docx、notes、references；无发现、结果回读或组队",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "无无效发现、结果回读或组队",
+          "passed": true
+        },
+        {
+          "name": "仅一次list_dir",
+          "passed": true
+        },
+        {
+          "name": "目录名称准确",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    },
+    {
+      "id": 2,
+      "name": "文件定位",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 8413,
+      "tokensOut": 80,
+      "elapsedMs": 5056,
+      "toolSequence": [
+        "glob"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "定位 notes/learning-plan.txt；使用文件名搜索；不读取文件内容",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "无无效发现、结果回读或组队",
+          "passed": true
+        },
+        {
+          "name": "文件路径准确",
+          "passed": true
+        },
+        {
+          "name": "文件名搜索且不读内容",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    },
+    {
+      "id": 3,
+      "name": "文本检索",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 8413,
+      "tokensOut": 243,
+      "elapsedMs": 5551,
+      "toolSequence": [
+        "grep"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "找到 notes/learning-plan.txt 第3行和 MAH-4827；使用内容搜索",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "无无效发现、结果回读或组队",
+          "passed": true
+        },
+        {
+          "name": "内容搜索命中",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-52-30-026Z"
+    },
+    {
+      "id": 4,
+      "name": "文档阅读",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 9774,
+      "tokensOut": 458,
+      "elapsedMs": 7498,
+      "toolSequence": [
+        "read_document_content"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "文档工具读取；答复每周五、林青、180天",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "无无效发现、结果回读或组队",
+          "passed": true
+        },
+        {
+          "name": "文档事实准确",
+          "passed": true
+        },
+        {
+          "name": "文档读取",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T12-01-58-874Z"
+    },
+    {
+      "id": 5,
+      "name": "Office处理",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 14036,
+      "tokensOut": 308,
+      "elapsedMs": 11103,
+      "toolSequence": [
+        "create_document"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "可重新解析的xlsx；工作表开销；指定3行及数值正确；登记产物",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "单个XLSX产物",
+          "passed": true
+        },
+        {
+          "name": "Run登记XLSX产物",
+          "passed": true
+        },
+        {
+          "name": "XLSX内容可解析且准确",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    },
+    {
+      "id": 6,
+      "name": "资料对比",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 13915,
+      "tokensOut": 660,
+      "elapsedMs": 9330,
+      "toolSequence": [
+        "read_file",
+        "read_file"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "读取两份资料；A满足；价格120/80，容量30/20，保留90/30；来源路径",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "比较事实与来源",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    },
+    {
+      "id": 7,
+      "name": "日程待办",
+      "passed": true,
+      "calls": 2,
+      "tokensIn": 14245,
+      "tokensOut": 199,
+      "elapsedMs": 6772,
+      "toolSequence": [
+        "item_create"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "只创建一条个人事项；标题、日期、时间、时区和高优先级准确",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "单条准确待办",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    },
+    {
+      "id": 8,
+      "name": "角色协作",
+      "passed": true,
+      "calls": 14,
+      "tokensIn": 111201,
+      "tokensOut": 5346,
+      "elapsedMs": 57812,
+      "toolSequence": [
+        "list_dir",
+        "glob",
+        "read_file",
+        "read_file",
+        "role_directory",
+        "discover_tools",
+        "team_create",
+        "discover_tools",
+        "run_parallel",
+        "read_file",
+        "read_file",
+        "write_file",
+        "write_file",
+        "read_file",
+        "read_file"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "真实团队与两个子Run；持久角色关联；两个独立文件；无预算与未知价格下完成",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "团队与两个真实子任务",
+          "passed": true
+        },
+        {
+          "name": "持久角色分工",
+          "passed": true
+        },
+        {
+          "name": "两份交付文件",
+          "passed": true
+        },
+        {
+          "name": "两份产物由约定角色独立交付",
+          "passed": true
+        },
+        {
+          "name": "无隐含预算",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T12-45-56-760Z"
+    },
+    {
+      "id": 9,
+      "name": "任务纠偏",
+      "passed": true,
+      "calls": 6,
+      "tokensIn": 48148,
+      "tokensOut": 1070,
+      "elapsedMs": 25104,
+      "toolSequence": [
+        "read_file",
+        "discover_tools",
+        "enable_tools",
+        "glob",
+        "write_file"
+      ],
+      "costUsd": null,
+      "priceSource": "unknown",
+      "expected": "首次读取后注入补充要求；同一Run消费消息；只写一次correction.md且含CORRECTION-OK",
+      "checks": [
+        {
+          "name": "有效完成",
+          "passed": true
+        },
+        {
+          "name": "无工具失败",
+          "passed": true
+        },
+        {
+          "name": "补充要求进入原任务",
+          "passed": true
+        },
+        {
+          "name": "单次写入且包含纠偏要求",
+          "passed": true
+        }
+      ],
+      "localEvidenceArchive": "2026-11-18T11-46-31-203Z"
+    }
+  ],
+  "dependencyAudit": {
+    "server": {
+      "counts": {
+        "info": 0,
+        "low": 0,
+        "moderate": 2,
+        "high": 2,
+        "critical": 0,
+        "total": 4
+      },
+      "packages": [
+        "exceljs",
+        "image-size",
+        "pptxgenjs",
+        "uuid"
+      ]
+    },
+    "ui": {
+      "counts": {
+        "info": 0,
+        "low": 0,
+        "moderate": 2,
+        "high": 10,
+        "critical": 0,
+        "total": 12
+      },
+      "packages": [
+        "@dotenvx/dotenvx",
+        "@shadcn/registry",
+        "@ts-morph/common",
+        "fast-glob",
+        "fdir",
+        "micromatch",
+        "minimatch",
+        "picomatch",
+        "shadcn",
+        "tinyglobby",
+        "ts-morph",
+        "vite"
+      ]
+    }
+  },
+  "release": {
+    "localFunctionalAcceptance": "passed",
+    "publication": "not performed",
+    "remoteCI": "not verified",
+    "dependencyAudit": "blocked",
+    "dependencyChanges": false
+  }
+}

@@ -156,7 +156,7 @@ export default {
               plugins: args.plugins,
               ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
             }, tctx.signal);
-            return { ok: !result.error, ...(result.error ? { error: result.error } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
+            return { ok: !result.error, ...(result.error ? { error: result.error, failure: { code: 'DELEGATION_INCOMPLETE', retryable: false, outcome: 'applied' as const } } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
           }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）

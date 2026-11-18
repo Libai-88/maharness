@@ -372,10 +372,11 @@ async function setup(page: Page) {
   });
 }
 
-test('人类经营 AI 社会闭环并留下可审计证据', async ({ page }) => {
+test('历史社会任务的审批、交付与治理保持可用', async ({ page }) => {
   await setup(page);
-  await page.goto('/?view=workbench');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await page.goto('/?view=society');
+  await expect(page.getByTestId('society-home')).toBeVisible();
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
 
   const society = page.getByTestId('society-console');
   await expect(society.getByText('maharness 社会运行')).toBeVisible();
@@ -383,8 +384,11 @@ test('人类经营 AI 社会闭环并留下可审计证据', async ({ page }) =>
   await expect(society.locator('span').filter({ hasText: /^知识与研究部$/ })).toBeVisible();
   await expect(society.getByText('高价值资料核验').first()).toBeVisible();
 
-  await society.getByLabel('社会任务目标').fill('整理一份可核对的会议纪要');
-  await society.getByRole('button', { name: '登记任务' }).click();
+  await page.evaluate(async () => {
+    const response = await fetch('/api/organization/society/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ objective: '整理一份可核对的会议纪要', valueUsd: 10, maxBudgetUsd: 0.5 }) });
+    if (!response.ok) throw new Error('Historical task fixture failed');
+  });
+  await page.getByTestId('society-observations').getByRole('button', { name: '刷新', exact: true }).click();
   await expect(society.getByText('整理一份可核对的会议纪要').first()).toBeVisible();
 
   await society.getByRole('button', { name: '批准', exact: true }).click();
@@ -426,11 +430,11 @@ test('人类经营 AI 社会闭环并留下可审计证据', async ({ page }) =>
   await expect(society.getByText('当前评价 v3', { exact: false })).toBeVisible();
   await expect(society.getByText('回滚自 v2', { exact: false }).last()).toBeVisible();
 
-  const evidence = resolve(process.cwd(), '../evals/acceptance/ai-society-v1');
+  const evidence = resolve(process.cwd(), 'test-results/ai-society-v1');
   mkdirSync(evidence, { recursive: true });
   await society.screenshot({ path: resolve(evidence, 'dashboard.png') });
 
-  await page.getByText('社会交付项目', { exact: true }).click();
+  await page.getByRole('button', { name: '社会交付项目 · 组织详情', exact: true }).click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.getByRole('heading', { name: '社会交付项目 · 组织视图' })).toBeVisible();
   await dialog.getByText('角色、契约与履历', { exact: true }).click();
@@ -440,5 +444,5 @@ test('人类经营 AI 社会闭环并留下可审计证据', async ({ page }) =>
   await expect(dialog.getByText('岗位建立：研究执行员')).toBeVisible();
   await expect(dialog.getByText(/collaborated/)).toBeVisible();
   await page.keyboard.press('Escape');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
+  await expect(page.getByTestId('society-home')).toBeVisible();
 });

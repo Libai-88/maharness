@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertCircle, ArrowRight, Bot, Building2, CheckCircle2, CircleDollarSign, Clock3, ExternalLink, FileText, FolderKanban, Gauge, ListTodo, Play, Plus, RefreshCw, ShieldAlert, Sparkles, TriangleAlert } from 'lucide-react';
 import { toast } from 'sonner';
-import { api } from '../api';
+import { api, subscribeEvents } from '../api';
 import { runLabels } from '../run-api';
 import { automationApi } from '../automation-api';
 import { workbenchApi, type WorkbenchItem, type WorkbenchProject, type WorkbenchSummary } from '../workbench-api';
@@ -12,11 +12,13 @@ import { Button } from './ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from './ui/card';
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from './ui/empty';
 import { Input } from './ui/input';
+import { Field, FieldLabel } from './ui/field';
 import { ScrollArea } from './ui/scroll-area';
 import { Skeleton } from './ui/skeleton';
 import { OrganizationDialog } from './OrganizationDialog';
 
 interface Props {
+  societyOnly?: boolean;
   onSession: (id: string) => void;
   onAutomations: () => void;
   onOpenWorkbench: () => void;
@@ -43,24 +45,37 @@ function societyTime(value?: number): string {
   return value ? new Date(value).toLocaleString('zh-CN', { hour12: false }) : '未知';
 }
 
-function ItemRow({ item, busy, onExecute }: { item: WorkbenchItem; busy: boolean; onExecute: () => void }) {
-  return (
-    <div className="flex items-start gap-3 rounded-lg border p-3">
-      <ListTodo className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
-      <div className="min-w-0 flex-1">
-        <p className="truncate text-sm font-medium">{item.title}</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          {item.due ? `${item.due}${item.dueTime ? ` ${item.dueTime}` : ''}` : '未排期'}{item.note ? ` · ${item.note}` : ''}
-        </p>
-      </div>
-      <Button size="sm" variant="outline" disabled={busy} onClick={onExecute}>
-        <Play data-icon="inline-start" />现在执行
-      </Button>
+function ItemRow({ item, busy, onExecute, onChanged }: { item: WorkbenchItem; busy: boolean; onExecute: () => void; onChanged: () => Promise<void> }) {
+  const [editing, setEditing] = useState(false);
+  const [title, setTitle] = useState(item.title);
+  const [due, setDue] = useState(item.due ?? '');
+  const [dueTime, setDueTime] = useState(item.dueTime ?? '');
+  const [note, setNote] = useState(item.note ?? '');
+  const [saving, setSaving] = useState(false);
+  const save = async (done = false) => {
+    setSaving(true);
+    try {
+      await api(`/api/items/${encodeURIComponent(item.id)}`, { method: 'PATCH', body: JSON.stringify({ revision: item.revision, ...(done ? { lifecycle: 'done' } : { title, due, dueTime, note }) }) });
+      setEditing(false); await onChanged();
+    } catch (reason) { toast.error(String(reason)); } finally { setSaving(false); }
+  };
+  return <div className="flex flex-col gap-3 rounded-lg border p-3">
+    <div className="flex flex-wrap items-start gap-3"><ListTodo className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div className="min-w-0 flex-1"><p className="truncate text-sm font-medium">{item.title}</p><p className="mt-1 text-xs text-muted-foreground">{item.due ? `${item.due}${item.dueTime ? ` ${item.dueTime}` : ''}` : '未排期'}{item.note ? ` · ${item.note}` : ''}</p></div>
+      <Button size="sm" variant="outline" disabled={busy || saving} onClick={() => { setTitle(item.title); setDue(item.due ?? ''); setDueTime(item.dueTime ?? ''); setNote(item.note ?? ''); setEditing(value => !value); }}>编辑</Button>
+      <Button size="sm" variant="outline" disabled={busy || saving} onClick={() => void save(true)}>完成</Button>
+      <Button size="sm" variant="outline" disabled={busy || saving} onClick={onExecute}><Play data-icon="inline-start" />现在执行</Button>
     </div>
-  );
+    {editing && <form className="flex flex-col gap-2" onSubmit={event => { event.preventDefault(); void save(); }}>
+      <Field><FieldLabel htmlFor={`title-${item.id}`}>事项</FieldLabel><Input id={`title-${item.id}`} value={title} onChange={event => setTitle(event.target.value)} /></Field>
+      <Field><FieldLabel htmlFor={`due-${item.id}`}>日期</FieldLabel><Input id={`due-${item.id}`} type="date" value={due} onChange={event => setDue(event.target.value)} /></Field>
+      <Field><FieldLabel htmlFor={`time-${item.id}`}>时间</FieldLabel><Input id={`time-${item.id}`} type="time" value={dueTime} onChange={event => setDueTime(event.target.value)} /></Field>
+      <Field><FieldLabel htmlFor={`note-${item.id}`}>备注</FieldLabel><Input id={`note-${item.id}`} value={note} onChange={event => setNote(event.target.value)} /></Field>
+      <Button disabled={!title.trim() || saving}>保存</Button>
+    </form>}
+  </div>;
 }
 
-export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbench }: Props) {
+export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbench, societyOnly = false }: Props) {
   const [summary, setSummary] = useState<WorkbenchSummary | null>(null);
   const [error, setError] = useState('');
   const [quick, setQuick] = useState('');
@@ -68,10 +83,6 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
   const [findingBusy, setFindingBusy] = useState<string | null>(null);
   const [verification, setVerification] = useState<Record<string, { runId: string; summary: string; outcome: 'passed' | 'failed' }>>({});
   const [organizationProject, setOrganizationProject] = useState<WorkbenchProject | null>(null);
-  const [societyObjective, setSocietyObjective] = useState('');
-  const [societyValueUsd, setSocietyValueUsd] = useState('5');
-  const [societyBudgetUsd, setSocietyBudgetUsd] = useState('0.10');
-  const [societyDepartmentId, setSocietyDepartmentId] = useState('');
   const [institutionBudget, setInstitutionBudget] = useState('');
   const [welfareLimit, setWelfareLimit] = useState('');
   const [evaluationLow, setEvaluationLow] = useState('');
@@ -88,7 +99,12 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = subscribeEvents(() => { if (!timer) timer = setTimeout(() => { timer = undefined; void load(); }, 500); }, state => { if (state === 'open') void load(); });
+    return () => { unsubscribe(); clearTimeout(timer); };
+  }, [load]);
   useEffect(() => {
     if (!summary?.society) return;
     setInstitutionBudget(String(summary.society.institution.policies.societyBudgetUsd));
@@ -97,7 +113,6 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
     setEvaluationMedium(String(summary.society.evaluation.record.mediumConfidenceSamples));
     setEvaluationHigh(String(summary.society.evaluation.record.highConfidenceSamples));
     setDepartmentQuotas(Object.fromEntries(summary.society.departments.map(item => [item.id, String(item.quotaUsd)])));
-    setSocietyDepartmentId(current => current || summary.society?.departments.find(item => item.enabled)?.id || '');
   }, [summary?.society]);
 
   const addItem = async () => {
@@ -202,30 +217,6 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
       toast.error(reason instanceof Error ? reason.message : String(reason));
     } finally {
       setFindingBusy(null);
-    }
-  };
-
-  const createSocietyTask = async () => {
-    const objective = societyObjective.trim();
-    const valueUsd = Number(societyValueUsd);
-    const maxBudgetUsd = Number(societyBudgetUsd);
-    if (!objective || !Number.isFinite(valueUsd) || valueUsd <= 0 || !Number.isFinite(maxBudgetUsd) || maxBudgetUsd <= 0) {
-      toast.error('填写目标、任务价值与正数预算');
-      return;
-    }
-    setBusy('society:create');
-    try {
-      await workbenchApi.societyTask({
-        objective, valueUsd, maxBudgetUsd,
-        departmentId: societyDepartmentId || undefined,
-      });
-      setSocietyObjective('');
-      await load();
-      toast.success('社会任务已登记');
-    } catch (reason) {
-      toast.error(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setBusy(null);
     }
   };
 
@@ -378,19 +369,20 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
     exceptions: [],
     proposals: [],
   };
+  const Container = societyOnly ? 'div' : ScrollArea;
   return (
-    <ScrollArea className="min-h-0 flex-1">
-      <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6" data-testid="workbench-home">
-        <header className="flex flex-wrap items-start justify-between gap-3">
+    <Container className="min-h-0 flex-1">
+      <main className="mx-auto flex w-full max-w-6xl flex-col gap-5 p-4 md:p-6" data-testid={societyOnly ? "society-observations" : "workbench-home"}>
+        {!societyOnly && <header className="flex flex-wrap items-start justify-between gap-3">
           <div><p className="text-xs font-medium text-muted-foreground">{summary!.today}</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">今天从这里继续</h1><p className="mt-1 text-sm text-muted-foreground">事项、自动化、最近结果和可继续处理的任务集中在这里。</p></div>
           <div className="flex gap-2"><Button variant="outline" onClick={() => void load()}><RefreshCw data-icon="inline-start" />刷新</Button><Button variant="outline" onClick={onOpenWorkbench}><ExternalLink data-icon="inline-start" />完整工作台</Button></div>
-        </header>
+        </header>}
 
-        {summary!.society ? <Card data-testid="society-console">
+        {societyOnly && (summary!.society ? <Card data-testid="society-console">
           <CardHeader>
             <div className="flex flex-wrap items-start justify-between gap-3">
-              <div><CardTitle className="flex items-center gap-2"><Building2 />maharness 社会运行</CardTitle><CardDescription>人类确定目标、价值、预算和制度；角色组织按制度调度，主 Agent 参与受理，但不驱动这一轮社会运行。</CardDescription></div>
-              <div className="flex items-center gap-2"><Badge variant={summary!.society.bottlenecks.length ? 'destructive' : 'secondary'}>{summary!.society.bottlenecks.length ? `${summary!.society.bottlenecks.length} 个瓶颈` : '运行平稳'}</Badge><Button disabled={busy === 'society:tick'} onClick={() => void tickSociety()}>{busy === 'society:tick' ? <RefreshCw className="animate-spin" /> : <Play />}运行制度调度</Button></div>
+              <div><CardTitle className="flex items-center gap-2"><Building2 />maharness 社会运行</CardTitle><CardDescription>制度版本、历史调度、角色负载与费用账本。</CardDescription></div>
+              <div className="flex items-center gap-2"><Badge variant={summary!.society.bottlenecks.length ? 'destructive' : 'secondary'}>{summary!.society.bottlenecks.length ? `${summary!.society.bottlenecks.length} 个瓶颈` : '运行平稳'}</Badge><Button variant="outline" onClick={() => void load()}>刷新</Button><Button disabled={busy === 'society:tick'} onClick={() => void tickSociety()}>{busy === 'society:tick' ? <RefreshCw className="animate-spin" /> : <Play />}运行制度调度</Button></div>
             </div>
           </CardHeader>
           <CardContent className="flex flex-col gap-5">
@@ -400,16 +392,6 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
               <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><CircleDollarSign className="size-3.5" />社会预算</p><p className="mt-1 font-medium">${summary!.society.economics.societyReservedUsd.toFixed(2)} 预留 · ${summary!.society.economics.societySpentUsd.toFixed(2)} 已结算 / ${summary!.society.economics.societyBudgetUsd.toFixed(2)}</p></div>
               <div className="rounded-lg border p-3"><p className="flex items-center gap-1 text-xs text-muted-foreground"><Clock3 className="size-3.5" />处置队列</p><p className="mt-1 font-medium">{summary!.society.scheduling.queue.length} 排队 · {summary!.society.scheduling.waitingApproval.length} 待批 · {summary!.society.schedules.filter(item => item.status === 'active').length} 执行中</p></div>
             </div>
-
-            <form className="grid gap-2 rounded-lg border bg-muted/20 p-3 lg:grid-cols-[1fr_110px_110px_150px_auto]" onSubmit={event => { event.preventDefault(); void createSocietyTask(); }}>
-              <Input aria-label="社会任务目标" placeholder="交给社会运行层，例如：对比三份资料并标出来源差异" value={societyObjective} onChange={event => setSocietyObjective(event.target.value)} />
-              <Input aria-label="任务价值" type="number" min="0.01" step="0.01" value={societyValueUsd} onChange={event => setSocietyValueUsd(event.target.value)} title="预期业务价值（USD）" />
-              <Input aria-label="任务预算" type="number" min="0.01" step="0.01" value={societyBudgetUsd} onChange={event => setSocietyBudgetUsd(event.target.value)} title="任务最高预算（USD）" />
-              <select aria-label="承接部门" className="rounded-md border bg-background px-2 text-sm" value={societyDepartmentId} onChange={event => setSocietyDepartmentId(event.target.value)}>
-                {summary!.society.departments.filter(item => item.enabled).map(department => <option key={department.id} value={department.id}>{department.name}</option>)}
-              </select>
-              <Button disabled={!societyObjective.trim() || busy === 'society:create'}>{busy === 'society:create' ? <RefreshCw className="animate-spin" /> : <Plus />}登记任务</Button>
-            </form>
 
             <div className="grid gap-3 lg:grid-cols-3">
               {summary!.society.departments.map(department => <div key={department.id} className="rounded-lg border p-3">
@@ -559,8 +541,9 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
               </div>
             </details>
           </CardContent>
-        </Card> : <Card><CardHeader><CardTitle>社会运行层暂不可用</CardTitle><CardDescription>事项、文件、自动化和既有组织交付仍可继续使用。</CardDescription></CardHeader></Card>}
+        </Card> : <Card><CardHeader><CardTitle>社会运行层暂不可用</CardTitle><CardDescription>事项、文件、自动化和既有组织交付仍可继续使用。</CardDescription></CardHeader></Card>)}
 
+        {!societyOnly && <>
         <div className="grid gap-4 lg:grid-cols-[1.35fr_.65fr]">
           <Card>
             <CardHeader><CardTitle>今日与待办</CardTitle><CardDescription>逾期 {summary!.overdue.length} 项 · 今日 {summary!.todayItems.length} 项 · 未排期 {summary!.unscheduled.length} 项</CardDescription></CardHeader>
@@ -569,10 +552,10 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
                 <Input aria-label="新增事项" placeholder="记一件事，例如：整理明天会议资料" value={quick} onChange={(event) => setQuick(event.target.value)} />
                 <Button disabled={!quick.trim() || busy !== null}>{busy === 'add' ? <RefreshCw className="animate-spin" /> : <Plus />}添加</Button>
               </form>
-              {summary!.overdue.map(item => <div key={item.id} className="rounded-lg border border-destructive/30 bg-destructive/5 p-2"><Badge variant="destructive" className="mb-2">逾期</Badge><ItemRow item={item} busy={busy === item.id} onExecute={() => void execute(item)} /></div>)}
-              {summary!.todayItems.map(item => <ItemRow key={item.id} item={item} busy={busy === item.id} onExecute={() => void execute(item)} />)}
+              {summary!.overdue.map(item => <div key={item.id} className="rounded-lg border border-destructive/30 bg-destructive/5 p-2"><Badge variant="destructive" className="mb-2">逾期</Badge><ItemRow item={item} busy={busy === item.id} onExecute={() => void execute(item)} onChanged={load} /></div>)}
+              {[...summary!.todayItems, ...summary!.unscheduled, ...summary!.upcoming].map(item => <ItemRow key={item.id} item={item} busy={busy === item.id} onExecute={() => void execute(item)} onChanged={load} />)}
               {allItems.length === 0 && <Empty className="py-8"><EmptyHeader><CheckCircle2 /><EmptyTitle>今天没有待办</EmptyTitle><EmptyDescription>可以直接记下一件事，或在会话里让模型整理计划。</EmptyDescription></EmptyHeader></Empty>}
-              {summary!.upcoming.length > 0 && <Button variant="ghost" className="justify-between" onClick={onOpenWorkbench}>查看后续 {summary!.upcoming.length} 项<ArrowRight /></Button>}
+
             </CardContent>
           </Card>
 
@@ -604,14 +587,17 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
           </Card>
           <Card>
             <CardHeader><CardTitle>项目</CardTitle><CardDescription>当前工作区中的项目。</CardDescription></CardHeader>
-            <CardContent className="flex flex-col gap-2">{summary!.projects.slice(0, 6).map(project => <button key={project.id} type="button" className="flex items-center gap-2 rounded-md p-2 text-left hover:bg-muted" onClick={() => setOrganizationProject(project)}><FolderKanban className="size-4 text-muted-foreground" /><span className="truncate text-sm">{project.name}</span><ArrowRight className="ml-auto size-4 text-muted-foreground" /></button>)}{!summary!.projects.length && <p className="text-sm text-muted-foreground">暂无项目，可在完整工作台中创建。</p>}</CardContent>
+            <CardContent className="flex flex-col gap-2">{summary!.projects.slice(0, 6).map(project => <button key={project.id} type="button" className="flex items-center gap-2 rounded-md p-2 text-left hover:bg-muted" onClick={onOpenWorkbench}><FolderKanban className="size-4 text-muted-foreground" /><span className="truncate text-sm">{project.name}</span><ArrowRight className="ml-auto size-4 text-muted-foreground" /></button>)}{!summary!.projects.length && <p className="text-sm text-muted-foreground">暂无项目，可在完整工作台中创建。</p>}</CardContent>
           </Card>
           <Card>
-            <CardHeader><CardTitle>笔记</CardTitle><CardDescription>最近记录的想法与资料。</CardDescription></CardHeader>
+            <CardHeader><CardTitle>笔记</CardTitle><CardDescription>最近记录的想法与资料。</CardDescription><Button variant="outline" onClick={onOpenWorkbench}>管理项目与笔记</Button></CardHeader>
             <CardContent className="flex flex-col gap-2">{summary!.notes.slice(0, 6).map(note => <div key={note.id} className="flex items-start gap-2"><Sparkles className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><span className="line-clamp-2 text-sm">{note.text || '未命名笔记'}</span></div>)}{!summary!.notes.length && <p className="text-sm text-muted-foreground">暂无笔记，可在完整工作台中记录。</p>}</CardContent>
           </Card>
         </div>
 
+        </>}
+        {societyOnly && <>
+        <Card><CardHeader><CardTitle>角色与项目组织</CardTitle></CardHeader><CardContent className="flex flex-col gap-2">{organization.roles.map(role => <p key={role.id} className="text-sm">{role.name} · {role.employment} · {role.responsibilities.join("、")}</p>)}{summary!.projects.map(project => <Button key={project.id} variant="outline" onClick={() => setOrganizationProject(project)}>{project.name} · 组织详情</Button>)}</CardContent></Card>
         <Card>
           <CardHeader><CardTitle>AI 用户整体体验</CardTitle><CardDescription>只来自你主动触发的本机复盘；事实、AI 评分和人工校准分开保存。</CardDescription></CardHeader>
           <CardContent className="flex flex-col gap-4">
@@ -687,6 +673,7 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
             </div>
           </CardContent>
         </Card> : null}
+        </>}
       </main>
       {organizationProject && <OrganizationDialog
         project={organizationProject}
@@ -697,6 +684,6 @@ export default function WorkbenchView({ onSession, onAutomations, onOpenWorkbenc
         onSession={onSession}
         reload={load}
       />}
-    </ScrollArea>
+    </Container>
   );
 }

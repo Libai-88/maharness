@@ -21,9 +21,21 @@
 - Windows 运维手册：安装、升级、恢复、数据目录、密钥异常、remote 暴露前置与回滚（API-08）。
 - 供应链策略文档 `plan/supply-chain-policy-v1.md`：npm/技能包/插件三类对象的哈希锚定、升级与回滚路径（SEC-07）。
 
+### Changed
+
+- 对话、个人事项与自动化共用 Run 执行链，返工关联原工作单并保留历史交付。
+- 工作台聚焦个人事务；独立 AI 社会页面提供角色、分支、交付和异常观察，以及补充要求、停止、恢复、审批与返工。
+- 普通任务支持预算缺省与未知价格，显式预算仍然生效；基础观察工具直接可用，其他工具按任务与阶段加载。
+
+### Fixed
+
+- 完成状态核对有效答复、必交产物与契约验收，缺项和失败保留可检查的部分成果。
+- 契约产物按父任务与角色权限收窄写入，执行时复检路径；暂停、重启和恢复复用已确认副作用。
+- 工具结果采用 8,000 字符内联边界，模型输出与上下文预算统一，调用用量去重并保留未知费用。
+
 ### Security
 
-- 依赖供应链漏洞清零：`npm audit fix` 修复 body-parser（high）、proxy-addr（critical）、qs（moderate）、undici（high）与 DOMPurify（critical），双仓生产依赖 `npm audit` 0 漏洞（SEC-07）。
+- body-parser、proxy-addr、qs、undici 与 DOMPurify 的安全修复已纳入依赖锁（SEC-07）。当前生产依赖审计与发布门禁见 `web-agent/evals/acceptance/optimization-closeout/summary.json`。
 
 ## [0.1.0]
 

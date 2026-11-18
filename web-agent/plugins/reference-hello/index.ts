@@ -8,7 +8,7 @@ const plugin: Plugin = {
     ctx.register({
       kind: 'tool',
       tool: {
-        version: '2.0.0',
+        version: '3.0.0',
         permissions: [],
         name: 'reference_hello',
         description: 'Return a deterministic health response from the reference plugin.',

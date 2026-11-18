@@ -3,8 +3,9 @@ import type { AgentEvent, RunOptions } from './loop';
 
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
 export type PermissionProfile = 'standard' | 'developer';
-export interface RunAuthorization { workspace: string; profile: PermissionProfile; readOnly: boolean; revision: number; frameworkChangeId?: string; pluginDevelopment?: import('./task-plugins').PluginDevelopmentGrant; }
+export interface RunAuthorization { workspace: string; profile: PermissionProfile; readOnly: boolean; revision: number; frameworkChangeId?: string; pluginDevelopment?: import('./task-plugins').PluginDevelopmentGrant; artifactWritePaths?: string[]; }
 export interface RunRecord {
+  reworkOfRunId?: string;
   materials?: import('./material').Material[];
   id: string; sessionId: string; tenantId: string; parentId?: string; rootId: string; depth: number;
   objective: string; providerId: string; model: string; status: RunStatus; authorization: RunAuthorization;
@@ -29,6 +30,7 @@ export interface RunRecord {
   capabilityResolution?: import('./types').CapabilityResolution;
   ruleResolution?: import('./types').RuleResolution;
   origin?:
+    | { kind: 'item'; itemId: string; revision: number }
     | { kind: 'automation'; automationId: string; occurrenceId: string }
     | { kind: 'society'; societyTaskId: string; scheduleId: string; assignmentContractId: string };
   workOrderId?: string;

@@ -11,6 +11,7 @@ export default function RunControls({ run, onChanged, onResume, onNew }: { run: 
   const [message, setMessage] = useState('');
   const [busy, setBusy] = useState(false);
   const [expanded, setExpanded] = useState(false);
+  const canRework = !activeRun(run) && !run.parentId && run.origin?.kind !== 'society' && !!run.workOrderId;
   const submit = async (replace: boolean) => {
     if (!message.trim()) return;
     setBusy(true);
@@ -25,17 +26,24 @@ export default function RunControls({ run, onChanged, onResume, onNew }: { run: 
   return <Alert className="mx-auto max-w-3xl" data-testid="run-controls">
     <AlertTitle>{runLabels[run.status]} · {run.model}</AlertTitle>
     <AlertDescription className="flex flex-col gap-2">
-      <p>费用 ${run.cost.toFixed(4)}{run.usageStatus === 'estimated' ? '（估算）' : run.usageStatus === 'unknown' ? '（用量不完整）' : ''} · {verificationLabel(run.verification)}</p>
+      <p>费用 {run.usageStatus === 'unknown' ? (run.cost > 0 ? `已知部分 $${run.cost.toFixed(4)}` : '未知') : run.usageStatus ? `$${run.cost.toFixed(4)}${run.usageStatus === 'estimated' ? '（估算）' : ''}` : '待记录'} · Token {run.tokensIn + run.tokensOut} · {verificationLabel(run.verification)}</p>
       {run.billingNotice && <p role="status">{run.billingNotice}</p>}
       {run.billingNotice && !activeRun(run) && <Button size="sm" variant="outline" disabled={busy} onClick={() => { setBusy(true); void runsApi.acknowledgeBilling(run.id).then(onChanged).catch(error => toast.error(String(error))).finally(() => setBusy(false)); }}>已核对，本次无需处理</Button>}
       {run.error && <p>{run.error}</p>}
       {run.problem && <p role="status">{run.problem.hint}</p>}
+      {!!run.supplements?.delivered && <p role="status">补充要求已送达 · {run.supplements.delivered} 条</p>}
+      {!!run.supplements?.queued && <p role="status">补充要求待送达 · {run.supplements.queued} 条</p>}
       {activeRun(run) && <Button size="sm" variant="outline" className="self-start" aria-expanded={expanded} aria-controls="run-message-editor" onClick={() => setExpanded(value => !value)}>补充或新建任务</Button>}
       {activeRun(run) && expanded && <div id="run-message-editor" className="flex flex-col gap-2">
         <Field><FieldLabel htmlFor="run-supplement">当前任务要求</FieldLabel><Textarea id="run-supplement" value={message} onChange={event => setMessage(event.target.value)} placeholder="补充目标或输入新任务" disabled={busy} /></Field>
         <div className="flex flex-wrap gap-2"><Button size="sm" variant="secondary" disabled={busy || !message.trim() || run.status === 'stopping'} onClick={() => void submit(false)}>补充当前任务</Button><Button size="sm" variant="outline" disabled={busy || !message.trim()} onClick={() => void submit(true)}>停止并发起新任务</Button></div>
       </div>}
       {run.status === 'interrupted' && !run.parentId && <Button size="sm" variant="secondary" disabled={busy || run.deadlineAt !== undefined && run.deadlineAt <= Date.now() || run.budgetPolicy === 'enforce' && run.budgetUsd !== undefined && run.cost >= run.budgetUsd} onClick={onResume}>继续任务</Button>}
+      {canRework && <Button size="sm" variant="outline" className="self-start" onClick={() => setExpanded(value => !value)}>返工</Button>}
+      {canRework && expanded && <div className="flex flex-col gap-2">
+        <Field><FieldLabel htmlFor="run-rework">返工要求</FieldLabel><Textarea id="run-rework" value={message} onChange={event => setMessage(event.target.value)} disabled={busy} /></Field>
+        <Button size="sm" className="self-start" disabled={busy || !message.trim()} onClick={() => void submit(true)}>提交返工</Button>
+      </div>}
     </AlertDescription>
   </Alert>;
 }

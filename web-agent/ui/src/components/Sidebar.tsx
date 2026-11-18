@@ -46,6 +46,7 @@ export const BUILTIN_TABS: TabDef[] = [
   { key: 'chat', label: '会话', icon: <MessageCircle /> },
   { key: 'files', label: '文件', icon: <Folder /> },
   { key: 'workbench', label: '工作台', icon: <BriefcaseBusiness /> },
+  { key: 'society', label: 'AI 社会', icon: <ListChecks /> },
   { key: 'automations', label: '自动化', icon: <CalendarClock /> },
 ];
 

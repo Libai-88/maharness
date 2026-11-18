@@ -63,8 +63,8 @@ test('custom tools retain long observations and a single runtime instruction acr
       }
       await terminal(service, run.id);
     }
-    assert.equal(service.get(run.id, 'default').status, 'completed', service.get(run.id, 'default').error); assert.equal(reads, 1); assert.equal(calls, 5);
-    assert.equal(service.get(run.id, 'default').tokensIn, 40);
+    assert.equal(service.get(run.id, 'default').status, 'completed', service.get(run.id, 'default').error); assert.equal(reads, 1); assert.equal(calls, 4);
+    assert.equal(service.get(run.id, 'default').tokensIn, 30);
     const inputs = store.runs.modelInputs(run.id);
     assert.equal(new Set(inputs.map(input => input.diagnostics.attemptId)).size, 3);
     assert.ok(inputs.every(input => input.diagnostics.fingerprint === describeModelInput(input.messages, input.tools).fingerprint));

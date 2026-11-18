@@ -39,6 +39,27 @@ function deferred() {
   return { promise, resolve };
 }
 
+test('rework retries reuse a new execution on the original work order', async () => {
+  const { store, session, environment } = setup({ approveApproval: () => false, async *run() { yield done; } });
+  const organization = new OrganizationService({ store });
+  const service = new RunService({ ...environment, organization });
+  try {
+    const original = service.create(session, { message: '交付首版' });
+    await terminal(service, original.id);
+    const input = { message: '调整首版', reworkOfRunId: original.id, requestKey: 'rework-1' };
+    const revision = service.create(session, input);
+    assert.equal(service.create(session, input).id, revision.id);
+    assert.throws(() => service.create(store.createSession('test', 'test'), input), /同一会话/);
+    await terminal(service, revision.id);
+    assert.equal(revision.workOrderId, original.workOrderId);
+    assert.equal(revision.reworkOfRunId, original.id);
+    assert.notEqual(revision.assignmentContractId, original.assignmentContractId);
+    assert.equal(store.organization.listWorkOrders('default').length, 1);
+    assert.equal(store.organization.getContract(original.assignmentContractId!, 'default')?.status, 'delivered');
+    assert.equal(store.organization.getContract(revision.assignmentContractId!, 'default')?.status, 'delivered');
+  } finally { await service.shutdown(); store.close(); }
+});
+
 test('delegation call cancellation stops only its child while the parent remains usable', async () => {
   const ready=deferred(),holdParent=deferred();let options:RunOptions|undefined;
   const {service,store,session}=setup({approveApproval:()=>false,async *run(opts){
@@ -447,6 +468,76 @@ test('parent cancellation propagates to child runs', async () => {
   } });
   try { const run = service.create(session, { message: 'work' }); const stopped = terminal(service, run.id); await entered.promise; service.cancel(run.id, 'default'); await stopped; assert.equal(store.runs.children(run.id, 'default')[0].status, 'cancelled'); }
   finally { await service.shutdown(); store.close(); }
+});
+
+test('resuming a paused team reuses delivered branches and recovers the pending branch write', async () => {
+  const store = new Store(':memory:');
+  const session = store.createSession('test');
+  const organization = new OrganizationService({ store });
+  let enterPause!: () => void;
+  const atPause = new Promise<void>(resolve => { enterPause = resolve; });
+  let attempts = 0;
+  let writes = 0;
+  let originalChildren: string[] = [];
+  const makeService = () => new RunService({
+    store, organization, workspace: () => process.cwd(),
+    provider: () => ({ id: 'test', model: 'test' }),
+    prepare: () => ({ provider, model: 'test', messages: [], traceId: '' }),
+    tools: () => [{ name: 'write_file', version: '1.0.0', description: 'write', permissions: [], parameters: { type: 'object' }, outputSchema: { type: 'object' }, sideEffect: 'write', async handler() { return { ok: true }; } }],
+    runner: () => ({ approveApproval: () => false, async *run(opts) {
+      if (opts.parentRunId) {
+        if (opts.messages.some(message => message.role === 'tool')) {
+          assert.match(JSON.stringify(opts.messages), /second\.md/);
+        } else {
+          const artifact = opts.messages.some(message => message.content === '第二项') ? 'second.md' : 'first.md';
+          const result = { ok: true, evidence: [{ artifact: true as const, kind: 'file' as const, ref: artifact, label: artifact }] };
+          writes++;
+          if (artifact === 'second.md') {
+            const call = { id: 'write', type: 'function' as const, function: { name: 'write_file', arguments: '{}' } };
+            store.claimToolEffect(opts.runId!, 'write');
+            store.completeToolEffect(opts.runId!, 'write', result);
+            opts.onCheckpoint?.(0, [...opts.messages, { role: 'assistant', content: '', tool_calls: [call] }], { costUsd: 0, toolResults: [] },
+              { phase: 'tool_pending', pendingTool: { name: 'write_file', toolCallId: 'write', sideEffect: 'write', effectKey: 'write' } });
+            await new Promise<void>(resolve => { opts.signal!.addEventListener('abort', () => resolve(), { once: true }); enterPause(); });
+            return;
+          }
+          store.runs.startTool(opts.runId!, 'first-write', 'write_file', artifact);
+          store.runs.finishTool(opts.runId!, 'first-write', result);
+        }
+      } else if (attempts++ === 0) {
+        const parent = store.runs.get(opts.runId!, 'default')!;
+        const team = organization.createTeam(parent, { reason: '两份独立文件', assignments: [
+          { roleName: '第一角色', objective: '第一项', expectedArtifacts: ['first.md'], acceptance: ['交付第一项'], allowedTools: ['write_file'] },
+          { roleName: '第二角色', objective: '第二项', expectedArtifacts: ['second.md'], acceptance: ['交付第二项'], allowedTools: ['write_file'] },
+        ] });
+        for (const contract of team.contracts) await opts.delegate!({ objective: contract.branchObjective, tools: 'read', assignmentContractId: contract.id });
+        return;
+      } else {
+        assert.match(JSON.stringify(opts.contextMessages), /first\.md.*second\.md/);
+        assert.deepEqual(store.runs.children(opts.runId!, 'default').map(child => child.id), originalChildren);
+      }
+      yield { type: 'assistant_done', content: '已交付', reasoning: '', usage: { input: 2, output: 1 }, cost: 0 };
+    } }),
+  });
+  let service = makeService();
+  try {
+    const run = service.create(session, { message: '请组队分别交付两份文件' });
+    const paused = terminal(service, run.id);
+    await atPause;
+    service.cancel(run.id, 'default', true);
+    await paused;
+    const children = store.runs.children(run.id, 'default');
+    originalChildren = children.map(child => child.id);
+    assert.deepEqual(children.map(child => child.status), ['completed', 'interrupted']);
+    await service.shutdown();
+    service = makeService();
+    const done = terminal(service, run.id);
+    service.resume(run.id, 'default');
+    await done;
+    assert.equal(service.get(run.id, 'default').status, 'completed');
+    assert.equal(writes, 2);
+    assert.deepEqual(store.runs.children(run.id, 'default').map(child => child.status), ['completed', 'completed']);
+  } finally { await service.shutdown(); store.close(); }
 });
 
 test('cancel aborts execution; shutdown leaves manually recoverable interruption', async () => {

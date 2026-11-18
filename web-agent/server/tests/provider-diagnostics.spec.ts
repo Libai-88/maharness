@@ -64,7 +64,7 @@ function enableForMock(provider: ProviderDef, nextNames: () => string[]) {
 function teamAssignments(prefix: string, count: number, budgetUsd = 0.02) {
   return Array.from({ length: count }, (_, index) => ({
     objective: `${prefix}-${index + 1}`,
-    expectedArtifacts: [`${prefix}-${index + 1}.md`],
+    expectedArtifacts: [],
     acceptance: [`${prefix}-${index + 1} 可检查`],
     budgetUsd,
     allowedTools: ['read_file'],
@@ -1003,7 +1003,7 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.equal(response.status, 200);
     const sse = await response.text();
     assert.match(sse, /event: tool_result\ndata: .*"name":"run_subagent"/, sse);
-    assert.match(sse, /event: done\ndata:/);
+    assert.match(sse, /DELIVERY_INCOMPLETE/, '第二个承诺分支尚未执行，父任务不能完成');
     assert.equal(calls, 7, '工具启用、团队建约、主代理委派、子代理读取与两个 run 的最终答复均已执行');
 
     const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);

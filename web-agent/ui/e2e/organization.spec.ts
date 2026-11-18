@@ -246,9 +246,10 @@ async function setup(page: Page) {
     return route.fulfill({ json: {} });
   });
 
-  await page.goto('/?view=workbench');
-  await expect(page.getByTestId('workbench-home')).toBeVisible();
-  await page.getByText('交付项目', { exact: true }).click();
+  await page.goto('/?view=society');
+  await expect(page.getByTestId('society-home')).toBeVisible();
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
+  await page.getByRole('button', { name: '交付项目 · 组织详情', exact: true }).click();
   await expect(page.getByRole('heading', { name: '交付项目 · 组织视图' })).toBeVisible();
 }
 
@@ -278,7 +279,7 @@ test('项目组织视图展示回执并完成暂停、改派、异常和关闭�
 
   await page.keyboard.press('Escape');
   await expect(page.getByRole('heading', { name: '交付项目 · 组织视图' })).toHaveCount(0);
-  await page.getByText('交付项目', { exact: true }).click();
+  await page.getByRole('button', { name: '交付项目 · 组织详情', exact: true }).click();
   await page.getByRole('button', { name: '打开会话', exact: true }).click();
   await expect(page).toHaveURL(/view=chat/);
   await expect(page.getByPlaceholder('跟 maharness 说点什么…（按 / 看命令）')).toBeVisible();

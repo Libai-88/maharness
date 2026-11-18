@@ -6,8 +6,8 @@
   "enabled": false,
   "compatibility": {
     "api": {
-      "min": "2.0.0",
-      "max": "2.0.0"
+      "min": "3.0.0",
+      "max": "3.0.0"
     }
   },
   "permissions": {
@@ -18,5 +18,5 @@
     }
   },
   "cleanup": "keep",
-  "apiVersion": 2
+  "apiVersion": 3
 }

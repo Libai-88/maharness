@@ -48,6 +48,17 @@ export function organizationTools(service: OrganizationService, store: Store): T
       },
     },
     {
+      version: '1.0.0', permissions: ['workspace.read'], name: 'role_assume',
+      discovery: { initial: true, keywords: ['角色', '指定角色', 'role'] },
+      risk: 'low', costHint: 'low', sideEffect: 'write', outputSchema: { type: 'object' },
+      description: '按用户要求或任务需要选择 role_directory 中的持久角色承接当前任务，保留同一工作单和 Run，权限只可收窄。已有团队或子任务不能切换。',
+      parameters: { type: 'object', properties: { roleId: { type: 'string' } }, required: ['roleId'], additionalProperties: false },
+      async handler(args: { roleId: string }, ctx) {
+        try { return { ok: true, data: service.assumeRole(requireRun(ctx), args.roleId) }; }
+        catch (error) { return toolFailure(error); }
+      },
+    },
+    {
       version: '1.0.0',
       permissions: ['delegate'],
       name: 'team_create',
@@ -60,7 +71,7 @@ export function organizationTools(service: OrganizationService, store: Store): T
         type: 'object', required: ['teamCycle', 'contracts', 'economics'],
         properties: { teamCycle: { type: 'object' }, contracts: { type: 'array' }, economics: { type: 'object' } },
       },
-      description: '在独立分支、互不重叠、硬预算且成本有收益时建立可审计分工契约。团队为 2-5 个分支；自动组队必须提供单角色费用基线。成功后下轮才加载委派工具。',
+      description: '按角色能力建立 2-5 个互不重叠的可交付分支，至少两个独立分支。预算可省略，显式预算继续生效；简单任务直接执行。成功后下轮加载委派工具。',
       parameters: {
         type: 'object',
         properties: {
@@ -68,12 +79,12 @@ export function organizationTools(service: OrganizationService, store: Store): T
             type: 'array', minItems: 2, maxItems: 5,
             items: {
               type: 'object',
-              required: ['objective', 'expectedArtifacts', 'acceptance', 'budgetUsd'],
+              required: ['objective', 'expectedArtifacts', 'acceptance'],
               properties: {
                 roleId: { type: 'string' },
                 roleName: { type: 'string' },
                 objective: { type: 'string' },
-                expectedArtifacts: { type: 'array', minItems: 1, items: { type: 'string' } },
+                expectedArtifacts: { type: 'array', description: '分支承诺交付的文件相对路径；只交分析或结论时填空数组', items: { type: 'string' } },
                 acceptance: { type: 'array', minItems: 1, items: { type: 'string' } },
                 evidenceInputs: { type: 'array', items: { type: 'object' } },
                 dependsOn: { type: 'array', items: { type: 'string' } },

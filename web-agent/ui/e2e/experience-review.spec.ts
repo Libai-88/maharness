@@ -333,7 +333,8 @@ test('体验问题池按分诊、复现、修复、真实验证和自进化提�
   await panel.getByRole('button', { name: '开始复盘' }).click();
   await page.getByTestId('experience-review-result').getByRole('button', { name: '加入问题池' }).click();
 
-  await page.goto('/?view=workbench');
+  await page.goto('/?view=society');
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
   const row = () => page.getByText('保留证据入口').locator('..').locator('..');
   await expect(row()).toContainText('new');
   await row().getByRole('button', { name: '分诊' }).click();
@@ -364,11 +365,12 @@ test('设置页展示复盘 Rubric、预算与复核入口', async ({ page }) =>
   await expect(page.getByRole('button', { name: '打开运行记录与复盘' })).toBeVisible();
 });
 
-test('工作台中的旧复盘可直接返回来源会话', async ({ page }) => {
+test('社会页中的旧复盘可直接返回来源会话', async ({ page }) => {
   await setup(page);
-  await page.goto('/?view=workbench');
+  await page.goto('/?view=society');
+  await page.getByText('制度、角色负载、费用账本与历史调度', { exact: true }).click();
 
-  await expect(page.getByTestId('workbench-home')).toContainText('AI 用户整体体验');
+  await expect(page.getByTestId('society-observations')).toContainText('AI 用户整体体验');
   await page.getByRole('button', { name: '打开会话' }).click();
   await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeVisible();
   await expect(page).toHaveURL(/view=chat/);

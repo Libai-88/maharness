@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync } from 'node:fs';
 import { resolve, join } from 'node:path';
-import { callModel, callEmbedding, inModelScope, ModelAdmissionError, type ModelCallRecord, type ModelCallScope } from '../model-call';
+import { callModel, modelOutputBudget, callEmbedding, inModelScope, ModelAdmissionError, type ModelCallRecord, type ModelCallScope } from '../model-call';
 import { ExecutionPool } from '../execution-pool';
 import { Store } from '../../server/db';
 import { compactHistory } from '../../core/chat/compact';
@@ -265,4 +265,15 @@ test('a different model does not silently inherit the default model price', asyn
   const f = fixture();
   await consume(inModelScope(callModel(provider(), [], { model: 'unpriced-model' }), f.scope));
   assert.equal(f.rows[0].cost, undefined); assert.equal(f.rows[0].priceSource, 'unknown');
+});
+
+
+test('output allocation matches actual request and context reserve with model and fallback capabilities', async () => {
+  const source = provider();
+  source.models = [{ modelId: 'm', contextWindow: 100000, maxOutput: 12000, vision: false, tools: true, reasoning: true, priceIn: 1, priceOut: 2, enabled: true, source: 'manual' }];
+  assert.deepEqual(modelOutputBudget(source, 'unknown', 60000), { limit: 4096, source: 'default' });
+  assert.deepEqual(modelOutputBudget(source, 'm', 60000), { limit: 9000, source: 'model' });
+  const f = fixture();
+  await consume(inModelScope(callModel(source, [{ role: 'user', content: 'hi' }], { model: 'm' }), f.scope));
+  assert.equal(f.rows[0].outputLimit, modelOutputBudget(source, 'm').limit);
 });

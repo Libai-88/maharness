@@ -139,7 +139,7 @@ test('mock provider drives solo and two real team child runs', async () => {
   try {
     const mock = mockProvider();
     const report = await runPairedLive(config(join(dir, 'run')), mock.provider);
-    assert.equal(report.status, 'passed');
+    assert.equal(report.status, 'passed', JSON.stringify(report.arms));
     assert.equal(report.evidenceMode, 'test-double');
     assert.match(report.runnerFingerprint, /^[a-f0-9]{64}$/);
     assert.equal(report.arms.solo?.status, 'completed');

@@ -66,13 +66,13 @@ describe('AgentRunner 任务完成验收', () => {
     assert.equal(events.some((event) => event.type === 'assistant_done'), false);
   });
 
-  test('只有期限的过期任务停止执行，未过期任务也不能凭空通过验收', async () => {
+  test('只有期限的任务到期停止，期限内有正文即可交付', async () => {
     const expired = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() - 1 });
     assert.ok(expired.events.some((event) => event.type === 'error' && event.kind === 'deadline'));
     const unverified = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() + 60_000 });
     assert.equal(unverified.events.some((event) => event.type === 'task_verified'), false);
     assert.ok(unverified.events.some((event) => event.type === 'assistant_done'));
-    assert.ok(unverified.events.some((event) => event.type === 'task_failed'));
+    assert.equal(unverified.events.some((event) => event.type === 'task_failed'), false);
     assert.equal(unverified.cacheWrites(), 0);
     assert.deepEqual(unverified.recorded, [{ failed: false }]);
   });

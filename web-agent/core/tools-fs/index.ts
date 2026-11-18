@@ -11,7 +11,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/types';
-import { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
+import { contractArtifactPath, resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
 import type { ReadResult } from '../../kernel/sandbox';
 import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/fssearch';
 import type { EditOp } from '../../kernel/fssearch';
@@ -259,7 +259,7 @@ export default {
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
-        limits: '仅文本文件；单次最多 2000 行 / 100k 字符，超出用 offset 续读',
+        limits: '仅文本文件；默认 2000 行，最多 20000 行 / 100k 字符，超出用 offset 续读',
         output: '{text, encoding, size, path, totalLines, startLine, endLine, nextOffset?}；nextOffset 表示还有后续行',
         outputSchema: {
           type: 'object', required: ['text', 'path', 'size', 'totalLines', 'startLine', 'endLine'],
@@ -303,7 +303,7 @@ export default {
             return { ok: true, data: cached, evidence: [{ kind: 'file', label: `已读取 ${cached.path}`, ref: cached.path }] };
           }
           const r = readTextSmart(file);
-          if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），read_file 不支持；图片/文档类请如实告知用户当前无法读取` };
+          if (r.isBinary) return { ok: false, error: `二进制文件（${st.size} 字节），read_file 不支持；请使用已授权的文档或图片读取能力` };
           const s = sliceLines(r.text, offset, limit, MAX_READ_CHARS);
           const result: ReadResult = {
             version: fileVersion(file)!,
@@ -479,6 +479,9 @@ export default {
         },
         assessApproval: writeGate,
         async handler(args: { path?: string; content?: string; expectedVersion?: string | null }, tctx: ToolContext) {
+          const paths = tctx.authorization?.artifactWritePaths;
+          if (paths && (tctx.authorization?.readOnly || !paths.includes(contractArtifactPath(tctx.sandboxRoot, args.path ?? '') ?? '')))
+            return { ok: false, error: '分工只能写入契约声明的产物路径' };
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
           if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
             return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。` };
@@ -553,6 +556,9 @@ export default {
         },
         assessApproval: writeGate,
         async handler(args: { path?: string; edits?: EditOp[]; expectedVersion?: string }, tctx: ToolContext) {
+          const paths = tctx.authorization?.artifactWritePaths;
+          if (paths && (tctx.authorization?.readOnly || !paths.includes(contractArtifactPath(tctx.sandboxRoot, args.path ?? '') ?? '')))
+            return { ok: false, error: '分工只能编辑契约声明的产物路径' };
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
           if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
             return { ok: false, error: `拒绝编辑内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}` };

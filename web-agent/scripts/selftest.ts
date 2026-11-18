@@ -453,7 +453,7 @@ export default {
   const na = normalizeUsage({ prompt_tokens: 1000, completion_tokens: 50 });
   const ok = ds.cachedInput === 800 && ds.missInput === 200
     && oa.cachedInput === 700 && oa.missInput === 300
-    && an.cachedInput === 500 && an.missInput === 400
+    && an.input === 1800 && an.cachedInput === 500 && an.missInput === 1300 && an.cacheWrite === 400
     && na.cachedInput === undefined;
   check('[usage] 缓存命中归一化 (DeepSeek/OpenAI/Anthropic/无)', ok,
     `ds=${ds.cachedInput}/${ds.missInput} oa=${oa.cachedInput}/${oa.missInput} an=${an.cachedInput}/${an.missInput} na=${na.cachedInput ?? 'undefined'}`);
@@ -1138,7 +1138,7 @@ export default {
 {
   const { AgentRunner } = await import('../core/chat/agent');
   const runner = new AgentRunner(kernel, kernel.bus);
-  const big = 'A'.repeat(3000); // 超 2000 阈值
+  const big = 'A'.repeat(9000);
   const mock = () => {
     let calls = 0;
     return {
@@ -1167,18 +1167,18 @@ export default {
     onCheckpoint: (_t, h) => { cap.history = h; },
   })) { /* 消费 */ }
   const toolMsg = cap.history?.find((m) => m.role === 'tool');
-  const storedRef = toolMsg && JSON.parse(String(toolMsg.content)).resultRef === 'rs1' && JSON.parse(String(toolMsg.content)).truncated === true;
+  const storedRef = toolMsg && JSON.parse(String(toolMsg.content)).resultRef === 'rs1' && JSON.parse(String(toolMsg.content)).truncated === true && JSON.parse(String(toolMsg.content)).nextOffset === 8000;
   const noFullText = toolMsg && !String(toolMsg.content).includes(big);
   // recall_tool_result 重读（chat 插件注册的真实工具）
   const recall = kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'recall_tool_result')?.tool;
-  const recalled = recall ? await recall.handler({ id: 'rs1' }, { traceId: 'rs-r', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
+  const recalled = recall ? await recall.handler({ id: 'rs1', limit: 16000 }, { traceId: 'rs-r', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace }) : { ok: false };
   const recallOk = recalled.ok === true && (recalled.data as { content: string }).content === JSON.stringify({ ok: true, data: { content: big } });
   const missOk = recall ? (await recall.handler({ id: 'nope' }, { traceId: 'rs-r2', turn: 0, sessionId, sandboxRoot: rootDir, cache: kernel.cache, trace: kernel.trace })).ok === false : false;
   check('[result-store] 大结果入存储+摘要回填', !!storedRef && !!noFullText,
     `(引用=${storedRef} 无全文=${noFullText} 回填长度=${toolMsg ? String(toolMsg.content).length : 0})`);
   check('[result-store] recall_tool_result 零副作用重读 + 缺失报错', recallOk && missOk,
     `(重读=${recallOk} 缺失=${missOk})`);
-  // 小结果（≤2000）全文回填，不折腾存储
+  // 小结果（≤8000）全文回填，不折腾存储
   const smallTool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
     name: 'small_result', description: '小结果工具', parameters: { type: 'object', properties: {} },
     async handler() { return { ok: true, data: { v: '小' } }; },

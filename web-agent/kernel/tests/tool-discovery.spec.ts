@@ -175,3 +175,13 @@ test('cross-plugin capability conflicts are reported once per competing owner', 
   ], [], 1);
   assert.deepEqual(capabilityConflicts(active), [{ capabilityId: 'document.read', shadowedBy: 'alpha' }]);
 });
+
+
+test('authorized file observations bypass discovery even when manager schemas exhaust the budget', () => {
+  const names = ['list_dir', 'glob', 'grep', 'read_file', 'read_document_content'];
+  const tools: ToolDef[] = [...names, 'other'].map(name => ({ name, description: name, version: '1.0.0', permissions: [], parameters: {}, outputSchema: {}, sideEffect: 'read', handler: async () => ({ ok: true }) }));
+  const active = createToolCatalog(tools, [], 1);
+  for (const name of names) assert.ok(active.some(tool => tool.name === name));
+  assert.equal(active.some(tool => tool.name === 'other'), false);
+  assert.equal(createToolCatalog(tools.filter(tool => tool.name !== 'grep'), [], 1).some(tool => tool.name === 'grep'), false);
+});

@@ -68,6 +68,26 @@ const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external'
 };
 
 describe('AgentRunner 副作用恢复账本', () => {
+  test('managed delegation checkpoints rely on child effects while other external tools stay journaled', async () => {
+    for (const name of ['run_subagent', 'custom_dispatch']) {
+      const store = new Store(':memory:');
+      let checkpoint: { sideEffect?: string; effectKey?: string } | undefined;
+      try {
+        for await (const _event of new AgentRunner(kernelStub(process.cwd()), bus).run({
+          provider: replayToolProvider('dispatch', name, {}), model: 'm',
+          messages: [{ role: 'user', content: 'delegate' }], traceId: name, executionId: name,
+          delegate: async () => ({ runId: 'child', traceId: 'child', answer: 'done', cost: 0, tokensIn: 0, tokensOut: 0, toolCalls: 0, cancelled: false }),
+          tools: [{ ...tool, name, delegates: true, parameters: { type: 'object' }, async handler() { return { ok: true }; } }],
+          effectJournal: { peek: key => store.peekToolEffect(name, key), claim: key => store.claimToolEffect(name, key), complete: (key, result) => store.completeToolEffect(name, key, result) },
+          onCheckpoint: (_turn, _history, _stats, state) => { if (state?.pendingTool) checkpoint = state.pendingTool; },
+        })) { /* Drain the execution. */ }
+        assert.ok(checkpoint);
+        assert.equal(checkpoint.sideEffect, name === 'run_subagent' ? 'none' : 'external');
+        assert.equal(!!checkpoint.effectKey, name !== 'run_subagent');
+        assert.equal(store.hasPendingToolEffects(name), false);
+      } finally { store.close(); }
+    }
+  });
   test('审批等待中没有副作用登记，取消后仍可以安全恢复', async () => {
     const store = new Store(':memory:');
     const abort = new AbortController();

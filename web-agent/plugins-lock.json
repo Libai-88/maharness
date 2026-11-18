@@ -3,11 +3,11 @@
   "plugins": {
     "reference-hello": {
       "version": "0.1.0",
-      "integrity": "2ed8947802",
+      "integrity": "d34657f667",
       "compatibility": {
         "api": {
-          "min": "2.0.0",
-          "max": "2.0.0"
+          "min": "3.0.0",
+          "max": "3.0.0"
         }
       },
       "permissions": {
@@ -17,11 +17,11 @@
           ]
         }
       },
-      "updatedAt": 1794846116146
+      "updatedAt": 1795007885481
     },
     "workbench": {
       "version": "0.4.0",
-      "integrity": "cbdab7baa5",
+      "integrity": "8d0dc33122",
       "compatibility": {
         "api": {
           "min": "3.0.0",
@@ -48,7 +48,7 @@
           ]
         }
       },
-      "updatedAt": 1794846116147
+      "updatedAt": 1795007885482
     }
   }
 }

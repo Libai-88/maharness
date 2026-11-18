@@ -3,6 +3,7 @@ import { estimateTokens } from './tokens';
 
 const DEFAULT_TOOLS = new Set(['list_dir', 'read_file', 'glob', 'grep', 'write_file', 'edit_file', 'delete_file', 'command_start', 'command_output', 'command_wait', 'command_cancel', 'powershell_execute', 'web_search', 'web_fetch', 'recall_tool_result', 'search_history', 'read_history']);
 const REQUIRED_TOOLS = new Set(['recall_tool_result']);
+const OBSERVATION_TOOLS = new Set(['list_dir', 'glob', 'grep', 'read_file', 'read_document_content']);
 export const CATALOG_MANAGER_TOOLS = new Set(['discover_tools', 'enable_tools', 'release_tools', 'discover_capabilities', 'enable_capabilities']);
 const MANAGERS = CATALOG_MANAGER_TOOLS;
 interface CatalogState {
@@ -31,7 +32,7 @@ export function createToolCatalog(authorized: ToolDef[], restoredEnabled: string
   const small = authorized.reduce((sum, tool) => sum + schemaTokens(tool), 0) <= tokenBudget;
   const restored = new Set(restoredEnabled);
   const released = new Set(restoredReleased.filter(name => !REQUIRED_TOOLS.has(name) && !MANAGERS.has(name)));
-  const active = authorized.filter(tool => REQUIRED_TOOLS.has(tool.name) || !released.has(tool.name) && (small || restored.has(tool.name)));
+  const active = authorized.filter(tool => REQUIRED_TOOLS.has(tool.name) || !released.has(tool.name) && (OBSERVATION_TOOLS.has(tool.name) || small || restored.has(tool.name)));
   states.set(active, { released, selectedCapabilities: new Set(), conflicts: [] });
   if (small && active.length === authorized.length) return active;
   // Reserve space for discovery schemas; required/restored tools are never silently dropped.
@@ -159,8 +160,8 @@ export function createToolCatalog(authorized: ToolDef[], restoredEnabled: string
 }
 
 /** Rebuild only at model-call boundaries; an issued batch retains its original definitions. */
-export function refreshToolCatalog(active: ToolDef[], authorized: ToolDef[], budget: number): void {
-  const enabled = active.map(tool => tool.name);
+export function refreshToolCatalog(active: ToolDef[], authorized: ToolDef[], budget: number, initial: string[] = []): void {
+  const enabled = [...active.map(tool => tool.name), ...initial];
   const previous = states.get(active);
   const next = createToolCatalog(authorized, enabled, budget, releasedToolNames(active));
   for (const tool of next.filter(tool => ['enable_tools', 'release_tools', 'enable_capabilities'].includes(tool.name))) {

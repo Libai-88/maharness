@@ -324,6 +324,10 @@ export class RunRepository {
   messageByRequest(runId: string, requestKey: string): { id: string; content: string } | undefined {
     return this.db.prepare('SELECT id,content FROM run_messages_v2 WHERE run_id=? AND request_key=?').get(runId, requestKey) as { id: string; content: string } | undefined;
   }
+  supplementStatus(runId: string): { queued: number; delivered: number } {
+    return this.db.prepare('SELECT COUNT(*) - COALESCE(SUM(delivered), 0) AS queued, COALESCE(SUM(delivered), 0) AS delivered FROM run_messages_v2 WHERE run_id=?')
+      .get(runId) as { queued: number; delivered: number };
+  }
   addMessage(runId: string, content: string, requestKey?: string): string {
     const id = randomUUID();
     if (requestKey) {
@@ -349,6 +353,7 @@ export class RunRepository {
     const rows = this.db.prepare("SELECT record FROM runs_v2 WHERE status IN ('queued','running','waiting_approval','stopping')").all() as { record: string }[];
     for (const row of rows) this.update(JSON.parse(row.record), { status: 'interrupted' }, 'state', { status: 'interrupted', reason: 'process_restart' });
     this.db.prepare('DELETE FROM run_budget_reservations_v2').run();
+    this.db.prepare('DELETE FROM run_token_reservations_v2').run();
     const calls = this.db.prepare("SELECT record FROM run_model_calls_v2 WHERE json_extract(record,'$.status')='running'").all() as { record: string }[];
     for (const row of calls) this.finishModelCall({ ...JSON.parse(row.record), status: 'unknown', finishedAt: Date.now(), usageStatus: 'unknown' });
     })();

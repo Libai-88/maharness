@@ -29,6 +29,7 @@ import PluginTabView from './PluginTabView';
 const MaterialViewer = lazy(() => import('./MaterialViewer'));
 const RunsView = lazy(() => import('./RunsView'));
 const FilesView = lazy(() => import('./FilesView'));
+const SocietyView = lazy(() => import('./SocietyView'));
 const WorkbenchView = lazy(() => import('./WorkbenchView'));
 const AutomationsView = lazy(() => import('./AutomationsView'));
 const PluginsView = lazy(() => import('./PluginsView'));
@@ -218,7 +219,7 @@ export default function AppView(props: Props) {
                   <BreadcrumbSeparator />
                   <BreadcrumbItem>
                     <BreadcrumbPage>
-                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activeTab === 'workbench' ? '工作台' : activeTab === 'automations' ? '自动化' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
+                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activeTab === 'society' ? 'AI 社会' : activeTab === 'workbench' ? '工作台' : activeTab === 'automations' ? '自动化' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
                     </BreadcrumbPage>
                   </BreadcrumbItem>
                 </BreadcrumbList>
@@ -377,6 +378,8 @@ export default function AppView(props: Props) {
                 <RunsView onSession={id => props.onSelectSession(id)} />
               ) : activeTab === 'files' ? (
                 <FilesView onFrameworkTask={props.onFrameworkTask} onUseMaterial={useMaterial} />
+              ) : activeTab === 'society' ? (
+                <SocietyView onSession={props.onSelectSession} onAutomations={() => props.onTab('automations')} onOpenWorkbench={() => props.onTab(workbenchTabKey ?? 'workbench')} />
               ) : activeTab === 'workbench' ? (
                 <WorkbenchView
                   onSession={props.onSelectSession}

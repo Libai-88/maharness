@@ -47,6 +47,17 @@ function resolveSync(p: string): string {
   try { return realpathSync.native(p); } catch { return resolve(p); }
 }
 
+export function contractArtifactPath(root: string, path: string): string | undefined {
+  const parts = path.replace(/\\/g, '/').split('/');
+  if (parts.some(part => !part || /[<>:"|?*\x00-\x1f]|[. ]$/.test(part)
+    || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part))) return;
+  const target = resolve(root, ...parts);
+  try {
+    if (resolveInSandbox(root, path) !== target) return;
+  } catch { return; }
+  return parts.join('/');
+}
+
 // ============ 内核硬保护与敏感清单（A2：双基座判定） ============
 
 /** 项目根（内核、core/、data/ 实际所在）与沙箱根（Agent 文件工具的边界）是两个不同的目录：

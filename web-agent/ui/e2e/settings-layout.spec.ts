@@ -132,10 +132,10 @@ test('固定功能页和设置的关闭按钮直接返回会话', async ({ page 
   }
 });
 
-test('主导航固定四项，浏览器后退与 Esc 返回会话', async ({ page }) => {
+test('主导航包含独立 AI 社会入口，浏览器后退与 Esc 返回会话', async ({ page }) => {
   await setup(page);
   const input = page.getByRole('textbox', { name: '消息', exact: true });
-  for (const name of ['会话', '文件', '工作台', '自动化']) {
+  for (const name of ['会话', '文件', '工作台', 'AI 社会', '自动化']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await page.getByRole('button', { name: '工作台', exact: true }).click();
@@ -462,5 +462,6 @@ test('文件预览、编辑和全屏保存保持同一内容', async ({ page }) 
   await page.getByRole('textbox', { name: '编辑 README.md' }).press('Control+s');
   await expect.poll(() => mutations.find((item) => item.path === '/api/files/write')?.body.content).toBe('# 保存的内容');
   await expect(page.getByText('# 保存的内容', { exact: false })).toBeVisible();
+  await expect(page.locator('[data-sonner-toast]')).toContainText('已保存 README.md');
   await checkAccessibility(page);
 });

@@ -10,6 +10,11 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from './ui/input';
 import { ScrollArea } from './ui/scroll-area';
 
+function formatCost(cost: number, status: WorkOrderView['economics']['costStatus'], known: boolean) {
+  if (status === 'unknown' || !status && !known && cost === 0) return '费用未知';
+  return `${status === 'partial' || !status && !known ? '已知部分 ' : ''}$${cost.toFixed(4)}`;
+}
+
 export function OrganizationDialog({
   project,
   workOrders,
@@ -132,7 +137,7 @@ export function OrganizationDialog({
                 <CardHeader>
                   <CardTitle className="text-base">{order.objective}</CardTitle>
                   <CardDescription>
-                    {order.status} · ${order.economics.actualCostUsd.toFixed(4)}
+                    {order.status} · {formatCost(order.economics.actualCostUsd, order.economics.costStatus, order.economics.usageKnown)}
                     {order.economics.usageKnown ? '' : ' · 用量待核对'}
                   </CardDescription>
                 </CardHeader>
@@ -143,13 +148,13 @@ export function OrganizationDialog({
                     <div className="mt-2 flex flex-wrap gap-3 text-xs text-muted-foreground">
                       <span>{order.receipt.artifacts.length} 个产物</span>
                       <span>{order.receipt.sources.length} 个来源</span>
-                      <span>{order.receipt.costUsd.toFixed(4)} USD</span>
+                      <span>{formatCost(order.receipt.costUsd, order.receipt.costStatus, order.receipt.usageKnown)}</span>
                       {order.receipt.unfinished.length > 0 && <span className="text-destructive">{order.receipt.unfinished.length} 项未完成</span>}
                     </div>
                   </div>}
 
                   <div className="grid gap-3 text-sm sm:grid-cols-3">
-                    <div><p className="text-xs text-muted-foreground">费用</p><p className="mt-1 font-medium">${order.economics.actualCostUsd.toFixed(4)} / 预算 {order.budgetUsd === undefined ? '未设置' : `$${order.budgetUsd.toFixed(4)}`}</p></div>
+                    <div><p className="text-xs text-muted-foreground">费用</p><p className="mt-1 font-medium">{formatCost(order.economics.actualCostUsd, order.economics.costStatus, order.economics.usageKnown)} / 预算 {order.budgetUsd === undefined ? '未设置' : `$${order.budgetUsd.toFixed(4)}`}</p></div>
                     <div><p className="text-xs text-muted-foreground">协调</p><p className="mt-1 font-medium">{order.economics.coordinationRounds} 轮 · 重复证据读取 {order.economics.duplicateEvidenceReads}</p></div>
                     <div><p className="text-xs text-muted-foreground">缓存</p><p className="mt-1 font-medium">{order.economics.cacheSavingsUsd === null ? '用量未知' : `节约 $${order.economics.cacheSavingsUsd.toFixed(4)}`}</p></div>
                   </div>
@@ -223,7 +228,7 @@ export function OrganizationDialog({
 
                   {team && <div className="flex flex-wrap items-center gap-2 border-t pt-3">
                     <CircleDollarSign className="size-4 text-muted-foreground" />
-                    <span className="text-xs text-muted-foreground">团队 {team.teamEstimateUsd.toFixed(4)} USD · 单角色基线 {team.soloEstimateUsd.toFixed(4)} USD</span>
+                    <span className="text-xs text-muted-foreground">团队 {team.teamEstimateUsd?.toFixed(4) ?? '未知'} USD · 单角色基线 {team.soloEstimateUsd?.toFixed(4) ?? '未知'} USD</span>
                     {['planned', 'running'].includes(team.status) && <Button size="sm" variant="outline" disabled={!!busy} onClick={() => void runAction(`${team.id}:pause`, () => workbenchApi.teamAction(team.id, 'pause'), '团队已暂停')}>暂停新分支</Button>}
                     {team.status === 'paused' && <Button size="sm" variant="outline" disabled={!!busy} onClick={() => void runAction(`${team.id}:resume`, () => workbenchApi.teamAction(team.id, 'resume'), '团队已恢复')}>恢复</Button>}
                     {!['completed', 'cancelled', 'dissolved'].includes(team.status) && <Button size="sm" variant="destructive" disabled={!!busy} onClick={() => {

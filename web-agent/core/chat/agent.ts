@@ -1,12 +1,12 @@
 import { isUserMessage } from '../../kernel/context';
-import { callModel, setModelCallTurn } from '../../kernel/model-call';
+import { callModel, modelOutputBudget, setModelCallTurn } from '../../kernel/model-call';
 /**
  * core/chat/agent.ts —— Agent 执行器（自研）
  * 循环模型：决策(LLM 流式) → 动作(工具执行) → 观测(结果回填)，直到无工具调用。
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
 import { randomUUID, createHash } from 'node:crypto';
-import { allocateTokenBudget, sharedPrefixTokens, estimateTokens, countMessageTokens } from '../../kernel/tokens';
+import { sharedPrefixTokens, estimateTokens, countMessageTokens } from '../../kernel/tokens';
 import { ContextCapacityError } from '../../kernel/context';
 import { classifyTask } from '../../kernel/budget';
 import { validateAgainstSchema, validateToolArguments } from '../../kernel/validate';
@@ -24,7 +24,7 @@ import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel }
 import { classifyError, shouldRetry } from '../../kernel/error-policy';
 import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
 import { sanitizeToolHistory } from './policy';
-import { capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
+import { CATALOG_MANAGER_TOOLS, capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
 import { ToolExecutor, abortableDelay } from './tool-executor';
 import { assessToolApproval } from './tool-approval';
 import { historyTools } from '../../kernel/history-tools';
@@ -43,7 +43,7 @@ const DEFAULT_SYSTEM_PROMPT = [
 const TOOL_TIMEOUT_DEFAULT = 30_000;
 
 /** 工具结果回填阈值（字符）：超过则存入结果存储，历史只留摘要+引用（recall_tool_result 重读） */
-const RESULT_STORE_THRESHOLD = 2000;
+const RESULT_STORE_THRESHOLD = 8000;
 
 /** Context Provider 单轮注入总预算（tokens）：上下文工程——按需组装，杜绝无脑塞入 */
 const CONTEXT_PROVIDER_BUDGET = 1500;
@@ -168,7 +168,14 @@ export class AgentRunner {
       if (availableTools.some(existing => existing.name === tool.name)) throw new Error('TOOL_DEFINITION_CONFLICT: ' + tool.name);
       availableTools.push(tool);
     }
-    const toolDefs = opts.runId ? createToolCatalog(availableTools.map(annotateToolDef), opts.restoredEnabledTools,
+    const taskTools = (tools: ToolDef[]) => tools.filter(tool => {
+      const objective = opts.task?.objective ?? opts.messages.findLast(message => message.role === 'user' && message.context?.source === 'user')?.content ?? '';
+      if (/^(?:team_create|role_directory|role_assume|run_parallel|run_subagent)$/.test(tool.name)) return true;
+      if (/^item_/.test(tool.name)) return /待办|日程|日历|提醒|\btodo\b|\bcalendar\b/i.test(objective);
+      if (['create_document', 'patch_document'].includes(tool.name)) return /\b(?:docx|xlsx|pptx|csv|word|excel|powerpoint|office)\b|幻灯片|工作簿|电子表格|文档编辑/i.test(objective);
+      return (opts.authorization?.artifactWritePaths?.length || /交付|写入|落盘|保存|生成.*文件/.test(objective)) && ['write_file', 'edit_file'].includes(tool.name);
+    }).map(tool => tool.name);
+    const toolDefs = opts.runId ? createToolCatalog(availableTools.map(annotateToolDef), [...(opts.restoredEnabledTools ?? []), ...taskTools(availableTools)],
       toolCatalogBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)), opts.restoredReleasedTools) : availableTools.map(annotateToolDef);
     const sandboxRoot = opts.sandboxRoot ?? this.kernel.config.get<string>('sandboxRoot', this.kernel.rootDir);
     const hookMeta = {
@@ -261,6 +268,7 @@ export class AgentRunner {
     const deadlineExpired = () => deadlineAt !== undefined && Date.now() >= deadlineAt;
 
     let truncationsWithoutSave = 0;
+    let emptyResponses = 0;
     let continuedAnswer = '';
     for (let i = history.length - 1; i >= 0 && history[i]!.role !== 'tool'; i--) {
       if (history[i]!.context?.source === 'response-fragment') continuedAnswer = (history[i]!.content ?? '') + continuedAnswer;
@@ -270,7 +278,7 @@ export class AgentRunner {
       if (opts.resolveTools && turn > 0) {
         const fresh = opts.resolveTools();
         const staticTools = availableTools.filter(tool => ['recall_tool_result', 'search_history', 'read_history'].includes(tool.name));
-        refreshToolCatalog(toolDefs, [...fresh, ...staticTools.filter(tool => !fresh.some(item => item.name === tool.name))].map(annotateToolDef), toolCatalogBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)));
+        refreshToolCatalog(toolDefs, [...fresh, ...staticTools.filter(tool => !fresh.some(item => item.name === tool.name))].map(annotateToolDef), toolCatalogBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)), taskTools(fresh));
       }
       setModelCallTurn((opts.turnOffset ?? 0) + turn);
       if (deadlineExpired()) {
@@ -325,7 +333,7 @@ export class AgentRunner {
       // 增量同步游标（重写后的序列与 DB 镜像关系由 server 侧协调）。
       if (opts.compactFn) {
         const ctxMaxTokens = opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000);
-        const contextBudget = Math.max(0, ctxMaxTokens - allocateTokenBudget(ctxMaxTokens).output);
+        const contextBudget = Math.max(0, ctxMaxTokens - modelOutputBudget(provider, model, ctxMaxTokens).limit);
         const histTokens = countMessageTokens(llmCtx.history, provider.tokenizer);
         if (histTokens > contextBudget) {
           try {
@@ -425,7 +433,7 @@ export class AgentRunner {
       if (opts.runId) {
         const window = opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000);
         const toolTokens = estimateTokens(JSON.stringify(schemas));
-        const inputBudget = Math.max(0, window - allocateTokenBudget(window).output);
+        const inputBudget = Math.max(0, window - modelOutputBudget(provider, model, window).limit);
         if (countMessageTokens(llmCtx.history, provider.tokenizer) + toolTokens > inputBudget && opts.compactFn) {
           const compacted = await opts.compactFn(llmCtx.history, Math.max(0, window - Math.ceil(toolTokens / 0.85)), signal, usage => {
             totalIn += usage.input; totalOut += usage.output; totalCost += usage.cost; opts.onUsage?.({ input: totalIn, output: totalOut, cost: totalCost });
@@ -533,9 +541,11 @@ export class AgentRunner {
             try {
               const release = opts.modelCallsManaged ? undefined : await opts.acquireExecution?.(signal);
               try {
-              opts.onModelInput?.({ diagnostics: { ...describeModelInput(sendHistory, schemas, activeProvider.tokenizer), capabilityRevision: opts.capabilityRevision?.() }, usage: { inputTokens: countMessageTokens(sendHistory, activeProvider.tokenizer) + estimateTokens(JSON.stringify(schemas)), window: opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000), outputReserve: allocateTokenBudget(opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000)).output }, turn: (opts.turnOffset ?? 0) + turn, providerId: activeProvider.id, model: chainModel, messages: sendHistory, tools: schemas });
+              const window = opts.contextWindow ?? this.kernel.config.get<number>('context.maxTokens', 60_000);
+              const outputBudget = modelOutputBudget(activeProvider, chainModel, window);
+              opts.onModelInput?.({ diagnostics: { ...describeModelInput(sendHistory, schemas, activeProvider.tokenizer), capabilityRevision: opts.capabilityRevision?.() }, usage: { inputTokens: countMessageTokens(sendHistory, activeProvider.tokenizer) + estimateTokens(JSON.stringify(schemas)), window, outputReserve: outputBudget.limit, outputLimitSource: outputBudget.source }, turn: (opts.turnOffset ?? 0) + turn, providerId: activeProvider.id, model: chainModel, messages: sendHistory, tools: schemas });
               for await (const chunk of callModel(activeProvider, sendHistory, {
-                model: chainModel, tools: llmCtx.tools, signal, responseFormat: opts.responseFormat,
+                model: chainModel, tools: llmCtx.tools, signal, responseFormat: opts.responseFormat, maxTokens: outputBudget.limit,
               })) {
                 for (const ev of handleChunk(chunk)) yield ev;
               }
@@ -669,7 +679,6 @@ export class AgentRunner {
         yield { type: 'retry', reason: 'attempt', detail: '内容尚未完成，正在接续；工具参数将拆小后重新提交' };
         continue;
       }
-      if (continuedAnswer && !collected.length) { text = continuedAnswer + text; continuedAnswer = ''; }
 
       // ---- 文本清洗：剥离混在正文中的思考标签（流式分流器的最终兜底，
       //      覆盖未走 splitter 的路径：缓存回放/异常流） ----
@@ -682,6 +691,8 @@ export class AgentRunner {
           if (!reasoning && extracted) reasoning = extracted;
         }
       }
+
+      if (continuedAnswer && !collected.length && text.trim()) { text = continuedAnswer + text; continuedAnswer = ''; }
 
       // ---- 钩子：LLM 输出后（校验/观测；流出的输出暂不可改写） ----
       await emitHook('agent.after_llm', {
@@ -712,9 +723,24 @@ export class AgentRunner {
           yield { type: 'retry', reason: 'attempt', detail: '补充要求已送达模型' };
           continue;
         }
+        if (!text.trim()) {
+          emptyResponses++;
+          if (emptyResponses >= 2 || turn + 1 >= maxTurns) {
+            const error = '模型未返回正文或工具操作，任务未完成。';
+            this.kernel.budget.recordTask({ type: classifyTask(q), turns: turn + 1, cost: totalCost, failed: true, ts: Date.now() });
+            emitFinish('failed', q, '', turn + 1);
+            yield { type: 'error', error, kind: 'upstream', code: 'EMPTY_RESPONSE', stage: 'model' };
+            return;
+          }
+          history.push({ role: 'user', content: '上次没有返回正文或工具操作。请直接完成回答，或调用工具执行任务。' });
+          syncHistory();
+          opts.onCheckpoint?.((opts.turnOffset ?? 0) + turn, history, { ...runStats, costUsd: restoredCost + totalCost, selectedCapabilities: selectedCapabilityNames(toolDefs), capabilityConflicts: capabilityConflicts(toolDefs) });
+          yield { type: 'retry', reason: 'attempt', detail: '模型没有返回结果，正在重试' };
+          continue;
+        }
         // 最终 assistant 消息同步入库（下 run 组装与该轮序列纯追加 → 前缓存延续）
         syncHistory();
-        const verification = opts.task
+        const verification = opts.task?.acceptance.length
           ? verifyTaskContract(opts.task, { answer: text, toolResults: runStats.toolResults, sandboxRoot })
           : undefined;
         const finalText = text;
@@ -803,7 +829,8 @@ export class AgentRunner {
         }
         const toolArgs = toolCtx.tool?.args ?? args;
         const effectiveSideEffect = effectiveToolSideEffect(tool, toolArgs);
-        const permissionDenied = opts.principalRole === 'readonly' && !tool.delegates && effectiveSideEffect !== 'none' && effectiveSideEffect !== 'read'
+        const permissionDenied = opts.resolveTools && !CATALOG_MANAGER_TOOLS.has(tool.name) && !['recall_tool_result', 'read_history', 'search_history'].includes(tool.name) && !opts.resolveTools().some(current => current.name === tool.name)
+          || opts.principalRole === 'readonly' && !tool.delegates && effectiveSideEffect !== 'none' && effectiveSideEffect !== 'read'
           || tool.permissions?.includes('admin') && opts.principalRole !== undefined && opts.principalRole !== 'admin';
         if (permissionDenied) {
           const result: ToolResult = { ok: false, error: '当前用户无权执行此操作', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
@@ -840,7 +867,9 @@ export class AgentRunner {
           continue;
         }
         let result: ToolResult;
-        const effectKey = opts.executionId && shouldJournalToolEffect(tool, toolArgs)
+        // These managed tools only dispatch durable child Runs. Each child journals its own effects.
+        const managedDelegation = !!opts.delegate && tool.delegates && ['run_parallel', 'run_subagent', 'run_review'].includes(tool.name);
+        const effectKey = opts.executionId && !managedDelegation && shouldJournalToolEffect(tool, toolArgs)
           ? `${(opts.turnOffset ?? 0) + turn}:${toolIndex}:${tool.name}:${createHash('sha256').update(JSON.stringify(toolArgs ?? null)).digest('hex').slice(0, 16)}`
           : undefined;
         const journalClaim = effectKey && opts.effectJournal
@@ -885,7 +914,7 @@ export class AgentRunner {
               toolCallId: tc.id,
               effectKey,
               resultId,
-              sideEffect: toolSideEffectLabel(tool, toolArgs),
+              sideEffect: managedDelegation ? 'none' : toolSideEffectLabel(tool, toolArgs),
               argsPreview: summarize(redactTraceValue(toolArgs), 160),
             },
           },
@@ -948,7 +977,7 @@ export class AgentRunner {
           acquireExecution: opts.acquireExecution, effectJournal: opts.effectJournal, effectKey, effectStarted,
           timeoutMs: toolTimeout, policyApproved: toolCtx.policyApproved === true });
         const invokeTool = (approved: boolean, approvalId?: string) => forwardToolEvents(emit => {
-          tctx.invoke = createToolBroker({ tools: issuedAuthorizedTools, caller: tool, context: tctx, options: opts,
+          tctx.invoke = createToolBroker({ tools: issuedAuthorizedTools.filter(item => !opts.resolveTools || opts.resolveTools().some(current => current.name === item.name)), caller: tool, context: tctx, options: opts,
             key: effectKey ?? `${opts.executionId ?? traceId}:${(opts.turnOffset ?? 0) + turn}:${toolIndex}`, board: this.pendingApprovals,
             timeoutMs: toolTimeout, assess: assessToolApproval, redact: redactTraceValue, emit,
             before: async (nested, nestedArgs) => { const hook: AgentHookCtx = { traceId, turn, model, history, systemPrompt, tools: toolDefs, scratchpad, tool: { name: nested.name, args: nestedArgs }, ...hookMeta }; await emitHook('agent.before_tool', hook); return hook; },
@@ -1087,16 +1116,16 @@ export class AgentRunner {
         // （recall_tool_result 零副作用重读；v1 截断后只能重算工具才能拿回全文）
         const rawResult = JSON.stringify(finalResult);
         let content: string;
-        if (rawResult.length > Math.min(4000, RESULT_STORE_THRESHOLD) && !['read_history', 'recall_tool_result'].includes(tool.name) && !(finalResult.resultRef && typeof finalResult.truncated === 'boolean')) {
+        if (rawResult.length > RESULT_STORE_THRESHOLD && !['read_history', 'recall_tool_result'].includes(tool.name) && !(finalResult.resultRef && typeof finalResult.truncated === 'boolean')) {
           if (!opts.toolJournal) resultStore.put(sessionKeyOf({ sessionId: opts.sessionId, tenantId: opts.tenantId, traceId }), resultId, rawResult);
-          content = JSON.stringify({ ok: finalResult.ok, summary: summarize(finalResult, 300), failure: finalResult.failure, error: finalResult.error, truncated: true, resultRef: resultId, length: rawResult.length });
+          content = JSON.stringify({ ok: finalResult.ok, summary: summarize(finalResult, 300), content: rawResult.slice(0, RESULT_STORE_THRESHOLD), offset: 0, nextOffset: RESULT_STORE_THRESHOLD, failure: finalResult.failure, error: finalResult.error, truncated: true, resultRef: resultId, length: rawResult.length });
         } else {
           content = rawResult;
         }
         history.push({ role: 'tool', tool_call_id: tc.id, content: content + outputNote + safetyNote });
         yield {
           type: 'tool_result', id: tc.id, name: tool.name, summary: summarize(finalResult), ok: !!finalResult.ok,
-          stored: rawResult.length > Math.min(4000, RESULT_STORE_THRESHOLD),
+          stored: rawResult.length > RESULT_STORE_THRESHOLD,
           ...(finalResult.evidence?.length ? { evidence: finalResult.evidence } : {}),
           ...(finalResult.warnings?.length ? { warnings: finalResult.warnings } : {}),
         };

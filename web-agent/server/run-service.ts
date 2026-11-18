@@ -83,12 +83,13 @@ export class RunService {
     if (!record) throw new RunError(404, 'RUN_NOT_FOUND', '任务不存在');
     return record;
   }
-  create(session: Session, input: { message: string; materials?: import('../kernel/material').MaterialRef[]; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; budgetTokens?: number; budgetPolicy?: 'advisory' | 'enforce'; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string }; origin?: RunRecord['origin']; projectId?: string; instructions?: string; toolNames?: string[]; authorization?: { workspace: string; readOnly: boolean; profile: 'standard' | 'developer' }; organizationBinding?: OrganizationRunBinding }): RunRecord {
+  create(session: Session, input: { message: string; reworkOfRunId?: string; materials?: import('../kernel/material').MaterialRef[]; provider?: string; model?: string; requestKey?: string; budgetUsd?: number; budgetTokens?: number; budgetPolicy?: 'advisory' | 'enforce'; deadlineAt?: number; acceptance?: RunRecord['acceptance']; principalRole?: RunRecord['principalRole']; frameworkChange?: { id: string; workspace: string }; origin?: RunRecord['origin']; projectId?: string; instructions?: string; toolNames?: string[]; authorization?: { workspace: string; readOnly: boolean; profile: 'standard' | 'developer' }; organizationBinding?: OrganizationRunBinding }): RunRecord {
     const tenantId = session.tenantId ?? 'default';
     if (input.materials !== undefined && (!Array.isArray(input.materials) || input.materials.length > 10 || input.materials.some(ref => !ref || typeof ref.id !== 'string' || typeof ref.version !== 'string'))) throw new RunError(400, 'INVALID_MATERIALS', '最多附加 10 个有效文件引用');
     const fingerprintParts: unknown[] = [input.message, input.provider ?? null, input.model ?? null, input.budgetUsd ?? null, input.budgetTokens ?? null, input.budgetPolicy ?? 'advisory', input.deadlineAt ?? null, input.acceptance ?? null, input.frameworkChange?.id ?? null, input.organizationBinding ?? null];
     if (input.materials?.length) fingerprintParts.push(input.materials.map(({ id, version }) => ({ id, version })));
     if (input.origin) fingerprintParts.push(input.origin);
+    if (input.reworkOfRunId) fingerprintParts.push({ reworkOfRunId: input.reworkOfRunId });
     const requestFingerprint = createHash('sha256').update(JSON.stringify(fingerprintParts)).digest('hex');
     if (input.requestKey) {
       const prior = this.env.store.runs.byRequest(tenantId, session.id, input.requestKey);
@@ -108,6 +109,10 @@ export class RunService {
     const spent = this.env.store.aggregateSessions(tenantId).reduce((total, row) => total + row.cost, 0);
     if (tenant?.maxCostUsd && spent >= tenant.maxCostUsd) throw new RunError(429, 'TENANT_BUDGET', '租户费用配额已用尽');
     const workspace = input.authorization?.workspace ?? input.frameworkChange?.workspace ?? this.env.workspace(tenantId);
+    const rework = input.reworkOfRunId ? this.get(input.reworkOfRunId, tenantId) : undefined;
+    if (rework && (!this.env.organization || rework.parentId || rework.origin?.kind === 'society'
+      || !RUN_TERMINAL.has(rework.status) || rework.sessionId !== session.id || resolve(rework.authorization.workspace) !== resolve(workspace)))
+      throw new RunError(409, 'INVALID_REWORK', '返工需要同一会话和工作区内已结束的主任务');
     const materials = this.env.store.materials.validate(input.materials, tenantId, workspace, this.env.projectRoot ?? workspace);
     const permission = this.env.store.runs.permission(tenantId, workspace);
     if (input.frameworkChange && (permission.profile !== 'developer' || input.principalRole && input.principalRole !== 'admin')) throw new RunError(403, 'DEVELOPER_AUTHORIZATION_REQUIRED', '框架修改需要用户开启开发者权限');
@@ -118,14 +123,15 @@ export class RunService {
       providerId: provider.id, model: input.model || session.model || provider.model, status: 'queued',
       authorization: {
         workspace, ...permission,
-        profile: input.authorization?.profile === 'standard' ? 'standard' : permission.profile,
-        readOnly: session.mode === 'plan' || input.principalRole === 'readonly' || input.authorization?.readOnly === true,
+        profile: input.authorization?.profile === 'standard' || rework?.authorization.profile === 'standard' ? 'standard' : permission.profile,
+        readOnly: session.mode === 'plan' || input.principalRole === 'readonly' || input.authorization?.readOnly === true || rework?.authorization.readOnly === true,
         frameworkChangeId: input.frameworkChange?.id,
         pluginDevelopment: input.frameworkChange ? undefined : this.env.store.runs.pluginGrant(tenantId, workspace),
       },
       createdAt: now, updatedAt: now, cost: 0, tokensIn: 0, tokensOut: 0,
       budgetUsd: input.budgetUsd, budgetTokens: input.budgetTokens, budgetPolicy: input.budgetPolicy ?? 'advisory', deadlineAt: input.deadlineAt, acceptance: input.acceptance, principalRole: input.principalRole,
       requestFingerprint,
+      ...(rework ? { reworkOfRunId: rework.id, workOrderId: rework.workOrderId, toolNames: rework.toolNames } : {}),
       ...(input.origin ? { origin: input.origin } : {}),
       ...(input.instructions ? { instructions: input.instructions } : {}),
       ...(input.toolNames?.length ? { toolNames: [...new Set(input.toolNames)] } : {}),
@@ -296,14 +302,14 @@ export class RunService {
     this.publish(event);
     return messageId;
   }
-  cancel(id: string, tenant: string): RunRecord {
+  cancel(id: string, tenant: string, pause = false): RunRecord {
     const run = this.get(id, tenant);
     if (RUN_TERMINAL.has(run.status)) return run;
     this.publish(this.env.store.runs.update(run, { status: 'stopping' }));
     const active = this.active.get(id);
-    if (active) active.abort.abort('user_cancel');
-    else this.publish(this.env.store.runs.update(run, { status: 'cancelled' }));
-    for (const child of this.env.store.runs.children(id, tenant)) if (!RUN_TERMINAL.has(child.status)) this.cancel(child.id, tenant);
+    if (active) active.abort.abort(pause ? 'user_pause' : 'user_cancel');
+    else this.publish(this.env.store.runs.update(run, { status: pause ? 'interrupted' : 'cancelled' }));
+    for (const child of this.env.store.runs.children(id, tenant)) if (!RUN_TERMINAL.has(child.status)) this.cancel(child.id, tenant, pause);
     return run;
   }
   async delegate(parentId: string, tenant: string, request: ChildRunRequest, signal?: AbortSignal): Promise<ChildRunResult> {
@@ -325,7 +331,7 @@ export class RunService {
     const child: RunRecord = {
       id, sessionId: parent.sessionId, tenantId: tenant, parentId, rootId: parent.rootId, depth: parent.depth + 1,
       objective: request.objective, providerId: parent.providerId, model: parent.model, status: 'queued',
-      authorization: { ...parent.authorization, readOnly }, principalRole: parent.principalRole,
+      authorization: { workspace: parent.authorization.workspace, revision: parent.authorization.revision, profile: parent.authorization.profile, readOnly }, principalRole: parent.principalRole,
       cost: 0, tokensIn: 0, tokensOut: 0, createdAt: now, updatedAt: now,
       parentStepId: request.parentStepId, toolNames, instructions: request.instructions, maxTurns: request.maxTurns, deadlineAt: parent.deadlineAt,
     };
@@ -333,7 +339,7 @@ export class RunService {
     const event = this.env.store.runs.transaction(() => {
       if (this.env.organization) {
         try {
-          const contract = this.env.organization.prepareDelegation(parent, child, request);
+          const contract = this.env.organization.prepareDelegation(parent, child, request, tools.map(tool => tool.name));
           contractId = contract.id;
         }
         catch (error) {
@@ -381,7 +387,7 @@ export class RunService {
     finally { execution.abort.signal.removeEventListener('abort', abort); signal?.removeEventListener('abort', abort); this.env.store.runs.releaseChild(id); }
     const finished = this.get(id, tenant);
     let fallback: ChildRunFallback | undefined;
-    if (finished.status !== 'completed') {
+    if (finished.status !== 'completed' && !execution.abort.signal.aborted) {
       const reason = finished.error ?? `分支状态：${finished.status}`;
       this.env.organization?.collapseToSolo(parent, reason);
       const current = this.get(parentId, tenant);
@@ -425,10 +431,59 @@ export class RunService {
     run.authorization = { ...run.authorization, profile: run.authorization.profile === 'developer' ? permission.profile : 'standard', revision: permission.revision, readOnly: run.authorization.readOnly || principalRole === 'readonly' };
     if (principalRole) run.principalRole = principalRole;
     this.publish(this.env.store.runs.update(run, { status: 'queued', error: undefined, problem: undefined }));
-    this.launch(run);
+    this.launch(run, true);
     return run;
   }
-  private launch(record: RunRecord): void {
+  private async resumeChildren(parent: RunRecord, signal: AbortSignal): Promise<void> {
+    const repo = this.env.store.runs;
+    const organization = this.env.store.organization;
+    const children = repo.children(parent.id, parent.tenantId).filter(child => child.status === 'interrupted'
+      && child.assignmentContractId && organization.getContract(child.assignmentContractId, parent.tenantId)?.status === 'active');
+    await Promise.all(children.map(async child => {
+      if (signal.aborted) return;
+      try {
+        const checkpoint = repo.checkpoint(child.id);
+        const role = child.organizationRoleId && organization.getRole(child.organizationRoleId, child.tenantId);
+        if (!checkpoint || !role || role.employment !== 'active' || role.authority.workspace && role.authority.workspace !== parent.authorization.workspace)
+          throw new Error('分支断点或角色授权不可用');
+        if (child.authorization.workspace !== parent.authorization.workspace) throw new Error('分支工作区授权已变更');
+        child.authorization = {
+          ...child.authorization,
+          revision: parent.authorization.revision,
+          profile: parent.authorization.profile === 'developer' && role.authority.profile !== 'standard' ? child.authorization.profile : 'standard',
+          readOnly: child.authorization.readOnly || parent.authorization.readOnly || role.authority.readOnly,
+        };
+        child.principalRole = parent.principalRole;
+        child.toolNames = child.toolNames?.filter(name => (!parent.toolNames || parent.toolNames.includes(name))
+          && (!role.authority.allowedTools.length || role.authority.allowedTools.includes(name)));
+        if (child.authorization.readOnly || child.authorization.profile !== 'developer' || !parent.authorization.pluginDevelopment?.enabled)
+          child.authorization.pluginDevelopment = undefined;
+        this.recoverCheckpoint(child, checkpoint);
+        if ((repo.checkpoint(child.id)?.turn ?? -1) + 1 >= (child.maxTurns ?? this.env.prepare(child).maxTurns ?? 30))
+          throw new Error('分支轮数已耗尽');
+        const queued = repo.transaction(() => {
+          const costRemaining = child.budgetUsd === undefined ? undefined : Math.max(0, child.budgetUsd - child.cost);
+          const tokensRemaining = child.budgetTokens === undefined ? undefined : Math.max(0, child.budgetTokens - child.tokensIn - child.tokensOut);
+          repo.reserveChild(parent, child.id, costRemaining);
+          repo.reserveChildTokens(parent, child.id, tokensRemaining);
+          return repo.update(child, { status: 'queued', error: undefined, problem: undefined });
+        });
+        this.publish(queued);
+      } catch (error) {
+        this.publish(repo.update(child, { status: 'interrupted', error: error instanceof Error ? error.message : String(error) }));
+        this.env.organization?.finalizeRun(child);
+        return;
+      }
+      this.launch(child, true);
+      const execution = this.active.get(child.id)!;
+      const stopChild = () => execution.abort.abort(signal.reason);
+      signal.addEventListener('abort', stopChild, { once: true });
+      if (signal.aborted) stopChild();
+      try { await execution.promise; }
+      finally { signal.removeEventListener('abort', stopChild); repo.releaseChild(child.id); }
+    }));
+  }
+  private launch(record: RunRecord, resumed = false): void {
     const abort = new AbortController();
     let deadlineTimer: ReturnType<typeof setTimeout> | undefined;
     const watchDeadline = () => {
@@ -439,8 +494,12 @@ export class RunService {
       deadlineTimer.unref?.();
     };
     watchDeadline();
-    const promise = new Promise<void>(resolve => setImmediate(resolve)).then(() => this.execute(record, abort))
-      .finally(() => { if (deadlineTimer) clearTimeout(deadlineTimer); this.active.delete(record.id); this.env.activity?.(false); });
+    const promise = new Promise<void>(resolve => setImmediate(resolve)).then(() => this.execute(record, abort, resumed))
+      .finally(() => {
+        if (deadlineTimer) clearTimeout(deadlineTimer);
+        if (this.active.get(record.id)?.abort === abort) this.active.delete(record.id);
+        this.env.activity?.(false);
+      });
     this.active.set(record.id, { abort, promise, record });
     this.env.activity?.(true);
   }
@@ -462,7 +521,10 @@ export class RunService {
     if (effect?.state === 'done' && !effect.result) throw new RunError(409, 'CHECKPOINT_INCOMPLETE', '已完成操作缺少持久结果，不能自动重放');
     const recovered: { call: ToolCall; id: string; result: ToolResult }[] = missing.map((call, index) => ({
       call, id: index === 0 && pending.resultId ? pending.resultId : randomUUID(),
-      result: index === 0 && effect?.state === 'done' && effect.result ? effect.result : { ok: false, error: '服务中断，此调用没有可用观察；有副作用的操作尚未开始。', failure: { code: 'TOOL_INTERRUPTED', retryable: true, outcome: 'not_started' } },
+      result: index === 0 && effect?.state === 'done' && effect.result ? effect.result
+        : index === 0 && pending.sideEffect === 'none' && ['run_parallel', 'run_subagent', 'run_review'].includes(pending.name)
+          ? { ok: false, error: '委派等待已中断。请查看已存在的分工回执。', failure: { code: 'DELEGATION_INTERRUPTED', retryable: false, outcome: 'applied' } }
+          : { ok: false, error: '服务中断，此调用没有可用观察；有副作用的操作尚未开始。', failure: { code: 'TOOL_INTERRUPTED', retryable: true, outcome: 'not_started' } },
     }));
     const events = this.env.store.runs.transaction(() => {
       const repo = this.env.store.runs;
@@ -498,11 +560,13 @@ export class RunService {
     this.env.store.runs.setPermission(tenant, current.workspace, profile);
     return this.workspacePermission(tenant);
   }
-  private async execute(record: RunRecord, abort: AbortController): Promise<void> {
+  private async execute(record: RunRecord, abort: AbortController, resumed: boolean): Promise<void> {
     const repo = this.env.store.runs;
     let reasoning = '';
     let plugins: TaskPluginSession | undefined;
     try {
+      if (abort.signal.aborted) return;
+      if (resumed) await this.resumeChildren(record, abort.signal);
       if (abort.signal.aborted) return;
       const runner = this.env.runner();
       if (!runner) throw new Error('执行循环服务未加载');
@@ -510,6 +574,14 @@ export class RunService {
       const attemptId = randomUUID();
       let ownUsage = { cost: 0, input: 0, output: 0 };
       const options = this.env.prepare(record);
+      const children = resumed ? repo.children(record.id, record.tenantId) : [];
+      if (children.length) options.contextMessages = [...(options.contextMessages ?? []), {
+        role: 'user', content: `恢复时已存在的分工回执，请沿用已交付结果：\n${JSON.stringify(children.map(child => ({
+          runId: child.id, contractId: child.assignmentContractId, objective: child.objective, status: child.status,
+          answer: child.answer?.slice(0, 4000), error: child.error, artifacts: repo.artifacts(child.id).map(asset => asset.ref),
+        })))}`,
+        context: { id: `child-receipts:${record.id}`, source: 'parent_agent', scope: 'run', trust: 'reference', retention: 'required' },
+      }];
       const resolveTools = () => {
         const current = repo.get(record.id, record.tenantId) ?? record;
         const allowed = current.toolNames ? new Set(current.toolNames) : undefined;
@@ -531,7 +603,6 @@ export class RunService {
         role: 'user', content: record.instructions,
         context: { id: `delegation:${record.id}`, source: 'parent_agent', scope: 'run', trust: 'reference', retention: 'required' },
       }];
-      if (record.toolNames) options.tools = (this.env.tools?.() ?? []).filter(tool => record.toolNames!.includes(tool.name));
       if (plugins) {
         const base = options.tools ?? this.env.tools?.() ?? [];
         const session = plugins;
@@ -707,11 +778,27 @@ export class RunService {
         if (event.type === 'approval_required') this.publish(repo.update(record, { status: 'waiting_approval' }));
         if (event.type === 'reasoning') reasoning += event.text;
         if (event.type === 'assistant_done') {
-          completed = true;
+          if (!event.content.trim()) {
+            record.error = '模型未返回有效交付，任务可恢复。';
+            record.problem = { code: 'EMPTY_RESPONSE', stage: 'model', hint: '工具事实与检查点已保留，可继续任务。' };
+            this.publish(repo.update(record, { error: record.error, problem: record.problem }, 'error', { error: record.error, code: 'EMPTY_RESPONSE' }));
+            continue;
+          }
+          const current = repo.get(record.id, record.tenantId)!;
+          const gaps = this.env.organization?.deliveryGaps(current) ?? [];
+          const verification = record.verification as { type?: string; checks?: { ok: boolean; reason: string }[] } | undefined;
+          if (verification?.type === 'task_failed' || verification?.type === 'task_partial') {
+            const failed = verification.checks?.filter(check => !check.ok).map(check => check.reason) ?? [];
+            gaps.push(...(failed.length ? failed : ['任务验收未通过']));
+          }
+          completed = gaps.length === 0;
           const patch = ledgerManaged ? { cost: record.cost, tokensIn: record.tokensIn, tokensOut: record.tokensOut } : usagePatch(event.cost, event.usage.input, event.usage.output);
           const persisted = repo.transaction(() => {
             if (!record.parentId && record.origin?.kind !== 'society') this.env.store.addMessage({ sessionId: record.sessionId, role: 'assistant', content: event.content, reasoning: event.reasoning || reasoning, traceId: record.id });
-            return accountUsage({ answer: event.content, ...patch, status: 'completed' }, 'done', { ...event, cost: patch.cost, usage: { input: patch.tokensIn, output: patch.tokensOut } });
+            const payload = { ...event, cost: patch.cost, usage: { input: patch.tokensIn, output: patch.tokensOut } };
+            if (completed) return accountUsage({ answer: event.content, ...patch }, 'done', payload);
+            const error = [...new Set(gaps)].join('；');
+            return accountUsage({ answer: event.content, ...patch, error, problem: { code: 'DELIVERY_INCOMPLETE', stage: 'verification', hint: error } }, 'error', { ...payload, error, code: 'DELIVERY_INCOMPLETE' });
           });
           publishUsage(persisted);
         } else if (event.type === 'error') {
@@ -726,17 +813,32 @@ export class RunService {
           this.publish(repo.update(record, {}, type, data as unknown as Record<string, unknown>));
         }
       }
-      if (!abort.signal.aborted) this.publish(repo.update(record, {
-        status: completed ? 'completed' : nonRecoverableUpstreamError ? 'failed' : 'interrupted',
-      }));
+      if (!abort.signal.aborted) {
+        const exhausted = (repo.checkpoint(record.id)?.turn ?? -1) + 1 >= (record.maxTurns ?? options.maxTurns ?? 30);
+        const terminal = repo.transaction(() => {
+          const state = repo.update(record, { status: completed ? 'completed' : nonRecoverableUpstreamError || exhausted ? 'failed' : 'interrupted' });
+          this.env.organization?.finalizeRun(record);
+          return state;
+        });
+        this.publish(terminal);
+      }
     } catch (error) {
       if (!abort.signal.aborted) this.publish(repo.update(record, { status: 'failed', error: error instanceof Error ? error.message : String(error) }));
     } finally {
       await plugins?.dispose();
-      if (abort.signal.aborted && record.status !== 'completed') this.publish(repo.update(record, { status: this.closing ? 'interrupted' : abort.signal.reason === 'deadline_exceeded' ? 'failed' : 'cancelled', ...(abort.signal.reason === 'deadline_exceeded' ? { error: '任务已超过用户设置的截止时间', problem: { code: 'DEADLINE_EXCEEDED', stage: 'execution', hint: '截止时间已过，已保存草稿仍可检查和下载；请发起新任务继续。' } } : {}) }));
+      if (abort.signal.aborted) await Promise.allSettled(repo.children(record.id, record.tenantId).flatMap(child => this.active.get(child.id)?.promise ?? []));
+      if (abort.signal.aborted && record.status !== 'completed') {
+        const paused = this.closing || abort.signal.reason === 'user_pause';
+        const deadlineExceeded = abort.signal.reason === 'deadline_exceeded';
+        this.publish(repo.update(record, {
+          status: paused ? 'interrupted' : deadlineExceeded ? 'failed' : 'cancelled',
+          ...(deadlineExceeded ? { error: '任务已超过用户设置的截止时间', problem: { code: 'DEADLINE_EXCEEDED', stage: 'execution', hint: '截止时间已过，已保存草稿仍可检查和下载；请发起新任务继续。' } } : {}),
+        }));
+      }
       const terminal = repo.get(record.id, record.tenantId);
-      const recoverableSocietyRun = terminal?.status === 'interrupted' && terminal.origin?.kind === 'society';
-      if (terminal && RUN_TERMINAL.has(terminal.status) && !recoverableSocietyRun) this.env.organization?.finalizeRun(terminal);
+      if (terminal && RUN_TERMINAL.has(terminal.status) && (terminal.status === 'cancelled' || abort.signal.aborted || terminal.status === 'failed')) {
+        this.env.organization?.finalizeRun(terminal);
+      }
       this.env.store.touchSession(record.sessionId);
       if (!abort.signal.aborted) abort.abort('run_finished');
     }

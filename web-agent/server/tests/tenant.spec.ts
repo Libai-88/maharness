@@ -227,7 +227,19 @@ describe('租户作用域 HTTP 契约', () => {
       body: JSON.stringify({ id: 'tenant-cost', name: 'Cost', maxCostUsd: 0.001 }),
     });
     assert.equal(created.status, 200);
-    const session = started!.store.createSession('m', '', 'tenant-cost');
+    started!.store.upsertProvider({
+      id: 'tenant-cost-provider', label: 'Tenant cost fixture',
+      baseUrl: 'https://fixture.invalid/v1', apiKey: '', model: 'fixture-model',
+      priceIn: 1, priceOut: 1,
+    });
+    const chat = started!.kernel.plugins.resolveService('service:chat') as {
+      providers: Array<{ id: string; label: string; defaultModel: string; chat: () => AsyncGenerator<never> }>;
+    };
+    chat.providers = [{
+      id: 'tenant-cost-provider', label: 'Tenant cost fixture', defaultModel: 'fixture-model',
+      async *chat() {},
+    }];
+    const session = started!.store.createSession('tenant-cost-provider', 'fixture-model', 'tenant-cost');
     started!.store.addMessage({ sessionId: session.id, role: 'assistant', content: 'costly', cost: 0.002 });
     const headers = { 'Content-Type': 'application/json', [TENANT_HEADER]: 'tenant-cost' };
     const res = await fetch(`${base}/api/sessions/${session.id}/chat`, {

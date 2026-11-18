@@ -92,6 +92,7 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
     const record = service.create(session, {
       message: text(body.message, '消息'), provider: body.provider === undefined ? undefined : text(body.provider, '供应商'),
       materials: body.materials,
+      reworkOfRunId: body.reworkOfRunId === undefined ? undefined : text(body.reworkOfRunId, '原任务'),
       model: body.model === undefined ? undefined : text(body.model, '模型'),
       budgetPolicy: body.budgetPolicy, requestKey: req.get('Idempotency-Key'), budgetUsd: explicitNumber(body.budgetUsd, '费用上限'),
       budgetTokens: body.budgetTokens === undefined ? undefined : Math.trunc(explicitNumber(body.budgetTokens, 'token 上限')!),
@@ -119,8 +120,17 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
     if (deps.store.runs.active(tenantIdOf(req)).length) throw new RunError(409, 'WORKSPACE_BUSY', '请先停止活动任务再采纳框架修改');
     res.json(await changes.adopt(id(req), tenantIdOf(req), text(req.body?.digest, '审阅版本')));
   }));
-  app.get('/api/v2/runs', wrap((req, res) => res.json(deps.store.runs.list(tenantIdOf(req), typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined))));
-  app.get('/api/v2/runs/:id', wrap((req, res) => res.json(service.get(id(req), tenantIdOf(req)))));
+  app.get('/api/v2/runs', wrap((req, res) => {
+    const runs = deps.store.runs.list(tenantIdOf(req), typeof req.query.sessionId === 'string' ? req.query.sessionId : undefined);
+    if (req.query.summary !== '1') { res.json(runs); return; }
+    res.json(runs.map(({ id, sessionId, parentId, objective, status, origin, workOrderId, updatedAt }) => ({
+      id, sessionId, parentId, objective, status, origin, workOrderId, updatedAt,
+    })));
+  }));
+  app.get('/api/v2/runs/:id', wrap((req, res) => {
+    const run = service.get(id(req), tenantIdOf(req));
+    res.json({ ...run, supplements: deps.store.runs.supplementStatus(run.id), eventCursor: deps.store.runs.eventCursor(run.id) });
+  }));
   app.get('/api/v2/runs/:id/model-calls', wrap((req, res) => {
     const run = service.get(id(req), tenantIdOf(req));
     const offset = Number(req.query.offset ?? 0), limit = Number(req.query.limit ?? 100);
@@ -158,7 +168,7 @@ export function registerRunRoutes(app: Express, deps: RouteDeps, service: RunSer
     res.json(page);
   }));
   app.post('/api/v2/runs/:id/messages', wrap((req, res) => res.status(202).json({ messageId: service.supplement(id(req), tenantIdOf(req), text(req.body?.message, '消息'), req.get('Idempotency-Key')) })));
-  app.post('/api/v2/runs/:id/cancel', wrap((req, res) => res.json(service.cancel(id(req), tenantIdOf(req)))));
+  app.post('/api/v2/runs/:id/cancel', wrap((req, res) => res.json(service.cancel(id(req), tenantIdOf(req), req.body?.resumable === true))));
   app.post('/api/v2/runs/:id/resume', wrap((req, res) => {
     service.get(id(req), tenantIdOf(req));
     const eventCursor = deps.store.runs.eventCursor(id(req));

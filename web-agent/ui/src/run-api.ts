@@ -8,6 +8,8 @@ export interface RuleDescriptor {
   priority: number; trust: 'core' | 'user' | 'reference'; contentHash: string; active: boolean;
 }
 export interface RunInfo {
+  workOrderId?: string; reworkOfRunId?: string;
+  supplements?: { queued: number; delivered: number };
   materials?: Material[];
   id: string; sessionId: string; parentId?: string; objective: string; status: RunStatus;
   providerId: string; model: string; cost: number; tokensIn: number; tokensOut: number;
@@ -21,12 +23,14 @@ export interface RunInfo {
   capabilityResolution?: { selected: string[]; tools: string[]; reason: string; conflicts: { capabilityId: string; shadowedBy: string; reason?: string; candidates?: { pluginId: string; priority: number; version?: string }[] }[] };
   ruleResolution?: { schemaVersion: 1; applied: RuleDescriptor[]; ignored: RuleDescriptor[]; conflicts: { left: string; right: string; reason: string; winner: string }[] };
   origin?:
+    | { kind: 'item'; itemId: string; revision: number }
     | { kind: 'automation'; automationId: string; occurrenceId: string }
     | { kind: 'society'; societyTaskId: string; scheduleId: string; assignmentContractId: string };
 }
 export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number } }
+export type RunSummary = Pick<RunInfo, 'id' | 'sessionId' | 'parentId' | 'objective' | 'status' | 'origin' | 'workOrderId' | 'updatedAt'>;
 export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number; finishReason?: string; errorCode?: string }
-export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
+export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number; outputLimitSource?: 'model' | 'default' }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
 export interface RunTool {
   id: string; name: string; status: string; argsSummary: string;
   version?: string; sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
@@ -43,10 +47,12 @@ export const runsApi = {
   savePlugin: (id: string, plugin: TaskPluginInfo) => api(`/api/v2/runs/${id}/plugins/${encodeURIComponent(plugin.id)}/save`, { method: 'POST', body: JSON.stringify({ hash: plugin.hash }) }),
   setPluginDevelopment: (grant: PluginGrant, revision: number) => api<WorkspacePermission>('/api/v2/workspace/plugin-development', { method: 'PUT', body: JSON.stringify({ ...grant, revision }) }),
   list: (sessionId?: string) => api<RunInfo[]>(`/api/v2/runs${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
+  summaries: () => api<RunSummary[]>('/api/v2/runs?summary=1'),
   get: (id: string) => api<RunInfo>(`/api/v2/runs/${id}`),
-  create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string, materials?: MaterialRef[]) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId, materials }) }),
+  create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string, materials?: MaterialRef[], reworkOfRunId?: string) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId, materials, reworkOfRunId }) }),
   supplement: (id: string, message: string) => api(`/api/v2/runs/${id}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message }) }),
   cancel: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST' }),
+  pause: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ resumable: true }) }),
   resume: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/resume`, { method: 'POST' }),
   calls: (id: string, offset = 0) => api<ModelCall[]>(`/api/v2/runs/${id}/model-calls?offset=${offset}`),
   acknowledgeBilling: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/billing/acknowledge`, { method: 'POST' }),
@@ -59,28 +65,28 @@ export const runsApi = {
   setPermission: (profile: WorkspacePermission['profile'], revision: number) => api<WorkspacePermission>('/api/v2/workspace/permissions', { method: 'PUT', body: JSON.stringify({ profile, revision }) }),
 };
 
-function dispatch(event: string, d: Record<string, unknown>, h: ChatHandlers) {
+function dispatch(event: string, d: Record<string, unknown>, h: Partial<ChatHandlers>) {
   const checks = (d.checks ?? []) as { ok: boolean; reason?: string }[];
   switch (event) {
-    case 'start': h.onStart(String(d.traceId ?? '')); break;
+    case 'start': h.onStart?.(String(d.traceId ?? '')); break;
     case 'status': h.onStatus?.(String(d.text ?? '')); break;
-    case 'delta': h.onDelta(String(d.text ?? '')); break;
-    case 'reasoning': h.onReasoning(String(d.text ?? '')); break;
-    case 'tool_start': h.onToolStart(d.id as string | undefined, String(d.name), d.args); break;
-    case 'tool_result': h.onToolResult(d.id as string | undefined, String(d.name), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored), d.evidence as never, d.warnings as never); break;
-    case 'approval_required': if (d.active !== false) h.onApprovalRequired(String(d.approvalId), String(d.name), String(d.summary), d.approvalToken as string | undefined); break;
-    case 'done': h.onDone(d as Parameters<ChatHandlers['onDone']>[0]); break;
+    case 'delta': h.onDelta?.(String(d.text ?? '')); break;
+    case 'reasoning': h.onReasoning?.(String(d.text ?? '')); break;
+    case 'tool_start': h.onToolStart?.(d.id as string | undefined, String(d.name), d.args); break;
+    case 'tool_result': h.onToolResult?.(d.id as string | undefined, String(d.name), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored), d.evidence as never, d.warnings as never); break;
+    case 'approval_required': if (d.active !== false) h.onApprovalRequired?.(String(d.approvalId), String(d.name), String(d.summary), d.approvalToken as string | undefined); break;
+    case 'done': h.onDone?.(d as Parameters<ChatHandlers['onDone']>[0]); break;
     case 'retry': h.onRetry?.(d.reason as 'attempt' | 'failover', d.detail as string); break;
     case 'budget_hit': h.onBudgetHit?.(Number(d.cost), Number(d.budget)); break;
     case 'task_verified': h.onTaskVerified?.(String(d.objective), checks, d.evidence as never); break;
     case 'task_partial': h.onTaskPartial?.(String(d.objective), checks, d.evidence as never); break;
     case 'task_failed': h.onTaskFailed?.(String(d.objective), checks, d.evidence as never); break;
-    case 'error': h.onError(String(d.error), d.kind as ErrorKind); break;
+    case 'error': h.onError?.(String(d.error), d.kind as ErrorKind); break;
   }
 }
 
 /** Each connection resumes from its last delivered sequence, without creating an execution. */
-export async function subscribeRun(id: string, h: ChatHandlers, signal?: AbortSignal, after = 0): Promise<void> {
+export async function subscribeRun(id: string, h: Partial<ChatHandlers>, signal?: AbortSignal, after = 0): Promise<void> {
   let cursor = after;
   let errors = 0;
   let doneSeen = false;
@@ -108,19 +114,19 @@ export async function subscribeRun(id: string, h: ChatHandlers, signal?: AbortSi
             dispatch(event, data, h);
             cursor = seq; errors = 0;
             if (event === 'done') doneSeen = true;
-            if (event === 'state' || event === 'usage' || event === 'usage_status') h.onRun?.(await runsApi.get(id));
+            if (h.onRun && ['state', 'usage', 'usage_status', 'message_queued', 'message_delivered'].includes(event)) h.onRun(await runsApi.get(id));
           }
         }
       } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
       const run = await runsApi.get(id); h.onRun?.(run);
       if (!activeRun(run)) {
-        if (!doneSeen && run.status === 'completed') h.onDone({ content: run.answer ?? '', usage: { input: run.tokensIn, output: run.tokensOut }, cost: run.cost });
-        else if (run.status !== 'completed') h.onError(run.error ?? runLabels[run.status], run.status === 'cancelled' ? 'aborted' : run.problem?.code === 'DEADLINE_EXCEEDED' ? 'deadline' : run.problem?.code === 'REQUEST_TIMEOUT' || run.problem?.code === 'STREAM_INTERRUPTED' ? 'transient' : 'upstream');
+        if (!doneSeen && run.status === 'completed') h.onDone?.({ content: run.answer ?? '', usage: { input: run.tokensIn, output: run.tokensOut }, cost: run.cost });
+        else if (run.status !== 'completed') h.onError?.(run.error ?? runLabels[run.status], run.status === 'cancelled' ? 'aborted' : run.problem?.code === 'DEADLINE_EXCEEDED' ? 'deadline' : run.problem?.code === 'REQUEST_TIMEOUT' || run.problem?.code === 'STREAM_INTERRUPTED' ? 'transient' : 'upstream');
         h.onEnd?.(); return;
       }
     } catch (error) {
       if (signal?.aborted) return;
-      if (++errors >= 8) { h.onError(`订阅已断开，任务仍保存在任务列表：${error instanceof Error ? error.message : String(error)}`, 'network'); return; }
+      if (++errors >= 8) { h.onError?.(`订阅已断开，任务仍保存在任务列表：${error instanceof Error ? error.message : String(error)}`, 'network'); return; }
     }
     h.onStatus?.('正在重新连接任务…');
     await new Promise<void>(resolve => {
@@ -132,12 +138,12 @@ export async function subscribeRun(id: string, h: ChatHandlers, signal?: AbortSi
   }
 }
 
-export async function streamChat(session: string, body: { message?: string; model?: string; provider?: string; resume?: boolean; frameworkChangeId?: string; materials?: MaterialRef[] }, h: ChatHandlers, signal?: AbortSignal) {
+export async function streamChat(session: string, body: { message?: string; model?: string; provider?: string; resume?: boolean; frameworkChangeId?: string; materials?: MaterialRef[]; reworkOfRunId?: string }, h: ChatHandlers, signal?: AbortSignal) {
   try {
     const record = body.resume
       ? await runsApi.resume((await runsApi.list(session)).find(run => !run.parentId && run.status === 'interrupted')?.id ?? '')
-      : (await runsApi.create(session, body.message ?? '', body.model, body.provider, body.frameworkChangeId, body.materials)).run;
+      : (await runsApi.create(session, body.message ?? '', body.model, body.provider, body.frameworkChangeId, body.materials, body.reworkOfRunId)).run;
     h.onRun?.(record);
     await subscribeRun(record.id, h, signal, record.eventCursor ?? 0);
-  } catch (error) { if (!signal?.aborted) h.onError(error instanceof Error ? error.message : String(error)); }
+  } catch (error) { if (!signal?.aborted) h.onError?.(error instanceof Error ? error.message : String(error)); }
 }

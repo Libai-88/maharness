@@ -53,6 +53,14 @@ export class ModelAdmissionError extends Error {
   readonly code = 'MODEL_BUDGET_UNCERTAIN';
 }
 
+export function modelOutputBudget(provider: ProviderDef, model: string, window?: number): { limit: number; source: 'model' | 'default' } {
+  const caps = provider.models?.find(item => item.modelId === model);
+  const known = caps && Number.isSafeInteger(caps.maxOutput) && caps.maxOutput > 0;
+  const capacity = window ?? caps?.contextWindow;
+  const reserve = capacity && Number.isFinite(capacity) && capacity > 0 ? Math.max(1, Math.floor(capacity * 0.15)) : undefined;
+  return { limit: known ? Math.min(caps.maxOutput, reserve ?? caps.maxOutput) : 4096, source: known ? 'model' : 'default' };
+}
+
 /** The only production boundary allowed to invoke a provider adapter. */
 export async function* callModel(provider: ProviderDef, messages: LLMMessage[], options: ChatOptions, purpose: ModelPurpose = 'agent'): AsyncGenerator<LLMChunk> {
   const scope = scopes.getStore() ?? maintenanceScope;
@@ -64,7 +72,7 @@ export async function* callModel(provider: ProviderDef, messages: LLMMessage[], 
     : undefined;
   const candidatePrice = provider.priceSource === 'unknown' ? undefined : modelPrice && modelPrice.source !== 'inferred' ? { in: modelPrice.priceIn, out: modelPrice.priceOut } : options.model === provider.defaultModel ? provider.prices : undefined;
   const price = candidatePrice && Number.isFinite(candidatePrice.in) && candidatePrice.in >= 0 && Number.isFinite(candidatePrice.out) && candidatePrice.out >= 0 ? candidatePrice : undefined;
-  const outputLimit = options.maxTokens ?? 4096;
+  const outputLimit = options.maxTokens ?? modelOutputBudget(provider, options.model).limit;
   if (!Number.isSafeInteger(outputLimit) || outputLimit < 0) throw new ModelAdmissionError('无效的模型输出上限');
   const record: ModelCallRecord = {
     id: randomUUID(), rootId: scope?.rootId, runId: scope?.runId || undefined, parentRunId: scope?.parentRunId, scope: scope?.runId ? 'run' : 'maintenance', turn: scope?.turn, purpose,

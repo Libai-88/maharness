@@ -281,7 +281,10 @@ export default {
               results.forEach(result => byId.set(result.taskId, result));
             }
             const aggregate = aggregateParallelResults(tasks.map(task => byId.get(task.id)!));
-            return { ok: parallelToolSucceeded(aggregate), data: aggregate };
+            const ok = parallelToolSucceeded(aggregate);
+            return { ok, data: aggregate, ...(!ok ? { failure: {
+              code: 'DELEGATION_INCOMPLETE', retryable: false, outcome: 'applied' as const,
+            } } : {}) };
           }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）

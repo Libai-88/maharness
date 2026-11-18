@@ -356,6 +356,7 @@ export interface AssignmentDelivery {
 }
 
 export interface AssignmentContract {
+  coordinatorArtifacts?: string[];
   id: string;
   tenantId: string;
   workOrderId: string;
@@ -384,8 +385,8 @@ export interface TeamCycle {
   tenantId: string;
   workOrderId: string;
   assignmentIds: string[];
-  soloEstimateUsd: number;
-  teamEstimateUsd: number;
+  soloEstimateUsd?: number;
+  teamEstimateUsd?: number;
   hardBudget: boolean;
   reason: string;
   status: 'planned' | 'running' | 'paused' | 'completed' | 'partial' | 'failed' | 'cancelled' | 'dissolved';
@@ -810,6 +811,7 @@ export interface WorkLedgerEntry {
 }
 
 export interface WorkReceipt {
+  costStatus?: 'known' | 'partial' | 'unknown';
   id: string;
   tenantId: string;
   workOrderId: string;
@@ -905,9 +907,10 @@ export interface InstitutionProposal {
 }
 
 export interface TeamEconomics {
+  costStatus?: 'known' | 'partial' | 'unknown';
   workOrderId: string;
   singleAgentEstimateUsd: number | null;
-  teamEstimateUsd: number;
+  teamEstimateUsd: number | null;
   actualCostUsd: number;
   singleAgentEstimateTokens: number | null;
   teamEstimateTokens: number;
