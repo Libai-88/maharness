@@ -1,6 +1,0 @@
-
-> maharness@0.1.0 plugin:lock:verify
-> tsx scripts/plugin-lock.ts verify
-
-reference-hello: ok
-workbench: ok

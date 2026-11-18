@@ -1,7 +1,0 @@
-{"exitCode":0,"check":"unit","time":"2026-11-15T06:26:06.8337151+08:00"}
-{"exitCode":0,"check":"security","time":"2026-11-15T06:26:35.7846662+08:00"}
-{"exitCode":0,"check":"selftest","time":"2026-11-15T06:27:02.0977157+08:00"}
-{"exitCode":0,"check":"replay","time":"2026-11-15T06:27:14.7855697+08:00"}
-{"exitCode":0,"check":"build","time":"2026-11-15T06:27:47.8576234+08:00"}
-{"exitCode":0,"check":"typecheck","time":"2026-11-15T06:28:06.9761063+08:00"}
-{"time":"2026-11-15T06:28:28.8784052+08:00","exitCode":0,"check":"browser"}

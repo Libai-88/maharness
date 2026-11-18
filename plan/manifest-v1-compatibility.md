@@ -1,4 +1,4 @@
-# Plugin Manifest v1
+# Plugin Manifest v3
 
 ## Required fields
 
@@ -18,12 +18,12 @@
 ```json
 {
   "compatibility": {
-    "api": { "min": "1.0.0", "max": "1.0.0" }
+    "api": { "min": "3.0.0", "max": "3.0.0" }
   }
 }
 ```
 
-`min` and `max` are optional complete semver values. `min` cannot exceed `max`, and the host API `1.0.0` must fall inside the declared range. Omitting `compatibility` keeps the legacy trusted compatibility path.
+`min` and `max` are optional complete semver values. `min` cannot exceed `max`, and the host API `3.0.0` must fall inside the declared range. New plugins declare `apiVersion: 3`; the loader also accepts v2 manifests through a compatibility adapter that adds default metadata without expanding permissions.
 
 ### Capability permissions
 
@@ -46,11 +46,11 @@ Once `permissions.capabilities` is declared, every registered capability type an
 
 ## Compatibility matrix
 
-| Plugin manifest | Host API 1.0.0 | Permission behavior | Migration action |
+| Plugin manifest | Host API 3.0.0 | Permission behavior | Migration action |
 |---|---|---|---|
 | No `compatibility` or `permissions` | Loads | Legacy trusted mode | Keep working; add declarations before distribution |
-| `compatibility.api` contains 1.0.0 | Loads | As declared | No code change required |
-| `compatibility.api` excludes 1.0.0 | Rejects before `onLoad` | No capability is registered | Raise `min`/`max` or pin the plugin to a compatible host |
+| `compatibility.api` contains 3.0.0 | Loads | As declared | No code change required |
+| `compatibility.api` excludes 3.0.0 | Rejects before `onLoad` | No capability is registered | Raise `min`/`max` or pin the plugin to a compatible host |
 | `permissions.capabilities` lists all registrations | Loads | Only listed names/types allowed | Update the list when adding a capability |
 | Permission declaration omits a registration | Rejects during registration | Effects are rolled back and a denial audit event is emitted | Add the exact capability name/type |
 | `config` values satisfy the schema | Loads | Configuration is available to the plugin | No action |
@@ -59,7 +59,7 @@ Once `permissions.capabilities` is declared, every registered capability type an
 ## Migration and rollback
 
 1. Copy the existing plugin directory and record its current `plugin.json` and dependency lock before editing.
-2. Add `compatibility.api` with the host API range, then run `npm run plugin:validate -- <plugin-dir>`.
+2. Set `apiVersion: 3` and add `compatibility.api` with the host API range, then run `npm run plugin:validate -- <plugin-dir>`.
 3. Add `permissions.capabilities` only after listing every capability currently registered by the plugin; use the generated scaffold as the baseline.
 4. Add `config` only when the plugin needs machine-validated settings, and test both a valid and invalid configuration.
 5. Reload the plugin and verify its state and visible capabilities. A failed reload restores the previous loaded version; a failed first load leaves no registered effects.

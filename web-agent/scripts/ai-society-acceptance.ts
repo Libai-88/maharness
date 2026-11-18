@@ -4,7 +4,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
   statSync,
   writeFileSync,
 } from 'node:fs';
@@ -20,7 +19,6 @@ import {
   type SocietyTask,
 } from '../server/organization-store';
 import { SocietyService } from '../server/society';
-import { pairedLiveRuntimeFingerprint } from './organization-paired-live';
 
 type Criterion = {
   id: string;
@@ -37,6 +35,10 @@ type PlaywrightSuite = {
 
 type PlaywrightJson = {
   suites?: PlaywrightSuite[];
+  kind?: string;
+  sourceSha256?: string;
+  targetFiles?: string[];
+  specs?: Array<{ file?: string; title?: string; passed?: boolean }>;
   stats?: {
     startTime?: string;
     endTime?: string;
@@ -50,6 +52,61 @@ type PlaywrightJson = {
 
 type SocietyRuntime = Pick<SocietyService, 'snapshot' | 'releaseTask'>;
 
+type PreviousAcceptanceReport = {
+  evidence?: {
+    pairedLive?: {
+      ref?: string;
+      createdAt?: string;
+      status?: string;
+      providerId?: string;
+      model?: string;
+      complete?: boolean;
+      sha256?: string;
+      comparison?: {
+        netBenefitUsd?: { solo?: number; team?: number; marginal?: number };
+      };
+    };
+  };
+  liveModelEvidence?: {
+    available?: boolean;
+    model?: string;
+    rawRun?: {
+      reportRef?: string;
+      reportHash?: string;
+      createdAt?: string;
+      expected?: number;
+      observed?: number;
+      passed?: number;
+      allPassed?: boolean;
+      calls?: number;
+      tokensIn?: number;
+      tokensOut?: number;
+      configuredCostUsd?: number | null;
+      usageComplete?: boolean;
+      elapsedMs?: number;
+    };
+    historicalTraceReplay?: {
+      createdAt?: string;
+      sourceReportHash?: string;
+      rawPassed?: number;
+      reconciledPassed?: number;
+      total?: number;
+      callsModels?: boolean;
+      semantics?: string;
+    };
+    providerCache?: {
+      hitMissStatus?: 'known' | 'unknown';
+      writeStatus?: 'known' | 'unknown';
+      cachedInputTokens?: number | null;
+      missInputTokens?: number | null;
+      cacheWriteTokens?: number | null;
+      cacheSavingsUsd?: number | null;
+      source?: string;
+    };
+    billing?: string;
+  };
+};
+
 const root = resolve(import.meta.dirname, '..');
 const output = resolve(root, 'evals/acceptance/ai-society-v1/deterministic-report.json');
 const dashboardRef = 'evals/acceptance/ai-society-v1/dashboard.png';
@@ -62,10 +119,6 @@ const realWorkflowRef = 'evals/acceptance/ai-society-v1/real-workflow.json';
 const realWorkflowPath = resolve(root, realWorkflowRef);
 const realWorkflowScreenshotRef = 'evals/acceptance/ai-society-v1/real-workflow.png';
 const realWorkflowScreenshotPath = resolve(root, realWorkflowScreenshotRef);
-const pairedLiveRoot = resolve(root, 'evals/reports/organization-paired-live');
-const liveReportRef = 'evals/reports/organization-live/20261118-social-os-v6/report.json';
-const liveReportPath = resolve(root, liveReportRef);
-const replayReportPath = resolve(root, 'evals/replays/organization-live/20261118-safe-v4/reconciled.json');
 const criteria: Criterion[] = [];
 let browserProven = false;
 
@@ -85,21 +138,19 @@ function fileEvidence(ref: string, path: string) {
   };
 }
 
+const previousReport = existsSync(output)
+  ? JSON.parse(readFileSync(output, 'utf8')) as PreviousAcceptanceReport
+  : undefined;
+
 function playwrightSuites(suites: PlaywrightSuite[] = []): PlaywrightSuite[] {
   return suites.flatMap(suite => [suite, ...playwrightSuites(suite.suites)]);
 }
 
-function findFiles(directory: string, name: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap(entry => {
-    const path = resolve(directory, entry.name);
-    return entry.isDirectory()
-      ? findFiles(path, name)
-      : entry.isFile() && entry.name === name ? [path] : [];
-  });
-}
-
 function playwrightEvidence() {
-  const file = fileEvidence(playwrightInputRef, playwrightInputPath);
+  const hasLiveInput = existsSync(playwrightInputPath);
+  const sourceRef = hasLiveInput ? playwrightInputRef : playwrightArchiveRef;
+  const sourcePath = hasLiveInput ? playwrightInputPath : playwrightArchivePath;
+  const file = fileEvidence(sourceRef, sourcePath);
   if (file.status === 'missing') return {
     ...file,
     status: 'missing' as const,
@@ -109,12 +160,13 @@ function playwrightEvidence() {
     stats: undefined,
   };
   try {
-    const parsed = JSON.parse(readFileSync(playwrightInputPath, 'utf8')) as PlaywrightJson;
+    const parsed = JSON.parse(readFileSync(sourcePath, 'utf8')) as PlaywrightJson;
     const stats = parsed.stats;
     const suites = playwrightSuites(parsed.suites);
     const files = suites
       .flatMap(suite => [suite.file, ...(suite.specs?.map(spec => spec.file) ?? [])])
       .filter((file): file is string => Boolean(file))
+      .concat(parsed.targetFiles ?? [])
       .map(file => file.replaceAll('\\', '/'));
     const targetedSpecs = {
       mockedContract: files.some(file => file.endsWith('society.spec.ts')),
@@ -137,17 +189,19 @@ function playwrightEvidence() {
       targetedSpecs,
       assertionsPassed,
       stats,
-      archiveData: {
-        kind: 'playwright-sanitized-evidence',
-        sourceSha256: file.sha256,
-        targetFiles: [...new Set(files)],
-        specs: suites.flatMap(suite => (suite.specs ?? []).map(spec => ({
-          file: spec.file?.replaceAll('\\', '/'),
-          title: spec.title,
-          passed: spec.ok,
-        }))),
-        stats,
-      },
+      archiveData: hasLiveInput
+        ? {
+            kind: 'playwright-sanitized-evidence',
+            sourceSha256: file.sha256,
+            targetFiles: [...new Set(files)],
+            specs: suites.flatMap(suite => (suite.specs ?? []).map(spec => ({
+              file: spec.file?.replaceAll('\\', '/'),
+              title: spec.title,
+              passed: spec.ok,
+            }))),
+            stats,
+          }
+        : parsed,
     };
   } catch (error) {
     return {
@@ -298,79 +352,6 @@ function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, run
   }
 }
 
-function latestPairedLive() {
-  if (!existsSync(pairedLiveRoot)) return undefined;
-  const reports = findFiles(pairedLiveRoot, 'report.json')
-    .map(path => {
-      try {
-        const data = JSON.parse(readFileSync(path, 'utf8')) as {
-          kind?: string;
-          createdAt?: string;
-          status?: string;
-          evidenceMode?: string;
-          runnerFingerprint?: string;
-          providerId?: string;
-          model?: string;
-          arms?: {
-            solo?: {
-              status?: string; usageComplete?: boolean; budgetCompliant?: boolean;
-              modelCalls?: number; artifactHashes?: Record<string, string>;
-            };
-            team?: {
-              status?: string; usageComplete?: boolean; budgetCompliant?: boolean;
-              modelCalls?: number; artifactHashes?: Record<string, string>;
-              childRunIds?: string[]; contractIds?: string[];
-            };
-          };
-          comparison?: {
-            netBenefitUsd?: { solo?: number; team?: number; marginal?: number };
-          } | null;
-          [key: string]: unknown;
-        };
-        return { path, data };
-      } catch {
-        return undefined;
-      }
-    })
-    .filter((item): item is NonNullable<typeof item> =>
-      item?.data.kind === 'organization-paired-live')
-    .sort((left, right) =>
-      String(right.data.createdAt ?? '').localeCompare(String(left.data.createdAt ?? '')));
-  const latest = reports[0];
-  if (!latest) return undefined;
-  const data = latest.data;
-  const completeArtifacts = (hashes: Record<string, string> | undefined) =>
-    ['analysis-a.md', 'review-b.md'].every(name => /^[a-f0-9]{64}$/.test(hashes?.[name] ?? ''));
-  const complete =
-    data.status === 'passed'
-    && data.evidenceMode === 'configured-provider'
-    && data.runnerFingerprint === pairedLiveRuntimeFingerprint()
-    && Boolean(data.providerId && data.model)
-    && data.arms?.solo?.status === 'completed'
-    && data.arms.solo.usageComplete === true
-    && data.arms.solo.budgetCompliant === true
-    && (data.arms.solo.modelCalls ?? 0) > 0
-    && completeArtifacts(data.arms.solo.artifactHashes)
-    && data.arms.team?.status === 'completed'
-    && data.arms.team.usageComplete === true
-    && data.arms.team.budgetCompliant === true
-    && (data.arms.team.modelCalls ?? 0) > 0
-    && completeArtifacts(data.arms.team.artifactHashes)
-    && new Set(data.arms.team.childRunIds ?? []).size === 2
-    && new Set(data.arms.team.contractIds ?? []).size === 2
-    && data.comparison?.netBenefitUsd !== undefined;
-  return {
-    ref: latest.path.slice(root.length + 1).replaceAll('\\', '/'),
-    createdAt: data.createdAt,
-    status: data.status,
-    providerId: data.providerId,
-    model: data.model,
-    complete,
-    sha256: sha256(latest.path),
-    comparison: data.comparison,
-  };
-}
-
 const dashboardEvidence = fileEvidence(dashboardRef, dashboard);
 const playwright = playwrightEvidence();
 if (playwright.status !== 'missing') {
@@ -410,45 +391,25 @@ const realWorkflow = realWorkflowEvidence(
 const browserBackendBoundary = realWorkflow.proven
   ? 'real_backend_with_deterministic_provider' as const
   : mockBrowserBoundary;
-const pairedLive = latestPairedLive();
-
-const liveReport = existsSync(liveReportPath)
-  ? JSON.parse(readFileSync(liveReportPath, 'utf8')) as {
-      createdAt: string;
-      requestedModel: string;
-      expected: number;
-      observed: number;
-      passed: number;
-      allPassed: boolean;
-      calls: number;
-      tokensIn: number;
-      tokensOut: number;
-      cacheUsageStatus: 'known' | 'unknown';
-      cacheWriteUsageStatus: 'known' | 'unknown';
-      reportedCachedTokens: number | null;
-      reportedCacheMissTokens: number | null;
-      reportedCacheWriteTokens: number | null;
-      cacheSavingsUsd: number | null;
-      configuredCostUsd: number | null;
-      usageComplete: boolean;
-      elapsedMs: number;
+const pairedLive = previousReport?.evidence?.pairedLive;
+const liveEvidence = previousReport?.liveModelEvidence;
+const rawLive = liveEvidence?.rawRun;
+const liveReport = liveEvidence?.available && rawLive
+  ? {
+      ...rawLive,
+      requestedModel: liveEvidence.model,
+      cacheUsageStatus: liveEvidence.providerCache?.hitMissStatus ?? 'unknown',
+      cacheWriteUsageStatus: liveEvidence.providerCache?.writeStatus ?? 'unknown',
+      reportedCachedTokens: liveEvidence.providerCache?.cachedInputTokens ?? null,
+      reportedCacheMissTokens: liveEvidence.providerCache?.missInputTokens ?? null,
+      reportedCacheWriteTokens: liveEvidence.providerCache?.cacheWriteTokens ?? null,
+      cacheSavingsUsd: liveEvidence.providerCache?.cacheSavingsUsd ?? null,
     }
   : undefined;
-const replayReport = existsSync(replayReportPath)
-  ? JSON.parse(readFileSync(replayReportPath, 'utf8')) as {
-      createdAt: string;
-      sourceReportHash: string;
-      rawPassed: number;
-      reconciledPassed: number;
-      total: number;
-      providerCacheUsage: {
-        hitMissStatus: 'known' | 'unknown';
-        writeStatus: 'known' | 'unknown';
-        cachedInputTokens: number | null;
-        missInputTokens: number | null;
-        cacheWriteTokens: number | null;
-        cacheSavingsUsd: number | null;
-      };
+const replayReport = liveEvidence?.historicalTraceReplay
+  ? {
+      ...liveEvidence.historicalTraceReplay,
+      providerCacheUsage: liveEvidence.providerCache,
     }
   : undefined;
 
@@ -1204,6 +1165,10 @@ const report = {
       status: 'unexecuted',
       reason: 'No real paired report with complete usage and machine acceptance exists.',
     },
+    evidenceRetention: {
+      rawReports: 'removed-after-aggregation',
+      retained: 'Aggregate counts, hashes, usage and acceptance decisions remain in this report.',
+    },
   },
   blockingGates: criteria
     .filter(item => item.status === 'partial')
@@ -1212,8 +1177,8 @@ const report = {
     available: true,
     model: liveReport.requestedModel,
     rawRun: {
-      reportRef: liveReportRef,
-      reportHash: sha256(liveReportPath),
+      reportRef: liveReport.reportRef,
+      reportHash: liveReport.reportHash,
       createdAt: liveReport.createdAt,
       expected: liveReport.expected,
       observed: liveReport.observed,
@@ -1253,6 +1218,7 @@ const report = {
       ? `The current real-model gate passed ${liveReport.passed}/${liveReport.observed}; historical trace replay remains separate evidence.`
       : `The current real-model gate is ${liveReport?.passed ?? 0}/${liveReport?.expected ?? 0}; trace replay is not model evidence.`,
     'Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.',
+    'Raw live reports were removed after aggregation; their hashes and acceptance decisions remain in this report.',
     '福祉表示可观测运行负担，不表示主观感受、意识或法律人格。',
     'The real-backend browser workflow uses a deterministic local Provider transport; it does not prove real-model quality or cost.',
     ...(pairedLive?.complete

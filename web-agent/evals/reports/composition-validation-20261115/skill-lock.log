@@ -1,6 +1,0 @@
-
-> maharness@0.1.0 skill:lock:verify
-> tsx scripts/skill-lock.ts verify
-
-skills-lock.json 未签名（仅哈希校验）
-D:\DEEPSEEK\maharness\skills-lock.json: ok（未签名）

@@ -51,4 +51,4 @@ HTTP 接口：`GET/POST /api/items`、`GET/PATCH /api/items/:id`、`POST /api/it
 
 工作台聚合接口为 `GET /api/workbench/summary`。兼容工作台接口 `GET/PUT /api/plugins/workbench/wb/data` 继续可用，写入携带 `{revision,data}`；`POST /api/plugins/workbench/wb/import` 按版本合并。文件夹和浏览器存储仅用于历史导入，日常数据以应用存储为准。
 
-验证范围见 [个人事项与工作台验收](PERSONAL-ITEMS-ACCEPTANCE.md)。
+验证入口与相关回归命令见 [开发环境与测试说明](DEVELOPMENT.md)。

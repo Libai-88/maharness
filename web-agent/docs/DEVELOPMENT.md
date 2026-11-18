@@ -78,7 +78,6 @@ npm run start:all      # 生产模式：构建前端后单端口 :3000
 - Windows 安装/升级/恢复/数据目录运维手册：[../../plan/windows-ops-runbook.md](../../plan/windows-ops-runbook.md)。
 - API 契约：[api-contract-v1.md](../../plan/api-contract-v1.md)。
 - 威胁模型：[threat-model-v1.md](../../plan/threat-model-v1.md)。
-- 优化登记册（当前状态）：[13-optimization-register.md](../../plan/13-optimization-register.md)。
 
 ## 八、脚本职责矩阵（诊断 vs 正式回归）
 
