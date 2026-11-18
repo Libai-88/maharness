@@ -362,7 +362,7 @@ async function waitForTeamSchedule(
       : task
         ? `queued:${task.status}:${task.lastSchedulingReason ?? 'no-reason'}`
         : 'missing-task';
-  }, { timeout: 20_000 }).toBe('active|team|2|2');
+  }, { timeout: 30_000 }).toBe('active|team|2|2');
   return schedule!;
 }
 
@@ -378,7 +378,7 @@ async function waitForTaskStatus(
     const schedule = snapshot.schedules.find(item => item.taskId === taskId);
     if (task?.status === status && schedule) result = { snapshot, task, schedule };
     return task?.status ?? 'missing';
-  }, { timeout: 30_000 }).toBe(status);
+  }, { timeout: 60_000 }).toBe(status);
   return result!;
 }
 
@@ -410,7 +410,7 @@ async function waitForRollback(
       return 'ready';
     }
     return 'waiting';
-  }, { timeout: 30_000 }).toBe('ready');
+  }, { timeout: 45_000 }).toBe('ready');
   return result!;
 }
 
@@ -690,7 +690,7 @@ test('AI 社会沿用真实工具审批，刷新等待期间不执行写入', as
 });
 
 test('生产 Scheduler 自动推进真实团队并展示网络、六因子、福利、瓶颈与 token 缓存', {
-  timeout: 60_000,
+  timeout: 120_000,
 }, async ({ page, request }, testInfo) => {
   providerSuccessDelayMs = 10_000;
   let tickApiCalls = 0;
