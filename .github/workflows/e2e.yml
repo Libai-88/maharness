@@ -48,7 +48,7 @@ jobs:
         run: npx playwright install --with-deps chromium
         working-directory: web-agent/ui
 
-      - name: 运行 E2E 冒烟（9 条；webServer 自动拉起后端，chat 接口已 mock，无需 API Key）
+      - name: 运行 E2E 全量回归（单 worker；webServer 自动拉起后端，chat 接口已 mock，无需 API Key）
         run: npm --prefix ui run e2e
 
       - name: 上传测试报告（失败时）
