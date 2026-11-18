@@ -45,7 +45,7 @@ jobs:
         run: npm run selftest
       - name: golden 回归、baseline 阈值门禁与 JSON 报告（ReplayProvider 确定性回放）
         id: eval
-        run: npm run eval -- --baseline evals/baseline.json --report evals/reports/current.json
+        run: npm run eval:ci -- --report evals/reports/current.json
       - name: 上传确定性评测报告
         if: always() && steps.eval.outcome != 'skipped'
         uses: actions/upload-artifact@v4

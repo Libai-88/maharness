@@ -3,9 +3,10 @@
  *
  * Usage:
  *   node scripts/plugin-scaffold.mjs create <plugin-id> [plugins-dir]
- *   node scripts/plugin-scaffold.mjs validate <plugin-dir>
+ *   node scripts/plugin-scaffold.mjs validate [plugin-dir...]
+ *   (with no plugin-dir, every top-level plugin under plugins/ is validated)
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -116,20 +117,40 @@ export function createPlugin(id, pluginsDir) {
 
 function usage() {
   console.error('用法：node scripts/plugin-scaffold.mjs create <plugin-id> [plugins-dir]');
-  console.error('      node scripts/plugin-scaffold.mjs validate <plugin-dir>');
+  console.error('      node scripts/plugin-scaffold.mjs validate [plugin-dir...]');
+}
+
+const defaultPluginsDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'plugins');
+
+function defaultPluginDirs() {
+  if (!existsSync(defaultPluginsDir)) return [];
+  return readdirSync(defaultPluginsDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory() && !/@[0-9a-f]{10}$/.test(entry.name))
+    .map((entry) => join(defaultPluginsDir, entry.name))
+    .filter((dir) => existsSync(join(dir, 'plugin.json')));
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const [, , command, value, target] = process.argv;
+  const [, , command, ...values] = process.argv;
   try {
-    if (command === 'create' && value) {
-      const root = createPlugin(value, target ?? resolve(dirname(new URL(import.meta.url).pathname), '..', 'plugins'));
+    if (command === 'create' && values[0]) {
+      const root = createPlugin(values[0], values[1] ?? defaultPluginsDir);
       console.log(`已生成插件: ${root}`);
       console.log('下一步：npm run plugin:validate -- ' + root);
-    } else if (command === 'validate' && value) {
-      const errors = validatePlugin(value);
-      if (errors.length) { console.error(errors.map((error) => `✗ ${error}`).join('\n')); process.exitCode = 1; }
-      else console.log(`✓ 插件 manifest 有效: ${resolve(value)}`);
+    } else if (command === 'validate') {
+      const dirs = values.length ? values : defaultPluginDirs();
+      if (!dirs.length) {
+        console.error('✗ 没有可校验的插件目录');
+        process.exitCode = 1;
+      } else {
+        let failed = false;
+        for (const dir of dirs) {
+          const errors = validatePlugin(dir);
+          if (errors.length) { failed = true; console.error(errors.map((error) => `✗ ${dir}: ${error}`).join('\n')); }
+          else console.log(`✓ 插件 manifest 有效: ${resolve(dir)}`);
+        }
+        if (failed) process.exitCode = 1;
+      }
     } else { usage(); process.exitCode = 1; }
   } catch (error) {
     console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
