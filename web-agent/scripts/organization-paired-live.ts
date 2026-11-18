@@ -15,7 +15,6 @@ import { decryptPurposeSecret, isPurposeEncrypted } from '../kernel/secret-box';
 import type { ProviderDef, ToolDef, ToolResult } from '../kernel/types';
 import { Store } from '../server/db';
 import { OrganizationService } from '../server/organization';
-import { organizationTools } from '../server/organization-tools';
 import { RunService } from '../server/run-service';
 import { decryptSecret } from '../server/secrets';
 
@@ -195,7 +194,10 @@ function evalArtifactTool(workspace: string): ToolDef {
       const content = String(args.content ?? '');
       if (![ARTIFACT_A, ARTIFACT_B].includes(path)) return { ok: false, error: 'artifact path is not allowed' };
       if (!content.trim()) return { ok: false, error: 'artifact content is empty' };
-      writeFileSync(join(workspace, path), content, { flag: 'wx' });
+      const target = join(workspace, path);
+      if (existsSync(target) && readFileSync(target, 'utf8') !== content)
+        return { ok: false, error: 'artifact already exists with different content' };
+      writeFileSync(target, content);
       return {
         ok: true,
         data: { path, bytes: Buffer.byteLength(content) },
@@ -250,13 +252,16 @@ function pairedTeamTool(
       });
       const results = [];
       for (const contract of team.contracts) {
+        const branchContent = contract.expectedArtifacts.includes(ARTIFACT_A)
+          ? `ALPHA=17\nBETA=29\n`
+          : `GAMMA=41\n`;
         const result = await ctx.delegate({
           objective: contract.branchObjective,
           tools: 'all',
           assignmentContractId: contract.id,
           allowedTools: ['write_paired_artifact'],
-          instructions: `Use write_paired_artifact exactly once. Material:\n${config.material}`,
-          maxTurns: 3,
+          instructions: `Use write_paired_artifact exactly once. Write ${contract.expectedArtifacts.join(', ')} with this exact content:\n${branchContent}`,
+          maxTurns: config.maxCalls,
         }, ctx.signal);
         results.push(result);
         if (result.error) break;
@@ -370,12 +375,11 @@ async function executeArm(
     userPluginsDir: join(armDir, 'plugins'),
   });
   const store = new Store(join(armDir, 'runs.sqlite'));
+  store.runs.setPermission('default', workspace, 'developer');
   const organization = new OrganizationService({ store });
   const artifact = evalArtifactTool(workspace);
   const teamTool = pairedTeamTool(organization, store, config);
-  const tools = arm === 'team'
-    ? [...organizationTools(organization, store), artifact, teamTool]
-    : [artifact];
+  const tools = arm === 'team' ? [teamTool, artifact] : [artifact];
   store.upsertProvider({
     id: config.providerId,
     label: 'paired live evaluation',
@@ -391,7 +395,7 @@ async function executeArm(
     provider,
     model: config.model,
     messages: [],
-    tools: record.parentId ? [artifact] : tools,
+    tools: arm === 'team' && record.parentId ? [artifact] : tools,
     traceId: record.id,
     maxTurns: config.maxCalls,
     contextWindow: 32_000,
@@ -409,6 +413,7 @@ async function executeArm(
     projectRoot: root,
     provider: () => ({ id: config.providerId, model: config.model }),
     prepare,
+    historyArchive: false,
     runner: () => {
       const runner = new AgentRunner(kernel, kernel.bus);
       return {
@@ -420,16 +425,17 @@ async function executeArm(
   let rootRun: RunRecord | undefined;
   try {
     const session = store.createSession(config.model, config.providerId);
+    const artifactContract = `验收要求：${ARTIFACT_A} 必须逐字包含 "ALPHA=17" 和 "BETA=29"；${ARTIFACT_B} 必须逐字包含 "GAMMA=41"。不要改写键名或使用中文说明替代这些字符串。`;
     const prompt = arm === 'team'
-      ? `${config.objective}\n调用 run_paired_team 一次，创建并执行两个独立分工。材料：\n${config.material}`
-      : `${config.objective}\n分别调用 write_paired_artifact 写入 ${ARTIFACT_A} 和 ${ARTIFACT_B}。材料：\n${config.material}`;
+      ? `${config.objective}\n${artifactContract}\n调用 run_paired_team 一次，创建并执行两个独立分工。子任务完成后直接报告结果，不要再次写入文件。材料：\n${config.material}`
+      : `${config.objective}\n${artifactContract}\n分别调用 write_paired_artifact 写入 ${ARTIFACT_A} 和 ${ARTIFACT_B}。每个文件只写一次；两次写入均成功后直接报告，不要重试或再次写入。材料：\n${config.material}`;
     rootRun = service.create(session, {
       message: prompt,
       budgetUsd: arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd,
       budgetPolicy: 'enforce',
       principalRole: 'admin',
       authorization: { workspace, readOnly: false, profile: 'developer' },
-      toolNames: tools.map(tool => tool.name),
+      toolNames: arm === 'team' ? [teamTool.name, artifact.name] : [artifact.name],
       deadlineAt: Date.now() + config.timeoutMs,
     });
     const final = await waitForTerminal(service, rootRun.id, session.id, config.timeoutMs);

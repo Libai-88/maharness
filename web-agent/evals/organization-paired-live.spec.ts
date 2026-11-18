@@ -48,10 +48,14 @@ function mockProvider(completeUsage = true): { provider: ProviderDef; calls: () 
       async *chat(messages, options) {
         calls++;
         const text = lastMessage(messages);
-        const key = text.includes('ALPHA 与 BETA') ? 'a'
-          : text.includes('提取 GAMMA') ? 'b'
-            : text.includes('run_paired_team') ? 'team-root'
-              : 'root';
+        const names = options.tools?.map(tool => tool.name) ?? [];
+        if (text.includes('run_paired_team')) assert.deepEqual(names, ['recall_tool_result', 'run_paired_team', 'write_paired_artifact']);
+        else if (text.includes('Use write_paired_artifact exactly once')) assert.deepEqual(names, ['recall_tool_result', 'write_paired_artifact']);
+        else if (text.includes('分别调用 write_paired_artifact')) assert.deepEqual(names, ['recall_tool_result', 'write_paired_artifact']);
+        const key = text.includes('Use write_paired_artifact exactly once')
+          ? text.includes('ALPHA 与 BETA') ? 'a' : 'b'
+          : text.includes('run_paired_team') ? 'team-root'
+            : 'root';
         const turn = (responses.get(key) ?? 0) + 1;
         responses.set(key, turn);
         assert.equal(options.model, 'mock-model');

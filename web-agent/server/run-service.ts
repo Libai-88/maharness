@@ -35,6 +35,7 @@ export interface RunEnvironment {
   plugins?: TaskPluginService;
   store: Store;
   prepare(record: RunRecord): RunOptions;
+  historyArchive?: boolean;
   runner(): AgentLoop | undefined;
   workspace(tenantId: string): string;
   projectRoot?: string;
@@ -317,8 +318,8 @@ export class RunService {
     ))
       throw new RunError(409, 'TEAM_BUDGET_INSUFFICIENT', '团队预算已使用至少 80%，不再启动新分支；已完成结果会保留');
     const id = randomUUID();
-    const tools = (this.env.tools?.() ?? []).filter(tool => !parent.toolNames || parent.toolNames.includes(tool.name));
     const readOnly = parent.authorization.readOnly || request.tools !== 'all' || parent.authorization.profile !== 'developer';
+    const tools = (this.env.tools?.() ?? []).filter(tool => !parent.toolNames || parent.toolNames.includes(tool.name));
     const toolNames = tools.filter(tool => !readOnly || tool.delegates || tool.sideEffect === 'none' || tool.sideEffect === 'read').map(tool => tool.name);
     const now = Date.now();
     const child: RunRecord = {
@@ -657,7 +658,9 @@ export class RunService {
         availableBudget: () => record.budgetPolicy === 'enforce' ? repo.availableBudget(record) : undefined,
         delegate: (request, signal) => this.delegate(record.id, record.tenantId, request, signal),
         onModelInput: input => { inputTurn = input.turn; },
-        historyArchive: { save: history => repo.archiveHistory(record.id, modelHistory(history)), search: (query, offset, limit) => repo.searchHistory(record.id, query, offset, limit), read: (id, offset, limit) => repo.readHistory(record.id, id, offset, limit) },
+        ...(this.env.historyArchive === false ? {} : {
+          historyArchive: { save: history => repo.archiveHistory(record.id, modelHistory(history)), search: (query, offset, limit) => repo.searchHistory(record.id, query, offset, limit), read: (id, offset, limit) => repo.readHistory(record.id, id, offset, limit) },
+        }),
         toolJournal: { start: (id, name, args, meta) => repo.startTool(record.id, id, name, args, meta), finish: (id, result) => repo.finishTool(record.id, id, result), read: (id, offset, limit) => repo.readTool(record.id, id, offset, limit) },
         task: record.acceptance?.length || record.deadlineAt ? { objective: record.objective, acceptance: record.acceptance ?? [], deadlineAt: record.deadlineAt } : undefined,
         effectJournal: { peek: key => this.env.store.peekToolEffect(record.id, key), claim: key => this.env.store.claimToolEffect(record.id, key), release: key => this.env.store.releaseToolEffect(record.id, key), complete: (key, result) => this.env.store.completeToolEffect(record.id, key, result) },
