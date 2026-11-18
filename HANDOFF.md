@@ -37,6 +37,7 @@
 - 清理旧规划文档与历史评测报告，统一文档引用；重新生成 `plugins-lock.json`，修复 `workbench` 插件完整性校验。
 - 依赖安全基线：后端用 `overrides` 固定 `exceljs→uuid@11.1.1`、`pptxgenjs→image-size@2.1.0`；前端将 `shadcn` CLI 移至 `devDependencies`。`npm audit --omit=dev` 前后端均 0 漏洞。
 - `plugin:validate` 支持无参数校验 `plugins/` 下全部插件，并保持单目录参数兼容。
+- 浏览器回归固定单 worker，避免并行运行时社会调度用例的时序竞争；本地全量 133/133 通过。
 
 ## 验收与发布
 
@@ -54,7 +55,7 @@
 | 技能锁 / 技能路由 | 通过，5/5 |
 | 威胁模型 / 文档事实 | 通过 |
 
-发布仍以 [发布清单](plan/release-checklist.md) 为准：双 workflow（quality + e2e）必须全绿；版本号与 CHANGELOG 一致后才可打 tag。当前本地功能验收已通过，远端 CI 在 `a082d6f` 上的结果需在推送后核对。
+发布仍以 [发布清单](plan/release-checklist.md) 为准：双 workflow（quality + e2e）必须全绿；版本号与 CHANGELOG 一致后才可打 tag。当前本地功能验收已通过，远端 GitHub Actions 以最终提交的运行结果为准。
 
 ## 相关文档
 
