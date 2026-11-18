@@ -390,6 +390,11 @@ export interface TraceLike {
 export interface CacheLike {
   l2Get(key: string): { hit: boolean; value?: unknown; meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number } };
   l2Set(key: string, value: unknown, ttlMs?: number, tenantId?: string): void;
+  l2GetOrLoad?<T>(
+    key: string,
+    load: (signal: AbortSignal) => Promise<T>,
+    opts?: { ttlMs?: number; tenantId?: string; signal?: AbortSignal },
+  ): Promise<{ hit: boolean; value: T; meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number } }>;
   l2Delete(key: string): void;
   /** 按命名空间批量失效（key 前缀 = parts[0]）：写操作后失效受影响工具的缓存，不误伤其他工具 */
   l2DeleteNamespace(ns: string): void;

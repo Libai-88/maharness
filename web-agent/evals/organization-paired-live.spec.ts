@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { LLMMessage, ProviderDef } from '../kernel/types';
 import {
+  pairedLiveRuntimeFingerprint,
+  pairedLiveRuntimeSources,
   runPairedLive,
   unexecutedPairedReport,
   validatePairedLiveConfig,
@@ -92,8 +94,37 @@ test('invalid or unconfirmed configurations never call a provider', () => {
     assert.throws(() => validatePairedLiveConfig(invalid), /inputUsdPerMillion/);
     const unexecuted = unexecutedPairedReport(config(join(dir, 'planned')), 'confirmation missing');
     assert.equal(unexecuted.status, 'unexecuted');
+    assert.equal(unexecuted.evidenceMode, 'test-double');
     assert.equal(unexecuted.arms.solo, undefined);
     assert.equal(unexecuted.arms.team, undefined);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runtime fingerprint covers execution dependencies and provenance follows the provider boundary', () => {
+  const sources = pairedLiveRuntimeSources();
+  for (const required of [
+    'scripts/organization-paired-live.ts',
+    'evals/provider-budget.ts',
+    'server/model-cost-estimator.ts',
+    'server/run-store.ts',
+    'server/run-service.ts',
+    'server/society.ts',
+    'core/chat/agent.ts',
+  ]) {
+    assert.ok(sources.includes(required), `missing runtime dependency ${required}`);
+  }
+  assert.match(pairedLiveRuntimeFingerprint(), /^[a-f0-9]{64}$/);
+
+  const dir = mkdtempSync(join(tmpdir(), 'mh-paired-provenance-'));
+  try {
+    const report = unexecutedPairedReport(
+      config(join(dir, 'planned')),
+      'provider was not executed',
+      'configured-provider',
+    );
+    assert.equal(report.evidenceMode, 'configured-provider');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -105,16 +136,30 @@ test('mock provider drives solo and two real team child runs', async () => {
     const mock = mockProvider();
     const report = await runPairedLive(config(join(dir, 'run')), mock.provider);
     assert.equal(report.status, 'passed');
+    assert.equal(report.evidenceMode, 'test-double');
+    assert.match(report.runnerFingerprint, /^[a-f0-9]{64}$/);
     assert.equal(report.arms.solo?.status, 'completed');
     assert.equal(report.arms.team?.status, 'completed');
     assert.equal(report.arms.solo?.childRunIds.length, 0);
     assert.equal(report.arms.team?.childRunIds.length, 2);
     assert.equal(report.arms.team?.contractIds.length, 2);
+    assert.equal(report.arms.solo?.modelCalls, 3);
+    assert.equal(report.arms.team?.modelCalls, 6);
+    assert.equal(report.arms.solo?.inputTokens, 300);
+    assert.equal(report.arms.solo?.outputTokens, 30);
+    assert.equal(report.arms.team?.inputTokens, 600);
+    assert.equal(report.arms.team?.outputTokens, 60);
+    assert.equal(report.arms.solo?.costUsd, 0.00033);
+    assert.equal(report.arms.team?.costUsd, 0.00066);
     assert.deepEqual(report.arms.solo?.artifacts.sort(), ['analysis-a.md', 'review-b.md']);
     assert.deepEqual(report.arms.team?.artifacts.sort(), ['analysis-a.md', 'review-b.md']);
+    assert.deepEqual(Object.keys(report.arms.team?.artifactHashes ?? {}).sort(), ['analysis-a.md', 'review-b.md']);
     assert.ok(report.arms.solo?.checks.every(check => check.passed));
     assert.ok(report.arms.team?.checks.every(check => check.passed));
-    assert.equal(report.comparison?.tokens.marginal !== 0, true);
+    assert.equal(report.comparison?.tokens.marginal, 330);
+    assert.equal(report.comparison?.coordination.tokens, report.comparison?.tokens.marginal);
+    assert.equal(report.comparison?.risk.solo, 0);
+    assert.equal(report.comparison?.risk.team, 0);
     assert.ok(mock.calls() >= 7);
   } finally {
     rmSync(dir, { recursive: true, force: true });

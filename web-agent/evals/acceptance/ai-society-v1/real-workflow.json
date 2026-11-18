@@ -1,21 +1,123 @@
 {
-  "kind": "browser-real-backend-workflow",
+  "kind": "browser-real-backend-workflow-suite",
   "backend": "maharness server/index.ts",
   "database": "temporary SQLite",
   "browser": "Playwright Chromium",
   "provider": "deterministic OpenAI-compatible local HTTP transport",
   "realModel": false,
-  "mockBoundary": "provider transport only; API, scheduler, RunService, persistence and UI are real",
-  "taskStatus": "completed",
-  "scheduleStatus": "completed",
-  "realRunCount": 1,
-  "providerCalls": 1,
-  "institutionVersion": 3,
-  "institutionBudgetUsd": 20,
-  "auditActions": [
-    "rollback",
-    "update",
-    "initialize"
-  ],
-  "screenshotSha256": "21e2fcd8b103ab6810b9ee37c2bae010f5aeff08183ba1dbbe23d9da70ce548c"
+  "mockBoundary": "provider transport only; API, production Scheduler, RunService, SocietyService, persistence and UI are real",
+  "coverage": {
+    "realTeamTask": true,
+    "childRunsAtLeast2": true,
+    "contractsAtLeast2": true,
+    "collaborationNetworkUi": true,
+    "bottleneckUi": true,
+    "sixFactorUi": true,
+    "wellbeingUi": true,
+    "tokenCacheUi": true,
+    "rollbackToSolo": true,
+    "immutableSocietyAudit": true,
+    "schedulerAutoAdvanceWithoutTickApi": true
+  },
+  "screenshots": {
+    "real-workflow-governance.png": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0",
+    "real-workflow-team-active.png": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
+    "real-workflow.png": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
+    "real-workflow-team-final.png": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df",
+    "real-workflow-rollback-active.png": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
+    "real-workflow-rollback.png": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+  },
+  "scenarios": [
+    {
+      "scenario": "governance-version-history",
+      "taskStatus": "completed",
+      "scheduleStatus": "completed",
+      "childRunCount": 1,
+      "providerCalls": 1,
+      "institutionVersion": 3,
+      "institutionBudgetUsd": 20,
+      "auditActions": [
+        "rollback",
+        "update",
+        "initialize"
+      ],
+      "societyAuditActions": [
+        "queued",
+        "scheduled",
+        "release_completed",
+        "human_accepted"
+      ],
+      "screenshotSha256": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0"
+    },
+    {
+      "scenario": "team-auto-scheduler-ui",
+      "taskStatus": "completed",
+      "scheduleStatus": "completed",
+      "scheduleMode": "team",
+      "childRunCount": 2,
+      "contractCount": 2,
+      "networkNodeCount": 4,
+      "networkEdgeCount": 2,
+      "bottleneckKinds": [
+        "budget"
+      ],
+      "selectionFactors": [
+        "capability",
+        "memory",
+        "tools",
+        "collaboration",
+        "history",
+        "load"
+      ],
+      "wellbeingRoleCount": 4,
+      "officialTokenCount": 140,
+      "actualTokenCount": 120,
+      "cacheUsageStatus": "known",
+      "cachedInputTokens": 0,
+      "cacheMissInputTokens": 84,
+      "cacheWriteUsageStatus": "unknown",
+      "providerCalls": 6,
+      "schedulerTickApiCalls": 0,
+      "schedulerAutoAdvanced": true,
+      "collaborationNetworkUi": true,
+      "bottleneckUi": true,
+      "sixFactorUi": true,
+      "wellbeingUi": true,
+      "tokenCacheUi": true,
+      "activeScreenshotSha256": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
+      "awaitingScreenshotSha256": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
+      "finalScreenshotSha256": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df"
+    },
+    {
+      "scenario": "failed-child-rollback-to-solo",
+      "taskStatus": "completed",
+      "initialScheduleMode": "team",
+      "initialChildRunCount": 2,
+      "initialContractCount": 2,
+      "childRunCount": 3,
+      "contractCount": 3,
+      "fallbackMode": "solo",
+      "fallbackRunStatus": "completed",
+      "rollbackMarker": "ROLLBACK_TO_SOLO",
+      "failedChildCount": 1,
+      "contractStatuses": [
+        "collapsed",
+        "delivered"
+      ],
+      "societyAuditActions": [
+        "queued",
+        "scheduled",
+        "fallback_solo",
+        "release_completed",
+        "human_accepted"
+      ],
+      "providerCalls": 8,
+      "schedulerTickApiCalls": 0,
+      "schedulerAutoAdvanced": true,
+      "soloUi": true,
+      "rollbackReasonUi": true,
+      "activeScreenshotSha256": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
+      "finalScreenshotSha256": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+    }
+  ]
 }

@@ -84,6 +84,19 @@ export class RunRepository {
   modelCalls(runId: string, offset = 0, limit = 100): ModelCallRecord[] {
     return (this.db.prepare('SELECT record FROM run_model_calls_v2 WHERE run_id=? ORDER BY rowid LIMIT ? OFFSET ?').all(runId, limit, offset) as { record: string }[]).map(row => JSON.parse(row.record));
   }
+  reportedModelUsage(tenantId: string, providerId: string, model: string, limit = 200): ModelCallRecord[] {
+    const rows = this.db.prepare(`
+      SELECT c.record FROM run_model_calls_v2 c
+      JOIN runs_v2 r ON r.id = c.run_id
+      WHERE r.tenant_id=?
+        AND json_extract(c.record,'$.providerId')=?
+        AND json_extract(c.record,'$.model')=?
+        AND json_extract(c.record,'$.status')='completed'
+        AND json_extract(c.record,'$.usageStatus')='reported'
+      ORDER BY c.rowid DESC LIMIT ?
+    `).all(tenantId, providerId, model, Math.max(1, Math.min(500, limit))) as { record: string }[];
+    return rows.map(row => JSON.parse(row.record) as ModelCallRecord);
+  }
   startModelCall(record: ModelCallRecord): void {
     this.db.prepare('INSERT INTO run_model_calls_v2 VALUES(?,?,?)').run(record.id, record.runId ?? '', JSON.stringify(record));
   }

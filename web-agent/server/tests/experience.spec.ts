@@ -153,7 +153,7 @@ describe('AI 用户复盘', () => {
       raw.close();
       const migrated = new Store(file);
       try {
-        assert.equal(migrated.schemaVersion, 14);
+        assert.equal(migrated.schemaVersion, 15);
         assert.deepEqual(migrated.experience.listReviews('default'), []);
       } finally { migrated.close(); }
     } finally { rmSync(root, { recursive: true, force: true }); }

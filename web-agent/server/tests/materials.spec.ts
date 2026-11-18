@@ -69,7 +69,7 @@ test('Schema 7 migration retains sessions and adds the material registry', () =>
   const raw = new Database(path); raw.exec('DROP TABLE materials_v1; DROP TABLE run_materials_v1; PRAGMA user_version=7'); raw.close();
   try {
     store = new Store(path);
-    assert.equal(store.schemaVersion, 14);
+    assert.equal(store.schemaVersion, 15);
     assert.equal(store.listSessions()[0]?.id, session.id);
     const tables = new Set((store as unknown as { db: Database.Database }).db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all().map((row: unknown) => (row as { name: string }).name));
     assert.ok(tables.has('automations_v3')); assert.ok(tables.has('automation_occurrences_v3')); assert.ok(tables.has('automation_trigger_baselines_v3'));

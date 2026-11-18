@@ -53,7 +53,34 @@ export interface ChildRunRequest {
   assignmentContractId?: string;
   allowedTools?: string[];
 }
-export interface ChildRunResult { runId: string; traceId: string; answer: string; toolCalls: number; cost: number; tokensIn: number; tokensOut: number; error?: string; cancelled: boolean; }
+export interface ChildRunFallback {
+  kind: 'solo_takeover';
+  runId: string;
+  workOrderId: string;
+  teamCycleId?: string;
+  contractId: string;
+  coordinatorRoleId: string;
+  objective: string;
+  expectedArtifacts: string[];
+  acceptance: string[];
+  completedEvidence: string[];
+  unfinished: string[];
+  remainingBudgetUsd?: number;
+  remainingBudgetTokens?: number;
+  reason: string;
+}
+export interface ChildRunResult {
+  runId: string;
+  traceId: string;
+  answer: string;
+  toolCalls: number;
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  error?: string;
+  cancelled: boolean;
+  fallback?: ChildRunFallback;
+}
 export interface ToolFailure { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown'; }
 export interface PersistedToolCall { id: string; runId: string; name: string; result?: ToolResult; }
 export const RUN_TERMINAL = new Set<RunStatus>(['completed', 'failed', 'cancelled', 'interrupted']);

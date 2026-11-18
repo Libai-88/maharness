@@ -183,9 +183,15 @@ export function registerOrganizationRoutes(
         materials: Array.isArray(req.body?.materials) ? req.body.materials : [],
         valueUsd: Number(req.body?.valueUsd),
         maxBudgetUsd: Number(req.body?.maxBudgetUsd),
+        maxBudgetTokens: req.body?.maxBudgetTokens === undefined ? undefined : Number(req.body.maxBudgetTokens),
         priority: req.body?.priority,
         departmentId: typeof req.body?.departmentId === 'string' ? req.body.departmentId : undefined,
         branches: Array.isArray(req.body?.branches) ? req.body.branches : undefined,
+        economics: typeof req.body?.economics === 'object'
+          && req.body.economics !== null
+          && !Array.isArray(req.body.economics)
+          ? req.body.economics
+          : undefined,
       }),
     });
   }));

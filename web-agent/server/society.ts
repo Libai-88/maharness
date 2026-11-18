@@ -1,8 +1,15 @@
 import { createHash, randomUUID } from 'node:crypto';
 import type { MaterialRef } from '../kernel/material';
 import { RUN_TERMINAL, type RunRecord } from '../kernel/run';
+import { estimateTokens } from '../kernel/tokens';
 import type { Store } from './db';
-import { OrganizationService } from './organization';
+import {
+  estimateModelWorkloadCost,
+  firstPricedModel,
+  resolvePricedModel,
+  type PricedModel,
+} from './model-cost-estimator';
+import { OrganizationService, explicitTeamRequest } from './organization';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -20,6 +27,7 @@ import {
   type SocietySnapshot,
   type SocietyTask,
   type SocietyTaskBranch,
+  type SocietyAuditEntry,
 } from './organization-store';
 import type { RunService } from './run-service';
 
@@ -56,6 +64,14 @@ const DEFAULT_POLICIES: InstitutionPolicies = {
   ],
 };
 
+function teamCostEligible(
+  objective: string,
+  estimate: SocietyEconomicsEstimate,
+): boolean {
+  return explicitTeamRequest(objective)
+    || estimate.team.costUsd <= estimate.single.costUsd + 1e-10;
+}
+
 export interface CreateSocietyTaskInput {
   tenantId: string;
   projectId?: string;
@@ -73,6 +89,8 @@ export interface CreateSocietyTaskInput {
 }
 
 export interface SocietyEconomicsEstimate {
+  costSource: 'configured' | 'historical' | 'unavailable';
+  pricingRefs: string[];
   single: {
     costUsd: number;
     tokens: number;
@@ -300,6 +318,26 @@ export class SocietyService {
 
   private repository() {
     return this.options.store.organization;
+  }
+
+  private appendAudit(
+    task: SocietyTask,
+    action: SocietyAuditEntry['action'],
+    reason: string,
+    details: Record<string, unknown>,
+    idempotencyKey: string,
+    actorId = 'maharness',
+  ): void {
+    const schedule = task.scheduleId
+      ? this.repository().getSocietySchedule(task.scheduleId, task.tenantId)
+      : this.repository().getSocietySchedule(idempotencyKey.replace(/^[^:]+:/, ''), task.tenantId);
+    this.repository().appendSocietyAudit({
+      id: randomUUID(), tenantId: task.tenantId, taskId: task.id,
+      ...(schedule ? { scheduleId: schedule.id } : {}),
+      ...(schedule?.workOrderId ? { workOrderId: schedule.workOrderId } : {}),
+      action, actorId, reason: reason.slice(0, 500), details, idempotencyKey,
+      createdAt: Date.now(),
+    });
   }
 
   private assignmentDepartmentId(
@@ -631,7 +669,20 @@ export class SocietyService {
       lastSchedulingReason: requiresApproval ? '等待人类批准高额任务' : '等待制度调度',
       createdAt: now, updatedAt: now, revision: 0,
     };
-    this.repository().createSocietyTask(record);
+    this.repository().transaction(() => {
+      this.repository().createSocietyTask(record);
+      this.appendAudit(
+        record, 'queued',
+        record.lastSchedulingReason ?? '等待制度调度',
+        {
+          status: record.status, approval: record.approval,
+          departmentId: record.departmentId, valueUsd: record.valueUsd,
+          maxBudgetUsd: record.maxBudgetUsd, maxBudgetTokens: record.maxBudgetTokens,
+          branchCount: record.branches.length,
+        },
+        `queued:${record.id}:created`,
+      );
+    });
     this.emit('organization.society.task.updated', { taskId: record.id, status: record.status });
     return record;
   }
@@ -874,15 +925,87 @@ export class SocietyService {
     const independent = branchCount >= 2
       && dependencies.filter(items => items.length === 0).length >= 2
       && task.branches.every(branch => branch.acceptance.length > 0);
-    // The structural branch estimate is conservative; actual economics stay in the run ledger.
-    const soloCostUsd = task.maxBudgetUsd;
-    const teamCostUsd = task.maxBudgetUsd;
-    const coordinationCostUsd = independent
-      ? Math.min(teamCostUsd * 0.2, roles.length >= 2 ? teamCostUsd * 0.05 * (dependencies.flat().length + 1) : 0)
-      : 0;
-    const coordinationTokens = independent
-      ? Math.min(task.maxBudgetTokens * 0.1, Math.max(0, roles.length - 1) * 250)
-      : 0;
+    const materialTokens = task.materials.reduce((sum, ref) => {
+      const size = this.options.store.materials.sizeForTenant(ref, task.tenantId);
+      return sum + (size === undefined ? 0 : Math.ceil(size / 2));
+    }, 0);
+    const taskText = [
+      task.objective,
+      ...task.acceptance,
+      ...task.branches.flatMap(branch => [
+        branch.objective,
+        ...branch.acceptance,
+        ...branch.expectedArtifacts,
+      ]),
+    ].join('\n');
+    const sharedText = task.objective + '\n' + task.acceptance.join('\n');
+    const runtimeRoute = firstPricedModel(this.options.store);
+    const branchRoutes = task.branches.map((_branch, index): PricedModel | undefined => {
+      const role = roles[index];
+      if (!role || !role.modelPolicy.providerId
+        || role.modelPolicy.providerId === 'institution'
+        || role.modelPolicy.model === 'runtime-selected') return runtimeRoute;
+      return resolvePricedModel(this.options.store, role.modelPolicy.providerId, role.modelPolicy.model);
+    });
+    const pricingRefs = [...new Set([
+      ...(runtimeRoute ? [`${runtimeRoute.providerId}@${runtimeRoute.model}`] : []),
+      ...branchRoutes.filter((route): route is PricedModel => Boolean(route))
+        .map(route => `${route.providerId}@${route.model}`),
+    ])];
+    let costSource: SocietyEconomicsEstimate['costSource'] = 'configured';
+    let soloCostUsd = task.maxBudgetUsd;
+    let soloTokens = task.maxBudgetTokens;
+    let teamCostUsd = task.maxBudgetUsd;
+    let teamTokens = task.maxBudgetTokens;
+    let coordinationCostUsd = 0;
+    let coordinationTokens = 0;
+    if (runtimeRoute && branchRoutes.every((route): route is PricedModel => Boolean(route))) {
+      const soloEstimate = estimateModelWorkloadCost(this.options.store, {
+        tenantId: task.tenantId,
+        pricedModel: runtimeRoute,
+        promptTokens: estimateTokens(taskText) + materialTokens,
+        outputTokens: Math.max(512, task.branches.length * 512),
+        fallbackCalls: 3,
+      });
+      soloCostUsd = soloEstimate.costUsd;
+      soloTokens = soloEstimate.tokens;
+      let teamEstimateCost = 0;
+      let teamEstimateTokens = 0;
+      let historical = false;
+      for (let index = 0; index < task.branches.length; index += 1) {
+        const branch = task.branches[index]!;
+        const estimate = estimateModelWorkloadCost(this.options.store, {
+          tenantId: task.tenantId,
+          pricedModel: branchRoutes[index]!,
+          promptTokens: estimateTokens(sharedText) + estimateTokens([
+            branch.objective,
+            ...branch.acceptance,
+            ...branch.expectedArtifacts,
+          ].join('\n')) + materialTokens,
+          outputTokens: 512,
+          fallbackCalls: 3,
+        });
+        teamEstimateCost += estimate.costUsd;
+        teamEstimateTokens += estimate.tokens;
+        historical ||= estimate.source === 'historical';
+      }
+      const coordination = estimateModelWorkloadCost(this.options.store, {
+        tenantId: task.tenantId,
+        pricedModel: runtimeRoute,
+        promptTokens: estimateTokens(sharedText + '\n' + taskText),
+        outputTokens: Math.max(128, roles.length * 64),
+        fallbackCalls: 1,
+      });
+      coordinationCostUsd = independent ? coordination.costUsd : 0;
+      coordinationTokens = independent ? Math.max(1, coordination.tokens) : 0;
+      teamCostUsd = Math.round((teamEstimateCost + coordinationCostUsd) * 1_000_000) / 1_000_000;
+      teamTokens = teamEstimateTokens + coordinationTokens;
+      costSource = historical || soloEstimate.source === 'historical' ? 'historical' : 'configured';
+    } else {
+      costSource = 'unavailable';
+      coordinationCostUsd = 0;
+      coordinationTokens = 0;
+    }
     const soloQuality = 1;
     const evidence = task.economics;
     const teamQuality = independent && roles.length >= 2 ? soloQuality + (evidence?.qualityGain ?? 0) : soloQuality;
@@ -895,14 +1018,16 @@ export class SocietyService {
     const roleFitPenalty = roles.length < teamSize ? Math.max(0, task.valueUsd * 0.05) : 0;
     const adjustedTeamNet = teamNetBenefitUsd - roleFitPenalty;
     return {
+      costSource,
+      pricingRefs,
       single: {
-        costUsd: soloCostUsd, tokens: task.maxBudgetTokens, quality: soloQuality,
+        costUsd: soloCostUsd, tokens: soloTokens, quality: soloQuality,
         latencyMs: branchCount * 2_000, risk: 0.12,
         netBenefitUsd: Math.round(soloNetBenefitUsd * 1e6) / 1e6,
       },
       team: {
         costUsd: teamCostUsd, coordinationCostUsd,
-        tokens: task.maxBudgetTokens, coordinationTokens,
+        tokens: teamTokens, coordinationTokens,
         quality: teamQuality,
         latencyGainMs, riskReduction,
         netBenefitUsd: Math.round(adjustedTeamNet * 1e6) / 1e6,
@@ -941,19 +1066,27 @@ export class SocietyService {
         && policy.model !== 'runtime-selected');
     if (!pinned.length) return true;
     if (new Set(pinned.map(policy => `${policy.providerId}\0${policy.model}`)).size > 1) return false;
-    const provider = this.options.store.listProviders()
-      .find(item => item.enabled && item.id === pinned[0]!.providerId);
-    return Boolean(provider
-      && provider.model === pinned[0]!.model
-      && Number.isFinite(provider.priceIn)
-      && Number.isFinite(provider.priceOut));
+    return Boolean(resolvePricedModel(
+      this.options.store, pinned[0]!.providerId, pinned[0]!.model,
+    ));
   }
 
   private queue(task: SocietyTask, reason: string): SocietyTask {
-    const result = this.repository().updateSocietyTask(task, {
-      status: task.approval === 'pending' ? 'waiting_approval' : 'queued',
-      scheduleId: undefined,
-      lastSchedulingReason: bounded(reason, 500, '调度原因'),
+    let result!: SocietyTask;
+    this.repository().transaction(() => {
+      result = this.repository().updateSocietyTask(task, {
+        status: task.approval === 'pending' ? 'waiting_approval' : 'queued',
+        scheduleId: undefined,
+        lastSchedulingReason: bounded(reason, 500, '调度原因'),
+      });
+      this.appendAudit(
+        result, 'queued', result.lastSchedulingReason!,
+        {
+          status: result.status, approval: result.approval,
+          departmentId: result.departmentId, revision: result.revision,
+        },
+        `queued:${result.id}:${createHash('sha256').update(result.lastSchedulingReason ?? '').digest('hex').slice(0, 16)}`,
+      );
     });
     this.emit('organization.society.task.queued', { taskId: task.id, reason });
     return result;
@@ -1041,19 +1174,35 @@ export class SocietyService {
             ? `配对实测边际净收益 ${evidenceMarginal} USD 未达到门槛，保持单角色`
             : undefined
         : undefined;
-      const teamEligible = independentBranches
-        && available.length >= Math.min(2, task.branches.length)
-        && !evidenceFallbackReason
-        && economics.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
-        && economics.team.netBenefitUsd > economics.single.netBenefitUsd;
       let teamFallbackReason: string | undefined = evidenceFallbackReason;
-      let teamRoles = teamEligible
+      let teamRoles = independentBranches
+        && available.length >= Math.min(2, task.branches.length)
         ? this.teamRolesForBranches(task, available, institution)
         : [];
       if (teamRoles.length > 1 && !this.teamRoutingCompatible(teamRoles)) {
         teamFallbackReason = '团队角色模型、tokenizer 或价格口径不可比，保持单角色';
         teamRoles = [];
       }
+      const teamEligible = teamRoles.length > 1
+        && !evidenceFallbackReason
+        && economics.costSource !== 'unavailable'
+        && economics.team.costUsd <= task.maxBudgetUsd + 1e-10
+        && economics.team.tokens <= task.maxBudgetTokens
+        && teamCostEligible(task.objective, economics)
+        && economics.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
+        && economics.team.netBenefitUsd > economics.single.netBenefitUsd;
+      if (!teamFallbackReason) {
+        teamFallbackReason = economics.costSource === 'unavailable'
+          ? '当前模型价格未配置，无法证明团队净收益，保持单角色'
+          : economics.team.costUsd > task.maxBudgetUsd + 1e-10
+            ? '服务端团队成本估算超过任务硬预算，保持单角色'
+            : economics.team.tokens > task.maxBudgetTokens
+              ? '服务端团队 token 估算超过任务硬预算，保持单角色'
+              : !teamCostEligible(task.objective, economics)
+                ? '团队估算高于单角色方案，保持单角色'
+              : undefined;
+      }
+      if (!teamEligible && teamRoles.length) teamRoles = [];
       const soloRole = available.find(role =>
         this.roleDepartment(role, task.departmentId ?? '', institution.policies.departments),
       ) ?? available[0];
@@ -1204,6 +1353,27 @@ export class SocietyService {
         this.repository().updateSocietyTask(task, {
           status: 'scheduled', scheduleId: schedule.id, lastSchedulingReason: schedule.reason,
         });
+        this.appendAudit(
+          { ...task, status: 'scheduled', scheduleId: schedule.id },
+          'scheduled', schedule.reason,
+          {
+            institutionVersion: institution.version,
+            mode: schedule.mode,
+            roleIds: schedule.roleIds,
+            selectedByDepartment: schedule.assignments.map(assignment => ({
+              roleId: assignment.roleId, departmentId: assignment.departmentId,
+            })),
+            excludedCandidates: schedule.selection?.candidates
+              .filter(candidate => !candidate.eligible)
+              .map(candidate => ({
+                roleId: candidate.roleId, score: candidate.score,
+                blockedReason: candidate.blockedReason ?? 'unknown',
+              })) ?? [],
+            estimates: schedule.estimates,
+            fallbackReason: useTeam ? undefined : teamFallbackReason,
+          },
+          `scheduled:${schedule.id}`,
+        );
         for (const roleId of schedule.roleIds) {
           this.repository().appendRoleMemory({
             id: randomUUID(), tenantId, roleId, kind: 'schedule',
@@ -1395,6 +1565,17 @@ export class SocietyService {
         this.repository().updateSocietyTask(task, {
           status: 'failed', lastSchedulingReason: `真实执行未通过：${reason}`.slice(0, 500),
         });
+      this.appendAudit(
+        { ...task, status: 'failed', scheduleId: schedule.id },
+        'release_failed', reason,
+        {
+          previousStatus: schedule.status, status: 'failed',
+          runIds: [...runIds], roleIds: [...roleIds],
+          artifacts: contracts.flatMap(contract => contract.delivery?.artifacts ?? []),
+          evidence: evidence.map(item => ({ id: item.id, kind: item.kind, ref: item.ref })),
+        },
+        `release_failed:${schedule.id}`,
+      );
     });
     this.emit('organization.society.failed', {
       taskId: task.id, scheduleId: schedule.id, reason,
@@ -1446,15 +1627,19 @@ export class SocietyService {
       > coordinatorDepartment.quotaTokens) return false;
 
     const artifacts = [...new Set(delivered.flatMap(contract => contract.delivery?.artifacts ?? []))];
+    const retainedExpected = new Set(delivered.flatMap(contract => contract.expectedArtifacts)
+      .map(path => path.replace(/\\/g, '/').toLowerCase()));
+    const expectedArtifacts = [...new Set([
+      ...contracts.filter(contract => contract.status !== 'delivered')
+        .flatMap(contract => contract.expectedArtifacts),
+      ...task.branches.flatMap(branch => branch.expectedArtifacts)
+        .filter(path => !retainedExpected.has(path.replace(/\\/g, '/').toLowerCase())),
+    ])];
     const evidence = [
       ...schedule.sharedMemoryRefs,
       ...contracts.flatMap(contract => contract.delivery?.evidence ?? contract.evidenceInputs),
       ...artifacts.map(ref => ({ id: `artifact:${ref}`, kind: 'artifact', ref })),
     ].filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
-    const expectedArtifacts = [...new Set([
-      ...contracts.flatMap(contract => contract.expectedArtifacts),
-      ...task.branches.flatMap(branch => branch.expectedArtifacts),
-    ])];
     const acceptance = [...new Set([
       ...task.acceptance,
       ...contracts.flatMap(contract => contract.acceptance.map(item => item.statement)),
@@ -1547,6 +1732,22 @@ export class SocietyService {
         status: 'scheduled',
         lastSchedulingReason: `团队失败，已回退单角色：${reason}`.slice(0, 500),
       });
+      this.appendAudit(
+        { ...task, status: 'scheduled', scheduleId: schedule.id },
+        'fallback_solo', reason,
+        {
+          previousMode: 'team', mode: 'solo',
+          coordinatorRoleId: coordinator.id,
+          retainedContracts: delivered.map(contract => contract.id),
+          collapsedContracts: contracts
+            .filter(contract => contract.status !== 'delivered')
+            .map(contract => contract.id),
+          fallbackContractId: fallbackContract.id,
+          remainingBudgetUsd: remainingUsd, remainingBudgetTokens: remainingTokens,
+          evidence: evidence.map(item => ({ id: item.id, kind: item.kind, ref: item.ref })),
+        },
+        `fallback_solo:${schedule.id}:${fallbackContract.id}`,
+      );
     });
 
     for (const runId of schedule.runIds ?? []) {
@@ -1705,9 +1906,7 @@ export class SocietyService {
       }
 
       contracts = schedule.contractIds.map(id => this.repository().getContract(id, tenantId)!);
-      if (contracts.some(contract => ['failed', 'cancelled'].includes(contract.status))) {
-        this.failSchedule(task, schedule, '至少一个真实分工未成功交付');
-      } else if (contracts.every(contract => ['delivered', 'failed', 'cancelled'].includes(contract.status))) {
+      if (contracts.every(contract => ['delivered', 'failed', 'cancelled'].includes(contract.status))) {
         return this.settleSchedule(schedule.id, tenantId);
       }
       return {
@@ -1748,6 +1947,18 @@ export class SocietyService {
         status: 'awaiting_acceptance',
         lastSchedulingReason: '全部真实分工已交付，等待人类验收',
       });
+      this.appendAudit(
+        { ...task, status: 'awaiting_acceptance', scheduleId: schedule.id },
+        'release_completed', '全部真实分工已交付，等待人类验收',
+        {
+          previousStatus: schedule.status, status: 'completed',
+          runIds: schedule.runIds ?? [], roleIds: schedule.roleIds,
+          artifacts: contracts.flatMap(contract => contract.delivery?.artifacts ?? []),
+          evidence: evidence.map(item => ({ id: item.id, kind: item.kind, ref: item.ref })),
+          deliveredContracts: contracts.map(contract => contract.id),
+        },
+        `release_completed:${schedule.id}`,
+      );
       for (const contract of contracts) this.repository().appendRoleMemory({
         id: randomUUID(), tenantId, roleId: contract.roleId,
         kind: 'submission',
@@ -1781,6 +1992,7 @@ export class SocietyService {
     if (!task.scheduleId) throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '任务尚未建立调度');
     const schedule = this.repository().getSocietySchedule(task.scheduleId, tenantId);
     if (!schedule) throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '任务调度不存在');
+    if (!schedule.workOrderId) throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '任务调度没有关联工作单');
     const reason = bounded(summary, 1000, '释放原因');
     const currentTask = task;
     if (outcome === 'completed') {
@@ -1794,6 +2006,7 @@ export class SocietyService {
         throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '分工交付事实不完整，不能标记完成');
       const now = Date.now();
       this.repository().transaction(() => {
+        this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'completed', reason);
         task = this.repository().updateSocietyTask(currentTask, {
           status: 'completed', lastSchedulingReason: `人类验收：${reason}`,
         });
@@ -1813,6 +2026,7 @@ export class SocietyService {
         .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
       const now = Date.now();
       this.repository().transaction(() => {
+        this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'failed', reason);
         task = this.repository().updateSocietyTask(currentTask, {
           status: 'failed', lastSchedulingReason: `人类拒绝验收：${reason}`,
         });
@@ -1982,6 +2196,7 @@ export class SocietyService {
         wellbeing: wellbeing.find(item => item.roleId === role.id),
       })),
       tasks, schedules,
+      audits: this.repository().societyAudits(tenantId),
       institutionAudits: this.repository().institutionAudits(tenantId),
       evaluation: evaluation.active,
       evaluationAudits: evaluation.audits,
@@ -2068,6 +2283,7 @@ export class SocietyService {
     const institution = this.ensureInstitution(tenantId);
     const estimate = this.estimate(task);
     const team = task.branches.length >= 2
+      && teamCostEligible(task.objective, estimate)
       && estimate.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
       && estimate.team.netBenefitUsd > 0;
     const selected = team ? 'team' : estimate.single.netBenefitUsd > institution.policies.minNetBenefitUsd ? 'solo' : 'queue';
@@ -2256,9 +2472,12 @@ export class SocietyService {
       ? contracts.filter(contract => contract.status === 'delivered').length / contracts.length
       : completed ? 1 : 0;
     const expected = [...new Set(task.branches.flatMap(branch => branch.expectedArtifacts))];
-    const artifacts = runs.flatMap(run => this.options.store.runs.artifacts(run.id).map(item => item.ref.toLowerCase()));
+    const artifacts = runs.flatMap(run => this.options.store.runs.artifacts(run.id).map(item => item.ref.replace(/\\/g, '/').toLowerCase()));
     const artifactCoverage = expected.length
-      ? expected.filter(ref => artifacts.some(artifact => artifact.includes(ref.toLowerCase()))).length / expected.length
+      ? expected.filter(ref => {
+        const normalized = ref.replace(/\\/g, '/').toLowerCase();
+        return artifacts.some(artifact => artifact.includes(normalized));
+      }).length / expected.length
       : completion;
     const startedAt = Math.min(task.createdAt, ...runs.map(run => run.createdAt));
     const finishedAt = Math.max(task.updatedAt, ...runs.map(run => run.updatedAt));

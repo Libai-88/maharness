@@ -33,6 +33,12 @@ function addRun(store: Store, input: {
   budgetPolicy?: 'advisory' | 'enforce';
   workspace?: string;
 } = {}): RunRecord {
+  if (!store.getProvider('fixture')) {
+    store.upsertProvider({
+      id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
+      apiKey: '', model: 'fixture-model', priceIn: 1, priceOut: 2,
+    });
+  }
   const tenantId = input.tenantId ?? 'default';
   const session = store.createSession('fixture-model', 'fixture', tenantId);
   const id = randomUUID();
@@ -89,6 +95,14 @@ function addChild(store: Store, parent: RunRecord, objective: string): RunRecord
   };
   store.runs.create(child);
   return child;
+}
+
+function addArtifact(store: Store, run: RunRecord, callId: string, ref: string): void {
+  store.runs.startTool(run.id, callId, 'write_file', '{}', { version: '1.0.0', sideEffect: 'write' });
+  store.runs.finishTool(run.id, callId, {
+    ok: true, data: {},
+    evidence: [{ artifact: true, kind: 'file', label: ref, ref }],
+  });
 }
 
 function addRole(store: Store, input: {
@@ -199,7 +213,7 @@ describe('AI labor organization', () => {
 
     store = new Store(file);
     try {
-      assert.equal(store.schemaVersion, 14);
+      assert.equal(store.schemaVersion, 15);
       assert.equal(store.getSession(session.id)?.id, session.id);
       assert.equal(store.runs.get(run.id, 'default')?.id, run.id);
       assert.doesNotThrow(() => store.organization.listWorkOrders('default'));
@@ -303,6 +317,37 @@ describe('AI labor organization', () => {
     }
   });
 
+  test('an empty artifact set cannot satisfy a contract with expected artifacts', () => {
+    const store = new Store(':memory:');
+    const organization = new OrganizationService({ store });
+    try {
+      const run = addRun(store, {
+        objective: '请组织团队并行整理两份资料',
+        budgetUsd: 0.1,
+        budgetPolicy: 'enforce',
+      });
+      organization.createForRun(run);
+      const team = addTeam(organization, run);
+      const child = addChild(store, run, team.contracts[0]!.branchObjective);
+      organization.prepareDelegation(run, child, {
+        objective: child.objective,
+        assignmentContractId: team.contracts[0]!.id,
+      });
+      store.runs.update(child, { status: 'completed', answer: '没有生成文件' });
+      const delivered = organization.deliver(child.id, 'default', { summary: '没有生成文件' });
+
+      assert.equal(delivered.status, 'failed');
+      assert.equal(delivered.delivery?.artifacts.length, 0);
+      assert.equal(
+        delivered.delivery?.unfinished.includes('缺少预期产物：analysis-a.md'),
+        true,
+        JSON.stringify(delivered.delivery),
+      );
+    } finally {
+      store.close();
+    }
+  });
+
   test('society assignments cannot create teams or delegate additional roles', () => {
     const store = new Store(':memory:');
     const organization = new OrganizationService({ store });
@@ -378,6 +423,67 @@ describe('AI labor organization', () => {
       assert.equal(after.includes('run_subagent'), true);
       assert.equal(after.includes('run_parallel'), true);
       assert.equal(after.includes('team_create'), false);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('team cost gate ignores caller claims and requires configured pricing', () => {
+    const store = new Store(':memory:');
+    const organization = new OrganizationService({ store });
+    try {
+      const run = addRun(store, {
+        objective: '分别整理两份资料并生成两个文件',
+        budgetUsd: 0.1,
+        budgetPolicy: 'enforce',
+      });
+      organization.createForRun(run);
+      const assignments = [
+        {
+          objective: '整理资料 A', expectedArtifacts: ['a.md'],
+          acceptance: ['内容可核对'], budgetUsd: 0.02,
+        },
+        {
+          objective: '整理资料 B', expectedArtifacts: ['b.md'],
+          acceptance: ['内容可核对'], budgetUsd: 0.02,
+        },
+      ];
+      assert.throws(() => organization.createTeam(run, {
+        assignments,
+        singleAgentEstimateUsd: 1,
+        teamEstimateUsd: 0.000001,
+      }), (error: unknown) => error instanceof OrganizationError
+        && error.code === 'TEAM_NOT_ELIGIBLE'
+        && /团队估算高于单角色方案/.test(error.message));
+
+      const humanRun = addRun(store, {
+        objective: '请组织团队并行整理两批资料',
+        budgetUsd: 0.1,
+        budgetPolicy: 'enforce',
+      });
+      organization.createForRun(humanRun);
+      const team = organization.createTeam(humanRun, {
+        assignments,
+        singleAgentEstimateUsd: 0.000001,
+        teamEstimateUsd: 0.000001,
+      });
+      assert.ok(team.teamCycle.teamEstimateUsd > 0.000001);
+      assert.ok(team.teamCycle.soloEstimateUsd > 0.000001);
+
+      store.upsertProvider({
+        id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
+        apiKey: '', model: 'fixture-model', priceIn: undefined, priceOut: undefined,
+      });
+      const missingPriceRun = addRun(store, {
+        objective: '请组织团队并行整理价格检查',
+        budgetUsd: 0.1,
+        budgetPolicy: 'enforce',
+      });
+      organization.createForRun(missingPriceRun);
+      assert.throws(() => organization.createTeam(missingPriceRun, { assignments }),
+        (error: unknown) => error instanceof OrganizationError
+          && error.code === 'TEAM_NOT_ELIGIBLE'
+          && /价格未配置/.test(error.message));
     } finally {
       store.close();
     }
@@ -474,6 +580,10 @@ describe('AI labor organization', () => {
 
   test('delegation enforces role authority and contract budget', async () => {
     const store = new Store(':memory:');
+    store.upsertProvider({
+      id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
+      apiKey: '', model: 'fixture-model', priceIn: 1, priceOut: 2,
+    });
     const provider: ProviderDef = {
       id: 'fixture', label: 'Fixture', defaultModel: 'fixture-model',
       async *chat() {},
@@ -643,10 +753,67 @@ describe('AI labor organization', () => {
       });
       store.runs.update(second, { status: 'completed', answer: '汇总已交付', usageStatus: 'reported', tokensIn: 10, tokensOut: 5 });
       const receipt = organization.finalizeRun(store.runs.get(second.id, 'default')!);
-      assert.equal(receipt?.status, 'completed');
+      assert.equal(receipt?.status, 'awaiting_acceptance');
       assert.equal(receipt?.artifacts.length, 2);
+      assert.equal(receipt?.humanAcceptedAt, undefined);
+      assert.equal(store.organization.getWorkOrder(plan.workOrder.id, 'default')?.status, 'awaiting_acceptance');
+      const reviewed = organization.reviewWorkOrder(plan.workOrder.id, 'default', 'completed', '人工验收通过');
+      assert.equal(reviewed.status, 'completed');
+      assert.ok(reviewed.humanAcceptedAt);
       assert.equal(store.organization.getWorkOrder(plan.workOrder.id, 'default')?.status, 'completed');
+      assert.deepEqual(
+        organization.detail(plan.workOrder.id, 'default').ledger.slice(-2).map(item => item.type),
+        ['reviewed', 'closed'],
+      );
       assert.equal(organization.workOrderForRun(second).id, plan.workOrder.id);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('human rejection is immutable when a late finalizer runs again', () => {
+    const store = new Store(':memory:');
+    const organization = new OrganizationService({
+      store,
+      runtimeAuthority: () => ({
+        workspace: process.cwd(), readOnly: false, profile: 'developer',
+        allowedTools: ['read_file'],
+      }),
+    });
+    try {
+      const role = addRole(store);
+      const task = societyTask();
+      const schedule = societySchedule(task, role.id);
+      store.organization.createSocietyTask(task);
+      store.organization.createSocietySchedule(schedule);
+      const plan = organization.createSocietyExecution(task, schedule);
+      let latest: RunRecord | undefined;
+      for (const [index, contract] of plan.contracts.entries()) {
+        const run = addSocietyRun(store, {
+          workOrderId: plan.workOrder.id, contractId: contract.id, roleId: role.id,
+          objective: contract.branchObjective, toolNames: ['read_file'],
+        });
+        organization.prepareSocietyRun(run, contract.id);
+        store.runs.create(run);
+        addArtifact(store, run, `review-artifact-${index}`, contract.expectedArtifacts[0]!);
+        store.runs.update(run, { status: 'completed', answer: '分支完成', usageStatus: 'reported' });
+        latest = store.runs.get(run.id, 'default')!;
+        organization.finalizeRun(latest);
+      }
+
+      const pending = store.organization.receipt(plan.workOrder.id, 'default')!;
+      assert.equal(pending.status, 'awaiting_acceptance');
+      const rejected = organization.reviewWorkOrder(plan.workOrder.id, 'default', 'failed', '关键来源不完整');
+      assert.equal(rejected.status, 'failed');
+      assert.ok(rejected.humanReviewedAt);
+      assert.equal(rejected.humanAcceptedAt, undefined);
+
+      const late = organization.finalizeRun(latest!);
+      assert.equal(late?.status, 'failed');
+      assert.equal(late?.humanReviewedAt, rejected.humanReviewedAt);
+      assert.equal(store.organization.getWorkOrder(plan.workOrder.id, 'default')?.status, 'failed');
+      assert.ok(store.organization.societyAudits('default').some(entry =>
+        entry.action === 'human_rejected' && entry.workOrderId === plan.workOrder.id));
     } finally {
       store.close();
     }
@@ -782,15 +949,87 @@ describe('AI labor organization', () => {
       const collapsed = organization.collapseToSolo(store.runs.get(run.id, 'default')!, '连续两个分支失败');
       assert.equal(collapsed?.status, 'partial');
       assert.equal(store.runs.get(run.id, 'default')?.fallbackReason, 'ROLLBACK_TO_SOLO');
+      const firstHandoff = organization.soloTakeoverContract(store.runs.get(run.id, 'default')!, '第一个分支失败');
+      const duplicateHandoff = organization.soloTakeoverContract(store.runs.get(run.id, 'default')!, '第二个分支失败');
+      assert.equal(firstHandoff.contractId, duplicateHandoff.contractId);
+      assert.deepEqual(firstHandoff.expectedArtifacts.sort(), ['analysis-a.md', 'analysis-b.md']);
+      addArtifact(store, store.runs.get(run.id, 'default')!, 'takeover-a', 'analysis-a.md');
+      addArtifact(store, store.runs.get(run.id, 'default')!, 'takeover-b', 'analysis-b.md');
       store.runs.update(store.runs.get(run.id, 'default')!, {
         status: 'completed',
         answer: '已由单角色合并失败分支后的有效结果',
       });
       const receipt = organization.finalizeRun(store.runs.get(run.id, 'default')!);
-      assert.equal(receipt?.status, 'partial');
+      assert.equal(receipt?.status, 'completed');
       assert.equal(store.organization.getTeamCycle(team.teamCycle.id, 'default')?.status, 'partial');
+      assert.equal(team.contracts.every(contract =>
+        store.organization.getContract(contract.id, 'default')?.status === 'collapsed'), true);
       const ledger = store.organization.ledger(organization.workOrderForRun(run).id, 'default');
       assert.ok(ledger.some(entry => entry.summary.includes('回退单角色')));
+      assert.equal(ledger.filter(entry => entry.type === 'handoff').length, 1);
+      assert.ok(store.organization.societyAudits('default').some(entry =>
+        entry.action === 'fallback_solo' && entry.workOrderId === organization.workOrderForRun(run).id));
+    } finally {
+      store.close();
+    }
+  });
+
+  test('society audit rows are append-only, idempotent, and isolated by tenant', () => {
+    const store = new Store(':memory:');
+    try {
+      const entry = {
+        id: 'society-audit-1', tenantId: 'default', taskId: 'task-1',
+        scheduleId: 'schedule-1', workOrderId: 'order-1', action: 'queued' as const,
+        actorId: 'maharness', reason: '排队等待', details: { queuePosition: 1 },
+        idempotencyKey: 'queued:task-1:1', createdAt: Date.now(),
+      };
+      assert.ok(store.organization.appendSocietyAudit(entry));
+      assert.equal(store.organization.appendSocietyAudit(entry), undefined);
+      const db = (store as unknown as { db: {
+        prepare(sql: string): { run(...args: unknown[]): void };
+      } }).db;
+      assert.throws(
+        () => db.prepare('UPDATE organization_society_audit_v1 SET reason=? WHERE id=?')
+          .run('篡改', entry.id),
+        /append-only/,
+      );
+      assert.throws(
+        () => db.prepare('DELETE FROM organization_society_audit_v1 WHERE id=?').run(entry.id),
+        /append-only/,
+      );
+      assert.equal(store.organization.societyAudits('default').length, 1);
+      assert.equal(store.organization.societyAudits('other-tenant').length, 0);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('solo takeover without the promised artifacts cannot report completion', () => {
+    const store = new Store(':memory:');
+    const organization = new OrganizationService({ store });
+    try {
+      const run = addRun(store, { objective: '请组织团队并行执行', budgetUsd: 0.1, budgetPolicy: 'enforce' });
+      organization.createForRun(run);
+      const team = addTeam(organization, run);
+      for (const contract of team.contracts) {
+        const child = addChild(store, run, contract.branchObjective);
+        organization.prepareDelegation(run, child, { objective: child.objective, assignmentContractId: contract.id });
+        store.runs.update(child, { status: 'failed', error: '分支失败' });
+        organization.finalizeRun(store.runs.get(child.id, 'default')!);
+      }
+      organization.collapseToSolo(store.runs.get(run.id, 'default')!, '连续两个分支失败');
+      organization.soloTakeoverContract(store.runs.get(run.id, 'default')!, '交给单角色接管');
+      store.runs.update(store.runs.get(run.id, 'default')!, {
+        status: 'completed', answer: '已口头完成',
+      });
+
+      const receipt = organization.finalizeRun(store.runs.get(run.id, 'default')!);
+      assert.equal(receipt?.status, 'failed');
+      assert.match(receipt?.unfinished.join('\n') ?? '', /analysis-a\.md/);
+      assert.match(receipt?.unfinished.join('\n') ?? '', /analysis-b\.md/);
+      assert.equal(store.organization.getWorkOrder(
+        organization.workOrderForRun(run).id, 'default',
+      )?.status, 'failed');
     } finally {
       store.close();
     }

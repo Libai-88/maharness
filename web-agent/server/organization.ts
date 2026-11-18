@@ -1,8 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { currentPlanForSession } from '../core/goal-plan';
-import { RUN_TERMINAL, type PermissionProfile, type RunRecord } from '../kernel/run';
+import {
+  RUN_TERMINAL,
+  type ChildRunFallback,
+  type PermissionProfile,
+  type RunRecord,
+} from '../kernel/run';
 import { validateTaskContract, type TaskCriterion } from '../kernel/task-verifier';
+import { estimateTokens } from '../kernel/tokens';
 import type { Store } from './db';
+import {
+  estimateModelWorkloadCost,
+  resolvePricedModel,
+  type PricedModel,
+} from './model-cost-estimator';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -19,6 +30,7 @@ import {
   type RoleScorecard,
   type RoleWellbeingSnapshot,
   type SocietySchedule,
+  type SocietyAuditEntry,
   type SocietyTask,
   type TeamCycle,
   type TeamEconomics,
@@ -42,7 +54,9 @@ export interface AssignmentDraft {
 
 export interface TeamCreateInput {
   assignments: AssignmentDraft[];
+  /** Retained for API compatibility. The service derives its own cost baseline. */
   singleAgentEstimateUsd?: number;
+  /** Retained for API compatibility. The service derives its own cost baseline. */
   teamEstimateUsd?: number;
   reason?: string;
 }
@@ -60,6 +74,7 @@ export interface OrganizationDetail {
   roles: OrganizationRole[];
   contracts: AssignmentContract[];
   ledger: WorkLedgerEntry[];
+  societyAudits: SocietyAuditEntry[];
   receipt?: WorkReceipt;
   exceptions: ExceptionCase[];
   economics: TeamEconomics;
@@ -83,7 +98,7 @@ const ORGANIZATION_ADVANCED_TOOLS = new Set(['team_create', 'work_contract_creat
 const TEAM_REQUEST = /(团队|小组|多人协作|多个角色|并行|分工|派给|交给.*代理|agent\s*(team|群|组)|subagents?|parallel)/i;
 const NEGATED_TEAM_REQUEST = /(?:不要|不用|无需|不需要|别|禁止|不得|暂不)[^，,。！？!?；;\n]{0,16}(?:团队|小组|多个角色|并行|分工|派给|代理|subagents?|parallel)/i;
 
-function explicitTeamRequest(text: string): boolean {
+export function explicitTeamRequest(text: string): boolean {
   return text.split(/[，,。！？!?；;\n]+/).some(clause => TEAM_REQUEST.test(clause) && !NEGATED_TEAM_REQUEST.test(clause));
 }
 
@@ -141,6 +156,11 @@ function unfinishedForRun(run: RunRecord): string[] {
   if (verification?.status === 'partial') return failedChecks.length ? failedChecks : ['任务仅部分完成'];
   if (verification?.status === 'failed') return failedChecks.length ? failedChecks : ['任务验收失败'];
   return failedChecks;
+}
+
+function artifactMatches(ref: string, expected: string): boolean {
+  const normalize = (value: string) => value.replace(/\\/g, '/').toLowerCase();
+  return normalize(ref).includes(normalize(expected));
 }
 
 export function taskCriteriaForContract(contract: AssignmentContract): TaskCriterion[] {
@@ -838,24 +858,24 @@ export class OrganizationService {
       if (draft.dependsOn.some(id => !ids.has(id) || id === `assignment-${drafts.indexOf(draft) + 1}`))
         throw new OrganizationError(400, 'WORK_CONTRACT_INVALID', '分工依赖引用无效');
     }
-    const teamEstimateUsd = input.teamEstimateUsd ?? drafts.reduce((sum, item) => sum + item.budgetUsd, 0);
-    if (!Number.isFinite(teamEstimateUsd) || teamEstimateUsd <= 0)
+    const authoritativeCost = this.teamCostEstimate(run, workOrder, drafts);
+    const teamEstimateUsd = authoritativeCost.teamEstimateUsd;
+    if (!Number.isFinite(teamEstimateUsd) || teamEstimateUsd < 0)
       throw new OrganizationError(400, 'INVALID_BUDGET', '团队费用估算无效');
     const available = this.options.store.runs.availableBudget(run);
-    if (available === undefined || teamEstimateUsd > available + 1e-10 || drafts.some(item => item.budgetUsd > available! + 1e-10))
+    if (available === undefined || teamEstimateUsd > available + 1e-10
+      || drafts.reduce((sum, item) => sum + item.budgetUsd, 0) > available + 1e-10)
       throw new OrganizationError(409, 'TEAM_BUDGET_INSUFFICIENT', '团队估算超过主任务可用硬预算');
     const humanRequested = explicitTeamRequest(run.objective);
     if (!humanRequested) {
-      if (input.singleAgentEstimateUsd === undefined)
-        throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '自动组队缺少单角色费用基线');
-      if (teamEstimateUsd > input.singleAgentEstimateUsd + 1e-10)
+      if (teamEstimateUsd > authoritativeCost.singleAgentEstimateUsd + 1e-10)
         throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '团队估算高于单角色方案，继续由单角色执行');
     }
 
     const now = Date.now();
     const cycle: TeamCycle = {
       id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
-      assignmentIds: [], soloEstimateUsd: input.singleAgentEstimateUsd ?? teamEstimateUsd,
+      assignmentIds: [], soloEstimateUsd: authoritativeCost.singleAgentEstimateUsd,
       teamEstimateUsd, hardBudget: true,
       reason: input.reason?.trim() || (humanRequested ? '人类明确要求组织执行' : '独立分支且成本不高于单角色方案'),
       status: 'planned', revision: 0, createdAt: now, updatedAt: now,
@@ -904,6 +924,81 @@ export class OrganizationService {
     this.emit('work.contract.updated', { workOrderId: workOrder.id, teamCycleId: cycle.id, contracts: contracts.length });
     this.emit('organization.updated', { workOrderId: workOrder.id, teamCycleId: cycle.id });
     return { teamCycle: cycle, contracts, economics };
+  }
+
+  private teamCostEstimate(
+    run: RunRecord,
+    workOrder: WorkOrder,
+    drafts: Array<AssignmentDraft & {
+      objective: string;
+      expectedArtifacts: string[];
+      acceptance: string[];
+      dependsOn: string[];
+    }>,
+  ): { singleAgentEstimateUsd: number; teamEstimateUsd: number } {
+    const soloRoute = resolvePricedModel(this.options.store, run.providerId, run.model);
+    if (!soloRoute)
+      throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '当前模型价格未配置，不能进行自动团队成本核算');
+    const materialTokens = (run.materials ?? []).reduce((sum, material) =>
+      sum + Math.ceil(Math.max(0, material.size) / 2), 0);
+    const sharedText = [
+      run.objective,
+      ...(run.acceptance ?? []).map(item => JSON.stringify(item)),
+      ...workOrder.acceptance.map(item => item.statement),
+    ].join('\n');
+    const branchText = drafts.map(item => [
+      item.objective,
+      ...item.expectedArtifacts,
+      ...item.acceptance,
+    ].join('\n')).join('\n');
+    const solo = estimateModelWorkloadCost(this.options.store, {
+      tenantId: run.tenantId,
+      pricedModel: soloRoute,
+      promptTokens: estimateTokens(sharedText) + estimateTokens(branchText) + materialTokens,
+      outputTokens: Math.max(512, drafts.length * 512),
+      fallbackCalls: 3,
+    });
+
+    let teamCostUsd = 0;
+    for (const draft of drafts) {
+      let route: PricedModel | undefined = soloRoute;
+      if (draft.roleId) {
+        const role = this.repo.getRole(draft.roleId, run.tenantId);
+        if (!role || role.employment !== 'active')
+          throw new OrganizationError(404, 'ROLE_NOT_FOUND', `角色不存在或不可用：${draft.roleId}`);
+        if (role.modelPolicy.providerId
+          && role.modelPolicy.providerId !== 'institution'
+          && role.modelPolicy.model !== 'runtime-selected') {
+          route = resolvePricedModel(
+            this.options.store, role.modelPolicy.providerId, role.modelPolicy.model,
+          );
+        }
+      }
+      if (!route)
+        throw new OrganizationError(409, 'TEAM_NOT_ELIGIBLE', '分工角色模型价格未配置，不能进行团队成本核算');
+      const estimate = estimateModelWorkloadCost(this.options.store, {
+        tenantId: run.tenantId,
+        pricedModel: route,
+        promptTokens: estimateTokens(sharedText)
+          + estimateTokens([draft.objective, ...draft.expectedArtifacts, ...draft.acceptance].join('\n'))
+          + materialTokens,
+        outputTokens: 512,
+        fallbackCalls: 3,
+      });
+      teamCostUsd += estimate.costUsd;
+    }
+    const coordination = estimateModelWorkloadCost(this.options.store, {
+      tenantId: run.tenantId,
+      pricedModel: soloRoute,
+      promptTokens: estimateTokens(sharedText) + estimateTokens(branchText),
+      outputTokens: 128,
+      fallbackCalls: 1,
+    });
+    teamCostUsd += coordination.costUsd;
+    return {
+      singleAgentEstimateUsd: solo.costUsd,
+      teamEstimateUsd: Math.round(teamCostUsd * 1_000_000) / 1_000_000,
+    };
   }
 
   private resolveRole(run: RunRecord, workOrder: WorkOrder, draft: AssignmentDraft, index: number): OrganizationRole {
@@ -1004,8 +1099,10 @@ export class OrganizationService {
       throw new OrganizationError(409, 'WORK_LEDGER_CONFLICT', '任务结束后才能交付契约');
     const artifacts = [...new Set((input.artifacts?.length ? input.artifacts : this.options.store.runs.artifacts(runId).map(item => item.ref)).filter(Boolean))];
     const expected = new Set(contract.expectedArtifacts.map(item => item.toLowerCase()));
-    const missing = artifacts.length && expected.size
-      ? [...expected].filter(item => !artifacts.some(artifact => artifact.toLowerCase().includes(item)))
+    const missing = expected.size
+      ? [...expected]
+        .filter(item => !artifacts.some(artifact => artifactMatches(artifact, item)))
+        .map(item => `缺少预期产物：${item}`)
       : [];
     const delivery: AssignmentDelivery = {
       summary: bounded(input.summary, 4000, '交付摘要'),
@@ -1033,7 +1130,7 @@ export class OrganizationService {
     if (!['active', 'proposed'].includes(contract.status)) return contract;
     const artifacts = this.options.store.runs.artifacts(run.id).map(item => item.ref);
     const missing = contract.expectedArtifacts.filter(expected =>
-      !artifacts.some(artifact => artifact.toLowerCase().includes(expected.toLowerCase())),
+      !artifacts.some(artifact => artifactMatches(artifact, expected)),
     );
     const delivery: AssignmentDelivery = {
       summary: (run.answer ?? run.error ?? `任务状态：${run.status}`).slice(0, 4000),
@@ -1068,6 +1165,10 @@ export class OrganizationService {
       : this.repo.workOrderByRun(run.rootId, run.tenantId) ?? this.repo.workOrderByRun(run.id, run.tenantId);
     if (!workOrder) return undefined;
     if (run.parentId && workOrder.rootRunId !== run.id) return undefined;
+    const previous = this.repo.receipt(workOrder.id, run.tenantId);
+    const humanReviewed = previous?.humanReviewedAt ?? (!!previous && this.repo.ledger(workOrder.id, run.tenantId)
+      .some(entry => entry.type === 'reviewed' && entry.actorId === 'human'));
+    if (humanReviewed) return run.parentId ? undefined : previous;
 
     let contracts = this.repo.contracts(workOrder.id, run.tenantId);
     const incomplete = contracts.some(item => ['proposed', 'active'].includes(item.status));
@@ -1077,14 +1178,20 @@ export class OrganizationService {
     const runs = [...new Map(contracts.flatMap(item =>
       item.runId ? [[item.runId, this.options.store.runs.get(item.runId, run.tenantId)] as const] : [],
     ).filter((entry): entry is [string, RunRecord] => !!entry[1])).values()];
-    const delivered = contracts.filter(item => item.status === 'delivered');
-    const unfinished = contracts.flatMap(item => item.delivery?.unfinished ?? (
+    const acceptanceContracts = run.fallbackReason === 'ROLLBACK_TO_SOLO'
+      ? contracts.filter(item => item.status !== 'collapsed')
+      : contracts;
+    const delivered = acceptanceContracts.filter(item => item.status === 'delivered');
+    const unfinished = acceptanceContracts.flatMap(item => item.delivery?.unfinished ?? (
       item.status === 'delivered' ? [] : [`组织分支未完成：${item.branchObjective}`]
     ));
-    const completed = contracts.length > 0 && delivered.length === contracts.length
+    const completed = acceptanceContracts.length > 0 && delivered.length === acceptanceContracts.length
       && delivered.every(item => (item.delivery?.unfinished.length ?? 1) === 0);
-    const status: WorkOrder['status'] = completed
-      ? 'completed'
+    const awaitingHumanAcceptance = completed && workOrder.originKind === 'society-task' && !previous?.humanAcceptedAt;
+    const status: WorkOrder['status'] = awaitingHumanAcceptance
+      ? 'awaiting_acceptance'
+      : completed
+        ? 'completed'
       : delivered.length ? 'partial'
         : contracts.length && contracts.every(item => ['cancelled', 'collapsed'].includes(item.status))
           ? 'cancelled' : 'failed';
@@ -1108,7 +1215,6 @@ export class OrganizationService {
     const tokensOut = runs.reduce((sum, item) => sum + item.tokensOut, 0);
     const costUsd = runs.reduce((sum, item) => sum + item.cost, 0);
     const usageKnown = runs.length > 0 && runs.every(item => item.usageStatus === 'reported');
-    const previous = this.repo.receipt(workOrder.id, run.tenantId);
     const receipt: WorkReceipt = {
       id: previous?.id ?? randomUUID(),
       tenantId: run.tenantId, workOrderId: workOrder.id, status,
@@ -1142,13 +1248,80 @@ export class OrganizationService {
     if (!previous || previous.status !== status) {
       this.repo.appendLedger({
         id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
-        type: 'closed', actorId: run.organizationRoleId ?? 'maharness',
-        summary: `工作单${status === 'completed' ? '完成' : `结束：${status}`}`,
+        type: status === 'awaiting_acceptance' ? 'checkpoint' : 'closed',
+        actorId: run.organizationRoleId ?? 'maharness',
+        summary: status === 'awaiting_acceptance'
+          ? '全部契约已交付，等待人工验收'
+          : `工作单${status === 'completed' ? '完成' : `结束：${status}`}`,
         evidence: receipt.sources, createdAt: Date.now(),
       });
     }
     this.emit('work.order.updated', { workOrderId: workOrder.id, status, receiptId: receipt.id });
     return receipt;
+  }
+
+  reviewWorkOrder(
+    workOrderId: string,
+    tenantId: string,
+    outcome: 'completed' | 'failed',
+    reason: string,
+  ): WorkReceipt {
+    const workOrder = this.repo.getWorkOrder(workOrderId, tenantId);
+    const receipt = this.repo.receipt(workOrderId, tenantId);
+    if (!workOrder || !receipt) throw new OrganizationError(404, 'RECEIPT_NOT_FOUND', '工作回执不存在');
+    if (workOrder.status !== 'awaiting_acceptance' || receipt.status !== 'awaiting_acceptance') {
+      throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '工作单当前不在人工验收状态');
+    }
+    if (outcome === 'completed' && receipt.unfinished.length > 0) {
+      throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '仍有未完成项，不能通过人工验收');
+    }
+    const now = Date.now();
+    const summary = bounded(reason, 1000, '人工验收说明');
+    const status: WorkOrder['status'] = outcome;
+    return this.repo.transaction(() => {
+      this.repo.updateWorkOrder(workOrder, { status }, workOrder.revision);
+      const reviewed: WorkReceipt = {
+        ...receipt,
+        status,
+        humanAcceptedAt: outcome === 'completed' ? now : receipt.humanAcceptedAt,
+      humanReviewedAt: now,
+        unfinished: outcome === 'failed'
+          ? [...new Set([...receipt.unfinished, `人工验收未通过：${summary}`])]
+          : receipt.unfinished,
+        updatedAt: now,
+      };
+      this.repo.saveReceipt(reviewed);
+      this.repo.appendLedger({
+        id: randomUUID(), tenantId, workOrderId, type: 'reviewed', actorId: 'human',
+        summary: `人工验收${outcome === 'completed' ? '通过' : '未通过'}：${summary}`,
+        evidence: reviewed.sources, createdAt: now,
+      });
+      this.repo.appendSocietyAudit({
+        id: randomUUID(),
+        tenantId,
+        taskId: workOrder.originId ?? workOrderId,
+        scheduleId: this.repo.societyScheduleByWorkOrder(workOrderId, tenantId)?.id,
+        workOrderId,
+        action: outcome === 'completed' ? 'human_accepted' : 'human_rejected',
+        actorId: 'human',
+        reason: summary,
+        details: {
+          receiptStatus: status,
+          humanAcceptedAt: reviewed.humanAcceptedAt,
+          unfinished: reviewed.unfinished,
+        },
+        idempotencyKey: `human-review:${workOrderId}:${outcome}`,
+        createdAt: now,
+      });
+      if (outcome === 'completed') {
+        this.repo.appendLedger({
+          id: randomUUID(), tenantId, workOrderId, type: 'closed', actorId: 'human',
+          summary: '人工验收通过，工作单关闭', evidence: reviewed.sources, createdAt: now,
+        });
+      }
+      this.emit('work.order.updated', { workOrderId, status, receiptId: reviewed.id });
+      return reviewed;
+    });
   }
 
   economics(workOrderId: string, tenantId: string): TeamEconomics {
@@ -1366,6 +1539,7 @@ export class OrganizationService {
       roles,
       contracts,
       ledger: this.repo.ledger(id, tenantId),
+      societyAudits: this.repo.societyAudits(tenantId).filter(entry => entry.workOrderId === id),
       receipt: this.repo.receipt(id, tenantId),
       exceptions: this.repo.exceptions(tenantId).filter(item => item.workOrderId === id),
       economics: this.economics(id, tenantId),
@@ -1420,6 +1594,7 @@ export class OrganizationService {
     }
     const workTerminal = contracts.every(contract =>
       ['delivered', 'failed', 'cancelled', 'collapsed'].includes(contract.status));
+    const workOrder = this.repo.getWorkOrder(cycle.workOrderId, run.tenantId);
     const actualCost = runs.reduce((sum, child) => sum + child.cost, 0);
     const usageKnown = runs.length > 0 && runs.every(child => child.usageStatus === 'reported');
     const triggers = [
@@ -1433,7 +1608,8 @@ export class OrganizationService {
     if (!triggers.length) return cycle;
     const collapseReason = triggers.join('；');
     this.repo.transaction(() => {
-      for (const contract of contracts.filter(item => item.status === 'proposed'))
+      for (const contract of contracts.filter(item =>
+        ['proposed', 'failed', 'cancelled'].includes(item.status)))
         this.repo.updateContract(contract, { status: 'collapsed' }, contract.revision);
       this.repo.updateTeamCycle(cycle, { status: 'partial' });
       this.options.store.runs.update(run, { fallbackReason: 'ROLLBACK_TO_SOLO' }, 'team_collapsed', {
@@ -1447,9 +1623,96 @@ export class OrganizationService {
         summary: bounded(`团队连续无有效进展，回退单角色：${collapseReason}；${reason}`, 2000, '回退摘要'),
         evidence: [], createdAt: Date.now(),
       });
+      if (workOrder) {
+        this.repo.appendSocietyAudit({
+          id: createHash('sha256').update(`fallback-solo:${cycle.id}`).digest('hex'),
+          tenantId: run.tenantId,
+          taskId: workOrder.originId,
+          workOrderId: cycle.workOrderId,
+          action: 'fallback_solo',
+          actorId: 'maharness',
+          reason: bounded(`${collapseReason}；${reason}`, 1000, '回退原因'),
+          details: {
+            teamCycleId: cycle.id,
+            collapsedContractIds: contracts.map(contract => contract.id),
+            remainingBudgetUsd: this.options.store.runs.availableBudget(run),
+            teamEstimateUsd: cycle.teamEstimateUsd,
+          },
+          idempotencyKey: `fallback-solo:${cycle.id}`,
+          createdAt: Date.now(),
+        });
+      }
     });
     this.emit('organization.updated', { teamCycleId: cycle.id, status: cycle.status, fallbackReason: 'ROLLBACK_TO_SOLO' });
     return cycle;
+  }
+
+  soloTakeoverContract(run: RunRecord, reason: string): ChildRunFallback {
+    const workOrder = this.workOrderForRun(run);
+    const contracts = this.repo.contracts(workOrder.id, run.tenantId);
+    const root = contracts.find(contract =>
+      contract.runId === run.id && !contract.teamCycleId && contract.status === 'active');
+    if (!root)
+      throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '团队回退后没有可接管的主角色契约');
+    const role = this.repo.getRole(root.roleId, run.tenantId);
+    if (!role || role.employment !== 'active')
+      throw new OrganizationError(409, 'ROLE_AUTHORITY_EXCEEDED', '接管角色不可用');
+    const teamContracts = contracts.filter(contract =>
+      contract.teamCycleId && contract.teamCycleId === run.teamCycleId);
+    const delivered = teamContracts.filter(contract => contract.status === 'delivered');
+    const collapsed = teamContracts.filter(contract => contract.status === 'collapsed');
+    const takeoverArtifacts = [...new Set(collapsed.flatMap(contract => contract.expectedArtifacts))];
+    const takeoverAcceptance = collapsed.flatMap(contract => contract.acceptance);
+    const mergedRoot = this.repo.updateContract(root, {
+      expectedArtifacts: [...new Set([...root.expectedArtifacts, ...takeoverArtifacts])],
+      acceptance: [...new Map([...root.acceptance, ...takeoverAcceptance]
+        .map(item => [item.id, item] as const)).values()],
+    }, root.revision);
+    const completedEvidence = delivered.flatMap(contract => [
+      ...(contract.delivery?.artifacts ?? []),
+      ...(contract.delivery?.evidence ?? []).map(item => item.ref),
+    ]);
+    const unfinished = collapsed.flatMap(contract =>
+      contract.delivery?.unfinished?.length
+        ? contract.delivery.unfinished
+        : [`${contract.branchObjective}：${contract.delivery?.summary ?? '团队未完成'}`],
+    );
+    const remainingBudgetUsd = this.options.store.runs.availableBudget(run);
+    const handoff: ChildRunFallback = {
+      kind: 'solo_takeover',
+      runId: run.id,
+      workOrderId: workOrder.id,
+      ...(run.teamCycleId ? { teamCycleId: run.teamCycleId } : {}),
+      contractId: mergedRoot.id,
+      coordinatorRoleId: role.id,
+      objective: run.objective,
+      expectedArtifacts: mergedRoot.expectedArtifacts,
+      acceptance: mergedRoot.acceptance.map(item => item.statement),
+      completedEvidence: [...new Set(completedEvidence)].slice(0, 30),
+      unfinished: [...new Set(unfinished)].slice(0, 30),
+      ...(remainingBudgetUsd === undefined ? {} : { remainingBudgetUsd }),
+      ...(run.budgetTokens === undefined
+        ? {}
+        : { remainingBudgetTokens: Math.max(0, run.budgetTokens - run.tokensIn - run.tokensOut) }),
+      reason: bounded(reason, 1000, '接管原因'),
+    };
+    const summary = `团队回退后由单角色接管：${handoff.reason}`;
+    this.repo.appendLedgerOnce({
+      id: createHash('sha256').update([
+        'solo-takeover', run.tenantId, workOrder.id, run.teamCycleId ?? '', mergedRoot.id,
+      ].join('\0')).digest('hex'),
+      tenantId: run.tenantId, workOrderId: workOrder.id, contractId: mergedRoot.id,
+      type: 'handoff', actorId: role.id, summary,
+      evidence: [
+        ...delivered.flatMap(contract => contract.delivery?.evidence ?? []),
+        ...collapsed.flatMap(contract => contract.delivery?.evidence ?? []),
+      ].filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index),
+      createdAt: Date.now(),
+    });
+    this.emit('work.order.updated', {
+      workOrderId: workOrder.id, contractId: mergedRoot.id, status: 'solo_takeover', actorId: role.id,
+    });
+    return handoff;
   }
 
   confirmPersistentRole(id: string, tenantId: string): OrganizationRole {

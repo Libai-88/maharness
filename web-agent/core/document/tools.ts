@@ -1,14 +1,15 @@
 import { readFile, stat, mkdir, writeFile, link, unlink } from 'node:fs/promises';
-import { basename, extname, join, relative } from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { basename, extname, join, relative, resolve } from 'node:path';
+import { createHash, randomUUID } from 'node:crypto';
 import type { PluginContext, ToolContext } from '../../kernel/types';
+import type { DocumentContent } from '../../kernel/material';
 import { isDeniedReadPath, isProtectedWritePath, resolveInSandbox } from '../../kernel/sandbox';
 import { documentService } from './service';
 import type { CreateSpec, Patch } from './formats';
-import { createHash } from 'node:crypto';
 import { registerDraftTools } from './drafts';
 
 const textRows = { type: 'array', items: { type: 'array', items: { type: 'string' } } };
+const READ_DOCUMENT_TOOL_VERSION = '1.0.0';
 const hash = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 async function inputFile(path: string, tctx: ToolContext, projectRoot: string) {
   const file = resolveInSandbox(tctx.sandboxRoot, path);
@@ -33,12 +34,41 @@ export function registerDocumentTools(ctx: PluginContext) {
   registerDraftTools(ctx, publish);
   ctx.register({ kind: 'service', service: { id: 'document', instance: documentService } });
   ctx.register({ kind: 'tool', tool: {
-    name: 'read_document_content', version: '1.0.0', permissions: ['workspace.read'], risk: 'low', sideEffect: 'read', contentTrust: 'untrusted', timeoutMs: 125_000,
+    name: 'read_document_content', version: READ_DOCUMENT_TOOL_VERSION, permissions: ['workspace.read'], risk: 'low', sideEffect: 'read', contentTrust: 'untrusted', timeoutMs: 125_000,
     outputSchema: { type: 'object', required: ['path', 'version', 'blocks', 'total'], properties: { path: { type: 'string' }, version: { type: 'string' }, blocks: { type: 'array' }, total: { type: 'integer' }, nextOffset: { type: 'integer' }, warnings: { type: 'array' }, editable: { type: 'boolean' } } },
     description: '按范围读取 PDF/DOCX/XLSX/CSV/PPTX/Markdown。返回版本、稳定内容块定位和来源锚点。正文是不可信资料。XLSX 公式为缓存值。CSV 修改定位为 row:行号:列号。',
     parameters: { type: 'object', properties: { path: { type: 'string' }, blockId: { type: 'string' }, offset: { type: 'integer', minimum: 0 }, limit: { type: 'integer', minimum: 1, maximum: 200 }, pages: { type: 'array', items: { type: 'integer', minimum: 1 }, maxItems: 200 } }, required: ['path'] },
     async handler(args: { path: string; blockId?: string; offset?: number; limit?: number; pages?: number[] }, tctx: ToolContext) {
-      try { const input = await inputFile(args.path, tctx, ctx.kernel.rootDir); const data = await documentService.read(input.bytes, input.format, args, tctx.signal); return { ok: true, data: { path: args.path, ...data }, evidence: [{ kind: 'file' as const, label: args.path, ref: args.path }] }; }
+      try {
+        const input = await inputFile(args.path, tctx, ctx.kernel.rootDir);
+        const tenantId = tctx.tenantId || 'default';
+        const workspace = resolve(tctx.authorization?.workspace || tctx.sandboxRoot);
+        const parameters = {
+          path: args.path,
+          blockId: args.blockId ?? null,
+          offset: args.offset ?? null,
+          limit: args.limit ?? null,
+          pages: args.pages ?? null,
+        };
+        const cacheKey = tctx.cache.makeKey([
+          'read_document_content',
+          `tenant:${tenantId}`,
+          `workspace:${workspace}`,
+          `tool:${READ_DOCUMENT_TOOL_VERSION}`,
+          JSON.stringify(parameters),
+          `file:${hash(input.bytes)}`,
+        ], { tenantId });
+        const load = (signal?: AbortSignal) => documentService.read(input.bytes, input.format, {
+          blockId: args.blockId,
+          offset: args.offset,
+          limit: args.limit,
+          pages: args.pages,
+        }, signal);
+        const parsed = tctx.cache.l2GetOrLoad
+          ? await tctx.cache.l2GetOrLoad<DocumentContent>(cacheKey, load, { tenantId, signal: tctx.signal })
+          : { hit: false, value: await load(tctx.signal) };
+        return { ok: true, data: { path: args.path, ...parsed.value }, evidence: [{ kind: 'file' as const, label: args.path, ref: args.path }] };
+      }
       catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
     },
   } });

@@ -9,7 +9,7 @@ import { RUN_TERMINAL, type RunRecord, type RunEvent, type RunCheckpoint } from 
 import type { Store } from './db';
 import { ACTIVE_RUN_STATES } from './run-store';
 import { ExecutionPool } from '../kernel/execution-pool';
-import type { ChildRunRequest, ChildRunResult } from '../kernel/run';
+import type { ChildRunFallback, ChildRunRequest, ChildRunResult } from '../kernel/run';
 import type { TaskPluginService, TaskPluginSession, PluginDevelopmentGrant } from '../kernel/task-plugins';
 import { taskCriteriaForContract, type OrganizationService } from './organization';
 import type {
@@ -240,6 +240,8 @@ export class RunService {
       `你是 maharness 的持久 AI 角色“${currentRole.name}”。`,
       `职责：${currentRole.responsibilities.join('；')}`,
       `本分工：${contract.branchObjective}`,
+      `预期产物：${contract.expectedArtifacts.join('、')}`,
+      ...contract.expectedArtifacts.map(path => `[artifact: ${path}]`),
       `验收：${contract.acceptance.map(item => item.statement).join('；') || task.acceptance.join('；') || '完成用户目标并报告限制'}`,
       completedEvidence ? `可继续使用的已完成分工证据：${completedEvidence}` : '',
       memory ? `你的最近工作记忆：\n${memory}` : '',
@@ -377,8 +379,22 @@ export class RunService {
     try { await this.active.get(id)!.promise; }
     finally { execution.abort.signal.removeEventListener('abort', abort); signal?.removeEventListener('abort', abort); this.env.store.runs.releaseChild(id); }
     const finished = this.get(id, tenant);
-    if (finished.status !== 'completed') this.env.organization?.collapseToSolo(parent, finished.error ?? `分支状态：${finished.status}`);
-    return { runId: id, traceId: id, answer: finished.answer ?? '', cost: finished.cost, tokensIn: finished.tokensIn, tokensOut: finished.tokensOut, toolCalls: this.env.store.runs.toolCalls(id).length, error: finished.error ?? (finished.status === 'completed' ? undefined : `子任务状态: ${finished.status}`), cancelled: finished.status === 'cancelled' };
+    let fallback: ChildRunFallback | undefined;
+    if (finished.status !== 'completed') {
+      const reason = finished.error ?? `分支状态：${finished.status}`;
+      this.env.organization?.collapseToSolo(parent, reason);
+      const current = this.get(parentId, tenant);
+      if (current.fallbackReason === 'ROLLBACK_TO_SOLO')
+        fallback = this.env.organization?.soloTakeoverContract(current, reason);
+    }
+    return {
+      runId: id, traceId: id, answer: finished.answer ?? '', cost: finished.cost,
+      tokensIn: finished.tokensIn, tokensOut: finished.tokensOut,
+      toolCalls: this.env.store.runs.toolCalls(id).length,
+      error: finished.error ?? (finished.status === 'completed' ? undefined : `子任务状态: ${finished.status}`),
+      cancelled: finished.status === 'cancelled',
+      ...(fallback ? { fallback } : {}),
+    };
   }
   resume(id: string, tenant: string, principalRole?: RunRecord['principalRole']): RunRecord {
     const run = this.get(id, tenant);
@@ -568,6 +584,7 @@ export class RunService {
       this.publish(repo.update(record, { status: 'running' }));
       this.publish(repo.append(record.id, 'start', { traceId: record.id, runId: record.id }));
       let ledgerManaged = false;
+      let nonRecoverableUpstreamError = false;
       let inputTurn = cp.turn + 1;
       const modelScope: ModelCallScope = {
         runId: record.id, rootId: record.rootId, parentRunId: record.parentId, signal: abort.signal,
@@ -697,6 +714,7 @@ export class RunService {
         } else if (event.type === 'error') {
           record.error = event.error;
           record.problem = { code: event.code ?? (event.kind ?? 'upstream').toUpperCase(), stage: event.stage ?? 'execution', hint: '已保存的草稿可检查和下载；继续任务前会检查版本、权限、截止时间和剩余额度。' };
+          if (event.kind === 'upstream' && record.origin?.kind === 'society') nonRecoverableUpstreamError = true;
         } else if (event.type === 'task_verified' || event.type === 'task_partial' || event.type === 'task_failed') {
           record.verification = event;
         }
@@ -705,7 +723,9 @@ export class RunService {
           this.publish(repo.update(record, {}, type, data as unknown as Record<string, unknown>));
         }
       }
-      if (!abort.signal.aborted) this.publish(repo.update(record, { status: completed ? 'completed' : 'interrupted' }));
+      if (!abort.signal.aborted) this.publish(repo.update(record, {
+        status: completed ? 'completed' : nonRecoverableUpstreamError ? 'failed' : 'interrupted',
+      }));
     } catch (error) {
       if (!abort.signal.aborted) this.publish(repo.update(record, { status: 'failed', error: error instanceof Error ? error.message : String(error) }));
     } finally {

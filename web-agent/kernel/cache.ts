@@ -32,6 +32,14 @@ interface L2Entry {
   tenantId?: string;    // 租户标记：按租户清理时无需反解哈希键
 }
 
+interface L2Flight {
+  key: string;
+  promise: Promise<unknown>;
+  controller: AbortController;
+  waiters: number;
+  tenantId: string;
+}
+
 interface L1Entry {
   vector?: number[];
   bigrams: Set<string>; // 内容词 bigram 特征（语义归一化后）
@@ -210,6 +218,7 @@ export interface L1HitMeta extends CacheHitMeta {
 
 export class Cache {
   private l2 = new Map<string, L2Entry>();
+  private l2Inflight = new Map<string, L2Flight>();
   private l1 = new Map<string, L1Entry>(); // key = 归一化文本
   private l1TextThreshold = 0.58;
   private l2TtlMs = 30 * 60_000;
@@ -408,7 +417,52 @@ export class Cache {
     this.scheduleSave();
   }
 
+  async l2GetOrLoad<T>(
+    key: string,
+    load: (signal: AbortSignal) => Promise<T>,
+    opts: { ttlMs?: number; tenantId?: string; signal?: AbortSignal } = {},
+  ): Promise<{ hit: boolean; value: T; meta?: CacheHitMeta }> {
+    opts.signal?.throwIfAborted();
+    const tenantId = opts.tenantId || 'default';
+    const cached = this.l2GetForTenant(key, tenantId);
+    if (cached.hit) return cached as { hit: true; value: T; meta?: CacheHitMeta };
+
+    const flightId = JSON.stringify([tenantId, key]);
+    let flight = this.l2Inflight.get(flightId);
+    if (!flight) {
+      const controller = new AbortController();
+      let promise: Promise<unknown>;
+      promise = Promise.resolve()
+        .then(() => load(controller.signal))
+        .then(value => {
+          if (!controller.signal.aborted) this.l2Set(key, value, opts.ttlMs, tenantId);
+          return value;
+        })
+        .finally(() => {
+          if (this.l2Inflight.get(flightId)?.promise === promise) this.l2Inflight.delete(flightId);
+        });
+      flight = { key, promise, controller, waiters: 0, tenantId };
+      this.l2Inflight.set(flightId, flight);
+      void promise.catch(() => undefined);
+    }
+
+    const current = flight;
+    current.waiters++;
+    try {
+      return { hit: false, value: await abortable(current.promise, opts.signal) as T };
+    } finally {
+      current.waiters--;
+      if (current.waiters === 0 && this.l2Inflight.get(flightId) === current) {
+        this.l2Inflight.delete(flightId);
+        current.controller.abort();
+      }
+    }
+  }
+
   l2Delete(key: string): void {
+    for (const [flightId, flight] of this.l2Inflight) {
+      if (flight.key === key) this.cancelL2Flight(flightId);
+    }
     this.l2.delete(key);
     this.scheduleSave();
   }
@@ -424,6 +478,9 @@ export class Cache {
     for (const key of this.l2.keys()) {
       if (key.startsWith(prefix)) { this.l2.delete(key); changed = true; }
     }
+    for (const [flightId, flight] of this.l2Inflight) {
+      if (flight.key.startsWith(prefix)) this.cancelL2Flight(flightId);
+    }
     if (changed) this.scheduleSave();
   }
 
@@ -436,6 +493,9 @@ export class Cache {
         this.l2.delete(key);
         removed++;
       }
+    }
+    for (const [flightId, flight] of this.l2Inflight) {
+      if (flight.tenantId === tenantId) this.cancelL2Flight(flightId);
     }
     if (removed) this.scheduleSave();
     return removed;
@@ -648,7 +708,10 @@ export class Cache {
     const l1 = this.l1.size;
     const l2 = this.l2.size;
     if (includeL1) this.l1.clear();
-    if (includeL2) this.l2.clear();
+    if (includeL2) {
+      for (const flightId of this.l2Inflight.keys()) this.cancelL2Flight(flightId);
+      this.l2.clear();
+    }
     this.scheduleSave();
     return { l1: includeL1 ? l1 : 0, l2: includeL2 ? l2 : 0 };
   }
@@ -691,6 +754,48 @@ export class Cache {
   statsSnapshot(): CacheStats {
     return this.stats();
   }
+
+  private l2GetForTenant(
+    key: string,
+    tenantId: string,
+  ): { hit: boolean; value?: unknown; meta?: CacheHitMeta } {
+    const entry = this.l2.get(key);
+    if (entry && entry.expiresAt >= Date.now()) {
+      const entryTenant = entry.tenantId ?? (tenantId === 'default' ? 'default' : undefined);
+      if (entryTenant !== tenantId) {
+        this.counter.l2Misses++;
+        return { hit: false };
+      }
+    }
+    return this.l2Get(key);
+  }
+
+  private cancelL2Flight(flightId: string): void {
+    const flight = this.l2Inflight.get(flightId);
+    if (!flight) return;
+    this.l2Inflight.delete(flightId);
+    flight.controller.abort();
+  }
+}
+
+function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  if (signal.aborted) return Promise.reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+  return new Promise<T>((resolve, reject) => {
+    let settled = false;
+    const settle = (finish: () => void) => {
+      if (settled) return;
+      settled = true;
+      signal.removeEventListener('abort', abort);
+      finish();
+    };
+    const abort = () => settle(() => reject(signal.reason ?? new DOMException('Aborted', 'AbortError')));
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      value => settle(() => resolve(value)),
+      error => settle(() => reject(error)),
+    );
+  });
 }
 
 function cosine(a: number[], b: number[]): number {

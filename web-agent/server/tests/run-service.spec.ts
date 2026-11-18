@@ -15,6 +15,7 @@ import { Kernel } from '../../kernel';
 import { AgentRunner } from '../../core/chat/agent';
 import type { KernelLike, ToolDef } from '../../kernel/types';
 import { resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
+import { OrganizationService } from '../organization';
 
 const provider: ProviderDef = { id: 'test', label: 'Test', defaultModel: 'test', async *chat() {} };
 const done = { type: 'assistant_done' as const, content: 'complete', reasoning: '', usage: { input: 10, output: 2 }, cost: 0.02 };
@@ -283,6 +284,115 @@ test('nested delegation, failed child and recovery account each execution exactl
   } finally { await service.shutdown(); store.close(); }
 });
 
+test('failed team returns a persisted solo takeover contract to the running coordinator', async () => {
+  const store = new Store(':memory:');
+  store.upsertProvider({
+    id: 'test', label: 'Test', baseUrl: 'https://test.invalid/v1',
+    apiKey: '', model: 'test', priceIn: 1, priceOut: 2,
+  });
+  const session = store.createSession('test', 'test');
+  const organization = new OrganizationService({ store });
+  let team: ReturnType<OrganizationService['createTeam']> | undefined;
+  let coordinatorSawFallback = false;
+  const runner: AgentLoop = {
+    approveApproval: () => false,
+    async *run(opts) {
+      if (opts.parentRunId) {
+        yield { type: 'error', error: '分支执行失败', kind: 'max-turns' };
+        return;
+      }
+      const parent = store.runs.get(opts.runId!, 'default')!;
+      team = organization.createTeam(parent, {
+        assignments: [
+          {
+            roleName: '资料分析员', objective: '分析资料 A', expectedArtifacts: ['analysis-a.md'],
+            acceptance: ['结论带来源'], budgetUsd: 0.02, allowedTools: ['read_file'],
+          },
+          {
+            roleName: '资料分析员 B', objective: '分析资料 B', expectedArtifacts: ['analysis-b.md'],
+            acceptance: ['结论带来源'], budgetUsd: 0.02, allowedTools: ['read_file'],
+          },
+        ],
+        teamEstimateUsd: 0.04,
+        reason: '两个独立资料来源与产物',
+      });
+      for (const contract of team.contracts) {
+        const result = await opts.delegate!({
+          objective: contract.branchObjective,
+          tools: 'read',
+          budgetUsd: contract.budgetUsd,
+          assignmentContractId: contract.id,
+        });
+        if (contract === team.contracts.at(-1)) {
+          assert.equal(result.fallback?.kind, 'solo_takeover');
+          assert.equal(result.fallback?.runId, parent.id);
+          assert.equal(result.fallback?.workOrderId, parent.workOrderId);
+          assert.equal(result.fallback?.teamCycleId, parent.teamCycleId);
+          assert.equal(result.fallback?.contractId, parent.assignmentContractId);
+          assert.equal(result.fallback?.coordinatorRoleId, parent.organizationRoleId);
+          assert.deepEqual(result.fallback?.expectedArtifacts.sort(), ['analysis-a.md', 'analysis-b.md']);
+          coordinatorSawFallback = true;
+        }
+      }
+      for (const [index, ref] of ['analysis-a.md', 'analysis-b.md'].entries()) {
+        const callId = `takeover-artifact-${index}`;
+        store.runs.startTool(opts.runId!, callId, 'write_file', ref, { sideEffect: 'write' });
+        store.runs.finishTool(opts.runId!, callId, {
+          ok: true,
+          data: {},
+          evidence: [{ artifact: true, kind: 'file', label: ref, ref }],
+        });
+      }
+      yield { type: 'assistant_done', content: '协调角色已接管并完成最终交付', reasoning: '', usage: { input: 10, output: 2 }, cost: 0.02 };
+    },
+  };
+  const service = new RunService({
+    store,
+    organization,
+    runner: () => runner,
+    workspace: () => process.cwd(),
+    projectRoot: process.cwd(),
+    provider: () => ({ id: 'test', model: 'test' }),
+    prepare: () => ({ provider, model: 'test', messages: [], traceId: '' }),
+    tools: () => [{
+      name: 'read_file', version: '1.0.0', description: 'read', permissions: [],
+      sideEffect: 'read', parameters: { type: 'object' }, outputSchema: { type: 'object' },
+      async handler() { return { ok: true, data: {} }; },
+    }],
+  });
+  try {
+    const run = service.create(session, {
+      message: '请组织团队并行分析，失败时直接完成最终交付',
+      budgetUsd: 0.1,
+      budgetPolicy: 'enforce',
+    });
+    await terminal(service, run.id);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    const finished = service.get(run.id, 'default');
+    assert.equal(finished.status, 'completed', finished.error);
+    assert.equal(finished.answer, '协调角色已接管并完成最终交付');
+    assert.equal(finished.fallbackReason, 'ROLLBACK_TO_SOLO');
+    assert.equal(coordinatorSawFallback, true);
+    assert.deepEqual(store.runs.children(run.id, 'default').map(child => child.status), ['interrupted', 'interrupted']);
+    const workOrder = organization.workOrderForRun(finished);
+    const detail = organization.detail(workOrder.id, 'default');
+    assert.equal(detail.receipt?.status, 'completed');
+    assert.deepEqual(detail.receipt?.artifacts.sort(), ['analysis-a.md', 'analysis-b.md']);
+    assert.equal(detail.receipt?.unfinished.length, 0);
+    assert.match(detail.receipt?.answer ?? '', /协调角色已接管并完成最终交付/);
+    assert.equal(detail.teamCycles.find(cycle => cycle.id === team!.teamCycle.id)?.status, 'partial');
+    assert.equal(detail.contracts.filter(contract =>
+      team!.contracts.some(item => item.id === contract.id)).every(contract => contract.status === 'collapsed'), true);
+    const handoffs = detail.ledger.filter(entry => entry.type === 'handoff');
+    assert.equal(handoffs.length, 1);
+    assert.equal(handoffs[0]?.contractId, finished.assignmentContractId);
+    assert.equal(handoffs[0]?.actorId, finished.organizationRoleId);
+  } finally {
+    await service.shutdown();
+    store.close();
+  }
+});
+
 test('raw history survives compaction and temporary context cannot remove identical user text', async () => {
   const context = { role: 'user' as const, content: 'same text', context: { id: 'rules', source: 'rules', scope: 'workspace' as const, trust: 'user' as const, retention: 'required' as const } };
   const { service, store, session, environment } = setup({ approveApproval: () => false, async *run(opts) {
@@ -497,4 +607,30 @@ test('resume keeps original total turns and structured timeout reason across dat
     const finished = terminal(fixture.service, run.id); fixture.service.resume(run.id, 'default'); await finished;
     assert.deepEqual(limits, [30, 27]); assert.equal(fixture.service.get(run.id, 'default').status, 'completed');
   } finally { await fixture.service.shutdown(); fixture.store.close(); }
+});
+
+test('an exhausted upstream provider error terminates the society run instead of leaving it resumable', async () => {
+  const fixture = setup({
+    approveApproval: () => false,
+    async *run() {
+      yield { type: 'error', error: 'Provider returned HTTP 500', kind: 'upstream', code: 'HTTP_500', stage: 'model' };
+    },
+  });
+  try {
+    const run = fixture.service.create(fixture.session, {
+      message: 'society branch',
+      origin: { kind: 'society', societyTaskId: 'task-1', scheduleId: 'schedule-1', assignmentContractId: 'contract-1' },
+    });
+    await terminal(fixture.service, run.id);
+    const failed = fixture.service.get(run.id, 'default');
+    assert.equal(failed.status, 'failed');
+    assert.equal(failed.problem?.code, 'HTTP_500');
+    assert.throws(
+      () => fixture.service.resume(run.id, 'default'),
+      (error: unknown) => error instanceof RunError && error.code === 'RUN_NOT_RESUMABLE',
+    );
+  } finally {
+    await fixture.service.shutdown();
+    fixture.store.close();
+  }
 });

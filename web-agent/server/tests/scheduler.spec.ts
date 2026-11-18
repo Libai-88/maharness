@@ -1,11 +1,21 @@
 import { after, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
+import type { RunEvent, RunRecord } from '../../kernel/run';
 import { Store } from '../db';
+import { OrganizationService } from '../organization';
+import type {
+  AssignmentContract,
+  OrganizationRole,
+  SocietySchedule,
+  SocietyTask,
+} from '../organization-store';
 import { Scheduler } from '../scheduler';
+import { SocietyService } from '../society';
 
 const roots: string[] = [];
 after(() => { for (const root of roots) { try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ } } });
@@ -104,5 +114,89 @@ describe('到点续跑调度器', () => {
     await scheduler.tick();
     assert.equal(ticks, 1);
     store.close();
+  });
+
+  test('自动调度周期无需手动 tick 即可推进 queued 社会任务', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-scheduler-society-auto-'));
+    roots.push(root);
+    const store = new Store(join(root, 'agent.db'));
+    const listeners = new Map<string, Set<(event: RunEvent) => void>>();
+    const organization = new OrganizationService({
+      store,
+      runtimeAuthority: () => ({ workspace: process.cwd(), readOnly: false, profile: 'standard' }),
+    });
+    const runtime = {
+      startSocietyAssignment(input: {
+        task: SocietyTask;
+        schedule: SocietySchedule;
+        role: OrganizationRole;
+        contract: AssignmentContract;
+      }): RunRecord {
+        const session = store.createSession('fixture-model', 'fixture', input.task.tenantId);
+        const now = Date.now();
+        const run: RunRecord = {
+          id: randomUUID(), rootId: '', sessionId: session.id, tenantId: input.task.tenantId,
+          depth: 0, objective: input.contract.branchObjective, providerId: 'fixture', model: 'fixture-model',
+          status: 'running', cost: 0, tokensIn: 0, tokensOut: 0, createdAt: now, updatedAt: now,
+          authorization: {
+            workspace: process.cwd(), profile: 'standard', readOnly: false, revision: 0,
+          },
+          requestFingerprint: randomUUID(), budgetUsd: input.contract.budgetUsd,
+          budgetTokens: input.contract.budgetTokens, budgetPolicy: 'enforce',
+          origin: {
+            kind: 'society', societyTaskId: input.task.id, scheduleId: input.schedule.id,
+            assignmentContractId: input.contract.id,
+          },
+          workOrderId: input.contract.workOrderId, assignmentContractId: input.contract.id,
+          organizationRoleId: input.role.id, teamCycleId: input.contract.teamCycleId,
+        };
+        run.rootId = run.id;
+        organization.prepareSocietyRun(run, input.contract.id);
+        store.runs.create(run);
+        return store.runs.get(run.id, run.tenantId)!;
+      },
+      get(runId: string, tenantId: string): RunRecord {
+        const run = store.runs.get(runId, tenantId);
+        if (!run) throw new Error('RUN_NOT_FOUND');
+        return run;
+      },
+      subscribe(runId: string, listener: (event: RunEvent) => void): () => void {
+        let current = listeners.get(runId);
+        if (!current) listeners.set(runId, current = new Set());
+        current.add(listener);
+        return () => { current!.delete(listener); };
+      },
+      cancel(runId: string, tenantId: string): RunRecord {
+        const run = store.runs.get(runId, tenantId)!;
+        store.runs.update(run, { status: 'cancelled' });
+        return store.runs.get(run.id, tenantId)!;
+      },
+    };
+    const society = new SocietyService({ store, organization, runs: runtime });
+    const scheduler = new Scheduler(store, {
+      file: join(root, 'schedules.json'),
+      intervalMs: 250,
+    });
+    try {
+      scheduler.attachSociety(society);
+      scheduler.start();
+      await new Promise(resolve => setTimeout(resolve, 50));
+      const task = society.createTask({
+        tenantId: 'default', objective: '自动调度一份会议纪要',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'operations',
+      });
+      assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'queued');
+      assert.equal(store.runs.list('default').length, 0);
+      const deadline = Date.now() + 3_000;
+      while (store.organization.getSocietyTask(task.id, 'default')?.status !== 'scheduled'
+        && Date.now() < deadline) {
+        await new Promise(resolve => setTimeout(resolve, 20));
+      }
+      assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'scheduled');
+      assert.equal(store.runs.list('default').length, 1);
+    } finally {
+      scheduler.stop();
+      store.close();
+    }
   });
 });

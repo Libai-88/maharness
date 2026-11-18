@@ -1,8 +1,8 @@
 import 'dotenv/config';
 import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, resolve } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { dirname, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { AgentRunner } from '../core/chat/agent';
 import { createProvider } from '../core/chat/provider';
@@ -41,6 +41,8 @@ export interface PairedLiveConfig {
   timeoutMs: number;
 }
 
+export type PairedEvidenceMode = 'configured-provider' | 'test-double';
+
 export interface PairedArmReport {
   arm: 'solo' | 'team';
   runId?: string;
@@ -48,6 +50,7 @@ export interface PairedArmReport {
   answer: string;
   error?: string;
   elapsedMs: number;
+  modelCalls: number;
   costUsd: number;
   inputTokens: number;
   outputTokens: number;
@@ -58,6 +61,7 @@ export interface PairedArmReport {
   budgetCompliant: boolean;
   checks: Array<{ name: string; passed: boolean }>;
   artifacts: string[];
+  artifactHashes: Record<string, string>;
   childRunIds: string[];
   teamCycleId?: string;
   contractIds: string[];
@@ -67,6 +71,8 @@ export interface PairedLiveReport {
   kind: 'organization-paired-live';
   createdAt: string;
   status: 'passed' | 'failed' | 'inconclusive' | 'unexecuted';
+  evidenceMode: PairedEvidenceMode;
+  runnerFingerprint: string;
   providerId: string;
   model: string;
   objectiveHash: string;
@@ -78,6 +84,8 @@ export interface PairedLiveReport {
     costUsd: { solo: number; team: number; marginal: number };
     tokens: { solo: number; team: number; marginal: number };
     elapsedMs: { solo: number; team: number; marginal: number };
+    coordination: { costUsd: number; tokens: number; elapsedMs: number };
+    risk: { solo: number; team: number; marginal: number };
     netBenefitUsd: { solo: number; team: number; marginal: number };
     teamPreferred: boolean;
   } | null;
@@ -106,8 +114,56 @@ export function validatePairedLiveConfig(config: PairedLiveConfig): void {
   if (!config.reportDir.trim()) throw new Error('reportDir is required');
 }
 
-function hash(value: string): string {
+function hash(value: string | Uint8Array): string {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function runtimeSources(): string[] {
+  const entry = join(root, 'scripts/organization-paired-live.ts');
+  const sources = new Set<string>();
+  const visit = (file: string): void => {
+    const absolute = resolve(file);
+    if (!absolute.startsWith(root) || sources.has(absolute)) return;
+    sources.add(absolute);
+    const source = readFileSync(absolute, 'utf8');
+    for (const match of source.matchAll(/(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+)(['"])(\.[^'"]+)\1/g)) {
+      const target = resolve(dirname(absolute), match[2]!);
+      const withoutJs = target.replace(/\.jsx?$/, '');
+      for (const candidate of [
+        target,
+        `${withoutJs}.ts`,
+        `${withoutJs}.tsx`,
+        `${target}.ts`,
+        `${target}.tsx`,
+        join(target, 'index.ts'),
+        join(target, 'index.tsx'),
+      ]) {
+        if (existsSync(candidate) && statSync(candidate).isFile()) {
+          visit(candidate);
+          break;
+        }
+      }
+    }
+  };
+  visit(entry);
+  return [...sources].sort();
+}
+
+export function pairedLiveRuntimeSources(): string[] {
+  return runtimeSources().map(source => relative(root, source).replaceAll('\\', '/'));
+}
+
+export function pairedLiveRuntimeFingerprint(): string {
+  const digest = createHash('sha256');
+  for (const source of runtimeSources()) {
+    digest.update(relative(root, source).replaceAll('\\', '/')).update('\0')
+      .update(readFileSync(source)).update('\0');
+  }
+  for (const lockfile of ['package.json', 'package-lock.json']) {
+    const file = join(root, lockfile);
+    if (existsSync(file)) digest.update(lockfile).update('\0').update(readFileSync(file)).update('\0');
+  }
+  return digest.digest('hex');
 }
 
 function round(value: number): number {
@@ -252,6 +308,44 @@ function artifactChecks(workspace: string): { checks: Array<{ name: string; pass
   };
 }
 
+function artifactEvidence(workspace: string): {
+  checks: Array<{ name: string; passed: boolean }>;
+  artifacts: string[];
+  artifactHashes: Record<string, string>;
+} {
+  const result = artifactChecks(workspace);
+  return {
+    ...result,
+    artifactHashes: Object.fromEntries(result.artifacts.map(path => [path, hash(readFileSync(join(workspace, path)))])),
+  };
+}
+
+function aggregateUsage(store: Store, runs: RunRecord[]): {
+  modelCalls: number;
+  costUsd: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedInputTokens: number | null;
+  cacheMissTokens: number | null;
+  cacheWriteTokens: number | null;
+  usageComplete: boolean;
+} {
+  const calls = runs.flatMap(run => store.runs.modelCalls(run.id, 0, 500));
+  const cacheKnown = calls.length > 0 && calls.every(call => call.cachedInput !== undefined);
+  const cacheMissKnown = calls.length > 0 && calls.every(call => call.missInput !== undefined);
+  const cacheWriteKnown = calls.length > 0 && calls.every(call => call.cacheWriteTokens !== undefined);
+  return {
+    modelCalls: calls.length,
+    costUsd: round(calls.reduce((sum, call) => sum + (call.cost ?? 0), 0)),
+    inputTokens: calls.reduce((sum, call) => sum + (call.input ?? 0), 0),
+    outputTokens: calls.reduce((sum, call) => sum + (call.output ?? 0), 0),
+    cachedInputTokens: cacheKnown ? calls.reduce((sum, call) => sum + (call.cachedInput ?? 0), 0) : null,
+    cacheMissTokens: cacheMissKnown ? calls.reduce((sum, call) => sum + (call.missInput ?? 0), 0) : null,
+    cacheWriteTokens: cacheWriteKnown ? calls.reduce((sum, call) => sum + (call.cacheWriteTokens ?? 0), 0) : null,
+    usageComplete: calls.length > 0 && calls.every(call => call.usageStatus === 'reported'),
+  };
+}
+
 async function executeArm(
   config: PairedLiveConfig,
   sourceProvider: ProviderDef,
@@ -343,16 +437,15 @@ async function executeArm(
     const detail = organization.detail(organization.workOrderForRun(final).id, 'default');
     const team = detail.teamCycles.at(-1);
     const contracts = team ? detail.contracts.filter(contract => contract.teamCycleId === team.id) : [];
-    const files = artifactChecks(workspace);
+    const files = artifactEvidence(workspace);
     const allRuns = [final, ...children];
+    const usage = aggregateUsage(store, allRuns);
     const checks = [
       ...files.checks,
       { name: 'root run completed', passed: final.status === 'completed' },
       { name: arm === 'team' ? 'team has exactly two child runs' : 'solo has no child runs', passed: children.length === (arm === 'team' ? 2 : 0) },
       { name: arm === 'team' ? 'team has two delivered contracts' : 'solo has no team', passed: arm === 'team' ? contracts.length === 2 && contracts.every(contract => contract.status === 'delivered') : detail.teamCycles.length === 0 },
     ];
-    const cacheKnown = allRuns.every(run => run.tokensCached !== undefined && run.tokensCacheMiss !== undefined);
-    const cacheWriteKnown = allRuns.every(run => run.cacheWriteTokens !== undefined);
     const armBudget = arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd;
     return {
       arm,
@@ -361,39 +454,49 @@ async function executeArm(
       answer: final.answer ?? '',
       error: final.error,
       elapsedMs: Date.now() - started,
-      costUsd: final.cost,
-      inputTokens: final.tokensIn,
-      outputTokens: final.tokensOut,
-      cachedInputTokens: cacheKnown ? allRuns.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0) : null,
-      cacheMissTokens: cacheKnown ? allRuns.reduce((sum, run) => sum + (run.tokensCacheMiss ?? 0), 0) : null,
-      cacheWriteTokens: cacheWriteKnown ? allRuns.reduce((sum, run) => sum + (run.cacheWriteTokens ?? 0), 0) : null,
-      usageComplete: allRuns.every(run => run.usageStatus === 'reported'),
-      budgetCompliant: final.cost <= armBudget + 1e-9 && allRuns.every(run => run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
+      modelCalls: usage.modelCalls,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      cacheMissTokens: usage.cacheMissTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      usageComplete: usage.usageComplete,
+      budgetCompliant: usage.costUsd <= armBudget + 1e-9 && allRuns.every(run => run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
       checks,
       artifacts: files.artifacts,
+      artifactHashes: files.artifactHashes,
       childRunIds: children.map(run => run.id),
       teamCycleId: team?.id,
       contractIds: contracts.map(contract => contract.id),
     };
   } catch (error) {
+    const latestRoot = rootRun ? store.runs.get(rootRun.id, 'default') : undefined;
+    const children = latestRoot ? store.runs.children(latestRoot.id, 'default') : [];
+    const usage = aggregateUsage(store, latestRoot ? [latestRoot, ...children] : []);
+    const files = artifactEvidence(workspace);
+    const armBudget = arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd;
     return {
       arm,
-      runId: rootRun?.id,
+      runId: latestRoot?.id,
       status: 'failed',
-      answer: rootRun?.answer ?? '',
+      answer: latestRoot?.answer ?? '',
       error: error instanceof Error ? error.message : String(error),
       elapsedMs: Date.now() - started,
-      costUsd: rootRun?.cost ?? 0,
-      inputTokens: rootRun?.tokensIn ?? 0,
-      outputTokens: rootRun?.tokensOut ?? 0,
-      cachedInputTokens: null,
-      cacheMissTokens: null,
-      cacheWriteTokens: null,
-      usageComplete: false,
-      budgetCompliant: (rootRun?.cost ?? 0) <= (arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd),
+      modelCalls: usage.modelCalls,
+      costUsd: usage.costUsd,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedInputTokens: usage.cachedInputTokens,
+      cacheMissTokens: usage.cacheMissTokens,
+      cacheWriteTokens: usage.cacheWriteTokens,
+      usageComplete: usage.usageComplete,
+      budgetCompliant: usage.costUsd <= armBudget + 1e-9
+        && [latestRoot, ...children].every(run => !run || run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
       checks: [],
-      artifacts: artifactChecks(workspace).artifacts,
-      childRunIds: rootRun ? store.runs.children(rootRun.id, 'default').map(run => run.id) : [],
+      artifacts: files.artifacts,
+      artifactHashes: files.artifactHashes,
+      childRunIds: children.map(run => run.id),
       contractIds: [],
     };
   } finally {
@@ -403,11 +506,18 @@ async function executeArm(
   }
 }
 
-function emptyReport(config: PairedLiveConfig, status: PairedLiveReport['status'], reason: string): PairedLiveReport {
+function emptyReport(
+  config: PairedLiveConfig,
+  status: PairedLiveReport['status'],
+  reason: string,
+  evidenceMode: PairedEvidenceMode,
+): PairedLiveReport {
   return {
     kind: 'organization-paired-live',
     createdAt: new Date().toISOString(),
     status,
+    evidenceMode,
+    runnerFingerprint: pairedLiveRuntimeFingerprint(),
     providerId: config.providerId,
     model: config.model,
     objectiveHash: hash(config.objective),
@@ -427,26 +537,36 @@ function emptyReport(config: PairedLiveConfig, status: PairedLiveReport['status'
   };
 }
 
-export async function runPairedLive(config: PairedLiveConfig, sourceProvider: ProviderDef): Promise<PairedLiveReport> {
+export async function runPairedLive(
+  config: PairedLiveConfig,
+  sourceProvider: ProviderDef,
+  evidenceMode: PairedEvidenceMode = 'test-double',
+): Promise<PairedLiveReport> {
   validatePairedLiveConfig(config);
   if (existsSync(config.reportDir)) throw new Error('reportDir must not already exist');
   mkdirSync(config.reportDir, { recursive: true });
   const solo = await executeArm(config, sourceProvider, 'solo');
   const team = await executeArm(config, sourceProvider, 'team');
   const executionChecks = [solo, team].every(arm =>
-    arm.status === 'completed' && arm.budgetCompliant && arm.checks.every(check => check.passed));
+    arm.status === 'completed'
+    && arm.modelCalls > 0
+    && arm.budgetCompliant
+    && arm.checks.every(check => check.passed));
   const usageComplete = solo.usageComplete && team.usageComplete;
   const quality = (arm: PairedArmReport) => arm.checks.length
     ? arm.checks.filter(check => check.passed).length / arm.checks.length
     : 0;
   const soloQuality = quality(solo);
   const teamQuality = quality(team);
+  const risk = (arm: PairedArmReport) => arm.status === 'completed' && arm.budgetCompliant ? 0 : 1;
+  const soloRisk = risk(solo);
+  const teamRisk = risk(team);
   const net = (arm: PairedArmReport, armQuality: number) =>
     round(config.valueUsd * armQuality * armQuality - arm.costUsd);
   const soloNet = net(solo, soloQuality);
   const teamNet = net(team, teamQuality);
   const report: PairedLiveReport = {
-    ...emptyReport(config, 'inconclusive', 'paired execution finished without complete usage'),
+    ...emptyReport(config, 'inconclusive', 'paired execution finished without complete usage', evidenceMode),
     arms: { solo, team },
     comparison: {
       quality: { solo: soloQuality, team: teamQuality, marginal: teamQuality - soloQuality },
@@ -460,6 +580,16 @@ export async function runPairedLive(config: PairedLiveConfig, sourceProvider: Pr
         solo: solo.elapsedMs,
         team: team.elapsedMs,
         marginal: team.elapsedMs - solo.elapsedMs,
+      },
+      coordination: {
+        costUsd: round(team.costUsd - solo.costUsd),
+        tokens: (team.inputTokens + team.outputTokens) - (solo.inputTokens + solo.outputTokens),
+        elapsedMs: team.elapsedMs - solo.elapsedMs,
+      },
+      risk: {
+        solo: soloRisk,
+        team: teamRisk,
+        marginal: round(teamRisk - soloRisk),
       },
       netBenefitUsd: { solo: soloNet, team: teamNet, marginal: round(teamNet - soloNet) },
       teamPreferred: teamNet > soloNet,
@@ -479,11 +609,15 @@ export async function runPairedLive(config: PairedLiveConfig, sourceProvider: Pr
   return report;
 }
 
-export function unexecutedPairedReport(config: PairedLiveConfig, reason: string): PairedLiveReport {
+export function unexecutedPairedReport(
+  config: PairedLiveConfig,
+  reason: string,
+  evidenceMode: PairedEvidenceMode = 'test-double',
+): PairedLiveReport {
   validatePairedLiveConfig(config);
   if (existsSync(config.reportDir)) throw new Error('reportDir must not already exist');
   mkdirSync(config.reportDir, { recursive: true });
-  const report = emptyReport(config, 'unexecuted', reason);
+  const report = emptyReport(config, 'unexecuted', reason, evidenceMode);
   writeFileSync(join(config.reportDir, 'manifest.json'), JSON.stringify({
     kind: 'organization-paired-live-manifest',
     createdAt: report.createdAt,
@@ -520,7 +654,7 @@ async function main(): Promise<void> {
   const config = cliConfig();
   validatePairedLiveConfig(config);
   if (process.env.EVAL_LIVE_CONFIRM !== '1') {
-    const report = unexecutedPairedReport(config, 'EVAL_LIVE_CONFIRM=1 is required before any paid model call');
+    const report = unexecutedPairedReport(config, 'EVAL_LIVE_CONFIRM=1 is required before any paid model call', 'configured-provider');
     console.log(JSON.stringify({ status: report.status, report: join(config.reportDir, 'report.json') }));
     return;
   }
@@ -547,7 +681,7 @@ async function main(): Promise<void> {
     outputPrice: config.outputUsdPerMillion,
     requestTimeoutMs: config.timeoutMs,
   });
-  const report = await runPairedLive(config, provider);
+  const report = await runPairedLive(config, provider, 'configured-provider');
   console.log(JSON.stringify({
     status: report.status,
     report: join(config.reportDir, 'report.json'),

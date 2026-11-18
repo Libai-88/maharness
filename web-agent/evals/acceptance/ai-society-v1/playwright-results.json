@@ -1,31 +1,29 @@
 {
   "kind": "playwright-sanitized-evidence",
-  "sourceSha256": "e6dd6aa46d6a7134305e9e631d933f200d8f14d4dbb9baa93e93251e1459e5e9",
+  "sourceSha256": "e26c48c12924be1f7c63b290c4c80c2d0dc79f092dec1ddf3325903cfca3e920",
   "targetFiles": [
-    "organization.spec.ts",
-    "society-real-backend.spec.ts",
-    "society.spec.ts"
+    "society-real-backend.spec.ts"
   ],
   "specs": [
     {
-      "file": "organization.spec.ts",
-      "title": "项目组织视图展示回执并完成暂停、改派、异常和关闭操作",
+      "file": "society-real-backend.spec.ts",
+      "title": "真实后端经营闭环写入临时 SQLite 并可由浏览器验收",
       "passed": true
     },
     {
       "file": "society-real-backend.spec.ts",
-      "title": "real backend经营闭环写入临时 SQLite 并可由浏览器验收",
+      "title": "生产 Scheduler 自动推进真实团队并展示网络、六因子、福利、瓶颈与 token 缓存",
       "passed": true
     },
     {
-      "file": "society.spec.ts",
-      "title": "人类经营 AI 社会闭环并留下可审计证据",
+      "file": "society-real-backend.spec.ts",
+      "title": "真实 child Run 失败后由 RunService 与 SocietyService 回退单角色并留下标记",
       "passed": true
     }
   ],
   "stats": {
-    "startTime": "2026-11-17T20:43:25.665Z",
-    "duration": 6802.492,
+    "startTime": "2026-11-18T00:10:57.915Z",
+    "duration": 50994.135,
     "expected": 3,
     "skipped": 0,
     "unexpected": 0,

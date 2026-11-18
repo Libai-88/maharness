@@ -20,6 +20,7 @@ import {
   type SocietyTask,
 } from '../server/organization-store';
 import { SocietyService } from '../server/society';
+import { pairedLiveRuntimeFingerprint } from './organization-paired-live';
 
 type Criterion = {
   id: string;
@@ -178,47 +179,111 @@ function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, run
       provider?: string;
       realModel?: boolean;
       mockBoundary?: string;
-      taskStatus?: string;
-      scheduleStatus?: string;
-      realRunCount?: number;
-      providerCalls?: number;
-      institutionVersion?: number;
-      institutionBudgetUsd?: number;
-      auditActions?: string[];
-      screenshotSha256?: string;
+      coverage?: Record<string, boolean>;
+      screenshots?: Record<string, string>;
+      scenarios?: Array<{
+        scenario?: string;
+        taskStatus?: string;
+        scheduleStatus?: string;
+        childRunCount?: number;
+        contractCount?: number;
+        providerCalls?: number;
+        auditActions?: string[];
+        scheduleMode?: string;
+        initialScheduleMode?: string;
+        initialChildRunCount?: number;
+        initialContractCount?: number;
+        fallbackMode?: string;
+        rollbackMarker?: string;
+        collaborationNetworkUi?: boolean;
+        bottleneckUi?: boolean;
+        sixFactorUi?: boolean;
+        wellbeingUi?: boolean;
+        tokenCacheUi?: boolean;
+      }>;
     };
     const source = readFileSync(resolve(root, 'ui/e2e/society-real-backend.spec.ts'), 'utf8');
     const sourceUsesLiveBackend = !/page\.route\(/.test(source);
-    const fresh = Number.isFinite(runStart)
+    const reportFresh = Number.isFinite(runStart)
       && Number.isFinite(runEnd)
       && Date.parse(file.modifiedAt!) >= runStart - 1_000
-      && Date.parse(file.modifiedAt!) <= runEnd + 2_000
-      && Date.parse(screenshot.modifiedAt!) >= runStart - 1_000
-      && Date.parse(screenshot.modifiedAt!) <= runEnd + 2_000;
+      && Date.parse(file.modifiedAt!) <= runEnd + 2_000;
+    const screenshotChecks = Object.entries(data.screenshots ?? {}).map(([name, expected]) => {
+      const path = resolve(root, 'evals/acceptance/ai-society-v1', name);
+      const actual = fileEvidence(`evals/acceptance/ai-society-v1/${name}`, path);
+      const valid = actual.status === 'present'
+        && actual.sha256 === expected
+        && Date.parse(actual.modifiedAt!) >= runStart - 1_000
+        && Date.parse(actual.modifiedAt!) <= runEnd + 2_000;
+      return { name, expected, actual, valid };
+    });
+    const requiredScreenshots = [
+      'real-workflow-governance.png',
+      'real-workflow-team-active.png',
+      'real-workflow.png',
+      'real-workflow-team-final.png',
+      'real-workflow-rollback-active.png',
+      'real-workflow-rollback.png',
+    ];
+    const screenshotsValid = requiredScreenshots.every(name =>
+      screenshotChecks.some(item => item.name === name && item.valid));
+    const coverage = data.coverage ?? {};
+    const scenarios = data.scenarios ?? [];
+    const governance = scenarios.find(item => item.scenario === 'governance-version-history');
+    const team = scenarios.find(item => item.scenario === 'team-auto-scheduler-ui');
+    const rollback = scenarios.find(item => item.scenario === 'failed-child-rollback-to-solo');
     const proven = Boolean(
       isPlaywrightTarget
       && sourceUsesLiveBackend
-      && fresh
-      && data.kind === 'browser-real-backend-workflow'
+      && reportFresh
+      && screenshotsValid
+      && data.kind === 'browser-real-backend-workflow-suite'
       && data.backend === 'maharness server/index.ts'
       && data.database === 'temporary SQLite'
       && data.realModel === false
-      && data.taskStatus === 'completed'
-      && data.scheduleStatus === 'completed'
-      && (data.realRunCount ?? 0) > 0
-      && (data.providerCalls ?? 0) > 0
-      && (data.institutionVersion ?? 0) >= 3
-      && data.auditActions?.includes('update')
-      && data.auditActions.includes('rollback')
-      && screenshot.sha256 === data.screenshotSha256,
+      && data.mockBoundary?.includes('API, production Scheduler, RunService, SocietyService, persistence and UI are real')
+      && coverage.realTeamTask === true
+      && coverage.childRunsAtLeast2 === true
+      && coverage.contractsAtLeast2 === true
+      && coverage.collaborationNetworkUi === true
+      && coverage.bottleneckUi === true
+      && coverage.sixFactorUi === true
+      && coverage.wellbeingUi === true
+      && coverage.tokenCacheUi === true
+      && coverage.rollbackToSolo === true
+      && coverage.immutableSocietyAudit === true
+      && coverage.schedulerAutoAdvanceWithoutTickApi === true
+      && governance?.taskStatus === 'completed'
+      && governance.scheduleStatus === 'completed'
+      && governance.auditActions?.includes('update')
+      && governance.auditActions.includes('rollback')
+      && (governance.providerCalls ?? 0) > 0
+      && team?.taskStatus === 'completed'
+      && team.scheduleStatus === 'completed'
+      && team.scheduleMode === 'team'
+      && (team.childRunCount ?? 0) >= 2
+      && (team.contractCount ?? 0) >= 2
+      && team.collaborationNetworkUi === true
+      && team.bottleneckUi === true
+      && team.sixFactorUi === true
+      && team.wellbeingUi === true
+      && team.tokenCacheUi === true
+      && rollback?.taskStatus === 'completed'
+      && rollback.initialScheduleMode === 'team'
+      && (rollback.initialChildRunCount ?? 0) >= 2
+      && (rollback.initialContractCount ?? 0) >= 2
+      && rollback.fallbackMode === 'solo'
+      && rollback.rollbackMarker === 'ROLLBACK_TO_SOLO'
+      && (rollback.providerCalls ?? 0) > 0,
     );
     return {
       file,
       screenshot,
       status: proven ? 'passed' as const : 'failed' as const,
       proven,
-      freshForPlaywrightRun: fresh,
+      freshForPlaywrightRun: reportFresh,
       sourceUsesLiveBackend,
+      screenshots: screenshotChecks,
       data,
     };
   } catch (error) {
@@ -241,12 +306,18 @@ function latestPairedLive() {
           kind?: string;
           createdAt?: string;
           status?: string;
+          evidenceMode?: string;
+          runnerFingerprint?: string;
           providerId?: string;
           model?: string;
           arms?: {
-            solo?: { status?: string; usageComplete?: boolean; budgetCompliant?: boolean };
+            solo?: {
+              status?: string; usageComplete?: boolean; budgetCompliant?: boolean;
+              modelCalls?: number; artifactHashes?: Record<string, string>;
+            };
             team?: {
               status?: string; usageComplete?: boolean; budgetCompliant?: boolean;
+              modelCalls?: number; artifactHashes?: Record<string, string>;
               childRunIds?: string[]; contractIds?: string[];
             };
           };
@@ -267,16 +338,25 @@ function latestPairedLive() {
   const latest = reports[0];
   if (!latest) return undefined;
   const data = latest.data;
+  const completeArtifacts = (hashes: Record<string, string> | undefined) =>
+    ['analysis-a.md', 'review-b.md'].every(name => /^[a-f0-9]{64}$/.test(hashes?.[name] ?? ''));
   const complete =
     data.status === 'passed'
+    && data.evidenceMode === 'configured-provider'
+    && data.runnerFingerprint === pairedLiveRuntimeFingerprint()
+    && Boolean(data.providerId && data.model)
     && data.arms?.solo?.status === 'completed'
     && data.arms.solo.usageComplete === true
     && data.arms.solo.budgetCompliant === true
+    && (data.arms.solo.modelCalls ?? 0) > 0
+    && completeArtifacts(data.arms.solo.artifactHashes)
     && data.arms.team?.status === 'completed'
     && data.arms.team.usageComplete === true
     && data.arms.team.budgetCompliant === true
-    && (data.arms.team.childRunIds?.length ?? 0) === 2
-    && (data.arms.team.contractIds?.length ?? 0) === 2
+    && (data.arms.team.modelCalls ?? 0) > 0
+    && completeArtifacts(data.arms.team.artifactHashes)
+    && new Set(data.arms.team.childRunIds ?? []).size === 2
+    && new Set(data.arms.team.contractIds ?? []).size === 2
     && data.comparison?.netBenefitUsd !== undefined;
   return {
     ref: latest.path.slice(root.length + 1).replaceAll('\\', '/'),
@@ -558,6 +638,11 @@ function finishAndAccept(
 }
 
 const store = new Store(':memory:');
+store.upsertProvider({
+  id: 'fixture', label: 'Acceptance fixture',
+  baseUrl: 'https://fixture.invalid/v1', apiKey: '',
+  model: 'fixture-model', priceIn: 1, priceOut: 2,
+});
 
 try {
   const primary = fixture(store);
@@ -589,14 +674,14 @@ try {
   const versionedRole = persistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
   const teamTask = society.createTask({
     tenantId: 'default',
-    objective: '分别核对两份独立资料并形成可追溯交付',
+    objective: '请组织团队并行核对两份独立资料并形成可追溯交付',
     materials: [
       { id: 'material-1', version: 'v1' },
       { id: 'material-1', version: 'v1' },
     ],
     valueUsd: 100,
     maxBudgetUsd: 0.08,
-    maxBudgetTokens: 4000,
+    maxBudgetTokens: 4_000,
     departmentId: 'knowledge',
     economics: { qualityGain: 0.1, riskReduction: 0.02 },
     branches: teamBranches(),
@@ -617,7 +702,13 @@ try {
   assert.ok(teamExperiment.estimate.marginalNetBenefitUsd > 0);
   const teamTick = society.tick('default');
   const teamSchedule = teamTick.decisions.find(item => item.taskId === teamTask.id);
-  assert.equal(teamSchedule?.mode, 'team');
+  assert.equal(teamSchedule?.mode, 'team', JSON.stringify({
+    task: store.organization.getSocietyTask(teamTask.id, 'default'),
+    decision: teamSchedule,
+    institution: society.ensureInstitution('default'),
+    roles: store.organization.listRoles('default', undefined, true),
+    schedules: store.organization.societySchedules('default', 1000),
+  }));
   assert.equal(teamSchedule?.roleIds.length, 2);
   assert.equal(teamSchedule?.runIds.length, 2);
   assert.equal(store.runs.list('default').length, 2);
@@ -698,10 +789,10 @@ try {
 
   const paired = society.createPairedExperiment({
     tenantId: 'default',
-    objective: '分别核对两份资料',
+    objective: '请组织团队并行分别核对两份资料',
     valueUsd: 0.1,
     maxBudgetUsd: 0.08,
-    maxBudgetTokens: 2_000,
+    maxBudgetTokens: 4_000,
     departmentId: 'knowledge',
     economics: { qualityGain: 0.2, riskReduction: 0.02 },
     branches: teamBranches(),
@@ -769,10 +860,27 @@ try {
   assert.equal(lowSchedule?.roleIds.length, 1);
   finishAndAccept(primary, society, lowSchedule!, lowTask);
 
+  const costTask = society.createTask({
+    tenantId: 'default',
+    objective: '分别核对两份资料',
+    valueUsd: 100,
+    maxBudgetUsd: 0.08,
+    maxBudgetTokens: 4_000,
+    departmentId: 'knowledge',
+    economics: { qualityGain: 0.1, riskReduction: 0.02 },
+    branches: teamBranches(),
+  });
+  const costEstimate = society.estimate(costTask);
+  const costSchedule = society.tick('default').decisions.find(item => item.taskId === costTask.id);
+  assert.ok(costEstimate.team.costUsd > costEstimate.single.costUsd);
+  assert.equal(costSchedule?.mode, 'solo');
+  assert.match(costSchedule?.reason ?? '', /团队估算高于单角色方案/);
+  finishAndAccept(primary, society, costSchedule!, costTask);
+
   const noGain = society.createTask({
     tenantId: 'default',
     objective: '低收益检查',
-    valueUsd: 0.05,
+    valueUsd: 0.001,
     maxBudgetUsd: 0.08,
     departmentId: 'operations',
   });
@@ -782,8 +890,9 @@ try {
   assert.match(noGainTask?.lastSchedulingReason ?? '', /净收益不足/);
   pass('G2', '组队净收益阈值', [
     '同一双分支结构在低价值时保持单角色，没有误组队。',
+    `自动组队团队估算 ${costEstimate.team.costUsd} USD 高于单角色 ${costEstimate.single.costUsd} USD，调度保持单角色。`,
     `更低收益任务进入排队：${noGainTask?.lastSchedulingReason}。`,
-    '组队决策要求团队净收益高于单角色并跨过制度门槛。',
+    '自动组队要求团队成本不高于单角色、团队净收益高于单角色并跨过制度门槛。',
   ]);
   pass('G6', '熔断与回退', [
     '低收益扩团被阻止，任务保留可重新估价状态。',
@@ -809,11 +918,11 @@ try {
 
   const fallbackTask = society.createTask({
     tenantId: 'default',
-    objective: '团队失败后由协调角色接管已完成证据',
+    objective: '请组织团队并行核对两份资料，失败后由协调角色接管已完成证据',
     acceptance: ['保留已完成分支证据'],
     valueUsd: 100,
     maxBudgetUsd: 0.08,
-    maxBudgetTokens: 2_000,
+    maxBudgetTokens: 4_000,
     departmentId: 'knowledge',
     economics: { qualityGain: 0.1, riskReduction: 0.02 },
     branches: teamBranches(),

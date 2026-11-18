@@ -5,14 +5,35 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import documentPlugin from '../index';
 import JSZip from 'jszip';
+import { Cache } from '../../../kernel/cache';
+import type { DocumentContent } from '../../../kernel/material';
+import { documentService } from '../service';
 
-type Tool = { name: string; handler: (args: Record<string, unknown>, ctx: any) => Promise<any> };
+type Tool = { name: string; version?: string; handler: (args: Record<string, unknown>, ctx: any) => Promise<any> };
 
-function loadTools(config: Record<string, unknown> = {}): Map<string, Tool> {
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
+function makeContent(text: string, version = 'v1'): DocumentContent {
+  return {
+    format: 'docx',
+    version,
+    blocks: [{ id: 'b1', type: 'paragraph', text, anchor: { version, blockId: 'b1' } }],
+    total: 1,
+    warnings: [],
+    editable: true,
+  };
+}
+
+function loadTools(config: Record<string, unknown> = {}, kernelRoot = tmpdir()): Map<string, Tool> {
   const tools = new Map<string, Tool>();
   (documentPlugin as any).onLoad({
     register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); },
     logger: { info() {} },
+    kernel: { rootDir: kernelRoot },
     config: { get: (key: string, fallback: unknown) => key in config ? config[key] : fallback },
   });
   return tools;
@@ -198,5 +219,187 @@ describe('文档读取', () => {
       assert.match(result.data.text, /OCR:.*page-1\.png/);
       assert.match(result.data.text, /OCR:.*page-2\.png/);
     } finally { rmSync(root, { recursive: true, force: true }); }
+  });
+});
+
+describe('文档内容 L2 缓存', () => {
+  it('同 key 并发读取只解析一次，后续命中不再解析', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-document-cache-'));
+    const originalRead = documentService.read;
+    const gate = deferred();
+    const started = deferred();
+    let reads = 0;
+    let loaderSignal: AbortSignal | undefined;
+    try {
+      writeFileSync(join(root, 'shared.docx'), await makeDocx('shared'));
+      const tools = loadTools({}, root);
+      const cache = new Cache();
+      documentService.read = async (_bytes, _format, _options, signal) => {
+        reads++;
+        loaderSignal = signal;
+        started.resolve();
+        await gate.promise;
+        return makeContent('shared', 'doc-v1');
+      };
+      const context = () => ({ sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {} });
+      const handler = tools.get('read_document_content')!.handler;
+
+      const first = handler({ path: 'shared.docx' }, context());
+      const second = handler({ path: 'shared.docx' }, context());
+      await started.promise;
+      await new Promise<void>(resolve => setImmediate(resolve));
+      assert.equal(reads, 1);
+
+      gate.resolve();
+      const [a, b] = await Promise.all([first, second]);
+      assert.equal(a.ok, true, a.error);
+      assert.equal(b.ok, true, b.error);
+      assert.equal(a.data.blocks[0].text, 'shared');
+      assert.equal(b.data.version, 'doc-v1');
+      assert.equal(loaderSignal?.aborted, false);
+
+      const cached = await handler({ path: 'shared.docx' }, context());
+      assert.equal(cached.ok, true, cached.error);
+      assert.equal(reads, 1);
+    } finally {
+      documentService.read = originalRead;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('解析失败不写入缓存，下一次调用会重试', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-document-retry-'));
+    const originalRead = documentService.read;
+    let reads = 0;
+    try {
+      writeFileSync(join(root, 'retry.docx'), await makeDocx('retry'));
+      const tools = loadTools({}, root);
+      const cache = new Cache();
+      documentService.read = async () => {
+        reads++;
+        if (reads === 1) throw new Error('parse failed');
+        return makeContent('retry', `doc-v${reads}`);
+      };
+      const context = { sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {} };
+      const handler = tools.get('read_document_content')!.handler;
+
+      const failed = await handler({ path: 'retry.docx' }, context);
+      assert.equal(failed.ok, false);
+      assert.match(String(failed.error), /parse failed/);
+
+      const retried = await handler({ path: 'retry.docx' }, context);
+      assert.equal(retried.ok, true, retried.error);
+      assert.equal(retried.data.version, 'doc-v2');
+      const cached = await handler({ path: 'retry.docx' }, context);
+      assert.equal(cached.ok, true, cached.error);
+      assert.equal(reads, 2);
+    } finally {
+      documentService.read = originalRead;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('单个读取取消不会取消同 key 的其他读取', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-document-cancel-'));
+    const originalRead = documentService.read;
+    const release = deferred();
+    const started = deferred();
+    const firstController = new AbortController();
+    let loaderSignal: AbortSignal | undefined;
+    try {
+      writeFileSync(join(root, 'cancel.docx'), await makeDocx('cancel'));
+      const tools = loadTools({}, root);
+      class TrackingCache extends Cache {
+        readonly secondEntered = deferred();
+        private calls = 0;
+
+        override async l2GetOrLoad<T>(
+          key: string,
+          load: (signal: AbortSignal) => Promise<T>,
+          opts?: { ttlMs?: number; tenantId?: string; signal?: AbortSignal },
+        ) {
+          this.calls++;
+          if (this.calls === 2) this.secondEntered.resolve();
+          return super.l2GetOrLoad(key, load, opts);
+        }
+      }
+      const cache = new TrackingCache();
+      documentService.read = async (_bytes, _format, _options, signal) => {
+        loaderSignal = signal;
+        started.resolve();
+        await release.promise;
+        return makeContent('cancel', 'doc-v1');
+      };
+      const handler = tools.get('read_document_content')!.handler;
+      const first = handler({ path: 'cancel.docx' }, {
+        sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {}, signal: firstController.signal,
+      });
+      const second = handler({ path: 'cancel.docx' }, {
+        sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {},
+      });
+      await started.promise;
+      await cache.secondEntered.promise;
+
+      firstController.abort();
+      const cancelled = await first;
+      assert.equal(cancelled.ok, false);
+      assert.equal(loaderSignal?.aborted, false);
+      release.resolve();
+      const completed = await second;
+      assert.equal(completed.ok, true, completed.error);
+      assert.equal(completed.data.version, 'doc-v1');
+      assert.equal(loaderSignal?.aborted, false);
+    } finally {
+      documentService.read = originalRead;
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('key 隔离 tenant、workspace、工具版本、参数和文件 SHA-256 版本', async () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-document-key-a-'));
+    const otherRoot = mkdtempSync(join(tmpdir(), 'mh-document-key-b-'));
+    const originalRead = documentService.read;
+    let reads = 0;
+    let lastParts: string[] = [];
+    try {
+      const bytes = await makeDocx('key');
+      writeFileSync(join(root, 'key.docx'), bytes);
+      writeFileSync(join(otherRoot, 'key.docx'), bytes);
+      const tools = loadTools({}, root);
+      const cache = new Cache();
+      const originalMakeKey = cache.makeKey.bind(cache);
+      cache.makeKey = (parts, scope) => {
+        lastParts = parts;
+        return originalMakeKey(parts, scope);
+      };
+      documentService.read = async () => makeContent('key', `doc-v${++reads}`);
+      const handler = tools.get('read_document_content')!.handler;
+      const read = (ctx: Record<string, unknown>, args: Record<string, unknown> = { path: 'key.docx' }) =>
+        handler(args, { sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {}, ...ctx });
+
+      assert.equal(tools.get('read_document_content')!.version, '1.0.0');
+      assert.equal((await read({})).ok, true);
+      assert.ok(lastParts.includes('tool:1.0.0'));
+      assert.ok(lastParts.some(part => part === 'tenant:tenant-a'));
+      assert.ok(lastParts.some(part => part.startsWith('workspace:')));
+      assert.ok(lastParts.some(part => part.startsWith('file:')));
+      assert.equal((await read({})).ok, true);
+      assert.equal(reads, 1);
+
+      assert.equal((await read({ tenantId: 'tenant-b' })).ok, true);
+      assert.equal(reads, 2);
+      assert.equal((await read({}, { path: 'key.docx', limit: 1 })).ok, true);
+      assert.equal(reads, 3);
+      assert.equal((await read({ sandboxRoot: otherRoot })).ok, true);
+      assert.equal(reads, 4);
+
+      writeFileSync(join(root, 'key.docx'), await makeDocx('key changed'));
+      assert.equal((await read({})).ok, true);
+      assert.equal(reads, 5);
+    } finally {
+      documentService.read = originalRead;
+      rmSync(root, { recursive: true, force: true });
+      rmSync(otherRoot, { recursive: true, force: true });
+    }
   });
 });

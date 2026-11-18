@@ -80,6 +80,33 @@ export const ORGANIZATION_SCHEMA = `
   CREATE INDEX IF NOT EXISTS organization_ledger_order
     ON organization_ledger_v1(tenant_id, work_order_id, created_at);
 
+  CREATE TABLE IF NOT EXISTS organization_society_audit_v1 (
+    id TEXT PRIMARY KEY,
+    tenant_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    schedule_id TEXT,
+    work_order_id TEXT,
+    action TEXT NOT NULL,
+    actor_id TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    details TEXT NOT NULL,
+    idempotency_key TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    UNIQUE(tenant_id, idempotency_key)
+  );
+  CREATE INDEX IF NOT EXISTS organization_society_audit_task
+    ON organization_society_audit_v1(tenant_id, task_id, created_at);
+  CREATE TRIGGER IF NOT EXISTS organization_society_audit_no_update
+  BEFORE UPDATE ON organization_society_audit_v1
+  BEGIN
+    SELECT RAISE(ABORT, 'organization_society_audit_v1 is append-only');
+  END;
+  CREATE TRIGGER IF NOT EXISTS organization_society_audit_no_delete
+  BEFORE DELETE ON organization_society_audit_v1
+  BEGIN
+    SELECT RAISE(ABORT, 'organization_society_audit_v1 is append-only');
+  END;
+
   CREATE TABLE IF NOT EXISTS organization_receipts_v1 (
     id TEXT PRIMARY KEY,
     tenant_id TEXT NOT NULL,
@@ -231,7 +258,7 @@ export const ORGANIZATION_SCHEMA = `
     ON organization_role_relations_v1(tenant_id, from_role_id, updated_at DESC);
 `;
 
-export type WorkOrderStatus = 'active' | 'waiting_approval' | 'completed' | 'partial' | 'failed' | 'cancelled';
+export type WorkOrderStatus = 'active' | 'waiting_approval' | 'awaiting_acceptance' | 'completed' | 'partial' | 'failed' | 'cancelled';
 export type ContractStatus = 'proposed' | 'active' | 'delivered' | 'failed' | 'cancelled' | 'collapsed';
 export type ExceptionStatus = 'open' | 'auto_resolved' | 'waiting_human' | 'resolved' | 'dismissed';
 export type ProposalStatus = 'pending' | 'accepted' | 'rejected';
@@ -686,6 +713,29 @@ export interface SocialHealth {
   collaborationHealth: number | null;
 }
 
+export type SocietyAuditAction =
+  | 'queued'
+  | 'scheduled'
+  | 'release_completed'
+  | 'release_failed'
+  | 'fallback_solo'
+  | 'human_accepted'
+  | 'human_rejected';
+
+export interface SocietyAuditEntry {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  scheduleId?: string;
+  workOrderId?: string;
+  action: SocietyAuditAction;
+  actorId: string;
+  reason: string;
+  details: Record<string, unknown>;
+  idempotencyKey: string;
+  createdAt: number;
+}
+
 export interface SocietySnapshot {
   schemaVersion: 1;
   institution: InstitutionVersion;
@@ -709,6 +759,7 @@ export interface SocietySnapshot {
   }>;
   tasks: SocietyTask[];
   schedules: SocietySchedule[];
+  audits: SocietyAuditEntry[];
   institutionAudits: InstitutionAudit[];
   evaluation: EvaluationVersion;
   evaluationAudits: OrganizationVersionAudit[];
@@ -779,6 +830,7 @@ export interface WorkReceipt {
   unfinished: string[];
   exceptions: string[];
   humanAcceptedAt?: number;
+  humanReviewedAt?: number;
   usageKnown: boolean;
   createdAt: number;
   updatedAt: number;
@@ -1187,6 +1239,56 @@ export class OrganizationRepository {
     return entry;
   }
 
+  appendLedgerOnce(entry: WorkLedgerEntry): WorkLedgerEntry | undefined {
+    const result = this.db.prepare(`INSERT OR IGNORE INTO organization_ledger_v1
+      (id,tenant_id,work_order_id,contract_id,type,actor_id,record,created_at) VALUES(?,?,?,?,?,?,?,?)`).run(
+      entry.id, entry.tenantId, entry.workOrderId, entry.contractId ?? null, entry.type,
+      entry.actorId, JSON.stringify(entry), entry.createdAt,
+    );
+    return result.changes ? entry : undefined;
+  }
+
+  appendSocietyAudit(entry: SocietyAuditEntry): SocietyAuditEntry | undefined {
+    const result = this.db.prepare(`INSERT OR IGNORE INTO organization_society_audit_v1
+      (id,tenant_id,task_id,schedule_id,work_order_id,action,actor_id,reason,details,idempotency_key,created_at)
+      VALUES(?,?,?,?,?,?,?,?,?,?,?)`).run(
+      entry.id, entry.tenantId, entry.taskId, entry.scheduleId ?? null, entry.workOrderId ?? null,
+      entry.action, entry.actorId, entry.reason, JSON.stringify(entry.details),
+      entry.idempotencyKey, entry.createdAt,
+    );
+    return result.changes ? entry : undefined;
+  }
+
+  societyAudits(tenantId: string, limit = 500, taskId?: string): SocietyAuditEntry[] {
+    const columns = `id,tenant_id,task_id,schedule_id,work_order_id,action,actor_id,reason,details,idempotency_key,created_at`;
+    const rows = taskId
+      ? this.db.prepare(`SELECT ${columns} FROM organization_society_audit_v1
+          WHERE tenant_id=? AND task_id=? ORDER BY created_at LIMIT ?`).all(
+          tenantId, taskId, Math.max(1, Math.min(2000, limit)),
+        )
+      : this.db.prepare(`SELECT ${columns} FROM organization_society_audit_v1
+          WHERE tenant_id=? ORDER BY created_at LIMIT ?`).all(
+          tenantId, Math.max(1, Math.min(2000, limit)),
+        );
+    return (rows as Array<{
+      id: string; tenant_id: string; task_id: string; schedule_id: string | null;
+      work_order_id: string | null; action: SocietyAuditAction; actor_id: string; reason: string;
+      details: string; idempotency_key: string; created_at: number;
+    }>).map(row => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      taskId: row.task_id,
+      ...(row.schedule_id ? { scheduleId: row.schedule_id } : {}),
+      ...(row.work_order_id ? { workOrderId: row.work_order_id } : {}),
+      action: row.action,
+      actorId: row.actor_id,
+      reason: row.reason,
+      details: JSON.parse(row.details) as Record<string, unknown>,
+      idempotencyKey: row.idempotency_key,
+      createdAt: row.created_at,
+    }));
+  }
+
   ledger(workOrderId: string, tenantId: string, limit = 500): WorkLedgerEntry[] {
     const rows = this.db.prepare(`SELECT record FROM organization_ledger_v1
       WHERE work_order_id=? AND tenant_id=? ORDER BY created_at LIMIT ?`).all(
@@ -1528,6 +1630,7 @@ export class OrganizationRepository {
           WHERE tenant_id=? ORDER BY updated_at DESC`).all(tenantId);
     return parseRows<SocietyRoleRelation>(rows as { record: string }[]);
   }
+
 }
 
 export class OrganizationError extends Error {

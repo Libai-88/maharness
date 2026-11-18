@@ -2,6 +2,12 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { Cache, contentWords, actionGroups, bigramSet, dice } from '../cache';
 
+function deferred<T = void>() {
+  let resolve!: (value: T | PromiseLike<T>) => void;
+  const promise = new Promise<T>(done => { resolve = done; });
+  return { promise, resolve };
+}
+
 describe('Cache LRU 修复', () => {
   it('l1Set 对已有 key 移动到队尾（高频条目不被误淘汰）', async () => {
     const cache = new Cache(undefined, { maxL1: 3 });
@@ -33,6 +39,162 @@ describe('Cache LRU 修复', () => {
     assert.equal(cache.l2Get('b:2').hit, false, 'b 应被淘汰');
     assert.equal(cache.l2Get('c:3').hit, true, 'c 应命中');
     assert.equal(cache.l2Get('d:4').hit, true, 'd 应命中');
+  });
+});
+
+describe('L2 并发单航班', () => {
+  it('同一租户和 key 的并发 loader 只执行一次', async () => {
+    const cache = new Cache();
+    const gate = deferred<string>();
+    const started = deferred();
+    let loads = 0;
+    let loaderSignal: AbortSignal | undefined;
+    const load = (signal: AbortSignal) => {
+      loads++;
+      loaderSignal = signal;
+      started.resolve();
+      return gate.promise;
+    };
+
+    const first = cache.l2GetOrLoad('read_file:shared', load, { tenantId: 'tenant-a' });
+    const second = cache.l2GetOrLoad('read_file:shared', load, { tenantId: 'tenant-a' });
+    await started.promise;
+    assert.equal(loads, 1);
+
+    gate.resolve('parsed');
+    const [a, b] = await Promise.all([first, second]);
+    assert.equal(a.value, 'parsed');
+    assert.equal(b.value, 'parsed');
+    assert.equal(a.hit, false);
+    assert.equal(b.hit, false);
+    assert.equal(loaderSignal?.aborted, false);
+
+    const cached = await cache.l2GetOrLoad('read_file:shared', async () => {
+      throw new Error('loader must not run on a cache hit');
+    }, { tenantId: 'tenant-a' });
+    assert.equal(cached.hit, true);
+    assert.equal(cached.value, 'parsed');
+    assert.equal(loads, 1);
+  });
+
+  it('单个 waiter 取消只结束自身，不取消共享 loader 或其他 waiter', async () => {
+    const cache = new Cache();
+    const gate = deferred<string>();
+    const started = deferred();
+    const controller = new AbortController();
+    let loaderSignal: AbortSignal | undefined;
+
+    const first = cache.l2GetOrLoad('document:shared', signal => {
+      loaderSignal = signal;
+      started.resolve();
+      return gate.promise;
+    }, { tenantId: 'tenant-a', signal: controller.signal });
+    const second = cache.l2GetOrLoad('document:shared', signal => {
+      loaderSignal = signal;
+      return gate.promise;
+    }, { tenantId: 'tenant-a' });
+    await started.promise;
+
+    controller.abort();
+    await assert.rejects(first, { name: 'AbortError' });
+    assert.equal(loaderSignal?.aborted, false);
+
+    gate.resolve('document');
+    const result = await second;
+    assert.equal(result.value, 'document');
+    assert.equal(loaderSignal?.aborted, false);
+  });
+
+  it('全部 waiter 取消时立即 abort 底层 loader', async () => {
+    const cache = new Cache();
+    const started = deferred();
+    const never = new Promise<string>(() => undefined);
+    const firstController = new AbortController();
+    const secondController = new AbortController();
+    let loaderSignal: AbortSignal | undefined;
+    const load = (signal: AbortSignal) => {
+      loaderSignal = signal;
+      started.resolve();
+      return never;
+    };
+
+    const first = cache.l2GetOrLoad('document:cancel', load, { tenantId: 'tenant-a', signal: firstController.signal });
+    const second = cache.l2GetOrLoad('document:cancel', load, { tenantId: 'tenant-a', signal: secondController.signal });
+    await started.promise;
+
+    firstController.abort();
+    await assert.rejects(first, { name: 'AbortError' });
+    assert.equal(loaderSignal?.aborted, false);
+
+    secondController.abort();
+    await assert.rejects(second, { name: 'AbortError' });
+    assert.equal(loaderSignal?.aborted, true);
+  });
+
+  it('loader 失败不缓存，后续调用可重试', async () => {
+    const cache = new Cache();
+    let attempts = 0;
+    await assert.rejects(cache.l2GetOrLoad('document:retry', async () => {
+      attempts++;
+      throw new Error('parse failed');
+    }, { tenantId: 'tenant-a' }), /parse failed/);
+
+    const retried = await cache.l2GetOrLoad('document:retry', async () => {
+      attempts++;
+      return 'ok';
+    }, { tenantId: 'tenant-a' });
+    assert.equal(retried.hit, false);
+    assert.equal(retried.value, 'ok');
+    assert.equal(attempts, 2);
+
+    const cached = await cache.l2GetOrLoad('document:retry', async () => 'unexpected', { tenantId: 'tenant-a' });
+    assert.equal(cached.hit, true);
+    assert.equal(cached.value, 'ok');
+    assert.equal(attempts, 2);
+  });
+
+  it('租户清理只 abort 目标租户的 in-flight，不提供跨租户缓存值', async () => {
+    const cache = new Cache();
+    const key = 'document:tenant-shared';
+    const starts = { a: deferred(), b: deferred() };
+    const gates = { a: deferred<string>(), b: deferred<string>() };
+    const signals: Partial<Record<'a' | 'b', AbortSignal>> = {};
+    const load = (tenant: 'a' | 'b') => (signal: AbortSignal) => {
+      signals[tenant] = signal;
+      starts[tenant].resolve();
+      return new Promise<string>((resolve, reject) => {
+        const onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
+        signal.addEventListener('abort', onAbort, { once: true });
+        gates[tenant].promise.then(value => {
+          signal.removeEventListener('abort', onAbort);
+          resolve(value);
+        }, reject);
+      });
+    };
+
+    const tenantA = cache.l2GetOrLoad(key, load('a'), { tenantId: 'tenant-a' });
+    const tenantB = cache.l2GetOrLoad(key, load('b'), { tenantId: 'tenant-b' });
+    await Promise.all([starts.a.promise, starts.b.promise]);
+    cache.l2DeleteTenant('tenant-a');
+    assert.equal(signals.a?.aborted, true);
+    assert.equal(signals.b?.aborted, false);
+    await assert.rejects(tenantA, { name: 'AbortError' });
+
+    gates.b.resolve('tenant-b');
+    assert.equal((await tenantB).value, 'tenant-b');
+    const cached = await cache.l2GetOrLoad(key, async () => 'unexpected', { tenantId: 'tenant-b' });
+    assert.equal(cached.hit, true);
+    assert.equal(cached.value, 'tenant-b');
+
+    await cache.l2GetOrLoad('document:cached-only', async () => 'tenant-a-value', { tenantId: 'tenant-a' });
+    let loads = 0;
+    const otherTenant = await cache.l2GetOrLoad('document:cached-only', async () => {
+      loads++;
+      return 'tenant-b-value';
+    }, { tenantId: 'tenant-b' });
+    assert.equal(otherTenant.hit, false);
+    assert.equal(otherTenant.value, 'tenant-b-value');
+    assert.equal(loads, 1);
   });
 });
 

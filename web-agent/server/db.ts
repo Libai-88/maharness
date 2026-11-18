@@ -498,10 +498,11 @@ export class Store {
         );
       }
     } },
+    { from: 14, to: 15, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
   ];
 
   /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 14;
+  static readonly DB_SCHEMA_VERSION = 15;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 

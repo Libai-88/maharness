@@ -1,11 +1,13 @@
 import { after, describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { RunEvent, RunRecord } from '../../kernel/run';
+import type { AgentLoop } from '../../kernel/loop';
+import type { ProviderDef } from '../../kernel/types';
 import { Store } from '../db';
 import { OrganizationService } from '../organization';
 import {
@@ -15,6 +17,7 @@ import {
   type SocietySchedule,
   type SocietyTask,
 } from '../organization-store';
+import { RunService } from '../run-service';
 import { SocietyService } from '../society';
 
 const roots: string[] = [];
@@ -46,6 +49,7 @@ function addPersistentRole(
   name: string,
   capabilities: string[],
   authority: { readOnly?: boolean; allowedTools?: string[] } = {},
+  modelPolicy: OrganizationRole['modelPolicy'] = { providerId: 'institution', model: 'runtime-selected' },
 ): OrganizationRole {
   const now = Date.now();
   return store.organization.createRole({
@@ -56,13 +60,19 @@ function addPersistentRole(
       workspace: '', readOnly: authority.readOnly ?? false, profile: 'standard',
       allowedTools: authority.allowedTools ?? [],
     },
-    modelPolicy: { providerId: 'institution', model: 'runtime-selected' },
+    modelPolicy,
     persistent: true, employment: 'active', source: 'builtin', revision: 0,
     createdAt: now, updatedAt: now,
   });
 }
 
 function societyRuntime(store: Store) {
+  if (!store.getProvider('fixture')) {
+    store.upsertProvider({
+      id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
+      apiKey: '', model: 'fixture-model', priceIn: 1, priceOut: 2,
+    });
+  }
   const listeners = new Map<string, Set<(event: RunEvent) => void>>();
   const organization = new OrganizationService({
     store,
@@ -194,7 +204,7 @@ function crossDepartmentBranches() {
 }
 
 describe('AI society operation layer', () => {
-  test('schema migration reaches 14 and backfills role/evaluation history without losing facts', () => {
+  test('schema migration reaches 15 and backfills role/evaluation history without losing facts', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-society-migration-'));
     roots.push(root);
     const file = join(root, 'agent.db');
@@ -219,7 +229,7 @@ describe('AI society operation layer', () => {
 
     store = new Store(file);
     try {
-      assert.equal(store.schemaVersion, 14);
+      assert.equal(store.schemaVersion, 15);
       assert.equal(store.organization.getWorkOrder(order.id, 'default')?.id, order.id);
       const snapshot = new SocietyService({ store }).snapshot('default');
       assert.equal(snapshot.institution.version, 1);
@@ -351,7 +361,7 @@ describe('AI society operation layer', () => {
       assert.equal(life.versions[0]?.version, 2);
       assert.equal(life.versions[0]?.status, 'active');
       assert.equal(society.snapshot('default').evaluation.version, 2);
-      assert.equal(store.schemaVersion, 14);
+      assert.equal(store.schemaVersion, 15);
     } finally {
       store.close();
     }
@@ -388,17 +398,96 @@ describe('AI society operation layer', () => {
       const run = tick.decisions[0]!.runIds[0]!;
       fixture.finish(run);
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
+      assert.equal(store.organization.getWorkOrder(tick.decisions[0]!.workOrderId!, 'default')?.status, 'awaiting_acceptance');
+      assert.equal(store.organization.receipt(tick.decisions[0]!.workOrderId!, 'default')?.status, 'awaiting_acceptance');
+      assert.equal(store.organization.receipt(tick.decisions[0]!.workOrderId!, 'default')?.humanAcceptedAt, undefined);
+      assert.equal(store.organization.ledger(tick.decisions[0]!.workOrderId!, 'default')
+        .some(item => item.type === 'closed'), false);
       const beforeAcceptance = store.organization.roleMemories('default', tick.decisions[0]!.roleIds[0]!, 20);
       assert.equal(beforeAcceptance.some(item => item.kind === 'submission'), true);
       assert.equal(beforeAcceptance.some(item => item.kind === 'delivery'), false);
       const released = society.releaseTask(task.id, 'default', 'completed', '文件已整理并通过来源检查');
       assert.equal(released.task.status, 'completed');
       assert.equal(released.schedule.status, 'completed');
+      const acceptedReceipt = store.organization.receipt(released.schedule.workOrderId!, 'default')!;
+      assert.equal(acceptedReceipt.status, 'completed');
+      assert.ok(acceptedReceipt.humanAcceptedAt);
+      assert.deepEqual(
+        store.organization.ledger(released.schedule.workOrderId!, 'default').slice(-2).map(item => item.type),
+        ['reviewed', 'closed'],
+      );
 
       const life = society.snapshot('default').roleLife.find(item => item.roleId === released.schedule.roleIds[0]);
       assert.equal(life?.memories.some(item => item.kind === 'schedule'), true);
       assert.equal(life?.memories.some(item => item.kind === 'submission'), true);
       assert.equal(life?.memories.some(item => item.kind === 'delivery'), true);
+      const audits = store.organization.societyAudits('default', 100, task.id);
+      assert.deepEqual(audits.map(item => item.action), [
+        'queued', 'scheduled', 'release_completed', 'human_accepted',
+      ]);
+      assert.equal(audits.find(item => item.action === 'scheduled')?.actorId, 'maharness');
+      assert.equal(audits.find(item => item.action === 'human_accepted')?.actorId, 'human');
+      assert.equal(audits.find(item => item.action === 'release_completed')?.workOrderId,
+        released.schedule.workOrderId);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('society audit facts are immutable, idempotent, tenant-scoped and survive restart', () => {
+    const root = mkdtempSync(join(tmpdir(), 'mh-society-audit-'));
+    roots.push(root);
+    const file = join(root, 'agent.db');
+    let store = new Store(file);
+    try {
+      const fixture = societyRuntime(store);
+      const society = new SocietyService({
+        store, organization: fixture.organization, runs: fixture.runtime,
+      });
+      const task = society.createTask({
+        tenantId: 'default', objective: '整理一份会议纪要',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'operations',
+      });
+      const schedule = society.tick('default').decisions
+        .find(item => item.taskId === task.id)!;
+      const entry = store.organization.societyAudits('default', 100, task.id)
+        .find(item => item.action === 'scheduled')!;
+      assert.ok(entry);
+      assert.equal(
+        store.organization.appendSocietyAudit({ ...entry, id: randomUUID() }),
+        undefined,
+      );
+      assert.equal(
+        store.organization.societyAudits('default', 100, task.id)
+          .filter(item => item.idempotencyKey === entry.idempotencyKey).length,
+        1,
+      );
+      assert.equal(store.organization.societyAudits('other', 100, task.id).length, 0);
+      const raw = new Database(file);
+      assert.throws(
+        () => raw.prepare(
+          'UPDATE organization_society_audit_v1 SET reason=? WHERE id=?',
+        ).run('篡改审计', entry.id),
+        /append-only/,
+      );
+      assert.throws(
+        () => raw.prepare(
+          'DELETE FROM organization_society_audit_v1 WHERE id=?',
+        ).run(entry.id),
+        /append-only/,
+      );
+      raw.close();
+
+      fixture.finish(schedule.runIds[0]);
+      assert.equal(store.organization.societyAudits('default', 100, task.id)
+        .some(item => item.action === 'release_completed'), true);
+      store.close();
+      store = new Store(file);
+      const restarted = new SocietyService({ store });
+      assert.equal(restarted.snapshot('default').audits
+        .filter(item => item.taskId === task.id).length, 3);
+      assert.equal(restarted.snapshot('default').audits
+        .filter(item => item.action === 'scheduled' && item.taskId === task.id).length, 1);
     } finally {
       store.close();
     }
@@ -418,6 +507,7 @@ describe('AI society operation layer', () => {
       });
       const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
       fixture.finish(schedule.runIds[0]);
+      const completedRun = store.runs.get(schedule.runIds[0], 'default')!;
       assert.equal(store.organization.roleMemories('default', schedule.roleIds[0], 20)
         .some(item => item.kind === 'submission' && item.scheduleId === schedule.id), true);
       assert.equal(store.organization.roleMemories('default', schedule.roleIds[0], 20)
@@ -426,6 +516,19 @@ describe('AI society operation layer', () => {
       const rejected = society.releaseTask(task.id, 'default', 'failed', '来源缺失，验收不通过');
       assert.equal(rejected.task.status, 'failed');
       assert.equal(rejected.schedule.status, 'failed');
+      const rejectedReceipt = store.organization.receipt(rejected.schedule.workOrderId!, 'default')!;
+      assert.equal(rejectedReceipt.status, 'failed');
+      assert.equal(rejectedReceipt.humanAcceptedAt, undefined);
+      assert.equal(rejectedReceipt.unfinished.some(item => item.includes('来源缺失')), true);
+      assert.equal(store.organization.ledger(rejected.schedule.workOrderId!, 'default')
+        .some(item => item.type === 'reviewed'), true);
+      assert.equal(store.organization.ledger(rejected.schedule.workOrderId!, 'default')
+        .some(item => item.type === 'closed'), false);
+      fixture.organization.finalizeRun(completedRun);
+      assert.equal(store.organization.receipt(rejected.schedule.workOrderId!, 'default')?.status, 'failed');
+      assert.equal(store.organization.getWorkOrder(rejected.schedule.workOrderId!, 'default')?.status, 'failed');
+      assert.equal(store.organization.ledger(rejected.schedule.workOrderId!, 'default')
+        .filter(item => item.type === 'reviewed').length, 1);
       const memories = store.organization.roleMemories('default', schedule.roleIds[0], 20);
       assert.equal(memories.some(item =>
         item.kind === 'failure'
@@ -433,6 +536,12 @@ describe('AI society operation layer', () => {
         && item.summary.includes('来源缺失')
       ), true);
       assert.equal(memories.some(item => item.kind === 'delivery'), false);
+      const audits = store.organization.societyAudits('default', 100, task.id);
+      assert.deepEqual(audits.map(item => item.action), [
+        'queued', 'scheduled', 'release_completed', 'human_rejected',
+      ]);
+      assert.equal(audits.at(-1)?.actorId, 'human');
+      assert.match(audits.at(-1)?.reason ?? '', /来源缺失/);
     } finally {
       store.close();
     }
@@ -519,6 +628,114 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('collaboration, history and load each independently change role ranking', () => {
+    for (const factor of ['collaboration', 'history', 'load'] as const) {
+      const store = new Store(':memory:');
+      const fixture = societyRuntime(store);
+      const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+      try {
+        society.ensureInstitution('default');
+        for (const role of store.organization.listRoles('default', undefined, true)) {
+          if (role.source === 'builtin')
+            fixture.organization.updateRole(
+              role.id, 'default', role.revision, { employment: 'paused' }, '隔离角色因子排序测试',
+            );
+        }
+        const preferred = addPersistentRole(
+          store, 'default', `排序因子研究员 ${factor}`, ['research', 'reading', 'analysis'],
+        );
+        const alternative = addPersistentRole(
+          store, 'default', `对照组研究员 ${factor}`, ['research', 'reading', 'analysis'],
+        );
+
+        if (factor === 'collaboration') {
+          const witness = addPersistentRole(
+            store, 'default', '协作见证角色', ['research', 'reading', 'analysis'],
+          );
+          fixture.organization.updateRole(
+            witness.id, 'default', witness.revision, { employment: 'paused' }, '移出候选角色集合',
+          );
+          store.organization.upsertRoleRelation({
+            id: randomUUID(), tenantId: 'default', fromRoleId: preferred.id, toRoleId: witness.id,
+            kind: 'collaborated', score: 1, evidence: [], updatedAt: Date.now(),
+          });
+        } else if (factor === 'history') {
+          fixture.organization.updateEvaluation('default', {
+            lowConfidenceSamples: 2, mediumConfidenceSamples: 3, highConfidenceSamples: 4,
+          }, '降低测试履历门槛');
+          const order = store.organization.createWorkOrder({
+            tenantId: 'default', objective: '履历样本',
+            authorization: {
+              workspace: process.cwd(), readOnly: false, profile: 'standard', revision: 0,
+            },
+            creator: 'fixture',
+          });
+          for (let index = 0; index < 2; index += 1) {
+            const now = Date.now();
+            store.organization.createContract({
+              id: randomUUID(), tenantId: 'default', workOrderId: order.id, roleId: preferred.id,
+              branchObjective: `已完成履历 ${index + 1}`, expectedArtifacts: [], acceptance: [],
+              evidenceInputs: [], dependsOn: [], allowedTools: [], status: 'delivered',
+              delivery: {
+                summary: '已交付', artifacts: [],
+                evidence: [{ id: `history-${index}`, kind: 'run', ref: `run-history-${index}` }],
+                unfinished: [], costUsd: 0, usageKnown: true,
+              },
+              revision: 0, createdAt: now, updatedAt: now,
+            });
+          }
+        } else {
+          const now = Date.now();
+          store.organization.createSocietySchedule({
+            id: randomUUID(), tenantId: 'default', taskId: `load-fixture-${factor}`,
+            contractIds: [], runIds: [], trigger: 'institution', institutionVersion: 1,
+            departmentId: 'knowledge', mode: 'solo', roleIds: [alternative.id], assignments: [],
+            formula: 'fixture', estimates: {
+              soloCostUsd: 0, teamCostUsd: 0, coordinationCostUsd: 0,
+              soloNetBenefitUsd: 0, teamNetBenefitUsd: 0, marginalNetBenefitUsd: 0,
+              qualityGain: 0, latencyGainMs: 0, riskReduction: 0,
+              soloTokens: 0, teamTokens: 0, coordinationTokens: 0, roi: null,
+            },
+            sharedMemoryRefs: [], reason: '负载排序夹具', status: 'active', createdAt: now,
+          });
+        }
+
+        const task = society.createTask({
+          tenantId: 'default', objective: '阅读论文并核对文献来源',
+          valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'knowledge',
+        });
+        const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+        const winner = schedule.selection!.candidates.find(item => item.roleId === preferred.id)!;
+        const other = schedule.selection!.candidates.find(item => item.roleId === alternative.id)!;
+
+        assert.equal(schedule.roleIds[0], preferred.id, factor);
+        assert.equal(winner.capabilityFit, other.capabilityFit, factor);
+        assert.equal(winner.memoryRelevance, other.memoryRelevance, factor);
+        assert.equal(winner.toolReadiness, other.toolReadiness, factor);
+        if (factor !== 'collaboration')
+          assert.equal(winner.collaborationHealth, other.collaborationHealth, factor);
+        if (factor !== 'history')
+          assert.equal(winner.historyReliability, other.historyReliability, factor);
+        if (factor !== 'load')
+          assert.equal(winner.loadBalance, other.loadBalance, factor);
+
+        if (factor === 'collaboration') {
+          assert.equal(winner.collaborationHealth, 1);
+          assert.equal(other.collaborationHealth, 0.5);
+        } else if (factor === 'history') {
+          assert.equal(winner.historyReliability, 0.7);
+          assert.equal(other.historyReliability, 0.5);
+        } else {
+          assert.equal(winner.loadBalance, 1);
+          assert.equal(other.loadBalance, 0.5);
+          assert.equal(other.activeAssignments, 1);
+        }
+      } finally {
+        store.close();
+      }
+    }
+  });
+
   test('team formation needs independent branches and positive marginal net benefit', () => {
     const store = new Store(':memory:');
     const fixture = societyRuntime(store);
@@ -529,9 +746,10 @@ describe('AI society operation layer', () => {
 
       const highValue = society.createTask({
         tenantId: 'default',
-        objective: '分别核对两份资料',
+        objective: '请组织团队并行分别核对两份资料',
         valueUsd: 100,
         maxBudgetUsd: 0.08,
+        maxBudgetTokens: 4_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: teamBranches(),
@@ -571,6 +789,190 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('team economics use configured pricing and historical tenant usage', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      addPersistentRole(store, 'default', '用量校准研究员', ['research', 'reading', 'analysis']);
+      const task = society.createTask({
+        tenantId: 'default', objective: '分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000, departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const configured = society.estimate(task);
+      assert.equal(configured.costSource, 'configured');
+      assert.deepEqual(configured.pricingRefs, ['fixture@fixture-model']);
+      assert.ok(configured.single.costUsd < task.maxBudgetUsd);
+      assert.ok(configured.team.costUsd < task.maxBudgetUsd);
+
+      const historyRun = addRun(store);
+      const call = {
+        id: randomUUID(), runId: historyRun.id, scope: 'run' as const, purpose: 'agent' as const,
+        providerId: 'fixture', model: 'fixture-model', startedAt: Date.now(), status: 'running' as const,
+        inputEstimate: 20_000, outputLimit: 200, usageStatus: 'unknown' as const,
+        priceSource: 'configured' as const, priceIn: 1, priceOut: 2,
+      };
+      store.runs.startModelCall(call);
+      store.runs.finishModelCall({
+        ...call, status: 'completed', input: 20_000, output: 200, usageStatus: 'reported',
+      });
+      const historical = society.estimate(task);
+      assert.equal(historical.costSource, 'historical');
+      assert.ok(historical.single.costUsd > configured.single.costUsd);
+
+      store.upsertProvider({
+        id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
+        apiKey: '', model: 'fixture-model', priceIn: undefined, priceOut: undefined,
+      });
+      const unknown = society.estimate(task);
+      assert.equal(unknown.costSource, 'unavailable');
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.mode, 'solo');
+      assert.match(schedule.reason, /模型价格未配置/);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('automatic team cost cap falls back to solo and explicit requests relax only that comparison', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
+
+      const automatic = society.createTask({
+        tenantId: 'default', objective: '分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const automaticSchedule = society.tick('default').decisions
+        .find(item => item.taskId === automatic.id)!;
+      const automaticEstimate = society.estimate(automatic);
+      assert.ok(automaticEstimate.team.costUsd > automaticEstimate.single.costUsd);
+      assert.equal(automaticSchedule.mode, 'solo');
+      assert.match(automaticSchedule.reason, /团队估算高于单角色方案/);
+
+      const explicit = society.createTask({
+        tenantId: 'default', objective: '请组织团队并行分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const explicitSchedule = society.tick('default').decisions
+        .find(item => item.taskId === explicit.id)!;
+      assert.equal(explicitSchedule.mode, 'team');
+      assert.equal(explicitSchedule.runIds.length, 2);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('automatic team is accepted when a pinned route makes it cheaper than solo', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      store.upsertProvider({
+        id: 'cheap', label: 'Cheap', baseUrl: 'https://cheap.invalid/v1', apiKey: '',
+        model: 'cheap-model', priceIn: 0.01, priceOut: 0.01,
+      });
+      for (const role of store.organization.listRoles('default', undefined, true)) {
+        if (role.source === 'builtin') fixture.organization.updateRole(
+          role.id, 'default', role.revision, { employment: 'paused' }, '隔离自动组队成本测试',
+        );
+      }
+      const cheapPolicy = { providerId: 'cheap', model: 'cheap-model' };
+      addPersistentRole(store, 'default', '低成本研究员甲', ['research', 'reading', 'analysis'], {}, cheapPolicy);
+      addPersistentRole(store, 'default', '低成本研究员乙', ['research', 'reading', 'analysis'], {}, cheapPolicy);
+
+      const task = society.createTask({
+        tenantId: 'default', objective: '分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const estimate = society.estimate(task);
+      assert.ok(estimate.team.costUsd <= estimate.single.costUsd + 1e-10);
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.mode, 'team');
+      assert.equal(schedule.runIds.length, 2);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('team estimate above the task token cap stays on the single-role path', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
+      const task = society.createTask({
+        tenantId: 'default', objective: '请组织团队并行分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 1_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.mode, 'solo');
+      assert.equal(schedule.runIds.length, 1);
+      assert.match(schedule.reason, /团队 token 估算超过任务硬预算/);
+    } finally {
+      store.close();
+    }
+  });
+
+  test('completed teams leave no active load and their roles can accept the next task', () => {
+    const store = new Store(':memory:');
+    const fixture = societyRuntime(store);
+    const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+    try {
+      society.ensureInstitution('default');
+      addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
+      const task = society.createTask({
+        tenantId: 'default', objective: '请组织团队并行分别核对两份资料',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000, departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const team = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(team.mode, 'team');
+      const active = society.snapshot('default');
+      assert.equal(active.scheduling.activeTeams.some(item => item.id === team.id), true);
+      assert.equal(team.roleIds.every(roleId =>
+        active.economics.roleBudgets.find(item => item.roleId === roleId)?.activeAssignments === 1), true);
+
+      for (const runId of team.runIds) fixture.finish(runId);
+      const settled = society.snapshot('default');
+      assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
+      assert.equal(settled.scheduling.activeTeams.some(item => item.id === team.id), false);
+      assert.equal(team.roleIds.every(roleId =>
+        settled.economics.roleBudgets.find(item => item.roleId === roleId)?.activeAssignments === 0), true);
+
+      const next = society.createTask({
+        tenantId: 'default', objective: '继续阅读并核对后续资料',
+        valueUsd: 5, maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      });
+      const nextSchedule = society.tick('default').decisions.find(item => item.taskId === next.id)!;
+      assert.equal(nextSchedule.mode, 'solo');
+      assert.equal(team.roleIds.includes(nextSchedule.roleIds[0]!), true);
+    } finally {
+      store.close();
+    }
+  });
+
   test('paired solo and team Runs persist measured net benefit and block negative expansion', () => {
     const store = new Store(':memory:');
     const fixture = societyRuntime(store);
@@ -580,10 +982,10 @@ describe('AI society operation layer', () => {
       addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
       const pair = society.createPairedExperiment({
         tenantId: 'default',
-        objective: '分别核对两份资料',
+        objective: '请组织团队并行分别核对两份资料',
         valueUsd: 0.1,
         maxBudgetUsd: 0.08,
-        maxBudgetTokens: 2_000,
+        maxBudgetTokens: 4_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.2, riskReduction: 0.02 },
         branches: teamBranches(),
@@ -636,11 +1038,11 @@ describe('AI society operation layer', () => {
       addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
       const task = society.createTask({
         tenantId: 'default',
-        objective: '分别核对两份资料并合并交付',
+        objective: '请组织团队并行分别核对两份资料并合并交付',
         acceptance: ['保留两份资料的有效证据'],
         valueUsd: 100,
         maxBudgetUsd: 0.08,
-        maxBudgetTokens: 1_000,
+        maxBudgetTokens: 4_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: teamBranches(),
@@ -660,7 +1062,7 @@ describe('AI society operation layer', () => {
       assert.equal(fallback.evidenceInputs.some(item => item.ref === 'source-a.md'), true);
       const fallbackRun = store.runs.get(fallback.runId!, 'default')!;
       assert.equal(fallbackRun.fallbackReason, 'ROLLBACK_TO_SOLO');
-      assert.equal(fallbackRun.budgetTokens, 500);
+      assert.equal(fallbackRun.budgetTokens, 2_000);
       assert.equal(store.organization.getTeamCycle(team.teamCycleId!, 'default')?.status, 'partial');
       const coordinator = store.organization.getRole(collapsed.roleIds[0], 'default')!;
       fixture.organization.updateRole(
@@ -677,8 +1079,15 @@ describe('AI society operation layer', () => {
       fixture.finish(fallbackRun.id);
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
       const receipt = fixture.organization.detail(fallback.workOrderId, 'default').receipt!;
-      assert.equal(receipt.status, 'partial');
+      assert.equal(receipt.status, 'awaiting_acceptance');
+      assert.equal(receipt.unfinished.length, 0);
+      assert.equal(store.organization.contracts(fallback.workOrderId, 'default')
+        .some(item => item.status === 'collapsed'), true);
       assert.equal(receipt.contributors.some(item => item.summary.includes('团队执行受阻')), true);
+      const audits = store.organization.societyAudits('default', 100, task.id);
+      assert.equal(audits.some(item => item.action === 'fallback_solo'), true);
+      assert.equal(audits.some(item => item.action === 'release_failed'), false);
+      assert.equal(audits.filter(item => item.action === 'scheduled').length, 1);
     } finally {
       store.close();
     }
@@ -693,10 +1102,10 @@ describe('AI society operation layer', () => {
       addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
       const task = society.createTask({
         tenantId: 'default',
-        objective: '验证团队回退不能绕过部门配额',
+        objective: '请组织团队并行验证团队回退不能绕过部门配额',
         valueUsd: 100,
         maxBudgetUsd: 0.12,
-        maxBudgetTokens: 1_000,
+        maxBudgetTokens: 4_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: teamBranches(),
@@ -730,9 +1139,10 @@ describe('AI society operation layer', () => {
       const institution = society.ensureInstitution('default');
       const task = society.createTask({
         tenantId: 'default',
-        objective: '跨部门交付一份带来源的研究简报',
+        objective: '请组织团队并行跨部门交付一份带来源的研究简报',
         valueUsd: 100,
         maxBudgetUsd: 0.12,
+        maxBudgetTokens: 6_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: [
@@ -825,9 +1235,10 @@ describe('AI society operation layer', () => {
       });
       const task = society.createTask({
         tenantId: 'default',
-        objective: '跨部门交付一份带来源的研究简报',
+        objective: '请组织团队并行跨部门交付一份带来源的研究简报',
         valueUsd: 100,
         maxBudgetUsd: 0.12,
+        maxBudgetTokens: 6_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: crossDepartmentBranches(),
@@ -841,6 +1252,10 @@ describe('AI society operation layer', () => {
         store.organization.getSocietyTask(task.id, 'default')?.lastSchedulingReason ?? '',
         /部门预算配额不足/,
       );
+      const audits = store.organization.societyAudits('default', 100, task.id);
+      assert.equal(audits.filter(item => item.action === 'queued').length, 2);
+      assert.equal(audits.at(-1)?.reason, '部门预算配额不足');
+      assert.equal(audits.some(item => item.action === 'scheduled'), false);
     } finally {
       store.close();
     }
@@ -854,9 +1269,10 @@ describe('AI society operation layer', () => {
       society.ensureInstitution('default');
       const task = society.createTask({
         tenantId: 'default',
-        objective: '跨部门交付一份带来源的研究简报',
+        objective: '请组织团队并行跨部门交付一份带来源的研究简报',
         valueUsd: 100,
         maxBudgetUsd: 0.12,
+        maxBudgetTokens: 6_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: crossDepartmentBranches(),
@@ -939,6 +1355,70 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('society, department and role token limits each block Runs while USD remains sufficient', () => {
+    for (const layer of ['society', 'department', 'role'] as const) {
+      const store = new Store(':memory:');
+      const fixture = societyRuntime(store);
+      const society = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
+      try {
+        const institution = society.ensureInstitution('default');
+        const usdPolicies = {
+          societyBudgetUsd: 100,
+          departments: institution.policies.departments.map(department => ({
+            ...department,
+            quotaUsd: 10,
+            quotaTokens: 1_000_000,
+          })),
+        };
+        if (layer === 'society') {
+          society.updateInstitution('default', {
+            ...usdPolicies,
+            societyTokenBudget: 999,
+            reason: '验证社会 token 门禁',
+          });
+        } else if (layer === 'department') {
+          society.updateInstitution('default', {
+            ...usdPolicies,
+            societyTokenBudget: 2_000_000,
+            departments: usdPolicies.departments.map(department => department.id === 'knowledge'
+              ? { ...department, quotaTokens: 999 }
+              : department),
+            reason: '验证部门 token 配额',
+          });
+        } else {
+          society.updateInstitution('default', {
+            ...usdPolicies,
+            societyTokenBudget: 2_000_000,
+            reason: '验证角色 token 预算',
+          });
+          for (const role of store.organization.listRoles('default', undefined, true)) {
+            if (!role.capabilities.includes('research')) continue;
+            store.organization.updateRole(role, {
+              budgetLimitUsd: 10,
+              budgetLimitTokens: 999,
+            }, role.revision);
+          }
+        }
+
+        const task = society.createTask({
+          tenantId: 'default', objective: '研究并核对资料',
+          valueUsd: 5, maxBudgetUsd: 0.08, maxBudgetTokens: 1_000,
+          departmentId: 'knowledge',
+        });
+        assert.equal(society.tick('default').decisions.length, 0, layer);
+        assert.equal(store.runs.list('default').length, 0, layer);
+        assert.match(
+          store.organization.getSocietyTask(task.id, 'default')?.lastSchedulingReason ?? '',
+          layer === 'society' ? /社会 token 总预算不足/
+            : layer === 'department' ? /部门 token 配额不足/ : /角色预算不足/,
+          layer,
+        );
+      } finally {
+        store.close();
+      }
+    }
+  });
+
   test('branch token budgets cannot exceed or escape the task cap', () => {
     const store = new Store(':memory:');
     const society = new SocietyService({ store });
@@ -980,20 +1460,20 @@ describe('AI society operation layer', () => {
       society.ensureInstitution('default');
       addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
       const task = society.createTask({
-        tenantId: 'default', objective: '按预算完成两条研究分支',
-        valueUsd: 100, maxBudgetUsd: 0.1, maxBudgetTokens: 1_000,
+        tenantId: 'default', objective: '请组织团队并行按预算完成两条研究分支',
+        valueUsd: 100, maxBudgetUsd: 0.1, maxBudgetTokens: 5_000,
         departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: teamBranches().map((branch, index) => ({
-          ...branch, maxBudgetTokens: index === 0 ? 300 : 700,
+          ...branch, maxBudgetTokens: index === 0 ? 2_000 : 3_000,
         })),
       });
       const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
       assert.equal(schedule.mode, 'team');
       const contracts = schedule.contractIds.map(id => store.organization.getContract(id, 'default')!);
       const runs = schedule.runIds.map(id => store.runs.get(id, 'default')!);
-      assert.deepEqual(contracts.map(contract => contract.budgetTokens), [300, 700]);
-      assert.deepEqual(runs.map(run => run.budgetTokens), [300, 700]);
+      assert.deepEqual(contracts.map(contract => contract.budgetTokens), [2_000, 3_000]);
+      assert.deepEqual(runs.map(run => run.budgetTokens), [2_000, 3_000]);
       assert.equal(runs.reduce((sum, run) => sum + (run.budgetTokens ?? 0), 0), task.maxBudgetTokens);
     } finally {
       store.close();
@@ -1025,7 +1505,7 @@ describe('AI society operation layer', () => {
       }, base.revision);
       const task = society.createTask({
         tenantId: 'default', objective: '核对两份资料',
-        valueUsd: 100, maxBudgetUsd: 0.08, departmentId: 'knowledge',
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000, departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: teamBranches(),
       });
@@ -1134,6 +1614,156 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('decision and execution branches route separately and retain memory and evidence context', { timeout: 5_000 }, async () => {
+    const workspace = mkdtempSync(join(tmpdir(), 'mh-cognitive-routing-'));
+    roots.push(workspace);
+    const store = new Store(':memory:');
+    let runs: RunService | undefined;
+    try {
+      writeFileSync(join(workspace, 'source.md'), 'shared evidence', 'utf8');
+      const material = store.materials.register('default', workspace, 'source.md', workspace);
+      const providerDefs: ProviderDef[] = [
+        { id: 'decision-provider', label: 'Decision', defaultModel: 'decision-model', async *chat() {} },
+        { id: 'execution-provider', label: 'Execution', defaultModel: 'execution-model', async *chat() {} },
+      ];
+      for (const provider of providerDefs) store.upsertProvider({
+        id: provider.id, label: provider.label, baseUrl: 'https://unused.invalid/v1',
+        apiKey: '', model: provider.defaultModel, priceIn: 0, priceOut: 0,
+      });
+      const configuredProviders = store.listProviders().filter(provider => provider.enabled);
+      const decisionProvider = configuredProviders[0]!;
+      const executionProvider = configuredProviders.find(provider => provider.id !== decisionProvider.id)!;
+      assert.notEqual(decisionProvider.id, executionProvider.id);
+
+      const organization = new OrganizationService({
+        store,
+        runtimeAuthority: () => ({ workspace, readOnly: false, profile: 'standard' }),
+      });
+      const society = new SocietyService({ store, organization });
+      society.ensureInstitution('default');
+      for (const role of store.organization.listRoles('default', undefined, true)) {
+        if (role.source !== 'builtin') continue;
+        organization.updateRole(
+          role.id, 'default', role.revision, { employment: 'paused' }, '隔离认知路由测试',
+        );
+      }
+      const decisionRole = addPersistentRole(
+        store, 'default', '决策角色', ['research', 'reading', 'analysis'],
+      );
+      const executionRole = addPersistentRole(
+        store, 'default', '执行角色', ['research', 'reading', 'analysis'],
+      );
+      const witness = addPersistentRole(
+        store, 'default', '路由排序见证角色', ['research', 'reading', 'analysis'],
+      );
+      organization.updateRole(
+        witness.id, 'default', witness.revision, { employment: 'paused' }, '移出路由候选集合',
+      );
+      store.organization.upsertRoleRelation({
+        id: randomUUID(), tenantId: 'default', fromRoleId: decisionRole.id, toRoleId: witness.id,
+        kind: 'collaborated', score: 1, evidence: [], updatedAt: Date.now(),
+      });
+      store.organization.appendRoleMemory({
+        id: randomUUID(), tenantId: 'default', roleId: decisionRole.id, kind: 'lesson',
+        summary: '论文阅读与文献来源核对经验', evidence: [], createdAt: Date.now(),
+      });
+      store.organization.updateRole(executionRole, {
+        modelPolicy: { providerId: executionProvider.id, model: executionProvider.model },
+      }, executionRole.revision);
+
+      let entered = 0;
+      let resolveEntered!: () => void;
+      const enteredBoth = new Promise<void>(resolve => { resolveEntered = resolve; });
+      const captures: Array<{
+        runId?: string;
+        providerId: string;
+        model: string;
+        messages: string;
+        context: string;
+      }> = [];
+      const loop: AgentLoop = {
+        approveApproval: () => false,
+        async *run(options) {
+          captures.push({
+            runId: options.runId,
+            providerId: options.provider.id,
+            model: options.model,
+            messages: options.messages.map(message => message.content).join('\n'),
+            context: (options.contextMessages ?? []).map(message => message.content).join('\n'),
+          });
+          entered += 1;
+          if (entered === 2) resolveEntered();
+          await new Promise<void>(resolve => {
+            if (options.signal?.aborted) resolve();
+            else options.signal?.addEventListener('abort', () => resolve(), { once: true });
+          });
+        },
+      };
+      runs = new RunService({
+        store,
+        organization,
+        runner: () => loop,
+        workspace: () => workspace,
+        projectRoot: workspace,
+        provider: (_session, providerId) => {
+          const selected = store.listProviders().find(provider => provider.enabled && provider.id === providerId);
+          return selected ? { id: selected.id, model: selected.model } : undefined;
+        },
+        prepare: record => ({
+          provider: providerDefs.find(provider => provider.id === record.providerId)!,
+          model: record.model,
+          messages: [],
+          traceId: record.id,
+        }),
+      });
+      society.attachRunService(runs);
+
+      const task = society.createTask({
+        tenantId: 'default', objective: '请组织团队并行分别核对两份资料',
+        materials: [{ id: material.id, version: material.version }],
+        valueUsd: 100, maxBudgetUsd: 0.08, maxBudgetTokens: 4_000,
+        departmentId: 'knowledge',
+        economics: { qualityGain: 0.1, riskReduction: 0.02 },
+        branches: teamBranches(),
+      });
+      const schedule = society.tick('default').decisions.find(item => item.taskId === task.id)!;
+      assert.equal(schedule.mode, 'team');
+      assert.equal(schedule.assignments[0]?.roleId, decisionRole.id);
+      assert.equal(schedule.assignments[0]?.cognitiveTier, 'decision');
+      assert.equal(schedule.assignments[1]?.roleId, executionRole.id);
+      assert.equal(schedule.assignments[1]?.cognitiveTier, 'execution');
+      await Promise.race([
+        enteredBoth,
+        new Promise<never>((_, reject) => setTimeout(() => reject(new Error('社会分支未进入实际运行')), 2_000)),
+      ]);
+
+      const branchRuns = store.runs.list('default');
+      const decisionRun = branchRuns.find(run => run.organizationRoleId === decisionRole.id)!;
+      const executionRun = branchRuns.find(run => run.organizationRoleId === executionRole.id)!;
+      assert.equal(decisionRun.providerId, decisionProvider.id);
+      assert.equal(decisionRun.model, decisionProvider.model);
+      assert.equal(executionRun.providerId, executionProvider.id);
+      assert.equal(executionRun.model, executionProvider.model);
+      assert.notEqual(decisionRun.providerId, executionRun.providerId);
+      assert.match(decisionRun.instructions ?? '', /论文阅读与文献来源核对经验/);
+      assert.match(decisionRun.instructions ?? '', new RegExp(`material:${material.id}@${material.version}`));
+      assert.equal(decisionRun.materials?.some(item => item.id === material.id) ?? false, true);
+
+      const decisionCapture = captures.find(item => item.runId === decisionRun.id)!;
+      const executionCapture = captures.find(item => item.runId === executionRun.id)!;
+      assert.equal(decisionCapture.providerId, decisionProvider.id);
+      assert.equal(decisionCapture.model, decisionProvider.model);
+      assert.equal(executionCapture.providerId, executionProvider.id);
+      assert.equal(executionCapture.model, executionProvider.model);
+      assert.match(decisionCapture.context, /论文阅读与文献来源核对经验/);
+      assert.match(executionCapture.context, new RegExp(`material:${material.id}@${material.version}`));
+      assert.match(executionCapture.messages, new RegExp(material.id));
+    } finally {
+      await runs?.shutdown();
+      store.close();
+    }
+  });
+
   test('cache hit rate is shown only when every Run reports cached and miss tokens', () => {
     const store = new Store(':memory:');
     const fixture = societyRuntime(store);
@@ -1200,8 +1830,8 @@ describe('AI society operation layer', () => {
       addPersistentRole(store, 'default', '研究执行员二', ['research', 'reading', 'analysis']);
       addPersistentRole(store, 'default', '研究执行员三', ['research', 'reading', 'analysis']);
       const task = society.createTask({
-        tenantId: 'default', objective: '先核对两份资料，再形成联合结论',
-        valueUsd: 100, maxBudgetUsd: 0.12, departmentId: 'knowledge',
+        tenantId: 'default', objective: '请组织团队并行先核对两份资料，再形成联合结论',
+        valueUsd: 100, maxBudgetUsd: 0.12, maxBudgetTokens: 8_000, departmentId: 'knowledge',
         economics: { qualityGain: 0.1, riskReduction: 0.02 },
         branches: [
           {
@@ -1250,6 +1880,8 @@ describe('AI society operation layer', () => {
       const restarted = new SocietyService({ store, organization: fixture.organization, runs: fixture.runtime });
       restarted.tick('default');
       assert.deepEqual(store.runs.list('default').map(run => run.id), first.runIds);
+      assert.equal(store.organization.societyAudits('default', 100, task.id)
+        .filter(item => item.action === 'scheduled').length, 1);
       fixture.finish(first.runIds[0]);
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
     } finally {
@@ -1275,6 +1907,8 @@ describe('AI society operation layer', () => {
 
       assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'awaiting_acceptance');
       assert.equal(store.organization.getSocietySchedule(schedule.id, 'default')?.status, 'completed');
+      assert.equal(store.organization.societyAudits('default', 100, task.id)
+        .filter(item => item.action === 'release_completed').length, 1);
     } finally {
       store.close();
     }

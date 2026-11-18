@@ -25,6 +25,12 @@ export class MaterialRepository {
     if (!row) throw new MaterialError(404, 'MATERIAL_NOT_FOUND', '文件不存在或不属于当前工作区');
     return JSON.parse(row.record);
   }
+  sizeForTenant(ref: MaterialRef, tenant: string): number | undefined {
+    const row = this.db.prepare('SELECT record FROM materials_v1 WHERE id=? AND tenant_id=?').get(ref.id, tenant) as { record: string } | undefined;
+    if (!row) return undefined;
+    const material = JSON.parse(row.record) as Material;
+    return material.version === ref.version ? material.size : undefined;
+  }
   resolve(ref: MaterialRef, tenant: string, workspace: string, projectRoot: string): { material: Material; file: string; bytes: Buffer } {
     const material = this.get(ref.id, tenant, workspace); const file = resolveInSandbox(workspace, material.path);
     if (isDeniedReadPath(file, workspace, projectRoot)) throw new MaterialError(403, 'MATERIAL_DENIED', '拒绝读取受保护路径');
