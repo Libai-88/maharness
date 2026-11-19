@@ -186,6 +186,10 @@ export function registerOrganizationRoutes(
         maxBudgetTokens: req.body?.maxBudgetTokens === undefined ? undefined : Number(req.body.maxBudgetTokens),
         priority: req.body?.priority,
         departmentId: typeof req.body?.departmentId === 'string' ? req.body.departmentId : undefined,
+        requiredCapabilities: Array.isArray(req.body?.requiredCapabilities)
+          ? req.body.requiredCapabilities.filter((item: unknown): item is string => typeof item === 'string')
+          : undefined,
+        needsWrite: typeof req.body?.needsWrite === 'boolean' ? req.body.needsWrite : undefined,
         branches: Array.isArray(req.body?.branches) ? req.body.branches : undefined,
         economics: typeof req.body?.economics === 'object'
           && req.body.economics !== null

@@ -1,5 +1,5 @@
 import { fetchDoc } from '../search';
-import type { PluginContext, ToolContext } from '../../kernel/types';
+import type { PluginContext, ToolContext } from '../../kernel/plugin-sdk';
 export interface Citation { doi?: string; title?: string; authors?: string[]; year?: number; journal?: string }
 export interface Reference extends Citation { source: string; retrievedAt: string; verification: 'metadata_retrieved' | 'not_checked'; abstract?: string }
 export type MetadataFetcher = (url: string, signal?: AbortSignal, maxBytes?: number, deps?: object, accept?: string) => Promise<{ body: string; finalUrl: string }>;

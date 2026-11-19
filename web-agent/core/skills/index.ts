@@ -13,13 +13,13 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Plugin, ToolContext } from '../../kernel/types';
-import type { AgentHookCtx } from '../../kernel/loop';
-import { parseFrontMatter, fmString, fmList, fmMap } from '../../kernel/frontmatter';
-import { estimateTokens } from '../../kernel/tokens';
-import { listSkillBackups, rollbackSkill } from '../../kernel/skillsSync';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
+import type { AgentHookCtx } from '../../kernel/plugin-sdk';
+import { parseFrontMatter, fmString, fmList, fmMap } from '../../kernel/plugin-sdk';
+import { estimateTokens } from '../../kernel/plugin-sdk';
+import { listSkillBackups, rollbackSkill } from '../../kernel/plugin-sdk';
 import { scoreSkillEntries } from './router';
-import { adminToolDenied } from '../../kernel/tool-privilege';
+import { adminToolDenied } from '../../kernel/plugin-sdk';
 
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));
 const builtinDir = join(rootDir, 'core', 'skills', 'builtin');

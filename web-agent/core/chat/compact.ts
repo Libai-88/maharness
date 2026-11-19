@@ -1,4 +1,4 @@
-import { callModel } from '../../kernel/model-call';
+import { callModel } from '../../kernel/plugin-sdk';
 /**
  * core/chat/compact.ts —— 上下文压缩（Context Compaction）
  *
@@ -19,10 +19,10 @@ import { callModel } from '../../kernel/model-call';
  * 与工作区切换同级的一次性代价，换来的是长会话不丢事实。
  */
 import { randomUUID } from 'node:crypto';
-import type { LLMMessage, ProviderDef, TraceLike } from '../../kernel/types';
-import { allocateTokenBudget, countMessageTokens, estimateTokens } from '../../kernel/tokens';
+import type { LLMMessage, ProviderDef, TraceLike } from '../../kernel/plugin-sdk';
+import { allocateTokenBudget, countMessageTokens, estimateTokens } from '../../kernel/plugin-sdk';
 import { sanitizeToolHistory } from './policy';
-import { ContextCapacityError } from '../../kernel/context';
+import { ContextCapacityError } from '../../kernel/plugin-sdk';
 import { estimateCost } from './provider';
 
 /** 压缩摘要的前缀标记：检测到它即认为历史已压缩（跳过，不重复总结） */

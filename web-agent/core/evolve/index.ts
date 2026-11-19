@@ -10,9 +10,9 @@
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { AgentRunSummary, Plugin } from '../../kernel/types';
-import { contentWords, bigramSet, dice } from '../../kernel/cache';
-import { parseFrontMatter, fmString, fmList } from '../../kernel/frontmatter';
+import type { AgentRunSummary, Plugin } from '../../kernel/plugin-sdk';
+import { contentWords, bigramSet, dice } from '../../kernel/plugin-sdk';
+import { parseFrontMatter, fmString, fmList } from '../../kernel/plugin-sdk';
 
 const EMPHASIS_PATTERNS: { re: RegExp; why: string }[] = [
   { re: /(记住|记一下|以后(都|每次|再也?不|一定|务必)|下次(也|记得|一定))/, why: '用户给出了需要长期遵守的指示' },

@@ -1164,7 +1164,7 @@ export class ExperienceService {
       if (requireModel || requestedProvider) throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
       throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
     }
-    const evaluation = new OrganizationService({ store: this.deps.store }).ensureEvaluation(tenantId);
+    const evaluation = new OrganizationService({ store: this.deps.store, now: this.now }).ensureEvaluation(tenantId);
     const rawFacts = buildCachedFactLedger(
       this.deps.store,
       tenantId,

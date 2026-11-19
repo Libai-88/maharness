@@ -1,8 +1,8 @@
 import { Worker } from 'node:worker_threads';
 import { fork } from 'node:child_process';
-import type { DocumentContent } from '../../kernel/material';
+import type { DocumentContent } from '../../kernel/plugin-sdk';
 import type { CreateSpec, Patch } from './formats';
-import { ExecutionPool } from '../../kernel/execution-pool';
+import { ExecutionPool } from '../../kernel/plugin-sdk';
 const workers = new ExecutionPool(2);
 
 export interface DocumentService {

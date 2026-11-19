@@ -29,40 +29,21 @@ import {
   type SocietyTaskBranch,
   type SocietyAuditEntry,
 } from './organization-store';
+import {
+  CAPABILITY_ALIASES,
+  CAPABILITY_TOOL_HINTS,
+  DEFAULT_POLICIES,
+  ROLE_SELECTION_WEIGHTS,
+  SOCIAL_HEALTH_WEIGHTS,
+  bounded,
+  money,
+  normalizePolicies,
+  policyHash,
+  ratio,
+  tokenCount,
+  validDepartmentId,
+} from './society-policy';
 import type { RunService } from './run-service';
-
-const DEFAULT_POLICIES: InstitutionPolicies = {
-  schemaVersion: 1,
-  societyBudgetUsd: 20,
-  societyTokenBudget: 2_000_000,
-  minNetBenefitUsd: 0.01,
-  maxTeamSize: 4,
-  welfareMaxActiveAssignments: 2,
-  highSpendApprovalUsd: 2,
-  maxQueuedPerDepartment: 25,
-  cognitiveRouting: {
-    decision: 'configured-primary-model',
-    execution: 'configured-role-model-or-tools',
-    utility: 'deterministic-tools',
-  },
-  departments: [
-    {
-      id: 'operations', name: '综合运营部', charter: '承接办公、文件和轻量自动化交付',
-      capabilities: ['coordination', 'files', 'documents', 'automation'],
-      quotaUsd: 10, quotaTokens: 1_000_000, maxConcurrent: 4, priority: 1, enabled: true,
-    },
-    {
-      id: 'knowledge', name: '知识与研究部', charter: '检索、阅读、归纳和证据整理',
-      capabilities: ['research', 'reading', 'analysis', 'files'],
-      quotaUsd: 7, quotaTokens: 700_000, maxConcurrent: 3, priority: 2, enabled: true,
-    },
-    {
-      id: 'quality', name: '质量与审校部', charter: '独立复核、来源核验和交付验收',
-      capabilities: ['review', 'analysis', 'quality'],
-      quotaUsd: 3, quotaTokens: 300_000, maxConcurrent: 2, priority: 3, enabled: true,
-    },
-  ],
-};
 
 function teamCostEligible(
   objective: string,
@@ -83,6 +64,8 @@ export interface CreateSocietyTaskInput {
   maxBudgetTokens?: number;
   priority?: number;
   departmentId?: string;
+  requiredCapabilities?: string[];
+  needsWrite?: boolean;
   economics?: Partial<NonNullable<SocietyTask['economics']>>;
   evidenceExperimentId?: string;
   branches?: SocietyTaskBranch[];
@@ -179,117 +162,9 @@ function dependencyIndexes(branches: SocietyTaskBranch[]): number[][] {
   return dependencies;
 }
 
-function bounded(value: string, max: number, label: string): string {
-  const result = String(value ?? '').trim();
-  if (!result) throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', `${label}不能为空`);
-  if (result.length > max) throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', `${label}过长`);
-  return result;
-}
-
-function money(value: unknown, label: string, allowZero = false): number {
-  const result = Number(value);
-  if (!Number.isFinite(result) || (allowZero ? result < 0 : result <= 0))
-    throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', `${label}必须是${allowZero ? '非负' : '正'}数`);
-  return Math.round(result * 1_000_000) / 1_000_000;
-}
-
-function ratio(value: unknown, label: string): number {
-  const result = Number(value ?? 0);
-  if (!Number.isFinite(result) || result < 0 || result > 1)
-    throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', `${label}必须在 0 到 1 之间`);
-  return result;
-}
-
-function tokenCount(value: unknown, label: string, allowZero = false): number {
-  const result = Number(value);
-  if (!Number.isSafeInteger(result) || (allowZero ? result < 0 : result <= 0))
-    throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', `${label}必须是${allowZero ? '非负' : '正'}整数`);
-  return result;
-}
-
-function validDepartmentId(value: string): string {
-  const id = bounded(value, 64, '部门 ID');
-  if (!/^[a-z0-9][a-z0-9-]*$/i.test(id))
-    throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', '部门 ID 只能包含字母、数字和连字符');
-  return id;
-}
-
-function policyHash(policies: InstitutionPolicies): string {
-  return createHash('sha256').update(JSON.stringify(policies)).digest('hex');
-}
-
-function normalizePolicies(input: Partial<InstitutionPolicies>): InstitutionPolicies {
-  const departments = (input.departments ?? DEFAULT_POLICIES.departments).map((department, index) => ({
-    ...DEFAULT_POLICIES.departments.find(item => item.id === department.id),
-    ...department,
-    id: validDepartmentId(department.id),
-    name: bounded(department.name, 80, `部门 ${index + 1} 名称`),
-    charter: bounded(department.charter, 500, `部门 ${index + 1} 职责`),
-    capabilities: [...new Set(department.capabilities.map(item => bounded(item, 80, '部门能力')))].slice(0, 20),
-    quotaUsd: money(department.quotaUsd, `部门 ${index + 1} 配额`, true),
-    quotaTokens: tokenCount(department.quotaTokens, `部门 ${index + 1} token 配额`, true),
-    maxConcurrent: Math.max(1, Math.min(100, Math.trunc(Number(department.maxConcurrent) || 1))),
-    priority: Math.max(1, Math.min(9, Math.trunc(Number(department.priority) || 5))),
-    enabled: department.enabled !== false,
-  }));
-  if (!departments.length) throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', '至少需要一个部门');
-  if (new Set(departments.map(item => item.id)).size !== departments.length)
-    throw new OrganizationError(400, 'SOCIETY_INPUT_INVALID', '部门 ID 不能重复');
-  const maxTeamSize = Math.max(2, Math.min(5, Math.trunc(Number(input.maxTeamSize ?? DEFAULT_POLICIES.maxTeamSize))));
-  return {
-    schemaVersion: 1,
-    societyBudgetUsd: money(input.societyBudgetUsd ?? DEFAULT_POLICIES.societyBudgetUsd, '社会总预算', true),
-    societyTokenBudget: tokenCount(input.societyTokenBudget ?? DEFAULT_POLICIES.societyTokenBudget, '社会 token 总预算', true),
-    minNetBenefitUsd: money(input.minNetBenefitUsd ?? DEFAULT_POLICIES.minNetBenefitUsd, '最低净收益', true),
-    maxTeamSize,
-    welfareMaxActiveAssignments: Math.max(1, Math.min(20, Math.trunc(
-      Number(input.welfareMaxActiveAssignments ?? DEFAULT_POLICIES.welfareMaxActiveAssignments),
-    ))),
-    highSpendApprovalUsd: money(input.highSpendApprovalUsd ?? DEFAULT_POLICIES.highSpendApprovalUsd, '高额审批阈值', true),
-    maxQueuedPerDepartment: Math.max(1, Math.min(500, Math.trunc(
-      Number(input.maxQueuedPerDepartment ?? DEFAULT_POLICIES.maxQueuedPerDepartment),
-    ))),
-    cognitiveRouting: { ...DEFAULT_POLICIES.cognitiveRouting, ...input.cognitiveRouting },
-    departments,
-  };
-}
-
 function activeScheduleRoleIds(schedules: SocietySchedule[]): string[] {
   return schedules.filter(item => item.status === 'active').flatMap(item => item.roleIds);
 }
-
-const CAPABILITY_ALIASES: Record<string, string[]> = {
-  research: ['研究', '论文', '文献', '检索', '资料对比', '来源'],
-  reading: ['阅读', '精读', '读懂', '摘要'],
-  analysis: ['分析', '归纳', '对比'],
-  review: ['审校', '复核', '核验', '验收', '检查', '核对'],
-  quality: ['质量', '准确性', '错误'],
-  documents: ['文档', 'word', 'docx', 'pdf', '表格', 'xlsx', '演示', 'ppt'],
-  files: ['文件', '整理', '批量'],
-  automation: ['自动化', '批量处理', '定时'],
-  coordination: ['协调', '计划', '排期'],
-};
-
-const CAPABILITY_TOOL_HINTS: Record<string, string[]> = {
-  research: ['search', 'fetch', 'browser', 'web'],
-  reading: ['read', 'document', 'pdf'],
-  analysis: ['read', 'document', 'data', 'analysis'],
-  review: ['review', 'read', 'search'],
-  quality: ['review', 'read', 'search'],
-  documents: ['document', 'docx', 'xlsx', 'pptx', 'write'],
-  files: ['file', 'workspace', 'write'],
-  automation: ['automation', 'schedule', 'command', 'shell', 'write'],
-  coordination: ['plan', 'team', 'subagent', 'task'],
-};
-
-const ROLE_SELECTION_WEIGHTS = {
-  capability: 0.3,
-  memory: 0.15,
-  tools: 0.15,
-  collaboration: 0.1,
-  history: 0.15,
-  load: 0.15,
-} as const;
 
 export class SocietyService {
   private readonly organization: OrganizationService;
@@ -297,17 +172,22 @@ export class SocietyService {
   private readonly advancing = new Set<string>();
   private readonly watchedRuns = new Map<string, () => void>();
 
+  private readonly now: () => number;
+
   constructor(private readonly options: {
     store: Store;
     emit?: (type: string, data: Record<string, unknown>) => void;
     organization?: OrganizationService;
     runs?: SocietyRunRuntime;
     runtimeAuthority?: ConstructorParameters<typeof OrganizationService>[0]['runtimeAuthority'];
+    now?: () => number;
   }) {
+    this.now = options.now ?? Date.now;
     this.organization = options.organization ?? new OrganizationService({
       store: options.store,
       emit: options.emit,
       ...(options.runtimeAuthority ? { runtimeAuthority: options.runtimeAuthority } : {}),
+      now: this.now,
     });
     this.runs = options.runs;
   }
@@ -336,7 +216,7 @@ export class SocietyService {
       ...(schedule ? { scheduleId: schedule.id } : {}),
       ...(schedule?.workOrderId ? { workOrderId: schedule.workOrderId } : {}),
       action, actorId, reason: reason.slice(0, 500), details, idempotencyKey,
-      createdAt: Date.now(),
+      createdAt: this.now(),
     });
   }
 
@@ -480,7 +360,7 @@ export class SocietyService {
     const record: InstitutionVersion = {
       id: randomUUID(), tenantId, version: 1, status: 'active', policies,
       hash: policyHash(policies), createdBy: 'maharness', reason: '初始化本地 AI 社会制度',
-      createdAt: Date.now(),
+      createdAt: this.now(),
     };
     this.repository().transaction(() => {
       this.repository().createInstitution(record);
@@ -495,7 +375,7 @@ export class SocietyService {
   }
 
   private ensureFoundationRoles(tenantId: string): void {
-    const now = Date.now();
+    const now = this.now();
     const roles: Array<Pick<OrganizationRole, 'name' | 'responsibilities' | 'capabilities'>> = [
       { name: '调度协调员', responsibilities: ['按制度选择单角色或短团队', '核对预算、权限和福利边界'], capabilities: ['coordination', 'planning', 'review'] },
       { name: '研究执行员', responsibilities: ['阅读资料、检索来源、形成可核对结论'], capabilities: ['research', 'reading', 'analysis', 'files'] },
@@ -553,7 +433,7 @@ export class SocietyService {
     const record: InstitutionVersion = {
       id: randomUUID(), tenantId, version: current.version + 1, status: 'active',
       policies, hash: policyHash(policies), createdBy: 'human',
-      reason: bounded(input.reason, 500, '制度变更原因'), createdAt: Date.now(),
+      reason: bounded(input.reason, 500, '制度变更原因'), createdAt: this.now(),
     };
     this.repository().transaction(() => {
       this.repository().updateInstitution(current, { status: 'superseded' });
@@ -577,7 +457,7 @@ export class SocietyService {
     const record: InstitutionVersion = {
       id: randomUUID(), tenantId, version: current.version + 1, status: 'active',
       policies, hash: policyHash(policies), createdBy: 'human',
-      reason: `回滚至 v${version}：${bounded(reason, 460, '回滚原因')}`, createdAt: Date.now(),
+      reason: `回滚至 v${version}：${bounded(reason, 460, '回滚原因')}`, createdAt: this.now(),
     };
     this.repository().transaction(() => {
       this.repository().updateInstitution(current, { status: 'superseded' });
@@ -642,7 +522,7 @@ export class SocietyService {
       });
     }
     dependencyIndexes(branches);
-    const now = Date.now();
+    const now = this.now();
     const record: SocietyTask = {
       id: randomUUID(), tenantId: input.tenantId, projectId: input.projectId ?? '',
       objective, acceptance: (input.acceptance ?? []).map(item => bounded(item, 300, '验收条件')).slice(0, 10),
@@ -652,6 +532,11 @@ export class SocietyService {
       maxBudgetTokens,
       priority: Math.max(1, Math.min(5, Math.trunc(Number(input.priority ?? 3)))),
       departmentId,
+      ...(input.requiredCapabilities?.length ? {
+        requiredCapabilities: [...new Set(input.requiredCapabilities.map(item =>
+          bounded(item, 80, '任务能力')))].slice(0, 20),
+      } : {}),
+      ...(input.needsWrite === undefined ? {} : { needsWrite: input.needsWrite }),
       ...(input.economics ? {
         economics: {
           qualityGain: ratio(input.economics.qualityGain, '团队质量增益'),
@@ -732,6 +617,7 @@ export class SocietyService {
   }
 
   private requiredCapabilities(task: SocietyTask, institution: InstitutionVersion): string[] {
+    if (task.requiredCapabilities?.length) return task.requiredCapabilities.slice(0, 8);
     const departmentIds = new Set(task.branches.map(branch =>
       branch.departmentId ?? task.departmentId ?? '',
     ).filter(Boolean));
@@ -757,6 +643,7 @@ export class SocietyService {
   }
 
   private taskNeedsWrite(task: SocietyTask): boolean {
+    if (task.needsWrite !== undefined) return task.needsWrite;
     const text = [
       task.objective,
       ...task.acceptance,
@@ -775,10 +662,11 @@ export class SocietyService {
     candidates: RoleSelectionScore[];
   } {
     const activeRoles = activeScheduleRoleIds(this.repository().societySchedules(task.tenantId, 1000));
-    const organization = new OrganizationService({ store: this.options.store });
+    const organization = this.organization;
     const scorecards = organization.scorecards(task.tenantId);
     const evaluation = organization.ensureEvaluation(task.tenantId);
-    const weights = evaluation.record.rankingWeights;
+    const evaluationWeights = evaluation.record.rankingWeights;
+    const selectionWeights = institution.policies.roleSelectionWeights ?? ROLE_SELECTION_WEIGHTS;
     const relations = this.repository().roleRelations(task.tenantId);
     const requiredCapabilities = this.requiredCapabilities(task, institution);
     const needsWrite = this.taskNeedsWrite(task);
@@ -810,19 +698,19 @@ export class SocietyService {
         : 0.5;
       const scorecard = scorecards.find(item => item.roleId === role.id);
       const historyReliability = scorecard && scorecard.sampleSize >= evaluation.record.lowConfidenceSamples
-        ? (scorecard.acceptanceRate ?? 0) * weights.acceptance
-          + (scorecard.budgetCompliance ?? 0) * weights.budget
-          + (scorecard.evidenceCompleteness ?? 0) * weights.evidence
+        ? (scorecard.acceptanceRate ?? 0) * evaluationWeights.acceptance
+          + (scorecard.budgetCompliance ?? 0) * evaluationWeights.budget
+          + (scorecard.evidenceCompleteness ?? 0) * evaluationWeights.evidence
         : 0.5;
       const activeAssignments = activeRoles.filter(id => id === role.id).length;
       const loadBalance = Math.max(0, 1 - activeAssignments
         / Math.max(1, institution.policies.welfareMaxActiveAssignments));
-      const score = capabilityFit * ROLE_SELECTION_WEIGHTS.capability
-        + memoryRelevance * ROLE_SELECTION_WEIGHTS.memory
-        + toolReadiness * ROLE_SELECTION_WEIGHTS.tools
-        + collaborationHealth * ROLE_SELECTION_WEIGHTS.collaboration
-        + historyReliability * ROLE_SELECTION_WEIGHTS.history
-        + loadBalance * ROLE_SELECTION_WEIGHTS.load;
+      const score = capabilityFit * selectionWeights.capability
+        + memoryRelevance * selectionWeights.memory
+        + toolReadiness * selectionWeights.tools
+        + collaborationHealth * selectionWeights.collaboration
+        + historyReliability * selectionWeights.history
+        + loadBalance * selectionWeights.load;
       const blockedReason = needsWrite && role.authority.readOnly
         ? '角色只读权限不覆盖写入任务'
         : toolReadiness === 0
@@ -1124,12 +1012,12 @@ export class SocietyService {
         .filter(score => score.eligible)
         .map(score => roleById.get(score.roleId))
         .filter((role): role is OrganizationRole => Boolean(role));
-      const wellbeing = new OrganizationService({ store: this.options.store }).wellbeing(tenantId, projectId);
+      const wellbeing = this.organization.wellbeing(tenantId, projectId);
       const contextBlocked = new Set(wellbeing
         .filter(item => item.contextPressure === 'high')
         .map(item => item.roleId));
       const failureBlocked = new Set(wellbeing
-        .filter(item => item.failureBackoffUntil !== undefined && item.failureBackoffUntil > Date.now())
+        .filter(item => item.failureBackoffUntil !== undefined && item.failureBackoffUntil > this.now())
         .map(item => item.roleId));
       const waitingBlocked = new Set(wellbeing
         .filter(item => item.waitingApproval > 0)
@@ -1257,7 +1145,7 @@ export class SocietyService {
       const selection: SocietyScheduleSelection = {
         policyVersion: institution.version,
         requiredCapabilities: ranking.requiredCapabilities,
-        weights: { ...ROLE_SELECTION_WEIGHTS },
+        weights: { ...(institution.policies.roleSelectionWeights ?? ROLE_SELECTION_WEIGHTS) },
         chosenRoleIds: [...selectedIds],
         candidates: ranking.candidates.map(candidate => {
           const blockedReason = candidate.blockedReason
@@ -1316,7 +1204,7 @@ export class SocietyService {
         this.queue(task, '社会 token 总预算不足');
         continue;
       }
-      const now = Date.now();
+      const now = this.now();
       const schedule: SocietySchedule = {
         id: randomUUID(), tenantId, taskId: task.id, trigger: 'institution',
         institutionVersion: institution.version, departmentId: department.id,
@@ -1546,7 +1434,7 @@ export class SocietyService {
       const run = this.options.store.runs.get(runId, task.tenantId);
       if (run && !RUN_TERMINAL.has(run.status)) this.runs?.cancel(runId, task.tenantId);
     }
-    const now = Date.now();
+    const now = this.now();
     this.repository().transaction(() => {
       for (const roleId of roleIds) {
         const recorded = this.repository().roleMemories(task.tenantId, roleId, 50)
@@ -1665,7 +1553,7 @@ export class SocietyService {
       model: 'runtime-selected',
       fallbackReason: 'ROLLBACK_TO_SOLO',
     };
-    const now = Date.now();
+    const now = this.now();
     const fallbackContract: AssignmentContract = {
       id: randomUUID(), tenantId: task.tenantId, workOrderId: schedule.workOrderId,
       roleId: coordinator.id, departmentId: coordinatorDepartmentId,
@@ -1804,7 +1692,7 @@ export class SocietyService {
       const task = this.repository().getSocietyTask(schedule.taskId, tenantId);
       if (!task) {
         this.repository().updateSocietySchedule(schedule, {
-          status: 'failed', reason: '社会任务不存在', releasedAt: Date.now(),
+          status: 'failed', reason: '社会任务不存在', releasedAt: this.now(),
         });
         return { schedule };
       }
@@ -1940,7 +1828,7 @@ export class SocietyService {
     }
     const evidence = contracts.flatMap(contract => contract.delivery?.evidence ?? [])
       .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
-    const now = Date.now();
+    const now = this.now();
     this.repository().transaction(() => {
       this.repository().updateSocietySchedule(schedule, { status: 'completed', releasedAt: now });
       this.repository().updateSocietyTask(task, {
@@ -2004,7 +1892,7 @@ export class SocietyService {
       if (!contracts.length || contracts.some(contract => contract.status !== 'delivered'
         || (contract.delivery?.unfinished.length ?? 1) > 0))
         throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '分工交付事实不完整，不能标记完成');
-      const now = Date.now();
+      const now = this.now();
       this.repository().transaction(() => {
         this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'completed', reason);
         task = this.repository().updateSocietyTask(currentTask, {
@@ -2024,7 +1912,7 @@ export class SocietyService {
         .filter((item): item is AssignmentContract => !!item);
       const evidence = contracts.flatMap(contract => contract.delivery?.evidence ?? [])
         .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
-      const now = Date.now();
+      const now = this.now();
       this.repository().transaction(() => {
         this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'failed', reason);
         task = this.repository().updateSocietyTask(currentTask, {
@@ -2070,7 +1958,7 @@ export class SocietyService {
     const roles = this.repository().listRoles(tenantId, undefined, true)
       .filter(role => !projectId || role.projectId === '' || role.projectId === projectId);
     const relations = this.repository().roleRelations(tenantId);
-    const organization = new OrganizationService({ store: this.options.store });
+    const organization = this.organization;
     const scorecards = organization.scorecards(tenantId);
     const wellbeing = organization.wellbeing(tenantId, projectId);
     const evaluation = organization.evaluationHistory(tenantId);
@@ -2122,10 +2010,22 @@ export class SocietyService {
       ? Math.min(1, (societyReservedUsd + societySpentUsd) / institution.policies.societyBudgetUsd) : 1;
     const collaborationHealth = relations.length
       ? relations.reduce((sum, relation) => sum + relation.score, 0) / relations.length : null;
-    const healthParts = [loadBalance, welfare, exceptionHealth, 1 - budgetUtilization, collaborationHealth]
-      .filter((value): value is number => value !== null);
+    const healthParts: Array<[number | null, number]> = [
+      [loadBalance, SOCIAL_HEALTH_WEIGHTS.loadBalance],
+      [welfare, SOCIAL_HEALTH_WEIGHTS.welfare],
+      [exceptionHealth, SOCIAL_HEALTH_WEIGHTS.exceptionHealth],
+      [1 - budgetUtilization, SOCIAL_HEALTH_WEIGHTS.budgetHeadroom],
+      [collaborationHealth, SOCIAL_HEALTH_WEIGHTS.collaborationHealth],
+    ];
+    const availableHealthParts = healthParts.filter((part): part is [number, number] => part[0] !== null);
+    const availableWeight = availableHealthParts.reduce((sum, [, weight]) => sum + weight, 0);
     const health: SocialHealth = {
-      score: healthParts.length ? Math.round(healthParts.reduce((sum, value) => sum + value, 0) / healthParts.length * 10_000) / 100 : null,
+      score: availableWeight
+        ? Math.round(availableHealthParts.reduce((sum, [value, weight]) => sum + value * weight, 0) / availableWeight * 10_000) / 100
+        : null,
+      scoreKind: 'weighted_heuristic',
+      sampleSize: relations.length,
+      weights: { ...SOCIAL_HEALTH_WEIGHTS },
       loadBalance, welfare, exceptionHealth, budgetUtilization, collaborationHealth,
     };
     const bottlenecks: SocietySnapshot['bottlenecks'] = [];
@@ -2326,7 +2226,7 @@ export class SocietyService {
         evidenceExperimentId: undefined,
       });
       const team = this.createTask(input);
-      const now = Date.now();
+      const now = this.now();
       const experiment: SocietyPairedExperiment = {
         id: randomUUID(),
         tenantId: input.tenantId,
@@ -2395,7 +2295,7 @@ export class SocietyService {
       const reason = '单角色或团队 Run 尚未结束';
       const running: SocietyPairedExperiment = {
         ...solo.experiment!.snapshot,
-        status: 'running', reason, updatedAt: Date.now(),
+        status: 'running', reason, updatedAt: this.now(),
       };
       this.persistExperiment(solo, team, running);
       return structuredClone(running);
@@ -2424,7 +2324,7 @@ export class SocietyService {
       reason: usageKnown
         ? '两条真实 Run 的验收、产物、成本、耗时与风险事实均已记录'
         : '两条真实 Run 已结束，但 Provider usage 不完整，净收益只能标记为不确定',
-      updatedAt: Date.now(),
+      updatedAt: this.now(),
     };
     this.persistExperiment(solo, team, measured);
     this.emit('organization.society.experiment.updated', {
@@ -2517,7 +2417,7 @@ export class SocietyService {
   roleLife(tenantId: string, roleId: string): SocietySnapshot['roleLife'][number] {
     const role = this.repository().getRole(roleId, tenantId);
     if (!role) throw new OrganizationError(404, 'ROLE_NOT_FOUND', '角色不存在');
-    const organization = new OrganizationService({ store: this.options.store });
+    const organization = this.organization;
     return {
       roleId,
       versions: this.repository().organizationVersions('role', tenantId, roleId),

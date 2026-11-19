@@ -9,7 +9,7 @@
  * 说明：工具轮保留 OpenAI 兼容的 tool/tool_result 消息形态，由这里统一映射成
  * Anthropic 的 tool_use / tool_result 块。
  */
-import type { LLMChunk, LLMMessage, ToolCall, ToolDef } from '../../kernel/types';
+import type { LLMChunk, LLMMessage, ToolCall, ToolDef } from '../../kernel/plugin-sdk';
 
 export interface AnthropicContentBlock {
   type: string;

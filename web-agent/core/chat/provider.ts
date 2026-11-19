@@ -1,5 +1,5 @@
-import { callEmbedding } from '../../kernel/model-call';
-import { ModelResponseError, normalizeFinishReason } from '../../kernel/model-response';
+import { callEmbedding } from '../../kernel/plugin-sdk';
+import { ModelResponseError, normalizeFinishReason } from '../../kernel/plugin-sdk';
 /**
  * core/chat/provider.ts —— 多 Provider LLM 客户端（全部自研）
  * 统一走 OpenAI 兼容接口（/chat/completions），原生 fetch + SSE 流式解析，零 SDK 依赖。
@@ -11,8 +11,8 @@ import { ModelResponseError, normalizeFinishReason } from '../../kernel/model-re
  * Anthropic cache_read_input_tokens），此处统一归一化为 cachedInput/missInput——
  * 真实命中率只能由 provider 说了算，本地估算不可替代。
  */
-import { estimateTokens } from '../../kernel/tokens';
-import { inferCapabilities } from '../../kernel/modelCatalog';
+import { estimateTokens } from '../../kernel/plugin-sdk';
+import { inferCapabilities } from '../../kernel/plugin-sdk';
 // 失败分类：带状态码的 HTTP 错误（provider-health 据此判定"密钥失效"，不再猜文本）
 import { LLMHttpError, parseRetryAfterMs } from './provider-health';
 import {
@@ -22,7 +22,7 @@ import {
 import type {
   ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
   ProviderCapabilities, ResponseFormat,
-} from '../../kernel/types';
+} from '../../kernel/plugin-sdk';
 
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
  *  - DeepSeek：prompt_cache_hit_tokens + prompt_cache_miss_tokens（和 = prompt_tokens）

@@ -7,8 +7,8 @@
  *       默认只读工具白名单（子代理不改世界，只侦查与计算），轮数由委派参数控制。
  */
 import { randomUUID } from 'node:crypto';
-import { makeRunner } from '../../kernel/types';
-import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
+import { makeRunner } from '../../kernel/plugin-sdk';
+import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/plugin-sdk';
 
 /** 只读白名单：子代理默认只能侦查世界，不能改变世界。
  *  M4 防递归：不含 run_subagent/run_parallel——子代理不得再开子代理

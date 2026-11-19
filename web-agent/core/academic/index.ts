@@ -13,7 +13,7 @@
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
 import { registerReferenceTools } from './references';
 
 const rootDir = fileURLToPath(new URL('../..', import.meta.url));

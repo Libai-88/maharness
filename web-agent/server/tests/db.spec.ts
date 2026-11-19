@@ -30,6 +30,16 @@ after(() => {
 });
 
 describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
+  test('迁移步骤覆盖连续的 from/to 版本且终点等于当前 schema 版本', () => {
+    let version = 1;
+    for (const step of Store.MIGRATIONS) {
+      assert.equal(step.from, version, `migration from ${step.from} is not contiguous`);
+      assert.equal(step.to, step.from + 1, `migration ${step.from}->${step.to} must advance exactly one version`);
+      version = step.to;
+    }
+    assert.equal(version, Store.DB_SCHEMA_VERSION);
+  });
+
   test('迁移 DDL 失败不推进版本；备份可恢复原会话与未知配置', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-failed-migration-'));
     const path = join(root, 'agent.db');

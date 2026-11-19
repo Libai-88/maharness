@@ -1,4 +1,4 @@
-import type { ToolDef, ToolResult } from '../../kernel/types';
+import type { ToolDef, ToolResult } from '../../kernel/plugin-sdk';
 
 export interface McpServerOptions {
   tools: ToolDef[];

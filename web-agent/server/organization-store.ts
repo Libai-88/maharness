@@ -416,6 +416,15 @@ export interface InstitutionPolicies {
   welfareMaxActiveAssignments: number;
   highSpendApprovalUsd: number;
   maxQueuedPerDepartment: number;
+  /** Versioned policy weights for the six-factor role selection. */
+  roleSelectionWeights: {
+    capability: number;
+    memory: number;
+    tools: number;
+    collaboration: number;
+    history: number;
+    load: number;
+  };
   cognitiveRouting: {
     decision: 'configured-primary-model';
     execution: 'configured-role-model-or-tools';
@@ -531,6 +540,10 @@ export interface SocietyTask {
   maxBudgetTokens: number;
   priority: number;
   departmentId?: string;
+  /** Explicit capability hints; legacy tasks omit this and use keyword inference. */
+  requiredCapabilities?: string[];
+  /** Explicit write requirement; legacy tasks omit this and use keyword inference. */
+  needsWrite?: boolean;
   economics?: {
     qualityGain: number;
     riskReduction: number;
@@ -706,7 +719,18 @@ export interface SocietyRoleRelation {
 }
 
 export interface SocialHealth {
+  /** Heuristic composite shown for observation only; not an objective social measurement. */
   score: number | null;
+  scoreKind: 'weighted_heuristic';
+  /** Number of role-relation observations behind collaborationHealth. */
+  sampleSize: number;
+  weights: {
+    loadBalance: number;
+    welfare: number;
+    exceptionHealth: number;
+    budgetHeadroom: number;
+    collaborationHealth: number;
+  };
   loadBalance: number | null;
   welfare: number | null;
   exceptionHealth: number | null;

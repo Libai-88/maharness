@@ -7,7 +7,7 @@
  * 监听 trace.step，把已完成步骤映射为标准 OTLP JSON span，批量 POST /v1/traces。
  */
 import { createHash } from 'node:crypto';
-import type { Plugin, TraceStep } from '../../kernel/types';
+import type { Plugin, TraceStep } from '../../kernel/plugin-sdk';
 
 interface OtlpAttribute {
   key: string;

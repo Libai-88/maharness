@@ -9,8 +9,8 @@
  */
 import { spawn } from 'node:child_process';
 import { CommandProcesses, isolatedProcessEnvironment } from './processes';
-import type { Plugin, ToolContext, ToolSideEffect } from '../../kernel/types';
-import { adminToolDenied } from '../../kernel/tool-privilege';
+import type { Plugin, ToolContext, ToolSideEffect } from '../../kernel/plugin-sdk';
+import { adminToolDenied } from '../../kernel/plugin-sdk';
 
 /** 只读可执行程序 / cmdlet 别名（首 token 命中且**参数不含可执行构造**才免审批）。
  *

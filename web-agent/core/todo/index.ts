@@ -12,7 +12,7 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import type { Plugin, ToolContext } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
 import { PersonalItems } from './items';
 import { registerItemTools } from './item-tools';
 

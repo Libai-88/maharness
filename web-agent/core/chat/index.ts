@@ -1,4 +1,4 @@
-import { callModel } from '../../kernel/model-call';
+import { callModel } from '../../kernel/plugin-sdk';
 /**
  * core/chat/index.ts —— 对话引擎插件
  * 证明"连对话都是插件"：本插件通过能力注册表暴露 chat 服务，server 层只认服务接口。
@@ -6,8 +6,8 @@ import { callModel } from '../../kernel/model-call';
  * 提示词由运行环境与用户明确配置的人设组成。
  * 插件能力通过工具描述与发现接口暴露。
  */
-import type { Plugin } from '../../kernel/types';
-import { SERVICE_KEYS } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
+import { SERVICE_KEYS } from '../../kernel/plugin-sdk';
 import { AgentRunner, defaultRunnerFactory, annotateToolDef, redactTraceValue } from './agent';
 import { compactHistory } from './compact';
 import { routeForCapability, routeForTask, type CapabilityNeed } from './routing';
@@ -17,7 +17,7 @@ import { createProvider, discoverProviders, setupEmbedding, type ProviderConfig 
 import { createResultTool } from './result-tool';
 // 审批共享板：挂起清单要能经服务接口暴露（刷新页面后审批卡原位复原，不再"卡没了但服务端还在等"）
 import { globalApprovalBoard, type PendingApproval } from './approvals';
-import type { ProviderGateway } from '../../kernel/provider-gateway';
+import type { ProviderGateway } from '../../kernel/plugin-sdk';
 
 function makeBasePrompt(): string {
   return [
@@ -59,7 +59,7 @@ export default {
       setPersonas: (list: { name: string; content: string }[]) => void;
       getSystemPrompt: () => string;
       getRuntimePrompt: () => string;
-      getUserContext: () => import('../../kernel/types').LLMMessage[];
+      getUserContext: () => import('../../kernel/plugin-sdk').LLMMessage[];
       refreshPrompt: () => void;
       /** 挂起审批清单（可按会话过滤）：前端刷新后据此恢复审批卡 */
       listApprovals: (sessionId?: string) => PendingApproval[];

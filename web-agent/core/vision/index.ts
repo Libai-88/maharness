@@ -1,4 +1,4 @@
-import { callModel } from '../../kernel/model-call';
+import { callModel } from '../../kernel/plugin-sdk';
 /**
  * core/vision/index.ts —— 图像能力中介（能力路由，不改消息模型）
  * 设计：图片不进主对话上下文（省 token、且文本网关根本不认），
@@ -9,8 +9,8 @@ import { callModel } from '../../kernel/model-call';
  */
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { extname } from 'node:path';
-import type { LLMMessage, Plugin, ProviderDef } from '../../kernel/types';
-import { resolveInSandbox, isDeniedReadPath } from '../../kernel/sandbox';
+import type { LLMMessage, Plugin, ProviderDef } from '../../kernel/plugin-sdk';
+import { resolveInSandbox, isDeniedReadPath } from '../../kernel/plugin-sdk';
 import { capabilityFor } from '../chat/provider';
 import { routeForCapability, capabilitySatisfied } from '../chat/routing';
 import type { RouteDecision } from '../chat/routing';

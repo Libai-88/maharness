@@ -17,11 +17,11 @@
           ]
         }
       },
-      "updatedAt": 1795025172719
+      "updatedAt": 1795052927347
     },
     "workbench": {
       "version": "0.4.0",
-      "integrity": "cbdab7baa5",
+      "integrity": "8da203e10a",
       "compatibility": {
         "api": {
           "min": "3.0.0",
@@ -48,7 +48,7 @@
           ]
         }
       },
-      "updatedAt": 1795025172725
+      "updatedAt": 1795052927348
     }
   }
 }

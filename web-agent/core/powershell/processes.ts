@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import type { ToolContext } from '../../kernel/types';
+import type { ToolContext } from '../../kernel/plugin-sdk';
 
 interface CommandState { id: string; owner: string; status: 'running' | 'stopping' | 'exited' | 'cancelled' | 'failed'; exitCode: number | null; output: string; error?: string; outputLimited?: boolean }
 export function isolatedProcessEnvironment(): NodeJS.ProcessEnv {

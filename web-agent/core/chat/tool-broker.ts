@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
-import type { ToolContext, ToolDef, ToolResult } from '../../kernel/types';
-import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
+import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/plugin-sdk';
+import type { ToolContext, ToolDef, ToolResult } from '../../kernel/plugin-sdk';
+import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/plugin-sdk';
 import { ToolExecutor } from './tool-executor';
 import type { ApprovalBoard } from './approvals';
 

@@ -1,11 +1,11 @@
-import type { RunOptions } from '../../kernel/loop';
-import type { ToolContext, ToolDef, ToolResult } from '../../kernel/types';
-import { acquireWriteLock } from '../../kernel/write-lock';
-import { classifyError, shouldRetry } from '../../kernel/error-policy';
+import type { RunOptions } from '../../kernel/plugin-sdk';
+import type { ToolContext, ToolDef, ToolResult } from '../../kernel/plugin-sdk';
+import { acquireWriteLock } from '../../kernel/plugin-sdk';
+import { classifyError, shouldRetry } from '../../kernel/plugin-sdk';
 import { TaskStoppedError } from './provider-health';
-import { validateToolArguments, validateAgainstSchema } from '../../kernel/validate';
+import { validateToolArguments, validateAgainstSchema } from '../../kernel/plugin-sdk';
 import { assessToolApproval } from './tool-approval';
-import { effectiveToolSideEffect } from '../../kernel/tool-contract';
+import { effectiveToolSideEffect } from '../../kernel/plugin-sdk';
 
 interface ToolExecutionOptions {
   tool: ToolDef;

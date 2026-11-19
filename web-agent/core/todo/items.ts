@@ -3,7 +3,7 @@ import { copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
 import { blank, mergeState, normalize, nextDue, taskDefaults, type Note, type Project, type Task, type WorkbenchState } from '../../plugins/workbench/model';
-import type { MaterialRef } from '../../kernel/material';
+import type { MaterialRef } from '../../kernel/plugin-sdk';
 
 export class ItemError extends Error {
   constructor(readonly status: number, readonly code: string, message: string) { super(message); this.name = 'ItemError'; }

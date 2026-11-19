@@ -1,4 +1,4 @@
-import type { Capability, PluginManifest } from '../../kernel/types';
+import type { Capability, PluginManifest } from '../../kernel/plugin-sdk';
 
 const registrations: { id: string; kind: Capability['kind']; name: string; code: string }[] = [
   { id: 'tool', kind: 'tool', name: 'sum_values', code: `{kind:'tool',tool:{name:'sum_values',version:'2.0.0',description:'Sum numeric values',permissions:[],sideEffect:'none',parameters:{type:'object',properties:{numbers:{type:'array',items:{type:'number'}}},required:['numbers']},outputSchema:{type:'object',properties:{sum:{type:'number'}},required:['sum']},async handler(args:unknown){const {numbers}=args as {numbers:number[]};return {ok:true,data:{sum:numbers.reduce((a,b)=>a+b,0)}}}}}` },

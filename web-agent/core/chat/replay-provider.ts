@@ -17,7 +17,7 @@
  * 若因钩子注入等导致调用次数/顺序不同，会以「序列耗尽/错位」的形式暴露（这正是回归要抓的）。
  */
 import { readFileSync } from 'node:fs';
-import type { LLMChunk, LLMMessage, ProviderDef, ChatOptions } from '../../kernel/types';
+import type { LLMChunk, LLMMessage, ProviderDef, ChatOptions } from '../../kernel/plugin-sdk';
 
 export interface RecordedRequest {
   /** 实际发送给 LLM 的消息序列 */

@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import JSZip from 'jszip';
 import { DOMParser, XMLSerializer } from '@xmldom/xmldom';
-import type { DocumentBlock, DocumentContent } from '../../kernel/material';
+import type { DocumentBlock, DocumentContent } from '../../kernel/plugin-sdk';
 
 const MAX_BYTES = 20 * 1024 * 1024;
 const XML_LIMIT = 20 * 1024 * 1024;

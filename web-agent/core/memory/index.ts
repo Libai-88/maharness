@@ -1,4 +1,4 @@
-import { isUserMessage } from '../../kernel/context';
+import { isUserMessage } from '../../kernel/plugin-sdk';
 /**
  * core/memory/index.ts —— 长期记忆插件
  * 上下文工程（context provider 的实战消费者）：
@@ -12,10 +12,10 @@ import { isUserMessage } from '../../kernel/context';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { bigramSet } from '../../kernel/cache';
-import { cosineSimilarity } from '../../kernel/vectors';
+import { bigramSet } from '../../kernel/plugin-sdk';
+import { cosineSimilarity } from '../../kernel/plugin-sdk';
 import type { AgentHookCtx } from '../chat/agent';
-import type { Plugin, ToolContext } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
 import { buildFact, isFactActive, normalizeFact, type MemoryFact, type MemoryFactInput } from './schema';
 import { inspectMemoryText } from './privacy';
 
@@ -38,7 +38,7 @@ interface EmbeddingService { model: string; embed(text: string): Promise<number[
 
 interface MemoryData { facts: Fact[]; blocks: Record<string, MemoryBlock>; vectors?: Record<string, number[]> }
 
-export { cosineSimilarity } from '../../kernel/vectors';
+export { cosineSimilarity } from '../../kernel/plugin-sdk';
 
 export function memoryScore(task: string, fact: Fact, queryVector?: number[], factVector?: number[]): number {
   const ageDays = Math.max(0, Date.now() - fact.ts) / 86_400_000;

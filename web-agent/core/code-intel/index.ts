@@ -6,8 +6,8 @@
  */
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, relative, sep } from 'node:path';
-import type { Plugin, ToolContext } from '../../kernel/types';
-import { isDeniedReadPath, resolveInSandbox } from '../../kernel/sandbox';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
+import { isDeniedReadPath, resolveInSandbox } from '../../kernel/plugin-sdk';
 import { LspClient, pickLspServer, type LspServerConfig } from './lsp';
 import { extractSymbolsWithTreeSitter, treeSitterSupported } from './treesitter';
 

@@ -86,7 +86,7 @@ function isTransientFailure(error: unknown): boolean {
   return /timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|socket hang up|连接.*超时|连接.*断/i.test(message);
 }
 
-import { sharedSingleton } from '../../kernel/shared';
+import { sharedSingleton } from '../../kernel/plugin-sdk';
 
 /** providerId → 健康状态。经 sharedSingleton 取（缺陷 B13）：
  *  agent 在快照副本里记账、`server/routes/providers.ts` import 的是活目录——

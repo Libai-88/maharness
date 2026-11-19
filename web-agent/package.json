@@ -52,7 +52,10 @@
     "ui:typecheck": "npm --prefix ui run typecheck",
     "e2e": "npm --prefix ui run e2e",
     "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck",
-    "eval:composition": "tsx scripts/composition-live.ts"
+    "eval:composition": "tsx scripts/composition-live.ts",
+    "check:boundaries": "node --import tsx --test kernel/tests/dependency-boundary.spec.ts",
+    "check:quality": "npm run typecheck && npm run check:boundaries",
+    "test:coverage": "node scripts/run-tests.mjs --coverage"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",

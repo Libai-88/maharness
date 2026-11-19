@@ -1,39 +1,39 @@
-import { isUserMessage } from '../../kernel/context';
-import { callModel, modelOutputBudget, setModelCallTurn } from '../../kernel/model-call';
+import { isUserMessage } from '../../kernel/plugin-sdk';
+import { callModel, modelOutputBudget, setModelCallTurn } from '../../kernel/plugin-sdk';
 /**
  * core/chat/agent.ts —— Agent 执行器（自研）
  * 循环模型：决策(LLM 流式) → 动作(工具执行) → 观测(结果回填)，直到无工具调用。
  * 每一步发 Trace 事件（llm_call / tool_call），全程可观测；支持预算与中断。
  */
 import { randomUUID, createHash } from 'node:crypto';
-import { sharedPrefixTokens, estimateTokens, countMessageTokens } from '../../kernel/tokens';
-import { ContextCapacityError } from '../../kernel/context';
-import { classifyTask } from '../../kernel/budget';
-import { validateAgainstSchema, validateToolArguments } from '../../kernel/validate';
+import { sharedPrefixTokens, estimateTokens, countMessageTokens } from '../../kernel/plugin-sdk';
+import { ContextCapacityError } from '../../kernel/plugin-sdk';
+import { classifyTask } from '../../kernel/plugin-sdk';
+import { validateAgainstSchema, validateToolArguments } from '../../kernel/plugin-sdk';
 import { resultStore, sessionKeyOf } from './result-store';
 import { estimateCost, pricesFor } from './provider';
 import { noteProviderFailure, noteProviderSuccess, isAbortError, TaskStoppedError, isProviderCircuitOpen } from './provider-health';
 import { ApprovalBoard, globalApprovalBoard } from './approvals';
 import type {
   AgentRunSummary, KernelLike, LLMChunk, LLMMessage, PluginBus, ProviderDef, RunnerFactory, ToolCall, ToolContext, ToolDef, ToolResult, TraceStep, TraceStepInit,
-} from '../../kernel/types';
+} from '../../kernel/plugin-sdk';
 // 循环契约来自内核（kernel/loop.ts）：内核承诺接口形状，本文件只实现行为。
-import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
-import { verifyTaskContract } from '../../kernel/task-verifier';
-import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/tool-contract';
-import { classifyError, shouldRetry } from '../../kernel/error-policy';
-import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/content-safety';
+import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/plugin-sdk';
+import { verifyTaskContract } from '../../kernel/plugin-sdk';
+import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/plugin-sdk';
+import { classifyError, shouldRetry } from '../../kernel/plugin-sdk';
+import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/plugin-sdk';
 import { sanitizeToolHistory } from './policy';
-import { CATALOG_MANAGER_TOOLS, capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/tool-discovery';
+import { CATALOG_MANAGER_TOOLS, capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/plugin-sdk';
 import { ToolExecutor, abortableDelay } from './tool-executor';
 import { assessToolApproval } from './tool-approval';
-import { historyTools } from '../../kernel/history-tools';
+import { historyTools } from '../../kernel/plugin-sdk';
 import { createResultTool, isResultTool } from './result-tool';
-import { describeModelInput } from '../../kernel/input-diagnostics';
+import { describeModelInput } from '../../kernel/plugin-sdk';
 import { createToolBroker, forwardToolEvents } from './tool-broker';
 
 // 契约类型对外再导出：既有 `from './agent'` 的引用保持可用（本轮不制造破坏性改动）
-export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/loop';
+export type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/plugin-sdk';
 
 const DEFAULT_SYSTEM_PROMPT = [
   '你是具备工具能力的 maharness Agent。基于工具返回回答事实问题，不编造结果。',

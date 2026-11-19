@@ -1,4 +1,4 @@
-import type { ToolContext, ToolDef } from '../../kernel/types';
+import type { ToolContext, ToolDef } from '../../kernel/plugin-sdk';
 
 /** Approval assessment is shared by model calls and composite/leaf execution. */
 export function assessToolApproval(tool: ToolDef, args: unknown, context: ToolContext): { needsApproval: boolean; reason: string } {

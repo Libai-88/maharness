@@ -1,7 +1,7 @@
-import type { ToolDef } from '../../kernel/types';
-import { resultPage } from '../../kernel/tool-journal';
+import type { ToolDef } from '../../kernel/plugin-sdk';
+import { resultPage } from '../../kernel/plugin-sdk';
 import { resultStore, sessionKeyOf } from './result-store';
-import { sharedSingleton } from '../../kernel/shared';
+import { sharedSingleton } from '../../kernel/plugin-sdk';
 
 const readers = sharedSingleton('chat.resultTool.readers.v2', () => new WeakSet<object>());
 export function isResultTool(tool: ToolDef): boolean { return readers.has(tool.handler); }

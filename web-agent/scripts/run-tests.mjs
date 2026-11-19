@@ -47,8 +47,9 @@ if (files.length === 0) {
 console.log(`[test] ${files.length} 个测试文件（已排除插件内容快照 @<hash> 目录）`);
 const requested = Math.trunc(Number(process.env.TEST_CONCURRENCY) || 4);
 const concurrency = Math.max(1, Math.min(8, requested));
-console.log(`[test] test-concurrency=${concurrency}`);
-const res = spawnSync(process.execPath, ['--import', 'tsx', '--test', `--test-concurrency=${concurrency}`, ...files], {
+const coverage = process.argv.includes('--coverage') ? ['--experimental-test-coverage'] : [];
+console.log(`[test] test-concurrency=${concurrency}${coverage.length ? ' coverage=on' : ''}`);
+const res = spawnSync(process.execPath, ['--import', 'tsx', '--test', ...coverage, `--test-concurrency=${concurrency}`, ...files], {
   stdio: 'inherit',
   cwd: ROOT,
 });

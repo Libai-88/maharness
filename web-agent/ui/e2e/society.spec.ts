@@ -179,7 +179,11 @@ async function setup(page: Page) {
           edges: [{ id: 'relation-1', fromRoleId: 'role-research', toRoleId: 'role-quality', kind: 'collaborated', score: 0.9, updatedAt: 2 }],
         },
         bottlenecks: [],
-        health: { score: 92, loadBalance: 1, welfare: 0.9, exceptionHealth: 1, budgetUtilization: 0.1, collaborationHealth: 0.9 },
+        health: {
+          score: 92, scoreKind: 'weighted_heuristic', sampleSize: 1,
+          weights: { loadBalance: 0.2, welfare: 0.2, exceptionHealth: 0.2, budgetHeadroom: 0.2, collaborationHealth: 0.2 },
+          loadBalance: 1, welfare: 0.9, exceptionHealth: 1, budgetUtilization: 0.1, collaborationHealth: 0.9,
+        },
         economics: {
           societyBudgetUsd, societyReservedUsd: 0, societySpentUsd: 0,
           departmentBudgets: departments.map(item => ({ departmentId: item.id, quotaUsd: item.quotaUsd, reservedUsd: 0, spentUsd: 0, remainingUsd: item.quotaUsd })),

@@ -279,6 +279,14 @@ export interface InstitutionVersionView {
     welfareMaxActiveAssignments: number;
     highSpendApprovalUsd: number;
     maxQueuedPerDepartment: number;
+    roleSelectionWeights?: {
+      capability: number;
+      memory: number;
+      tools: number;
+      collaboration: number;
+      history: number;
+      load: number;
+    };
     cognitiveRouting: {
       decision: string;
       execution: string;
@@ -358,6 +366,8 @@ export interface SocietyTaskView {
   maxBudgetUsd: number;
   priority: number;
   departmentId?: string;
+  requiredCapabilities?: string[];
+  needsWrite?: boolean;
   branches: Array<{
     objective: string;
     acceptance: string[];
@@ -516,6 +526,15 @@ export interface SocietySnapshot {
   }>;
   health: {
     score: number | null;
+    scoreKind: 'weighted_heuristic';
+    sampleSize: number;
+    weights: {
+      loadBalance: number;
+      welfare: number;
+      exceptionHealth: number;
+      budgetHeadroom: number;
+      collaborationHealth: number;
+    };
     loadBalance: number | null;
     welfare: number | null;
     exceptionHealth: number | null;
@@ -643,6 +662,8 @@ export const workbenchApi = {
     maxBudgetUsd: number;
     departmentId?: string;
     projectId?: string;
+    requiredCapabilities?: string[];
+    needsWrite?: boolean;
     branches?: SocietyTaskView['branches'];
     materials?: SocietyTaskView['materials'];
   }) => api<{ task: SocietyTaskView }>('/api/organization/society/tasks', {

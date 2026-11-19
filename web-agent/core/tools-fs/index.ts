@@ -10,12 +10,12 @@ import { statSync, readdirSync, mkdirSync, writeFileSync, readFileSync, existsSy
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
-import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/types';
-import { contractArtifactPath, resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/sandbox';
-import type { ReadResult } from '../../kernel/sandbox';
-import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/fssearch';
-import type { EditOp } from '../../kernel/fssearch';
-import { reviewPluginWrite } from '../../kernel/plugin-review';
+import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/plugin-sdk';
+import { contractArtifactPath, resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/plugin-sdk';
+import type { ReadResult } from '../../kernel/plugin-sdk';
+import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/plugin-sdk';
+import type { EditOp } from '../../kernel/plugin-sdk';
+import { reviewPluginWrite } from '../../kernel/plugin-sdk';
 
 export { resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart };
 export type { ReadResult };

@@ -4,9 +4,9 @@
  * maharness 版：复用 kernel/budget.ts 的 classifyTask（与任务画像同源），
  * 按任务类型把整次 run 路由到配置指定的 provider/model；未命中配置则用默认模型。
  */
-import { classifyTask } from '../../kernel/budget';
+import { classifyTask } from '../../kernel/plugin-sdk';
 import { capabilityFor } from './provider';
-import type { ModelCapability, ProviderDef } from '../../kernel/types';
+import type { ModelCapability, ProviderDef } from '../../kernel/plugin-sdk';
 
 export interface RouteDecision {
   provider: ProviderDef;

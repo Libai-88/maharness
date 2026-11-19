@@ -5,7 +5,7 @@
  * 计划状态实时通过 plan.updated 事件推送（前端显示计划卡片）。
  * H14 会话隔离：计划按 sessionId 存取（Map + LRU，上限 50），多会话互不串扰。
  */
-import type { Plugin, ToolContext } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
 import { join } from 'node:path';
 import { canTransition, loadPlans, savePlans, MAX_PLANS, type PlanState, type PlanWorkItem, type StepStatus } from './store';
 

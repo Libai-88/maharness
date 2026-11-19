@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
-import type { PluginContext, ToolContext, ToolResult } from '../../kernel/types';
-import { isDeniedReadPath, isProtectedWritePath, resolveInSandbox } from '../../kernel/sandbox';
-import { ExecutionPool } from '../../kernel/execution-pool';
+import type { PluginContext, ToolContext, ToolResult } from '../../kernel/plugin-sdk';
+import { isDeniedReadPath, isProtectedWritePath, resolveInSandbox } from '../../kernel/plugin-sdk';
+import { ExecutionPool } from '../../kernel/plugin-sdk';
 import { documentService } from './service';
 import type { CreateSpec } from './formats';
 

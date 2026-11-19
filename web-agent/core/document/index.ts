@@ -5,9 +5,9 @@ import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { extname, join } from 'node:path';
 import { tmpdir } from 'node:os';
-import type { Plugin, ToolContext } from '../../kernel/types';
-import { isDeniedReadPath, resolveInSandbox } from '../../kernel/sandbox';
-import { buildProcessEnv } from '../../kernel/plugin-process';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
+import { isDeniedReadPath, resolveInSandbox } from '../../kernel/plugin-sdk';
+import { buildProcessEnv } from '../../kernel/plugin-sdk';
 import { registerDocumentTools } from './tools';
 import { documentService } from './service';
 

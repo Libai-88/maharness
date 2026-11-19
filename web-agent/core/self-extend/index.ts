@@ -9,11 +9,11 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Plugin, ToolContext } from '../../kernel/types';
-import { adminToolDenied } from '../../kernel/tool-privilege';
-import { reviewPluginSource } from '../../kernel/plugin-review';
-import { runPluginTrial } from '../../kernel/plugin-trial';
-import { SNAPSHOT_SUFFIX } from '../../kernel/plugin-snapshot';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
+import { adminToolDenied } from '../../kernel/plugin-sdk';
+import { reviewPluginSource } from '../../kernel/plugin-sdk';
+import { runPluginTrial } from '../../kernel/plugin-sdk';
+import { SNAPSHOT_SUFFIX } from '../../kernel/plugin-sdk';
 import { TaskPlugins } from './runtime';
 
 // 项目根 = 本文件上溯两级（core/self-extend/index.ts → <root>/）
@@ -43,7 +43,7 @@ function defaultSource(id: string, name: string): string {
   return `/**
  * plugins/${id}/index.ts —— 由 Agent 自我扩展创建（${name}）
  */
-import type { Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
 
 export default {
   id: '${id}',
@@ -137,7 +137,7 @@ export default {
         content: [
           '自我扩展规则（maharness 核心理念：万物都是插件，你通过写插件来定义自己）：',
           '1. 需要新能力（新工具/新命令/事件监听）时，不要试图绕过限制，而是写一个新插件：用 create_plugin 生成（把完整 index.ts 源码放进 source 参数），或用 write_file 直接写 plugins/<id>/plugin.json 与 plugins/<id>/index.ts；',
-          '2. 插件契约（务必遵守，否则加载失败或注册不上）：默认导出对象 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from "../../kernel/types"；工具注册成功后在运行时可用。注意：不是 initialize/execute/success 那套旧写法；',
+          '2. 插件契约（务必遵守，否则加载失败或注册不上）：默认导出对象 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from "../../kernel/plugin-sdk"；工具注册成功后在运行时可用。注意：不是 initialize/execute/success 那套旧写法；',
           '3. 创建后先用 plugin_status 确认静态审查结果与能力白名单；新插件默认停用，确认安全后用 enable_plugin 显式进入试运行；若 error 或 caps 为空，读取错误信息与插件文件，修复后保存（目录监听会自动重载），再验证；',
           '4. 插件目录名必须等于 id（小写字母/数字/连字符）；',
           '5. 任务插件启用后，在下一次模型请求中通过 discover_tools 查找并按需 enable_tools；',
@@ -197,7 +197,7 @@ export default {
           properties: {
             id: { type: 'string', description: '插件 id：小写字母/数字/连字符，如 demo-clock' },
             name: { type: 'string', description: '插件显示名，如 时钟工具' },
-            source: { type: 'string', description: 'index.ts 完整源码（可选；不传则生成正确的示例骨架）。契约：默认导出 { id, name, version, onLoad(ctx) }，onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册；handler(args, tctx) 返回 { ok, data } 或 { ok, error }；类型 import type { Plugin } from "../../kernel/types"' },
+            source: { type: 'string', description: 'index.ts 完整源码（可选；不传则生成正确的示例骨架）。契约：默认导出 { id, name, version, onLoad(ctx) }，onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册；handler(args, tctx) 返回 { ok, data } 或 { ok, error }；类型 import type { Plugin } from "../../kernel/plugin-sdk"' },
           },
           required: ['id'],
         },
@@ -233,7 +233,7 @@ export default {
           if (missing.length) {
             return {
               ok: false,
-              error: `源码不符合插件契约（缺少: ${missing.join(', ')}）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/types'。若不传 source，create_plugin 会生成正确的示例骨架。`,
+              error: `源码不符合插件契约（缺少: ${missing.join(', ')}）。正确契约：默认导出 { id, name, version, onLoad(ctx) }；onLoad 中用 ctx.register({ kind: 'tool', tool: { name, description, parameters, handler } }) 注册工具；handler(args, tctx) 返回 { ok: true, data } 或 { ok: false, error }；类型定义用 import type { Plugin } from '../../kernel/plugin-sdk'。若不传 source，create_plugin 会生成正确的示例骨架。`,
             };
           }
 

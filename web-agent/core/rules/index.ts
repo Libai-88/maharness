@@ -8,10 +8,10 @@
  * 重载：5s 轮询 mtime 指纹 + sandboxRoot 切换 + rules.* 配置变更。
  */
 import { join } from 'node:path';
-import type { Plugin } from '../../kernel/types';
-import { dryRunPolicy, loadPromptRules, loadPolicyRules, rulesSignature, matchPolicy } from '../../kernel/rules';
-import type { PolicyRule, RuleSource } from '../../kernel/rules';
-import type { RuleResolution } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
+import { dryRunPolicy, loadPromptRules, loadPolicyRules, rulesSignature, matchPolicy } from '../../kernel/plugin-sdk';
+import type { PolicyRule, RuleSource } from '../../kernel/plugin-sdk';
+import type { RuleResolution } from '../../kernel/plugin-sdk';
 
 /** agent.before_tool 钩子负载中本插件用到的字段（与 core/chat/agent.ts 的 AgentHookCtx 对齐） */
 interface BeforeToolCtx {

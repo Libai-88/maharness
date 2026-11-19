@@ -278,6 +278,47 @@ describe('AI society operation layer', () => {
     }
   });
 
+  test('institution owns role selection weights and task capability/write hints are explicit', () => {
+    const store = new Store(':memory:');
+    const now = 1_700_000_000_000;
+    const society = new SocietyService({ store, now: () => now });
+    try {
+      const task = society.createTask({
+        tenantId: 'default',
+        objective: '读取资料并写一份摘要',
+        valueUsd: 1,
+        maxBudgetUsd: 1,
+        requiredCapabilities: ['research'],
+        needsWrite: false,
+      });
+      assert.equal(task.createdAt, now);
+      assert.deepEqual(task.requiredCapabilities, ['research']);
+      assert.equal(task.needsWrite, false);
+
+      const updated = society.updateInstitution('default', {
+        roleSelectionWeights: {
+          capability: 2, memory: 0, tools: 0, collaboration: 0, history: 0, load: 0,
+        },
+        reason: '测试选择权重版本化',
+      });
+      assert.equal(updated.policies.roleSelectionWeights.capability, 1);
+      assert.equal(updated.policies.roleSelectionWeights.memory, 0);
+
+      const snapshot = society.snapshot('default');
+      assert.equal(snapshot.health.scoreKind, 'weighted_heuristic');
+      assert.equal(typeof snapshot.health.sampleSize, 'number');
+      assert.deepEqual(snapshot.health.weights, {
+        loadBalance: 0.2,
+        welfare: 0.2,
+        exceptionHealth: 0.2,
+        budgetHeadroom: 0.2,
+        collaborationHealth: 0.2,
+      });
+    } finally {
+      store.close();
+    }
+  });
+
   test('role and evaluation standards have independent versions, audits and rollback', () => {
     const store = new Store(':memory:');
     const society = new SocietyService({ store });

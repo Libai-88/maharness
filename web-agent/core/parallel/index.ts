@@ -7,9 +7,9 @@
  * 批量并行委派（多个独立子任务一次并发跑完，适合"拆分为 N 个独立部分"的任务）。
  */
 import { randomUUID } from 'node:crypto';
-import { makeRunner } from '../../kernel/types';
-import { reserveBudget } from '../../kernel/budget';
-import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/types';
+import { makeRunner } from '../../kernel/plugin-sdk';
+import { reserveBudget } from '../../kernel/plugin-sdk';
+import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/plugin-sdk';
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
 const READ_ONLY_TOOLS = new Set([

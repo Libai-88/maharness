@@ -12,8 +12,8 @@
  * 与截断告知的分工：v1 截断后 LLM 只能「用工具定向读取」（可能重算/副作用）；
  * v2 截断后 LLM 用 recall_tool_result 直接重读已观察的原文（纯读）。
  */
-import type { ToolContext } from '../../kernel/types';
-import { sharedSingleton } from '../../kernel/shared';
+import type { ToolContext } from '../../kernel/plugin-sdk';
+import { sharedSingleton } from '../../kernel/plugin-sdk';
 
 interface ResultEntry {
   content: string;

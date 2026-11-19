@@ -1,4 +1,4 @@
-import { callModel, currentModelScope, withModelScope, type ModelCallScope } from '../../kernel/model-call';
+import { callModel, currentModelScope, withModelScope, type ModelCallScope } from '../../kernel/plugin-sdk';
 /**
  * core/mcp/index.ts —— MCP 客户端插件（接入 MCP 生态：filesystem/github/memory 等外部工具）
  *
@@ -37,9 +37,9 @@ import { pathToFileURL } from 'node:url';
 import { isIP } from 'node:net';
 import { lookup } from 'node:dns/promises';
 import { Agent, fetch as undiciFetch } from 'undici';
-import type { LLMMessage, Plugin, ToolContext, ToolDef } from '../../kernel/types';
-import type { ProviderGateway } from '../../kernel/provider-gateway';
-import { adminToolDenied } from '../../kernel/tool-privilege';
+import type { LLMMessage, Plugin, ToolContext, ToolDef } from '../../kernel/plugin-sdk';
+import type { ProviderGateway } from '../../kernel/plugin-sdk';
+import { adminToolDenied } from '../../kernel/plugin-sdk';
 import { handleMcpRpc } from './server';
 import { McpCircuitBreaker, type McpHealthSnapshot } from './health';
 import {

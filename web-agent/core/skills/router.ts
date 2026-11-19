@@ -1,5 +1,5 @@
-import { contentWords, bigramSet, dice } from '../../kernel/cache';
-import { cosineSimilarity } from '../../kernel/vectors';
+import { contentWords, bigramSet, dice } from '../../kernel/plugin-sdk';
+import { cosineSimilarity } from '../../kernel/plugin-sdk';
 
 export interface SkillRouteEntry {
   name: string;

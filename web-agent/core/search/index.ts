@@ -7,7 +7,7 @@
 import { Agent, ProxyAgent, fetch as undiciFetch, type Response as UndiciResponse } from 'undici';
 import { isIP } from 'node:net';
 import { lookup as dnsLookup } from 'node:dns/promises';
-import type { Plugin, ToolContext } from '../../kernel/types';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
 
 const SEARCH_TTL = 10 * 60_000;
 

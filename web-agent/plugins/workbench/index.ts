@@ -1,4 +1,4 @@
-import type { Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
 import type { PersonalItems } from '../../core/todo/items';
 import { ItemError, isItemError } from '../../core/todo/items';
 import { day } from './model';

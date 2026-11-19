@@ -92,6 +92,8 @@ export interface OrganizationServiceOptions {
     profile: PermissionProfile;
     allowedTools?: string[];
   };
+  /** Injectable clock so scheduling, budgets and audit records are deterministic in tests. */
+  now?: () => number;
 }
 
 const TEAM_TOOL_NAMES = new Set(['run_subagent', 'run_parallel', 'run_review', 'work_contract_deliver', 'raise_exception']);
@@ -318,9 +320,11 @@ function rootAnswer(workOrder: WorkOrder, run: RunRecord, contracts: AssignmentC
 
 export class OrganizationService {
   private readonly repo;
+  private readonly now: () => number;
 
   constructor(private readonly options: OrganizationServiceOptions) {
     this.repo = options.store.organization;
+    this.now = options.now ?? Date.now;
   }
 
   private emit(type: string, data: Record<string, unknown>): void {
@@ -332,7 +336,7 @@ export class OrganizationService {
     if (active) {
       const policy = normalizeEvaluationPolicy(active.record);
       if (JSON.stringify(policy) === JSON.stringify(active.record)) return active;
-      const now = Date.now();
+      const now = this.now();
       const version: EvaluationVersion = {
         id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default',
         version: active.version + 1, status: 'active', record: policy,
@@ -351,7 +355,7 @@ export class OrganizationService {
       return version;
     }
     const policy = normalizeEvaluationPolicy(DEFAULT_EVALUATION_POLICY);
-    const now = Date.now();
+    const now = this.now();
     const hash = createHash('sha256').update(JSON.stringify(policy)).digest('hex');
     const version: EvaluationVersion = {
       id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default', version: 1,
@@ -389,7 +393,7 @@ export class OrganizationService {
       id: randomUUID(), tenantId, kind: 'evaluation', subjectId: 'default',
       version: current.version + 1, status: 'active', record: policy,
       hash: createHash('sha256').update(JSON.stringify(policy)).digest('hex'),
-      createdBy: 'human', reason: bounded(reason, 500, '评价标准变更原因'), createdAt: Date.now(),
+      createdBy: 'human', reason: bounded(reason, 500, '评价标准变更原因'), createdAt: this.now(),
     };
     this.repo.transaction(() => {
       this.repo.supersedeOrganizationVersions(tenantId, 'evaluation', 'default', version.version);
@@ -416,7 +420,7 @@ export class OrganizationService {
       version: current.version + 1, status: 'active', record: policy,
       hash: createHash('sha256').update(JSON.stringify(policy)).digest('hex'),
       createdBy: 'human', reason: `回滚至 v${targetVersion}：${bounded(reason, 450, '评价标准回滚原因')}`,
-      createdAt: Date.now(),
+      createdAt: this.now(),
     };
     this.repo.transaction(() => {
       this.repo.supersedeOrganizationVersions(tenantId, 'evaluation', 'default', version.version);
@@ -570,7 +574,7 @@ export class OrganizationService {
     this.repo.transaction(() => {
       this.repo.updateContract(contract, { roleId: role.id, allowedTools: run.toolNames ?? [] }, contract.revision);
       this.options.store.runs.update(run, { organizationRoleId: role.id, authorization: run.authorization, toolNames: run.toolNames }, 'role_selected', { roleId: role.id, contractId: contract.id });
-      this.repo.appendLedger({ id: randomUUID(), tenantId: run.tenantId, workOrderId: order.id, contractId: contract.id, type: 'accepted', actorId: role.id, summary: '承接角色已选择', evidence: [], createdAt: Date.now() });
+      this.repo.appendLedger({ id: randomUUID(), tenantId: run.tenantId, workOrderId: order.id, contractId: contract.id, type: 'accepted', actorId: role.id, summary: '承接角色已选择', evidence: [], createdAt: this.now() });
     });
     this.emit('organization.updated', { workOrderId: order.id, roleId: role.id });
     return scoped;
@@ -606,7 +610,7 @@ export class OrganizationService {
     });
     const existing = this.repo.contracts(workOrder.id, run.tenantId).find(contract => contract.runId === run.id);
     if (!existing) {
-      const now = Date.now();
+      const now = this.now();
       const contract: AssignmentContract = {
         id: randomUUID(),
         tenantId: run.tenantId,
@@ -687,7 +691,7 @@ export class OrganizationService {
       budgetTokens: task.maxBudgetTokens,
       budgetPolicy: 'enforce',
       materials: task.materials.map(({ id, version }) => ({
-        id, version, path: '', name: '', format: '', size: 0, createdAt: Date.now(),
+        id, version, path: '', name: '', format: '', size: 0, createdAt: this.now(),
         tenantId: task.tenantId, workspace: primary.authority.workspace,
       })),
       authorization: { ...primary.authority, revision: 0 },
@@ -705,7 +709,7 @@ export class OrganizationService {
         contracts: existing,
       };
     }
-    const now = Date.now();
+    const now = this.now();
     const teamCycle: TeamCycle | undefined = schedule.mode === 'team' ? {
       id: randomUUID(), tenantId: task.tenantId, workOrderId: workOrder.id,
       assignmentIds: [], soloEstimateUsd: schedule.estimates.soloCostUsd,
@@ -800,7 +804,7 @@ export class OrganizationService {
     this.repo.appendLedger({
       id: randomUUID(), tenantId: run.tenantId, workOrderId: contract.workOrderId,
       contractId: contract.id, type: 'started', actorId: contract.roleId,
-      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: Date.now(),
+      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: this.now(),
     });
     this.emit('work.contract.updated', { workOrderId: contract.workOrderId, contractId: contract.id, status: 'active', runId: run.id });
     return updated;
@@ -888,7 +892,7 @@ export class OrganizationService {
       throw new OrganizationError(409, 'TEAM_BUDGET_INSUFFICIENT', '团队估算超过主任务可用硬预算');
     const humanRequested = explicitTeamRequest(run.objective);
 
-    const now = Date.now();
+    const now = this.now();
     const cycle: TeamCycle = {
       id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
       assignmentIds: [], soloEstimateUsd: authoritativeCost.singleAgentEstimateUsd,
@@ -930,7 +934,7 @@ export class OrganizationService {
       for (const contract of contracts) this.repo.appendLedger({
         id: randomUUID(), tenantId: run.tenantId, workOrderId: workOrder.id,
         contractId: contract.id, type: 'commitment', actorId: contract.roleId,
-        summary: contract.branchObjective, evidence: contract.evidenceInputs, createdAt: Date.now(),
+        summary: contract.branchObjective, evidence: contract.evidenceInputs, createdAt: this.now(),
       });
       this.options.store.runs.update(run, { teamCycleId: cycle.id }, 'team_created', {
         teamCycleId: cycle.id, assignments: contracts.map(contract => contract.id), teamEstimateUsd,
@@ -1024,7 +1028,7 @@ export class OrganizationService {
       return this.scopeRunToRole({ ...run }, role);
     }
     const name = bounded(draft.roleName ?? `临时角色 ${index + 1}`, 80, '角色名称');
-    const now = Date.now();
+    const now = this.now();
     const role: OrganizationRole = {
       id: randomUUID(), tenantId: run.tenantId, projectId: workOrder.projectId,
       name, responsibilities: [draft.objective], capabilities: draft.expectedArtifacts,
@@ -1110,7 +1114,7 @@ export class OrganizationService {
     this.repo.appendLedger({
       id: randomUUID(), tenantId: child.tenantId, workOrderId: workOrder.id,
       contractId: contract.id, type: 'started', actorId: role.id,
-      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: Date.now(),
+      summary: `开始执行：${contract.branchObjective}`, evidence: contract.evidenceInputs, createdAt: this.now(),
     });
     return contract;
   }
@@ -1150,7 +1154,7 @@ export class OrganizationService {
     this.repo.appendLedger({
       id: randomUUID(), tenantId, workOrderId: contract.workOrderId, contractId: contract.id,
       type: status === 'delivered' ? 'delivered' : 'exception', actorId: contract.roleId, summary: delivery.summary,
-      evidence: delivery.evidence, createdAt: Date.now(),
+      evidence: delivery.evidence, createdAt: this.now(),
     });
     this.emit('work.contract.updated', { contractId: contract.id, status: updated.status });
     return updated;
@@ -1178,7 +1182,7 @@ export class OrganizationService {
       id: randomUUID(), tenantId: run.tenantId, workOrderId: contract.workOrderId,
       contractId: contract.id, type: status === 'delivered' ? 'delivered' : 'exception',
       actorId: contract.roleId, summary: delivery.summary,
-      evidence: delivery.evidence, createdAt: Date.now(),
+      evidence: delivery.evidence, createdAt: this.now(),
     });
     this.emit('work.contract.updated', { workOrderId: contract.workOrderId, contractId: contract.id, status });
     return updated;
@@ -1320,8 +1324,8 @@ export class OrganizationService {
         .filter(item => item.workOrderId === workOrder.id && !['resolved', 'dismissed'].includes(item.status))
         .map(item => item.summary),
       humanAcceptedAt: run.reworkOfRunId ? undefined : previous?.humanAcceptedAt,
-      createdAt: previous?.createdAt ?? Date.now(),
-      updatedAt: Date.now(),
+      createdAt: previous?.createdAt ?? this.now(),
+      updatedAt: this.now(),
     };
     if (workOrder.status !== status) this.repo.updateWorkOrder(workOrder, { status }, workOrder.revision);
     this.repo.saveReceipt(receipt);
@@ -1333,7 +1337,7 @@ export class OrganizationService {
         summary: status === 'awaiting_acceptance'
           ? '全部契约已交付，等待人工验收'
           : `工作单${status === 'completed' ? '完成' : `结束：${status}`}`,
-        evidence: receipt.sources, createdAt: Date.now(),
+        evidence: receipt.sources, createdAt: this.now(),
       });
     }
     this.emit('work.order.updated', { workOrderId: workOrder.id, status, receiptId: receipt.id });
@@ -1355,7 +1359,7 @@ export class OrganizationService {
     if (outcome === 'completed' && receipt.unfinished.length > 0) {
       throw new OrganizationError(409, 'WORK_CONTRACT_INVALID', '仍有未完成项，不能通过人工验收');
     }
-    const now = Date.now();
+    const now = this.now();
     const summary = bounded(reason, 1000, '人工验收说明');
     const status: WorkOrder['status'] = outcome;
     return this.repo.transaction(() => {
@@ -1490,7 +1494,7 @@ export class OrganizationService {
         tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
         cachedInputTokens: runs.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0),
         tokenBudgetCompliance: tokenBudgetChecks.length ? tokenBudgetChecks.filter(Boolean).length / tokenBudgetChecks.length : null,
-        updatedAt: Date.now(),
+        updatedAt: this.now(),
       };
     });
   }
@@ -1501,7 +1505,7 @@ export class OrganizationService {
     const orders = this.repo.listWorkOrders(tenantId, projectId, 200);
     const contracts = orders.flatMap(order => this.repo.contracts(order.id, tenantId));
     const allRuns = this.options.store.runs.list(tenantId);
-    const now = Date.now();
+    const now = this.now();
     const recentCutoff = now - 24 * 60 * 60 * 1000;
     const backoffMs = 15 * 60 * 1000;
     return roles.map(role => {
@@ -1571,7 +1575,7 @@ export class OrganizationService {
       throw new OrganizationError(404, 'WORK_CONTRACT_INVALID', '分工契约不存在');
     const requiresHuman = ['budget', 'authority', 'opinion-conflict'].includes(input.kind)
       || input.kind === 'ambiguity' && !order.acceptance.length;
-    const now = Date.now();
+    const now = this.now();
     const record: ExceptionCase = {
       id: randomUUID(), tenantId: input.tenantId, workOrderId: input.workOrderId,
       contractId: input.contractId, kind: input.kind,
@@ -1699,7 +1703,7 @@ export class OrganizationService {
         id: randomUUID(), tenantId: run.tenantId, workOrderId: cycle.workOrderId,
         type: 'exception', actorId: 'maharness',
         summary: bounded(`团队连续无有效进展，回退单角色：${collapseReason}；${reason}`, 2000, '回退摘要'),
-        evidence: [], createdAt: Date.now(),
+        evidence: [], createdAt: this.now(),
       });
       if (workOrder) {
         this.repo.appendSocietyAudit({
@@ -1717,7 +1721,7 @@ export class OrganizationService {
             teamEstimateUsd: cycle.teamEstimateUsd,
           },
           idempotencyKey: `fallback-solo:${cycle.id}`,
-          createdAt: Date.now(),
+          createdAt: this.now(),
         });
       }
     });
@@ -1785,7 +1789,7 @@ export class OrganizationService {
         ...delivered.flatMap(contract => contract.delivery?.evidence ?? []),
         ...collapsed.flatMap(contract => contract.delivery?.evidence ?? []),
       ].filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index),
-      createdAt: Date.now(),
+      createdAt: this.now(),
     });
     this.emit('work.order.updated', {
       workOrderId: workOrder.id, contractId: mergedRoot.id, status: 'solo_takeover', actorId: role.id,
@@ -1827,7 +1831,7 @@ export class OrganizationService {
   }): InstitutionProposal {
     if (!this.repo.getWorkOrder(input.workOrderId, input.tenantId))
       throw new OrganizationError(404, 'WORK_ORDER_NOT_FOUND', '工作单不存在');
-    const now = Date.now();
+    const now = this.now();
     const record: InstitutionProposal = {
       id: randomUUID(), tenantId: input.tenantId, workOrderId: input.workOrderId,
       category: input.category, title: bounded(input.title, 200, '提案标题'),

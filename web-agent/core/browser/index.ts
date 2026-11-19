@@ -14,8 +14,8 @@ import { createServer as createHttpServer, request as httpRequest } from 'node:h
 import { mkdirSync, statSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import type { Browser, BrowserContext, Page } from 'playwright-core';
-import type { Plugin, ToolContext } from '../../kernel/types';
-import { resolveInSandbox } from '../../kernel/sandbox';
+import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
+import { resolveInSandbox } from '../../kernel/plugin-sdk';
 
 const DEFAULT_MAX_CHARS = 8_000;
 const MAX_CHARS = 40_000;

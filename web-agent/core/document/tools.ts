@@ -1,9 +1,9 @@
 import { readFile, stat, mkdir, writeFile, link, unlink } from 'node:fs/promises';
 import { basename, extname, join, relative, resolve } from 'node:path';
 import { createHash, randomUUID } from 'node:crypto';
-import type { PluginContext, ToolContext } from '../../kernel/types';
-import type { DocumentContent } from '../../kernel/material';
-import { isDeniedReadPath, isProtectedWritePath, resolveInSandbox } from '../../kernel/sandbox';
+import type { PluginContext, ToolContext } from '../../kernel/plugin-sdk';
+import type { DocumentContent } from '../../kernel/plugin-sdk';
+import { isDeniedReadPath, isProtectedWritePath, resolveInSandbox } from '../../kernel/plugin-sdk';
 import { documentService } from './service';
 import type { CreateSpec, Patch } from './formats';
 import { registerDraftTools } from './drafts';

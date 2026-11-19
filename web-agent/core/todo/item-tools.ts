@@ -1,4 +1,4 @@
-import type { PluginContext } from '../../kernel/types';
+import type { PluginContext } from '../../kernel/plugin-sdk';
 import { PersonalItems } from './items';
 import { isItemError } from './items';
 
