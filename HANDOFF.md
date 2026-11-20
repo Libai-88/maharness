@@ -38,7 +38,7 @@
 - 依赖安全基线：后端用 `overrides` 固定 `exceljs→uuid@11.1.1`、`pptxgenjs→image-size@2.1.0`；前端将 `shadcn` CLI 移至 `devDependencies`。`npm audit --omit=dev` 前后端均 0 漏洞。
 - `plugin:validate` 支持无参数校验 `plugins/` 下全部插件，并保持单目录参数兼容。
 - 浏览器回归固定单 worker，避免并行运行时社会调度用例的时序竞争；本地全量 133/133 通过。
-- 质量审查后的第一批结构修复：插件源码统一走 `kernel/plugin-sdk`，新增 core/plugins 边界测试；`OrganizationService`/`SocietyService` 注入可测试时钟；角色选择权重进入制度版本，任务支持显式能力/写需求；社会健康分标记为 `weighted_heuristic` 并附样本量与权重；`server/society/policy.ts`、`server/society/selection.ts`、`server/society/health.ts` 已从单体 `society.ts` 拆出并归入 `server/society/`；宿主服务装配集中到 `server/host-services.ts`；新增 `check:boundaries`、`check:quality`、`test:coverage` 脚本。
+- 质量审查后的第一批结构修复：插件源码统一走 `kernel/plugin-sdk`，新增 core/plugins 边界测试；`OrganizationService`/`SocietyService` 注入可测试时钟；角色选择权重进入制度版本，任务支持显式能力/写需求；社会健康分标记为 `weighted_heuristic` 并附样本量与权重；`server/society/policy.ts`、`server/society/selection.ts`、`server/society/health.ts` 已从单体 `society.ts` 拆出并归入 `server/society/`；宿主服务装配集中到 `server/host-services.ts`；新增 `server/migration-lock.ts` 迁移指纹门禁，以及 `check:boundaries`、`check:quality`、`test:coverage` 脚本。
 
 ## 验收与发布
 

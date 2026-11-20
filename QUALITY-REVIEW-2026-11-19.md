@@ -226,6 +226,6 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | F3 角色权重 / 任务提示 | 部分完成 | 六因子权重进入 `InstitutionPolicies` 并版本化；任务支持 `requiredCapabilities` / `needsWrite`；旧关键词推断保留兼容。 |
 | F3 社会健康指标 | 部分完成 | 健康快照增加 `scoreKind: weighted_heuristic`、`sampleSize` 和显式权重；UI 标注“启发式”。 |
 | F5 文件拆分 | 部分完成 | 制度默认值与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康拆到 `server/society/health.ts`，单体入口归入 `server/society/index.ts`；热点路径复用单个 `OrganizationService`；调度/结算/快照仍需继续拆分。 |
-| F6 迁移 | 部分完成 | 增加迁移版本连续性门禁；历史 schema 快照/不可变 DDL 尚未重构。 |
+| F6 迁移 | 部分完成 | 增加迁移版本连续性测试与 `server/migration-lock.ts` 指纹门禁，旧迁移/ schema 常量变更必须显式更新锁；历史 schema 快照/完全不可变 DDL 仍需后续重构。 |
 | F7 体验真实模型证据 | 未完成 | 需要单独重跑并预算；本次只补了工程门禁与文档。 |
 | F1 host service 边界 | 部分完成 | 已明确 host service / plugin 的边界语义；`server/host-services.ts` 统一装配宿主服务，减少 routes 直接构造服务；全量插件化仍需后续架构批次。

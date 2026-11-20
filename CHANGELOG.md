@@ -22,7 +22,7 @@
 - 供应链策略文档 `plan/supply-chain-policy-v1.md`：npm/技能包/插件三类对象的哈希锚定、升级与回滚路径（SEC-07）。
 - 插件 SDK 公共边界：core/plugins 源码统一从 `kernel/plugin-sdk` 导入，新增依赖边界测试与 `npm run check:boundaries` / `check:quality`。
 - 社会制度新增 `roleSelectionWeights` 六因子权重版本；任务支持显式 `requiredCapabilities` / `needsWrite`，社会健康快照附带 `scoreKind`、`sampleSize` 与权重说明。
-- `npm run test:coverage` 可选的 Node 原生覆盖率入口；数据库迁移连续性门禁测试。
+- `npm run test:coverage` 可选的 Node 原生覆盖率入口；数据库迁移连续性门禁测试与 `server/migration-lock.ts` 指纹锁定。
 
 ### Changed
 
