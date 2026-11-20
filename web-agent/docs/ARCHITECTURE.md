@@ -18,7 +18,7 @@ React 界面 / HTTP API
 
 `kernel/` 定义循环、工具、插件、任务、上下文与持久化适配契约，并提供事件、配置、资源作用域、调度与协议校验机制。它不导入 `core/`、`server/` 或 UI 功能实现。`core/` 与 `plugins/` 源码只能通过 `kernel/plugin-sdk` 使用公共契约；边界测试会拒绝深层 `kernel/*` 导入。
 
-`core/chat/` 提供默认循环、工具执行器和组合调用代理；`core/self-extend/` 提供任务插件运行服务。`server/` 负责 HTTP、认证、SQLite、任务生命周期以及 AI 社会/劳动组织等宿主服务；`server/society/policy.ts` 管理制度策略，`server/society/selection.ts` 管理角色选择，`server/society/health.ts` 计算社会健康，`server/society/index.ts` 负责调度与生命周期。宿主服务不是可热插拔插件，必须通过显式服务接口访问 RunService、Store 与组织事实。`ui/` 展示持久状态与用户授权入口。
+`core/chat/` 提供默认循环、工具执行器和组合调用代理；`core/self-extend/` 提供任务插件运行服务。`server/` 负责 HTTP、认证、SQLite、任务生命周期以及 AI 社会/劳动组织等宿主服务；`server/host-services.ts` 统一装配宿主服务，`server/society/policy.ts` 管理制度策略，`server/society/selection.ts` 管理角色选择，`server/society/health.ts` 计算社会健康，`server/society/index.ts` 负责调度与生命周期。宿主服务不是可热插拔插件，必须通过显式服务接口访问 RunService、Store 与组织事实。`ui/` 展示持久状态与用户授权入口。
 
 ## 任务生命周期
 

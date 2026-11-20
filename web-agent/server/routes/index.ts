@@ -37,9 +37,8 @@ import { registerAutomationRoutes } from './automations';
 import { registerWorkbenchRoutes } from './workbench';
 import { registerExperienceRoutes } from './experience';
 import { registerOrganizationRoutes } from './organization';
-import { SocietyService } from '../society';
 import type { Scheduler } from '../scheduler';
-import { AutomationService } from '../automations';
+import { createHostServices } from '../host-services';
 import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
@@ -51,8 +50,7 @@ import { tenantSandboxRoot } from '../tenant-workspace';
 import { beginRun, endRun } from '../index';
 import { loadPromptRules, personaRuleDescriptor, resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
 import { runtimeClockContext } from '../runtime-context';
-import { OrganizationService } from '../organization';
-import { organizationTools } from '../organization-tools';
+
 
 export { refreshChatProviders, refreshChatPersonas } from './shared';
 
@@ -101,38 +99,7 @@ export function readStorageSnapshot(dataDir: string): StorageSnapshot {
 export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): RunService {
   app.use(express.json({ limit: '5mb' }));
 
-  const automations = new AutomationService(
-    store,
-    tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
-    Date.now,
-    {
-      filePollMs: kernel.config.get<number>('automation.filePollMs', 5_000),
-      urlPollMs: kernel.config.get<number>('automation.urlPollMs', 300_000),
-    },
-  );
-  const automationTools = automations.tools();
-  let runtimeToolNames: () => string[] = () => [];
-  const organization = new OrganizationService({
-    store,
-    emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
-    runtimeAuthority: tenant => {
-      const workspace = tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant);
-      return {
-        workspace,
-        readOnly: false,
-        profile: store.runs.permission(tenant, workspace).profile,
-        allowedTools: runtimeToolNames(),
-      };
-    },
-  });
-  const society = new SocietyService({
-    store,
-    emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
-    organization,
-  });
-  const orgTools = organizationTools(organization, store);
-  const runTools = () => [...kernel.plugins.capabilities('tool').map(capability => capability.tool), ...automationTools, ...orgTools];
-  runtimeToolNames = () => runTools().map(tool => tool.name);
+  const { automations, organization, society, runTools } = createHostServices(kernel, store);
 
   const deps = {
     kernel, store, tracker,
