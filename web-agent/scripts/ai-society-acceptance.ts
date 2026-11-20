@@ -621,7 +621,8 @@ try {
     readFileSync(resolve(root, 'docs/AI-SOCIETY.md'), 'utf8'),
     readFileSync(resolve(root, 'docs/AI-ORGANIZATION.md'), 'utf8'),
   ].join('\n');
-  assert.match(docs, /AI 原生操作系统层和 AI 社会运行层/);
+  assert.match(docs, /AI 社会 v1/);
+  assert.match(docs, /AI 社会运行层/);
   assert.match(docs, /主 Agent/);
   assert.match(docs, /持久角色/);
   pass('A1', '产品定位', [
@@ -1127,7 +1128,10 @@ const report = {
   sourceHashes: Object.fromEntries([
     'scripts/ai-society-acceptance.ts',
     'server/db.ts',
-    'server/society.ts',
+    'server/society/index.ts',
+    'server/society/policy.ts',
+    'server/society/selection.ts',
+    'server/society/health.ts',
     'server/organization.ts',
     'server/organization-store.ts',
     'server/run-service.ts',
