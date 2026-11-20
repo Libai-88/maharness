@@ -38,6 +38,18 @@ const provider: ProviderDef = createProvider({
   inputPrice,
   outputPrice,
   requestTimeoutMs: timeoutMs,
+  models: [{
+    modelId: model,
+    contextWindow: 1_048_576,
+    maxOutput: 1_048_576,
+    vision: false,
+    tools: true,
+    reasoning: process.env.EVAL_REASONING === '1',
+    priceIn: inputPrice,
+    priceOut: outputPrice,
+    enabled: true,
+    source: 'manual',
+  }],
 });
 
 interface Capture {

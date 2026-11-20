@@ -73,6 +73,7 @@ function reviewProvider(options: {
   usage?: { input: number; output: number };
   duplicatePlanRefs?: boolean;
   modelMaxOutput?: number;
+  reasoning?: boolean;
   planGap?: boolean;
 } = {}): ProviderDef & { calls: () => number } {
   let calls = 0;
@@ -80,7 +81,7 @@ function reviewProvider(options: {
     id: 'fixture', label: 'Fixture', defaultModel: 'fixture-model', priceSource: 'configured',
     models: [{
       modelId: 'fixture-model', contextWindow: 32_000, maxOutput: options.modelMaxOutput ?? 4_096,
-      vision: false, tools: false, reasoning: false, priceIn: 1, priceOut: 2,
+      vision: false, tools: false, reasoning: options.reasoning ?? false, priceIn: 1, priceOut: 2,
       enabled: true, source: 'manual',
     }],
     calls: () => calls,
@@ -704,6 +705,22 @@ describe('AI 用户复盘', () => {
       assert.match(finished.error ?? '', /JSON/);
       assert.equal(provider.calls(), 1);
       assert.equal(finished.calls, 1);
+    } finally { store.close(); }
+  });
+
+  test('reasoning models can use total-budget headroom for thinking before emitting review JSON', async () => {
+    const store = new Store(':memory:');
+    const maxTokens: number[] = [];
+    const provider = reviewProvider({ reasoning: true, maxTokens });
+    const { experience } = services(store, provider);
+    try {
+      const run = addRun(store);
+      const review = experience.create({ runIds: [run.id] }, 'default');
+      await experience.settled(review.id)!;
+      const finished = experience.review(review.id, 'default');
+      assert.equal(finished.status, 'completed');
+      assert.equal(provider.calls(), 1);
+      assert.ok((maxTokens[0] ?? 0) > 800, `reasoning review should receive more than the nominal 800-token output cap, got ${maxTokens[0]}`);
     } finally { store.close(); }
   });
 

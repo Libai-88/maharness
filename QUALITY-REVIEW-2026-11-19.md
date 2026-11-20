@@ -209,7 +209,7 @@ maharness 已经不是早期原型：它有真实的 Run 执行链、恢复账�
 - 时间与测试：`web-agent/server/tests/society.spec.ts`；E2E `web-agent/ui/e2e/society-real-backend.spec.ts`
 - 产品边界声明：`web-agent/docs/AI-ORGANIZATION.md:5`
 - 真实模型复盘记录：`web-agent/docs/RUNTIME-V2.md:240`
-- 工程验证：`npm test` 1532 总用例/1530 通过/2 跳过；`npm run test:security` 402/402；`selftest` 90/90；`eval:ci` 28/28；`eval:optimization` 108/108；E2E 133/133；`npm audit --omit=dev` 前后端 0 漏洞；CI `quality` + `e2e` 双绿。
+- 工程验证：`npm test` 1533 总用例/1531 通过/2 跳过；`npm run test:security` 402/402；`selftest` 90/90；`eval:ci` 28/28；`eval:optimization` 108/108；E2E 133/133；`npm audit --omit=dev` 前后端 0 漏洞；CI `quality` + `e2e` 双绿。
 
 ---
 
@@ -227,5 +227,5 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | F3 社会健康指标 | 部分完成 | 健康快照增加 `scoreKind: weighted_heuristic`、`sampleSize` 和显式权重；UI 标注“启发式”。 |
 | F5 文件拆分 | 部分完成 | 制度默认值与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康拆到 `server/society/health.ts`，单体入口归入 `server/society/index.ts`；热点路径复用单个 `OrganizationService`；调度/结算/快照仍需继续拆分。 |
 | F6 迁移 | 部分完成 | 增加迁移版本连续性测试与 `server/migration-lock.ts` 指纹门禁，旧迁移/ schema 常量变更必须显式更新锁；历史 schema 快照/完全不可变 DDL 仍需后续重构。 |
-| F7 体验真实模型证据 | 未完成 | 需要单独重跑并预算；本次只补了工程门禁与文档。 |
+| F7 体验真实模型证据 | 部分完成 | 修复 reasoning 模型的复盘输出预算；2026-11-20 本机路由复测 `group/never-stuck` 1/9、`auto/deepseek-v4.1-flash` 5/9；仍未达到 9/9，需要继续调 prompt/预算并保留真实报告。 |
 | F1 host service 边界 | 部分完成 | 已明确 host service / plugin 的边界语义；`server/host-services.ts` 统一装配宿主服务，减少 routes 直接构造服务；全量插件化仍需后续架构批次。

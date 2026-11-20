@@ -1456,8 +1456,20 @@ export class ExperienceService {
       - review.budget.inputTokens
       - review.budget.outputTokens
       - inputTokens;
-    const protocolCap = provider.models?.find(item => item.modelId === model)?.maxOutput;
-    const limits = [remainingOutput, remainingTotal];
+    const modelCapability = provider.models?.find(item => item.modelId === model);
+    const protocolCap = modelCapability?.maxOutput;
+    // Reasoning tokens are billed as output but arrive before the JSON body.
+    // For reasoning models, allow the total-budget headroom to cover them;
+    // otherwise a nominal output cap can be exhausted entirely by reasoning
+    // and leave no content for the review itself. Non-reasoning models keep
+    // the frozen output cap semantics.
+    const reasoningHeadroom = modelCapability?.reasoning
+      ? Math.min(4_096, Math.max(1_024, protocolCap ?? 4_096))
+      : 0;
+    const outputLimit = modelCapability?.reasoning
+      ? Math.max(remainingOutput, Math.min(remainingTotal, reasoningHeadroom))
+      : remainingOutput;
+    const limits = [outputLimit, remainingTotal];
     if (protocolCap !== undefined && Number.isSafeInteger(protocolCap) && protocolCap > 0) limits.push(protocolCap);
     const maxTokens = Math.min(...limits);
     if (!Number.isSafeInteger(maxTokens) || maxTokens < 1) {
