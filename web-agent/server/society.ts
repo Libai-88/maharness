@@ -10,13 +10,13 @@ import {
   type PricedModel,
 } from './model-cost-estimator';
 import { OrganizationService, explicitTeamRequest } from './organization';
+import { SocietySelectionService } from './society-selection';
 import {
   OrganizationError,
   type AssignmentContract,
   type InstitutionPolicies,
   type InstitutionVersion,
   type OrganizationRole,
-  type RoleSelectionScore,
   type SocialHealth,
   type SocietyDepartmentPolicy,
   type SocietyExperimentMeasurement,
@@ -30,8 +30,6 @@ import {
   type SocietyAuditEntry,
 } from './organization-store';
 import {
-  CAPABILITY_ALIASES,
-  CAPABILITY_TOOL_HINTS,
   DEFAULT_POLICIES,
   ROLE_SELECTION_WEIGHTS,
   SOCIAL_HEALTH_WEIGHTS,
@@ -162,12 +160,9 @@ function dependencyIndexes(branches: SocietyTaskBranch[]): number[][] {
   return dependencies;
 }
 
-function activeScheduleRoleIds(schedules: SocietySchedule[]): string[] {
-  return schedules.filter(item => item.status === 'active').flatMap(item => item.roleIds);
-}
-
 export class SocietyService {
   private readonly organization: OrganizationService;
+  private readonly selection: SocietySelectionService;
   private runs?: SocietyRunRuntime;
   private readonly advancing = new Set<string>();
   private readonly watchedRuns = new Map<string, () => void>();
@@ -189,6 +184,7 @@ export class SocietyService {
       ...(options.runtimeAuthority ? { runtimeAuthority: options.runtimeAuthority } : {}),
       now: this.now,
     });
+    this.selection = new SocietySelectionService(this.repository(), this.organization);
     this.runs = options.runs;
   }
 
@@ -415,15 +411,7 @@ export class SocietyService {
   }
 
   departmentForRole(role: OrganizationRole, departments: SocietyDepartmentPolicy[]): SocietyDepartmentPolicy | undefined {
-    const capabilities = new Set(role.capabilities);
-    return departments.filter(item => item.enabled)
-      .map(department => ({
-        department,
-        fit: department.capabilities.filter(capability => capabilities.has(capability)).length,
-      }))
-      .filter(item => item.fit > 0)
-      .sort((left, right) => right.fit - left.fit || left.department.priority - right.department.priority)
-      [0]?.department;
+    return this.selection.departmentForRole(role, departments);
   }
 
   updateInstitution(tenantId: string, input: Partial<InstitutionPolicies> & { reason: string }): InstitutionVersion {
@@ -482,7 +470,7 @@ export class SocietyService {
     }
     const departmentId = input.departmentId
       ? validDepartmentId(input.departmentId)
-      : this.departmentForText(objective, institution.policies.departments).id;
+      : this.selection.departmentForText(objective, institution.policies.departments).id;
     const department = institution.policies.departments.find(item => item.id === departmentId && item.enabled);
     if (!department) throw new OrganizationError(404, 'DEPARTMENT_NOT_FOUND', '部门不存在或已停用');
     const queued = this.repository().societyTasks(input.tenantId, input.projectId, 1000)
@@ -583,170 +571,6 @@ export class SocietyService {
     });
   }
 
-  private departmentForText(text: string, departments: SocietyDepartmentPolicy[]): SocietyDepartmentPolicy {
-    const enabled = departments.filter(item => item.enabled).sort((left, right) => left.priority - right.priority);
-    if (!enabled.length) throw new OrganizationError(409, 'DEPARTMENT_NOT_FOUND', '没有可用部门');
-    const lowered = text.toLowerCase();
-    const aliases: Record<string, string[]> = {
-      research: ['研究', '论文', '文献', '检索', '资料对比', '来源'],
-      reading: ['阅读', '精读', '读懂', '摘要'],
-      analysis: ['分析', '归纳', '对比'],
-      review: ['审校', '复核', '核验', '验收', '检查'],
-      quality: ['质量', '准确性', '错误'],
-      documents: ['文档', 'word', 'docx', 'pdf', '表格', 'xlsx', '演示', 'ppt'],
-      files: ['文件', '整理', '批量'],
-      automation: ['自动化', '批量处理', '定时'],
-      coordination: ['协调', '计划', '排期'],
-    };
-    return enabled.find(department => department.capabilities.some(capability =>
-      lowered.includes(capability.toLowerCase())
-      || (aliases[capability] ?? []).some(alias => lowered.includes(alias.toLowerCase())),
-    )) ?? enabled[0];
-  }
-
-  private roleDepartment(role: OrganizationRole, departmentId: string, departments: SocietyDepartmentPolicy[]): boolean {
-    return this.departmentForRole(role, departments)?.id === departmentId;
-  }
-
-  private eligibleRoles(task: SocietyTask, institution: InstitutionVersion): OrganizationRole[] {
-    const departments = institution.policies.departments;
-    const departmentIds = [...new Set(task.branches.map(branch => branch.departmentId ?? task.departmentId ?? ''))];
-    return this.repository().listRoles(task.tenantId, undefined, true)
-      .filter(role => role.employment === 'active' && (role.projectId === '' || role.projectId === task.projectId))
-      .filter(role => departmentIds.some(id => this.roleDepartment(role, id, departments)));
-  }
-
-  private requiredCapabilities(task: SocietyTask, institution: InstitutionVersion): string[] {
-    if (task.requiredCapabilities?.length) return task.requiredCapabilities.slice(0, 8);
-    const departmentIds = new Set(task.branches.map(branch =>
-      branch.departmentId ?? task.departmentId ?? '',
-    ).filter(Boolean));
-    const departmentCapabilities = institution.policies.departments
-      .filter(department => departmentIds.has(department.id))
-      .flatMap(department => department.capabilities);
-    const text = [
-      task.objective,
-      ...task.acceptance,
-      ...task.branches.flatMap(branch => [
-        branch.objective,
-        ...branch.acceptance,
-        ...branch.expectedArtifacts,
-      ]),
-    ].join(' ').toLowerCase();
-    const matched = Object.entries(CAPABILITY_ALIASES)
-      .filter(([capability, aliases]) =>
-        text.includes(capability.toLowerCase())
-        || aliases.some(alias => text.includes(alias.toLowerCase())),
-      )
-      .map(([capability]) => capability);
-    return [...new Set(matched.length ? matched : departmentCapabilities)].slice(0, 8);
-  }
-
-  private taskNeedsWrite(task: SocietyTask): boolean {
-    if (task.needsWrite !== undefined) return task.needsWrite;
-    const text = [
-      task.objective,
-      ...task.acceptance,
-      ...task.branches.flatMap(branch => [
-        branch.objective,
-        ...branch.expectedArtifacts,
-        ...branch.acceptance,
-      ]),
-    ].join(' ').toLowerCase();
-    return task.branches.some(branch => branch.expectedArtifacts.length > 0)
-      || /创建|生成|修改|导出|写入|整理|制作|转换|保存|create|generate|edit|write|export|convert|save/.test(text);
-  }
-
-  private rankRoles(task: SocietyTask, institution: InstitutionVersion): {
-    requiredCapabilities: string[];
-    candidates: RoleSelectionScore[];
-  } {
-    const activeRoles = activeScheduleRoleIds(this.repository().societySchedules(task.tenantId, 1000));
-    const organization = this.organization;
-    const scorecards = organization.scorecards(task.tenantId);
-    const evaluation = organization.ensureEvaluation(task.tenantId);
-    const evaluationWeights = evaluation.record.rankingWeights;
-    const selectionWeights = institution.policies.roleSelectionWeights ?? ROLE_SELECTION_WEIGHTS;
-    const relations = this.repository().roleRelations(task.tenantId);
-    const requiredCapabilities = this.requiredCapabilities(task, institution);
-    const needsWrite = this.taskNeedsWrite(task);
-    const candidates = this.eligibleRoles(task, institution).map(role => {
-      const capabilityFit = requiredCapabilities.length
-        ? requiredCapabilities.filter(capability => role.capabilities.includes(capability)).length
-          / requiredCapabilities.length
-        : 0.5;
-      const memories = this.repository().roleMemories(task.tenantId, role.id, 20);
-      const memoryHits = requiredCapabilities.filter(capability => {
-        const terms = [capability, ...(CAPABILITY_ALIASES[capability] ?? [])];
-        return memories.some(memory => terms.some(term => memory.summary.toLowerCase().includes(term.toLowerCase())));
-      }).length;
-      const memoryRelevance = requiredCapabilities.length ? memoryHits / requiredCapabilities.length : 0;
-      const allowedTools = role.authority.allowedTools.map(tool => tool.toLowerCase());
-      const toolHints = [...new Set(requiredCapabilities.flatMap(capability =>
-        CAPABILITY_TOOL_HINTS[capability] ?? [],
-      ))];
-      const toolReadiness = allowedTools.length === 0
-        ? 1
-        : toolHints.length === 0
-          ? 0.5
-          : toolHints.filter(hint => allowedTools.some(tool => tool.includes(hint))).length / toolHints.length;
-      const roleRelations = relations.filter(relation =>
-        relation.fromRoleId === role.id || relation.toRoleId === role.id,
-      );
-      const collaborationHealth = roleRelations.length
-        ? roleRelations.reduce((sum, relation) => sum + relation.score, 0) / roleRelations.length
-        : 0.5;
-      const scorecard = scorecards.find(item => item.roleId === role.id);
-      const historyReliability = scorecard && scorecard.sampleSize >= evaluation.record.lowConfidenceSamples
-        ? (scorecard.acceptanceRate ?? 0) * evaluationWeights.acceptance
-          + (scorecard.budgetCompliance ?? 0) * evaluationWeights.budget
-          + (scorecard.evidenceCompleteness ?? 0) * evaluationWeights.evidence
-        : 0.5;
-      const activeAssignments = activeRoles.filter(id => id === role.id).length;
-      const loadBalance = Math.max(0, 1 - activeAssignments
-        / Math.max(1, institution.policies.welfareMaxActiveAssignments));
-      const score = capabilityFit * selectionWeights.capability
-        + memoryRelevance * selectionWeights.memory
-        + toolReadiness * selectionWeights.tools
-        + collaborationHealth * selectionWeights.collaboration
-        + historyReliability * selectionWeights.history
-        + loadBalance * selectionWeights.load;
-      const blockedReason = needsWrite && role.authority.readOnly
-        ? '角色只读权限不覆盖写入任务'
-        : toolReadiness === 0
-          ? '角色工具权限不覆盖任务能力'
-          : undefined;
-      return {
-        roleId: role.id,
-        score: Math.round(score * 1000) / 1000,
-        capabilityFit: Math.round(capabilityFit * 1000) / 1000,
-        memoryRelevance: Math.round(memoryRelevance * 1000) / 1000,
-        toolReadiness: Math.round(toolReadiness * 1000) / 1000,
-        collaborationHealth: Math.round(collaborationHealth * 1000) / 1000,
-        historyReliability: Math.round(historyReliability * 1000) / 1000,
-        loadBalance: Math.round(loadBalance * 1000) / 1000,
-        activeAssignments,
-        eligible: !blockedReason,
-        reason: `能力=${capabilityFit.toFixed(2)} 记忆=${memoryRelevance.toFixed(2)} 工具=${toolReadiness.toFixed(2)} 协作=${collaborationHealth.toFixed(2)} 履历=${historyReliability.toFixed(2)} 负载=${loadBalance.toFixed(2)}`,
-        ...(blockedReason ? { blockedReason } : {}),
-      };
-    }).sort((left, right) =>
-      Number(right.eligible) - Number(left.eligible)
-      || right.score - left.score
-      || left.activeAssignments - right.activeAssignments
-      || left.roleId.localeCompare(right.roleId),
-    );
-    return { requiredCapabilities, candidates };
-  }
-
-  private rankedRoles(task: SocietyTask, institution: InstitutionVersion, exclude: Set<string> = new Set()): OrganizationRole[] {
-    const eligible = this.eligibleRoles(task, institution).filter(role => !exclude.has(role.id));
-    const eligibleIds = new Set(eligible.map(role => role.id));
-    return this.rankRoles(task, institution).candidates
-      .filter(score => score.eligible && eligibleIds.has(score.roleId))
-      .map(score => eligible.find(role => role.id === score.roleId)!);
-  }
-
   private resourceUsage(task: SocietyTask, schedules: SocietySchedule[], institution: InstitutionVersion): {
     departmentActive: Map<string, number>;
     departmentCommittedUsd: Map<string, number>;
@@ -757,7 +581,7 @@ export class SocietyService {
     roleBudgetBlocked: Set<string>;
   } {
     const active = schedules.filter(schedule => schedule.status === 'active');
-    const eligibleRoles = this.eligibleRoles(task, institution);
+    const eligibleRoles = this.selection.eligibleRoles(task, institution);
     const relevantRoles = new Set(eligibleRoles.map(role => role.id));
     const roleLoads = new Map<string, number>();
     const roleSpend = new Map<string, number>();
@@ -806,7 +630,7 @@ export class SocietyService {
 
   estimate(task: SocietyTask): SocietyEconomicsEstimate {
     const institution = this.ensureInstitution(task.tenantId);
-    const roles = this.rankedRoles(task, institution);
+    const roles = this.selection.rankedRoles(task, institution);
     const branchCount = task.branches.length;
     const teamSize = Math.min(institution.policies.maxTeamSize, Math.max(2, branchCount));
     const dependencies = dependencyIndexes(task.branches);
@@ -935,7 +759,7 @@ export class SocietyService {
     for (const branch of task.branches) {
       const role = available.find(candidate =>
         !selected.some(item => item.id === candidate.id)
-        && this.roleDepartment(candidate, branch.departmentId ?? task.departmentId ?? '', institution.policies.departments),
+        && this.selection.roleDepartment(candidate, branch.departmentId ?? task.departmentId ?? '', institution.policies.departments),
       );
       if (!role) return [];
       selected.push(role);
@@ -1006,8 +830,8 @@ export class SocietyService {
       if (!department) { this.queue(task, '部门不可用'); continue; }
       const schedules = this.repository().societySchedules(tenantId, 1000);
       const usage = this.resourceUsage(task, schedules, institution);
-      const ranking = this.rankRoles(task, institution);
-      const roleById = new Map(this.eligibleRoles(task, institution).map(role => [role.id, role]));
+      const ranking = this.selection.rankRoles(task, institution);
+      const roleById = new Map(this.selection.eligibleRoles(task, institution).map(role => [role.id, role]));
       const roles = ranking.candidates
         .filter(score => score.eligible)
         .map(score => roleById.get(score.roleId))
@@ -1092,7 +916,7 @@ export class SocietyService {
       }
       if (!teamEligible && teamRoles.length) teamRoles = [];
       const soloRole = available.find(role =>
-        this.roleDepartment(role, task.departmentId ?? '', institution.policies.departments),
+        this.selection.roleDepartment(role, task.departmentId ?? '', institution.policies.departments),
       ) ?? available[0];
       const selected = teamRoles.length === task.branches.length ? teamRoles : [soloRole];
       const useTeam = teamRoles.length > 1;
@@ -1483,7 +1307,7 @@ export class SocietyService {
     const coordinator = schedule.assignments
       .map(assignment => this.repository().getRole(assignment.roleId, task.tenantId))
       .find((role): role is OrganizationRole => !!role && role.employment === 'active')
-      ?? this.rankedRoles(task, institution).find(role => role.employment === 'active');
+      ?? this.selection.rankedRoles(task, institution).find(role => role.employment === 'active');
     if (!coordinator) return false;
     const coordinatorDepartmentId = this.departmentForRole(
       coordinator, institution.policies.departments,
@@ -1984,7 +1808,7 @@ export class SocietyService {
         reservedTokens,
         spentTokens,
         quotaRemainingTokens: Math.max(0, department.quotaTokens - reservedTokens - spentTokens),
-        roleIds: roles.filter(role => this.roleDepartment(role, department.id, institution.policies.departments)).map(role => role.id),
+        roleIds: roles.filter(role => this.selection.roleDepartment(role, department.id, institution.policies.departments)).map(role => role.id),
       };
     });
     const societyReservedUsd = [...departmentUsage.values()]
@@ -2205,7 +2029,7 @@ export class SocietyService {
     const institution = this.ensureInstitution(input.tenantId);
     const objective = bounded(input.objective, 2000, '任务目标');
     const departmentId = input.departmentId
-      ?? this.departmentForText(objective, institution.policies.departments).id;
+      ?? this.selection.departmentForText(objective, institution.policies.departments).id;
     const plannedArtifacts = [...new Set(input.branches.flatMap(branch => branch.expectedArtifacts ?? []) )];
     const acceptance = [...new Set([
       ...(input.acceptance ?? []),
