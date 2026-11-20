@@ -6,13 +6,13 @@ import {
   type RoleSelectionScore,
   type SocietyDepartmentPolicy,
   type SocietyTask,
-} from './organization-store';
-import { OrganizationService } from './organization';
+} from '../organization-store';
+import { OrganizationService } from '../organization';
 import {
   CAPABILITY_ALIASES,
   CAPABILITY_TOOL_HINTS,
   ROLE_SELECTION_WEIGHTS,
-} from './society-policy';
+} from './policy';
 
 function activeScheduleRoleIds(schedules: ReturnType<OrganizationRepository['societySchedules']>): string[] {
   return schedules.filter(item => item.status === 'active').flatMap(item => item.roleIds);

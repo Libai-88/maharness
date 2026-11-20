@@ -225,7 +225,7 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | F4 时钟 | 已完成 | `OrganizationService` / `SocietyService` 注入 `now`，业务路径不再直接 `Date.now()`；新增确定性测试。 |
 | F3 角色权重 / 任务提示 | 部分完成 | 六因子权重进入 `InstitutionPolicies` 并版本化；任务支持 `requiredCapabilities` / `needsWrite`；旧关键词推断保留兼容。 |
 | F3 社会健康指标 | 部分完成 | 健康快照增加 `scoreKind: weighted_heuristic`、`sampleSize` 和显式权重；UI 标注“启发式”。 |
-| F5 文件拆分 | 部分完成 | 制度默认值与校验拆到 `server/society-policy.ts`，角色选择评分拆到 `server/society-selection.ts`；热点路径复用单个 `OrganizationService`；`society.ts` 仍需继续拆分调度/结算/快照。 |
+| F5 文件拆分 | 部分完成 | 制度默认值与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康拆到 `server/society/health.ts`，单体入口归入 `server/society/index.ts`；热点路径复用单个 `OrganizationService`；调度/结算/快照仍需继续拆分。 |
 | F6 迁移 | 部分完成 | 增加迁移版本连续性门禁；历史 schema 快照/不可变 DDL 尚未重构。 |
 | F7 体验真实模型证据 | 未完成 | 需要单独重跑并预算；本次只补了工程门禁与文档。 |
 | F1 全量插件化 | 未完成（路线决策） | 已明确 host service / plugin 的边界语义；AI 社会等宿主模块拆分需后续架构批次。

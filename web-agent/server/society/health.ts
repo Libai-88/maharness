@@ -1,5 +1,5 @@
-import type { SocialHealth } from './organization-store';
-import { SOCIAL_HEALTH_WEIGHTS } from './society-policy';
+import type { SocialHealth } from '../organization-store';
+import { SOCIAL_HEALTH_WEIGHTS } from './policy';
 
 export interface SocialHealthInput {
   loadBalance: number | null;

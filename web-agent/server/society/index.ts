@@ -1,17 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { MaterialRef } from '../kernel/material';
-import { RUN_TERMINAL, type RunRecord } from '../kernel/run';
-import { estimateTokens } from '../kernel/tokens';
-import type { Store } from './db';
+import type { MaterialRef } from '../../kernel/material';
+import { RUN_TERMINAL, type RunRecord } from '../../kernel/run';
+import { estimateTokens } from '../../kernel/tokens';
+import type { Store } from '../db';
 import {
   estimateModelWorkloadCost,
   firstPricedModel,
   resolvePricedModel,
   type PricedModel,
-} from './model-cost-estimator';
-import { OrganizationService, explicitTeamRequest } from './organization';
-import { SocietySelectionService } from './society-selection';
-import { buildSocialHealth } from './society-health';
+} from '../model-cost-estimator';
+import { OrganizationService, explicitTeamRequest } from '../organization';
+import { SocietySelectionService } from './selection';
+import { buildSocialHealth } from './health';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -28,7 +28,7 @@ import {
   type SocietyTask,
   type SocietyTaskBranch,
   type SocietyAuditEntry,
-} from './organization-store';
+} from '../organization-store';
 import {
   DEFAULT_POLICIES,
   ROLE_SELECTION_WEIGHTS,
@@ -39,8 +39,8 @@ import {
   ratio,
   tokenCount,
   validDepartmentId,
-} from './society-policy';
-import type { RunService } from './run-service';
+} from './policy';
+import type { RunService } from '../run-service';
 
 function teamCostEligible(
   objective: string,

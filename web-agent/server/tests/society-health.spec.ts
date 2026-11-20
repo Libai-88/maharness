@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSocialHealth } from '../society-health';
+import { buildSocialHealth } from '../society/health';
 
 test('social health is an explicit weighted heuristic and re-normalizes missing components', () => {
   const all = buildSocialHealth({

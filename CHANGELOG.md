@@ -30,7 +30,7 @@
 - 工作台聚焦个人事务；独立 AI 社会页面提供角色、分支、交付和异常观察，以及补充要求、停止、恢复、审批与返工。
 - 普通任务支持预算缺省与未知价格，显式预算仍然生效；基础观察工具直接可用，其他工具按任务与阶段加载。
 - 清理过时的规划文档与历史评测报告目录，文档引用统一指向现行开发与验收入口；重新生成插件锁，恢复 workbench 源码完整性校验。
-- `OrganizationService` / `SocietyService` 注入可测试时钟；角色选择权重进入制度版本；`society` 政策常量与校验拆到 `server/society-policy.ts`，角色选择评分拆到 `server/society-selection.ts`，社会健康指标拆到 `server/society-health.ts`，热点路径复用单个 `OrganizationService`。
+- `OrganizationService` / `SocietyService` 注入可测试时钟；角色选择权重进入制度版本；`society` 政策常量与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康指标拆到 `server/society/health.ts`，热点路径复用单个 `OrganizationService`。
 - 社会健康指标从等权展示改为显式 `weighted_heuristic`，UI 标注“社会健康（启发式）”，避免把启发式分数当成客观测量。
 
 ### Fixed
