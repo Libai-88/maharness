@@ -209,7 +209,7 @@ maharness 已经不是早期原型：它有真实的 Run 执行链、恢复账�
 - 时间与测试：`web-agent/server/tests/society.spec.ts`；E2E `web-agent/ui/e2e/society-real-backend.spec.ts`
 - 产品边界声明：`web-agent/docs/AI-ORGANIZATION.md:5`
 - 真实模型复盘记录：`web-agent/docs/RUNTIME-V2.md:240`
-- 工程验证：`npm test` 1531 总用例/1529 通过/2 跳过；`npm run test:security` 402/402；`selftest` 90/90；`eval:ci` 28/28；`eval:optimization` 108/108；E2E 133/133；`npm audit --omit=dev` 前后端 0 漏洞；CI `quality` + `e2e` 双绿。
+- 工程验证：`npm test` 1532 总用例/1530 通过/2 跳过；`npm run test:security` 402/402；`selftest` 90/90；`eval:ci` 28/28；`eval:optimization` 108/108；E2E 133/133；`npm audit --omit=dev` 前后端 0 漏洞；CI `quality` + `e2e` 双绿。
 
 ---
 
