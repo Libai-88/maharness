@@ -11,13 +11,13 @@ import {
 } from './model-cost-estimator';
 import { OrganizationService, explicitTeamRequest } from './organization';
 import { SocietySelectionService } from './society-selection';
+import { buildSocialHealth } from './society-health';
 import {
   OrganizationError,
   type AssignmentContract,
   type InstitutionPolicies,
   type InstitutionVersion,
   type OrganizationRole,
-  type SocialHealth,
   type SocietyDepartmentPolicy,
   type SocietyExperimentMeasurement,
   type SocietyPairedExperiment,
@@ -32,7 +32,6 @@ import {
 import {
   DEFAULT_POLICIES,
   ROLE_SELECTION_WEIGHTS,
-  SOCIAL_HEALTH_WEIGHTS,
   bounded,
   money,
   normalizePolicies,
@@ -1834,24 +1833,14 @@ export class SocietyService {
       ? Math.min(1, (societyReservedUsd + societySpentUsd) / institution.policies.societyBudgetUsd) : 1;
     const collaborationHealth = relations.length
       ? relations.reduce((sum, relation) => sum + relation.score, 0) / relations.length : null;
-    const healthParts: Array<[number | null, number]> = [
-      [loadBalance, SOCIAL_HEALTH_WEIGHTS.loadBalance],
-      [welfare, SOCIAL_HEALTH_WEIGHTS.welfare],
-      [exceptionHealth, SOCIAL_HEALTH_WEIGHTS.exceptionHealth],
-      [1 - budgetUtilization, SOCIAL_HEALTH_WEIGHTS.budgetHeadroom],
-      [collaborationHealth, SOCIAL_HEALTH_WEIGHTS.collaborationHealth],
-    ];
-    const availableHealthParts = healthParts.filter((part): part is [number, number] => part[0] !== null);
-    const availableWeight = availableHealthParts.reduce((sum, [, weight]) => sum + weight, 0);
-    const health: SocialHealth = {
-      score: availableWeight
-        ? Math.round(availableHealthParts.reduce((sum, [value, weight]) => sum + value * weight, 0) / availableWeight * 10_000) / 100
-        : null,
-      scoreKind: 'weighted_heuristic',
+    const health = buildSocialHealth({
+      loadBalance,
+      welfare,
+      exceptionHealth,
+      budgetUtilization,
+      collaborationHealth,
       sampleSize: relations.length,
-      weights: { ...SOCIAL_HEALTH_WEIGHTS },
-      loadBalance, welfare, exceptionHealth, budgetUtilization, collaborationHealth,
-    };
+    });
     const bottlenecks: SocietySnapshot['bottlenecks'] = [];
     for (const department of departments) {
       if (department.queued > department.maxConcurrent * 2)
