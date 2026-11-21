@@ -1,8 +1,8 @@
 import type { ToolDef } from '../../kernel/types';
 import type { AutomationService } from '../automations';
 import type { ExperienceService } from '../experience';
-import type { OrganizationService } from '../organization';
-import type { SocietyService } from '../society';
+import type { OrganizationService } from '../services/organization/service';
+import type { SocietyService } from '../services/society';
 
 /**
  * Narrow host-service ports consumed by HTTP routes and read-only projections.

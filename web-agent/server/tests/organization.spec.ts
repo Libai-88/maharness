@@ -9,7 +9,7 @@ import type { RunRecord } from '../../kernel/run';
 import type { AgentLoop, RunOptions } from '../../kernel/loop';
 import type { ProviderDef, ToolDef } from '../../kernel/types';
 import { Store } from '../db';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import {
   OrganizationError,
   type OrganizationRole,

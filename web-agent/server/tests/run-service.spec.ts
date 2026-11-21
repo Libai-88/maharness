@@ -15,7 +15,7 @@ import { Kernel } from '../../kernel';
 import { AgentRunner } from '../../core/chat/agent';
 import type { KernelLike, ToolDef } from '../../kernel/types';
 import { resolveRuleDescriptors, runtimeRuleDescriptor } from '../../kernel/rules';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 
 const provider: ProviderDef = { id: 'test', label: 'Test', defaultModel: 'test', async *chat() {} };
 const done = { type: 'assistant_done' as const, content: 'complete', reasoning: '', usage: { input: 10, output: 2 }, cost: 0.02 };

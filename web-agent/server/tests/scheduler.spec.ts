@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import Database from 'better-sqlite3';
 import type { RunEvent, RunRecord } from '../../kernel/run';
 import { Store } from '../db';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import type {
   AssignmentContract,
   OrganizationRole,
@@ -15,7 +15,7 @@ import type {
   SocietyTask,
 } from '../organization-store';
 import { Scheduler } from '../scheduler';
-import { SocietyService } from '../society';
+import { SocietyService } from '../services/society';
 
 const roots: string[] = [];
 after(() => { for (const root of roots) { try { rmSync(root, { recursive: true, force: true }); } catch { /* ignore */ } } });

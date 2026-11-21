@@ -3,7 +3,7 @@ import { existsSync, readFileSync, renameSync } from 'node:fs';
 import type { Store } from './db';
 import type { RunService } from './run-service';
 import type { AutomationService } from './automations';
-import type { SocietyService } from './society';
+import type { SocietyService } from './services/society';
 import type { ScheduleJob } from './schedule-store';
 
 export type { ScheduleJob, ScheduleState } from './schedule-store';

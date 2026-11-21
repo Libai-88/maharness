@@ -1,6 +1,6 @@
 import type { ToolContext, ToolDef, ToolResult } from '../kernel/types';
 import type { Store } from './db';
-import { isOrganizationError, OrganizationService, type AssignmentDraft } from './organization';
+import { isOrganizationError, OrganizationService, type AssignmentDraft } from './services/organization/service';
 import type { EvidenceRef, ExceptionCase } from './organization-store';
 
 function toolFailure(error: unknown): ToolResult {

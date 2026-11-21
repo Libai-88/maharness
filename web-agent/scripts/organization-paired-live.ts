@@ -14,7 +14,7 @@ import type { RunRecord } from '../kernel/run';
 import { decryptPurposeSecret, isPurposeEncrypted } from '../kernel/secret-box';
 import type { ProviderDef, ToolDef, ToolResult } from '../kernel/types';
 import { Store } from '../server/db';
-import { OrganizationService } from '../server/organization';
+import { OrganizationService } from '../server/services/organization/service';
 import { RunService } from '../server/run-service';
 import { decryptSecret } from '../server/secrets';
 

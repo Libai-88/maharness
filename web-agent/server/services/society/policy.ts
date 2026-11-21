@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import {
   OrganizationError,
   type InstitutionPolicies,
-} from '../organization-store';
+} from '../../organization-store';
 
 /** Default institution policy. Kept separate from scheduling so policy changes are auditable. */
 export const DEFAULT_POLICIES: InstitutionPolicies = {

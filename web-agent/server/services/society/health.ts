@@ -1,4 +1,4 @@
-import type { SocialHealth } from '../organization-store';
+import type { SocialHealth } from '../../organization-store';
 import { SOCIAL_HEALTH_WEIGHTS } from './policy';
 
 export interface SocialHealthInput {

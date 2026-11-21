@@ -9,7 +9,7 @@ import type { RunEvent, RunRecord } from '../../kernel/run';
 import type { AgentLoop } from '../../kernel/loop';
 import type { ProviderDef } from '../../kernel/types';
 import { Store } from '../db';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -18,7 +18,7 @@ import {
   type SocietyTask,
 } from '../organization-store';
 import { RunService } from '../run-service';
-import { SocietyService } from '../society';
+import { SocietyService } from '../services/society';
 
 const roots: string[] = [];
 

@@ -5,7 +5,7 @@ import type { LLMMessage, ProviderDef } from '../kernel/types';
 import { RUN_TERMINAL, type RunRecord } from '../kernel/run';
 import { countMessageTokens, estimateTokens } from '../kernel/tokens';
 import type { Store } from './db';
-import { OrganizationService } from './organization';
+import { OrganizationService } from './services/organization/service';
 import type { EvaluationVersion } from './organization-store';
 import {
   REVIEW_DIMENSIONS,

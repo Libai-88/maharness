@@ -10,7 +10,7 @@ import {
 import { dirname, resolve } from 'node:path';
 import type { RunEvent, RunRecord } from '../kernel/run';
 import { Store } from '../server/db';
-import { OrganizationService } from '../server/organization';
+import { OrganizationService } from '../server/services/organization/service';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -18,7 +18,7 @@ import {
   type SocietySchedule,
   type SocietyTask,
 } from '../server/organization-store';
-import { SocietyService } from '../server/society';
+import { SocietyService } from '../server/services/society';
 
 type Criterion = {
   id: string;
@@ -1128,11 +1128,11 @@ const report = {
   sourceHashes: Object.fromEntries([
     'scripts/ai-society-acceptance.ts',
     'server/db.ts',
-    'server/society/index.ts',
-    'server/society/policy.ts',
-    'server/society/selection.ts',
-    'server/society/health.ts',
-    'server/organization.ts',
+    'server/services/society/index.ts',
+    'server/services/society/policy.ts',
+    'server/services/society/selection.ts',
+    'server/services/society/health.ts',
+    'server/services/organization/service.ts',
     'server/organization-store.ts',
     'server/run-service.ts',
     'kernel/model-call.ts',

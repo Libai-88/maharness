@@ -3,9 +3,9 @@ import type { ProviderDef, ToolDef } from '../../kernel/types';
 import type { Store } from '../db';
 import { AutomationService } from '../automations';
 import { ExperienceService } from '../experience';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import { organizationTools } from '../organization-tools';
-import { SocietyService } from '../society';
+import { SocietyService } from '../services/society';
 import { tenantSandboxRoot } from '../tenant-workspace';
 import { currentPlan } from './adapters/goal-plan';
 

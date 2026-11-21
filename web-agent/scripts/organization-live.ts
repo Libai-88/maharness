@@ -12,7 +12,7 @@ import { createProvider } from '../core/chat/provider';
 import { AgentRunner } from '../core/chat/agent';
 import { globalApprovalBoard } from '../core/chat/approvals';
 import { Store } from '../server/db';
-import { OrganizationService } from '../server/organization';
+import { OrganizationService } from '../server/services/organization/service';
 import { organizationTools } from '../server/organization-tools';
 import { RunService } from '../server/run-service';
 import { TokenBudget } from '../evals/strengthening';

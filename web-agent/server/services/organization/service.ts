@@ -1,19 +1,19 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { contractArtifactPath } from '../kernel/sandbox';
+import { contractArtifactPath } from '../../../kernel/sandbox';
 import {
   RUN_TERMINAL,
   type ChildRunFallback,
   type PermissionProfile,
   type RunRecord,
-} from '../kernel/run';
-import { validateTaskContract, type TaskCriterion } from '../kernel/task-verifier';
-import { estimateTokens } from '../kernel/tokens';
-import type { Store } from './db';
+} from '../../../kernel/run';
+import { validateTaskContract, type TaskCriterion } from '../../../kernel/task-verifier';
+import { estimateTokens } from '../../../kernel/tokens';
+import type { Store } from '../../db';
 import {
   estimateModelWorkloadCost,
   resolvePricedModel,
   type PricedModel,
-} from './model-cost-estimator';
+} from '../../model-cost-estimator';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -37,8 +37,8 @@ import {
   type WorkLedgerEntry,
   type WorkOrder,
   type WorkReceipt,
-} from './organization-store';
-import { REVIEW_DIMENSIONS, REVIEW_RUBRIC_VERSION, REVIEW_SYSTEM_PROMPT } from './review-rubric';
+} from '../../organization-store';
+import { REVIEW_DIMENSIONS, REVIEW_RUBRIC_VERSION, REVIEW_SYSTEM_PROMPT } from '../../review-rubric';
 
 export interface AssignmentDraft {
   roleId?: string;
@@ -837,7 +837,7 @@ export class OrganizationService {
     return workItems.length >= 2 && workItems.length <= 5 && workItems.filter(item => item.dependsOn.length === 0).length >= 2;
   }
 
-  authorizeTools(run: RunRecord, tools: import('../kernel/types').ToolDef[]): import('../kernel/types').ToolDef[] {
+  authorizeTools(run: RunRecord, tools: import('../../../kernel/types').ToolDef[]): import('../../../kernel/types').ToolDef[] {
     const team = this.teamEligible(run);
     const planning = !team && this.teamPlanningEligible(run);
     const role = run.organizationRoleId ? this.repo.getRole(run.organizationRoleId, run.tenantId) : undefined;
@@ -1049,7 +1049,7 @@ export class OrganizationService {
     return role;
   }
 
-  prepareDelegation(parent: RunRecord, child: RunRecord, request: import('../kernel/run').ChildRunRequest, availableTools?: string[]): AssignmentContract {
+  prepareDelegation(parent: RunRecord, child: RunRecord, request: import('../../../kernel/run').ChildRunRequest, availableTools?: string[]): AssignmentContract {
     if (parent.origin?.kind === 'society')
       throw new OrganizationError(403, 'ROLE_AUTHORITY_EXCEEDED', '社会分工不能再次委派角色');
     if (parent.parentId || parent.depth > 0)

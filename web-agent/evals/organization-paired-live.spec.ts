@@ -114,10 +114,10 @@ test('runtime fingerprint covers execution dependencies and provenance follows t
     'server/model-cost-estimator.ts',
     'server/run-store.ts',
     'server/run-service.ts',
-    'server/society/index.ts',
-    'server/society/policy.ts',
-    'server/society/selection.ts',
-    'server/society/health.ts',
+    'server/services/society/index.ts',
+    'server/services/society/policy.ts',
+    'server/services/society/selection.ts',
+    'server/services/society/health.ts',
     'core/chat/agent.ts',
   ]) {
     assert.ok(sources.includes(required), `missing runtime dependency ${required}`);

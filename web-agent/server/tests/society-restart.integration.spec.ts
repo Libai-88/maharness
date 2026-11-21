@@ -7,10 +7,10 @@ import type { AgentLoop } from '../../kernel/loop';
 import { RUN_TERMINAL, type RunRecord } from '../../kernel/run';
 import type { ProviderDef } from '../../kernel/types';
 import { Store } from '../db';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import { RunService } from '../run-service';
 import { Scheduler } from '../scheduler';
-import { SocietyService } from '../society';
+import { SocietyService } from '../services/society';
 
 function deferred() {
   let resolve!: () => void;

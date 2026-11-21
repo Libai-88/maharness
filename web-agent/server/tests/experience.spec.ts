@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Store } from '../db';
 import { buildCachedFactLedger, buildEvidenceIndex, buildFactLedger, ExperienceError, ExperienceService } from '../experience';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import { setMaintenanceModelScope, type ModelCallRecord } from '../../kernel/model-call';
 import type { RunRecord } from '../../kernel/run';
 import type { ProviderDef } from '../../kernel/types';

@@ -6,8 +6,8 @@ import {
   type RoleSelectionScore,
   type SocietyDepartmentPolicy,
   type SocietyTask,
-} from '../organization-store';
-import { OrganizationService } from '../organization';
+} from '../../organization-store';
+import { OrganizationService } from '../organization/service';
 import {
   CAPABILITY_ALIASES,
   CAPABILITY_TOOL_HINTS,

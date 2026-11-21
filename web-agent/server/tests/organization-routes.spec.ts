@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import express from 'express';
 import { Store } from '../db';
-import { OrganizationService } from '../organization';
+import { OrganizationService } from '../services/organization/service';
 import { registerOrganizationRoutes } from '../routes/organization';
-import { SocietyService } from '../society';
+import { SocietyService } from '../services/society';
 
 function addKnowledgeRole(store: Store): void {
   const now = Date.now();

@@ -1,6 +1,6 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type { RunService } from '../run-service';
-import { isOrganizationError } from '../organization';
+import { isOrganizationError } from '../services/organization/service';
 import { OrganizationError } from '../organization-store';
 import type { ExceptionStatus, ProposalStatus } from '../organization-store';
 import type { OrganizationPort, SocietyPort } from '../host/ports';

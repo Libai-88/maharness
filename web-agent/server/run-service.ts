@@ -11,7 +11,7 @@ import { ACTIVE_RUN_STATES } from './run-store';
 import { ExecutionPool } from '../kernel/execution-pool';
 import type { ChildRunFallback, ChildRunRequest, ChildRunResult } from '../kernel/run';
 import type { TaskPluginService, TaskPluginSession, PluginDevelopmentGrant } from '../kernel/task-plugins';
-import { taskCriteriaForContract, type OrganizationService } from './organization';
+import { taskCriteriaForContract, type OrganizationService } from './services/organization/service';
 import type {
   AssignmentContract,
   OrganizationRole,

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Store } from '../server/db';
-import { OrganizationService } from '../server/organization';
+import { OrganizationService } from '../server/services/organization/service';
 
 const root = resolve(import.meta.dirname, '..');
 const reportDir = resolve(
