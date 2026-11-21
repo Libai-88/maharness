@@ -1,5 +1,4 @@
 import { createHash, randomUUID } from 'node:crypto';
-import type { MaterialRef } from '../../../kernel/material';
 import { RUN_TERMINAL, type RunRecord } from '../../../kernel/run';
 import { estimateTokens } from '../../../kernel/tokens';
 import type { Store } from '../../db';
@@ -11,7 +10,15 @@ import {
 } from '../../model-cost-estimator';
 import { OrganizationService, explicitTeamRequest } from '../organization/service';
 import { SocietySelectionService } from './selection';
-import { buildSocialObservations } from './health';
+import { buildSocietySnapshot, type DepartmentUsage, type RunUsage } from './snapshot';
+import { teamCostEligible as teamCostEligibleImpl } from './types';
+
+export type {
+  CreateSocietyTaskInput,
+  SocietyEconomicsEstimate,
+  SocietyTickAllResult,
+  SocietyTickResult,
+} from './types';
 import {
   OrganizationError,
   type AssignmentContract,
@@ -20,7 +27,6 @@ import {
   type InstitutionVersion,
   type OrganizationRole,
   type SocietyDepartmentPolicy,
-  type SocietyExperimentMeasurement,
   type SocietyPairedExperiment,
   type SocietySchedule,
   type SocietyScheduleAssignment,
@@ -41,97 +47,19 @@ import {
   tokenCount,
   validDepartmentId,
 } from './policy';
-import type { RunService } from '../../run-service';
-
-function teamCostEligible(
-  objective: string,
-  estimate: SocietyEconomicsEstimate,
-): boolean {
-  return explicitTeamRequest(objective)
-    || estimate.team.costUsd <= estimate.single.costUsd + 1e-10;
-}
-
-export interface CreateSocietyTaskInput {
-  tenantId: string;
-  projectId?: string;
-  objective: string;
-  acceptance?: string[];
-  materials?: Pick<MaterialRef, 'id' | 'version'>[];
-  valueUsd: number;
-  maxBudgetUsd: number;
-  maxBudgetTokens?: number;
-  priority?: number;
-  departmentId?: string;
-  requiredCapabilities?: string[];
-  needsWrite?: boolean;
-  teamMode?: 'auto' | 'solo' | 'team';
-  economics?: Partial<NonNullable<SocietyTask['economics']>>;
-  evidenceExperimentId?: string;
-  branches?: SocietyTaskBranch[];
-}
-
-export interface SocietyEconomicsEstimate {
-  costSource: 'configured' | 'historical' | 'unavailable';
-  pricingRefs: string[];
-  single: {
-    costUsd: number;
-    tokens: number;
-    quality: number;
-    latencyMs: number;
-    risk: number;
-    netBenefitUsd: number;
-  };
-  team: {
-    costUsd: number;
-    coordinationCostUsd: number;
-    tokens: number;
-    coordinationTokens: number;
-    quality: number;
-    latencyGainMs: number;
-    riskReduction: number;
-    netBenefitUsd: number;
-  };
-  marginalNetBenefitUsd: number;
-  formula: string;
-}
-
-export interface SocietyTickResult {
-  decisions: SocietySchedule[];
-  queued: number;
-  waitingApproval: number;
-  snapshot: SocietySnapshot;
-}
-
-export interface SocietyTickAllResult {
-  tenants: number;
-  decisions: SocietySchedule[];
-  queued: number;
-  waitingApproval: number;
-  failed: Array<{ tenantId: string; error: string }>;
-}
-
-type SocietyRunRuntime = Pick<RunService, 'startSocietyAssignment' | 'get' | 'subscribe' | 'cancel'>
-  & Partial<Pick<RunService, 'resume'>>;
-
-interface RunUsage {
-  runs: RunRecord[];
-  costUsd: number;
-  tokens: number;
-  cachedInputTokens: number;
-  cacheMissTokens: number;
-  cacheWriteTokens: number;
-  usageKnown: boolean;
-  cacheUsageKnown: boolean;
-  cacheWriteKnown: boolean;
-}
-
-interface DepartmentUsage {
-  activeAssignments: number;
-  reservedUsd: number;
-  reservedTokens: number;
-  spentUsd: number;
-  spentTokens: number;
-}
+import {
+  createPairedExperiment as createPairedExperimentImpl,
+  experimentDecision,
+  measurePairedExperiment as measurePairedExperimentImpl,
+  pairedExperiment as pairedExperimentImpl,
+} from './experiments';
+import {
+  type CreateSocietyTaskInput,
+  type SocietyEconomicsEstimate,
+  type SocietyRunRuntime,
+  type SocietyTickAllResult,
+  type SocietyTickResult,
+} from './types';
 
 function branchIndex(dependency: string): number | undefined {
   const match = /^(?:assignment|branch)-(\d+)$/i.exec(dependency.trim());
@@ -364,6 +292,10 @@ export class SocietyService {
       }
     }
     return result;
+  }
+
+  private teamCostEligible(objective: string, estimate: SocietyEconomicsEstimate): boolean {
+    return teamCostEligibleImpl(objective, estimate, explicitTeamRequest);
   }
 
   private emit(type: string, data: Record<string, unknown>): void {
@@ -927,7 +859,7 @@ export class SocietyService {
         && economics.costSource !== 'unavailable'
         && economics.team.costUsd <= task.maxBudgetUsd + 1e-10
         && economics.team.tokens <= task.maxBudgetTokens
-        && teamCostEligible(task.objective, economics)
+        && this.teamCostEligible(task.objective, economics)
         && economics.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
         && economics.team.netBenefitUsd > economics.single.netBenefitUsd;
       if (!teamFallbackReason) {
@@ -937,7 +869,7 @@ export class SocietyService {
             ? '服务端团队成本估算超过任务硬预算，保持单角色'
             : economics.team.tokens > task.maxBudgetTokens
               ? '服务端团队 token 估算超过任务硬预算，保持单角色'
-              : !teamCostEligible(task.objective, economics)
+              : !this.teamCostEligible(task.objective, economics)
                 ? '团队估算高于单角色方案，保持单角色'
               : undefined;
       }
@@ -1790,219 +1722,19 @@ export class SocietyService {
   }
 
   snapshot(tenantId: string, projectId?: string): SocietySnapshot {
-    const institution = this.ensureInstitution(tenantId);
-    const tasks = this.repository().societyTasks(tenantId, projectId, 1000);
-    const schedules = this.repository().societySchedules(tenantId, 1000);
-    const roles = this.repository().listRoles(tenantId, undefined, true)
-      .filter(role => !projectId || role.projectId === '' || role.projectId === projectId);
-    const relations = this.repository().roleRelations(tenantId);
-    const organization = this.organization;
-    const scorecards = organization.scorecards(tenantId);
-    const wellbeing = organization.wellbeing(tenantId, projectId);
-    const evaluation = organization.evaluationHistory(tenantId);
-    const active = schedules.filter(schedule => schedule.status === 'active');
-    const usageBySchedule = new Map(schedules.map(schedule => [schedule.id, this.runUsage(schedule, tenantId)]));
-    const departmentUsage = this.departmentUsage(schedules, tenantId, institution.policies.departments);
-    const roleLoads = new Map<string, number>();
-    for (const schedule of active) for (const roleId of schedule.roleIds)
-      roleLoads.set(roleId, (roleLoads.get(roleId) ?? 0) + 1);
-    const departments = institution.policies.departments.map(department => {
-      const usage = departmentUsage.get(department.id);
-      const reservedUsd = usage?.reservedUsd ?? 0;
-      const spentUsd = usage?.spentUsd ?? 0;
-      const reservedTokens = usage?.reservedTokens ?? 0;
-      const spentTokens = usage?.spentTokens ?? 0;
-      return {
-        ...department,
-        queued: tasks.filter(task => task.departmentId === department.id && task.status === 'queued').length,
-        active: usage?.activeAssignments ?? 0,
-        reservedUsd,
-        spentUsd,
-        quotaRemainingUsd: Math.max(0, department.quotaUsd - reservedUsd - spentUsd),
-        reservedTokens,
-        spentTokens,
-        quotaRemainingTokens: Math.max(0, department.quotaTokens - reservedTokens - spentTokens),
-        roleIds: roles.filter(role => this.selection.roleDepartment(role, department.id, institution.policies.departments)).map(role => role.id),
-      };
-    });
-    const societyReservedUsd = [...departmentUsage.values()]
-      .reduce((sum, usage) => sum + usage.reservedUsd, 0);
-    const societySpentUsd = [...departmentUsage.values()]
-      .reduce((sum, usage) => sum + usage.spentUsd, 0);
-    const societyReservedTokens = [...departmentUsage.values()]
-      .reduce((sum, usage) => sum + usage.reservedTokens, 0);
-    const societySpentTokens = [...departmentUsage.values()]
-      .reduce((sum, usage) => sum + usage.spentTokens, 0);
-    const sharedRefs = tasks.flatMap(task => task.materials.map(material => `${material.id}:${material.version}`));
-    const reusedRefs = [...new Set(sharedRefs)].filter(ref => sharedRefs.filter(item => item === ref).length > 1).length;
-    const loads = roles.map(role => roleLoads.get(role.id) ?? 0);
-    const meanLoad = loads.length ? loads.reduce((sum, load) => sum + load, 0) / loads.length : 0;
-    const variance = loads.length ? loads.reduce((sum, load) => sum + (load - meanLoad) ** 2, 0) / loads.length : 0;
-    const loadBalance = loads.length ? Math.max(0, 1 - Math.sqrt(variance) / Math.max(1, meanLoad)) : null;
-    const welfare = roles.length
-      ? roles.reduce((sum, role) => sum + Math.max(0, 1 - (roleLoads.get(role.id) ?? 0) / institution.policies.welfareMaxActiveAssignments), 0) / roles.length
-      : null;
-    const unresolved = this.repository().exceptions(tenantId).filter(item => !['resolved', 'dismissed', 'auto_resolved'].includes(item.status));
-    const exceptionHealth = unresolved.length ? Math.max(0, 1 - unresolved.length / 10) : 1;
-    const budgetUtilization = institution.policies.societyBudgetUsd > 0
-      ? Math.min(1, (societyReservedUsd + societySpentUsd) / institution.policies.societyBudgetUsd) : 1;
-    const collaborationHealth = relations.length
-      ? relations.reduce((sum, relation) => sum + relation.score, 0) / relations.length : null;
-    const observations = buildSocialObservations({
-      loadBalance,
-      welfare,
-      exceptionHealth,
-      budgetUtilization,
-      collaborationHealth,
-      sampleSize: relations.length,
-      roleCount: roles.length,
-      unresolvedExceptions: unresolved.length,
-      reservedUsd: societyReservedUsd,
-      spentUsd: societySpentUsd,
-      budgetUsd: institution.policies.societyBudgetUsd,
-    });
-    const bottlenecks: SocietySnapshot['bottlenecks'] = [];
-    for (const department of departments) {
-      if (department.queued > department.maxConcurrent * 2)
-        bottlenecks.push({ departmentId: department.id, kind: 'queue', count: department.queued, detail: '排队任务超过并发容量的两倍' });
-      if (department.active >= department.maxConcurrent)
-        bottlenecks.push({ departmentId: department.id, kind: 'load', count: department.active, detail: '部门并发容量已满' });
-      if (department.quotaRemainingUsd <= department.quotaUsd * 0.2)
-        bottlenecks.push({ departmentId: department.id, kind: 'budget', count: 1, detail: '部门可用配额低于 20%' });
-    }
-    for (const role of roles) {
-      if ((roleLoads.get(role.id) ?? 0) >= institution.policies.welfareMaxActiveAssignments)
-        bottlenecks.push({ departmentId: this.departmentForRole(role, institution.policies.departments)?.id ?? '', kind: 'welfare', count: roleLoads.get(role.id) ?? 0, detail: `${role.name} 已达到福利负载上限` });
-    }
-    const allSocietyRuns = [...new Map(schedules.flatMap(schedule => usageBySchedule.get(schedule.id)?.runs ?? [])
-      .map(run => [run.id, run])).values()];
-    let duplicateEvidenceReads = 0;
-    const readSignatures = new Map<string, number>();
-    for (const run of allSocietyRuns) for (const call of this.options.store.runs.toolCalls(run.id)) {
-      if (call.sideEffect !== 'read' || !['succeeded', 'failed', 'unknown'].includes(call.status)) continue;
-      const signature = `${call.name}\0${call.argsSummary}`;
-      const seen = readSignatures.get(signature) ?? 0;
-      if (seen) duplicateEvidenceReads++;
-      readSignatures.set(signature, seen + 1);
-    }
-    const roleBudgets = roles.map(role => {
-      const runs = schedules.flatMap(schedule => {
-        const contracts = (schedule.contractIds ?? [])
-          .map(id => this.repository().getContract(id, tenantId))
-          .filter((contract): contract is AssignmentContract => contract?.roleId === role.id && !!contract.runId);
-        return contracts.flatMap(contract => {
-          const run = this.options.store.runs.get(contract.runId!, tenantId);
-          return run ? [run] : [];
-        });
-      });
-      return {
-        roleId: role.id,
-        budgetLimitUsd: role.budgetLimitUsd,
-        budgetLimitTokens: role.budgetLimitTokens,
-        costUsd: runs.reduce((sum, run) => sum + run.cost, 0),
-        tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
-        cachedInputTokens: runs.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0),
-        activeAssignments: roleLoads.get(role.id) ?? 0,
-      };
-    });
-    const cacheUsageKnown = allSocietyRuns.length > 0 && allSocietyRuns.every(run =>
-      run.usageStatus === 'reported'
-      && run.tokensCached !== undefined
-      && run.tokensCacheMiss !== undefined);
-    const cachedInputTokens = cacheUsageKnown
-      ? allSocietyRuns.reduce((sum, run) => sum + (run.tokensCached ?? 0), 0) : 0;
-    const cacheMissTokens = cacheUsageKnown
-      ? allSocietyRuns.reduce((sum, run) => sum + (run.tokensCacheMiss ?? 0), 0) : 0;
-    const cacheWriteUsageKnown = schedules.length > 0
-      && schedules.every(schedule => usageBySchedule.get(schedule.id)!.cacheWriteKnown);
-    const cacheWriteTokens = cacheWriteUsageKnown
-      ? allSocietyRuns.reduce((sum, run) => sum + (run.cacheWriteTokens ?? 0), 0) : 0;
-    return {
-      schemaVersion: 1, institution, departments, roles,
-      roleLife: roles.map(role => ({
-        roleId: role.id,
-        versions: this.repository().organizationVersions('role', tenantId, role.id, 50),
-        versionAudits: this.repository().organizationVersionAudits('role', tenantId, role.id, 50),
-        memories: this.repository().roleMemories(tenantId, role.id, 50),
-        relations: relations.filter(relation => relation.fromRoleId === role.id || relation.toRoleId === role.id),
-        scorecard: scorecards.find(item => item.roleId === role.id),
-        wellbeing: wellbeing.find(item => item.roleId === role.id),
-      })),
-      tasks, schedules,
-      audits: this.repository().societyAudits(tenantId),
-      institutionAudits: this.repository().institutionAudits(tenantId),
-      evaluation: evaluation.active,
-      evaluationAudits: evaluation.audits,
-      network: {
-        nodes: roles.map(role => ({
-          roleId: role.id,
-          departmentId: this.departmentForRole(role, institution.policies.departments)?.id,
-          load: roleLoads.get(role.id) ?? 0,
-        })),
-        edges: relations,
-      },
-      bottlenecks, observations,
-      economics: {
-        societyBudgetUsd: institution.policies.societyBudgetUsd,
-        societyTokenBudget: institution.policies.societyTokenBudget,
-        societyReservedUsd, societySpentUsd,
-        societyReservedTokens, societySpentTokens,
-        departmentBudgets: departments.map(department => ({
-          departmentId: department.id, quotaUsd: department.quotaUsd,
-          reservedUsd: department.reservedUsd, spentUsd: department.spentUsd,
-          remainingUsd: department.quotaRemainingUsd,
-          quotaTokens: department.quotaTokens, reservedTokens: department.reservedTokens,
-          spentTokens: department.spentTokens, remainingTokens: department.quotaRemainingTokens,
-        })),
-        roleBudgets,
-        taskLedger: tasks.map(task => {
-          const taskSchedules = schedules.filter(schedule => schedule.taskId === task.id);
-          const taskCacheUsageKnown = taskSchedules.length > 0
-            && taskSchedules.every(schedule => usageBySchedule.get(schedule.id)!.cacheUsageKnown);
-          const taskCacheWriteKnown = taskSchedules.length > 0
-            && taskSchedules.every(schedule => usageBySchedule.get(schedule.id)!.cacheWriteKnown);
-          return {
-            taskId: task.id, maxBudgetUsd: task.maxBudgetUsd, maxBudgetTokens: task.maxBudgetTokens,
-            estimatedCostUsd: taskSchedules[0]?.estimates.teamCostUsd ?? 0,
-            estimatedTokens: taskSchedules[0]?.estimates.teamTokens ?? 0,
-            actualCostUsd: taskSchedules.reduce((sum, schedule) => sum + usageBySchedule.get(schedule.id)!.costUsd, 0),
-            actualTokens: taskSchedules.reduce((sum, schedule) => sum + usageBySchedule.get(schedule.id)!.tokens, 0),
-            cachedInputTokens: taskCacheUsageKnown
-              ? taskSchedules.reduce((sum, schedule) => sum + usageBySchedule.get(schedule.id)!.cachedInputTokens, 0)
-              : 0,
-            cacheMissInputTokens: taskCacheUsageKnown
-              ? taskSchedules.reduce((sum, schedule) => sum + usageBySchedule.get(schedule.id)!.cacheMissTokens, 0)
-              : 0,
-            cacheWriteTokens: taskCacheWriteKnown
-              ? taskSchedules.reduce((sum, schedule) => sum + usageBySchedule.get(schedule.id)!.cacheWriteTokens, 0)
-              : 0,
-            cacheUsageStatus: taskCacheUsageKnown ? 'known' as const : 'unknown' as const,
-            cacheWriteUsageStatus: taskCacheWriteKnown ? 'known' as const : 'unknown' as const,
-            valueUsd: task.valueUsd, status: task.status,
-          };
-        }),
-        cachedInputTokens,
-        cacheMissInputTokens: cacheMissTokens,
-        cacheWriteTokens,
-        cacheSavingsUsd: null,
-        cacheHitRate: cacheUsageKnown && cachedInputTokens + cacheMissTokens > 0
-          ? cachedInputTokens / (cachedInputTokens + cacheMissTokens) : null,
-        cacheUsageStatus: cacheUsageKnown ? 'known' : 'unknown',
-        cacheWriteUsageStatus: cacheWriteUsageKnown ? 'known' : 'unknown',
-        duplicateEvidenceReads,
-        compression: {
-          sharedMemoryRefs: new Set(sharedRefs).size,
-          reusedRefs,
-          officialTokenCount: allSocietyRuns.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
-        },
-      },
-      scheduling: {
-        decisions: schedules,
-        queue: tasks.filter(task => task.status === 'queued'),
-        waitingApproval: tasks.filter(task => task.status === 'waiting_approval'),
-        activeTeams: active.filter(schedule => schedule.mode === 'team'),
-      },
-    };
+    return buildSocietySnapshot({
+      store: this.options.store,
+      repository: () => this.repository(),
+      organization: this.organization,
+      selection: this.selection,
+      ensureInstitution: tenantId => this.ensureInstitution(tenantId),
+      departmentForRole: (role, departments) => this.departmentForRole(role, departments),
+      runUsage: (schedule, tenantId) => this.runUsage(schedule, tenantId),
+      departmentUsage: (schedules, tenantId, departments) => this.departmentUsage(schedules, tenantId, departments),
+      assignmentDepartmentId: (schedule, assignment, departments) => this.assignmentDepartmentId(schedule, assignment, departments),
+      contractDepartmentId: (schedule, contract, assignment, departments, task) =>
+        this.contractDepartmentId(schedule, contract, assignment, departments, task),
+    }, tenantId, projectId);
   }
 
   experiment(taskId: string, tenantId: string): {
@@ -2011,21 +1743,7 @@ export class SocietyService {
     selected: 'solo' | 'team' | 'queue';
     reason: string;
   } {
-    const task = this.repository().getSocietyTask(taskId, tenantId);
-    if (!task) throw new OrganizationError(404, 'SOCIETY_TASK_NOT_FOUND', '社会任务不存在');
-    const institution = this.ensureInstitution(tenantId);
-    const estimate = this.estimate(task);
-    const team = task.branches.length >= 2
-      && teamCostEligible(task.objective, estimate)
-      && estimate.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
-      && estimate.team.netBenefitUsd > 0;
-    const selected = team ? 'team' : estimate.single.netBenefitUsd > institution.policies.minNetBenefitUsd ? 'solo' : 'queue';
-    return {
-      task, estimate, selected,
-      reason: selected === 'team' ? '团队净收益超过单角色并满足独立分支门槛'
-        : selected === 'solo' ? '团队净收益不足，保持单角色执行'
-          : '两种方案净收益均不足，排队或等待人类重新估价',
-    };
+    return experimentDecision(this.experimentDeps(), taskId, tenantId);
   }
 
   createPairedExperiment(input: CreateSocietyTaskInput): {
@@ -2033,218 +1751,29 @@ export class SocietyService {
     team: SocietyTask;
     experiment: SocietyPairedExperiment;
   } {
-    if (!input.branches || input.branches.length < 2)
-      throw new OrganizationError(400, 'SOCIETY_EXPERIMENT_INVALID', '配对实验至少需要两个独立团队分支');
-    const institution = this.ensureInstitution(input.tenantId);
-    const objective = bounded(input.objective, 2000, '任务目标');
-    const departmentId = input.departmentId
-      ?? this.selection.departmentForText(objective, institution.policies.departments).id;
-    const plannedArtifacts = [...new Set(input.branches.flatMap(branch => branch.expectedArtifacts ?? []) )];
-    const acceptance = [...new Set([
-      ...(input.acceptance ?? []),
-      ...input.branches.flatMap(branch => branch.acceptance ?? []),
-    ])];
-    let solo: SocietyTask | undefined;
-    try {
-      solo = this.createTask({
-        ...input,
-        departmentId,
-        branches: [{
-          objective,
-          acceptance,
-          expectedArtifacts: plannedArtifacts,
-          departmentId,
-        }],
-        economics: undefined,
-        evidenceExperimentId: undefined,
-      });
-      const team = this.createTask(input);
-      const now = this.now();
-      const experiment: SocietyPairedExperiment = {
-        id: randomUUID(),
-        tenantId: input.tenantId,
-        projectId: input.projectId ?? '',
-        objective,
-        valueUsd: solo.valueUsd,
-        status: 'running',
-        soloTaskId: solo.id,
-        teamTaskId: team.id,
-        formula: 'net = value * completion * (1 - artifactRisk) + latencyBenefit - actualCost; unmeasured latencyBenefit stays zero',
-        reason: '等待单角色与团队两条真实 Run 结束',
-        createdAt: now,
-        updatedAt: now,
-      };
-      this.repository().transaction(() => {
-        this.repository().updateSocietyTask(solo!, {
-          experiment: {
-            id: experiment.id, variant: 'solo', peerTaskId: team.id,
-            snapshot: structuredClone(experiment),
-          },
-        });
-        this.repository().updateSocietyTask(team, {
-          experiment: {
-            id: experiment.id, variant: 'team', peerTaskId: solo!.id,
-            snapshot: structuredClone(experiment),
-          },
-        });
-      });
-      this.emit('organization.society.experiment.updated', {
-        experimentId: experiment.id, status: experiment.status,
-        soloTaskId: solo.id, teamTaskId: team.id,
-      });
-      return {
-        solo: this.repository().getSocietyTask(solo.id, input.tenantId)!,
-        team: this.repository().getSocietyTask(team.id, input.tenantId)!,
-        experiment,
-      };
-    } catch (error) {
-      if (solo) this.repository().updateSocietyTask(solo, {
-        status: 'cancelled', lastSchedulingReason: '配对实验创建失败',
-      });
-      throw error;
-    }
+    return createPairedExperimentImpl(this.experimentDeps(), input);
   }
 
   pairedExperiment(experimentId: string, tenantId: string): SocietyPairedExperiment {
-    const matching = this.repository().societyTasks(tenantId, undefined, 1000)
-      .filter(task => task.experiment?.id === experimentId);
-    if (matching.length !== 2)
-      throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
-    return structuredClone(matching[0]!.experiment!.snapshot);
+    return pairedExperimentImpl(this.experimentDeps(), experimentId, tenantId);
   }
 
   measurePairedExperiment(experimentId: string, tenantId: string): SocietyPairedExperiment {
-    const matching = this.repository().societyTasks(tenantId, undefined, 1000)
-      .filter(task => task.experiment?.id === experimentId);
-    const solo = matching.find(task => task.experiment?.variant === 'solo');
-    const team = matching.find(task => task.experiment?.variant === 'team');
-    if (!solo || !team)
-      throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
-    const soloMeasurement = this.experimentMeasurement(solo);
-    const teamMeasurement = this.experimentMeasurement(team);
-    const terminal = [soloMeasurement, teamMeasurement]
-      .every(item => ['awaiting_acceptance', 'completed', 'failed', 'cancelled'].includes(item.status));
-    if (!terminal) {
-      const reason = '单角色或团队 Run 尚未结束';
-      const running: SocietyPairedExperiment = {
-        ...solo.experiment!.snapshot,
-        status: 'running', reason, updatedAt: this.now(),
-      };
-      this.persistExperiment(solo, team, running);
-      return structuredClone(running);
-    }
-    const usageKnown = soloMeasurement.usageKnown && teamMeasurement.usageKnown;
-    const net = (measurement: SocietyExperimentMeasurement): number =>
-      Math.round((solo.valueUsd * measurement.quality * (1 - measurement.risk) - measurement.costUsd) * 1e6) / 1e6;
-    const soloNet = net(soloMeasurement);
-    const teamNet = net(teamMeasurement);
-    const measured: SocietyPairedExperiment = {
-      ...solo.experiment!.snapshot,
-      status: usageKnown ? 'measured' : 'inconclusive',
-      measurements: {
-        solo: soloMeasurement,
-        team: {
-          ...teamMeasurement,
-          coordinationCostUsd: Math.max(0, Math.round((teamMeasurement.costUsd - soloMeasurement.costUsd) * 1e6) / 1e6),
-          coordinationTokens: Math.max(0, teamMeasurement.tokens - soloMeasurement.tokens),
-        },
-      },
-      netBenefitUsd: {
-        solo: soloNet,
-        team: teamNet,
-        marginal: Math.round((teamNet - soloNet) * 1e6) / 1e6,
-      },
-      reason: usageKnown
-        ? '两条真实 Run 的验收、产物、成本、耗时与风险事实均已记录'
-        : '两条真实 Run 已结束，但 Provider usage 不完整，净收益只能标记为不确定',
-      updatedAt: this.now(),
-    };
-    this.persistExperiment(solo, team, measured);
-    this.emit('organization.society.experiment.updated', {
-      experimentId: measured.id,
-      status: measured.status,
-      marginalNetBenefitUsd: measured.netBenefitUsd?.marginal,
-    });
-    return structuredClone(measured);
+    return measurePairedExperimentImpl(this.experimentDeps(), experimentId, tenantId);
   }
 
-  private experimentMeasurement(task: SocietyTask): SocietyExperimentMeasurement {
-    const schedule = task.scheduleId
-      ? this.repository().getSocietySchedule(task.scheduleId, task.tenantId)
-      : this.repository().societySchedules(task.tenantId, 1000)
-        .find(item => item.taskId === task.id);
-    if (!schedule) {
-      return {
-        taskId: task.id, runIds: [], status: task.status, completed: false,
-        quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
-        costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
-        usageKnown: false,
-      };
-    }
-    const contracts = (schedule.contractIds ?? [])
-      .map(id => this.repository().getContract(id, task.tenantId))
-      .filter((contract): contract is AssignmentContract => !!contract);
-    const runIds = [...new Set([
-      ...(schedule.runIds ?? []),
-      ...contracts.flatMap(contract => contract.runId ? [contract.runId] : []),
-    ])];
-    const runs = runIds
-      .map(runId => this.options.store.runs.get(runId, task.tenantId))
-      .filter((run): run is RunRecord => !!run);
-    const terminal = runs.length > 0 && runs.every(run => RUN_TERMINAL.has(run.status));
-    if (!terminal || ['queued', 'waiting_approval', 'scheduled'].includes(task.status)) {
-      return {
-        taskId: task.id, scheduleId: schedule.id, runIds, status: task.status, completed: false,
-        quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
-        costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
-        usageKnown: false,
-      };
-    }
-    const completed = ['awaiting_acceptance', 'completed'].includes(task.status);
-    const completion = contracts.length
-      ? contracts.filter(contract => contract.status === 'delivered').length / contracts.length
-      : completed ? 1 : 0;
-    const expected = [...new Set(task.branches.flatMap(branch => branch.expectedArtifacts))];
-    const artifacts = runs.flatMap(run => this.options.store.runs.artifacts(run.id).map(item => item.ref.replace(/\\/g, '/').toLowerCase()));
-    const artifactCoverage = expected.length
-      ? expected.filter(ref => {
-        const normalized = ref.replace(/\\/g, '/').toLowerCase();
-        return artifacts.some(artifact => artifact.includes(normalized));
-      }).length / expected.length
-      : completion;
-    const startedAt = Math.min(task.createdAt, ...runs.map(run => run.createdAt));
-    const finishedAt = Math.max(task.updatedAt, ...runs.map(run => run.updatedAt));
+  private experimentDeps() {
     return {
-      taskId: task.id,
-      scheduleId: schedule.id,
-      runIds,
-      status: task.status,
-      completed,
-      quality: Math.round(completion * 1e6) / 1e6,
-      artifactCoverage: Math.round(artifactCoverage * 1e6) / 1e6,
-      latencyMs: Math.max(0, finishedAt - startedAt),
-      risk: Math.round((1 - artifactCoverage) * 1e6) / 1e6,
-      costUsd: Math.round(runs.reduce((sum, run) => sum + run.cost, 0) * 1e6) / 1e6,
-      tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
-      coordinationCostUsd: 0,
-      coordinationTokens: 0,
-      usageKnown: runs.length > 0 && runs.every(run => run.usageStatus === 'reported'),
+      store: this.options.store,
+      repository: () => this.repository(),
+      selection: this.selection,
+      ensureInstitution: (tenantId: string) => this.ensureInstitution(tenantId),
+      estimate: (task: SocietyTask) => this.estimate(task),
+      createTask: (input: CreateSocietyTaskInput) => this.createTask(input),
+      teamCostEligible: (objective: string, estimate: SocietyEconomicsEstimate) => this.teamCostEligible(objective, estimate),
+      now: () => this.now(),
+      emit: (type: string, data: Record<string, unknown>) => this.emit(type, data),
     };
-  }
-
-  private persistExperiment(
-    solo: SocietyTask,
-    team: SocietyTask,
-    experiment: SocietyPairedExperiment,
-  ): void {
-    this.repository().transaction(() => {
-      this.repository().updateSocietyTask(solo, {
-        experiment: { ...solo.experiment!, snapshot: structuredClone(experiment) },
-      });
-      this.repository().updateSocietyTask(team, {
-        experiment: { ...team.experiment!, snapshot: structuredClone(experiment) },
-      });
-    });
   }
 
   roleLife(tenantId: string, roleId: string): SocietySnapshot['roleLife'][number] {
