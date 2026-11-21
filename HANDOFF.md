@@ -38,7 +38,9 @@
 - 依赖安全基线：后端用 `overrides` 固定 `exceljs→uuid@11.1.1`、`pptxgenjs→image-size@2.1.0`；前端将 `shadcn` CLI 移至 `devDependencies`。`npm audit --omit=dev` 前后端均 0 漏洞。
 - `plugin:validate` 支持无参数校验 `plugins/` 下全部插件，并保持单目录参数兼容。
 - 浏览器回归固定单 worker，避免并行运行时社会调度用例的时序竞争；本地全量 133/133 通过。
-- 质量审查后的第一批结构修复：插件源码统一走 `kernel/plugin-sdk`，新增 core/plugins 边界测试；`OrganizationService`/`SocietyService` 注入可测试时钟；角色选择权重进入制度版本，任务支持显式能力/写需求；社会健康分标记为 `weighted_heuristic` 并附样本量与权重；`server/society/policy.ts`、`server/society/selection.ts`、`server/society/health.ts` 已从单体 `society.ts` 拆出并归入 `server/society/`；宿主服务装配集中到 `server/host-services.ts`；新增 `server/migration-lock.ts` 迁移指纹门禁；体验复盘对 reasoning 模型使用总预算余量作为输出上限；新增 `check:boundaries`、`check:quality`、`test:coverage` 脚本。
+- v0.2.0 架构收敛：`server/host/` 建立宿主服务边界（`container.ts` 装配、`ports.ts` 窄接口、`adapters/` 是唯一访问 core 的入口），`server/tests/boundary.spec.ts` 强制 server 不得直接 import core；`server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `institutions` / `types`（入口 2,264→1,706 行）；`server/services/organization/` 拆出 `projections`（评分卡与福祉，入口 1,860→1,770 行）；`server/experience.ts` 拆出 `services/experience/facts`（事实账本、证据索引、定价、预算）与 `shared`（入口 1,639→1,077 行）；删除 `Store.MIGRATIONS` 与 `migration-lock.ts`，改为 `server/migrations/` 不可变 SQL + manifest checksum + `schema_migrations` 审计表，最低支持 v15。
+- 社会语义：删除 `/100` 聚合健康分，改为带公式/分子分母/样本量的 `observations[]`；协作关系分只由人工复核事件写入；社会任务要求显式 `requiredCapabilities` 与 `needsWrite`。
+- 体验复盘：评价标准可配置独立 reviewer；输出上限可借用总预算余量；`evals/experience-v2.ts` 用真实工具事实样本按裁决一致/证据有效/建议可用三项指标验收。
 
 ## 验收与发布
 
@@ -46,6 +48,7 @@
 | --- | --- |
 | 双端类型检查与构建 | 通过 |
 | 单测 | 1535 通过、2 跳过、0 失败 |
+| 数据库迁移 | 本机 v15 → v16 实测通过（57→58 表，审计表记录两条 checksum） |
 | 体验复盘 v2 真实模型 | 7/7（裁决一致 100%、证据有效 100%、建议可用 100%） |
 | 安全回归 | 402/402 |
 | 产品自检 | 90/90 |
