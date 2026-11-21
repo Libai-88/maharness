@@ -63,6 +63,11 @@ export class SocietySelectionService {
   }
 
   requiredCapabilities(task: SocietyTask, institution: InstitutionVersion): string[] {
+    // Explicit capability declarations always win; keyword inference exists only
+    // for tasks created before provenance was recorded.
+    if (task.capabilitySource === 'explicit' && task.requiredCapabilities?.length) {
+      return task.requiredCapabilities.slice(0, 8);
+    }
     if (task.requiredCapabilities?.length) return task.requiredCapabilities.slice(0, 8);
     const departmentIds = new Set(task.branches.map(branch =>
       branch.departmentId ?? task.departmentId ?? '',
@@ -90,6 +95,7 @@ export class SocietySelectionService {
 
   taskNeedsWrite(task: SocietyTask): boolean {
     if (task.needsWrite !== undefined) return task.needsWrite;
+    if (task.capabilitySource === 'explicit') return false;
     const text = [
       task.objective,
       ...task.acceptance,

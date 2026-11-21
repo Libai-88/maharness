@@ -58,7 +58,8 @@
     "test:coverage": "node scripts/run-tests.mjs --coverage",
     "db:export": "tsx scripts/db-migrate.ts export",
     "db:upgrade": "tsx scripts/db-migrate.ts upgrade",
-    "db:verify": "tsx scripts/db-migrate.ts verify"
+    "db:verify": "tsx scripts/db-migrate.ts verify",
+    "eval:experience:v2": "tsx evals/experience-v2.ts"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",

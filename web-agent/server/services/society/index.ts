@@ -11,10 +11,11 @@ import {
 } from '../../model-cost-estimator';
 import { OrganizationService, explicitTeamRequest } from '../organization/service';
 import { SocietySelectionService } from './selection';
-import { buildSocialHealth } from './health';
+import { buildSocialObservations } from './health';
 import {
   OrganizationError,
   type AssignmentContract,
+  type EvidenceRef,
   type InstitutionPolicies,
   type InstitutionVersion,
   type OrganizationRole,
@@ -63,6 +64,7 @@ export interface CreateSocietyTaskInput {
   departmentId?: string;
   requiredCapabilities?: string[];
   needsWrite?: boolean;
+  teamMode?: 'auto' | 'solo' | 'team';
   economics?: Partial<NonNullable<SocietyTask['economics']>>;
   evidenceExperimentId?: string;
   branches?: SocietyTaskBranch[];
@@ -193,6 +195,30 @@ export class SocietyService {
 
   private repository() {
     return this.options.store.organization;
+  }
+
+  /**
+   * Record a reviewed relation only when a human actually reviewed the delivery.
+   * `score` 1 = accepted review, 0 = rejected review; every pair gets the same
+   * evidence-backed event rather than a fabricated collaboration number.
+   */
+  private recordReviewedRelations(
+    tenantId: string,
+    roleIds: string[],
+    evidence: EvidenceRef[],
+    score: 0 | 1,
+    now: number,
+  ): void {
+    const unique = [...new Set(roleIds)];
+    if (unique.length < 2) return;
+    for (const fromRoleId of unique) for (const toRoleId of unique) {
+      if (fromRoleId === toRoleId) continue;
+      this.repository().upsertRoleRelation({
+        id: randomUUID(), tenantId,
+        fromRoleId, toRoleId, kind: 'reviewed', score,
+        evidence: evidence.slice(0, 5), updatedAt: now,
+      });
+    }
   }
 
   private appendAudit(
@@ -524,6 +550,8 @@ export class SocietyService {
           bounded(item, 80, '任务能力')))].slice(0, 20),
       } : {}),
       ...(input.needsWrite === undefined ? {} : { needsWrite: input.needsWrite }),
+      capabilitySource: input.requiredCapabilities?.length ? 'explicit' : 'legacy_heuristic',
+      teamMode: input.teamMode ?? 'auto',
       ...(input.economics ? {
         economics: {
           qualityGain: ratio(input.economics.qualityGain, '团队质量增益'),
@@ -1092,15 +1120,8 @@ export class SocietyService {
             scheduleId: schedule.id, evidence: schedule.sharedMemoryRefs, createdAt: now,
           });
         }
-        if (schedule.roleIds.length > 1) {
-          for (const fromRoleId of schedule.roleIds) for (const toRoleId of schedule.roleIds) {
-            if (fromRoleId === toRoleId) continue;
-            this.repository().upsertRoleRelation({
-              id: randomUUID(), tenantId, fromRoleId, toRoleId, kind: 'collaborated',
-              score: 0.5, evidence: schedule.sharedMemoryRefs, updatedAt: now,
-            });
-          }
-        }
+        // Relation scores come from real handoff/review/conflict events only.
+        // Scheduling two roles into one team is not evidence of collaboration quality.
       });
       let executed = schedule;
       try {
@@ -1677,15 +1698,8 @@ export class SocietyService {
         scheduleId: schedule.id, workOrderId: schedule.workOrderId,
         evidence: contract.delivery?.evidence ?? [], createdAt: now,
       });
-      if (schedule.roleIds.length > 1) {
-        for (const fromRoleId of schedule.roleIds) for (const toRoleId of schedule.roleIds) {
-          if (fromRoleId === toRoleId) continue;
-          this.repository().upsertRoleRelation({
-            id: randomUUID(), tenantId, fromRoleId, toRoleId, kind: 'collaborated',
-            score: 0.9, evidence, updatedAt: now,
-          });
-        }
-      }
+      // Completion alone does not prove good collaboration: record the event kind
+      // without a fabricated high score; scoring stays evidence-driven.
     });
     this.emit('organization.society.released', {
       taskId: task.id, scheduleId: schedule.id, outcome: 'completed',
@@ -1716,6 +1730,8 @@ export class SocietyService {
         || (contract.delivery?.unfinished.length ?? 1) > 0))
         throw new OrganizationError(409, 'SOCIETY_TASK_STATE', '分工交付事实不完整，不能标记完成');
       const now = this.now();
+      const acceptanceEvidence = contracts.flatMap(contract => contract.delivery?.evidence ?? [])
+        .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
       this.repository().transaction(() => {
         this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'completed', reason);
         task = this.repository().updateSocietyTask(currentTask, {
@@ -1728,13 +1744,14 @@ export class SocietyService {
           scheduleId: schedule.id, workOrderId: schedule.workOrderId,
           evidence: contract.delivery?.evidence ?? [], createdAt: now,
         });
+        // Human acceptance is a real review event between the delivered roles, so
+        // it is the only place a positive relation score is justified.
+        this.recordReviewedRelations(tenantId, schedule.roleIds, acceptanceEvidence, 1, now);
       });
     } else if (task.status === 'awaiting_acceptance') {
       const contracts = (schedule.contractIds ?? [])
         .map(id => this.repository().getContract(id, tenantId))
         .filter((item): item is AssignmentContract => !!item);
-      const evidence = contracts.flatMap(contract => contract.delivery?.evidence ?? [])
-        .filter((item, index, all) => all.findIndex(candidate => candidate.id === item.id) === index);
       const now = this.now();
       this.repository().transaction(() => {
         this.organization.reviewWorkOrder(schedule.workOrderId!, tenantId, 'failed', reason);
@@ -1750,17 +1767,15 @@ export class SocietyService {
           scheduleId: schedule.id, workOrderId: schedule.workOrderId,
           evidence: contract.delivery?.evidence ?? contract.evidenceInputs, createdAt: now,
         });
-        if (contracts.length > 1) {
-          for (const fromRoleId of contracts.map(contract => contract.roleId)) {
-            for (const toRoleId of contracts.map(contract => contract.roleId)) {
-              if (fromRoleId === toRoleId) continue;
-              this.repository().upsertRoleRelation({
-                id: randomUUID(), tenantId, fromRoleId, toRoleId,
-                kind: 'conflict', score: 0.2, evidence, updatedAt: now,
-              });
-            }
-          }
-        }
+        // Human rejection is a real review event: record the negative review
+        // outcome for the delivered roles, without inventing pairwise conflicts.
+        this.recordReviewedRelations(
+          tenantId,
+          contracts.map(contract => contract.roleId),
+          contracts.flatMap(contract => contract.delivery?.evidence ?? contract.evidenceInputs),
+          0,
+          now,
+        );
       });
     } else if (schedule.status === 'active') {
       this.failSchedule(task, schedule, `人类终止：${reason}`, false);
@@ -1833,13 +1848,18 @@ export class SocietyService {
       ? Math.min(1, (societyReservedUsd + societySpentUsd) / institution.policies.societyBudgetUsd) : 1;
     const collaborationHealth = relations.length
       ? relations.reduce((sum, relation) => sum + relation.score, 0) / relations.length : null;
-    const health = buildSocialHealth({
+    const observations = buildSocialObservations({
       loadBalance,
       welfare,
       exceptionHealth,
       budgetUtilization,
       collaborationHealth,
       sampleSize: relations.length,
+      roleCount: roles.length,
+      unresolvedExceptions: unresolved.length,
+      reservedUsd: societyReservedUsd,
+      spentUsd: societySpentUsd,
+      budgetUsd: institution.policies.societyBudgetUsd,
     });
     const bottlenecks: SocietySnapshot['bottlenecks'] = [];
     for (const department of departments) {
@@ -1921,7 +1941,7 @@ export class SocietyService {
         })),
         edges: relations,
       },
-      bottlenecks, health,
+      bottlenecks, observations,
       economics: {
         societyBudgetUsd: institution.policies.societyBudgetUsd,
         societyTokenBudget: institution.policies.societyTokenBudget,

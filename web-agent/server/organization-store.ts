@@ -512,6 +512,9 @@ export interface EvaluationPolicy {
     positiveMinAverage: number;
     positiveMinReuse: number;
     positiveMinDimension: number;
+    /** Independent reviewer route. Absent means the caller must pass one explicitly. */
+    providerId?: string;
+    model?: string;
   };
   formula: string;
 }
@@ -722,24 +725,18 @@ export interface SocietyRoleRelation {
   updatedAt: number;
 }
 
-export interface SocialHealth {
-  /** Heuristic composite shown for observation only; not an objective social measurement. */
-  score: number | null;
-  scoreKind: 'weighted_heuristic';
-  /** Number of role-relation observations behind collaborationHealth. */
+export interface SocietyObservation {
+  id: string;
+  label: string;
+  /** null means the observation has no defined value for this snapshot. */
+  value: number | null;
+  unit: 'ratio' | 'count' | 'usd';
+  numerator: number | null;
+  denominator: number | null;
   sampleSize: number;
-  weights: {
-    loadBalance: number;
-    welfare: number;
-    exceptionHealth: number;
-    budgetHeadroom: number;
-    collaborationHealth: number;
-  };
-  loadBalance: number | null;
-  welfare: number | null;
-  exceptionHealth: number | null;
-  budgetUtilization: number | null;
-  collaborationHealth: number | null;
+  /** observed = real samples; insufficient = 1-2 samples; unknown = no samples. */
+  quality: 'observed' | 'insufficient' | 'unknown';
+  formula: string;
 }
 
 export type SocietyAuditAction =
@@ -797,7 +794,7 @@ export interface SocietySnapshot {
     edges: SocietyRoleRelation[];
   };
   bottlenecks: Array<{ departmentId: string; kind: 'queue' | 'load' | 'budget' | 'welfare'; count: number; detail: string }>;
-  health: SocialHealth;
+  observations: SocietyObservation[];
   economics: {
     societyBudgetUsd: number;
     societyTokenBudget: number;

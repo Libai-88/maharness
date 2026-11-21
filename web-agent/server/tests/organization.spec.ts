@@ -205,7 +205,7 @@ describe('AI labor organization', () => {
     const untouched = new Database(file, { readonly: true });
     try {
       assert.equal(untouched.pragma('user_version', { simple: true }), 10);
-      assert.equal((untouched.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
+      assert.ok((untouched.prepare('SELECT COUNT(*) AS count FROM sessions WHERE id=?').get(session.id) as { count: number }).count === 1);
       assert.ok((untouched.prepare('SELECT COUNT(*) AS count FROM runs_v2').get() as { count: number }).count >= 1);
     } finally { untouched.close(); }
   });

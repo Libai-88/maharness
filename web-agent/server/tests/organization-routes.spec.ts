@@ -144,3 +144,53 @@ test('society experiment HTTP route returns the team comparison and enforces ten
     store.close();
   }
 });
+
+test('society task creation requires explicit capabilities and write need (API v2)', async () => {
+  const store = new Store(':memory:');
+  const organization = new OrganizationService({ store });
+  const society = new SocietyService({ store, organization });
+  society.ensureInstitution('default');
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => { Object.assign(req, { tenantId: 'default' }); next(); });
+  registerOrganizationRoutes(
+    app,
+    { store, organization, society } as unknown as Parameters<typeof registerOrganizationRoutes>[1],
+    {} as Parameters<typeof registerOrganizationRoutes>[2],
+  );
+  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+    const value = app.listen(0, '127.0.0.1', () => resolve(value));
+  });
+  const { port } = server.address() as { port: number };
+  const post = async (payload: Record<string, unknown>) => {
+    const response = await fetch(`http://127.0.0.1:${port}/api/organization/society/tasks`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    return { status: response.status, body: await response.json() as Record<string, unknown> };
+  };
+  try {
+    const base = { objective: '整理资料', valueUsd: 10, maxBudgetUsd: 0.05 };
+    const missingCapabilities = await post(base);
+    assert.equal(missingCapabilities.status, 400);
+    assert.equal(missingCapabilities.body.code, 'TASK_CAPABILITIES_REQUIRED');
+
+    const missingWrite = await post({ ...base, requiredCapabilities: ['research'] });
+    assert.equal(missingWrite.status, 400);
+    assert.equal(missingWrite.body.code, 'TASK_CAPABILITIES_REQUIRED');
+
+    const invalidTeamMode = await post({ ...base, requiredCapabilities: ['research'], needsWrite: false, teamMode: 'many' });
+    assert.equal(invalidTeamMode.status, 400);
+
+    const created = await post({ ...base, requiredCapabilities: ['research', 'reading'], needsWrite: true, teamMode: 'solo' });
+    assert.equal(created.status, 201);
+    const task = created.body.task as { capabilitySource: string; teamMode: string; requiredCapabilities: string[] };
+    assert.equal(task.capabilitySource, 'explicit');
+    assert.equal(task.teamMode, 'solo');
+    assert.deepEqual(task.requiredCapabilities, ['research', 'reading']);
+  } finally {
+    await new Promise<void>(resolve => server.close(() => resolve()));
+    store.close();
+  }
+});

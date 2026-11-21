@@ -174,6 +174,18 @@ export function registerOrganizationRoutes(
 
   app.post('/api/organization/society/tasks', wrap((req, res) => {
     requireWrite(req);
+    // Capabilities and write need are explicit in API v2: guessing them from task
+    // text made role selection language-dependent and hid provenance.
+    const capabilities = Array.isArray(req.body?.requiredCapabilities)
+      ? req.body.requiredCapabilities.filter((item: unknown): item is string => typeof item === 'string' && item.trim().length > 0)
+      : [];
+    if (!capabilities.length)
+      throw new OrganizationError(400, 'TASK_CAPABILITIES_REQUIRED', '创建社会任务需要显式声明 requiredCapabilities（1–20 个能力）');
+    if (typeof req.body?.needsWrite !== 'boolean')
+      throw new OrganizationError(400, 'TASK_CAPABILITIES_REQUIRED', '创建社会任务需要显式声明 needsWrite（是否需要写入产物）');
+    const teamMode = req.body?.teamMode;
+    if (teamMode !== undefined && !['auto', 'solo', 'team'].includes(String(teamMode)))
+      throw new OrganizationError(400, 'TASK_CAPABILITIES_REQUIRED', 'teamMode 只能是 auto、solo 或 team');
     res.status(201).json({
       task: society.createTask({
         tenantId: tenantIdOf(req),
@@ -186,10 +198,9 @@ export function registerOrganizationRoutes(
         maxBudgetTokens: req.body?.maxBudgetTokens === undefined ? undefined : Number(req.body.maxBudgetTokens),
         priority: req.body?.priority,
         departmentId: typeof req.body?.departmentId === 'string' ? req.body.departmentId : undefined,
-        requiredCapabilities: Array.isArray(req.body?.requiredCapabilities)
-          ? req.body.requiredCapabilities.filter((item: unknown): item is string => typeof item === 'string')
-          : undefined,
-        needsWrite: typeof req.body?.needsWrite === 'boolean' ? req.body.needsWrite : undefined,
+        requiredCapabilities: capabilities,
+        needsWrite: req.body.needsWrite,
+        ...(teamMode === undefined ? {} : { teamMode: teamMode as 'auto' | 'solo' | 'team' }),
         branches: Array.isArray(req.body?.branches) ? req.body.branches : undefined,
         economics: typeof req.body?.economics === 'object'
           && req.body.economics !== null

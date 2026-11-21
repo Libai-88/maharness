@@ -157,8 +157,11 @@ function verificationStatus(value: unknown): string | undefined {
 }
 
 function jsonText(value: unknown): string {
-  try { return JSON.stringify(redactTraceValue(value), null, 2); }
-  catch { return String(value); }
+  try {
+    // JSON.stringify(undefined) returns undefined (not a string); callers use
+    // .length on the result, so normalise it instead of throwing.
+    return JSON.stringify(redactTraceValue(value), null, 2) ?? 'null';
+  } catch { return String(value); }
 }
 
 function trimToTokens(text: string, limit: number, tokenizer?: ProviderDef['tokenizer']): string {
@@ -1147,13 +1150,19 @@ export class ExperienceService {
       throw new ExperienceError(400, 'MIXED_WORKSPACES', '多运行复盘必须属于同一工作区');
     }
     const providers = this.deps.providers();
+    const policy = new OrganizationService({ store: this.deps.store, now: this.now }).ensureEvaluation(tenantId).record;
     const originalAvailable = !!providerFor(providers, first.providerId, first.model);
-    const requestedProvider = typeof request.providerId === 'string' ? request.providerId.trim() : '';
-    const requestedModel = typeof request.model === 'string' ? request.model.trim() : '';
-    if (!originalAvailable && (!requestedProvider || !requestedModel) && !allowUnavailable) {
+    const configuredProvider = (policy.review.providerId ?? '').trim();
+    const configuredModel = (policy.review.model ?? '').trim();
+    const explicitProvider = (typeof request.providerId === 'string' ? request.providerId : '').trim();
+    const explicitModel = (typeof request.model === 'string' ? request.model : '').trim();
+    if (!!explicitProvider !== !!explicitModel) throw new ExperienceError(400, 'INVALID_MODEL', '复盘模型必须同时提供供应商和模型名称');
+    if (!originalAvailable && !explicitProvider && !configuredProvider && !allowUnavailable) {
       throw new ExperienceError(409, 'ORIGINAL_MODEL_UNAVAILABLE', '原工作模型不可用；请显式选择一个替代模型');
     }
-    if (!!requestedProvider !== !!requestedModel) throw new ExperienceError(400, 'INVALID_MODEL', '替代模型必须同时提供供应商和模型名称');
+    const requestedProvider = explicitProvider || configuredProvider;
+    const requestedModel = explicitModel || configuredModel;
+    if (!!requestedProvider !== !!requestedModel) throw new ExperienceError(400, 'INVALID_MODEL', '复盘模型必须同时提供供应商和模型名称');
     const providerId = requestedProvider || first.providerId;
     const model = requestedModel || first.model;
     const provider = providerFor(providers, providerId, model) ?? (allowUnavailable ? {
@@ -1364,13 +1373,16 @@ export class ExperienceService {
       return [{ kind: raw.kind as ReviewObservation['kind'], summary: raw.summary.slice(0, 1_500), ...(typeof raw.cost === 'string' ? { cost: raw.cost.slice(0, 500) } : {}), evidenceRefs }];
     }).slice(0, 12);
     const suggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : []).flatMap<ReviewSuggestion>(raw => {
-      if (!isRecord(raw) || typeof raw.title !== 'string' || typeof raw.detail !== 'string' || typeof raw.category !== 'string' || !SUGGESTION_CATEGORIES.has(raw.category as ReviewSuggestion['category'])) return [];
+      // Models frequently emit `category` as a single-element array; accept both
+      // shapes instead of silently dropping otherwise valid suggestions.
+      const rawCategory = Array.isArray(raw?.category) ? raw.category[0] : raw?.category;
+      if (!isRecord(raw) || typeof raw.title !== 'string' || typeof raw.detail !== 'string' || typeof rawCategory !== 'string' || !SUGGESTION_CATEGORIES.has(rawCategory as ReviewSuggestion['category'])) return [];
       const evidenceRefs = uniqueStrings(raw.evidenceRefs).filter(ref => valid.has(ref));
       if (!evidenceRefs.length) throw new ExperienceError(502, 'UNSUPPORTED_REVIEW_CLAIM', '复盘建议缺少有效证据');
       return [{
         id: stableHash({ title: raw.title, detail: raw.detail, evidenceRefs }).slice(0, 24),
         title: raw.title.slice(0, 300), detail: raw.detail.slice(0, 2_000),
-        category: raw.category as ReviewSuggestion['category'],
+        category: rawCategory as ReviewSuggestion['category'],
         impact: (raw.impact === 'high' || raw.impact === 'low' ? raw.impact : 'medium') as ReviewSuggestion['impact'],
         confidence: typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : 0,
         evidenceRefs,
@@ -1458,17 +1470,12 @@ export class ExperienceService {
       - inputTokens;
     const modelCapability = provider.models?.find(item => item.modelId === model);
     const protocolCap = modelCapability?.maxOutput;
-    // Reasoning tokens are billed as output but arrive before the JSON body.
-    // For reasoning models, allow the total-budget headroom to cover them;
-    // otherwise a nominal output cap can be exhausted entirely by reasoning
-    // and leave no content for the review itself. Non-reasoning models keep
-    // the frozen output cap semantics.
-    const reasoningHeadroom = modelCapability?.reasoning
-      ? Math.min(4_096, Math.max(1_024, protocolCap ?? 4_096))
-      : 0;
-    const outputLimit = modelCapability?.reasoning
-      ? Math.max(remainingOutput, Math.min(remainingTotal, reasoningHeadroom))
-      : remainingOutput;
+    // The configured output number is a nominal target, not a hard ceiling:
+    // verbose models and reasoning tokens otherwise exhaust it before the JSON
+    // review body is complete. The total budget stays the hard cap, and the
+    // provider's declared maxOutput is still enforced below.
+    const headroom = Math.min(4_096, Math.max(1_024, protocolCap ?? 4_096));
+    const outputLimit = Math.max(remainingOutput, Math.min(remainingTotal, headroom));
     const limits = [outputLimit, remainingTotal];
     if (protocolCap !== undefined && Number.isSafeInteger(protocolCap) && protocolCap > 0) limits.push(protocolCap);
     const maxTokens = Math.min(...limits);

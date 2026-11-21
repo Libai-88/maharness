@@ -1,35 +1,49 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildSocialHealth } from '../services/society/health';
+import { buildSocialObservations } from '../services/society/health';
 
-test('social health is an explicit weighted heuristic and re-normalizes missing components', () => {
-  const all = buildSocialHealth({
-    loadBalance: 1,
-    welfare: 1,
+test('social observations expose formula, sample size and quality instead of a composite score', () => {
+  const full = buildSocialObservations({
+    loadBalance: 0.8,
+    welfare: 0.9,
     exceptionHealth: 1,
-    budgetUtilization: 0,
-    collaborationHealth: 1,
-    sampleSize: 3,
+    budgetUtilization: 0.25,
+    collaborationHealth: 0.75,
+    sampleSize: 6,
+    roleCount: 4,
+    unresolvedExceptions: 0,
+    reservedUsd: 20,
+    spentUsd: 5,
+    budgetUsd: 100,
   });
-  assert.equal(all.scoreKind, 'weighted_heuristic');
-  assert.equal(all.score, 100);
-  assert.equal(all.sampleSize, 3);
-  assert.deepEqual(all.weights, {
-    loadBalance: 0.2,
-    welfare: 0.2,
-    exceptionHealth: 0.2,
-    budgetHeadroom: 0.2,
-    collaborationHealth: 0.2,
-  });
+  assert.deepEqual(full.map(item => item.id), [
+    'load_balance', 'welfare', 'exception_backlog', 'budget_utilization', 'collaboration',
+  ]);
+  assert.equal(full.every(item => item.formula.length > 0), true);
+  const collaboration = full.find(item => item.id === 'collaboration')!;
+  assert.equal(collaboration.quality, 'observed');
+  assert.equal(collaboration.sampleSize, 6);
+  const budget = full.find(item => item.id === 'budget_utilization')!;
+  assert.equal(budget.numerator, 25);
+  assert.equal(budget.denominator, 100);
+  assert.equal(budget.value, 0.25);
 
-  const partial = buildSocialHealth({
-    loadBalance: 0,
-    welfare: 1,
-    exceptionHealth: 1,
-    budgetUtilization: 0,
+  const empty = buildSocialObservations({
+    loadBalance: null,
+    welfare: null,
+    exceptionHealth: null,
+    budgetUtilization: null,
     collaborationHealth: null,
     sampleSize: 0,
+    roleCount: 0,
+    unresolvedExceptions: 0,
+    reservedUsd: 0,
+    spentUsd: 0,
+    budgetUsd: 0,
   });
-  assert.equal(partial.collaborationHealth, null);
-  assert.equal(partial.score, 75);
+  assert.equal(empty.find(item => item.id === 'collaboration')!.quality, 'unknown');
+  assert.equal(empty.find(item => item.id === 'load_balance')!.value, null);
+  assert.equal(empty.find(item => item.id === 'budget_utilization')!.quality, 'unknown');
+  // No composite score field is exposed at all.
+  assert.equal(empty.some(item => (item as unknown as { score?: number }).score !== undefined), false);
 });

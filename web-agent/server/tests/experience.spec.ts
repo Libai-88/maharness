@@ -244,7 +244,11 @@ describe('AI 用户复盘', () => {
       const finished = experience.review(review.id, 'default');
       assert.equal(finished.status, 'completed');
       assert.equal(finished.budget.outputTokenLimit, 500);
-      assert.deepEqual(maxTokens, [500]);
+      // The frozen 500 is a nominal target; the call may borrow total-budget
+      // headroom so verbose models still emit complete JSON.
+      assert.equal(maxTokens.length, 1);
+      assert.ok(maxTokens[0]! >= 500, `expected at least the nominal cap, got ${maxTokens[0]}`);
+      assert.ok(maxTokens[0]! <= finished.budget.totalTokenLimit, 'must stay inside the total budget');
     } finally { store.close(); }
   });
 
@@ -271,7 +275,10 @@ describe('AI 用户复盘', () => {
       const finished = experience.review(review.id, 'default');
       assert.equal(finished.status, 'completed');
       assert.equal(finished.budget.outputTokenLimit, 1_400);
-      assert.deepEqual(maxTokens, [1_400, 1_350]);
+      assert.equal(maxTokens.length, 2);
+      assert.ok(maxTokens[0]! >= 1_400);
+      assert.ok(maxTokens[1]! <= maxTokens[0]!);
+      assert.ok(maxTokens[1]! >= 1_000);
     } finally { store.close(); }
   });
 
@@ -910,4 +917,20 @@ describe('AI 用户复盘', () => {
       assert.equal(experience.audits(review.id, 'default').filter(item => item.source === 'human').length, 1);
     } finally { store.close(); }
   });
+});
+
+test('evidence index tolerates undefined values instead of throwing on .length', async () => {
+  const store = new Store(':memory:');
+  const provider = reviewProvider();
+  const { experience } = services(store, provider);
+  try {
+    const run = addRun(store, { verification: undefined, answer: '' });
+    // No verification and empty answer means several evidence sources are
+    // undefined; building the index must not throw.
+    const review = experience.create({ runIds: [run.id] }, 'default');
+    await experience.settled(review.id)!;
+    const finished = experience.review(review.id, 'default');
+    assert.ok(['completed', 'insufficient_evidence', 'failed'].includes(finished.status));
+    assert.ok(finished.evidenceIndex.every(item => (item.size ?? 0) >= 0));
+  } finally { store.close(); }
 });

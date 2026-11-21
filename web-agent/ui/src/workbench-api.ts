@@ -524,23 +524,17 @@ export interface SocietySnapshot {
     count: number;
     detail: string;
   }>;
-  health: {
-    score: number | null;
-    scoreKind: 'weighted_heuristic';
+  observations: Array<{
+    id: string;
+    label: string;
+    value: number | null;
+    unit: 'ratio' | 'count' | 'usd';
+    numerator: number | null;
+    denominator: number | null;
     sampleSize: number;
-    weights: {
-      loadBalance: number;
-      welfare: number;
-      exceptionHealth: number;
-      budgetHeadroom: number;
-      collaborationHealth: number;
-    };
-    loadBalance: number | null;
-    welfare: number | null;
-    exceptionHealth: number | null;
-    budgetUtilization: number | null;
-    collaborationHealth: number | null;
-  };
+    quality: 'observed' | 'insufficient' | 'unknown';
+    formula: string;
+  }>;
   economics: {
     societyBudgetUsd: number;
     societyReservedUsd: number;

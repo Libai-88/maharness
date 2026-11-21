@@ -724,13 +724,13 @@ try {
   assert.equal(society.snapshot('default').economics.cacheHitRate, null);
   pass('B3', '部门与社会运行层', [
     `${postRun.departments.length} 个部门、${postRun.network.nodes.length} 个成员和 ${postRun.network.edges.length} 条协作关系进入社会快照。`,
-    '快照同时提供部门队列、并发、福利、瓶颈和健康度。',
+    '快照同时提供部门队列、并发、福利、瓶颈和社会观察指标（不输出伪精确总分）。',
   ]);
   pass('C1', '多目标优化', [
     '每个调度决策记录能力、记忆、工具、协作、履历和负载六项分数及权重。',
     `能力索引=${teamSchedule?.selection?.requiredCapabilities.join('/')}，选中角色=${teamSchedule?.selection?.chosenRoleIds.length}。`,
     '调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。',
-    `当前社会健康分数=${postRun.health.score}，预算利用率=${postRun.health.budgetUtilization}。`,
+    `当前社会观察=${postRun.observations.map(item => `${item.label}:${item.value ?? 'unknown'}`).join('/')}。`,
   ]);
   pass('F2', '角色跨任务生命史', [
     '团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。',

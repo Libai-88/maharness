@@ -271,6 +271,8 @@ describe('AI society operation layer', () => {
       });
       assert.equal(task.createdAt, now);
       assert.deepEqual(task.requiredCapabilities, ['research']);
+      assert.equal(task.capabilitySource, 'explicit');
+      assert.equal(task.teamMode, 'auto');
       assert.equal(task.needsWrite, false);
 
       const updated = society.updateInstitution('default', {
@@ -283,15 +285,15 @@ describe('AI society operation layer', () => {
       assert.equal(updated.policies.roleSelectionWeights.memory, 0);
 
       const snapshot = society.snapshot('default');
-      assert.equal(snapshot.health.scoreKind, 'weighted_heuristic');
-      assert.equal(typeof snapshot.health.sampleSize, 'number');
-      assert.deepEqual(snapshot.health.weights, {
-        loadBalance: 0.2,
-        welfare: 0.2,
-        exceptionHealth: 0.2,
-        budgetHeadroom: 0.2,
-        collaborationHealth: 0.2,
-      });
+      assert.equal(snapshot.observations.length, 5);
+      const ids = snapshot.observations.map(item => item.id);
+      assert.deepEqual(ids, ['load_balance', 'welfare', 'exception_backlog', 'budget_utilization', 'collaboration']);
+      for (const observation of snapshot.observations) {
+        assert.ok(observation.formula.length > 0, `${observation.id} must document its formula`);
+        assert.ok(['observed', 'insufficient', 'unknown'].includes(observation.quality));
+      }
+      const collaboration = snapshot.observations.find(item => item.id === 'collaboration')!;
+      assert.equal(collaboration.quality, collaboration.sampleSize > 0 ? collaboration.quality : 'unknown');
     } finally {
       store.close();
     }

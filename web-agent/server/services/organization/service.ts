@@ -293,6 +293,10 @@ function normalizeEvaluationPolicy(input: Partial<EvaluationPolicy>): Evaluation
       positiveMinAverage: decimal(merged.review.positiveMinAverage, '正面平均分门槛', 1, 5),
       positiveMinReuse: integer(merged.review.positiveMinReuse, '再次使用意愿门槛', 1, 5),
       positiveMinDimension: integer(merged.review.positiveMinDimension, '单个维度最低分', 1, 5),
+      ...(merged.review.providerId
+        ? { providerId: bounded(merged.review.providerId, 100, '复盘供应商') }
+        : {}),
+      ...(merged.review.model ? { model: bounded(merged.review.model, 200, '复盘模型') } : {}),
     },
     formula: bounded(merged.formula, 1_000, '评价公式'),
   };
