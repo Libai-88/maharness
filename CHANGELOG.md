@@ -21,7 +21,7 @@
 
 ### Changed
 
-- `server/services/society/` 拆出 `snapshot.ts`、`experiments.ts`、`types.ts`；`server/services/organization/` 拆出 `projections.ts`；`server/experience.ts` 拆出 `services/experience/{facts,shared}` 与 `experience-error.ts`。
+- `server/services/society/` 拆出 `snapshot.ts`、`experiments.ts`、`institutions.ts`、`types.ts`；`server/services/organization/` 拆出 `projections.ts`；`server/experience.ts` 拆出 `services/experience/{facts,shared}` 与 `experience-error.ts`。
 - 数据库最低支持版本为 v15；v14 及以下 fail-closed，必须先导出或恢复备份。
 - 社会任务创建要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`。
 - 复盘输出上限可借用总预算余量（最高 8,192 token），总预算仍是硬上限。

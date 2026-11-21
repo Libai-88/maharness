@@ -225,7 +225,7 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | F4 时钟 | 已完成 | `OrganizationService` / `SocietyService` 注入 `now`，业务路径不再直接 `Date.now()`；新增确定性测试。 |
 | F3 角色权重 / 任务提示 | 已完成 | 六因子权重进入 `InstitutionPolicies` 并版本化；`POST /api/organization/society/tasks` 要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`；任务记录 `capabilitySource` / `teamMode`；关键词推断只用于旧记录。 |
 | F3 社会健康指标 | 已完成 | 删除 `/100` 聚合分；快照改为 `observations[]`，每项带公式、分子分母、样本量与 `quality`；协作分只由人工复核事件写入。 |
-| F5 文件拆分 | 已完成 | `server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `types`，入口 2,264→1,793 行；`server/services/organization/` 拆出 `projections`，入口 1,860→1,771 行；`server/experience.ts` 拆出 `services/experience/{facts,shared}`，1,639→1,077 行。 |
+| F5 文件拆分 | 已完成 | `server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `institutions` / `types`，入口 2,264→1,706 行；`server/services/organization/` 拆出 `projections`，入口 1,860→1,771 行；`server/experience.ts` 拆出 `services/experience/{facts,shared}`，1,639→1,077 行。 |
 | F6 迁移 | 已完成 | `Store.MIGRATIONS` 与 `migration-lock.ts` 删除，改为 `server/migrations/` 不可变 SQL + `manifest.json` checksum + `schema_migrations` 审计表；最低支持 v15，v14 及以下 fail-closed；新增 `db:export` / `db:upgrade` / `db:verify`。 |
 | F7 体验真实模型证据 | 已完成 | 新增 `evals/experience-v2.ts`（7 条真实工具事实样本、显式 reviewer、裁决/证据/建议三项指标）；2026-11-21 复测 7/7，裁决一致 100%、证据有效 100%、建议可用 100%。 |
 | F1 host service 边界 | 已完成 | `server/host/` 拆出 `container` / `ports` / `adapters`；server 不再直接 import core（`server/tests/boundary.spec.ts` 强制），routes 只依赖窄接口；全量插件化保留为产品决策而非架构债。
