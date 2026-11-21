@@ -11,6 +11,11 @@ import {
 import { OrganizationService, explicitTeamRequest } from '../organization/service';
 import { SocietySelectionService } from './selection';
 import { buildSocietySnapshot, type DepartmentUsage, type RunUsage } from './snapshot';
+import {
+  ensureInstitution as ensureInstitutionImpl,
+  rollbackInstitution as rollbackInstitutionImpl,
+  updateInstitution as updateInstitutionImpl,
+} from './institutions';
 import { teamCostEligible as teamCostEligibleImpl } from './types';
 
 export type {
@@ -37,12 +42,9 @@ import {
   type SocietyAuditEntry,
 } from '../../organization-store';
 import {
-  DEFAULT_POLICIES,
   ROLE_SELECTION_WEIGHTS,
   bounded,
   money,
-  normalizePolicies,
-  policyHash,
   ratio,
   tokenCount,
   validDepartmentId,
@@ -303,68 +305,7 @@ export class SocietyService {
   }
 
   ensureInstitution(tenantId: string): InstitutionVersion {
-    const existing = this.repository().activeInstitution(tenantId);
-    if (existing) {
-      this.ensureFoundationRoles(tenantId);
-      this.organization.ensureEvaluation(tenantId);
-      return existing;
-    }
-    const policies = normalizePolicies(DEFAULT_POLICIES);
-    const record: InstitutionVersion = {
-      id: randomUUID(), tenantId, version: 1, status: 'active', policies,
-      hash: policyHash(policies), createdBy: 'maharness', reason: '初始化本地 AI 社会制度',
-      createdAt: this.now(),
-    };
-    this.repository().transaction(() => {
-      this.repository().createInstitution(record);
-      this.repository().appendInstitutionAudit({
-        id: randomUUID(), tenantId, version: 1, action: 'initialize', actor: 'maharness',
-        toVersion: 1, afterHash: record.hash, reason: record.reason, createdAt: record.createdAt,
-      });
-      this.ensureFoundationRoles(tenantId);
-    });
-    this.organization.ensureEvaluation(tenantId);
-    return record;
-  }
-
-  private ensureFoundationRoles(tenantId: string): void {
-    const now = this.now();
-    const roles: Array<Pick<OrganizationRole, 'name' | 'responsibilities' | 'capabilities'>> = [
-      { name: '调度协调员', responsibilities: ['按制度选择单角色或短团队', '核对预算、权限和福利边界'], capabilities: ['coordination', 'planning', 'review'] },
-      { name: '研究执行员', responsibilities: ['阅读资料、检索来源、形成可核对结论'], capabilities: ['research', 'reading', 'analysis', 'files'] },
-      { name: '交付执行员', responsibilities: ['处理文件、文档和办公自动化任务'], capabilities: ['documents', 'files', 'automation'] },
-      { name: '质量审校员', responsibilities: ['独立检查来源、验收条件和未完成项'], capabilities: ['review', 'analysis', 'quality'] },
-    ];
-    for (const role of roles) {
-      const id = `institution-${createHash('sha256').update(`${tenantId}\0${role.name}`).digest('hex').slice(0, 24)}`;
-      let record = this.repository().getRole(id, tenantId);
-      if (!record) {
-        record = {
-          id, tenantId, projectId: '', ...role,
-          authority: { workspace: '', readOnly: false, profile: 'standard', allowedTools: [] },
-          modelPolicy: { providerId: '', model: 'runtime-selected' },
-          persistent: true, employment: 'active', source: 'builtin', revision: 0,
-          createdAt: now, updatedAt: now,
-        };
-        this.repository().createRole(record);
-      } else if (record.source === 'builtin' && record.authority.readOnly) {
-        record = this.repository().updateRole(record, {
-          authority: { ...record.authority, readOnly: false },
-        }, record.revision);
-      }
-      this.ensureAppointmentMemory(record, now);
-    }
-    for (const record of this.repository().listRoles(tenantId, undefined, true)) {
-      this.ensureAppointmentMemory(record, now);
-    }
-  }
-
-  private ensureAppointmentMemory(role: OrganizationRole, now: number): void {
-    if (this.repository().roleMemories(role.tenantId, role.id, 100).some(item => item.kind === 'appointment')) return;
-    this.repository().appendRoleMemory({
-      id: randomUUID(), tenantId: role.tenantId, roleId: role.id, kind: 'appointment',
-      summary: `岗位建立：${role.name}`, evidence: [], createdAt: now,
-    });
+    return ensureInstitutionImpl(this.institutionDeps(), tenantId);
   }
 
   departmentForRole(role: OrganizationRole, departments: SocietyDepartmentPolicy[]): SocietyDepartmentPolicy | undefined {
@@ -372,49 +313,21 @@ export class SocietyService {
   }
 
   updateInstitution(tenantId: string, input: Partial<InstitutionPolicies> & { reason: string }): InstitutionVersion {
-    this.ensureInstitution(tenantId);
-    const current = this.repository().activeInstitution(tenantId)!;
-    const policies = normalizePolicies({ ...current.policies, ...input });
-    const record: InstitutionVersion = {
-      id: randomUUID(), tenantId, version: current.version + 1, status: 'active',
-      policies, hash: policyHash(policies), createdBy: 'human',
-      reason: bounded(input.reason, 500, '制度变更原因'), createdAt: this.now(),
-    };
-    this.repository().transaction(() => {
-      this.repository().updateInstitution(current, { status: 'superseded' });
-      this.repository().createInstitution(record);
-      this.repository().appendInstitutionAudit({
-        id: randomUUID(), tenantId, version: record.version, action: 'update', actor: 'human',
-        fromVersion: current.version, toVersion: record.version, beforeHash: current.hash,
-        afterHash: record.hash, reason: record.reason, createdAt: record.createdAt,
-      });
-    });
-    this.emit('organization.institution.updated', { version: record.version, hash: record.hash });
-    return record;
+    return updateInstitutionImpl(this.institutionDeps(), tenantId, input);
   }
 
   rollbackInstitution(tenantId: string, version: number, reason: string): InstitutionVersion {
-    this.ensureInstitution(tenantId);
-    const current = this.repository().activeInstitution(tenantId)!;
-    const target = this.repository().institutions(tenantId, 500).find(item => item.version === version);
-    if (!target) throw new OrganizationError(404, 'INSTITUTION_VERSION_NOT_FOUND', '制度版本不存在');
-    const policies = normalizePolicies(target.policies);
-    const record: InstitutionVersion = {
-      id: randomUUID(), tenantId, version: current.version + 1, status: 'active',
-      policies, hash: policyHash(policies), createdBy: 'human',
-      reason: `回滚至 v${version}：${bounded(reason, 460, '回滚原因')}`, createdAt: this.now(),
+    return rollbackInstitutionImpl(this.institutionDeps(), tenantId, version, reason);
+  }
+
+  private institutionDeps() {
+    return {
+      store: this.options.store,
+      repository: () => this.repository(),
+      organization: this.organization,
+      now: () => this.now(),
+      emit: (type: string, data: Record<string, unknown>) => this.emit(type, data),
     };
-    this.repository().transaction(() => {
-      this.repository().updateInstitution(current, { status: 'superseded' });
-      this.repository().createInstitution(record);
-      this.repository().appendInstitutionAudit({
-        id: randomUUID(), tenantId, version: record.version, action: 'rollback', actor: 'human',
-        fromVersion: current.version, toVersion: record.version, beforeHash: current.hash,
-        afterHash: record.hash, reason: record.reason, createdAt: record.createdAt,
-      });
-    });
-    this.emit('organization.institution.updated', { version: record.version, rollbackTo: version });
-    return record;
   }
 
   createTask(input: CreateSocietyTaskInput): SocietyTask {
