@@ -21,15 +21,15 @@ import {
   verificationStatus,
 } from './shared';
 
-const FAST_INPUT_LIMIT = 3_000;
-const FAST_OUTPUT_LIMIT = 800;
-const FAST_TOTAL_LIMIT = 3_800;
+const FAST_INPUT_LIMIT = 4_000;
+const FAST_OUTPUT_LIMIT = 4_000;
+const FAST_TOTAL_LIMIT = 8_000;
 const FOCUSED_INPUT_LIMIT = 8_000;
-const FOCUSED_OUTPUT_LIMIT = 1_200;
-const FOCUSED_TOTAL_LIMIT = 9_200;
+const FOCUSED_OUTPUT_LIMIT = 6_000;
+const FOCUSED_TOTAL_LIMIT = 14_000;
 const MULTI_INPUT_LIMIT = 10_000;
-const MULTI_OUTPUT_LIMIT = 1_500;
-const MULTI_TOTAL_LIMIT = 11_500;
+const MULTI_OUTPUT_LIMIT = 6_000;
+const MULTI_TOTAL_LIMIT = 16_000;
 const FACT_LEDGER_TOKEN_LIMIT = 1_200;
 
 /** Fact ledger, evidence index, pricing and review-budget helpers. */

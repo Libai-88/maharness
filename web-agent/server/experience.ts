@@ -1044,7 +1044,19 @@ export class ExperienceService {
 
   private async invokeReview(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[], signal: AbortSignal): Promise<InvocationResult> {
     const maxTokens = this.reviewMaxTokens(review, provider, model, messages);
-    return this.invoke(provider, model, messages, maxTokens, 'experience_review', signal);
+    try {
+      return await this.invoke(provider, model, messages, maxTokens, 'experience_review', signal);
+    } catch (error) {
+      // A model that truncates before emitting the complete JSON body is a budget
+      // problem, not a semantic one: retry once with a doubled output cap. The
+      // total-budget and provider ceilings below still bound the larger cap, and
+      // the retry keeps a complete review from being discarded on a 502.
+      if (error instanceof ExperienceError && error.code === 'REVIEW_OUTPUT_TRUNCATED' && signal && !signal.aborted) {
+        const retryCap = Math.min(review.budget.totalTokenLimit, maxTokens * 2);
+        return await this.invoke(provider, model, messages, retryCap, 'experience_review', signal);
+      }
+      throw error;
+    }
   }
 
   private insufficient(reason: string): ExperienceError {

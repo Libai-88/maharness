@@ -213,9 +213,13 @@ const DEFAULT_EVALUATION_POLICY: EvaluationPolicy = {
     rubricVersion: REVIEW_RUBRIC_VERSION,
     dimensions: [...REVIEW_DIMENSIONS],
     systemPrompt: REVIEW_SYSTEM_PROMPT,
-    fast: { input: 3_000, output: 800, total: 3_800 },
-    focused: { input: 8_000, output: 1_200, total: 9_200 },
-    multi: { input: 10_000, output: 1_500, total: 11_500 },
+    // A complete review is ten scored dimensions plus observations and
+    // suggestions; real models spend 1,500–3,200 output tokens on it. The
+    // earlier 3,800/9,200/11,500 totals truncated the JSON body before it closed,
+    // so the caps now leave room for the full body while still bounding spend.
+    fast: { input: 4_000, output: 4_000, total: 8_000 },
+    focused: { input: 8_000, output: 6_000, total: 14_000 },
+    multi: { input: 10_000, output: 6_000, total: 16_000 },
     positiveMinAverage: 3.5,
     positiveMinReuse: 4,
     positiveMinDimension: 3,

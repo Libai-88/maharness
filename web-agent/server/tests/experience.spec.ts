@@ -75,6 +75,7 @@ function reviewProvider(options: {
   modelMaxOutput?: number;
   reasoning?: boolean;
   planGap?: boolean;
+  truncateOnce?: boolean;
 } = {}): ProviderDef & { calls: () => number } {
   let calls = 0;
   return {
@@ -89,6 +90,10 @@ function reviewProvider(options: {
       calls++;
       options.seen?.push(messages.map(message => message.content ?? ''));
       options.maxTokens?.push(chatOptions.maxTokens ?? -1);
+      if (options.truncateOnce && calls === 1) {
+        yield { type: 'done', reason: 'length' };
+        return;
+      }
       if (options.hold) {
         await new Promise<void>(resolve => {
           if (chatOptions.signal?.aborted) resolve();
@@ -167,7 +172,7 @@ describe('AI 用户复盘', () => {
       const review = experience.create({ runIds: [run.id] }, 'default');
       assert.equal(review.evaluationVersion, initial.version);
       assert.equal(review.evaluationHash, initial.hash);
-      assert.equal(review.evaluationPolicy?.review.fast.total, 3_800);
+      assert.equal(review.evaluationPolicy?.review.fast.total, 8_000);
 
       const updated = organization.updateEvaluation('default', {
         review: {
@@ -500,7 +505,7 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.path, 'fast');
       assert.equal(finished.verdict, 'positive');
       assert.equal(finished.calls, 1);
-      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 3_800);
+      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 8_000);
       assert.ok(finished.evidence.length <= 4);
       assert.equal(provider.calls(), 1);
       assert.doesNotMatch(JSON.stringify(seen), /FULL_TRACE_MARKER{20}/);
@@ -519,16 +524,16 @@ describe('AI 用户复盘', () => {
       const focused = experience.estimate({ runIds: [failed.id] }, 'default');
       assert.equal(focused.path, 'focused');
       assert.equal(focused.inputTokenLimit, 8_000);
-      assert.equal(focused.outputTokenLimit, 1_200);
-      assert.equal(focused.totalTokenLimit, 9_200);
+      assert.equal(focused.outputTokenLimit, 6_000);
+      assert.equal(focused.totalTokenLimit, 14_000);
 
       const first = addRun(store);
       const second = addRun(store);
       const multi = experience.estimate({ runIds: [first.id, second.id] }, 'default');
       assert.equal(multi.path, 'focused');
       assert.equal(multi.inputTokenLimit, 10_000);
-      assert.equal(multi.outputTokenLimit, 1_500);
-      assert.equal(multi.totalTokenLimit, 11_500);
+      assert.equal(multi.outputTokenLimit, 6_000);
+      assert.equal(multi.totalTokenLimit, 16_000);
       assert.throws(
         () => experience.estimate({ runIds: [first.id, addRun(store, { model: 'another-model' }).id] }, 'default'),
         (error: unknown) => error instanceof ExperienceError && error.code === 'MIXED_MODELS',
@@ -563,7 +568,7 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.facts.truncated, true);
       assert.ok(finished.facts.anomalies.length <= 5);
       assert.ok(estimateTokens(JSON.stringify(finished.facts)) <= 1_200);
-      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 11_500);
+      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 16_000);
     } finally { store.close(); }
   });
 
@@ -614,7 +619,7 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.path, 'focused');
       assert.equal(finished.calls, 2);
       assert.equal(provider.calls(), 2);
-      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 9_200);
+      assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 14_000);
       assert.match(seen[0]!.join('\n'), /evidence_plan/);
       assert.match(seen[1]!.join('\n'), /review_input/);
       const finalInput = JSON.parse(seen[1]!.at(-1)!) as { evidence: Array<{ ref: string }> };
@@ -725,7 +730,7 @@ describe('AI 用户复盘', () => {
 
   test('实测 token 超过总预算时终止并保留结构化失败状态', async () => {
     const store = new Store(':memory:');
-    const provider = reviewProvider({ usage: { input: 3_000, output: 900 } });
+    const provider = reviewProvider({ usage: { input: 5_000, output: 3_500 } });
     const { experience } = services(store, provider);
     try {
       const run = addRun(store);
@@ -735,10 +740,10 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.status, 'failed');
       assert.equal(finished.calls, 1);
       assert.equal(provider.calls(), 1);
-      assert.equal(finished.budget.inputTokens, 3_000);
-      assert.equal(finished.budget.outputTokens, 900);
+      assert.equal(finished.budget.inputTokens, 5_000);
+      assert.equal(finished.budget.outputTokens, 3_500);
       assert.equal(finished.completedAt, undefined);
-      assert.match(finished.error ?? '', /3900 token.*3800 token.*输入 3000，输出 900/);
+      assert.match(finished.error ?? '', /8500 token.*8000 token.*输入 5000，输出 3500/);
     } finally { store.close(); }
   });
 
@@ -932,5 +937,20 @@ test('evidence index tolerates undefined values instead of throwing on .length',
     const finished = experience.review(review.id, 'default');
     assert.ok(['completed', 'insufficient_evidence', 'failed'].includes(finished.status));
     assert.ok(finished.evidenceIndex.every(item => (item.size ?? 0) >= 0));
+  } finally { store.close(); }
+});
+
+test('review retries once with a doubled output cap when the model truncates', async () => {
+  const store = new Store(':memory:');
+  const provider = reviewProvider({ truncateOnce: true });
+  const { experience } = services(store, provider);
+  try {
+    const run = addRun(store, {});
+    const review = experience.create({ runIds: [run.id] }, 'default');
+    await experience.settled(review.id)!;
+    const finished = experience.review(review.id, 'default');
+    assert.equal(finished.status, 'completed', 'the retry should complete the review');
+    assert.equal(provider.calls(), 2);
+    assert.ok(finished.dimensions.length > 0);
   } finally { store.close(); }
 });
