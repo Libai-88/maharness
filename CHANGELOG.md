@@ -24,7 +24,9 @@
 - `server/services/society/` 拆出 `snapshot.ts`、`experiments.ts`、`institutions.ts`、`types.ts`；`server/services/organization/` 拆出 `projections.ts`；`server/experience.ts` 拆出 `services/experience/{facts,shared}` 与 `experience-error.ts`。
 - 数据库最低支持版本为 v15；v14 及以下 fail-closed，必须先导出或恢复备份。
 - 社会任务创建要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`。
+- 复盘预算按完整复盘所需调整：fast 8,000、focused 14,000、multi 16,000 token（原 3,800 / 9,200 / 11,500 会在 JSON 未闭合时截断）。
 - 复盘输出上限可借用总预算余量（最高 8,192 token），总预算仍是硬上限。
+- 复盘输出被截断时自动以加倍输出上限重试一次，仍受总预算与 Provider `maxOutput` 约束。
 - 社会协作关系分只由人工复核事件写入；调度入队和任务完成不再批量赋值。
 - 体验复盘建议的 `category` 兼容字符串与单元素数组两种输入。
 

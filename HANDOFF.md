@@ -40,7 +40,7 @@
 - 浏览器回归固定单 worker，避免并行运行时社会调度用例的时序竞争；本地全量 133/133 通过。
 - v0.2.0 架构收敛：`server/host/` 建立宿主服务边界（`container.ts` 装配、`ports.ts` 窄接口、`adapters/` 是唯一访问 core 的入口），`server/tests/boundary.spec.ts` 强制 server 不得直接 import core；`server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `institutions` / `types`（入口 2,264→1,706 行）；`server/services/organization/` 拆出 `projections`（评分卡与福祉，入口 1,860→1,770 行）；`server/experience.ts` 拆出 `services/experience/facts`（事实账本、证据索引、定价、预算）与 `shared`（入口 1,639→1,077 行）；删除 `Store.MIGRATIONS` 与 `migration-lock.ts`，改为 `server/migrations/` 不可变 SQL + manifest checksum + `schema_migrations` 审计表，最低支持 v15。
 - 社会语义：删除 `/100` 聚合健康分，改为带公式/分子分母/样本量的 `observations[]`；协作关系分只由人工复核事件写入；社会任务要求显式 `requiredCapabilities` 与 `needsWrite`。
-- 体验复盘：评价标准可配置独立 reviewer；输出上限可借用总预算余量；`evals/experience-v2.ts` 用真实工具事实样本按裁决一致/证据有效/建议可用三项指标验收。
+- 体验复盘：评价标准可配置独立 reviewer；输出上限可借用总预算余量；默认复盘预算按完整复盘所需调整为 fast 8,000 / focused 14,000 / multi 16,000 token，并在截断时以加倍上限重试一次；`evals/experience-v2.ts` 用真实工具事实样本按通过率/裁决一致/证据有效/建议可用四项门禁验收。
 
 ## 验收与发布
 
@@ -49,7 +49,7 @@
 | 双端类型检查与构建 | 通过 |
 | 单测 | 1535 通过、2 跳过、0 失败 |
 | 数据库迁移 | 本机 v15 → v16 实测通过（57→58 表，审计表记录两条 checksum） |
-| 体验复盘 v2 真实模型 | 7/7（裁决一致 100%、证据有效 100%、建议可用 100%） |
+| 体验复盘 v2 真实模型 | 6/7，四项门禁通过（通过率 86%、裁决一致 86%、证据有效 100%、建议可用 100%） |
 | 安全回归 | 402/402 |
 | 产品自检 | 90/90 |
 | 确定性回放 | 28/28 |

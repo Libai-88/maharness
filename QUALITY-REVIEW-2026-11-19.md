@@ -227,5 +227,5 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | F3 社会健康指标 | 已完成 | 删除 `/100` 聚合分；快照改为 `observations[]`，每项带公式、分子分母、样本量与 `quality`；协作分只由人工复核事件写入。 |
 | F5 文件拆分 | 已完成 | `server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `institutions` / `types`，入口 2,264→1,706 行；`server/services/organization/` 拆出 `projections`，入口 1,860→1,771 行；`server/experience.ts` 拆出 `services/experience/{facts,shared}`，1,639→1,077 行。 |
 | F6 迁移 | 已完成 | `Store.MIGRATIONS` 与 `migration-lock.ts` 删除，改为 `server/migrations/` 不可变 SQL + `manifest.json` checksum + `schema_migrations` 审计表；最低支持 v15，v14 及以下 fail-closed；新增 `db:export` / `db:upgrade` / `db:verify`。 |
-| F7 体验真实模型证据 | 已完成 | 新增 `evals/experience-v2.ts`（7 条真实工具事实样本、显式 reviewer、裁决/证据/建议三项指标）；2026-11-21 复测 7/7，裁决一致 100%、证据有效 100%、建议可用 100%。 |
+| F7 体验真实模型证据 | 已完成 | 新增 `evals/experience-v2.ts`（7 条真实工具事实样本、显式 reviewer、裁决/证据/建议三项指标）。根因是默认复盘预算（3,800/9,200/11,500 token）小于完整复盘 JSON 所需，模型在正文未闭合时被截断；预算已按真实用量调整为 8,000/14,000/16,000，并增加截断后单次加倍重试。2026-11-21 复测 6/7，四项门禁全部通过（通过率 86%、裁决一致 86%、证据有效 100%、建议可用 100%）。 |
 | F1 host service 边界 | 已完成 | `server/host/` 拆出 `container` / `ports` / `adapters`；server 不再直接 import core（`server/tests/boundary.spec.ts` 强制），routes 只依赖窄接口；全量插件化保留为产品决策而非架构债。
