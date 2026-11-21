@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 16,
+  "minSupportedVersion": 15,
+  "migrations": [
+    {
+      "version": 15,
+      "file": "001_v15_baseline.sql",
+      "description": "v15 full schema baseline (frozen)",
+      "sha256": "a3f2566ceb7ae2350341a066036a2c27a9d50a7b30cd2b61ec9f478513a214b6"
+    },
+    {
+      "version": 16,
+      "file": "002_v16.sql",
+      "description": "explicit society capability provenance and review reviewer model",
+      "sha256": "4c929361c2dae4531fe054c9177e33585760bcaa26e406bb1db62bee67f6b61f"
+    }
+  ]
+}

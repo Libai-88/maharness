@@ -55,7 +55,10 @@
     "eval:composition": "tsx scripts/composition-live.ts",
     "check:boundaries": "node --import tsx --test kernel/tests/dependency-boundary.spec.ts",
     "check:quality": "npm run typecheck && npm run check:boundaries",
-    "test:coverage": "node scripts/run-tests.mjs --coverage"
+    "test:coverage": "node scripts/run-tests.mjs --coverage",
+    "db:export": "tsx scripts/db-migrate.ts export",
+    "db:upgrade": "tsx scripts/db-migrate.ts upgrade",
+    "db:verify": "tsx scripts/db-migrate.ts verify"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",

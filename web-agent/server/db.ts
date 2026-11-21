@@ -1,4 +1,3 @@
-import { importLegacyContext } from '../kernel/context';
 /**
  * server/db.ts —— SQLite 持久化（better-sqlite3，同步 API，零配置）
  * 表（与 CREATE TABLE 一致）：sessions / messages / providers / models / personas
@@ -19,8 +18,8 @@ import { MATERIAL_SCHEMA, MaterialRepository } from './materials';
 import { AUTOMATION_SCHEMA, AutomationRepository } from './automations';
 import { RECOVERY_SCHEDULE_SCHEMA, ScheduleRepository } from './schedule-store';
 import { EXPERIENCE_SCHEMA, ExperienceRepository } from './experience-store';
-import { ORGANIZATION_SCHEMA, OrganizationRepository, roleGovernance, type OrganizationRole } from './organization-store';
-import { REVIEW_DIMENSIONS, REVIEW_RUBRIC_VERSION, REVIEW_SYSTEM_PROMPT } from './review-rubric';
+import { ORGANIZATION_SCHEMA, OrganizationRepository } from './organization-store';
+import { applyMigrations } from './migrations/runner';
 
 function providerPurpose(providerId: string): string {
   return `provider:${providerId}`;
@@ -206,22 +205,24 @@ export class Store {
   }
 
   /**
-   * schema 版本化迁移。
-   * - 新库：`user_version` 为 0 且无任何用户表 → 直接写入当前版本。
-   * - 旧库：`user_version` 为 0 但已有用户表 → 认定为 v1 之前的历史库；基线结构
-   *   与「新库直接建当前 schema」等价（列级增量由下方 CREATE 后的幂等 ALTER 兜底），
-   *   因此直接提升到当前版本，不重复执行已随时间累积过的变更。
-   * - 已知更高版本：库来自更新的程序版本，fail-closed 拒绝打开（不猜测降级行为）。
-   * - 未来新增破坏性变更：在 MIGRATIONS 追加 `from → run` 步骤（迁移内可再写 DDL），
-   *   每步完成后推进 user_version；失败中断且库保留在旧版本，启动自检拒绝运行。
+   * schema 版本化迁移（v15 起为不可变 SQL 迁移）。
+   * - 新库：`user_version` 为 0 且无任何用户表 → 顺序应用 manifest 中全部迁移。
+   * - 历史库：`user_version` 为 0 但已有用户表 → 先补基线 schema，再应用 v16 迁移。
+   * - v15 库：只应用 v16；已应用文件的 checksum 每次都校验。
+   * - 低于最低支持版本：fail-closed 并提示导出/恢复备份。
+   * - 更高版本：fail-closed，不猜测降级行为。
    */
   private migrate(dbFile: string, sources?: { configFile: string; pluginDirs: string[] }): void {
     let current = Number(this.db.pragma('user_version', { simple: true }));
     if (current > Store.DB_SCHEMA_VERSION) {
       throw new Error(`数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`);
     }
-    if (current === Store.DB_SCHEMA_VERSION) return;
     const hasData = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get();
+    if (current === Store.DB_SCHEMA_VERSION) {
+      // 已是最新版本也要校验已应用迁移的 checksum，防止迁移文件被静默改动。
+      applyMigrations(this.db, current, { empty: !hasData });
+      return;
+    }
     if (dbFile !== ':memory:' && existsSync(dbFile) && hasData) {
       const backup = `${dbFile}.pre-v2-${Date.now()}-${randomUUID()}.sqlite`;
       this.db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
@@ -235,8 +236,8 @@ export class Store {
       }
     }
     if (current === 0) {
-      // 新库（无表）与历史库（本机制引入版本号之前建立、已有表）统一走基线建表：
-      // 基线 schema 与当前版本一致，CREATE IF NOT EXISTS 对两者都幂等。
+      // 新库（无表）与历史库（版本号机制引入前建立、已有表）先补齐基线 schema，
+      // 基线迁移本身是幂等的 CREATE IF NOT EXISTS，对两者都安全。
       this.db.transaction(() => {
         this.createBaselineSchema();
         this.db.exec(RUN_SCHEMA);
@@ -245,22 +246,16 @@ export class Store {
         this.db.exec(RECOVERY_SCHEDULE_SCHEMA);
         this.db.exec(EXPERIENCE_SCHEMA);
         this.db.exec(ORGANIZATION_SCHEMA);
-        this.db.pragma(`user_version = ${Store.DB_SCHEMA_VERSION}`);
       })();
-      return;
+      this.db.pragma('user_version = 15');
+      current = 15;
     }
     const originalVersion = current;
     try {
-      this.db.transaction(() => {
-        for (const step of Store.MIGRATIONS) {
-          if (step.from < current) continue;
-          if (step.from !== current) break;
-          step.run(this.db);
-          current = step.to;
-          this.db.pragma(`user_version = ${current}`);
-        }
-        if (current !== Store.DB_SCHEMA_VERSION) throw new Error(`缺少到 schema ${Store.DB_SCHEMA_VERSION} 的迁移`);
-      })();
+      const result = applyMigrations(this.db, current, { empty: !hasData });
+      if (result.to !== Store.DB_SCHEMA_VERSION) {
+        throw new Error(`缺少到 schema ${Store.DB_SCHEMA_VERSION} 的迁移`);
+      }
     } catch (err) {
       throw new Error(`数据库迁移 ${originalVersion} → ${Store.DB_SCHEMA_VERSION} 失败，事务已回滚，可从备份恢复: ${err instanceof Error ? err.message : String(err)}`);
     }
@@ -402,114 +397,8 @@ export class Store {
     console.error('[store] 没有可用备份能通过完整性校验——保留损坏现场并继续启动（新写入可能失败）');
   }
 
-  /** 版本化迁移步骤表：新 schema 变更在此追加，逐版本推进（每步事务化 + 可回滚） */
-  static readonly MIGRATIONS: readonly { from: number; to: number; run: (db: Database.Database) => void }[] = [
-    { from: 1, to: 2, run: db => { db.exec(RUN_SCHEMA); } },
-    { from: 2, to: 3, run: db => { db.exec(RUN_SCHEMA); } },
-    { from: 3, to: 4, run: db => { db.exec(RUN_SCHEMA); } },
-    { from: 4, to: 5, run: db => { db.exec(RUN_SCHEMA); } },
-    { from: 5, to: 6, run: db => {
-      db.exec(RUN_SCHEMA);
-      const checkpoints = db.prepare('SELECT run_id,data FROM run_checkpoints_v2').all() as { run_id: string; data: string }[];
-      for (const row of checkpoints) { const checkpoint = JSON.parse(row.data); checkpoint.history = importLegacyContext(checkpoint.history); db.prepare('UPDATE run_checkpoints_v2 SET data=? WHERE run_id=?').run(JSON.stringify(checkpoint), row.run_id); }
-      const rows = db.prepare('SELECT id,record FROM runs_v2').all() as { id: string; record: string }[];
-      for (const row of rows) { const record = JSON.parse(row.record); if (record.budgetUsd !== undefined && record.budgetPolicy === undefined) { record.budgetPolicy = 'enforce'; db.prepare('UPDATE runs_v2 SET record=? WHERE id=?').run(JSON.stringify(record), row.id); } }
-    } },
-    { from: 6, to: 7, run: db => { db.exec(RUN_SCHEMA); } },
-    { from: 7, to: 8, run: db => { db.exec(MATERIAL_SCHEMA); } },
-    { from: 8, to: 9, run: db => { db.exec(AUTOMATION_SCHEMA); db.exec(RECOVERY_SCHEDULE_SCHEMA); } },
-    { from: 9, to: 10, run: db => { db.exec(EXPERIENCE_SCHEMA); } },
-    { from: 10, to: 11, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
-    { from: 11, to: 12, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
-    { from: 12, to: 13, run: db => {
-      const scheduleColumns = db.prepare('PRAGMA table_info(organization_society_schedules_v1)').all() as { name: string }[];
-      if (!scheduleColumns.some(column => column.name === 'work_order_id'))
-        db.exec('ALTER TABLE organization_society_schedules_v1 ADD COLUMN work_order_id TEXT');
-      db.exec(`
-        DROP INDEX IF EXISTS organization_work_orders_tenant;
-        DROP INDEX IF EXISTS organization_work_orders_project;
-        ALTER TABLE organization_work_orders_v1 RENAME TO organization_work_orders_v12;
-      `);
-      db.exec(ORGANIZATION_SCHEMA);
-      db.exec(`
-        INSERT INTO organization_work_orders_v1
-          (id,tenant_id,project_id,session_id,root_run_id,origin_kind,origin_id,status,operation_key,record,created_at,updated_at)
-        SELECT id,tenant_id,project_id,session_id,root_run_id,'run',root_run_id,status,operation_key,record,created_at,updated_at
-        FROM organization_work_orders_v12;
-        DROP TABLE organization_work_orders_v12;
-      `);
-    } },
-    { from: 13, to: 14, run: db => {
-      // Pre-tenant databases reach this step before the startup column migrations.
-      ensureTenants(db);
-      db.exec(ORGANIZATION_SCHEMA);
-      const insertVersion = db.prepare(`INSERT OR IGNORE INTO organization_versions_v1
-        (id,tenant_id,kind,subject_id,version,status,record,hash,created_by,reason,created_at)
-        VALUES(?,?,?,?,?,?,?,?,?,?,?)`);
-      const insertAudit = db.prepare(`INSERT INTO organization_version_audits_v1
-        (id,tenant_id,kind,subject_id,version,action,actor,from_version,to_version,
-         before_hash,after_hash,reason,created_at)
-        SELECT ?,?,?,?,?,'initialize',?,NULL,1,NULL,?,?,?
-        WHERE NOT EXISTS (
-          SELECT 1 FROM organization_version_audits_v1
-          WHERE tenant_id=? AND kind=? AND subject_id=? AND version=1
-        )`);
-      const roles = db.prepare('SELECT tenant_id,record,created_at FROM organization_roles_v1').all() as
-        Array<{ tenant_id: string; record: string; created_at: number }>;
-      for (const role of roles) {
-        const parsed = JSON.parse(role.record) as OrganizationRole;
-        const governance = JSON.stringify(roleGovernance(parsed));
-        const hash = createHash('sha256').update(governance).digest('hex');
-        const actor = parsed.source === 'human' ? 'human' : 'maharness';
-        insertVersion.run(
-          randomUUID(), role.tenant_id, 'role', parsed.id, 1, 'active',
-          governance, hash, actor, '迁移当前角色为 v1', role.created_at,
-        );
-        insertAudit.run(
-          randomUUID(), role.tenant_id, 'role', parsed.id, 1, actor, hash, '迁移当前角色为 v1', role.created_at,
-          role.tenant_id, 'role', parsed.id,
-        );
-      }
-      const tenants = db.prepare(`SELECT id FROM tenants
-        UNION SELECT DISTINCT tenant_id FROM organization_roles_v1`).all() as Array<{ id: string }>;
-      for (const tenant of tenants) {
-        const policy = {
-          schemaVersion: 1,
-          lowConfidenceSamples: 3,
-          mediumConfidenceSamples: 10,
-          highConfidenceSamples: 30,
-          rankingWeights: { acceptance: 0.5, budget: 0.3, evidence: 0.2 },
-          review: {
-            rubricVersion: REVIEW_RUBRIC_VERSION,
-            dimensions: [...REVIEW_DIMENSIONS],
-            systemPrompt: REVIEW_SYSTEM_PROMPT,
-            fast: { input: 3_000, output: 800, total: 3_800 },
-            focused: { input: 8_000, output: 1_200, total: 9_200 },
-            multi: { input: 10_000, output: 1_500, total: 11_500 },
-            positiveMinAverage: 3.5,
-            positiveMinReuse: 4,
-            positiveMinDimension: 3,
-          },
-          formula: 'role metrics come from contract and Run facts; review verdict cannot override fact gates',
-        };
-        const json = JSON.stringify(policy);
-        const hash = createHash('sha256').update(json).digest('hex');
-        const now = Date.now();
-        insertVersion.run(
-          randomUUID(), tenant.id, 'evaluation', 'default', 1, 'active',
-          json, hash, 'maharness', '初始化评价标准', now,
-        );
-        insertAudit.run(
-          randomUUID(), tenant.id, 'evaluation', 'default', 1, 'maharness',
-          hash, '初始化评价标准', now, tenant.id, 'evaluation', 'default',
-        );
-      }
-    } },
-    { from: 14, to: 15, run: db => { db.exec(ORGANIZATION_SCHEMA); } },
-  ];
-
-  /** 数据库 schema 当前版本（结构演进时递增并补 MIGRATIONS 步骤） */
-  static readonly DB_SCHEMA_VERSION = 15;
+  /** 数据库 schema 当前版本；结构变更必须追加不可变迁移文件并同步 manifest。 */
+  static readonly DB_SCHEMA_VERSION = 16;
   /** 启动备份保留份数（data/backups/ 下最多保留多少份） */
   static readonly BACKUP_KEEP = 7;
 

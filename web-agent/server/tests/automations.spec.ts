@@ -298,7 +298,7 @@ describe('自动化定义、确认与版本边界', () => {
     } finally { store.close(); }
   });
 
-  test('schema 8 迁移到 9 保留会话并建立自动化、发生记录和触发基线表', () => {
+  test('schema 8 旧库低于最低支持版本时拒绝打开且不改动数据', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-automation-migration-'));
     roots.push(root);
     const file = join(root, 'agent.db');
@@ -308,15 +308,12 @@ describe('自动化定义、确认与版本边界', () => {
     const raw = new Database(file);
     raw.exec('DROP TABLE scheduled_recovery_jobs_v3; DROP TABLE automation_occurrences_v3; DROP TABLE automation_trigger_baselines_v3; DROP TABLE automations_v3; PRAGMA user_version=8');
     raw.close();
-    store = new Store(file);
+    assert.throws(() => new Store(file), /低于最低支持的 15/);
+    const untouched = new Database(file, { readonly: true });
     try {
-      assert.equal(store.schemaVersion, 15);
-      assert.equal(store.getSession(session.id, 'default')?.id, session.id);
-      assert.doesNotThrow(() => store.automations.list('default'));
-      assert.doesNotThrow(() => store.automations.occurrences('default'));
-      assert.equal(store.automations.baseline('default', 'none'), undefined);
-      assert.deepEqual(store.schedules.list('default'), []);
-    } finally { store.close(); }
+      assert.equal(untouched.pragma('user_version', { simple: true }), 8);
+      assert.equal((untouched.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
+    } finally { untouched.close(); }
   });
 });
 

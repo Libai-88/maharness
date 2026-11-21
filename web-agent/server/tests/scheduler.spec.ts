@@ -30,20 +30,16 @@ function setup(): { root: string; store: Store; file: string; sessionId: string 
 }
 
 describe('到点续跑调度器', () => {
-  test('既有 schema 9 数据库补建续跑计划表', () => {
-    const { root, store, file, sessionId } = setup();
+  test('schema 9 旧库低于最低支持版本时拒绝打开', () => {
+    const { root, store } = setup();
     store.close();
     const dbFile = join(root, 'agent.db');
     const raw = new Database(dbFile);
     raw.exec('DROP TABLE scheduled_recovery_jobs_v3; PRAGMA user_version=9');
     raw.close();
-    const reopened = new Store(dbFile);
-    try {
-      const scheduler = new Scheduler(reopened, { file, now: () => 1_000 });
-      assert.deepEqual(scheduler.list(), []);
-      scheduler.schedule({ sessionId, runId: 'run-1', tenantId: 'default', dueAt: 2_000 });
-      assert.equal(scheduler.list().length, 1);
-    } finally { reopened.close(); }
+    assert.throws(() => new Store(dbFile), /低于最低支持的 15/);
+    const untouched = new Database(dbFile, { readonly: true });
+    try { assert.equal(untouched.pragma('user_version', { simple: true }), 9); } finally { untouched.close(); }
   });
 
   test('旧 schedules.json 导入 SQLite 后归档源文件', () => {

@@ -204,7 +204,7 @@ function crossDepartmentBranches() {
 }
 
 describe('AI society operation layer', () => {
-  test('schema migration reaches 15 and backfills role/evaluation history without losing facts', () => {
+  test('schema 11 database is rejected below the minimum supported version', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-society-migration-'));
     roots.push(root);
     const file = join(root, 'agent.db');
@@ -214,37 +214,15 @@ describe('AI society operation layer', () => {
     store.close();
 
     const raw = new Database(file);
-    raw.exec(`
-      DROP TABLE organization_version_audits_v1;
-      DROP TABLE organization_versions_v1;
-      DROP TABLE organization_role_relations_v1;
-      DROP TABLE organization_role_memories_v1;
-      DROP TABLE organization_society_schedules_v1;
-      DROP TABLE organization_society_tasks_v1;
-      DROP TABLE organization_institution_audits_v1;
-      DROP TABLE organization_institutions_v1;
-      PRAGMA user_version=11;
-    `);
+    raw.pragma('user_version=11');
     raw.close();
 
-    store = new Store(file);
+    assert.throws(() => new Store(file), /低于最低支持的 15/);
+    const untouched = new Database(file, { readonly: true });
     try {
-      assert.equal(store.schemaVersion, 15);
-      assert.equal(store.organization.getWorkOrder(order.id, 'default')?.id, order.id);
-      const snapshot = new SocietyService({ store }).snapshot('default');
-      assert.equal(snapshot.institution.version, 1);
-      assert.equal(snapshot.roles.length >= 4, true);
-      assert.equal(snapshot.evaluation.version, 1);
-      assert.equal(snapshot.roleLife.every(item => item.versions[0]?.version === 1), true);
-      assert.equal(snapshot.roleLife.every(item => item.versionAudits[0]?.action === 'initialize'), true);
-      const inspection = new Database(file, { readonly: true });
-      const columns = inspection.prepare('PRAGMA table_info(organization_work_orders_v1)').all() as Array<{ name: string; notnull: number }>;
-      inspection.close();
-      assert.equal(columns.find(column => column.name === 'root_run_id')?.notnull, 0);
-      assert.equal(columns.some(column => column.name === 'origin_kind'), true);
-    } finally {
-      store.close();
-    }
+      assert.equal(untouched.pragma('user_version', { simple: true }), 11);
+      assert.equal((untouched.prepare('SELECT id FROM organization_work_orders_v1').get() as { id: string }).id, order.id);
+    } finally { untouched.close(); }
   });
 
   test('institution versions are audited and rollback creates a new active version', () => {
@@ -402,7 +380,7 @@ describe('AI society operation layer', () => {
       assert.equal(life.versions[0]?.version, 2);
       assert.equal(life.versions[0]?.status, 'active');
       assert.equal(society.snapshot('default').evaluation.version, 2);
-      assert.equal(store.schemaVersion, 15);
+      assert.equal(store.schemaVersion, Store.DB_SCHEMA_VERSION);
     } finally {
       store.close();
     }

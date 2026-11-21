@@ -544,6 +544,10 @@ export interface SocietyTask {
   requiredCapabilities?: string[];
   /** Explicit write requirement; legacy tasks omit this and use keyword inference. */
   needsWrite?: boolean;
+  /** Where requiredCapabilities came from: explicit request or legacy heuristic backfill. */
+  capabilitySource?: 'explicit' | 'legacy_heuristic';
+  /** Team mode requested by the human; `auto` keeps the cost/eligibility rules. */
+  teamMode?: 'auto' | 'solo' | 'team';
   economics?: {
     qualityGain: number;
     riskReduction: number;

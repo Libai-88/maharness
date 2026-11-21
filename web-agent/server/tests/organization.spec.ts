@@ -188,38 +188,26 @@ function addSocietyRun(store: Store, input: {
 }
 
 describe('AI labor organization', () => {
-  test('schema 10 migration installs organization and versioned society tables while preserving existing data', () => {
+  test('schema 10 database is rejected below the minimum supported version', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-org-migration-'));
     roots.push(root);
     const file = join(root, 'agent.db');
     let store = new Store(file);
     const session = store.createSession('fixture-model', 'fixture');
-    const run = addRun(store);
+    addRun(store);
     store.close();
 
     const raw = new Database(file);
-    raw.exec(`
-      DROP TABLE organization_proposals_v1;
-      DROP TABLE organization_exceptions_v1;
-      DROP TABLE organization_receipts_v1;
-      DROP TABLE organization_ledger_v1;
-      DROP TABLE organization_contracts_v1;
-      DROP TABLE organization_team_cycles_v1;
-      DROP TABLE organization_roles_v1;
-      DROP TABLE organization_work_orders_v1;
-    `);
     raw.pragma('user_version = 10');
     raw.close();
 
-    store = new Store(file);
+    assert.throws(() => new Store(file), /低于最低支持的 15/);
+    const untouched = new Database(file, { readonly: true });
     try {
-      assert.equal(store.schemaVersion, 15);
-      assert.equal(store.getSession(session.id)?.id, session.id);
-      assert.equal(store.runs.get(run.id, 'default')?.id, run.id);
-      assert.doesNotThrow(() => store.organization.listWorkOrders('default'));
-    } finally {
-      store.close();
-    }
+      assert.equal(untouched.pragma('user_version', { simple: true }), 10);
+      assert.equal((untouched.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
+      assert.ok((untouched.prepare('SELECT COUNT(*) AS count FROM runs_v2').get() as { count: number }).count >= 1);
+    } finally { untouched.close(); }
   });
 
   test('runtime role binding does not advance governance revision or enter version snapshots', () => {

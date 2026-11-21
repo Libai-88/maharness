@@ -137,26 +137,18 @@ function services(store: Store, provider: ProviderDef) {
 }
 
 describe('AI 用户复盘', () => {
-  test('schema 9 升级到 14 并建立体验、组织、版本与社会表', () => {
+  test('schema 9 database is rejected below the minimum supported version', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-experience-migration-'));
     const file = join(root, 'review.db');
     try {
       const initial = new Store(file);
       initial.close();
       const raw = new Database(file);
-      raw.exec(`
-        DROP TABLE experience_reviews_v1;
-        DROP TABLE experience_findings_v1;
-        DROP TABLE experience_audits_v1;
-        DROP TABLE experience_regressions_v1;
-        PRAGMA user_version=9;
-      `);
+      raw.pragma('user_version = 9');
       raw.close();
-      const migrated = new Store(file);
-      try {
-        assert.equal(migrated.schemaVersion, 15);
-        assert.deepEqual(migrated.experience.listReviews('default'), []);
-      } finally { migrated.close(); }
+      assert.throws(() => new Store(file), /低于最低支持的 15/);
+      const untouched = new Database(file, { readonly: true });
+      try { assert.equal(untouched.pragma('user_version', { simple: true }), 9); } finally { untouched.close(); }
     } finally { rmSync(root, { recursive: true, force: true }); }
   });
 
