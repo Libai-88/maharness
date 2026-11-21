@@ -179,11 +179,13 @@ async function setup(page: Page) {
           edges: [{ id: 'relation-1', fromRoleId: 'role-research', toRoleId: 'role-quality', kind: 'collaborated', score: 0.9, updatedAt: 2 }],
         },
         bottlenecks: [],
-        health: {
-          score: 92, scoreKind: 'weighted_heuristic', sampleSize: 1,
-          weights: { loadBalance: 0.2, welfare: 0.2, exceptionHealth: 0.2, budgetHeadroom: 0.2, collaborationHealth: 0.2 },
-          loadBalance: 1, welfare: 0.9, exceptionHealth: 1, budgetUtilization: 0.1, collaborationHealth: 0.9,
-        },
+        observations: [
+          { id: 'load_balance', label: '负载均衡', value: 1, unit: 'ratio', numerator: null, denominator: roles.length, sampleSize: roles.length, quality: 'observed', formula: '1 - 标准差 / 平均值' },
+          { id: 'welfare', label: '福利余量', value: 0.9, unit: 'ratio', numerator: null, denominator: roles.length, sampleSize: roles.length, quality: 'observed', formula: '1 - 活跃任务 / 福利上限' },
+          { id: 'exception_backlog', label: '未结异常', value: 0, unit: 'count', numerator: 0, denominator: null, sampleSize: 0, quality: 'observed', formula: '未结异常计数' },
+          { id: 'budget_utilization', label: '预算占用', value: 0.1, unit: 'ratio', numerator: societyBudgetUsd * 0.1, denominator: societyBudgetUsd, sampleSize: 1, quality: 'observed', formula: '(已预留 + 已花费) / 社会预算' },
+          { id: 'collaboration', label: '协作关系', value: 0.9, unit: 'ratio', numerator: null, denominator: null, sampleSize: 1, quality: 'insufficient', formula: '人工复核事件关系分平均' },
+        ],
         economics: {
           societyBudgetUsd, societyReservedUsd: 0, societySpentUsd: 0,
           departmentBudgets: departments.map(item => ({ departmentId: item.id, quotaUsd: item.quotaUsd, reservedUsd: 0, spentUsd: 0, remainingUsd: item.quotaUsd })),
@@ -384,7 +386,8 @@ test('历史社会任务的审批、交付与治理保持可用', async ({ page 
 
   const society = page.getByTestId('society-console');
   await expect(society.getByText('maharness 社会运行')).toBeVisible();
-  await expect(society.getByText('92/100')).toBeVisible();
+  await expect(society.getByText('社会观察')).toBeVisible();
+  await expect(society.getByText('福利余量')).toBeVisible();
   await expect(society.locator('span').filter({ hasText: /^知识与研究部$/ })).toBeVisible();
   await expect(society.getByText('高价值资料核验').first()).toBeVisible();
 

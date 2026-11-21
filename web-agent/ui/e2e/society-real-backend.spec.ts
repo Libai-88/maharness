@@ -334,6 +334,9 @@ async function createTeamTask(
       priority: 5,
       departmentId: input.departmentId,
       acceptance: ['交付结论可核对且限制明确'],
+      // API v2: capabilities and write need are explicit, not inferred from text.
+      requiredCapabilities: ['research', 'reading', 'analysis'],
+      needsWrite: true,
       branches: input.branches,
       economics: {
         qualityGain: 0.1,
@@ -532,7 +535,16 @@ test('真实后端经营闭环写入临时 SQLite 并可由浏览器验收', asy
   await expect(society).toBeVisible();
 
   const objective = `真实后端会议纪要 ${Date.now()}`;
-  const submitted = await request.post('/api/organization/society/tasks', { data: { objective, acceptance: ['会议纪要可核对'], valueUsd: 20, maxBudgetUsd: 10 } });
+  const submitted = await request.post('/api/organization/society/tasks', {
+    data: {
+      objective,
+      acceptance: ['会议纪要可核对'],
+      valueUsd: 20,
+      maxBudgetUsd: 10,
+      requiredCapabilities: ['research', 'reading'],
+      needsWrite: true,
+    },
+  });
   expect(submitted.status(), await submitted.text()).toBe(201);
   await refreshWorkbench(page);
 
