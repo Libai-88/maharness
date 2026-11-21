@@ -148,8 +148,10 @@ const cases: CaseDefinition[] = [
   },
   {
     id: 'retry-loop',
+    // Three identical invalid attempts with no recovery is a negative outcome,
+    // not merely friction: the task never produced a result.
     name: '参数循环',
-    expectedVerdict: 'neutral',
+    expectedVerdict: 'negative',
     expectSuggestion: true,
     setup: store => [addRun(store, {
       objective: '读取目标文件',

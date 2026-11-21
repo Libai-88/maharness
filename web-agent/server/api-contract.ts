@@ -1,5 +1,5 @@
 /** API-01：公开 HTTP 契约的单一登记入口。响应体保持既有形状，版本通过响应头发布。 */
-export const API_SCHEMA_VERSION = 1 as const;
+export const API_SCHEMA_VERSION = 2 as const;
 export const API_SCHEMA_HEADER = 'X-API-Schema-Version' as const;
 
 export type ApiResponseKind = 'object' | 'array' | 'sse' | 'empty' | 'binary';

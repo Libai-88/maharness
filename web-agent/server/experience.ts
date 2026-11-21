@@ -1474,7 +1474,7 @@ export class ExperienceService {
     // verbose models and reasoning tokens otherwise exhaust it before the JSON
     // review body is complete. The total budget stays the hard cap, and the
     // provider's declared maxOutput is still enforced below.
-    const headroom = Math.min(4_096, Math.max(1_024, protocolCap ?? 4_096));
+    const headroom = Math.min(8_192, Math.max(2_048, protocolCap ?? 8_192));
     const outputLimit = Math.max(remainingOutput, Math.min(remainingTotal, headroom));
     const limits = [outputLimit, remainingTotal];
     if (protocolCap !== undefined && Number.isSafeInteger(protocolCap) && protocolCap > 0) limits.push(protocolCap);

@@ -2,6 +2,42 @@
 
 格式参考 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)；版本号与 `web-agent/package.json` 一致。
 
+## [0.2.0] - 2026-11-21
+
+破坏性架构与语义收敛版本。API schema 升到 2，数据库 schema 升到 16；插件 API 仍为 3.0.0。
+
+### Added
+
+- `server/host/` 宿主服务边界：`container.ts` 统一装配，`ports.ts` 定义路由可见的窄接口，`adapters/` 是 server 访问 core 的唯一入口。
+- `server/services/` 领域目录：society、organization、experience 归入明确模块。
+- 社会任务 `capabilitySource`（explicit / legacy_heuristic）与 `teamMode`（auto / solo / team）。
+- 社会快照改为 `observations[]` 观察指标，每项带公式、分子分母、样本量与 quality。
+- 评价标准新增 `review.providerId` / `review.model`，复盘可使用独立 reviewer。
+- `evals/experience-v2.ts` 与 `npm run eval:experience:v2`：7 条真实工具事实样本，按裁决一致率、证据有效率、建议可用率验收。
+- 不可变迁移：`server/migrations/` 下 SQL 文件 + `manifest.json` checksum，`schema_migrations` 审计表。
+- `npm run db:export` / `db:upgrade` / `db:verify` 数据库维护命令。
+- ADR 0002–0005：host service 边界、社会观察指标、数据库 v16、Experience Review v2。
+- `plan/api-contract-v2.md`：API v2 破坏性变更清单。
+
+### Changed
+
+- 数据库最低支持版本为 v15；v14 及以下 fail-closed，必须先导出或恢复备份。
+- 社会任务创建要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`。
+- 复盘输出上限可借用总预算余量（最高 8,192 token），总预算仍是硬上限。
+- 社会协作关系分只由人工复核事件写入；调度入队和任务完成不再批量赋值。
+- 体验复盘建议的 `category` 兼容字符串与单元素数组两种输入。
+
+### Removed
+
+- `Store.MIGRATIONS` 与 `server/migration-lock.ts`，由不可变迁移 manifest 取代。
+- `SocialHealth.score` / `scoreKind` / `weights` 与 UI 的 `/100` 社会健康展示。
+
+### Fixed
+
+- `jsonText(undefined)` 返回 `undefined` 导致证据索引构建崩溃（`.length` of undefined）。
+- 证据索引在缺少验收/回答时不再抛错。
+- 复盘建议因 `category` 为数组被静默丢弃。
+
 ## [Unreleased]
 
 ### Added

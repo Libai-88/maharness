@@ -1,6 +1,6 @@
 {
   "name": "maharness",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "maharness：自研 Windows 原生网页版 Agent——薄内核 + 全插件化 + 全程可观测，agent 可以自己定义自己",
   "bin": {

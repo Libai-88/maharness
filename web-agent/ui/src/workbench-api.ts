@@ -368,6 +368,8 @@ export interface SocietyTaskView {
   departmentId?: string;
   requiredCapabilities?: string[];
   needsWrite?: boolean;
+  capabilitySource?: 'explicit' | 'legacy_heuristic';
+  teamMode?: 'auto' | 'solo' | 'team';
   branches: Array<{
     objective: string;
     acceptance: string[];
@@ -656,8 +658,10 @@ export const workbenchApi = {
     maxBudgetUsd: number;
     departmentId?: string;
     projectId?: string;
-    requiredCapabilities?: string[];
-    needsWrite?: boolean;
+    /** API v2: explicit capabilities and write need are required. */
+    requiredCapabilities: string[];
+    needsWrite: boolean;
+    teamMode?: 'auto' | 'solo' | 'team';
     branches?: SocietyTaskView['branches'];
     materials?: SocietyTaskView['materials'];
   }) => api<{ task: SocietyTaskView }>('/api/organization/society/tasks', {

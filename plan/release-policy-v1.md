@@ -7,9 +7,9 @@
 | 维度 | 版本载体 | 当前版本 | 版本规则 |
 | --- | --- | --- | --- |
 | 应用整体 | `web-agent/package.json` 的 `version` | 0.1.0 | 语义化版本；发布产物与代码版本一致 |
-| HTTP API 契约 | `X-API-Schema-Version` 响应头（`server/api-contract.ts` 的 `API_SCHEMA_VERSION`） | 1 | 破坏性字段变更时递增 |
+| HTTP API 契约 | `X-API-Schema-Version` 响应头（`server/api-contract.ts` 的 `API_SCHEMA_VERSION`） | 2 | 破坏性字段变更时递增 |
 | 插件 manifest | `plugin.json` 的 `version` 与 `compatibility.api.min/max` | API 3.0.0 | 新插件使用 v3；加载器兼容 v2 |
-| 数据库 schema | SQLite `PRAGMA user_version`（`server/db.ts` 的 `Store.DB_SCHEMA_VERSION`） | 15 | 每次破坏性 schema 变更 +1，并补 `MIGRATIONS` 步骤 |
+| 数据库 schema | SQLite `PRAGMA user_version`（`server/db.ts` 的 `Store.DB_SCHEMA_VERSION`） | 16 | 每次破坏性 schema 变更 +1，并追加不可变迁移文件与 manifest |
 | 插件内容快照 | 目录名 `@<10位hash>`（`kernel/plugin-snapshot.ts`） | — | 内容寻址，自动失效 |
 
 发布前检查 `package.json` 版本与 CHANGELOG 最新条目一致。
@@ -22,10 +22,11 @@
 - 改变字段语义或删除字段：递增 `API_SCHEMA_VERSION`，旧版本保留过渡期。
 - 错误响应统一 `schemaVersion: 1`、`ok: false`、稳定 `code`，跨版本稳定。
 
-### 数据库 schema（v15）
+### 数据库 schema（v16）
 
 - 列级增量（新增可空列/带默认值列）：幂等 ALTER 兜底，不递增 `user_version`。
-- 破坏性变更（改列类型、拆表、删列）：`DB_SCHEMA_VERSION` +1，`MIGRATIONS` 追加 `from → to` 事务化步骤。
+- 破坏性变更（改列类型、拆表、删列）：`DB_SCHEMA_VERSION` +1，并在 `server/migrations/` 追加不可变 SQL 文件与 manifest checksum；已发布文件不可修改。
+- 最低支持 v15：v14 及更低版本 fail-closed，必须先 `npm run db:export` 或恢复 v15 备份。
 - 更高版本的库 fail-closed 拒绝打开；迁移失败保留旧版本，可从启动备份恢复（`data/backups/` 保留 7 份）。
 
 ### 插件 manifest（v3）
