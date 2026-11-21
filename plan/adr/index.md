@@ -5,5 +5,9 @@
 | 编号 | 标题 | 状态 |
 |---|---|---|
 | [0001](0001-deploy-modes.md) | local/trusted/remote 三部署模式与启动安全自检 | accepted |
+| [0002](0002-host-service-boundary.md) | Host Service 与 Plugin 的边界 | accepted |
+| [0003](0003-social-observations.md) | 社会健康改为观察指标 | accepted |
+| [0004](0004-database-migration-v16.md) | 数据库 v16 与不可变迁移 | accepted |
+| [0005](0005-experience-review-v2.md) | Experience Review v2 与真实模型验收 | accepted |
 
 与本文关联的既有权威文档：威胁模型 [threat-model-v1.md](../threat-model-v1.md)、版本与兼容策略 [release-policy-v1.md](../release-policy-v1.md)、插件 manifest 兼容 [manifest-v1-compatibility.md](../manifest-v1-compatibility.md)、API 契约 [api-contract-v1.md](../api-contract-v1.md)、供应链策略 [supply-chain-policy-v1.md](../supply-chain-policy-v1.md)。
