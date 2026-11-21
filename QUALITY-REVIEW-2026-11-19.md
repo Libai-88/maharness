@@ -223,9 +223,9 @@ maharness 的底座是可靠的，测试和安全投入值得保留；真正需�
 | --- | --- | --- |
 | F2 插件 SDK 边界 | 已完成 | core/plugins 源码统一从 `kernel/plugin-sdk` 导入；新增依赖边界测试与 `check:boundaries`。 |
 | F4 时钟 | 已完成 | `OrganizationService` / `SocietyService` 注入 `now`，业务路径不再直接 `Date.now()`；新增确定性测试。 |
-| F3 角色权重 / 任务提示 | 部分完成 | 六因子权重进入 `InstitutionPolicies` 并版本化；任务支持 `requiredCapabilities` / `needsWrite`；旧关键词推断保留兼容。 |
-| F3 社会健康指标 | 部分完成 | 健康快照增加 `scoreKind: weighted_heuristic`、`sampleSize` 和显式权重；UI 标注“启发式”。 |
-| F5 文件拆分 | 部分完成 | 制度默认值与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康拆到 `server/society/health.ts`，单体入口归入 `server/society/index.ts`；热点路径复用单个 `OrganizationService`；调度/结算/快照仍需继续拆分。 |
-| F6 迁移 | 部分完成 | 增加迁移版本连续性测试与 `server/migration-lock.ts` 指纹门禁，旧迁移/ schema 常量变更必须显式更新锁；历史 schema 快照/完全不可变 DDL 仍需后续重构。 |
-| F7 体验真实模型证据 | 部分完成 | 修复 reasoning 模型的复盘输出预算；2026-11-20 本机路由复测 `group/never-stuck` 1/9、`auto/deepseek-v4.1-flash` 5/9；仍未达到 9/9，需要继续调 prompt/预算并保留真实报告。 |
-| F1 host service 边界 | 部分完成 | 已明确 host service / plugin 的边界语义；`server/host-services.ts` 统一装配宿主服务，减少 routes 直接构造服务；全量插件化仍需后续架构批次。
+| F3 角色权重 / 任务提示 | 已完成 | 六因子权重进入 `InstitutionPolicies` 并版本化；`POST /api/organization/society/tasks` 要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`；任务记录 `capabilitySource` / `teamMode`；关键词推断只用于旧记录。 |
+| F3 社会健康指标 | 已完成 | 删除 `/100` 聚合分；快照改为 `observations[]`，每项带公式、分子分母、样本量与 `quality`；协作分只由人工复核事件写入。 |
+| F5 文件拆分 | 已完成 | `server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `types`，入口 2,264→1,793 行；`server/services/organization/` 拆出 `projections`，入口 1,860→1,771 行；`server/experience.ts` 拆出 `services/experience/{facts,shared}`，1,639→1,077 行。 |
+| F6 迁移 | 已完成 | `Store.MIGRATIONS` 与 `migration-lock.ts` 删除，改为 `server/migrations/` 不可变 SQL + `manifest.json` checksum + `schema_migrations` 审计表；最低支持 v15，v14 及以下 fail-closed；新增 `db:export` / `db:upgrade` / `db:verify`。 |
+| F7 体验真实模型证据 | 已完成 | 新增 `evals/experience-v2.ts`（7 条真实工具事实样本、显式 reviewer、裁决/证据/建议三项指标）；2026-11-21 复测 7/7，裁决一致 100%、证据有效 100%、建议可用 100%。 |
+| F1 host service 边界 | 已完成 | `server/host/` 拆出 `container` / `ports` / `adapters`；server 不再直接 import core（`server/tests/boundary.spec.ts` 强制），routes 只依赖窄接口；全量插件化保留为产品决策而非架构债。
