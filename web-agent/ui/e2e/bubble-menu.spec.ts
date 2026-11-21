@@ -507,6 +507,9 @@ test.describe('运行轨迹', () => {
       setTimeout(releaseTrace, 200);
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('运行一次回放');
+    // Under full-suite load the composer can still be resolving providers when
+    // Enter is pressed, which drops the message and leaves the trace panel empty.
+    await expect(page.getByTestId('send-btn')).toBeEnabled();
     await page.keyboard.press('Enter');
     await page.getByRole('button', { name: '运行轨迹面板' }).click();
 

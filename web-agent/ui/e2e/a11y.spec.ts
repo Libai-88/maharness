@@ -75,6 +75,7 @@ test.describe('可访问性（UX-05）', () => {
       ].join('\n'),
     }));
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('执行一个多阶段任务');
+    await expect(page.getByTestId('send-btn')).toBeEnabled();
     await page.keyboard.press('Enter');
     const failure = page.getByTestId('message-failure').last();
     await expect(failure).toContainText('这个任务有点大');
@@ -101,6 +102,7 @@ test.describe('可访问性（UX-05）', () => {
       ].join('\n'),
     }));
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
+    await expect(page.getByTestId('send-btn')).toBeEnabled();
     await page.keyboard.press('Enter');
     const card = page.getByTestId('approval-card');
     await expect(card).toBeVisible();
