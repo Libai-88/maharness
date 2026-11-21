@@ -51,7 +51,7 @@ AI 社会页面分组展示正在执行、等待处理、已交付和异常任�
 
 ## 治理与历史兼容
 
-制度版本、角色负载、费用账本、角色履历和评价标准位于次级观察信息。制度、角色与评价标准分别版本化，变更和回滚保留审计；角色权限只能收窄父任务授权。AI 提案不能自行变更权限、审批或制度。制度版本包含 `roleSelectionWeights` 六因子权重；任务可显式提供 `requiredCapabilities` 和 `needsWrite`，旧任务继续使用兼容的关键词推断。社会快照中的 `health` 带有 `scoreKind: "weighted_heuristic"`、`sampleSize` 和 `weights`，只作为观察指标，不表示客观社会测量。
+制度版本、角色负载、费用账本、角色履历和评价标准位于次级观察信息。制度、角色与评价标准分别版本化，变更和回滚保留审计；角色权限只能收窄父任务授权。AI 提案不能自行变更权限、审批或制度。制度版本包含 `roleSelectionWeights` 六因子权重；`POST /api/organization/society/tasks` 要求显式 `requiredCapabilities` 与 `needsWrite`，缺失返回 `400 TASK_CAPABILITIES_REQUIRED`；任务记录 `capabilitySource` 与 `teamMode`，旧任务继续使用兼容的关键词推断。社会快照不再提供 `/100` 聚合健康分，改为 `observations[]`，每项带公式、分子、分母、样本量和 `quality`；协作关系分只由人工复核事件写入，未标注样本量的指标不表示客观社会测量。
 
 历史社会任务继续使用原社会任务 API、制度调度和已记录授权。其部门配额、价值与净收益比较、高额审批和人工释放规则按历史记录执行；`awaiting_acceptance` 仍须人工确认。系统调度器可以在没有聊天主 Agent 时推进这类排队任务。该兼容入口与普通对话 Run 共享底层执行事实，不为同一请求重复创建工作单。
 

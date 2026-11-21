@@ -20,12 +20,12 @@
     "schedulerAutoAdvanceWithoutTickApi": true
   },
   "screenshots": {
-    "real-workflow-governance.png": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0",
-    "real-workflow-team-active.png": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
-    "real-workflow.png": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
-    "real-workflow-team-final.png": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df",
-    "real-workflow-rollback-active.png": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
-    "real-workflow-rollback.png": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+    "real-workflow-governance.png": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66",
+    "real-workflow-team-active.png": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d",
+    "real-workflow.png": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6",
+    "real-workflow-team-final.png": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234",
+    "real-workflow-rollback-active.png": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca",
+    "real-workflow-rollback.png": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d"
   },
   "scenarios": [
     {
@@ -47,7 +47,7 @@
         "release_completed",
         "human_accepted"
       ],
-      "screenshotSha256": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0"
+      "screenshotSha256": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66"
     },
     {
       "scenario": "team-auto-scheduler-ui",
@@ -56,8 +56,8 @@
       "scheduleMode": "team",
       "childRunCount": 2,
       "contractCount": 2,
-      "networkNodeCount": 4,
-      "networkEdgeCount": 2,
+      "networkNodeCount": 5,
+      "networkEdgeCount": 0,
       "bottleneckKinds": [
         "budget"
       ],
@@ -69,14 +69,14 @@
         "history",
         "load"
       ],
-      "wellbeingRoleCount": 4,
-      "officialTokenCount": 140,
-      "actualTokenCount": 120,
+      "wellbeingRoleCount": 5,
+      "officialTokenCount": 120,
+      "actualTokenCount": 100,
       "cacheUsageStatus": "known",
       "cachedInputTokens": 0,
-      "cacheMissInputTokens": 84,
+      "cacheMissInputTokens": 72,
       "cacheWriteUsageStatus": "unknown",
-      "providerCalls": 6,
+      "providerCalls": 5,
       "schedulerTickApiCalls": 0,
       "schedulerAutoAdvanced": true,
       "collaborationNetworkUi": true,
@@ -84,9 +84,9 @@
       "sixFactorUi": true,
       "wellbeingUi": true,
       "tokenCacheUi": true,
-      "activeScreenshotSha256": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
-      "awaitingScreenshotSha256": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
-      "finalScreenshotSha256": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df"
+      "activeScreenshotSha256": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d",
+      "awaitingScreenshotSha256": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6",
+      "finalScreenshotSha256": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234"
     },
     {
       "scenario": "failed-child-rollback-to-solo",
@@ -111,13 +111,13 @@
         "release_completed",
         "human_accepted"
       ],
-      "providerCalls": 8,
+      "providerCalls": 6,
       "schedulerTickApiCalls": 0,
       "schedulerAutoAdvanced": true,
       "soloUi": true,
       "rollbackReasonUi": true,
-      "activeScreenshotSha256": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
-      "finalScreenshotSha256": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+      "activeScreenshotSha256": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca",
+      "finalScreenshotSha256": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d"
     }
   ]
 }

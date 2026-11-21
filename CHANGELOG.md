@@ -60,8 +60,6 @@
 - Windows 运维手册：安装、升级、恢复、数据目录、密钥异常、remote 暴露前置与回滚（API-08）。
 - 供应链策略文档 `plan/supply-chain-policy-v1.md`：npm/技能包/插件三类对象的哈希锚定、升级与回滚路径（SEC-07）。
 - 插件 SDK 公共边界：core/plugins 源码统一从 `kernel/plugin-sdk` 导入，新增依赖边界测试与 `npm run check:boundaries` / `check:quality`。
-- 社会制度新增 `roleSelectionWeights` 六因子权重版本；任务支持显式 `requiredCapabilities` / `needsWrite`，社会健康快照附带 `scoreKind`、`sampleSize` 与权重说明。
-- `npm run test:coverage` 可选的 Node 原生覆盖率入口；数据库迁移连续性门禁测试与 `server/migration-lock.ts` 指纹锁定。
 - 体验复盘支持 reasoning 模型的输出预算：reasoning token 计入总预算，输出上限可使用总预算余量；`experience-live` 支持 `EVAL_REASONING=1`。
 
 ### Changed
@@ -70,8 +68,7 @@
 - 工作台聚焦个人事务；独立 AI 社会页面提供角色、分支、交付和异常观察，以及补充要求、停止、恢复、审批与返工。
 - 普通任务支持预算缺省与未知价格，显式预算仍然生效；基础观察工具直接可用，其他工具按任务与阶段加载。
 - 清理过时的规划文档与历史评测报告目录，文档引用统一指向现行开发与验收入口；重新生成插件锁，恢复 workbench 源码完整性校验。
-- `OrganizationService` / `SocietyService` 注入可测试时钟；角色选择权重进入制度版本；`society` 政策常量与校验拆到 `server/society/policy.ts`，角色选择评分拆到 `server/society/selection.ts`，社会健康指标拆到 `server/society/health.ts`，宿主服务装配集中到 `server/host-services.ts`，热点路径复用单个 `OrganizationService`。
-- 社会健康指标从等权展示改为显式 `weighted_heuristic`，UI 标注“社会健康（启发式）”，避免把启发式分数当成客观测量。
+- `OrganizationService` / `SocietyService` 注入可测试时钟；角色选择权重进入制度版本；`society` 政策常量与校验、角色选择评分、社会观察指标分别拆到 `server/services/society/{policy,selection,health}.ts`，宿主服务装配集中到 `server/host/container.ts`，热点路径复用单个 `OrganizationService`。
 
 ### Fixed
 

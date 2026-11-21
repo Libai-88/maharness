@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import {
+  copyFileSync,
   existsSync,
   mkdirSync,
   readFileSync,
@@ -108,6 +109,32 @@ type PreviousAcceptanceReport = {
 };
 
 const root = resolve(import.meta.dirname, '..');
+
+// Playwright writes its evidence under ui/test-results/, while the acceptance
+// report reads the versioned copy under evals/acceptance/. Sync the browser
+// artefacts first so a fresh `npm run e2e` is enough to refresh the report.
+const EVIDENCE_FILES = [
+  'dashboard.png',
+  'real-workflow.json',
+  'real-workflow.png',
+  'real-workflow-governance.png',
+  'real-workflow-team-active.png',
+  'real-workflow-team-final.png',
+  'real-workflow-rollback-active.png',
+  'real-workflow-rollback.png',
+];
+function syncBrowserEvidence(): void {
+  const source = resolve(root, 'ui/test-results/ai-society-v1');
+  if (!existsSync(source)) return;
+  const target = resolve(root, 'evals/acceptance/ai-society-v1');
+  mkdirSync(target, { recursive: true });
+  for (const name of EVIDENCE_FILES) {
+    const from = resolve(source, name);
+    if (existsSync(from)) copyFileSync(from, resolve(target, name));
+  }
+}
+syncBrowserEvidence();
+
 const output = resolve(root, 'evals/acceptance/ai-society-v1/deterministic-report.json');
 const dashboardRef = 'evals/acceptance/ai-society-v1/dashboard.png';
 const dashboard = resolve(root, dashboardRef);
@@ -258,7 +285,12 @@ function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, run
       }>;
     };
     const source = readFileSync(resolve(root, 'ui/e2e/society-real-backend.spec.ts'), 'utf8');
-    const sourceUsesLiveBackend = !/page\.route\(/.test(source);
+    // `page.route` alone is not mocking: the disconnect scenario registers a route
+    // that aborts/continues the SSE stream to exercise offline recovery. Only a
+    // route that fulfils a response replaces the real backend.
+    const mockedRoutes = [...source.matchAll(/page\.route\([\s\S]{0,400}?\}\);/g)]
+      .filter(match => /route\.fulfill\(/.test(match[0]));
+    const sourceUsesLiveBackend = mockedRoutes.length === 0;
     const reportFresh = Number.isFinite(runStart)
       && Number.isFinite(runEnd)
       && Date.parse(file.modifiedAt!) >= runStart - 1_000
@@ -392,7 +424,14 @@ const browserBackendBoundary = realWorkflow.proven
   ? 'real_backend_with_deterministic_provider' as const
   : mockBrowserBoundary;
 const pairedLive = previousReport?.evidence?.pairedLive;
-const liveEvidence = previousReport?.liveModelEvidence;
+// The carried-forward live-model evidence points at a report under the ignored
+// evals/reports/ tree. If that artefact is gone (cleanup, fresh clone), the
+// reference is stale and must not be reported as available evidence.
+const liveEvidenceRaw = previousReport?.liveModelEvidence;
+const liveEvidence = liveEvidenceRaw && liveEvidenceRaw.rawRun?.reportRef
+  && existsSync(resolve(root, liveEvidenceRaw.rawRun.reportRef))
+  ? liveEvidenceRaw
+  : undefined;
 const rawLive = liveEvidence?.rawRun;
 const liveReport = liveEvidence?.available && rawLive
   ? {
@@ -703,7 +742,9 @@ try {
   const postRun = society.snapshot('default');
   const settledSchedule = postRun.schedules.find(item => item.id === teamSchedule?.id);
   assert.equal(settledSchedule?.status, 'completed');
-  assert.equal(postRun.network.edges.length > 0, true);
+  // Collaboration relations are only written by human review events; scheduling
+  // and completion must not fabricate them.
+  assert.equal(postRun.network.edges.length, 0);
   assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'submission')), true);
   assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'delivery')), false);
   const teamLedger = postRun.economics.taskLedger.find(item => item.taskId === teamTask.id)!;
@@ -734,7 +775,7 @@ try {
   ]);
   pass('F2', '角色跨任务生命史', [
     '团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。',
-    `当前协作网络包含 ${postRun.network.edges.length} 条有契约证据的关系。`,
+    '调度与提交阶段不写协作关系；关系分只在人工验收事件后按真实证据写入。',
   ]);
   pass('G3', '最小必要团队与动态解散', [
     `团队 Run 数=${settledSchedule?.runIds.length}，全部真实契约交付后调度释放。`,
@@ -755,6 +796,11 @@ try {
   assert.equal(acceptedTeam.task.status, 'completed');
   assert.equal(society.snapshot('default').roleLife
     .some(item => item.memories.some(memory => memory.kind === 'delivery')), true);
+  // Human acceptance is a real review event, so it is the first point where a
+  // positive collaboration relation is justified.
+  assert.equal(society.snapshot('default').network.edges.length > 0, true);
+  assert.equal(society.snapshot('default').network.edges
+    .every(edge => edge.score === 1), true);
 
   const paired = society.createPairedExperiment({
     tenantId: 'default',

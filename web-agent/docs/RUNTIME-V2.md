@@ -198,7 +198,7 @@ advisory 任务在额度超出、价格未知或用量不完整时继续执行�
 
 ## 数据迁移与回滚
 
-升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带迁移前标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建 schema 15。
+升级前停止旧实例，确保没有活动调用。数据库迁移前，在数据库同目录生成带迁移前标记的 SQLite 快照，并备份配置与插件清单。迁移失败拒绝启动；版本化迁移在事务内推进。新建空库直接创建 schema 16。
 
 schema 8 到 9 新增 `automations_v3`、`automation_occurrences_v3`、`automation_trigger_baselines_v3`、`scheduled_recovery_jobs_v3` 及 Run 来源字段。历史续跑计划从 `schedules.json` 一次性导入 SQLite，原文件归档为 `schedules.json.migrated`。历史会话、Run、文件、事项、模型配置、用户规则、插件授权与审批记录保持不变。旧断点在聊天中可查看；用户核对先前操作后，以明确目标发起新任务，不自动重放旧工具。
 

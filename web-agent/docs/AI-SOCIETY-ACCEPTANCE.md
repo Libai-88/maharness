@@ -67,6 +67,12 @@
 
 ### 真实模型门禁
 
+> **当前状态（2026-11-21）**：本节的 9 样本 `group/never-stuck` 门禁是 2026-11-18 的历史结论。其原始报告位于已被忽略并清理的 `evals/reports/`，当前提交内不再可访问，因此 `deterministic-report.json` 的 `liveModelEvidence` 已如实降级为 `{"available": false}`——验收脚本会校验 `rawRun.reportRef` 指向的文件是否存在，不存在即不再声明该证据可用。
+>
+> 当前可复现的真实模型证据是 `npm run eval:experience:v2`（7 条真实工具事实样本、独立 reviewer）：最新一轮 6/7，通过率 86%、裁决一致 86%、证据有效 100%、建议可用 100%，四项门禁全过。报告位于 `evals/reports/experience-v2/`（本机运行数据，不提交）。
+>
+> 以下 2026-11-18 的历史门禁记录保留作为演进过程说明，不代表当前可复核的证据。
+
 该次门禁使用 `group/never-stuck` 路由，温度 0，9 个样本：
 
 - 9 个样本、21 次模型调用、115,349 ms。
@@ -112,7 +118,7 @@ H1 另使用同一 `group/never-stuck` 路由执行一次真实配对 A/B。两�
 | D2 社会仪表盘 | 真实后端截图与 UI contract | 确定性通过 | 展示部门、角色、网络、瓶颈、六因子选择、福利退避、三级预算、执行进度和待验收交付 |
 | E1 制度演化 | 制度、角色、评价标准版本与审计测试 | 确定性通过 | 三类对象独立发布、审计并回滚；AI 复盘冻结评价标准版本和哈希；mock API 覆盖相应界面 |
 | E2 可审计干预 | 高额审批与配额测试 | 确定性通过 | 高额任务等待人类，配额变化影响下一轮实际调度 |
-| 补充：生命周期审计 | 真实后端经营闭环、不可变审计测试 | 确定性通过 | schema 15 的 `organization_society_audit_v1` 记录排队、制度调度、释放、回退与人工验收；SQLite 触发器拒绝更新和删除，租户幂等键避免重复 tick 或重启写入重复事实 |
+| 补充：生命周期审计 | 真实后端经营闭环、不可变审计测试 | 确定性通过 | schema 16 的 `organization_society_audit_v1` 记录排队、制度调度、释放、回退与人工验收；SQLite 触发器拒绝更新和删除，租户幂等键避免重复 tick 或重启写入重复事实 |
 | F1 去掉主 Agent | 系统调度器测试 | 确定性通过 | 无聊天主 Agent 时仍创建并推进持久化社会 Run |
 | F2 跨任务生命 | 角色记忆与关系 | 确定性通过 | 调度写 submission，人工验收后才写 delivery；执行失败和拒收写 failure，记忆、关系和履历持久保留 |
 | F3 福利资源约束 | 福利与三级预算测试 | 确定性通过 | 超载、上下文压力、连续失败退避、审批休眠、部门配额、社会预算和角色预算均参与派工门禁 |
@@ -139,6 +145,8 @@ node --import tsx --test --test-concurrency=2 `
   server/tests/experience.spec.ts
 npm run ui:build
 npm run e2e -- society.spec.ts organization.spec.ts society-real-backend.spec.ts
+# E2E 把截图与 real-workflow.json 写到 ui/test-results/ai-society-v1/，
+# 验收脚本会自动同步到 evals/acceptance/ai-society-v1/ 后再校验，无需手动复制
 node --import tsx scripts/ai-society-acceptance.ts
 node --import tsx scripts/replay-organization-live.ts
 ```

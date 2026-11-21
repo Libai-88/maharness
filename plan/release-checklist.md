@@ -5,7 +5,7 @@
 ## 发布检查
 
 1. 版本一致性：`web-agent/package.json` `version` 与 CHANGELOG 最新条目一致；`ui/package.json` 同步。
-2. 数据库 schema：涉及 schema 变更时 `Store.DB_SCHEMA_VERSION` 已递增且 `MIGRATIONS` 含对应步骤；`npm run eval:ci` 全绿。
+2. 数据库 schema：涉及 schema 变更时 `Store.DB_SCHEMA_VERSION` 已递增，且 `server/migrations/` 已追加对应不可变迁移文件、`manifest.json` 校验和与 `schema_migrations` 审计记录；`npm run eval:ci` 全绿。
 3. API schema：涉及契约变更时 `API_SCHEMA_VERSION` 已按 release-policy 递增；`npm test` 的 api-contract 契约扫描 + `node scripts/check-doc-facts.mjs` 通过。
 4. 插件 manifest：涉及 manifest 语义变更时 `manifest-v1-compatibility.md` 与 `PLUGIN_API_VERSION` 同步；`npm run plugin:validate` 双插件通过。
 5. 安全门禁：`npm run test:security` 全绿；`npm run check:threat-model` 通过；威胁模型在安全边界变更时已升版。

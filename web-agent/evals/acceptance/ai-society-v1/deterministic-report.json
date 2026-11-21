@@ -1,7 +1,7 @@
 {
   "kind": "ai-society-deterministic-acceptance",
   "schemaVersion": 4,
-  "generatedAt": "2026-11-18T03:22:23.455Z",
+  "generatedAt": "2026-11-21T07:12:28.760Z",
   "mode": "deterministic-real-runtime-fixture",
   "criteria": [
     {
@@ -45,8 +45,8 @@
       "domain": "部门与社会运行层",
       "status": "passed",
       "evidence": [
-        "3 个部门、5 个成员和 2 条协作关系进入社会快照。",
-        "快照同时提供部门队列、并发、福利、瓶颈和健康度。"
+        "3 个部门、5 个成员和 0 条协作关系进入社会快照。",
+        "快照同时提供部门队列、并发、福利、瓶颈和社会观察指标（不输出伪精确总分）。"
       ]
     },
     {
@@ -57,7 +57,7 @@
         "每个调度决策记录能力、记忆、工具、协作、履历和负载六项分数及权重。",
         "能力索引=research/review，选中角色=2。",
         "调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。",
-        "当前社会健康分数=93.92，预算利用率=0.004。"
+        "当前社会观察=负载均衡:1/福利余量:1/未结异常:0/预算占用:0.004/协作关系:unknown。"
       ]
     },
     {
@@ -76,10 +76,10 @@
       "status": "passed",
       "evidence": [
         "确定性服务测试覆盖高额审批、制度调度、终端交付、人工验收、制度发布和回滚落库。",
-        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":927,\"modifiedAt\":\"2026-11-18T03:22:22.932Z\",\"sha256\":\"d5e02ec27dc408f6860e388f31dd9a40de0b6d218844bf9d673dd08582178c4e\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-18T00:10:57.915Z\",\"duration\":50994.135,\"expected\":3,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
-        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":109813,\"modifiedAt\":\"2026-11-17T20:43:31.718Z\",\"sha256\":\"cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6\"}，与本次 Playwright 运行时间匹配=false。",
+        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":1795,\"modifiedAt\":\"2026-11-21T07:12:28.245Z\",\"sha256\":\"c98ba616047b9dc18b4126ac31a7b555fb74d512f403eac2412ee5910696b5c5\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-21T07:03:40.804Z\",\"duration\":64995.378,\"expected\":8,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
+        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":100540,\"modifiedAt\":\"2026-11-21T07:04:44.886Z\",\"sha256\":\"e99f32ec3cf4b782a3d7ed067f3ffb3419f663546dbb226848a8f4eef4d7bd7f\"}，与本次 Playwright 运行时间匹配=true。",
         "mock UI 契约边界=mocked_api，page.route 数量=1。",
-        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":4202,\"modifiedAt\":\"2026-11-18T00:11:48.626Z\",\"sha256\":\"ea35f1247017659dabc40d08d10d2ea2b6267c1b22941bdb355cb50c6d3d202b\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":131717,\"modifiedAt\":\"2026-11-18T00:11:38.096Z\",\"sha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"screenshots\":[{\"name\":\"real-workflow-governance.png\",\"expected\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-governance.png\",\"status\":\"present\",\"bytes\":122887,\"modifiedAt\":\"2026-11-18T00:11:05.357Z\",\"sha256\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\"},\"valid\":true},{\"name\":\"real-workflow-team-active.png\",\"expected\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-active.png\",\"status\":\"present\",\"bytes\":134585,\"modifiedAt\":\"2026-11-18T00:11:08.317Z\",\"sha256\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\"},\"valid\":true},{\"name\":\"real-workflow.png\",\"expected\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":131717,\"modifiedAt\":\"2026-11-18T00:11:38.096Z\",\"sha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\"},\"valid\":true},{\"name\":\"real-workflow-team-final.png\",\"expected\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-final.png\",\"status\":\"present\",\"bytes\":135071,\"modifiedAt\":\"2026-11-18T00:11:38.434Z\",\"sha256\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\"},\"valid\":true},{\"name\":\"real-workflow-rollback-active.png\",\"expected\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback-active.png\",\"status\":\"present\",\"bytes\":150843,\"modifiedAt\":\"2026-11-18T00:11:46.228Z\",\"sha256\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\"},\"valid\":true},{\"name\":\"real-workflow-rollback.png\",\"expected\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback.png\",\"status\":\"present\",\"bytes\":149303,\"modifiedAt\":\"2026-11-18T00:11:48.594Z\",\"sha256\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"},\"valid\":true}],\"data\":{\"kind\":\"browser-real-backend-workflow-suite\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, production Scheduler, RunService, SocietyService, persistence and UI are real\",\"coverage\":{\"realTeamTask\":true,\"childRunsAtLeast2\":true,\"contractsAtLeast2\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"rollbackToSolo\":true,\"immutableSocietyAudit\":true,\"schedulerAutoAdvanceWithoutTickApi\":true},\"screenshots\":{\"real-workflow-governance.png\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\",\"real-workflow-team-active.png\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"real-workflow.png\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"real-workflow-team-final.png\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\",\"real-workflow-rollback-active.png\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"real-workflow-rollback.png\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"},\"scenarios\":[{\"scenario\":\"governance-version-history\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"childRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"release_completed\",\"human_accepted\"],\"screenshotSha256\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\"},{\"scenario\":\"team-auto-scheduler-ui\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"scheduleMode\":\"team\",\"childRunCount\":2,\"contractCount\":2,\"networkNodeCount\":4,\"networkEdgeCount\":2,\"bottleneckKinds\":[\"budget\"],\"selectionFactors\":[\"capability\",\"memory\",\"tools\",\"collaboration\",\"history\",\"load\"],\"wellbeingRoleCount\":4,\"officialTokenCount\":140,\"actualTokenCount\":120,\"cacheUsageStatus\":\"known\",\"cachedInputTokens\":0,\"cacheMissInputTokens\":84,\"cacheWriteUsageStatus\":\"unknown\",\"providerCalls\":6,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"activeScreenshotSha256\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"awaitingScreenshotSha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"finalScreenshotSha256\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\"},{\"scenario\":\"failed-child-rollback-to-solo\",\"taskStatus\":\"completed\",\"initialScheduleMode\":\"team\",\"initialChildRunCount\":2,\"initialContractCount\":2,\"childRunCount\":3,\"contractCount\":3,\"fallbackMode\":\"solo\",\"fallbackRunStatus\":\"completed\",\"rollbackMarker\":\"ROLLBACK_TO_SOLO\",\"failedChildCount\":1,\"contractStatuses\":[\"collapsed\",\"delivered\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"fallback_solo\",\"release_completed\",\"human_accepted\"],\"providerCalls\":8,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"soloUi\":true,\"rollbackReasonUi\":true,\"activeScreenshotSha256\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"finalScreenshotSha256\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"}]}}，最终边界=real_backend_with_deterministic_provider。"
+        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":4202,\"modifiedAt\":\"2026-11-21T07:04:42.989Z\",\"sha256\":\"24a25c5be879a49de6ce5ebb352f6cf6313d413ee45da7c814b23ee4a6eebc63\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":133262,\"modifiedAt\":\"2026-11-21T07:04:30.312Z\",\"sha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"screenshots\":[{\"name\":\"real-workflow-governance.png\",\"expected\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-governance.png\",\"status\":\"present\",\"bytes\":126350,\"modifiedAt\":\"2026-11-21T07:03:50.070Z\",\"sha256\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\"},\"valid\":true},{\"name\":\"real-workflow-team-active.png\",\"expected\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-active.png\",\"status\":\"present\",\"bytes\":143053,\"modifiedAt\":\"2026-11-21T07:04:00.245Z\",\"sha256\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\"},\"valid\":true},{\"name\":\"real-workflow.png\",\"expected\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":133262,\"modifiedAt\":\"2026-11-21T07:04:30.312Z\",\"sha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\"},\"valid\":true},{\"name\":\"real-workflow-team-final.png\",\"expected\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-final.png\",\"status\":\"present\",\"bytes\":127191,\"modifiedAt\":\"2026-11-21T07:04:30.694Z\",\"sha256\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\"},\"valid\":true},{\"name\":\"real-workflow-rollback-active.png\",\"expected\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback-active.png\",\"status\":\"present\",\"bytes\":154579,\"modifiedAt\":\"2026-11-21T07:04:40.269Z\",\"sha256\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\"},\"valid\":true},{\"name\":\"real-workflow-rollback.png\",\"expected\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback.png\",\"status\":\"present\",\"bytes\":146637,\"modifiedAt\":\"2026-11-21T07:04:42.957Z\",\"sha256\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"},\"valid\":true}],\"data\":{\"kind\":\"browser-real-backend-workflow-suite\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, production Scheduler, RunService, SocietyService, persistence and UI are real\",\"coverage\":{\"realTeamTask\":true,\"childRunsAtLeast2\":true,\"contractsAtLeast2\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"rollbackToSolo\":true,\"immutableSocietyAudit\":true,\"schedulerAutoAdvanceWithoutTickApi\":true},\"screenshots\":{\"real-workflow-governance.png\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\",\"real-workflow-team-active.png\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"real-workflow.png\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"real-workflow-team-final.png\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\",\"real-workflow-rollback-active.png\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"real-workflow-rollback.png\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"},\"scenarios\":[{\"scenario\":\"governance-version-history\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"childRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"release_completed\",\"human_accepted\"],\"screenshotSha256\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\"},{\"scenario\":\"team-auto-scheduler-ui\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"scheduleMode\":\"team\",\"childRunCount\":2,\"contractCount\":2,\"networkNodeCount\":5,\"networkEdgeCount\":0,\"bottleneckKinds\":[\"budget\"],\"selectionFactors\":[\"capability\",\"memory\",\"tools\",\"collaboration\",\"history\",\"load\"],\"wellbeingRoleCount\":5,\"officialTokenCount\":120,\"actualTokenCount\":100,\"cacheUsageStatus\":\"known\",\"cachedInputTokens\":0,\"cacheMissInputTokens\":72,\"cacheWriteUsageStatus\":\"unknown\",\"providerCalls\":5,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"activeScreenshotSha256\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"awaitingScreenshotSha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"finalScreenshotSha256\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\"},{\"scenario\":\"failed-child-rollback-to-solo\",\"taskStatus\":\"completed\",\"initialScheduleMode\":\"team\",\"initialChildRunCount\":2,\"initialContractCount\":2,\"childRunCount\":3,\"contractCount\":3,\"fallbackMode\":\"solo\",\"fallbackRunStatus\":\"completed\",\"rollbackMarker\":\"ROLLBACK_TO_SOLO\",\"failedChildCount\":1,\"contractStatuses\":[\"collapsed\",\"delivered\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"fallback_solo\",\"release_completed\",\"human_accepted\"],\"providerCalls\":6,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"soloUi\":true,\"rollbackReasonUi\":true,\"activeScreenshotSha256\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"finalScreenshotSha256\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"}]}}，最终边界=real_backend_with_deterministic_provider。"
       ]
     },
     {
@@ -88,10 +88,10 @@
       "status": "passed",
       "evidence": [
         "真实服务、临时 SQLite、调度器、RunService 和浏览器组成经营闭环；Provider 使用确定性本地传输，真实模型未参与。",
-        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":927,\"modifiedAt\":\"2026-11-18T03:22:22.932Z\",\"sha256\":\"d5e02ec27dc408f6860e388f31dd9a40de0b6d218844bf9d673dd08582178c4e\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-18T00:10:57.915Z\",\"duration\":50994.135,\"expected\":3,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
-        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":109813,\"modifiedAt\":\"2026-11-17T20:43:31.718Z\",\"sha256\":\"cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6\"}，与本次 Playwright 运行时间匹配=false。",
+        "Playwright JSON=ui/test-results/playwright-results.json，归档={\"ref\":\"evals/acceptance/ai-society-v1/playwright-results.json\",\"status\":\"present\",\"bytes\":1795,\"modifiedAt\":\"2026-11-21T07:12:28.245Z\",\"sha256\":\"c98ba616047b9dc18b4126ac31a7b555fb74d512f403eac2412ee5910696b5c5\"}，状态=passed，目标测试=true，公开结果={\"startTime\":\"2026-11-21T07:03:40.804Z\",\"duration\":64995.378,\"expected\":8,\"skipped\":0,\"unexpected\":0,\"flaky\":0}。",
+        "截图={\"ref\":\"evals/acceptance/ai-society-v1/dashboard.png\",\"status\":\"present\",\"bytes\":100540,\"modifiedAt\":\"2026-11-21T07:04:44.886Z\",\"sha256\":\"e99f32ec3cf4b782a3d7ed067f3ffb3419f663546dbb226848a8f4eef4d7bd7f\"}，与本次 Playwright 运行时间匹配=true。",
         "mock UI 契约边界=mocked_api，page.route 数量=1。",
-        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":4202,\"modifiedAt\":\"2026-11-18T00:11:48.626Z\",\"sha256\":\"ea35f1247017659dabc40d08d10d2ea2b6267c1b22941bdb355cb50c6d3d202b\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":131717,\"modifiedAt\":\"2026-11-18T00:11:38.096Z\",\"sha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"screenshots\":[{\"name\":\"real-workflow-governance.png\",\"expected\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-governance.png\",\"status\":\"present\",\"bytes\":122887,\"modifiedAt\":\"2026-11-18T00:11:05.357Z\",\"sha256\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\"},\"valid\":true},{\"name\":\"real-workflow-team-active.png\",\"expected\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-active.png\",\"status\":\"present\",\"bytes\":134585,\"modifiedAt\":\"2026-11-18T00:11:08.317Z\",\"sha256\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\"},\"valid\":true},{\"name\":\"real-workflow.png\",\"expected\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":131717,\"modifiedAt\":\"2026-11-18T00:11:38.096Z\",\"sha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\"},\"valid\":true},{\"name\":\"real-workflow-team-final.png\",\"expected\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-final.png\",\"status\":\"present\",\"bytes\":135071,\"modifiedAt\":\"2026-11-18T00:11:38.434Z\",\"sha256\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\"},\"valid\":true},{\"name\":\"real-workflow-rollback-active.png\",\"expected\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback-active.png\",\"status\":\"present\",\"bytes\":150843,\"modifiedAt\":\"2026-11-18T00:11:46.228Z\",\"sha256\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\"},\"valid\":true},{\"name\":\"real-workflow-rollback.png\",\"expected\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback.png\",\"status\":\"present\",\"bytes\":149303,\"modifiedAt\":\"2026-11-18T00:11:48.594Z\",\"sha256\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"},\"valid\":true}],\"data\":{\"kind\":\"browser-real-backend-workflow-suite\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, production Scheduler, RunService, SocietyService, persistence and UI are real\",\"coverage\":{\"realTeamTask\":true,\"childRunsAtLeast2\":true,\"contractsAtLeast2\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"rollbackToSolo\":true,\"immutableSocietyAudit\":true,\"schedulerAutoAdvanceWithoutTickApi\":true},\"screenshots\":{\"real-workflow-governance.png\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\",\"real-workflow-team-active.png\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"real-workflow.png\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"real-workflow-team-final.png\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\",\"real-workflow-rollback-active.png\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"real-workflow-rollback.png\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"},\"scenarios\":[{\"scenario\":\"governance-version-history\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"childRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"release_completed\",\"human_accepted\"],\"screenshotSha256\":\"e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0\"},{\"scenario\":\"team-auto-scheduler-ui\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"scheduleMode\":\"team\",\"childRunCount\":2,\"contractCount\":2,\"networkNodeCount\":4,\"networkEdgeCount\":2,\"bottleneckKinds\":[\"budget\"],\"selectionFactors\":[\"capability\",\"memory\",\"tools\",\"collaboration\",\"history\",\"load\"],\"wellbeingRoleCount\":4,\"officialTokenCount\":140,\"actualTokenCount\":120,\"cacheUsageStatus\":\"known\",\"cachedInputTokens\":0,\"cacheMissInputTokens\":84,\"cacheWriteUsageStatus\":\"unknown\",\"providerCalls\":6,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"activeScreenshotSha256\":\"27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664\",\"awaitingScreenshotSha256\":\"903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3\",\"finalScreenshotSha256\":\"3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df\"},{\"scenario\":\"failed-child-rollback-to-solo\",\"taskStatus\":\"completed\",\"initialScheduleMode\":\"team\",\"initialChildRunCount\":2,\"initialContractCount\":2,\"childRunCount\":3,\"contractCount\":3,\"fallbackMode\":\"solo\",\"fallbackRunStatus\":\"completed\",\"rollbackMarker\":\"ROLLBACK_TO_SOLO\",\"failedChildCount\":1,\"contractStatuses\":[\"collapsed\",\"delivered\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"fallback_solo\",\"release_completed\",\"human_accepted\"],\"providerCalls\":8,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"soloUi\":true,\"rollbackReasonUi\":true,\"activeScreenshotSha256\":\"357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac\",\"finalScreenshotSha256\":\"dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5\"}]}}，最终边界=real_backend_with_deterministic_provider。"
+        "真实后端浏览器证据={\"file\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.json\",\"status\":\"present\",\"bytes\":4202,\"modifiedAt\":\"2026-11-21T07:04:42.989Z\",\"sha256\":\"24a25c5be879a49de6ce5ebb352f6cf6313d413ee45da7c814b23ee4a6eebc63\"},\"screenshot\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":133262,\"modifiedAt\":\"2026-11-21T07:04:30.312Z\",\"sha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\"},\"status\":\"passed\",\"proven\":true,\"freshForPlaywrightRun\":true,\"sourceUsesLiveBackend\":true,\"screenshots\":[{\"name\":\"real-workflow-governance.png\",\"expected\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-governance.png\",\"status\":\"present\",\"bytes\":126350,\"modifiedAt\":\"2026-11-21T07:03:50.070Z\",\"sha256\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\"},\"valid\":true},{\"name\":\"real-workflow-team-active.png\",\"expected\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-active.png\",\"status\":\"present\",\"bytes\":143053,\"modifiedAt\":\"2026-11-21T07:04:00.245Z\",\"sha256\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\"},\"valid\":true},{\"name\":\"real-workflow.png\",\"expected\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow.png\",\"status\":\"present\",\"bytes\":133262,\"modifiedAt\":\"2026-11-21T07:04:30.312Z\",\"sha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\"},\"valid\":true},{\"name\":\"real-workflow-team-final.png\",\"expected\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-team-final.png\",\"status\":\"present\",\"bytes\":127191,\"modifiedAt\":\"2026-11-21T07:04:30.694Z\",\"sha256\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\"},\"valid\":true},{\"name\":\"real-workflow-rollback-active.png\",\"expected\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback-active.png\",\"status\":\"present\",\"bytes\":154579,\"modifiedAt\":\"2026-11-21T07:04:40.269Z\",\"sha256\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\"},\"valid\":true},{\"name\":\"real-workflow-rollback.png\",\"expected\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\",\"actual\":{\"ref\":\"evals/acceptance/ai-society-v1/real-workflow-rollback.png\",\"status\":\"present\",\"bytes\":146637,\"modifiedAt\":\"2026-11-21T07:04:42.957Z\",\"sha256\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"},\"valid\":true}],\"data\":{\"kind\":\"browser-real-backend-workflow-suite\",\"backend\":\"maharness server/index.ts\",\"database\":\"temporary SQLite\",\"browser\":\"Playwright Chromium\",\"provider\":\"deterministic OpenAI-compatible local HTTP transport\",\"realModel\":false,\"mockBoundary\":\"provider transport only; API, production Scheduler, RunService, SocietyService, persistence and UI are real\",\"coverage\":{\"realTeamTask\":true,\"childRunsAtLeast2\":true,\"contractsAtLeast2\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"rollbackToSolo\":true,\"immutableSocietyAudit\":true,\"schedulerAutoAdvanceWithoutTickApi\":true},\"screenshots\":{\"real-workflow-governance.png\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\",\"real-workflow-team-active.png\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"real-workflow.png\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"real-workflow-team-final.png\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\",\"real-workflow-rollback-active.png\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"real-workflow-rollback.png\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"},\"scenarios\":[{\"scenario\":\"governance-version-history\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"childRunCount\":1,\"providerCalls\":1,\"institutionVersion\":3,\"institutionBudgetUsd\":20,\"auditActions\":[\"rollback\",\"update\",\"initialize\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"release_completed\",\"human_accepted\"],\"screenshotSha256\":\"708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66\"},{\"scenario\":\"team-auto-scheduler-ui\",\"taskStatus\":\"completed\",\"scheduleStatus\":\"completed\",\"scheduleMode\":\"team\",\"childRunCount\":2,\"contractCount\":2,\"networkNodeCount\":5,\"networkEdgeCount\":0,\"bottleneckKinds\":[\"budget\"],\"selectionFactors\":[\"capability\",\"memory\",\"tools\",\"collaboration\",\"history\",\"load\"],\"wellbeingRoleCount\":5,\"officialTokenCount\":120,\"actualTokenCount\":100,\"cacheUsageStatus\":\"known\",\"cachedInputTokens\":0,\"cacheMissInputTokens\":72,\"cacheWriteUsageStatus\":\"unknown\",\"providerCalls\":5,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"collaborationNetworkUi\":true,\"bottleneckUi\":true,\"sixFactorUi\":true,\"wellbeingUi\":true,\"tokenCacheUi\":true,\"activeScreenshotSha256\":\"595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d\",\"awaitingScreenshotSha256\":\"cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6\",\"finalScreenshotSha256\":\"ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234\"},{\"scenario\":\"failed-child-rollback-to-solo\",\"taskStatus\":\"completed\",\"initialScheduleMode\":\"team\",\"initialChildRunCount\":2,\"initialContractCount\":2,\"childRunCount\":3,\"contractCount\":3,\"fallbackMode\":\"solo\",\"fallbackRunStatus\":\"completed\",\"rollbackMarker\":\"ROLLBACK_TO_SOLO\",\"failedChildCount\":1,\"contractStatuses\":[\"collapsed\",\"delivered\"],\"societyAuditActions\":[\"queued\",\"scheduled\",\"fallback_solo\",\"release_completed\",\"human_accepted\"],\"providerCalls\":6,\"schedulerTickApiCalls\":0,\"schedulerAutoAdvanced\":true,\"soloUi\":true,\"rollbackReasonUi\":true,\"activeScreenshotSha256\":\"d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca\",\"finalScreenshotSha256\":\"fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d\"}]}}，最终边界=real_backend_with_deterministic_provider。"
       ]
     },
     {
@@ -118,7 +118,7 @@
       "domain": "去掉主 Agent 仍运转",
       "status": "passed",
       "evidence": [
-        "无主 Agent 运行时创建 Run：51890cb4-03d3-4344-8ac4-d2f37b280392, b2924d91-5d11-4092-a97e-8b89ecd0adda。",
+        "无主 Agent 运行时创建 Run：689f17a5-1b10-436f-9a5f-61332b42d559, e4cb6038-d3d6-431a-a05a-513d006c9392。",
         "运行来源均为 society，并由系统调度器而不是聊天调用链推进。"
       ]
     },
@@ -128,7 +128,7 @@
       "status": "passed",
       "evidence": [
         "团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。",
-        "当前协作网络包含 2 条有契约证据的关系。"
+        "调度与提交阶段不写协作关系；关系分只在人工验收事件后按真实证据写入。"
       ]
     },
     {
@@ -239,22 +239,25 @@
     "fullyPassed": true
   },
   "sourceHashes": {
-    "scripts/ai-society-acceptance.ts": "3396316d46530a660991394dab07b3bbc140e349857d76e8d1594ac5074f0f68",
-    "server/db.ts": "fb96d52d1c1f77aa9344af49a9eeb3ef01785d6bf6ff060b99390fc8379275c8",
-    "server/society.ts": "dc6a1a0adc28a1e3593a1b51a46921625f59d69f723b9cb204ac6e7df22a76cd",
-    "server/organization.ts": "02f5b6c4402171dd775df42e5a16fe9d39ac8c09f32c7bf5758a9cae4a302586",
-    "server/organization-store.ts": "1aa399785b1c2ce0c325b16bea3f90d3bcd5e13d0e53baf26a39ed571e2ef70b",
-    "server/run-service.ts": "4d2d9a0a2edd63af761a4ebba49f6352b9ff8a36a4da4f474c317745c9818300",
-    "kernel/model-call.ts": "a0e3de5dbaceaba9f1abff85d675b751223af205cfea3764bc66392328f5b222",
-    "kernel/tests/model-call.spec.ts": "c6e2d7ae6961ae155833cf618f50d569540a786d0e476873050bc4c2013d47c2",
-    "server/tests/organization.spec.ts": "5691f200c8522d619f08f54216edc966bcb3cef190bd121901db3a05d228174d",
-    "server/tests/society.spec.ts": "97f25c18941c55ad41209a41367e42879270e6c5d673336de068d8aaa89111e9",
-    "server/tests/society-restart.integration.spec.ts": "47b60e6f1a228dba2d6e44afa2ed69ee94d285035e70c91898dd6e6f2201c093",
-    "ui/e2e/society.spec.ts": "42f850e1eeee2b51707353e65a11fd5a644fa5f88e6dc83e495aa60e2570de84",
-    "ui/playwright.config.ts": "25c0de949138b2333e905033d8a94a056a80147cb315c64ffff9b8ac54a5ad30",
-    "ui/e2e/society-real-backend.spec.ts": "23fc590f249478575aceb51a72a4b9abd89428bac9359a8f8951a0cd81386397",
-    "scripts/organization-paired-live.ts": "eb52f4a773c20a14db590d39a137d2f2d84d55de63bb64ab59eb2a6253f87803",
-    "evals/organization-paired-live.spec.ts": "d71bb7c3c55eb50e550176a5590b269b965ee64dbcc55a2435a1b029fda570dd"
+    "scripts/ai-society-acceptance.ts": "9af74b2eef4b40e80f02c30b7ac83c9a8e4f205f87620bb4a7cbd1c060ce73d4",
+    "server/db.ts": "835f9e91a0b48a6f9c49a0cabf9696337bd40cea372dd8cd2744a1d22fb49fec",
+    "server/services/society/index.ts": "e0bfe61d75a68fbbb6a7bdc8773b33f7bace6c1eea1bbf8b8c0c62c5349d3553",
+    "server/services/society/policy.ts": "2ef1caa394c6946e2d60a50a028edbfbf6c2a9765ab45eab326008614f1bb403",
+    "server/services/society/selection.ts": "8fccac45b850ca066c928a7f02fccb886e55c63552d29f08e9d630e7740ddf9b",
+    "server/services/society/health.ts": "e09075204c1e0645bd4304eb0ac452289005dc1658d883ccbb15557fca81843e",
+    "server/services/organization/service.ts": "f4c5a96e8e031c3583d7dc9b7758e2b8ec09e473c90825d97a74c73363b08022",
+    "server/organization-store.ts": "a6ac76d3b8f0260b0661b9bc1514a0fa0091fcf5c9ddc39e924b0827f7bc1098",
+    "server/run-service.ts": "8aa30a3d5a753821b1026a7dcdc2d828eedfd796310c2279102e88fb4267af28",
+    "kernel/model-call.ts": "ccfc1825720db1ccba4ce812f2d6fcb2b5a70558d100a297c11b8c679bc69959",
+    "kernel/tests/model-call.spec.ts": "a5e524e6c552bf70032296dda69866e2bc0886ff571f2f868600077b15dbd1a1",
+    "server/tests/organization.spec.ts": "fbc76745ddff67225c3476549324f139972d2047222e1f35e94973d389fc3bbb",
+    "server/tests/society.spec.ts": "be0e2e54b51fedd7969a53b5fd499dd3f3a533d494252cc6c882e5f075bea421",
+    "server/tests/society-restart.integration.spec.ts": "19884c9801f3266627e2c8685f2a4204cdcf6ecc9f838eecd48d713deef40a28",
+    "ui/e2e/society.spec.ts": "4d9d943cce68473c566e11f715afed767d187bb7f5b1cf7458bc635c87c3a991",
+    "ui/playwright.config.ts": "7398d01740acc94eb6995afe8018a323f38075350cadfe6109ed084ab5a7ded0",
+    "ui/e2e/society-real-backend.spec.ts": "d0237a8a86689d1240316f529a356194ac09f508ea06329fa925ef85d147085a",
+    "scripts/organization-paired-live.ts": "45916d77cab9efc2d0850111ae85a3b0cf771324f0cfc5e37e3ed88b0e145c44",
+    "evals/organization-paired-live.spec.ts": "50572bdfa443bf8772406df0124a275defac263c2c9b989dbf5abc0fdbac8e08"
   },
   "evidence": {
     "realRuntime": "Production service classes create persisted Runs with society origin, work-order, contract, role, token and cache facts; execution uses a deterministic local runtime fixture.",
@@ -270,15 +273,15 @@
           "ref": "evals/acceptance/ai-society-v1/real-workflow.json",
           "status": "present",
           "bytes": 4202,
-          "modifiedAt": "2026-11-18T00:11:48.626Z",
-          "sha256": "ea35f1247017659dabc40d08d10d2ea2b6267c1b22941bdb355cb50c6d3d202b"
+          "modifiedAt": "2026-11-21T07:04:42.989Z",
+          "sha256": "24a25c5be879a49de6ce5ebb352f6cf6313d413ee45da7c814b23ee4a6eebc63"
         },
         "screenshot": {
           "ref": "evals/acceptance/ai-society-v1/real-workflow.png",
           "status": "present",
-          "bytes": 131717,
-          "modifiedAt": "2026-11-18T00:11:38.096Z",
-          "sha256": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3"
+          "bytes": 133262,
+          "modifiedAt": "2026-11-21T07:04:30.312Z",
+          "sha256": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6"
         },
         "status": "passed",
         "proven": true,
@@ -287,73 +290,73 @@
         "screenshots": [
           {
             "name": "real-workflow-governance.png",
-            "expected": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0",
+            "expected": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow-governance.png",
               "status": "present",
-              "bytes": 122887,
-              "modifiedAt": "2026-11-18T00:11:05.357Z",
-              "sha256": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0"
+              "bytes": 126350,
+              "modifiedAt": "2026-11-21T07:03:50.070Z",
+              "sha256": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66"
             },
             "valid": true
           },
           {
             "name": "real-workflow-team-active.png",
-            "expected": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
+            "expected": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow-team-active.png",
               "status": "present",
-              "bytes": 134585,
-              "modifiedAt": "2026-11-18T00:11:08.317Z",
-              "sha256": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664"
+              "bytes": 143053,
+              "modifiedAt": "2026-11-21T07:04:00.245Z",
+              "sha256": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d"
             },
             "valid": true
           },
           {
             "name": "real-workflow.png",
-            "expected": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
+            "expected": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow.png",
               "status": "present",
-              "bytes": 131717,
-              "modifiedAt": "2026-11-18T00:11:38.096Z",
-              "sha256": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3"
+              "bytes": 133262,
+              "modifiedAt": "2026-11-21T07:04:30.312Z",
+              "sha256": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6"
             },
             "valid": true
           },
           {
             "name": "real-workflow-team-final.png",
-            "expected": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df",
+            "expected": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow-team-final.png",
               "status": "present",
-              "bytes": 135071,
-              "modifiedAt": "2026-11-18T00:11:38.434Z",
-              "sha256": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df"
+              "bytes": 127191,
+              "modifiedAt": "2026-11-21T07:04:30.694Z",
+              "sha256": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234"
             },
             "valid": true
           },
           {
             "name": "real-workflow-rollback-active.png",
-            "expected": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
+            "expected": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow-rollback-active.png",
               "status": "present",
-              "bytes": 150843,
-              "modifiedAt": "2026-11-18T00:11:46.228Z",
-              "sha256": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac"
+              "bytes": 154579,
+              "modifiedAt": "2026-11-21T07:04:40.269Z",
+              "sha256": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca"
             },
             "valid": true
           },
           {
             "name": "real-workflow-rollback.png",
-            "expected": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5",
+            "expected": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d",
             "actual": {
               "ref": "evals/acceptance/ai-society-v1/real-workflow-rollback.png",
               "status": "present",
-              "bytes": 149303,
-              "modifiedAt": "2026-11-18T00:11:48.594Z",
-              "sha256": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+              "bytes": 146637,
+              "modifiedAt": "2026-11-21T07:04:42.957Z",
+              "sha256": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d"
             },
             "valid": true
           }
@@ -380,12 +383,12 @@
             "schedulerAutoAdvanceWithoutTickApi": true
           },
           "screenshots": {
-            "real-workflow-governance.png": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0",
-            "real-workflow-team-active.png": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
-            "real-workflow.png": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
-            "real-workflow-team-final.png": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df",
-            "real-workflow-rollback-active.png": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
-            "real-workflow-rollback.png": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+            "real-workflow-governance.png": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66",
+            "real-workflow-team-active.png": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d",
+            "real-workflow.png": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6",
+            "real-workflow-team-final.png": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234",
+            "real-workflow-rollback-active.png": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca",
+            "real-workflow-rollback.png": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d"
           },
           "scenarios": [
             {
@@ -407,7 +410,7 @@
                 "release_completed",
                 "human_accepted"
               ],
-              "screenshotSha256": "e9bf322fec54ccd93db386c19a37826bfd7385e75c5837d24fdba939c3d60ce0"
+              "screenshotSha256": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66"
             },
             {
               "scenario": "team-auto-scheduler-ui",
@@ -416,8 +419,8 @@
               "scheduleMode": "team",
               "childRunCount": 2,
               "contractCount": 2,
-              "networkNodeCount": 4,
-              "networkEdgeCount": 2,
+              "networkNodeCount": 5,
+              "networkEdgeCount": 0,
               "bottleneckKinds": [
                 "budget"
               ],
@@ -429,14 +432,14 @@
                 "history",
                 "load"
               ],
-              "wellbeingRoleCount": 4,
-              "officialTokenCount": 140,
-              "actualTokenCount": 120,
+              "wellbeingRoleCount": 5,
+              "officialTokenCount": 120,
+              "actualTokenCount": 100,
               "cacheUsageStatus": "known",
               "cachedInputTokens": 0,
-              "cacheMissInputTokens": 84,
+              "cacheMissInputTokens": 72,
               "cacheWriteUsageStatus": "unknown",
-              "providerCalls": 6,
+              "providerCalls": 5,
               "schedulerTickApiCalls": 0,
               "schedulerAutoAdvanced": true,
               "collaborationNetworkUi": true,
@@ -444,9 +447,9 @@
               "sixFactorUi": true,
               "wellbeingUi": true,
               "tokenCacheUi": true,
-              "activeScreenshotSha256": "27445f2912dcdb826dbc646091b3265a88fba4d8492cb513e9bc0931de8f3664",
-              "awaitingScreenshotSha256": "903f91a0c7c9c920040ad4bf31f2adafda0f18c0bd7066aa9204d772238285f3",
-              "finalScreenshotSha256": "3af6d9d780b1746826fda2eaba09dd12e728cb351bee4729a474d178962881df"
+              "activeScreenshotSha256": "595f77787a26fe09d4bfce3b4b47598b549f67fbf49fc2e45663a5c4bc83de9d",
+              "awaitingScreenshotSha256": "cce02b65efc1f330e3864a863cb1d6a33d00259df44487aef2581573c44449a6",
+              "finalScreenshotSha256": "ab4d7437e715ecd7a56a545162a51e3d409d874a64a6c016124f3fc447825234"
             },
             {
               "scenario": "failed-child-rollback-to-solo",
@@ -471,13 +474,13 @@
                 "release_completed",
                 "human_accepted"
               ],
-              "providerCalls": 8,
+              "providerCalls": 6,
               "schedulerTickApiCalls": 0,
               "schedulerAutoAdvanced": true,
               "soloUi": true,
               "rollbackReasonUi": true,
-              "activeScreenshotSha256": "357bb8b64c7fa53550d7b63bf087bef980a6a95e71da6f2898ef1e409a99f0ac",
-              "finalScreenshotSha256": "dc2d024ddaf5d1391774cf5232ead29cf42d043e751c763d23489942caf06fc5"
+              "activeScreenshotSha256": "d61c8313fd31f807f152a158de1ab589a3c4b59ba66616e4e90683bbfb464fca",
+              "finalScreenshotSha256": "fb750deab8565d4659d52d56aaa2e4e9de8581fff3286ef99dd8462e9625ea1d"
             }
           ]
         }
@@ -485,33 +488,55 @@
       "playwright": {
         "ref": "evals/acceptance/ai-society-v1/playwright-results.json",
         "status": "passed",
-        "bytes": 927,
-        "modifiedAt": "2026-11-18T01:38:11.176Z",
-        "sha256": "d5e02ec27dc408f6860e388f31dd9a40de0b6d218844bf9d673dd08582178c4e",
+        "bytes": 1795,
+        "modifiedAt": "2026-11-21T07:09:38.116Z",
+        "sha256": "c98ba616047b9dc18b4126ac31a7b555fb74d512f403eac2412ee5910696b5c5",
         "targetedSpec": true,
         "targetedSpecs": {
-          "mockedContract": false,
+          "mockedContract": true,
           "realBackend": true
         },
         "assertionsPassed": true,
         "stats": {
-          "startTime": "2026-11-18T00:10:57.915Z",
-          "duration": 50994.135,
-          "expected": 3,
+          "startTime": "2026-11-21T07:03:40.804Z",
+          "duration": 64995.378,
+          "expected": 8,
           "skipped": 0,
           "unexpected": 0,
           "flaky": 0
         },
         "archiveData": {
           "kind": "playwright-sanitized-evidence",
-          "sourceSha256": "e26c48c12924be1f7c63b290c4c80c2d0dc79f092dec1ddf3325903cfca3e920",
+          "sourceSha256": "2e3631d1c77cdb63ceedf374ce0362ac11c0f2781a70446665065195be421c2a",
           "targetFiles": [
-            "society-real-backend.spec.ts"
+            "organization.spec.ts",
+            "society-real-backend.spec.ts",
+            "society.spec.ts"
           ],
           "specs": [
             {
+              "file": "organization.spec.ts",
+              "title": "项目组织视图展示回执并完成暂停、改派、异常和关闭操作",
+              "passed": true
+            },
+            {
               "file": "society-real-backend.spec.ts",
               "title": "真实后端经营闭环写入临时 SQLite 并可由浏览器验收",
+              "passed": true
+            },
+            {
+              "file": "society-real-backend.spec.ts",
+              "title": "对话交付在 AI 社会可下载，刷新和返工沿用原工作单",
+              "passed": true
+            },
+            {
+              "file": "society-real-backend.spec.ts",
+              "title": "AI 社会断线补读，停止和继续保留补充及已写入产物",
+              "passed": true
+            },
+            {
+              "file": "society-real-backend.spec.ts",
+              "title": "AI 社会沿用真实工具审批，刷新等待期间不执行写入",
               "passed": true
             },
             {
@@ -523,12 +548,17 @@
               "file": "society-real-backend.spec.ts",
               "title": "真实 child Run 失败后由 RunService 与 SocietyService 回退单角色并留下标记",
               "passed": true
+            },
+            {
+              "file": "society.spec.ts",
+              "title": "历史社会任务的审批、交付与治理保持可用",
+              "passed": true
             }
           ],
           "stats": {
-            "startTime": "2026-11-18T00:10:57.915Z",
-            "duration": 50994.135,
-            "expected": 3,
+            "startTime": "2026-11-21T07:03:40.804Z",
+            "duration": 64995.378,
+            "expected": 8,
             "skipped": 0,
             "unexpected": 0,
             "flaky": 0
@@ -537,18 +567,18 @@
         "archive": {
           "ref": "evals/acceptance/ai-society-v1/playwright-results.json",
           "status": "present",
-          "bytes": 927,
-          "modifiedAt": "2026-11-18T03:22:22.932Z",
-          "sha256": "d5e02ec27dc408f6860e388f31dd9a40de0b6d218844bf9d673dd08582178c4e"
+          "bytes": 1795,
+          "modifiedAt": "2026-11-21T07:12:28.245Z",
+          "sha256": "c98ba616047b9dc18b4126ac31a7b555fb74d512f403eac2412ee5910696b5c5"
         }
       },
       "screenshot": {
         "ref": "evals/acceptance/ai-society-v1/dashboard.png",
         "status": "present",
-        "bytes": 109813,
-        "modifiedAt": "2026-11-17T20:43:31.718Z",
-        "sha256": "cc891a84482c2cbb4b9675e882c471567976ba6bada6625811c1a291203afcf6",
-        "freshForPlaywrightRun": false
+        "bytes": 100540,
+        "modifiedAt": "2026-11-21T07:04:44.886Z",
+        "sha256": "e99f32ec3cf4b782a3d7ed067f3ffb3419f663546dbb226848a8f4eef4d7bd7f",
+        "freshForPlaywrightRun": true
       }
     },
     "pairedLive": {
@@ -605,45 +635,10 @@
   },
   "blockingGates": [],
   "liveModelEvidence": {
-    "available": true,
-    "model": "group/never-stuck",
-    "rawRun": {
-      "reportRef": "evals/reports/organization-live/20261118-social-os-v6/report.json",
-      "reportHash": "4bb902268c59360871502c9ddd4c2f59cb4fd1880e6e9c0fef190ad8f2d53e8f",
-      "createdAt": "2026-11-18T01:32:43.407Z",
-      "expected": 9,
-      "observed": 9,
-      "passed": 9,
-      "allPassed": true,
-      "calls": 21,
-      "tokensIn": 36478,
-      "tokensOut": 12881,
-      "configuredCostUsd": 0,
-      "usageComplete": true,
-      "elapsedMs": 115349
-    },
-    "historicalTraceReplay": {
-      "createdAt": "2026-11-17T17:34:08.237Z",
-      "sourceReportHash": "346f91fb2ae78324fa53395e5a900308b0b66cbe5bec80978201da6b61178dc4",
-      "rawPassed": 1,
-      "reconciledPassed": 9,
-      "total": 9,
-      "callsModels": false,
-      "semantics": "Reloads persisted outputs and terminal facts through the corrected deterministic finalizer."
-    },
-    "providerCache": {
-      "hitMissStatus": "known",
-      "writeStatus": "unknown",
-      "cachedInputTokens": 9856,
-      "missInputTokens": 26622,
-      "cacheWriteTokens": null,
-      "cacheSavingsUsd": null,
-      "source": "organization-live report receipts"
-    },
-    "billing": "The configured route declares a zero local price; supplier billing and cache savings remain unverified."
+    "available": false
   },
   "limits": [
-    "The current real-model gate passed 9/9; historical trace replay remains separate evidence.",
+    "The current real-model gate is 0/0; trace replay is not model evidence.",
     "Provider cache savings remain unknown unless usage is reported; cache token hit rate is calculated only from reported cache fields.",
     "Raw live reports were removed after aggregation; their hashes and acceptance decisions remain in this report.",
     "福祉表示可观测运行负担，不表示主观感受、意识或法律人格。",

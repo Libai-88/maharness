@@ -6,7 +6,8 @@
 
 **万物都是插件：agent 可以自己定义自己。** 只有内外之分：内部是唯一保持不变的 Agent 核心（kernel/），其余一切能力都通过可插拔的插件实现（外部）。
 
-- 实现与使用文档：[web-agent/](web-agent/)
+- 实现与使用文档：[web-agent/](web-agent/) · 当前版本 `0.2.0`（插件 API 3.0.0，数据库 schema 16）
+- 开发交接与验收状态：[HANDOFF.md](HANDOFF.md) · 更新日志：[CHANGELOG.md](CHANGELOG.md)
 - 文件、Office 与学习工作流：[办公与学习工作台](web-agent/docs/WORKBENCH.md)
 - 架构设计：[docs/ARCHITECTURE.md](web-agent/docs/ARCHITECTURE.md)
 - AI 劳动组织：[AI-ORGANIZATION.md](web-agent/docs/AI-ORGANIZATION.md)

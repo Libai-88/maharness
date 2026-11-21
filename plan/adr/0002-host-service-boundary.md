@@ -21,4 +21,4 @@ maharness 的产品能力持续进入 `server/`：组织、社会、复盘、自
 
 ## 回滚
 
-回退到当前 `server/host-services.ts` + 具体 service 的装配方式；数据库和插件契约不受本 ADR 影响。
+回退到 v0.1.x 的 `server/host-services.ts` + 具体 service 的装配方式；数据库和插件契约不受本 ADR 影响。

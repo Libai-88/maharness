@@ -1,13 +1,35 @@
 {
   "kind": "playwright-sanitized-evidence",
-  "sourceSha256": "e26c48c12924be1f7c63b290c4c80c2d0dc79f092dec1ddf3325903cfca3e920",
+  "sourceSha256": "2e3631d1c77cdb63ceedf374ce0362ac11c0f2781a70446665065195be421c2a",
   "targetFiles": [
-    "society-real-backend.spec.ts"
+    "organization.spec.ts",
+    "society-real-backend.spec.ts",
+    "society.spec.ts"
   ],
   "specs": [
     {
+      "file": "organization.spec.ts",
+      "title": "项目组织视图展示回执并完成暂停、改派、异常和关闭操作",
+      "passed": true
+    },
+    {
       "file": "society-real-backend.spec.ts",
       "title": "真实后端经营闭环写入临时 SQLite 并可由浏览器验收",
+      "passed": true
+    },
+    {
+      "file": "society-real-backend.spec.ts",
+      "title": "对话交付在 AI 社会可下载，刷新和返工沿用原工作单",
+      "passed": true
+    },
+    {
+      "file": "society-real-backend.spec.ts",
+      "title": "AI 社会断线补读，停止和继续保留补充及已写入产物",
+      "passed": true
+    },
+    {
+      "file": "society-real-backend.spec.ts",
+      "title": "AI 社会沿用真实工具审批，刷新等待期间不执行写入",
       "passed": true
     },
     {
@@ -19,12 +41,17 @@
       "file": "society-real-backend.spec.ts",
       "title": "真实 child Run 失败后由 RunService 与 SocietyService 回退单角色并留下标记",
       "passed": true
+    },
+    {
+      "file": "society.spec.ts",
+      "title": "历史社会任务的审批、交付与治理保持可用",
+      "passed": true
     }
   ],
   "stats": {
-    "startTime": "2026-11-18T00:10:57.915Z",
-    "duration": 50994.135,
-    "expected": 3,
+    "startTime": "2026-11-21T07:03:40.804Z",
+    "duration": 64995.378,
+    "expected": 8,
     "skipped": 0,
     "unexpected": 0,
     "flaky": 0

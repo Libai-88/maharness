@@ -8,7 +8,6 @@
 | --- | --- |
 | 日常运行目录 | `D:\\DEEPSEEK\\maharness\\web-agent` |
 | 本地 `maharness` 分支 | 当前 HEAD 见 `git log`；v0.2.0 架构收敛提交见 `CHANGELOG.md` 的 0.2.0 条目 |
-| 隔离开发分支 | `codex/maharness-closeout`，停留在 `1934c31`（对比基线） |
 | 远端状态 | `origin/maharness` 已同步；GitHub Actions 结果以远端为准 |
 
 在 PowerShell 执行 `maharness`，默认打开 `http://localhost:3000`。前端构建产物位于 `web-agent/ui/dist/`。日常运行仓库的数据目录和本机运行文件不在版本库；提交前按路径检查 Git 状态。
@@ -27,11 +26,11 @@
 
 ## 数据库与恢复
 
-日常数据库为 `D:\\DEEPSEEK\\maharness\\web-agent\\data\\agent.db`，当前 schema 为 15。`server/db.ts` 的版本迁移会在初始化组织评价标准前建好租户表和默认租户；迁移前生成 SQLite 快照，失败不启动新执行。
+日常数据库为 `D:\\DEEPSEEK\\maharness\\web-agent\\data\\agent.db`，当前 schema 为 16（最低支持 v15，v14 及以下 fail-closed）。迁移由 `server/migrations/` 下的不可变 SQL 文件与 `manifest.json` 校验和驱动，`schema_migrations` 记录已应用版本；迁移前生成 SQLite 快照，失败不启动新执行。可用 `npm run db:export` / `db:upgrade` / `db:verify` 单独执行迁移与校验。
 
 清理文件前按明确路径核对 ignored 文件及本地运行数据，避免宽泛的 `git clean`。数据库、WAL、密钥与配置的恢复步骤见 [Windows 运维手册](plan/windows-ops-runbook.md)。
 
-## 本次接手完成
+## 已完成的关键改动
 
 - 命令执行器恢复：本机 dsh-ops 的 Niubash 准备目录要求位于会话工作区外；在 `D:\\DEEPSEEK\\.dsh\\profiles\\desktop\\cordis.patch.yml` 的 `dsh-ops` 行配置 `bashPath: D:\\mingit\\bin\\bash.exe`，恢复 `ops_bash`。
 - 清理旧规划文档与历史评测报告，统一文档引用；重新生成 `plugins-lock.json`，修复 `workbench` 插件完整性校验。
@@ -47,7 +46,7 @@
 | 验收 | 结果 |
 | --- | --- |
 | 双端类型检查与构建 | 通过 |
-| 单测 | 1535 通过、2 跳过、0 失败 |
+| 单测 | 1536 通过、2 跳过、0 失败 |
 | 数据库迁移 | 本机 v15 → v16 实测通过（57→58 表，审计表记录两条 checksum） |
 | 体验复盘 v2 真实模型 | 6/7，四项门禁通过（通过率 86%、裁决一致 86%、证据有效 100%、建议可用 100%） |
 | 安全回归 | 402/402 |
@@ -60,7 +59,7 @@
 | 技能锁 / 技能路由 | 通过，5/5 |
 | 威胁模型 / 文档事实 | 通过 |
 
-发布仍以 [发布清单](plan/release-checklist.md) 为准：双 workflow（quality + e2e）必须全绿；版本号与 CHANGELOG 一致后才可打 tag。当前本地功能验收已通过，远端 GitHub Actions 以最终提交的运行结果为准。
+v0.2.0 已发布并打 tag；发布门禁仍以 [发布清单](plan/release-checklist.md) 为准：双 workflow（quality + e2e）必须全绿，版本号与 CHANGELOG 一致。后续提交需重新跑完整验收并确认远端 Actions 结果。
 
 ## 相关文档
 
