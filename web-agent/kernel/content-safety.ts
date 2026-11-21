@@ -174,3 +174,19 @@ export function summarizeWarnings(warnings: ToolWarning[]): string {
     .map((warning) => `${warning.kind === 'prompt-injection' ? '提示注入' : '敏感信息'}:${warning.label}`)
     .join('；');
 }
+
+/**
+ * Trace/诊断参数的统一脱敏：只保留结构，不把凭据写入实时事件或归档。
+ * server 与 core 共用这一份，避免两套脱敏规则漂移。
+ */
+export function redactTraceValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(redactTraceValue);
+  if (!value || typeof value !== 'object') return value;
+  const out: Record<string, unknown> = {};
+  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
+    out[key] = /(?:api[-_]?key|token|secret|password|authorization|cookie|credential)/i.test(key)
+      ? '[REDACTED]'
+      : redactTraceValue(child);
+  }
+  return out;
+}

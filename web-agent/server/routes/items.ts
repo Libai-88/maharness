@@ -1,5 +1,5 @@
 import type { Express, Request, Response, NextFunction } from 'express';
-import { ItemError, isItemError, type PersonalItem, type ItemAttempt, type PersonalItems } from '../../core/todo/items';
+import { ItemError, isItemError, type PersonalItem, type ItemAttempt, type PersonalItems } from '../host/adapters/items';
 import type { RouteDeps } from './shared';
 import { tenantIdOf, getChatService } from './shared';
 import { RunError, type RunService } from '../run-service';

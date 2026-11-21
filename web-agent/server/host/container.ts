@@ -1,16 +1,19 @@
-import type { Kernel } from '../kernel';
-import type { ToolDef } from '../kernel/types';
-import type { Store } from './db';
-import { AutomationService } from './automations';
-import { OrganizationService } from './organization';
-import { organizationTools } from './organization-tools';
-import { SocietyService } from './society';
-import { tenantSandboxRoot } from './tenant-workspace';
+import type { Kernel } from '../../kernel';
+import type { ProviderDef, ToolDef } from '../../kernel/types';
+import type { Store } from '../db';
+import { AutomationService } from '../automations';
+import { ExperienceService } from '../experience';
+import { OrganizationService } from '../organization';
+import { organizationTools } from '../organization-tools';
+import { SocietyService } from '../society';
+import { tenantSandboxRoot } from '../tenant-workspace';
+import { currentPlan } from './adapters/goal-plan';
 
 export interface HostServices {
   automations: AutomationService;
   organization: OrganizationService;
   society: SocietyService;
+  experience: ExperienceService;
   automationTools: ToolDef[];
   organizationTools: ToolDef[];
   runTools: () => ToolDef[];
@@ -21,8 +24,8 @@ export interface HostServices {
  *
  * Product services in this module are intentionally not plugins: they own
  * durable Run/tenant facts and must be constructed once for the host process.
- * Plugins continue to enter through kernel/plugin-sdk; routes receive these
- * services through RouteDeps rather than constructing their own instances.
+ * Plugins continue to enter through kernel/plugin-sdk; routes receive narrow
+ * ports (server/host/ports.ts) instead of constructing their own instances.
  */
 export function createHostServices(kernel: Kernel, store: Store): HostServices {
   const automations = new AutomationService(
@@ -48,11 +51,21 @@ export function createHostServices(kernel: Kernel, store: Store): HostServices {
         allowedTools: runtimeToolNames(),
       };
     },
+    goalPlan: { currentPlan },
   });
   const society = new SocietyService({
     store,
     emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
     organization,
+  });
+  const experience = new ExperienceService({
+    store,
+    providers: () => {
+      const chat = kernel.plugins.resolveService('service:chat') as { providers?: ProviderDef[] } | undefined;
+      return chat?.providers ?? [];
+    },
+    emit: (type, data, traceId) => kernel.bus.emit({ type, data, ...(traceId ? { traceId } : {}), ts: Date.now() }),
+    now: Date.now,
   });
   const orgTools = organizationTools(organization, store);
   const runTools = (): ToolDef[] => [
@@ -61,5 +74,5 @@ export function createHostServices(kernel: Kernel, store: Store): HostServices {
     ...orgTools,
   ];
   runtimeToolNames = () => runTools().map(tool => tool.name);
-  return { automations, organization, society, automationTools, organizationTools: orgTools, runTools };
+  return { automations, organization, society, experience, automationTools, organizationTools: orgTools, runTools };
 }

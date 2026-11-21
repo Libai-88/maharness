@@ -3,7 +3,7 @@
  */
 import { randomUUID } from 'node:crypto';
 import type { Express } from 'express';
-import { APPROVAL_TIMEOUT } from '../../core/chat/approvals';
+import { APPROVAL_TIMEOUT } from '../host/adapters/chat';
 import { approvalTokens } from './approvals';
 import { getChatService, SseConnectionLimiter, tenantIdOf, type RouteDeps } from './shared';
 import { auditSseLifecycle } from '../security-policy';

@@ -7,8 +7,8 @@ import { tenantSandboxRoot } from '../tenant-workspace';
 import { assertTenantStorage, invalidateTenantStorage, TenantStorageQuotaError } from '../tenant-quota';
 import { MATERIAL_MAX_BYTES, MaterialError } from '../materials';
 import { tenantIdOf, type RouteDeps } from './shared';
-import type { DocumentService } from '../../core/document/service';
-import type { OcrConfig } from '../../core/document';
+import type { DocumentService } from '../host/adapters/document';
+import type { OcrConfig } from '../host/adapters/document';
 
 export function registerMaterialRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, store } = deps;

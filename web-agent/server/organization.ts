@@ -8,7 +8,6 @@ import {
 } from '../kernel/run';
 import { validateTaskContract, type TaskCriterion } from '../kernel/task-verifier';
 import { estimateTokens } from '../kernel/tokens';
-import { currentPlanForSession } from '../core/goal-plan';
 import type { Store } from './db';
 import {
   estimateModelWorkloadCost,
@@ -94,6 +93,10 @@ export interface OrganizationServiceOptions {
   };
   /** Injectable clock so scheduling, budgets and audit records are deterministic in tests. */
   now?: () => number;
+  /** Goal/plan facts are supplied by the host adapter; organization must not import core/goal-plan. */
+  goalPlan?: {
+    currentPlan(tenantId: string, sessionId: string): { workItems?: Array<{ dependsOn: string[] }> } | undefined;
+  };
 }
 
 const TEAM_TOOL_NAMES = new Set(['run_subagent', 'run_parallel', 'run_review', 'work_contract_deliver', 'raise_exception']);
@@ -830,7 +833,7 @@ export class OrganizationService {
   teamPlanningEligible(run: RunRecord): boolean {
     if (run.origin?.kind === 'society' || run.parentId || run.teamCycleId) return false;
     if (explicitTeamRequest(run.objective)) return true;
-    const workItems = currentPlanForSession(run.tenantId, run.sessionId)?.workItems ?? [];
+    const workItems = this.options.goalPlan?.currentPlan(run.tenantId, run.sessionId)?.workItems ?? [];
     return workItems.length >= 2 && workItems.length <= 5 && workItems.filter(item => item.dependsOn.length === 0).length >= 2;
   }
 

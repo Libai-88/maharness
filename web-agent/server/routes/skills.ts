@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import type { RouteDeps } from './shared';
 import { readLockFile, installSkill, validateLockFile } from '../../kernel/skillsSync';
 import { parseFrontMatter, fmString } from '../../kernel/frontmatter';
-import type { SkillSource } from '../../core/skills/index';
+import type { SkillSource } from '../host/adapters/skills';
 
 interface SkillsService {
   list: () => {

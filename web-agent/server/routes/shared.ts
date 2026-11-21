@@ -9,14 +9,11 @@ import type { LLMMessage, ModelCapability, ProviderDef, ToolDef } from '../../ke
 import { inferCapabilities } from '../../kernel/modelCatalog';
 import type { AgentLoop } from '../../kernel/types';
 import { makeRunner } from '../../kernel/types';
-import type { ProviderConfig } from '../../core/chat/provider';
-import type { CompactOptions, CompactResult } from '../../core/chat/compact';
+import type { ProviderConfig, CompactOptions, CompactResult } from '../host/adapters/chat';
 import type { Store } from '../db';
 import type { ClientTracker } from '../client-tracker';
 import type { Scheduler } from '../scheduler';
-import type { AutomationService } from '../automations';
-import type { OrganizationService } from '../organization';
-import type { SocietyService } from '../society';
+import type { HostPorts } from '../host/ports';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { Response } from 'express';
@@ -27,7 +24,7 @@ import { Agent, fetch as undiciFetch, type Dispatcher } from 'undici';
 const execFileAsync = promisify(execFile);
 
 /** 各资源路由文件的公共依赖（index.ts 装配时统一传入） */
-export interface RouteDeps {
+export interface RouteDeps extends HostPorts {
   kernel: Kernel;
   store: Store;
   tracker?: ClientTracker;
@@ -35,9 +32,6 @@ export interface RouteDeps {
   /** 活跃 chat run 计数（M3 自动停止机制的事实源；句柄审计对外暴露用） */
   activeRunCount?: () => number;
   scheduler?: Scheduler;
-  automations?: AutomationService;
-  organization?: OrganizationService;
-  society?: SocietyService;
 }
 
 export const DEFAULT_TENANT = 'default';

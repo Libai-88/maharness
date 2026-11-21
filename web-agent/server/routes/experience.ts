@@ -1,7 +1,8 @@
 import type { Express, NextFunction, Request, Response } from 'express';
-import { ExperienceError, ExperienceService } from '../experience';
+import { ExperienceError } from '../experience';
 import type { AIUserReviewRequest, FindingStatus } from '../experience-store';
-import { getChatService, tenantIdOf, type RouteDeps } from './shared';
+import type { ExperiencePort } from '../host/ports';
+import { tenantIdOf, type RouteDeps } from './shared';
 
 const FINDING_STATUSES = new Set<FindingStatus>(['new', 'triaged', 'reproduced', 'fixing', 'verifying', 'closed', 'wont_fix', 'reopened']);
 
@@ -30,12 +31,9 @@ function requestOf(req: Request): AIUserReviewRequest {
   };
 }
 
-export function registerExperienceRoutes(app: Express, deps: RouteDeps): ExperienceService {
-  const service = new ExperienceService({
-    store: deps.store,
-    providers: () => getChatService(deps.kernel)?.providers ?? [],
-    emit: (type, data, traceId) => deps.kernel.bus.emit({ type, data, traceId, ts: Date.now() }),
-  });
+export function registerExperienceRoutes(app: Express, deps: RouteDeps): ExperiencePort {
+  const service = deps.experience;
+  if (!service) throw new Error('Experience host service unavailable');
   const wrap = (handler: (req: Request, res: Response) => unknown) => (req: Request, res: Response, next: NextFunction) => {
     try {
       Promise.resolve(handler(req, res)).catch(error => {

@@ -1,14 +1,14 @@
 import type { Express, NextFunction, Request, Response } from 'express';
 import type { RunService } from '../run-service';
-import { isOrganizationError, OrganizationService } from '../organization';
+import { isOrganizationError } from '../organization';
 import { OrganizationError } from '../organization-store';
 import type { ExceptionStatus, ProposalStatus } from '../organization-store';
-import type { SocietyService } from '../society';
+import type { OrganizationPort, SocietyPort } from '../host/ports';
 import { tenantIdOf, type RouteDeps } from './shared';
 
 export function registerOrganizationRoutes(
   app: Express,
-  deps: RouteDeps & { organization: OrganizationService; society: SocietyService },
+  deps: RouteDeps & { organization: OrganizationPort; society: SocietyPort },
   runs: RunService,
 ): void {
   const { organization, society } = deps;

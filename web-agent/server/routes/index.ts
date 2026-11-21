@@ -38,7 +38,7 @@ import { registerWorkbenchRoutes } from './workbench';
 import { registerExperienceRoutes } from './experience';
 import { registerOrganizationRoutes } from './organization';
 import type { Scheduler } from '../scheduler';
-import { createHostServices } from '../host-services';
+import { createHostServices } from '../host/container';
 import { getChatService, SseConnectionLimiter } from './shared';
 import { activeRunCount } from '../index';
 import { activeWarmupCount } from './warmup';
@@ -99,7 +99,7 @@ export function readStorageSnapshot(dataDir: string): StorageSnapshot {
 export function registerRoutes(app: Express, kernel: Kernel, store: Store, tracker?: ClientTracker, scheduler?: Scheduler): RunService {
   app.use(express.json({ limit: '5mb' }));
 
-  const { automations, organization, society, runTools } = createHostServices(kernel, store);
+  const { automations, organization, society, experience, runTools } = createHostServices(kernel, store);
 
   const deps = {
     kernel, store, tracker,
@@ -107,6 +107,7 @@ export function registerRoutes(app: Express, kernel: Kernel, store: Store, track
     automations,
     organization,
     society,
+    experience,
     sseLimiter: new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8))),
     activeRunCount: () => activeRunCount(),
   };

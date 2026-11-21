@@ -1,5 +1,5 @@
 import type { Express } from 'express';
-import type { PersonalItems } from '../../core/todo/items';
+import type { PersonalItems } from '../host/adapters/items';
 import { tenantIdOf, type RouteDeps } from './shared';
 import { reviewScore } from '../experience';
 

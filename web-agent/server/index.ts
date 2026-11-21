@@ -21,8 +21,7 @@ import { registerRoutes, refreshChatProviders, refreshChatPersonas } from './rou
 import { isSafeWorkspaceRoot } from './routes/workspaces';
 import { policyPosture } from './routes/rules';
 import { approvalTokenRequired } from './routes/approvals';
-import { discoverProviders } from '../core/chat/provider';
-import { globalApprovalBoard } from '../core/chat/approvals';
+import { approvalBoard, discoverProviders } from './host/adapters/chat';
 import { ClientTracker } from './client-tracker';
 import { Scheduler } from './scheduler';
 import { recoverOrphanedApprovals } from './approval-recovery';
@@ -300,7 +299,8 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     checkpointRetentionMs: kernel.config.get<number>('checkpoint.retentionDays', 30) * 24 * 60 * 60 * 1000,
   });
   try { await kernel.start(); } catch (error) { store.close(); throw error; }
-  globalApprovalBoard.onRegister = (approval) => {
+  const approvals = approvalBoard();
+  approvals.onRegister = (approval) => {
     const session = approval.sessionId ? store.getSession(approval.sessionId) : undefined;
     store.saveApprovalRequest({
       id: approval.id,
@@ -313,10 +313,10 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
       expiresAt: approval.expiresAt,
     });
   };
-  globalApprovalBoard.onResolve = (id, approved, reason) => {
+  approvals.onResolve = (id, approved, reason) => {
     store.decideApprovalRequest(id, approved ? 'approved' : 'rejected', reason);
   };
-  globalApprovalBoard.onWithdraw = (id) => {
+  approvals.onWithdraw = (id) => {
     store.decideApprovalRequest(id, 'withdrawn', 'withdrawn');
   };
   kernel.tenantQuota = {

@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { redactTraceValue } from '../core/chat/agent';
+import { redactTraceValue } from '../kernel/content-safety';
 import { callModel } from '../kernel/model-call';
 import type { LLMMessage, ProviderDef } from '../kernel/types';
 import { RUN_TERMINAL, type RunRecord } from '../kernel/run';

@@ -22,7 +22,8 @@ import type { AgentEvent, AgentHookCtx, RunOptions } from '../../kernel/plugin-s
 import { verifyTaskContract } from '../../kernel/plugin-sdk';
 import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel } from '../../kernel/plugin-sdk';
 import { classifyError, shouldRetry } from '../../kernel/plugin-sdk';
-import { scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/plugin-sdk';
+import { redactTraceValue, scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../../kernel/plugin-sdk';
+export { redactTraceValue };
 import { sanitizeToolHistory } from './policy';
 import { CATALOG_MANAGER_TOOLS, capabilityConflicts, createToolCatalog, refreshToolCatalog, selectedCapabilityNames, toolCatalogBudget, releasedToolNames } from '../../kernel/plugin-sdk';
 import { ToolExecutor, abortableDelay } from './tool-executor';
@@ -53,18 +54,7 @@ export function normalizeToolHistory(history: LLMMessage[]): LLMMessage[] {
   return sanitizeToolHistory(history);
 }
 
-/** Trace 参数只保留结构，不把凭据写入实时事件或 JSONL 归档。 */
-export function redactTraceValue(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(redactTraceValue);
-  if (!value || typeof value !== 'object') return value;
-  const out: Record<string, unknown> = {};
-  for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = /(?:api[-_]?key|token|secret|password|authorization|cookie|credential)/i.test(key)
-      ? '[REDACTED]'
-      : redactTraceValue(child);
-  }
-  return out;
-}
+
 
 /** 叙述化工具调用检测：模型把工具调用写成正文文本（【工具调用 X】参数/结果 …）而非原生
  *  tool_calls——文本不会被执行。导出供协议诊断与 selftest。 */
