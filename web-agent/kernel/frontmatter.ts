@@ -34,7 +34,10 @@ function indentOf(line: string): number {
 function toList(v: string): string[] {
   const t = v.trim();
   const inner = t.startsWith('[') && t.endsWith(']') ? t.slice(1, -1) : t;
-  return inner.split(',').map(s => unquote(s)).filter(s => s !== '');
+  return inner
+    .split(',')
+    .map((s) => unquote(s))
+    .filter((s) => s !== '');
 }
 
 export function parseFrontMatter(md: string): FrontMatter {
@@ -55,9 +58,15 @@ export function parseFrontMatter(md: string): FrontMatter {
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (!line.trim() || line.trim().startsWith('#')) continue;
-    if (indentOf(line) > 0) { warnings.push(`忽略缩进的游离行: ${line.trim().slice(0, 40)}`); continue; }
+    if (indentOf(line) > 0) {
+      warnings.push(`忽略缩进的游离行: ${line.trim().slice(0, 40)}`);
+      continue;
+    }
     const kv = /^([A-Za-z0-9_.-]+):(.*)$/.exec(line);
-    if (!kv) { warnings.push(`无法解析的行: ${line.trim().slice(0, 40)}`); continue; }
+    if (!kv) {
+      warnings.push(`无法解析的行: ${line.trim().slice(0, 40)}`);
+      continue;
+    }
     const key = kv[1];
     let value = kv[2];
 

@@ -8,9 +8,7 @@
   "priceSource": "unknown",
   "comparisons": {
     "directory": {
-      "tools": [
-        "list_dir"
-      ],
+      "tools": ["list_dir"],
       "baselineInputTokens": 13181,
       "calls": 2,
       "inputTokens": 8107
@@ -39,11 +37,7 @@
   ],
   "verification": {
     "build": {
-      "includes": [
-        "frontend typecheck",
-        "frontend build",
-        "backend typecheck"
-      ],
+      "includes": ["frontend typecheck", "frontend build", "backend typecheck"],
       "passed": true
     },
     "unitTests": {
@@ -116,9 +110,7 @@
       "tokensIn": 8107,
       "tokensOut": 202,
       "elapsedMs": 5590,
-      "toolSequence": [
-        "list_dir"
-      ],
+      "toolSequence": ["list_dir"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "一次 list_dir；列出 handbook.docx、notes、references；无发现、结果回读或组队",
@@ -154,9 +146,7 @@
       "tokensIn": 8413,
       "tokensOut": 80,
       "elapsedMs": 5056,
-      "toolSequence": [
-        "glob"
-      ],
+      "toolSequence": ["glob"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "定位 notes/learning-plan.txt；使用文件名搜索；不读取文件内容",
@@ -192,9 +182,7 @@
       "tokensIn": 8413,
       "tokensOut": 243,
       "elapsedMs": 5551,
-      "toolSequence": [
-        "grep"
-      ],
+      "toolSequence": ["grep"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "找到 notes/learning-plan.txt 第3行和 MAH-4827；使用内容搜索",
@@ -226,9 +214,7 @@
       "tokensIn": 9774,
       "tokensOut": 458,
       "elapsedMs": 7498,
-      "toolSequence": [
-        "read_document_content"
-      ],
+      "toolSequence": ["read_document_content"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "文档工具读取；答复每周五、林青、180天",
@@ -264,9 +250,7 @@
       "tokensIn": 14036,
       "tokensOut": 308,
       "elapsedMs": 11103,
-      "toolSequence": [
-        "create_document"
-      ],
+      "toolSequence": ["create_document"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "可重新解析的xlsx；工作表开销；指定3行及数值正确；登记产物",
@@ -302,10 +286,7 @@
       "tokensIn": 13915,
       "tokensOut": 660,
       "elapsedMs": 9330,
-      "toolSequence": [
-        "read_file",
-        "read_file"
-      ],
+      "toolSequence": ["read_file", "read_file"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "读取两份资料；A满足；价格120/80，容量30/20，保留90/30；来源路径",
@@ -333,9 +314,7 @@
       "tokensIn": 14245,
       "tokensOut": 199,
       "elapsedMs": 6772,
-      "toolSequence": [
-        "item_create"
-      ],
+      "toolSequence": ["item_create"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "只创建一条个人事项；标题、日期、时间、时区和高优先级准确",
@@ -423,13 +402,7 @@
       "tokensIn": 48148,
       "tokensOut": 1070,
       "elapsedMs": 25104,
-      "toolSequence": [
-        "read_file",
-        "discover_tools",
-        "enable_tools",
-        "glob",
-        "write_file"
-      ],
+      "toolSequence": ["read_file", "discover_tools", "enable_tools", "glob", "write_file"],
       "costUsd": null,
       "priceSource": "unknown",
       "expected": "首次读取后注入补充要求；同一Run消费消息；只写一次correction.md且含CORRECTION-OK",
@@ -464,12 +437,7 @@
         "critical": 0,
         "total": 4
       },
-      "packages": [
-        "exceljs",
-        "image-size",
-        "pptxgenjs",
-        "uuid"
-      ]
+      "packages": ["exceljs", "image-size", "pptxgenjs", "uuid"]
     },
     "ui": {
       "counts": {

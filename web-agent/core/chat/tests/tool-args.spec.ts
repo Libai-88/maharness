@@ -1,31 +1,58 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { AgentRunner } from '../agent';
-import type { ChatOptions, EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, ToolDef, TraceStepInit } from '../../../kernel/types';
+import type {
+  ChatOptions,
+  EventBusLike,
+  KernelLike,
+  LLMChunk,
+  ProviderDef,
+  StepHandle,
+  ToolDef,
+  TraceStepInit,
+} from '../../../kernel/types';
 
 const bus: EventBusLike = {
-  on: () => () => {}, emit: () => {}, emitAsync: async () => {}, serial: async () => undefined,
-  bail: () => undefined, parallel: async () => {}, waterfall: async () => undefined as never,
+  on: () => () => {},
+  emit: () => {},
+  emitAsync: async () => {},
+  serial: async () => undefined,
+  bail: () => undefined,
+  parallel: async () => {},
+  waterfall: async () => undefined as never,
   onPhase: () => () => {},
 };
 
 function kernel(): KernelLike {
   const config = new Map<string, unknown>([
-    ['agent.toolTimeoutMs', 1000], ['agent.reasoningBudget', 640], ['agent.reasoningTotalBudget', 2000],
-    ['agent.maxTurns', 2], ['agent.thinkInEnglish', true], ['sandboxRoot', process.cwd()],
+    ['agent.toolTimeoutMs', 1000],
+    ['agent.reasoningBudget', 640],
+    ['agent.reasoningTotalBudget', 2000],
+    ['agent.maxTurns', 2],
+    ['agent.thinkInEnglish', true],
+    ['sandboxRoot', process.cwd()],
   ]);
   return {
     rootDir: process.cwd(),
     paths: { root: process.cwd(), data: process.cwd(), traces: process.cwd(), configFile: '', dbFile: '', cacheFile: '' },
-    config: { get: <T>(key: string, def?: T): T => (config.has(key) ? config.get(key) as T : def as T) } as unknown as KernelLike['config'],
+    config: {
+      get: <T>(key: string, def?: T): T => (config.has(key) ? (config.get(key) as T) : (def as T)),
+    } as unknown as KernelLike['config'],
     trace: {
       startStep: (_init: TraceStepInit): StepHandle => ({
-        id: 'tool-args-step', finish: () => {}, fail: () => {}, cancel: () => {},
+        id: 'tool-args-step',
+        finish: () => {},
+        fail: () => {},
+        cancel: () => {},
       }),
     } as unknown as KernelLike['trace'],
     cache: {
-      l1Enabled: false, l1Get: async () => ({ hit: false }), l1Set: async () => {},
-      recordPrefixRepeat: () => {}, recordProviderCacheHit: () => {}, recordSavedCost: () => {},
+      l1Enabled: false,
+      l1Get: async () => ({ hit: false }),
+      l1Set: async () => {},
+      recordPrefixRepeat: () => {},
+      recordProviderCacheHit: () => {},
+      recordSavedCost: () => {},
     } as unknown as KernelLike['cache'],
     budget: { recordTask: () => {} } as unknown as KernelLike['budget'],
     plugins: { capabilities: (): [] => [] } as unknown as KernelLike['plugins'],
@@ -35,7 +62,9 @@ function kernel(): KernelLike {
 function providerFor(argumentsText: string): { provider: ProviderDef; calls: { count: number } } {
   const calls = { count: 0 };
   const provider: ProviderDef = {
-    id: 'tool-args-provider', label: 'tool-args-provider', defaultModel: 'm',
+    id: 'tool-args-provider',
+    label: 'tool-args-provider',
+    defaultModel: 'm',
     async *chat(): AsyncIterable<LLMChunk> {
       calls.count++;
       if (calls.count === 1) {
@@ -50,7 +79,11 @@ function providerFor(argumentsText: string): { provider: ProviderDef; calls: { c
 }
 
 function demoTool(handlerCalls: { count: number }): ToolDef {
-  return {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
+  return {
+    version: '2.0.0',
+    permissions: [],
+    sideEffect: 'external',
+    outputSchema: {},
     name: 'demo',
     description: 'demo tool',
     parameters: {
@@ -72,9 +105,13 @@ describe('工具参数契约', () => {
     const { provider } = providerFor(JSON.stringify({ path: 123, extra: true }));
     const events: { type: string; [key: string]: unknown }[] = [];
     for await (const event of new AgentRunner(kernel(), bus).run({
-      provider, model: 'm', messages: [{ role: 'user', content: 'run tool' }], traceId: 'tool-args-schema',
+      provider,
+      model: 'm',
+      messages: [{ role: 'user', content: 'run tool' }],
+      traceId: 'tool-args-schema',
       tools: [demoTool(handlerCalls)],
-    })) events.push(event as { type: string; [key: string]: unknown });
+    }))
+      events.push(event as { type: string; [key: string]: unknown });
 
     assert.equal(handlerCalls.count, 0);
     const result = events.find((event) => event.type === 'tool_result');
@@ -88,9 +125,13 @@ describe('工具参数契约', () => {
     const { provider } = providerFor('{not-json');
     const events: { type: string; [key: string]: unknown }[] = [];
     for await (const event of new AgentRunner(kernel(), bus).run({
-      provider, model: 'm', messages: [{ role: 'user', content: 'run tool' }], traceId: 'tool-args-json',
+      provider,
+      model: 'm',
+      messages: [{ role: 'user', content: 'run tool' }],
+      traceId: 'tool-args-json',
       tools: [demoTool(handlerCalls)],
-    })) events.push(event as { type: string; [key: string]: unknown });
+    }))
+      events.push(event as { type: string; [key: string]: unknown });
 
     assert.equal(handlerCalls.count, 0);
     const result = events.find((event) => event.type === 'tool_result');
@@ -101,7 +142,9 @@ describe('工具参数契约', () => {
   test('responseFormat 透传到 Provider', async () => {
     let seen: ChatOptions | undefined;
     const provider: ProviderDef = {
-      id: 'response-format', label: 'response-format', defaultModel: 'm',
+      id: 'response-format',
+      label: 'response-format',
+      defaultModel: 'm',
       async *chat(_messages, opts): AsyncIterable<LLMChunk> {
         seen = opts;
         yield { type: 'delta', text: '{"ok":true}' };
@@ -109,9 +152,14 @@ describe('工具参数契约', () => {
       },
     };
     for await (const _event of new AgentRunner(kernel(), bus).run({
-      provider, model: 'm', messages: [{ role: 'user', content: 'json' }], traceId: 'response-format',
+      provider,
+      model: 'm',
+      messages: [{ role: 'user', content: 'json' }],
+      traceId: 'response-format',
       responseFormat: { type: 'json_object' },
-    })) { /* drain */ }
+    })) {
+      /* drain */
+    }
     assert.deepEqual(seen?.responseFormat, { type: 'json_object' });
   });
 });

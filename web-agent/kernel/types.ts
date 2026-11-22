@@ -8,9 +8,9 @@ import type { SecretBox } from './secret-box';
 // ============ 事件 ============
 
 export interface Event<T = unknown> {
-  type: string;          // 域.对象.动作，如 agent.turn.started
-  traceId?: string;      // 关联执行轨迹
-  ts: number;            // 时间戳(ms)
+  type: string; // 域.对象.动作，如 agent.turn.started
+  traceId?: string; // 关联执行轨迹
+  ts: number; // 时间戳(ms)
   data?: T;
   /** waterfall 派发时由 EventBus 注入；普通事件不存在。 */
   next?: (data?: unknown) => unknown;
@@ -26,13 +26,13 @@ export interface PluginManifest {
   id: string;
   name: string;
   version: string;
-  entry: string;            // 入口文件（相对插件目录）
+  entry: string; // 入口文件（相对插件目录）
   /** 宿主插件 API 兼容范围；缺省表示兼容当前 API（旧 manifest 兼容）。 */
   compatibility?: {
     api?: { min?: string; max?: string };
   };
-  enabled?: boolean;        // 默认 true；false = 声明停用（不自动启动）
-  requires?: string[];      // 依赖的插件 id（先加载）
+  enabled?: boolean; // 默认 true；false = 声明停用（不自动启动）
+  requires?: string[]; // 依赖的插件 id（先加载）
   /** 显式 capability 注册许可；一旦声明，未列出的类型或名称均拒绝。缺省表示本机 trusted 兼容模式。 */
   permissions: {
     capabilities: Partial<Record<Capability['kind'], string[]>>;
@@ -47,8 +47,8 @@ export interface PluginManifest {
       process?: boolean;
     };
   };
-  lazy?: boolean;           // 默认 false；true = 惰性加载（注册可见但默认不启动，
-                            // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
+  lazy?: boolean; // 默认 false；true = 惰性加载（注册可见但默认不启动，
+  // 能力不进入上下文；LLM 需要时用 enable_plugin 激活，类似 OS 驱动按需加载）
   /** 核心必要插件：即使 enabled=false 也不允许完全卸载（卸载=丧失关键能力）。
    *  disable 时进入降级模式（服务返回 503），而非彻底移除。 */
   essential?: boolean;
@@ -191,10 +191,10 @@ export interface Plugin {
   id: string;
   name: string;
   version: string;
-  onLoad?(ctx: PluginContext): void | Promise<void>;    // 注册能力
-  onStart?(ctx: PluginContext): void | Promise<void>;   // 启动
-  onStop?(ctx: PluginContext): void | Promise<void>;    // 热停
-  onUnload?(ctx: PluginContext): void | Promise<void>;  // 卸载
+  onLoad?(ctx: PluginContext): void | Promise<void>; // 注册能力
+  onStart?(ctx: PluginContext): void | Promise<void>; // 启动
+  onStop?(ctx: PluginContext): void | Promise<void>; // 热停
+  onUnload?(ctx: PluginContext): void | Promise<void>; // 卸载
 }
 
 /** 常用路径投影（Kernel 构造时按 dataDir 覆盖解析；插件持久化文件应写 ctx.paths.data，
@@ -238,7 +238,10 @@ export interface KernelLike {
      *  源码改动需 reload/重启才生效——UI 据此如实标注，不给所有插件一律打「热重载」。 */
     list(): { manifest: PluginManifest; state: string; error?: string; watched?: boolean }[];
     /** 服务共效应解析（非插件消费方用，如 server 层）：key = 'service:<id>' 或自定义提供键 */
-    resolveService(key: string, consumer?: string): unknown | undefined;    /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */
+    resolveService(
+      key: string,
+      consumer?: string,
+    ): unknown | undefined /** 服务解析的可观测形式：返回提供者身份与服务实例，并写入 service_call Trace。 */;
     resolveTraced(key: string, consumer?: string): { provider: string; value: unknown } | undefined;
     /** v3 依赖驱动智能重载：仅重载依赖签名变化的插件，返回实际重载的 id 列表 */
     reloadChanged(): Promise<string[]>;
@@ -365,11 +368,15 @@ export interface EventBusLike {
   bail<T = unknown>(e: Event<T>): T | boolean | null | undefined;
   parallel(e: Event): Promise<void>;
   waterfall<T = unknown>(type: string, ...args: unknown[]): Promise<T>;
-  onPhase(pattern: string, phase: {
-    before?: (value: unknown) => void;
-    after?: (result: unknown, value: unknown) => void;
-    rewrite?: (value: unknown) => unknown;
-  }, priority?: number): () => void;
+  onPhase(
+    pattern: string,
+    phase: {
+      before?: (value: unknown) => void;
+      after?: (result: unknown, value: unknown) => void;
+      rewrite?: (value: unknown) => unknown;
+    },
+    priority?: number,
+  ): () => void;
 }
 
 export interface ConfigLike {
@@ -388,13 +395,21 @@ export interface TraceLike {
 }
 
 export interface CacheLike {
-  l2Get(key: string): { hit: boolean; value?: unknown; meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number } };
+  l2Get(key: string): {
+    hit: boolean;
+    value?: unknown;
+    meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number };
+  };
   l2Set(key: string, value: unknown, ttlMs?: number, tenantId?: string): void;
   l2GetOrLoad?<T>(
     key: string,
     load: (signal: AbortSignal) => Promise<T>,
     opts?: { ttlMs?: number; tenantId?: string; signal?: AbortSignal },
-  ): Promise<{ hit: boolean; value: T; meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number } }>;
+  ): Promise<{
+    hit: boolean;
+    value: T;
+    meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number };
+  }>;
   l2Delete(key: string): void;
   /** 按命名空间批量失效（key 前缀 = parts[0]）：写操作后失效受影响工具的缓存，不误伤其他工具 */
   l2DeleteNamespace(ns: string): void;
@@ -405,9 +420,27 @@ export interface CacheLike {
    *  scope 为会话级隔离键（如 traceId）：传入时仅命中「该会话自产」的答案，
    *  全局答案对所有会话可见（纯问答产物），会话答案只对本会话可见（依赖工具观察的产物）。
    *  hitScope：命中条目的作用域，供命中学习回填沿用。 */
-  l1Get(question: string, promptKey?: string, scope?: string, tenantId?: string): Promise<{
-    hit: boolean; answer?: string; key?: string; hitScope?: string;
-    meta?: { key: string; namespace: string; createdAt: number; ageMs: number; ttlRemainingMs: number; hits: number; promptKey: string; scope?: string; match: 'exact' | 'vector' | 'dice' };
+  l1Get(
+    question: string,
+    promptKey?: string,
+    scope?: string,
+    tenantId?: string,
+  ): Promise<{
+    hit: boolean;
+    answer?: string;
+    key?: string;
+    hitScope?: string;
+    meta?: {
+      key: string;
+      namespace: string;
+      createdAt: number;
+      ageMs: number;
+      ttlRemainingMs: number;
+      hits: number;
+      promptKey: string;
+      scope?: string;
+      match: 'exact' | 'vector' | 'dice';
+    };
   }>;
   l1Set(question: string, answer: string, promptKey?: string, scope?: string, tenantId?: string): Promise<void>;
   /** 失效指定会话的全部 L1 条目（会话级隔离键命中）：会话内写入文件成功后调用，
@@ -451,10 +484,10 @@ export type Capability =
  * 热切换，无需重启）。角色注册表动态枚举进 handoff_to 工具参数。
  */
 export interface RoleDef {
-  id: string;               // 如 main / planner（handoff_to 的 role 参数枚举值）
-  name: string;             // 显示名（前端/日志）
-  description: string;      // 角色职责说明（进 handoff_to 工具描述，LLM 据此决定移交对象）
-  systemPrompt: string;     // 角色主提示词（置于通用规则之前——系统提示词越靠前引导力越强）
+  id: string; // 如 main / planner（handoff_to 的 role 参数枚举值）
+  name: string; // 显示名（前端/日志）
+  description: string; // 角色职责说明（进 handoff_to 工具描述，LLM 据此决定移交对象）
+  systemPrompt: string; // 角色主提示词（置于通用规则之前——系统提示词越靠前引导力越强）
   /** 角色可用工具集：all=全部（默认）；readonly=只读白名单（侦查/搜索/记忆，不改变世界） */
   tools?: 'all' | 'readonly';
 }
@@ -489,10 +522,16 @@ export interface ServiceDef {
 //
 // 契约形状定义在 kernel/loop.ts（此处只做转发，避免 types ↔ loop 循环依赖）。
 export {
-  SERVICE_KEYS, resolveRunnerFactory, makeRunner,
+  SERVICE_KEYS,
+  resolveRunnerFactory,
+  makeRunner,
 } from './loop';
 export type {
-  AgentEvent, AgentHookCtx, AgentLoop, RunOptions, RunnerFactory,
+  AgentEvent,
+  AgentHookCtx,
+  AgentLoop,
+  RunOptions,
+  RunnerFactory,
 } from './loop';
 
 /** 人设能力：插件向 LLM 贡献的系统提示词片段（随插件加载/卸载自动增减） */
@@ -500,8 +539,8 @@ export interface PersonaDef {
   id: string;
   name: string;
   description: string;
-  content: string;          // 提示词片段（自然语言规则）
-  priority?: number;        // 排序，大者在前（默认 0）
+  content: string; // 提示词片段（自然语言规则）
+  priority?: number; // 排序，大者在前（默认 0）
   /** 层级：'user' = 用户规则（与 DB 人设同层渲染，不加「插件规则」前缀）；缺省 'plugin' */
   tier?: 'plugin' | 'user';
 }
@@ -523,7 +562,7 @@ export interface ToolDef {
   permissions: ToolPermission[];
   delegates?: boolean;
   name: string;
-  description: string;      // 给 LLM 看的能力说明
+  description: string; // 给 LLM 看的能力说明
   parameters: Record<string, unknown>; // JSONSchema
   /** 风险等级：high 的工具默认需要审批（harness 可在审批策略中自动挂起） */
   risk?: 'low' | 'medium' | 'high';
@@ -567,7 +606,7 @@ export type ToolDefV2 = ToolDef & Required<Pick<ToolDef, 'version' | 'permission
  *  受总预算（contextMaxTokens）约束；contentFn 可依据当前任务动态返回内容。 */
 export interface ContextDef {
   id: string;
-  description: string;      // 给人类/harness 看（registry 可查）
+  description: string; // 给人类/harness 看（registry 可查）
   /** 注入优先级（越大越靠前，默认 0） */
   weight?: number;
   /** 单次注入的独立 token 上限（缺省只受全局 context provider 预算约束） */
@@ -594,14 +633,14 @@ export interface ToolResult {
   truncated?: boolean;
   resultRef?: string;
   ok: boolean;
-  data?: unknown;           // 成功时返回给 LLM 的结构化结果
-  error?: string;           // 失败原因（会原样回给 LLM）
+  data?: unknown; // 成功时返回给 LLM 的结构化结果
+  error?: string; // 失败原因（会原样回给 LLM）
   /** 可供任务验收或 UI 复核的观察证据；不替代 data。 */
   evidence?: ToolEvidence[];
   /** 外部内容安全警告：只标注，不替代审批或权限判定。 */
   warnings?: ToolWarning[];
-  cacheable?: boolean;      // 是否允许 L2 缓存（默认 true）
-  needsApproval?: boolean;  // 需用户审批（执行器级挂起，不可绕过）
+  cacheable?: boolean; // 是否允许 L2 缓存（默认 true）
+  needsApproval?: boolean; // 需用户审批（执行器级挂起，不可绕过）
   approvalSummary?: string; // 审批卡片摘要（needsApproval 时必填）
   /** 审批/治理类拦截标记：本次"失败"是用户拒绝/策略拦截，不是工具或执行错误——
    *  memory 插件据此不把"用户拒绝"记为失败教训（拒绝是合法终态，不是教训） */
@@ -651,14 +690,14 @@ export interface ToolContext {
   principal?: { role: 'admin' | 'member' | 'readonly' };
   /** 当前工具调用的 Trace 步骤 id：子任务（子代理/并行）用它挂 parentId，形成 span 树 */
   stepId?: string;
-  sandboxRoot: string;      // 文件类工具的安全边界
+  sandboxRoot: string; // 文件类工具的安全边界
   /** 租户存储配额：写入类工具在落盘前调用；未注入时视为不限制 */
   quota?: { assertWritable(additionalBytes: number): void; assertToolCall?(): void; invalidate?(): void };
   signal?: AbortSignal;
-  cache: CacheLike;         // 工具自管理时效性缓存（L2）
-  trace: TraceLike;         // 工具可自行记录 cache_hit 等步骤
-  approved?: boolean;       // 已通过用户审批（审批后重试时置 true）
-  approvalId?: string;      // 本次审批 ID
+  cache: CacheLike; // 工具自管理时效性缓存（L2）
+  trace: TraceLike; // 工具可自行记录 cache_hit 等步骤
+  approved?: boolean; // 已通过用户审批（审批后重试时置 true）
+  approvalId?: string; // 本次审批 ID
   /** 用户策略规则（rules 插件 allow）显式放行本次调用：等价于"已获授权但没有审批卡"。
    *  高危工具的 handler 侧纵深防御（A8）据此区分「策略放行」与「绕过审批门」——
    *  前者照常执行并留痕，后者一律拒绝。 */
@@ -697,8 +736,8 @@ export interface ModelCapability {
 }
 
 export interface ProviderDef {
-  id: string;               // 如 deepseek
-  label: string;            // 显示名
+  id: string; // 如 deepseek
+  label: string; // 显示名
   defaultModel: string;
   /** 协议族：openai | anthropic | ollama（缺省按 openai 兼容处理） */
   protocol?: string;
@@ -711,7 +750,7 @@ export interface ProviderDef {
   priceSource?: 'configured' | 'catalog' | 'unknown';
   outputLimitGuaranteed?: boolean;
   inputTokenUpperBound?: (messages: LLMMessage[], options: ChatOptions) => number;
-  prices?: { in: number; out: number };  // USD / 百万 token，用于成本核算
+  prices?: { in: number; out: number }; // USD / 百万 token，用于成本核算
   chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk>;
 }
 
@@ -755,13 +794,13 @@ export interface LLMMessage {
 
 export type LLMChunk =
   | { type: 'delta'; text: string }
-  | { type: 'reasoning'; text: string }   // 推理模型思考过程（如 deepseek reasoning_content）
+  | { type: 'reasoning'; text: string } // 推理模型思考过程（如 deepseek reasoning_content）
   | { type: 'tool_call'; toolCall: ToolCall }
   | {
       type: 'usage';
       estimated?: boolean;
       incomplete?: boolean;
-      input: number;           // 总输入 token（含缓存命中部分）
+      input: number; // 总输入 token（含缓存命中部分）
       output: number;
       /** 本次请求中 provider 前缀缓存真实命中的输入 token（归一化各厂商字段）：
        *  DeepSeek prompt_cache_hit_tokens / OpenAI·智谱 prompt_tokens_details.cached_tokens /
@@ -777,7 +816,7 @@ export type LLMChunk =
 
 export interface ChatOptions {
   model: string;
-  tools?: ToolDef[];        // 传给 LLM 的工具定义
+  tools?: ToolDef[]; // 传给 LLM 的工具定义
   signal?: AbortSignal;
   maxTokens?: number;
   temperature?: number;
@@ -818,7 +857,7 @@ export interface TraceStepInit {
 export interface TraceStep extends TraceStepInit {
   id: string;
   status: StepStatus;
-  ts: number;               // 开始时间
+  ts: number; // 开始时间
   endTs?: number;
   durationMs?: number;
   outputSummary?: string;
@@ -912,12 +951,21 @@ export interface KernelEvents {
   'trace.step': TraceStep;
   'config.changed': { key: string; value: unknown };
   'security.authorization.denied': {
-    subject: 'anonymous'; capability: string; object: string;
-    reason: 'api-token-required' | 'api-token-invalid' | 'approval-token-required'
-      | 'approval-token-invalid' | 'source-host-denied' | 'source-origin-denied';
+    subject: 'anonymous';
+    capability: string;
+    object: string;
+    reason:
+      | 'api-token-required'
+      | 'api-token-invalid'
+      | 'approval-token-required'
+      | 'approval-token-invalid'
+      | 'source-host-denied'
+      | 'source-origin-denied';
   };
   'security.authorization.granted': {
-    subject: 'api-token' | 'approval-token'; capability: string; object: string;
+    subject: 'api-token' | 'approval-token';
+    capability: string;
+    object: string;
   };
   'security.sse.connected': { subject: 'local-client'; capability: 'sse:events'; object: '/api/events' };
   'security.sse.disconnected': { subject: 'local-client'; capability: 'sse:events'; object: '/api/events' };
@@ -954,12 +1002,12 @@ export interface Session {
   title: string;
   model: string;
   provider: string;
-  mode: string;             // normal / plan / goal：会话级 Agent 模式
-  planPending: number;      // 计划模式进度：0 未提出 / 1 待确认 / 2 已确认
+  mode: string; // normal / plan / goal：会话级 Agent 模式
+  planPending: number; // 计划模式进度：0 未提出 / 1 待确认 / 2 已确认
   /** 当前接管角色（handoff）：空 = 主代理（默认）；有值 = 该角色接管会话 */
   role?: string;
-  archived: number;         // 0/1 归档（会话管理）
-  pinned: number;           // 0/1 置顶标记（会话管理）
+  archived: number; // 0/1 归档（会话管理）
+  pinned: number; // 0/1 置顶标记（会话管理）
   createdAt: number;
   updatedAt: number;
   /** 列表派生字段（非 sessions 列）：最后一句"真正说出口的话"与其角色。
@@ -974,7 +1022,7 @@ export interface Message {
   sessionId: string;
   role: LLMRole;
   content: string | null;
-  reasoning?: string;          // 推理模型思考过程（可选）
+  reasoning?: string; // 推理模型思考过程（可选）
   toolCalls?: ToolCall[];
   toolCallId?: string;
   tokensIn?: number;

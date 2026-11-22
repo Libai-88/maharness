@@ -10,19 +10,24 @@ describe('LR-05 warmup cancellation', () => {
     let providerSignal: AbortSignal | undefined;
     let finishStream: (() => void) | undefined;
     let resolveStarted!: () => void;
-    const started = new Promise<void>((resolve) => { resolveStarted = resolve; });
+    const started = new Promise<void>((resolve) => {
+      resolveStarted = resolve;
+    });
     const provider = {
-      id: 'fixture', label: 'Fixture', defaultModel: 'test',
+      id: 'fixture',
+      label: 'Fixture',
+      defaultModel: 'test',
       chat: (_messages: LLMMessage[], opts: ChatOptions) => {
         providerSignal = opts.signal;
         resolveStarted();
         return {
           [Symbol.asyncIterator]() {
             return {
-              next: () => new Promise<{ done: boolean; value?: never }>((_resolve, reject) => {
-                finishStream = () => reject(new DOMException('The operation was aborted', 'AbortError'));
-                opts.signal?.addEventListener('abort', () => finishStream?.(), { once: true });
-              }),
+              next: () =>
+                new Promise<{ done: boolean; value?: never }>((_resolve, reject) => {
+                  finishStream = () => reject(new DOMException('The operation was aborted', 'AbortError'));
+                  opts.signal?.addEventListener('abort', () => finishStream?.(), { once: true });
+                }),
             };
           },
         };
@@ -40,14 +45,19 @@ describe('LR-05 warmup cancellation', () => {
       },
       config: {
         get: () => warmupMode,
-        setPersistent: (_key: string, value: unknown) => { warmupMode = value as 'auto' | 'off'; },
+        setPersistent: (_key: string, value: unknown) => {
+          warmupMode = value as 'auto' | 'off';
+        },
       },
     } as unknown as Kernel;
 
     let patchHandler: ((req: unknown, res: unknown) => void) | undefined;
     const app = {
       get: () => app,
-      patch: (_path: string, handler: typeof patchHandler) => { patchHandler = handler; return app; },
+      patch: (_path: string, handler: typeof patchHandler) => {
+        patchHandler = handler;
+        return app;
+      },
       post: () => app,
     };
     registerConfigRoutes(app as never, { kernel } as never);
@@ -62,7 +72,19 @@ describe('LR-05 warmup cancellation', () => {
     let responseBody: unknown;
     patchHandler?.(
       { body: { cache: { warmup: 'off' } } },
-      { status: (code: number) => { responseStatus = code; return { json: (body: unknown) => { responseBody = body; } }; }, json: (body: unknown) => { responseBody = body; } },
+      {
+        status: (code: number) => {
+          responseStatus = code;
+          return {
+            json: (body: unknown) => {
+              responseBody = body;
+            },
+          };
+        },
+        json: (body: unknown) => {
+          responseBody = body;
+        },
+      },
     );
 
     await running;

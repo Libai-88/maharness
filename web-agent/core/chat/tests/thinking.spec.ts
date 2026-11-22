@@ -15,8 +15,12 @@ function split(parts: string[]): { out: string; think: string } {
   const s = new ThinkTagStreamSplitter();
   let out = '';
   let think = '';
-  s.onOut = (t) => { out += t; };
-  s.onThink = (t) => { think += t; };
+  s.onOut = (t) => {
+    out += t;
+  };
+  s.onThink = (t) => {
+    think += t;
+  };
   for (const p of parts) s.push(p);
   s.end();
   return { out, think };

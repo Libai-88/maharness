@@ -8,7 +8,7 @@ import ts from 'typescript';
 const serverRoot = fileURLToPath(new URL('../', import.meta.url));
 
 function files(dir: string): string[] {
-  return readdirSync(dir, { withFileTypes: true }).flatMap(entry => {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     if (entry.name === 'node_modules' || entry.name === 'test-results' || entry.name === 'tests') return [];
     const full = join(dir, entry.name);
     return entry.isDirectory() ? files(full) : entry.isFile() && entry.name.endsWith('.ts') ? [full] : [];
@@ -41,5 +41,5 @@ test('server reaches core only through explicit host adapters', () => {
 
 test('host adapters are the only server files allowed to import core internals', () => {
   const adapters = files(join(serverRoot, 'host', 'adapters'));
-  assert.deepEqual(adapters.map(file => relative(serverRoot, file).replaceAll('\\', '/')).sort(), [...ALLOWED_ADAPTERS].sort());
+  assert.deepEqual(adapters.map((file) => relative(serverRoot, file).replaceAll('\\', '/')).sort(), [...ALLOWED_ADAPTERS].sort());
 });

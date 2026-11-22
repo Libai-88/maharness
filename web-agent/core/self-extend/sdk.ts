@@ -8,7 +8,7 @@ Capabilities use kind/name declarations: tool.tool.name, command.command.name, s
 enable_plugin({id}) validates and returns registered capability identifiers. Small catalogs expose tools directly on the next request; with a large catalog, discover_capabilities finds task-facing capabilities and enable_capabilities exposes their authorized tools. discover_tools/enable_tools remain the direct tool interface. capabilityIndex may only name tools already listed in permissions.capabilities.tool. Version 2 manifests remain loadable through the compatibility adapter without v3-only metadata. disable_plugin({id}) releases the instance. Requires/permissions are not expanded automatically.
 
 Examples: plugin_status({example:'tool'}) returns a complete tested source and manifest.
-Available examples: ${taskPluginExamples.map(item => item.id).join(', ')}.
+Available examples: ${taskPluginExamples.map((item) => item.id).join(', ')}.
 
 ## Plugin lifecycle and context
 Plugin={id:string,name:string,version:string,onLoad?(ctx),onStart?(ctx),onStop?(ctx),onUnload?(ctx)}.

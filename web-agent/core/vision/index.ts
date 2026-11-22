@@ -16,8 +16,12 @@ import { routeForCapability, capabilitySatisfied } from '../chat/routing';
 import type { RouteDecision } from '../chat/routing';
 
 const MIME: Record<string, string> = {
-  '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg',
-  '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
 };
 /** 单图 base64 上限（字节，原图）：base64 后约 ×1.37 */
 const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
@@ -28,8 +32,14 @@ const SESSION_STORE_MAX = 12;
 const STORE_BYTES_MAX = 48 * 1024 * 1024;
 
 interface ImageRef {
-  id: string; path: string; mime: string; bytes: number; dataUrl: string; at: number;
-  tenantId: string; sessionId: string;
+  id: string;
+  path: string;
+  mime: string;
+  bytes: number;
+  dataUrl: string;
+  at: number;
+  tenantId: string;
+  sessionId: string;
 }
 
 let store: ImageRef[] = [];
@@ -37,7 +47,7 @@ let seq = 0;
 
 function remember(ref: ImageRef): void {
   store.push(ref);
-  let perSession = store.filter((item) => item.tenantId === ref.tenantId && item.sessionId === ref.sessionId);
+  const perSession = store.filter((item) => item.tenantId === ref.tenantId && item.sessionId === ref.sessionId);
   while (perSession.length > SESSION_STORE_MAX) {
     const oldest = perSession.shift()!;
     store = store.filter((item) => item !== oldest);
@@ -80,18 +90,28 @@ export default {
       question: string,
       signal?: AbortSignal,
     ): Promise<{ ok: boolean; text?: string; error?: string; tokensIn: number; tokensOut: number }> {
-      const messages: LLMMessage[] = [{
-        role: 'user',
-        content: question,
-        images: [dataUrl],
-      }];
+      const messages: LLMMessage[] = [
+        {
+          role: 'user',
+          content: question,
+          images: [dataUrl],
+        },
+      ];
       let text = '';
       let tokensIn = 0;
       let tokensOut = 0;
       try {
-        for await (const chunk of callModel(target.provider, messages, { model: target.model, maxTokens: 1500, ...(signal ? { signal } : {}) }, 'vision')) {
+        for await (const chunk of callModel(
+          target.provider,
+          messages,
+          { model: target.model, maxTokens: 1500, ...(signal ? { signal } : {}) },
+          'vision',
+        )) {
           if (chunk.type === 'delta') text += chunk.text;
-          else if (chunk.type === 'usage') { tokensIn = chunk.input; tokensOut = chunk.output; }
+          else if (chunk.type === 'usage') {
+            tokensIn = chunk.input;
+            tokensOut = chunk.output;
+          }
         }
         return { ok: true, text: text.trim(), tokensIn, tokensOut };
       } catch (err) {
@@ -120,7 +140,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'read_image',
         risk: 'low',
         costHint: 'low',
@@ -128,8 +148,15 @@ export default {
         limits: `仅图片（png/jpg/gif/webp/bmp）；单图 ≤${Math.round(maxBytes / 1024 / 1024)}MB；路径须在沙箱内`,
         output: '{imageId, path, mime, bytes, note}',
         outputSchema: {
-          type: 'object', required: ['imageId', 'path', 'mime', 'bytes'],
-          properties: { imageId: { type: 'string' }, path: { type: 'string' }, mime: { type: 'string' }, bytes: { type: 'integer' }, note: { type: 'string' } },
+          type: 'object',
+          required: ['imageId', 'path', 'mime', 'bytes'],
+          properties: {
+            imageId: { type: 'string' },
+            path: { type: 'string' },
+            mime: { type: 'string' },
+            bytes: { type: 'integer' },
+            note: { type: 'string' },
+          },
         },
         description: '登记一张图片供后续分析（不读取像素、不塞进上下文）。返回 imageId，配合 analyze_image 使用。',
         parameters: {
@@ -149,16 +176,28 @@ export default {
           if (st.size > maxBytes) return { ok: false, error: `图片过大（${st.size} 字节 > ${maxBytes}）` };
           const ref: ImageRef = {
             id: `img-${Date.now().toString(36)}-${++seq}`,
-            path: args.path ?? '', mime, bytes: st.size,
+            path: args.path ?? '',
+            mime,
+            bytes: st.size,
             dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`,
-            at: Date.now(), ...ownerOf(tctx),
+            at: Date.now(),
+            ...ownerOf(tctx),
           };
           remember(ref);
-          const canSee = tctx.providerId ? capabilitySatisfied({ vision: true }, providers().find(p => p.id === tctx.providerId) ?? ({} as ProviderDef), tctx.model ?? '') : false;
+          const canSee = tctx.providerId
+            ? capabilitySatisfied(
+                { vision: true },
+                providers().find((p) => p.id === tctx.providerId) ?? ({} as ProviderDef),
+                tctx.model ?? '',
+              )
+            : false;
           return {
             ok: true,
             data: {
-              imageId: ref.id, path: ref.path, mime, bytes: st.size,
+              imageId: ref.id,
+              path: ref.path,
+              mime,
+              bytes: st.size,
               note: canSee
                 ? '当前模型自带视觉，analyze_image 将就地分析（不切换模型）。'
                 : '当前模型不支持视觉，调用 analyze_image 会自动借道可用的多模态模型，分析结果以文本回传后继续你的工作。',
@@ -172,7 +211,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network"],
+        permissions: ['network'],
         name: 'analyze_image',
         risk: 'low',
         costHint: 'medium',
@@ -182,10 +221,19 @@ export default {
         limits: '一次一张；结果按文本返回，原图不进入对话历史',
         output: '{answer, model, provider, routed, tokensIn, tokensOut}',
         outputSchema: {
-          type: 'object', required: ['answer', 'model', 'provider', 'routed'],
-          properties: { answer: { type: 'string' }, model: { type: 'string' }, provider: { type: 'string' }, routed: { type: 'boolean' }, tokensIn: { type: 'integer' }, tokensOut: { type: 'integer' } },
+          type: 'object',
+          required: ['answer', 'model', 'provider', 'routed'],
+          properties: {
+            answer: { type: 'string' },
+            model: { type: 'string' },
+            provider: { type: 'string' },
+            routed: { type: 'boolean' },
+            tokensIn: { type: 'integer' },
+            tokensOut: { type: 'integer' },
+          },
         },
-        description: '把已登记的图片交给具备视觉能力的模型分析并返回文本结论。当前模型不支持视觉时自动路由到可用的多模态模型（同 provider 优先、其次价格低），分析结束即回到原模型继续任务。',
+        description:
+          '把已登记的图片交给具备视觉能力的模型分析并返回文本结论。当前模型不支持视觉时自动路由到可用的多模态模型（同 provider 优先、其次价格低），分析结束即回到原模型继续任务。',
         parameters: {
           type: 'object',
           properties: {
@@ -198,7 +246,17 @@ export default {
           },
           required: ['question'],
         },
-        async handler(args: { imageId?: string; path?: string; question?: string; maxLatencyMs?: number; privacyTier?: 'local' | 'trusted' | 'external'; maxRiskLevel?: 'low' | 'medium' | 'high' }, tctx) {
+        async handler(
+          args: {
+            imageId?: string;
+            path?: string;
+            question?: string;
+            maxLatencyMs?: number;
+            privacyTier?: 'local' | 'trusted' | 'external';
+            maxRiskLevel?: 'low' | 'medium' | 'high';
+          },
+          tctx,
+        ) {
           if (!enabled) return { ok: false, error: '视觉能力已由配置关闭' };
           const owner = ownerOf(tctx);
           let ref = args.imageId ? findImage(String(args.imageId), owner) : undefined;
@@ -211,8 +269,13 @@ export default {
             const st = statSync(file);
             if (st.size > maxBytes) return { ok: false, error: `图片过大（${st.size} 字节）` };
             ref = {
-              id: `img-${Date.now().toString(36)}-${++seq}`, path: String(args.path), mime, bytes: st.size,
-              dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`, at: Date.now(), ...owner,
+              id: `img-${Date.now().toString(36)}-${++seq}`,
+              path: String(args.path),
+              mime,
+              bytes: st.size,
+              dataUrl: `data:${mime};base64,${readFileSync(file).toString('base64')}`,
+              at: Date.now(),
+              ...owner,
             };
             remember(ref);
           }
@@ -221,7 +284,7 @@ export default {
           const list = providers();
           if (!list.length) return { ok: false, error: '尚未配置任何 Provider，无法分析图片' };
 
-          const currentProvider = list.find(p => p.id === tctx.providerId) ?? list[0];
+          const currentProvider = list.find((p) => p.id === tctx.providerId) ?? list[0];
           const currentModel = tctx.model || currentProvider.defaultModel;
           let target = { provider: currentProvider, model: currentModel };
           let routed = false;
@@ -239,15 +302,21 @@ export default {
             const pick = routeForCapability(capabilityNeed, list, { providerId: currentProvider.id, model: currentModel });
             decision = pick;
             if (!pick) {
-              const known = list.map(p => `${p.id}@${p.defaultModel}`).join('、');
-              return { ok: false, error: `当前模型 ${currentProvider.id}@${currentModel} 不支持视觉，且可用 provider 中没有任何带视觉能力的模型（已配置：${known}）。请在「设置 → 供应商」拉取模型列表（会自动识别视觉能力）或配置一个多模态模型。` };
+              const known = list.map((p) => `${p.id}@${p.defaultModel}`).join('、');
+              return {
+                ok: false,
+                error: `当前模型 ${currentProvider.id}@${currentModel} 不支持视觉，且可用 provider 中没有任何带视觉能力的模型（已配置：${known}）。请在「设置 → 供应商」拉取模型列表（会自动识别视觉能力）或配置一个多模态模型。`,
+              };
             }
             target = { provider: pick.provider, model: pick.model };
             routed = true;
           }
 
           const step = ctx.trace.startStep({
-            traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: routed ? 'vision-route' : 'vision-local',
+            traceId: tctx.traceId ?? '',
+            turn: tctx.turn,
+            type: 'system',
+            name: routed ? 'vision-route' : 'vision-local',
             inputSummary: `${currentProvider.id}@${currentModel} ← ${ref.path || ref.id}`,
           });
           const r = await analyze(target, ref.dataUrl, question, tctx.signal);
@@ -257,32 +326,42 @@ export default {
           }
           step.finish({
             outputSummary: routed
-              ? JSON.stringify({ reason: decision?.reason, target: `${target.provider.id}@${target.model}`, candidates: decision?.candidates })
+              ? JSON.stringify({
+                  reason: decision?.reason,
+                  target: `${target.provider.id}@${target.model}`,
+                  candidates: decision?.candidates,
+                })
               : `就地 ${target.model} 分析`,
-            tokensIn: r.tokensIn, tokensOut: r.tokensOut,
+            tokensIn: r.tokensIn,
+            tokensOut: r.tokensOut,
           });
           return {
             ok: true,
             data: {
               answer: r.text,
               image: { id: ref.id, path: ref.path, mime: ref.mime, bytes: ref.bytes },
-              model: target.model, provider: target.provider.id,
-              routed, backTo: routed ? `${currentProvider.id}@${currentModel}` : undefined,
-              tokensIn: r.tokensIn, tokensOut: r.tokensOut,
+              model: target.model,
+              provider: target.provider.id,
+              routed,
+              backTo: routed ? `${currentProvider.id}@${currentModel}` : undefined,
+              tokensIn: r.tokensIn,
+              tokensOut: r.tokensOut,
             },
           };
         },
       },
     });
 
-    const visionCapable = providers().flatMap(p => (p.models ?? []).filter(m => m.vision).map(m => `${p.id}@${m.modelId}`));
-    ctx.logger.info(`图像能力就绪: read_image / analyze_image（当前${visionCapable.length ? ` 已有多模态模型 ${visionCapable.slice(0, 3).join('、')}${visionCapable.length > 3 ? '…' : ''}` : ' 无带视觉能力的模型，读图会给出配置指引'}）`);
+    const visionCapable = providers().flatMap((p) => (p.models ?? []).filter((m) => m.vision).map((m) => `${p.id}@${m.modelId}`));
+    ctx.logger.info(
+      `图像能力就绪: read_image / analyze_image（当前${visionCapable.length ? ` 已有多模态模型 ${visionCapable.slice(0, 3).join('、')}${visionCapable.length > 3 ? '…' : ''}` : ' 无带视觉能力的模型，读图会给出配置指引'}）`,
+    );
   },
 } satisfies Plugin;
 
 /** 供 UI/统计展示：内存中最近登记过的图片（不含 base64） */
 export function recentImages(): { id: string; path: string; mime: string; bytes: number; at: number }[] {
-  return store.map(r => ({ id: r.id, path: r.path, mime: r.mime, bytes: r.bytes, at: r.at }));
+  return store.map((r) => ({ id: r.id, path: r.path, mime: r.mime, bytes: r.bytes, at: r.at }));
 }
 
 /** 未登记模型的能力兜底（供测试与自检引用） */

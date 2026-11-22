@@ -1,9 +1,16 @@
 import { expect, test, type Page } from '@playwright/test';
 
 const dimensions = [
-  'capability_discovery', 'tool_contract_clarity', 'result_actionability', 'state_credibility',
-  'error_recovery', 'execution_efficiency', 'context_continuity', 'authorization_control',
-  'result_usability', 'reuse_intention',
+  'capability_discovery',
+  'tool_contract_clarity',
+  'result_actionability',
+  'state_credibility',
+  'error_recovery',
+  'execution_efficiency',
+  'context_continuity',
+  'authorization_control',
+  'result_usability',
+  'reuse_intention',
 ] as const;
 
 async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insufficient_evidence' = 'completed') {
@@ -36,18 +43,42 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
     rubricVersion: 'ai-user-review-v1',
     runIds: ['run-1'],
     generatedAt: 2,
-    runs: [{
-      id: 'run-1', status: 'completed', goal: run.objective, verified: true, durationMs: 1,
-      modelCalls: 1, toolCalls: 1, failedTools: 0, duplicateTools: 0, recoveries: 0,
-      approvalWaits: 0, artifacts: 0, invalidArtifacts: 0, capabilities: [], conflicts: 0,
-    }],
+    runs: [
+      {
+        id: 'run-1',
+        status: 'completed',
+        goal: run.objective,
+        verified: true,
+        durationMs: 1,
+        modelCalls: 1,
+        toolCalls: 1,
+        failedTools: 0,
+        duplicateTools: 0,
+        recoveries: 0,
+        approvalWaits: 0,
+        artifacts: 0,
+        invalidArtifacts: 0,
+        capabilities: [],
+        conflicts: 0,
+      },
+    ],
     totals: {
-      durationMs: 1, modelCalls: 1, toolCalls: 1, failedTools: 0, duplicateTools: 0,
-      recoveries: 0, approvalWaits: 0, artifacts: 0, invalidArtifacts: 0,
+      durationMs: 1,
+      modelCalls: 1,
+      toolCalls: 1,
+      failedTools: 0,
+      duplicateTools: 0,
+      recoveries: 0,
+      approvalWaits: 0,
+      artifacts: 0,
+      invalidArtifacts: 0,
     },
     gates: {
-      allTerminal: true, noFalseSuccess: true, noUnknownSideEffects: true,
-      noUnauthorizedSideEffects: true, artifactsParsable: true,
+      allTerminal: true,
+      noFalseSuccess: true,
+      noUnknownSideEffects: true,
+      noUnauthorizedSideEffects: true,
+      artifactsParsable: true,
     },
     anomalies: [],
   };
@@ -64,27 +95,49 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
     originalModel: 'fixture-model',
     crossModel: false,
     verdict: initialStatus === 'insufficient_evidence' ? 'insufficient_evidence' : 'positive',
-    dimensions: dimensions.map(id => ({
-      id, score: 5, reason: '事实与证据支持该判断。', evidenceRefs: ['run:run-1:verification'],
+    dimensions: dimensions.map((id) => ({
+      id,
+      score: 5,
+      reason: '事实与证据支持该判断。',
+      evidenceRefs: ['run:run-1:verification'],
     })),
-    observations: [{
-      kind: 'positive', summary: '结果和验收事实可直接核对。', evidenceRefs: ['run:run-1:verification'],
-    }],
+    observations: [
+      {
+        kind: 'positive',
+        summary: '结果和验收事实可直接核对。',
+        evidenceRefs: ['run:run-1:verification'],
+      },
+    ],
     suggestions: [suggestion],
     reuseIntent: 5,
     confidence: 0.9,
     evidenceGaps: [],
     facts: factLedger,
-    evidenceIndex: [{
-      id: 'run:run-1:verification', kind: 'verification', runId: 'run-1', label: '机器验收结果',
-    }],
-    evidence: [{
-      ref: 'run:run-1:verification', label: '机器验收结果', text: '{"status":"passed"}',
-      hash: '0123456789abcdef', tokens: 8,
-    }],
+    evidenceIndex: [
+      {
+        id: 'run:run-1:verification',
+        kind: 'verification',
+        runId: 'run-1',
+        label: '机器验收结果',
+      },
+    ],
+    evidence: [
+      {
+        ref: 'run:run-1:verification',
+        label: '机器验收结果',
+        text: '{"status":"passed"}',
+        hash: '0123456789abcdef',
+        tokens: 8,
+      },
+    ],
     budget: {
-      inputTokenLimit: 3_000, outputTokenLimit: 800, totalTokenLimit: 3_800,
-      inputTokens: 100, outputTokens: 50, costUsd: 0.001, costSource: 'configured',
+      inputTokenLimit: 3_000,
+      outputTokenLimit: 800,
+      totalTokenLimit: 3_800,
+      inputTokens: 100,
+      outputTokens: 50,
+      costUsd: 0.001,
+      costSource: 'configured',
     },
     calls: 1,
     createdAt: 2,
@@ -95,21 +148,31 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
   const audits: Array<Record<string, unknown>> = [];
   let created = false;
 
-  await page.route('**/api/**', async route => {
+  await page.route('**/api/**', async (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === '/api/events') return route.fulfill({ contentType: 'text/event-stream', body: '' });
     if (path === '/api/sessions') {
-      return route.fulfill({ json: [{
-        id: 'session-1', title: '复盘测试', model: 'fixture-model', provider: 'fixture',
-        createdAt: 1, updatedAt: 2,
-      }] });
+      return route.fulfill({
+        json: [
+          {
+            id: 'session-1',
+            title: '复盘测试',
+            model: 'fixture-model',
+            provider: 'fixture',
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      });
     }
     if (/\/api\/sessions\/session-1\/messages$/.test(path) || /\/api\/sessions\/session-1\/checkpoint$/.test(path)) {
       return route.fulfill({ json: path.endsWith('checkpoint') ? { exists: false } : [] });
     }
     if (path === '/api/models') {
-      return route.fulfill({ json: [{ id: 'fixture@fixture-model', provider: 'fixture', label: 'Fixture Model', model: 'fixture-model' }] });
+      return route.fulfill({
+        json: [{ id: 'fixture@fixture-model', provider: 'fixture', label: 'Fixture Model', model: 'fixture-model' }],
+      });
     }
     if (path === '/api/providers') {
       return route.fulfill({ json: [{ id: 'fixture', label: 'Fixture', model: 'fixture-model', enabled: true, hasKey: true }] });
@@ -117,69 +180,104 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
     if (path === '/api/plugins' || path === '/api/plugins/diagnostics') return route.fulfill({ json: [] });
     if (path === '/api/nav') return route.fulfill({ json: { items: [] } });
     if (path === '/api/items') return route.fulfill({ json: { items: [], projects: [] } });
-    if (path === '/api/security') return route.fulfill({ json: {
-      bind: '127.0.0.1',
-      mutationAuthRequired: false,
-      mutationTokenHeader: 'x-maharness-token',
-      approvalTokenRequired: true,
-      masterKey: { state: 'generated', available: true, path: 'data/secret.key' },
-      credentials: { broken: [] },
-      policy: { available: true, files: [], blanketAllow: [] },
-    } });
+    if (path === '/api/security')
+      return route.fulfill({
+        json: {
+          bind: '127.0.0.1',
+          mutationAuthRequired: false,
+          mutationTokenHeader: 'x-maharness-token',
+          approvalTokenRequired: true,
+          masterKey: { state: 'generated', available: true, path: 'data/secret.key' },
+          credentials: { broken: [] },
+          policy: { available: true, files: [], blanketAllow: [] },
+        },
+      });
     if (path === '/api/v2/runs') return route.fulfill({ json: [run] });
     if (/^\/api\/v2\/runs\/[^/]+\/(artifacts|children|tools|inputs|calls|plugins)$/.test(path)) {
       return route.fulfill({ json: [] });
     }
     if (path === '/api/workbench/summary') {
-      return route.fulfill({ json: {
-        schemaVersion: 1,
-        today: '2026-11-17',
-        todayItems: [], overdue: [], upcoming: [], unscheduled: [],
-        pendingAutomations: [], automations: [], recentRuns: [], artifacts: [], projects: [], notes: [],
-        metrics: {
-          schemaVersion: 1, firstTaskSuccessRate: 100, takeoverRate: 0,
-          recoveredAfterFailureRate: null, automaticRecoveryRate: null,
-          invalidToolCalls: 0, duplicateToolCalls: 0, capabilitySelectionFailures: 0,
-          durationMs: 1, modelCalls: 1, costUsd: 0, experienceReviewCostUsd: 0.001,
-          experienceReviewCount: 1,
-        },
-        experience: {
+      return route.fulfill({
+        json: {
           schemaVersion: 1,
-          reviewCount: 1,
-          negativeReviews: 0,
-          averageScore: 5,
-          undecidedFindings: findings.filter(finding => finding.status === 'new' || finding.status === 'triaged').length,
-          openFindings: findings.filter(finding => finding.status !== 'closed' && finding.status !== 'wont_fix').length,
-          findings,
-          recentReviews: [{
-            id: review.id,
-            sourceRunIds: review.sourceRunIds,
-            sessionId: run.sessionId,
-            status: review.status,
-            verdict: review.verdict,
-            path: review.path,
-            providerId: review.providerId,
-            model: review.model,
-            originalProviderId: review.originalProviderId,
-            originalModel: review.originalModel,
-            crossModel: review.crossModel,
-            score: 5,
-            suggestionCount: 1,
-            adoptedCount: 0,
-            costUsd: 0.001,
-            updatedAt: 3,
-          }],
+          today: '2026-11-17',
+          todayItems: [],
+          overdue: [],
+          upcoming: [],
+          unscheduled: [],
+          pendingAutomations: [],
+          automations: [],
+          recentRuns: [],
+          artifacts: [],
+          projects: [],
+          notes: [],
+          metrics: {
+            schemaVersion: 1,
+            firstTaskSuccessRate: 100,
+            takeoverRate: 0,
+            recoveredAfterFailureRate: null,
+            automaticRecoveryRate: null,
+            invalidToolCalls: 0,
+            duplicateToolCalls: 0,
+            capabilitySelectionFailures: 0,
+            durationMs: 1,
+            modelCalls: 1,
+            costUsd: 0,
+            experienceReviewCostUsd: 0.001,
+            experienceReviewCount: 1,
+          },
+          experience: {
+            schemaVersion: 1,
+            reviewCount: 1,
+            negativeReviews: 0,
+            averageScore: 5,
+            undecidedFindings: findings.filter((finding) => finding.status === 'new' || finding.status === 'triaged').length,
+            openFindings: findings.filter((finding) => finding.status !== 'closed' && finding.status !== 'wont_fix').length,
+            findings,
+            recentReviews: [
+              {
+                id: review.id,
+                sourceRunIds: review.sourceRunIds,
+                sessionId: run.sessionId,
+                status: review.status,
+                verdict: review.verdict,
+                path: review.path,
+                providerId: review.providerId,
+                model: review.model,
+                originalProviderId: review.originalProviderId,
+                originalModel: review.originalModel,
+                crossModel: review.crossModel,
+                score: 5,
+                suggestionCount: 1,
+                adoptedCount: 0,
+                costUsd: 0.001,
+                updatedAt: 3,
+              },
+            ],
+          },
         },
-      } });
+      });
     }
     if (path === '/api/experience/reviews/estimate') {
-      return route.fulfill({ json: {
-        providerId: 'fixture', model: 'fixture-model',
-        originalProviderId: 'fixture', originalModel: 'fixture-model',
-        crossModel: false, available: true, requiresExplicitModel: false,
-        scope: 'run', path: 'fast', inputTokenLimit: 3_000, outputTokenLimit: 800,
-        totalTokenLimit: 3_800, estimatedCostUsd: 0.001, costSource: 'configured', runCount: 1,
-      } });
+      return route.fulfill({
+        json: {
+          providerId: 'fixture',
+          model: 'fixture-model',
+          originalProviderId: 'fixture',
+          originalModel: 'fixture-model',
+          crossModel: false,
+          available: true,
+          requiresExplicitModel: false,
+          scope: 'run',
+          path: 'fast',
+          inputTokenLimit: 3_000,
+          outputTokenLimit: 800,
+          totalTokenLimit: 3_800,
+          estimatedCostUsd: 0.001,
+          costSource: 'configured',
+          runCount: 1,
+        },
+      });
     }
     if (path === '/api/experience/reviews' && request.method() === 'POST') {
       created = true;
@@ -201,10 +299,19 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
     }
     if (path === '/api/experience/reviews/review-1/audit') {
       const audit = {
-        id: 'audit-1', source: 'ai', kind: 'independent_review', providerId: 'fixture',
-        model: 'fixture-model', verdict: 'agree', summary: '事实和评分一致。',
-        correctedEvidenceRefs: [], confidence: 0.9, inputTokens: 200, outputTokens: 50,
-        costUsd: 0.0001, createdAt: 5,
+        id: 'audit-1',
+        source: 'ai',
+        kind: 'independent_review',
+        providerId: 'fixture',
+        model: 'fixture-model',
+        verdict: 'agree',
+        summary: '事实和评分一致。',
+        correctedEvidenceRefs: [],
+        confidence: 0.9,
+        inputTokens: 200,
+        outputTokens: 50,
+        costUsd: 0.0001,
+        createdAt: 5,
       };
       audits.unshift(audit);
       return route.fulfill({ status: 201, json: { audit } });
@@ -212,19 +319,36 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
     if (path === '/api/experience/reviews/review-1/calibrate') {
       const body = request.postDataJSON() as { dimensions?: unknown[] };
       const audit = {
-        id: 'calibration-1', source: 'human', kind: 'calibration', providerId: 'human',
-        model: 'human', verdict: 'agree', summary: '人工验收结果一致。',
-        correctedEvidenceRefs: [], dimensions: body.dimensions, createdAt: 6,
+        id: 'calibration-1',
+        source: 'human',
+        kind: 'calibration',
+        providerId: 'human',
+        model: 'human',
+        verdict: 'agree',
+        summary: '人工验收结果一致。',
+        correctedEvidenceRefs: [],
+        dimensions: body.dimensions,
+        createdAt: 6,
       };
       audits.unshift(audit);
       return route.fulfill({ status: 201, json: { audit } });
     }
     if (path === '/api/experience/reviews/review-1/suggestions/suggestion-1/adopt') {
       const finding = {
-        id: 'finding-1', reviewId: review.id, reviewIds: [review.id], suggestionId: suggestion.id,
-        title: suggestion.title, detail: suggestion.detail, category: suggestion.category,
-        severity: 'P3', status: 'new', evidenceRefs: suggestion.evidenceRefs,
-        sourceRunIds: review.sourceRunIds, occurrences: 2, createdAt: 4, updatedAt: 4,
+        id: 'finding-1',
+        reviewId: review.id,
+        reviewIds: [review.id],
+        suggestionId: suggestion.id,
+        title: suggestion.title,
+        detail: suggestion.detail,
+        category: suggestion.category,
+        severity: 'P3',
+        status: 'new',
+        evidenceRefs: suggestion.evidenceRefs,
+        sourceRunIds: review.sourceRunIds,
+        occurrences: 2,
+        createdAt: 4,
+        updatedAt: 4,
       };
       findings = [finding];
       review = {
@@ -234,36 +358,43 @@ async function setup(page: Page, initialStatus: 'completed' | 'queued' | 'insuff
       return route.fulfill({ status: 201, json: { finding } });
     }
     if (path === '/api/experience/findings/finding-1/reproduce') {
-      findings = findings.map(finding => finding.id === 'finding-1'
-        ? { ...finding, status: 'reproduced', regressionId: 'regression-1', updatedAt: 5 }
-        : finding);
+      findings = findings.map((finding) =>
+        finding.id === 'finding-1' ? { ...finding, status: 'reproduced', regressionId: 'regression-1', updatedAt: 5 } : finding,
+      );
       return route.fulfill({ status: 201, json: { finding: findings[0] } });
     }
     if (path === '/api/experience/findings/finding-1/verify') {
-      findings = findings.map(finding => finding.id === 'finding-1'
-        ? { ...finding, status: 'closed', updatedAt: 6 }
-        : finding);
-      return route.fulfill({ status: 201, json: {
-        finding: findings[0],
-        regression: {
-          id: 'regression-1', findingId: 'finding-1', sourceRunIds: review.sourceRunIds,
-          objective: '隔离重放', expected: '问题不再出现', evidenceRefs: ['run:run-1:verification'],
-          status: 'passed', verificationRunId: 'run-1', resultSummary: '隔离重放通过',
-          completedAt: 6, createdAt: 4, updatedAt: 6,
+      findings = findings.map((finding) => (finding.id === 'finding-1' ? { ...finding, status: 'closed', updatedAt: 6 } : finding));
+      return route.fulfill({
+        status: 201,
+        json: {
+          finding: findings[0],
+          regression: {
+            id: 'regression-1',
+            findingId: 'finding-1',
+            sourceRunIds: review.sourceRunIds,
+            objective: '隔离重放',
+            expected: '问题不再出现',
+            evidenceRefs: ['run:run-1:verification'],
+            status: 'passed',
+            verificationRunId: 'run-1',
+            resultSummary: '隔离重放通过',
+            completedAt: 6,
+            createdAt: 4,
+            updatedAt: 6,
+          },
         },
-      } });
+      });
     }
     if (path === '/api/experience/findings/finding-1/evolve') {
-      findings = findings.map(finding => finding.id === 'finding-1'
-        ? { ...finding, evolutionProposalId: 'proposal-1', evolutionSubmittedAt: 7, updatedAt: 7 }
-        : finding);
+      findings = findings.map((finding) =>
+        finding.id === 'finding-1' ? { ...finding, evolutionProposalId: 'proposal-1', evolutionSubmittedAt: 7, updatedAt: 7 } : finding,
+      );
       return route.fulfill({ status: 201, json: { finding: findings[0] } });
     }
     if (path === '/api/experience/findings/finding-1') {
       const body = request.postDataJSON() as { status?: string };
-      findings = findings.map(finding => finding.id === 'finding-1'
-        ? { ...finding, status: body.status, updatedAt: 5 }
-        : finding);
+      findings = findings.map((finding) => (finding.id === 'finding-1' ? { ...finding, status: body.status, updatedAt: 5 } : finding));
       return route.fulfill({ json: { finding: findings[0] } });
     }
     return route.fulfill({ json: {} });

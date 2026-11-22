@@ -28,7 +28,13 @@ export interface BlackboardEntry {
 }
 
 export interface BlackboardService {
-  put(sessionId: string, key: string, value: unknown, tags?: string[], tenantId?: string): { key: string; bytes: number; updatedAt: number };
+  put(
+    sessionId: string,
+    key: string,
+    value: unknown,
+    tags?: string[],
+    tenantId?: string,
+  ): { key: string; bytes: number; updatedAt: number };
   get(sessionId: string, key: string, tenantId?: string): BlackboardEntry | undefined;
   list(sessionId: string, prefix?: string, tenantId?: string): { key: string; tags?: string[]; updatedAt: number }[];
   delete(sessionId: string, key: string, tenantId?: string): boolean;
@@ -166,13 +172,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'blackboard_put',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['key', 'bytes', 'updatedAt'],
+          type: 'object',
+          required: ['key', 'bytes', 'updatedAt'],
           properties: { key: { type: 'string' }, bytes: { type: 'integer' }, updatedAt: { type: 'integer' } },
         },
         limits: `会话级；单值 ≤ ${MAX_VALUE_CHARS} 字符；每会话最多 ${MAX_ENTRIES} 条`,
@@ -202,14 +209,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'blackboard_get',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         contentTrust: 'untrusted',
         outputSchema: {
-          type: 'object', required: ['key', 'value'],
+          type: 'object',
+          required: ['key', 'value'],
           properties: { key: { type: 'string' }, value: {}, tags: { type: 'array' }, updatedAt: { type: 'integer' } },
         },
         description: '读取会话共享黑板中的一个 key。',
@@ -227,13 +235,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'blackboard_list',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         outputSchema: {
-          type: 'object', required: ['count', 'entries'],
+          type: 'object',
+          required: ['count', 'entries'],
           properties: { count: { type: 'integer' }, entries: { type: 'array' } },
         },
         description: '列出当前会话共享黑板的 key、标签和更新时间。',
@@ -253,13 +262,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'blackboard_delete',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['removed'],
+          type: 'object',
+          required: ['removed'],
           properties: { removed: { type: 'string' } },
         },
         description: '删除当前会话共享黑板中的一个 key。',

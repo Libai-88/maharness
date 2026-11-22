@@ -4,8 +4,17 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  diffPolicyRules, dryRunPolicy, evaluatePolicy, loadPromptRules, loadPolicyRules,
-  matchPolicy, personaRuleDescriptor, resolveRuleDescriptors, rulesSignature, runtimeRuleDescriptor, validatePolicyRules,
+  diffPolicyRules,
+  dryRunPolicy,
+  evaluatePolicy,
+  loadPromptRules,
+  loadPolicyRules,
+  matchPolicy,
+  personaRuleDescriptor,
+  resolveRuleDescriptors,
+  rulesSignature,
+  runtimeRuleDescriptor,
+  validatePolicyRules,
 } from '../rules';
 import type { RuleDescriptor } from '../types';
 
@@ -23,8 +32,16 @@ before(() => {
 });
 
 after(() => {
-  try { rmSync(dataDir, { recursive: true, force: true }); } catch { /* 忽略 */ }
-  try { rmSync(projectRoot, { recursive: true, force: true }); } catch { /* 忽略 */ }
+  try {
+    rmSync(dataDir, { recursive: true, force: true });
+  } catch {
+    /* 忽略 */
+  }
+  try {
+    rmSync(projectRoot, { recursive: true, force: true });
+  } catch {
+    /* 忽略 */
+  }
 });
 
 describe('loadPromptRules', () => {
@@ -45,15 +62,21 @@ describe('loadPromptRules', () => {
   it('全局、AGENTS 与项目规则按来源拆成独立上下文', () => {
     const r = loadPromptRules({ dataDir, projectRoot });
     assert.ok(r.segments.length >= 3);
-    assert.ok(['tone.md', 'AGENTS.md', '.maharness/rules/tests.md'].every(label =>
-      r.segments.some(segment => segment.descriptor.label === label)));
-    assert.equal(r.segments.every(segment => !segment.text.includes('全局规则·tone.md\n【项目规则')), true);
+    assert.ok(
+      ['tone.md', 'AGENTS.md', '.maharness/rules/tests.md'].every((label) =>
+        r.segments.some((segment) => segment.descriptor.label === label),
+      ),
+    );
+    assert.equal(
+      r.segments.every((segment) => !segment.text.includes('全局规则·tone.md\n【项目规则')),
+      true,
+    );
   });
 
   it('sources 记录不存在文件（供 UI 显示候选）', () => {
     const r = loadPromptRules({ dataDir, projectRoot });
-    assert.ok(r.sources.some(s => s.scope === 'project' && !s.exists));
-    assert.ok(r.sources.every(s => !s.file.includes('..')));
+    assert.ok(r.sources.some((s) => s.scope === 'project' && !s.exists));
+    assert.ok(r.sources.every((s) => !s.file.includes('..')));
   });
 
   it('maxChars 超预算时截断并标记', () => {
@@ -112,8 +135,11 @@ describe('loadPromptRules', () => {
       const result = loadPromptRules({ dataDir: localData, projectRoot: localProject });
       assert.equal(result.text.split(duplicate).length - 1, 1);
       assert.equal(result.resolution.applied[0]?.source, 'project');
-      assert.ok(result.resolution.conflicts.some(conflict =>
-        conflict.reason === 'same_content_duplicate' && conflict.winner.startsWith('rules:project:')));
+      assert.ok(
+        result.resolution.conflicts.some(
+          (conflict) => conflict.reason === 'same_content_duplicate' && conflict.winner.startsWith('rules:project:'),
+        ),
+      );
     } finally {
       rmSync(localData, { recursive: true, force: true });
       rmSync(localProject, { recursive: true, force: true });
@@ -128,18 +154,26 @@ describe('结构化规则裁决', () => {
       { context: { id: 'skill', source: 'skill-guidance:技能' }, content: 'skill' },
       { context: { id: 'plugin', source: 'plugin-persona:插件' }, content: 'plugin' },
     ].map(personaRuleDescriptor);
-    assert.deepEqual(rules.map(rule => [rule.source, rule.priority, rule.trust]), [
-      ['user', 75, 'user'],
-      ['skill', 60, 'reference'],
-      ['plugin', 55, 'reference'],
-    ]);
+    assert.deepEqual(
+      rules.map((rule) => [rule.source, rule.priority, rule.trust]),
+      [
+        ['user', 75, 'user'],
+        ['skill', 60, 'reference'],
+        ['plugin', 55, 'reference'],
+      ],
+    );
   });
 
   test('按优先级去重、记录冲突和未生效来源', () => {
     const rule = (id: string, source: RuleDescriptor['source'], priority: number, hash: string, active = true): RuleDescriptor => ({
-      id, label: id, source, scope: source === 'runtime' ? 'runtime' : 'workspace', priority,
+      id,
+      label: id,
+      source,
+      scope: source === 'runtime' ? 'runtime' : 'workspace',
+      priority,
       trust: source === 'runtime' || source === 'user' || source === 'project' ? 'user' : 'reference',
-      contentHash: hash, active,
+      contentHash: hash,
+      active,
     });
     const result = resolveRuleDescriptors([
       rule('project', 'project', 600, 'same'),
@@ -147,15 +181,27 @@ describe('结构化规则裁决', () => {
       rule('skill', 'skill', 200, 'skill'),
       rule('disabled', 'plugin', 900, 'disabled', false),
     ]);
-    assert.deepEqual(result.applied.map(item => item.id), ['user-rule', 'skill']);
-    assert.deepEqual(result.ignored.map(item => item.id), ['disabled', 'project']);
+    assert.deepEqual(
+      result.applied.map((item) => item.id),
+      ['user-rule', 'skill'],
+    );
+    assert.deepEqual(
+      result.ignored.map((item) => item.id),
+      ['disabled', 'project'],
+    );
     assert.deepEqual(result.conflicts[0], { left: 'user-rule', right: 'project', reason: 'same_content_duplicate', winner: 'user-rule' });
   });
 
   test('运行时、当前指令、项目与持久规则按固定优先级合并', () => {
     const rule = (id: string, source: RuleDescriptor['source'], priority: number, hash: string): RuleDescriptor => ({
-      id, label: id, source, scope: source === 'runtime' ? 'runtime' : source === 'user' && id.startsWith('instruction') ? 'run' : 'workspace',
-      priority, trust: source === 'project' ? 'user' : source === 'user' ? 'user' : 'core', contentHash: hash, active: true,
+      id,
+      label: id,
+      source,
+      scope: source === 'runtime' ? 'runtime' : source === 'user' && id.startsWith('instruction') ? 'run' : 'workspace',
+      priority,
+      trust: source === 'project' ? 'user' : source === 'user' ? 'user' : 'core',
+      contentHash: hash,
+      active: true,
     });
     const result = resolveRuleDescriptors([
       rule('persistent-user', 'user', 70, 'persistent'),
@@ -164,25 +210,33 @@ describe('结构化规则裁决', () => {
       rule('instruction', 'user', 900, 'instruction'),
       runtimeRuleDescriptor(),
     ]);
-    assert.deepEqual(result.applied.map(item => item.id), [
-      'runtime:invariants', 'instruction', 'project-winner', 'persistent-user',
-    ]);
-    assert.ok(result.conflicts.some(conflict =>
-      conflict.reason === 'same_content_duplicate' && conflict.winner === 'project-winner' && conflict.right === 'global-loser'));
+    assert.deepEqual(
+      result.applied.map((item) => item.id),
+      ['runtime:invariants', 'instruction', 'project-winner', 'persistent-user'],
+    );
+    assert.ok(
+      result.conflicts.some(
+        (conflict) =>
+          conflict.reason === 'same_content_duplicate' && conflict.winner === 'project-winner' && conflict.right === 'global-loser',
+      ),
+    );
   });
 });
 
 describe('策略规则', () => {
   const file = () => join(projectRoot, '.maharness', 'rules.json');
   before(() => {
-    writeFileSync(file(), JSON.stringify({
-      rules: [
-        { id: 'allow-test', effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run (test|typecheck)', reason: '测试免审批' },
-        { id: 'allow-read', effect: 'allow', tool: 'read_*', pathPattern: 'docs/**' },
-        { id: 'deny-kill', effect: 'deny', tool: 'powershell_execute', argPattern: 'taskkill' },
-        { id: 'off', effect: 'allow', tool: 'delete_file', enabled: false },
-      ],
-    }));
+    writeFileSync(
+      file(),
+      JSON.stringify({
+        rules: [
+          { id: 'allow-test', effect: 'allow', tool: 'powershell_execute', argPattern: 'npm run (test|typecheck)', reason: '测试免审批' },
+          { id: 'allow-read', effect: 'allow', tool: 'read_*', pathPattern: 'docs/**' },
+          { id: 'deny-kill', effect: 'deny', tool: 'powershell_execute', argPattern: 'taskkill' },
+          { id: 'off', effect: 'allow', tool: 'delete_file', enabled: false },
+        ],
+      }),
+    );
   });
 
   it('解析并按 tool/argPattern/pathPattern 匹配', () => {
@@ -244,7 +298,9 @@ describe('策略规则', () => {
     ];
     const changes = diffPolicyRules(before, after);
     assert.deepEqual(changes.map((item) => [item.id, item.change]).sort(), [
-      ['add', 'added'], ['change', 'changed'], ['remove', 'removed'],
+      ['add', 'added'],
+      ['change', 'changed'],
+      ['remove', 'removed'],
     ]);
     assert.deepEqual(changes.find((item) => item.id === 'change')?.fields, ['effect', 'pathPattern']);
   });
@@ -262,12 +318,8 @@ describe('策略规则', () => {
   });
 
   it('dryRunPolicy 只读比较候选策略且不改变输入', () => {
-    const current = [
-      { id: 'allow-test', effect: 'allow' as const, tool: 'powershell_execute', argPattern: 'npm run test' },
-    ];
-    const candidate = [
-      { id: 'allow-test', effect: 'deny' as const, tool: 'powershell_execute', argPattern: 'npm run test' },
-    ];
+    const current = [{ id: 'allow-test', effect: 'allow' as const, tool: 'powershell_execute', argPattern: 'npm run test' }];
+    const candidate = [{ id: 'allow-test', effect: 'deny' as const, tool: 'powershell_execute', argPattern: 'npm run test' }];
     const before = JSON.stringify(current);
     const result = dryRunPolicy(current, candidate, [{ tool: 'powershell_execute', args: { command: 'npm run test' } }]);
     assert.equal(result.current[0].decision, 'allow');

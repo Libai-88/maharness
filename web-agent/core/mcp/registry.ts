@@ -46,26 +46,32 @@ function stringOf(value: unknown): string | undefined {
 
 export function normalizeRegistryServer(raw: unknown): RegistryServer | null {
   if (!raw || typeof raw !== 'object') return null;
-  const source = (raw as { server?: unknown }).server && typeof (raw as { server?: unknown }).server === 'object'
-    ? (raw as { server: Record<string, unknown> }).server
-    : raw as Record<string, unknown>;
+  const source =
+    (raw as { server?: unknown }).server && typeof (raw as { server?: unknown }).server === 'object'
+      ? (raw as { server: Record<string, unknown> }).server
+      : (raw as Record<string, unknown>);
   const name = stringOf(source.name);
   if (!name) return null;
   const packages = Array.isArray(source.packages)
-    ? source.packages.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object').map((item) => ({
-      registryType: stringOf(item.registryType),
-      identifier: stringOf(item.identifier),
-      version: stringOf(item.version),
-      transport: item.transport && typeof item.transport === 'object'
-        ? { type: stringOf((item.transport as Record<string, unknown>).type) }
-        : undefined,
-    }))
+    ? source.packages
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+          registryType: stringOf(item.registryType),
+          identifier: stringOf(item.identifier),
+          version: stringOf(item.version),
+          transport:
+            item.transport && typeof item.transport === 'object'
+              ? { type: stringOf((item.transport as Record<string, unknown>).type) }
+              : undefined,
+        }))
     : [];
   const remotes = Array.isArray(source.remotes)
-    ? source.remotes.filter((item): item is Record<string, unknown> => !!item && typeof item === 'object').map((item) => ({
-      type: stringOf(item.type),
-      url: stringOf(item.url),
-    }))
+    ? source.remotes
+        .filter((item): item is Record<string, unknown> => !!item && typeof item === 'object')
+        .map((item) => ({
+          type: stringOf(item.type),
+          url: stringOf(item.url),
+        }))
     : [];
   return {
     name,
@@ -86,12 +92,10 @@ export async function fetchRegistryServers(opts: RegistrySearchOptions): Promise
   if (opts.query) url.searchParams.set('search', opts.query);
   url.searchParams.set('limit', String(Math.max(1, Math.min(100, Math.trunc(opts.limit ?? 20)))));
   await opts.assertUrl?.(url.toString());
-  const signal = opts.signal
-    ? AbortSignal.any([opts.signal, AbortSignal.timeout(15_000)])
-    : AbortSignal.timeout(15_000);
+  const signal = opts.signal ? AbortSignal.any([opts.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000);
   const res = await fetch(url, { headers: { Accept: 'application/json' }, redirect: 'error', signal });
   if (!res.ok) throw new Error(`MCP registry HTTP ${res.status}`);
-  const data = await res.json() as { servers?: unknown[]; data?: unknown[] };
+  const data = (await res.json()) as { servers?: unknown[]; data?: unknown[] };
   const list = Array.isArray(data.servers) ? data.servers : Array.isArray(data.data) ? data.data : [];
   return list.map(normalizeRegistryServer).filter((item): item is RegistryServer => !!item);
 }
@@ -124,7 +128,11 @@ export function registryInstallCandidate(server: RegistryServer, allowPrivate = 
   for (const remote of server.remotes ?? []) {
     if (!remote.url) continue;
     let url: URL;
-    try { url = new URL(remote.url); } catch { continue; }
+    try {
+      url = new URL(remote.url);
+    } catch {
+      continue;
+    }
     if (url.protocol !== 'https:' && !(allowPrivate && url.protocol === 'http:')) return null;
     return {
       server,

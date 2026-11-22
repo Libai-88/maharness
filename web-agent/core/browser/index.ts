@@ -33,8 +33,15 @@ function privateIpv4(ip: string): boolean {
   const parts = ip.split('.').map(Number);
   if (parts.length !== 4 || parts.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
   const [a, b] = parts as [number, number, number, number];
-  return a === 0 || a === 10 || a === 127 || (a === 169 && b === 254)
-    || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || a >= 224;
+  return (
+    a === 0 ||
+    a === 10 ||
+    a === 127 ||
+    (a === 169 && b === 254) ||
+    (a === 172 && b >= 16 && b <= 31) ||
+    (a === 192 && b === 168) ||
+    a >= 224
+  );
 }
 
 function privateAddress(address: string): boolean {
@@ -42,8 +49,16 @@ function privateAddress(address: string): boolean {
   if (family === 4) return privateIpv4(address);
   if (family === 6) {
     const normalized = address.toLowerCase();
-    return normalized === '::1' || normalized === '::' || normalized.startsWith('fc') || normalized.startsWith('fd')
-      || normalized.startsWith('fe8') || normalized.startsWith('fe9') || normalized.startsWith('fea') || normalized.startsWith('feb');
+    return (
+      normalized === '::1' ||
+      normalized === '::' ||
+      normalized.startsWith('fc') ||
+      normalized.startsWith('fd') ||
+      normalized.startsWith('fe8') ||
+      normalized.startsWith('fe9') ||
+      normalized.startsWith('fea') ||
+      normalized.startsWith('feb')
+    );
   }
   return true;
 }
@@ -56,7 +71,11 @@ export interface BrowserTarget {
 /** 解析并校验目标；返回的 addresses 用于把实际连接钉死在这一次 DNS 结果上。 */
 export async function resolveBrowserTarget(raw: string, allowPrivate: boolean): Promise<BrowserTarget> {
   let url: URL;
-  try { url = new URL(raw); } catch { throw new Error('URL 非法'); }
+  try {
+    url = new URL(raw);
+  } catch {
+    throw new Error('URL 非法');
+  }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') throw new Error('仅支持 http/https');
   if (allowPrivate) {
     const host = url.hostname.replace(/^\[|\]$/g, '');
@@ -70,8 +89,8 @@ export async function resolveBrowserTarget(raw: string, allowPrivate: boolean): 
   const addresses = isIP(host)
     ? [{ address: host, family: isIP(host) }]
     : await lookup(host, { all: true }).catch(() => {
-      throw new Error(`无法解析主机: ${host}`);
-    });
+        throw new Error(`无法解析主机: ${host}`);
+      });
   if (addresses.length === 0) throw new Error(`无法解析主机: ${host}`);
   if (addresses.some((entry) => privateAddress(entry.address))) {
     throw new Error('拒绝访问私网地址（如需访问请设 browser.allowPrivate=true）');
@@ -156,21 +175,24 @@ export async function startBrowserProxy(
         const target = await resolve(req.url ?? '');
         const address = target.addresses[0];
         if (!address) throw new Error('目标无法解析');
-        const upstream = httpRequest({
-          host: address.address,
-          family: address.family,
-          port: Number(target.url.port || 80),
-          method: req.method,
-          path: `${target.url.pathname}${target.url.search}`,
-          headers: { ...req.headers, host: target.url.host },
-          lookup: (_hostname, options, callback) => {
-            if (options.all) callback(null, [address]);
-            else callback(null, address.address, address.family);
+        const upstream = httpRequest(
+          {
+            host: address.address,
+            family: address.family,
+            port: Number(target.url.port || 80),
+            method: req.method,
+            path: `${target.url.pathname}${target.url.search}`,
+            headers: { ...req.headers, host: target.url.host },
+            lookup: (_hostname, options, callback) => {
+              if (options.all) callback(null, [address]);
+              else callback(null, address.address, address.family);
+            },
           },
-        }, (upstreamRes) => {
-          res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
-          upstreamRes.pipe(res);
-        });
+          (upstreamRes) => {
+            res.writeHead(upstreamRes.statusCode ?? 502, upstreamRes.headers);
+            upstreamRes.pipe(res);
+          },
+        );
         upstream.once('error', () => {
           if (!res.headersSent) res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
           res.end('Bad Gateway');
@@ -219,8 +241,7 @@ export default {
     let proxyPromise: Promise<BrowserProxy> | undefined;
     const ensureProxy = (): Promise<BrowserProxy> => (proxyPromise ??= startBrowserProxy());
 
-    const sessionKey = (tctx: ToolContext) =>
-      `${tctx.tenantId ?? 'default'}\u0000${tctx.sessionId ?? '_default'}`;
+    const sessionKey = (tctx: ToolContext) => `${tctx.tenantId ?? 'default'}\u0000${tctx.sessionId ?? '_default'}`;
     const getPage = async (tctx: ToolContext): Promise<Page> => {
       const key = sessionKey(tctx);
       const existing = sessions.get(key);
@@ -249,7 +270,7 @@ export default {
           viewport: { width: 1280, height: 800 },
         });
       }
-      const page = context.pages()[0] ?? await context.newPage();
+      const page = context.pages()[0] ?? (await context.newPage());
       if (!allowPrivate) {
         await context.route('**/*', async (route) => {
           const url = route.request().url();
@@ -277,14 +298,17 @@ export default {
       return page;
     };
 
-    ctx.effect<void>(() => undefined, () => () => {
-      for (const session of sessions.values()) {
-        void session.context.close().catch(() => undefined);
-        void session.browser?.close().catch(() => undefined);
-      }
-      sessions.clear();
-      void proxyPromise?.then((p) => p.close()).catch(() => undefined);
-    });
+    ctx.effect<void>(
+      () => undefined,
+      () => () => {
+        for (const session of sessions.values()) {
+          void session.context.close().catch(() => undefined);
+          void session.browser?.close().catch(() => undefined);
+        }
+        sessions.clear();
+        void proxyPromise?.then((p) => p.close()).catch(() => undefined);
+      },
+    );
 
     ctx.register({
       kind: 'persona',
@@ -305,7 +329,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network"],
+        permissions: ['network'],
         name: 'browser_open',
         risk: 'medium',
         costHint: 'medium',
@@ -313,7 +337,8 @@ export default {
         sideEffect: 'external',
         limits: '仅 http/https；默认拒绝私网；单会话独立 browser',
         outputSchema: {
-          type: 'object', required: ['url', 'title'],
+          type: 'object',
+          required: ['url', 'title'],
           properties: { url: { type: 'string' }, title: { type: 'string' }, status: { type: ['integer', 'null'] } },
         },
         description: '在浏览器中打开 URL（启动会话）。用于需要渲染/交互的网页任务。',
@@ -341,7 +366,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'browser_snapshot',
         risk: 'low',
         costHint: 'low',
@@ -350,7 +375,8 @@ export default {
         limits: `返回正文 ≤ ${maxChars} 字符`,
         output: '{url, title, text, truncated}',
         outputSchema: {
-          type: 'object', required: ['url', 'title', 'text', 'truncated'],
+          type: 'object',
+          required: ['url', 'title', 'text', 'truncated'],
           properties: { url: { type: 'string' }, title: { type: 'string' }, text: { type: 'string' }, truncated: { type: 'boolean' } },
         },
         description: '读取当前页面 URL、标题和可见正文（innerText），用于观察渲染结果与页面状态。',
@@ -383,7 +409,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'browser_network',
         risk: 'low',
         costHint: 'low',
@@ -391,7 +417,8 @@ export default {
         contentTrust: 'untrusted',
         output: '{count, total, entries: [{url, method, status, resourceType, at}]}',
         outputSchema: {
-          type: 'object', required: ['count', 'total', 'entries'],
+          type: 'object',
+          required: ['count', 'total', 'entries'],
           properties: { count: { type: 'integer' }, total: { type: 'integer' }, entries: { type: 'array' } },
         },
         description: '查看当前浏览器会话最近捕获的网络响应（最多 200 条），用于核对页面实际调用的 API 和资源状态。',
@@ -405,14 +432,18 @@ export default {
         async handler(args: { filter?: string; max?: number }, tctx: ToolContext) {
           const session = sessions.get(sessionKey(tctx));
           if (!session) return { ok: false, error: '浏览器未打开，请先 browser_open' };
-          const filter = String(args.filter ?? '').trim().toLowerCase();
+          const filter = String(args.filter ?? '')
+            .trim()
+            .toLowerCase();
           const max = Math.max(1, Math.min(MAX_NETWORK_ENTRIES, Math.floor(Number(args.max) || 50)));
           const matched = session.network.filter((entry) => !filter || entry.url.toLowerCase().includes(filter));
           const entries = matched.slice(-max);
           return {
             ok: true,
             data: { count: entries.length, total: matched.length, entries },
-            evidence: entries.slice(-5).map((entry) => ({ kind: 'url', label: `${entry.status} ${entry.method} ${entry.url}`, ref: entry.url })),
+            evidence: entries
+              .slice(-5)
+              .map((entry) => ({ kind: 'url', label: `${entry.status} ${entry.method} ${entry.url}`, ref: entry.url })),
           };
         },
       },
@@ -422,7 +453,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'browser_download',
         risk: 'medium',
         costHint: 'medium',
@@ -431,7 +462,8 @@ export default {
         sideEffect: 'write',
         output: '{filename, path, bytes}',
         outputSchema: {
-          type: 'object', required: ['filename', 'path', 'bytes'],
+          type: 'object',
+          required: ['filename', 'path', 'bytes'],
           properties: { filename: { type: 'string' }, path: { type: 'string' }, bytes: { type: 'integer' } },
         },
         limits: '下载文件落 data/browser-downloads/<session>；单次只处理一个下载事件',
@@ -456,7 +488,11 @@ export default {
             const download = await downloadPromise;
             const dir = join(ctx.paths.data, 'browser-downloads', sessionKey(tctx).replace(/[^a-zA-Z0-9_-]/g, '_'));
             mkdirSync(dir, { recursive: true });
-            const safe = basename(download.suggestedFilename() || 'download').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 180) || 'download';
+            const safe =
+              basename(download.suggestedFilename() || 'download')
+                // biome-ignore lint/suspicious/noControlCharactersInRegex: 文件名净化必须剔除控制字符
+                .replace(/[<>:"/\\|?*\x00-\x1f]/g, '_')
+                .slice(0, 180) || 'download';
             const file = join(dir, `${Date.now()}-${safe}`);
             await download.saveAs(file);
             const bytes = statSync(file).size;
@@ -476,14 +512,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network"],
+        permissions: ['network'],
         name: 'browser_click',
         risk: 'medium',
         costHint: 'low',
         sideEffect: 'external',
         approval: true,
         outputSchema: {
-          type: 'object', required: ['selector', 'url', 'title'],
+          type: 'object',
+          required: ['selector', 'url', 'title'],
           properties: { selector: { type: 'string' }, url: { type: 'string' }, title: { type: 'string' } },
         },
         description: '点击当前页面的元素（CSS/文本 selector）。点击后建议 browser_snapshot 核对状态。',
@@ -511,14 +548,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network"],
+        permissions: ['network'],
         name: 'browser_type',
         risk: 'medium',
         costHint: 'low',
         sideEffect: 'external',
         approval: true,
         outputSchema: {
-          type: 'object', required: ['selector', 'length'],
+          type: 'object',
+          required: ['selector', 'length'],
           properties: { selector: { type: 'string' }, length: { type: 'integer' } },
         },
         description: '在当前页面输入文本（fill）。用于表单/搜索框。',
@@ -536,7 +574,10 @@ export default {
           const selector = String(args.selector ?? '').trim();
           if (!selector) return { ok: false, error: '缺少 selector' };
           try {
-            await page.locator(selector).first().fill(String(args.text ?? ''), { timeout: 10_000 });
+            await page
+              .locator(selector)
+              .first()
+              .fill(String(args.text ?? ''), { timeout: 10_000 });
             return { ok: true, data: { selector, length: String(args.text ?? '').length } };
           } catch (err) {
             return { ok: false, error: `输入失败: ${err instanceof Error ? err.message : String(err)}` };
@@ -549,14 +590,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network"],
+        permissions: ['network'],
         name: 'browser_press',
         risk: 'medium',
         costHint: 'low',
         sideEffect: 'external',
         approval: true,
         outputSchema: {
-          type: 'object', required: ['key', 'url'],
+          type: 'object',
+          required: ['key', 'url'],
           properties: { key: { type: 'string' }, url: { type: 'string' } },
         },
         description: '在当前页面按键（如 Enter / Tab / Escape）。',
@@ -590,7 +632,8 @@ export default {
         costHint: 'low',
         sideEffect: 'none',
         outputSchema: {
-          type: 'object', required: ['closed'],
+          type: 'object',
+          required: ['closed'],
           properties: { closed: { type: 'boolean' }, note: { type: 'string' } },
         },
         description: '关闭当前会话的浏览器，释放资源。',
@@ -610,7 +653,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'browser_screenshot',
         risk: 'low',
         costHint: 'low',
@@ -618,7 +661,8 @@ export default {
         sideEffect: 'read',
         output: '{path, bytes, fullPage}',
         outputSchema: {
-          type: 'object', required: ['path', 'bytes', 'fullPage'],
+          type: 'object',
+          required: ['path', 'bytes', 'fullPage'],
           properties: { path: { type: 'string' }, bytes: { type: 'integer' }, fullPage: { type: 'boolean' } },
         },
         description: '把当前页面截图保存为 PNG（路径相对沙箱根）。用于视觉检查、留证或后续 analyze_image。',

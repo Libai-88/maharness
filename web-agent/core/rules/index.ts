@@ -77,12 +77,20 @@ export default {
       errors = p.errors;
       resolution = r.resolution;
       publish();
-      ctx.logger.info(`规则已生效：${r.sources.filter(s => s.exists).length} 个来源 / ${r.text.length} 字符 / 策略 ${p.rules.length} 条${p.errors.length ? ` / ${p.errors.length} 个策略文件解析失败` : ''}`);
+      ctx.logger.info(
+        `规则已生效：${r.sources.filter((s) => s.exists).length} 个来源 / ${r.text.length} 字符 / 策略 ${p.rules.length} 条${p.errors.length ? ` / ${p.errors.length} 个策略文件解析失败` : ''}`,
+      );
       return true;
     }
     refresh(true);
 
-    const timer = setInterval(() => { try { refresh(); } catch { /* 轮询失败等下一轮 */ } }, POLL_MS);
+    const timer = setInterval(() => {
+      try {
+        refresh();
+      } catch {
+        /* 轮询失败等下一轮 */
+      }
+    }, POLL_MS);
     (timer as { unref?: () => void }).unref?.();
     ctx.watchConfig('sandboxRoot', () => refresh(true));
     ctx.watchConfig('rules.*', () => refresh(true));
@@ -90,7 +98,10 @@ export default {
     ctx.on('agent.before_tool', (e) => {
       const data = e.data as BeforeToolCtx | undefined;
       if (!policyEnabled || !data?.tool) return;
-      const effectivePolicy = data.runId && data.sandboxRoot ? loadPolicyRules([join(dataDir, 'rules.json'), join(data.sandboxRoot, '.maharness', 'rules.json')]).rules : policy;
+      const effectivePolicy =
+        data.runId && data.sandboxRoot
+          ? loadPolicyRules([join(dataDir, 'rules.json'), join(data.sandboxRoot, '.maharness', 'rules.json')]).rules
+          : policy;
       const hit = matchPolicy(effectivePolicy, data.tool.name, data.tool.args);
       if (!hit) return;
       if (hit.effect === 'deny') {
@@ -130,21 +141,31 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'list_rules',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{sources, promptChars, policy, errors, resolution}',
         outputSchema: {
-          type: 'object', required: ['sources', 'promptChars', 'policy', 'errors', 'resolution'],
-          properties: { sources: { type: 'array' }, promptChars: { type: 'integer' }, policy: { type: 'array' }, errors: { type: 'array' }, resolution: { type: 'object' } },
+          type: 'object',
+          required: ['sources', 'promptChars', 'policy', 'errors', 'resolution'],
+          properties: {
+            sources: { type: 'array' },
+            promptChars: { type: 'integer' },
+            policy: { type: 'array' },
+            errors: { type: 'array' },
+            resolution: { type: 'object' },
+          },
         },
         description: '查看当前生效的规则来源、去重裁决与策略规则。用户问「你遵守哪些规则/项目有什么约定」时调一次即可。',
         parameters: { type: 'object', properties: {} },
         async handler() {
           refresh();
-          return { ok: true, data: { sources: sources.filter(s => s.exists), promptChars: promptText.length, policy, errors, resolution } };
+          return {
+            ok: true,
+            data: { sources: sources.filter((s) => s.exists), promptChars: promptText.length, policy, errors, resolution },
+          };
         },
       },
     });
@@ -153,17 +174,29 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'check_policy',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{tool, decision, ruleId?, reason?, matched, candidate?}',
         outputSchema: {
-          type: 'object', required: ['tool', 'decision', 'matched'],
-          properties: { tool: { type: 'string' }, decision: { type: 'string' }, matched: { type: 'boolean' }, ruleId: { type: 'string' }, reason: { type: 'string' }, changed: { type: 'boolean' }, candidate: { type: 'object' }, diff: { type: 'array' }, issues: { type: 'array' } },
+          type: 'object',
+          required: ['tool', 'decision', 'matched'],
+          properties: {
+            tool: { type: 'string' },
+            decision: { type: 'string' },
+            matched: { type: 'boolean' },
+            ruleId: { type: 'string' },
+            reason: { type: 'string' },
+            changed: { type: 'boolean' },
+            candidate: { type: 'object' },
+            diff: { type: 'array' },
+            issues: { type: 'array' },
+          },
         },
-        description: '模拟一次工具调用的策略判定：返回 allow / deny / require-approval / default 与命中的规则。传入 candidate 时只读对比候选策略，不落盘、不执行工具。',
+        description:
+          '模拟一次工具调用的策略判定：返回 allow / deny / require-approval / default 与命中的规则。传入 candidate 时只读对比候选策略，不落盘、不执行工具。',
         parameters: {
           type: 'object',
           properties: {
@@ -213,6 +246,8 @@ export default {
       },
     });
 
-    ctx.logger.info(`规则系统就绪：提示规则 ${promptText.length} 字符 / 策略规则 ${policy.length} 条（全局 ${join(dataDir, 'rules')}，项目 AGENTS.md·CLAUDE.md·.maharness/rules）`);
+    ctx.logger.info(
+      `规则系统就绪：提示规则 ${promptText.length} 字符 / 策略规则 ${policy.length} 条（全局 ${join(dataDir, 'rules')}，项目 AGENTS.md·CLAUDE.md·.maharness/rules）`,
+    );
   },
 } satisfies Plugin;

@@ -19,10 +19,22 @@ const model = option('--model') ?? process.env.EVAL_MODEL;
 const budgetUsd = Number(option('--budget-usd') ?? process.env.EVAL_BUDGET_USD);
 const inputUsdPerMillion = Number(process.env.EVAL_INPUT_USD_PER_MILLION);
 const outputUsdPerMillion = Number(process.env.EVAL_OUTPUT_USD_PER_MILLION);
-if (!baseUrl || !apiKey || !model || !Number.isFinite(budgetUsd) || budgetUsd <= 0
-  || !process.env.EVAL_INPUT_USD_PER_MILLION || !process.env.EVAL_OUTPUT_USD_PER_MILLION
-  || !Number.isFinite(inputUsdPerMillion) || inputUsdPerMillion < 0 || !Number.isFinite(outputUsdPerMillion) || outputUsdPerMillion < 0) {
-  console.log('[eval:live] 需要独立 EVAL_BASE_URL/EVAL_API_KEY/EVAL_MODEL、正数 EVAL_BUDGET_USD 和输入/输出每百万 token 测试价格；未发送模型请求。');
+if (
+  !baseUrl ||
+  !apiKey ||
+  !model ||
+  !Number.isFinite(budgetUsd) ||
+  budgetUsd <= 0 ||
+  !process.env.EVAL_INPUT_USD_PER_MILLION ||
+  !process.env.EVAL_OUTPUT_USD_PER_MILLION ||
+  !Number.isFinite(inputUsdPerMillion) ||
+  inputUsdPerMillion < 0 ||
+  !Number.isFinite(outputUsdPerMillion) ||
+  outputUsdPerMillion < 0
+) {
+  console.log(
+    '[eval:live] 需要独立 EVAL_BASE_URL/EVAL_API_KEY/EVAL_MODEL、正数 EVAL_BUDGET_USD 和输入/输出每百万 token 测试价格；未发送模型请求。',
+  );
   process.exit(2);
 }
 if (option('--judge-model') && option('--judge-model') !== model) {
@@ -56,7 +68,9 @@ for (const item of report.cases) {
   if (item.reason) console.log(`  reason: ${item.reason}`);
   if (item.error) console.log(`  error: ${item.error}`);
 }
-console.log(`\n[eval:live/text-smoke] ${report.cases.filter((item) => item.pass).length}/${report.cases.length} 通过 · passRate=${(report.passRate * 100).toFixed(1)}% · avgScore=${report.averageScore.toFixed(2)} · tokens=${report.totalTokensIn}/${report.totalTokensOut} · cost≤$${report.costUsd.toFixed(6)}/$${report.budgetUsd}；文本冒烟结果不代表运行时发布门禁。`);
+console.log(
+  `\n[eval:live/text-smoke] ${report.cases.filter((item) => item.pass).length}/${report.cases.length} 通过 · passRate=${(report.passRate * 100).toFixed(1)}% · avgScore=${report.averageScore.toFixed(2)} · tokens=${report.totalTokensIn}/${report.totalTokensOut} · cost≤$${report.costUsd.toFixed(6)}/$${report.budgetUsd}；文本冒烟结果不代表运行时发布门禁。`,
+);
 
 const reportPath = option('--report');
 if (reportPath) {

@@ -15,20 +15,10 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "create_plan",
-        "update_plan_progress",
-        "complete_goal"
-      ],
-      "persona": [
-        "goal-plan-rules"
-      ],
-      "role": [
-        "planner"
-      ],
-      "api": [
-        "plan"
-      ]
+      "tool": ["create_plan", "update_plan_progress", "complete_goal"],
+      "persona": ["goal-plan-rules"],
+      "role": ["planner"],
+      "api": ["plan"]
     }
   },
   "apiVersion": 2

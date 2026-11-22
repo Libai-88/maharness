@@ -10,14 +10,17 @@ describe('SearXNG 搜索 provider', () => {
   });
 
   it('解析 SearXNG JSON 结果并过滤非法项', () => {
-    const results = parseSearxngResults({
-      results: [
-        { title: 'A', url: 'https://a.example', content: 'x'.repeat(800) },
-        { title: 'missing url' },
-        { title: 'B', url: 'https://b.example', snippet: 'brief' },
-        null,
-      ],
-    }, 5);
+    const results = parseSearxngResults(
+      {
+        results: [
+          { title: 'A', url: 'https://a.example', content: 'x'.repeat(800) },
+          { title: 'missing url' },
+          { title: 'B', url: 'https://b.example', snippet: 'brief' },
+          null,
+        ],
+      },
+      5,
+    );
     assert.equal(results.length, 2);
     assert.equal(results[0]?.title, 'A');
     assert.equal(results[0]?.snippet.length, 500);

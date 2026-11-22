@@ -16,12 +16,21 @@ import { inferCapabilities } from '../../kernel/plugin-sdk';
 // 失败分类：带状态码的 HTTP 错误（provider-health 据此判定"密钥失效"，不再猜文本）
 import { LLMHttpError, parseRetryAfterMs } from './provider-health';
 import {
-  buildBody as buildAnthropicBody, createStreamState as createAnthropicState,
-  reduceEvent as reduceAnthropicEvent, usageChunks,
+  buildBody as buildAnthropicBody,
+  createStreamState as createAnthropicState,
+  reduceEvent as reduceAnthropicEvent,
+  usageChunks,
 } from './anthropic';
 import type {
-  ChatOptions, LLMChunk, LLMMessage, ModelCapability, PluginContext, ProviderDef, ToolDef,
-  ProviderCapabilities, ResponseFormat,
+  ChatOptions,
+  LLMChunk,
+  LLMMessage,
+  ModelCapability,
+  PluginContext,
+  ProviderDef,
+  ToolDef,
+  ProviderCapabilities,
+  ResponseFormat,
 } from '../../kernel/plugin-sdk';
 
 /** 各厂商 usage 缓存字段归一化（OpenAI 兼容 + Anthropic 兼容双路）：
@@ -30,7 +39,12 @@ import type {
  *  - Anthropic：input_tokens 不含缓存读写；cache_read + cache_creation 分别映射为命中与写入
  *  不识别任何字段（provider 不支持缓存）时返回 undefined，调用方按「无反馈」处理。 */
 export function normalizeUsage(raw: Record<string, unknown>): {
-  input: number; output: number; cachedInput?: number; missInput?: number; cacheWrite?: number; incomplete?: boolean;
+  input: number;
+  output: number;
+  cachedInput?: number;
+  missInput?: number;
+  cacheWrite?: number;
+  incomplete?: boolean;
 } {
   let input = Number(raw.prompt_tokens ?? raw.input_tokens ?? 0) || 0;
   const output = Number(raw.completion_tokens ?? raw.output_tokens ?? 0) || 0;
@@ -38,8 +52,9 @@ export function normalizeUsage(raw: Record<string, unknown>): {
   let cachedInput: number | undefined;
   let missInput: number | undefined;
   let cacheWrite: number | undefined;
-  const anthropicCache = raw.prompt_tokens === undefined
-    && (typeof raw.cache_read_input_tokens === 'number' || typeof raw.cache_creation_input_tokens === 'number');
+  const anthropicCache =
+    raw.prompt_tokens === undefined &&
+    (typeof raw.cache_read_input_tokens === 'number' || typeof raw.cache_creation_input_tokens === 'number');
   if (anthropicCache) {
     // Anthropic 的 input_tokens 只含普通未缓存输入。总输入必须加上缓存读写，
     // 但费用按这个总数只计算一次；cacheWrite 仅用于诊断，不能再次计费。
@@ -51,17 +66,21 @@ export function normalizeUsage(raw: Record<string, unknown>): {
   } else if (typeof raw.prompt_cache_hit_tokens === 'number') {
     // DeepSeek 风格：命中 + 未命中 = 全部输入
     cachedInput = raw.prompt_cache_hit_tokens;
-    missInput = typeof raw.prompt_cache_miss_tokens === 'number'
-      ? raw.prompt_cache_miss_tokens
-      : Math.max(0, input - cachedInput);
+    missInput = typeof raw.prompt_cache_miss_tokens === 'number' ? raw.prompt_cache_miss_tokens : Math.max(0, input - cachedInput);
   } else if (details && typeof details.cached_tokens === 'number') {
     // OpenAI / 智谱 风格：cached_tokens 单独报告，未命中 = 总输入 - 命中
     cachedInput = details.cached_tokens;
     missInput = Math.max(0, input - cachedInput);
   }
   return {
-    input, output, cachedInput, missInput, cacheWrite,
-    ...(!Number.isFinite(raw.prompt_tokens ?? raw.input_tokens) || !Number.isFinite(raw.completion_tokens ?? raw.output_tokens) ? { incomplete: true } : {}),
+    input,
+    output,
+    cachedInput,
+    missInput,
+    cacheWrite,
+    ...(!Number.isFinite(raw.prompt_tokens ?? raw.input_tokens) || !Number.isFinite(raw.completion_tokens ?? raw.output_tokens)
+      ? { incomplete: true }
+      : {}),
   };
 }
 
@@ -123,8 +142,10 @@ const priceGuessWarned = new Set<string>();
 function warnOncePriceGuess(who: string, prices: { in: number; out: number }): void {
   if (priceGuessWarned.has(who)) return;
   priceGuessWarned.add(who);
-  console.warn(`[provider] ${who} 未登记价格，成本统计按估算 ${prices.in}/${prices.out} USD/百万 token 计——`
-    + `如需准确成本，请在设置里为该模型填价，或设 <NAME>_PRICE_IN/_PRICE_OUT。`);
+  console.warn(
+    `[provider] ${who} 未登记价格，成本统计按估算 ${prices.in}/${prices.out} USD/百万 token 计——` +
+      `如需准确成本，请在设置里为该模型填价，或设 <NAME>_PRICE_IN/_PRICE_OUT。`,
+  );
 }
 
 /** 扫描 .env / 环境变量，自动发现 OpenAI 兼容 Provider */
@@ -159,7 +180,7 @@ export function estimateCost(provider: ProviderDef, input: number, output: numbe
 
 /** 按实际调用的模型取价（路由/视觉子调用可能与 provider 默认模型不同） */
 export function pricesFor(provider: ProviderDef, model?: string): { in: number; out: number } {
-  const cap = model ? provider.models?.find(m => m.modelId === model) : undefined;
+  const cap = model ? provider.models?.find((m) => m.modelId === model) : undefined;
   if (cap) return { in: cap.priceIn, out: cap.priceOut };
   return provider.prices ?? { in: 0, out: 0 };
 }
@@ -167,7 +188,7 @@ export function pricesFor(provider: ProviderDef, model?: string): { in: number; 
 /** 取模型能力（未登记时按目录推断，保证路由永不因缺数据而失败） */
 export function capabilityFor(provider: ProviderDef, model?: string): ModelCapability | undefined {
   const id = model ?? provider.defaultModel;
-  const known = provider.models?.find(m => m.modelId === id);
+  const known = provider.models?.find((m) => m.modelId === id);
   if (known) return known;
   if (!id) return undefined;
   const c = inferCapabilities(id, provider.id);
@@ -179,10 +200,12 @@ export function serializeMessages(messages: LLMMessage[]): unknown[] {
   return messages.map((m) => {
     const out: Record<string, unknown> = {
       role: m.role,
-      content: !m.images?.length ? m.content : [
-        ...(m.content ? [{ type: 'text', text: m.content }] : []),
-        ...m.images.map(url => ({ type: 'image_url', image_url: { url } })),
-      ],
+      content: !m.images?.length
+        ? m.content
+        : [
+            ...(m.content ? [{ type: 'text', text: m.content }] : []),
+            ...m.images.map((url) => ({ type: 'image_url', image_url: { url } })),
+          ],
     };
     if (m.tool_calls?.length) out.tool_calls = m.tool_calls;
     if (m.tool_call_id) out.tool_call_id = m.tool_call_id;
@@ -192,15 +215,15 @@ export function serializeMessages(messages: LLMMessage[]): unknown[] {
 
 /** 由配置创建 ProviderDef（含流式 chat 实现） */
 export function createProvider(cfg: ProviderConfig): ProviderDef {
-  const capFor = (model: string): ModelCapability | undefined => cfg.models?.find(m => m.modelId === model);
+  const capFor = (model: string): ModelCapability | undefined => cfg.models?.find((m) => m.modelId === model);
   const cap = capFor(cfg.model);
   const tablePrice = PRICE_TABLE[cfg.model];
   // D2：价格来源可追溯——用户显式设定 > 模型登记价 > 内置价表 > 目录推断/兜底。
   // 落到最后一档时价格是**编出来的**（未知模型套 0.3/1.2），统计面板与成本熔断都吃它。
   // 不静默：告警一次并说明如何设真价（清单 D2 的"诚实"要求；数值本身保持原行为，
   // 避免把"本地网关代理付费上游"这类场景误归零——那同样是错的口径）。
-  const priceGuessed = cfg.inputPrice === undefined && cfg.outputPrice === undefined
-    && cap?.priceIn === undefined && tablePrice === undefined;
+  const priceGuessed =
+    cfg.inputPrice === undefined && cfg.outputPrice === undefined && cap?.priceIn === undefined && tablePrice === undefined;
   const resolvedPrices = {
     in: cfg.inputPrice ?? cap?.priceIn ?? tablePrice?.in ?? 0.3,
     out: cfg.outputPrice ?? cap?.priceOut ?? tablePrice?.out ?? 1.2,
@@ -222,151 +245,178 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
     async *chat(messages: LLMMessage[], opts: ChatOptions): AsyncIterable<LLMChunk> {
       const requestSignal = providerRequestSignal(opts.signal, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
       try {
-      const protocol = cfg.protocol ?? 'openai';
-      if (protocol === 'anthropic') {
-        yield* anthropicStream(cfg.id, baseUrl, cfg.apiKey, messages, { ...opts, signal: requestSignal }, cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS);
-        return;
-      }
-      if (process.env.TRACE_LLM_BODY === 'on') {
-        const { appendFileSync } = await import('node:fs');
-        try { appendFileSync('llm-body.log', JSON.stringify(messages) + '\n'); } catch { /* ignore */ }
-      }
-      const body: Record<string, unknown> = {
-        model: opts.model,
-        messages: serializeMessages(messages),
-        stream: true,
-        temperature: opts.temperature ?? 0.7,
-        stream_options: { include_usage: true },
-      };
-      if (opts.maxTokens) body.max_tokens = opts.maxTokens;
-      if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
-      if (opts.tools?.length) {
-        body.tools = opts.tools.map((t: ToolDef) => ({
-          type: 'function',
-          function: { name: t.name, description: t.description, parameters: t.parameters },
-        }));
-      }
-      const responseFormat = openAIResponseFormat(opts.responseFormat);
-      if (responseFormat) body.response_format = responseFormat;
-      if (process.env.TRACE_LLM_BODY === 'on') {
-        const { appendFileSync } = await import('node:fs');
-        try { appendFileSync('llm-full.log', JSON.stringify(body) + '\n'); } catch { /* ignore */ }
-      }
-
-      const res = await fetch(`${baseUrl}/chat/completions`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${cfg.apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: requestSignal,
-      });
-      if (!res.ok) {
-        const text = await res.text().catch(() => '');
-        throw new LLMHttpError(res.status, `LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`, parseRetryAfterMs(res.headers.get('retry-after')));
-      }
-      if (!res.body) throw new Error('LLM 响应无 body');
-
-      // ---- SSE 流式解析（自研，逐行） ----
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = '';
-      const toolAcc = new Map<number, { id: string; name: string; args: string }>();
-      let finished = false;
-      // M7：记录是否收到 usage / 累积输出文本（usage 缺失时估算计费用的）
-      let usageSeen = false;
-      let outText = '';
-      let rawReason: string | undefined;
-
-      const flushToolCalls = function* (): Generator<LLMChunk> {
-        for (const tc of toolAcc.values()) {
-          if (!tc.name) continue;
-          yield {
-            type: 'tool_call',
-            toolCall: {
-              id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
-              type: 'function',
-              function: { name: tc.name, arguments: tc.args },
-            },
-          };
+        const protocol = cfg.protocol ?? 'openai';
+        if (protocol === 'anthropic') {
+          yield* anthropicStream(
+            cfg.id,
+            baseUrl,
+            cfg.apiKey,
+            messages,
+            { ...opts, signal: requestSignal },
+            cfg.requestTimeoutMs ?? PROVIDER_REQUEST_TIMEOUT_MS,
+          );
+          return;
         }
-        toolAcc.clear();
-      };
-
-      try {
-        while (!finished) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          buf += decoder.decode(value, { stream: true });
-          const lines = buf.split('\n');
-          buf = lines.pop() ?? '';
-          for (const line of lines) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const payload = trimmed.slice(5).trim();
-            if (payload === '[DONE]') { finished = true; break; }
-            try {
-              const json = JSON.parse(payload);
-              if (typeof json.model === 'string') yield { type: 'model', model: json.model };
-              const delta = json.choices?.[0]?.delta;
-              if (typeof json.choices?.[0]?.finish_reason === 'string') rawReason = json.choices[0].finish_reason;
-              outText += (delta?.content ?? '') + (delta?.reasoning_content ?? delta?.reasoning ?? '');
-              if (delta?.content) yield { type: 'delta', text: delta.content };
-              // 推理模型思考过程：DeepSeek 系 reasoning_content / OpenAI o1 系 reasoning
-              const reasoning = delta?.reasoning_content ?? delta?.reasoning;
-              if (reasoning) yield { type: 'reasoning', text: reasoning };
-              if (delta?.tool_calls) {
-                for (const tc of delta.tool_calls) {
-                  const idx = tc.index ?? 0;
-                  const acc = toolAcc.get(idx) ?? { id: '', name: '', args: '' };
-                  if (tc.id) acc.id = tc.id;
-                  if (tc.function?.name) acc.name += tc.function.name;
-                  if (tc.function?.arguments) acc.args += tc.function.arguments;
-                  outText += tc.function?.arguments ?? '';
-                  toolAcc.set(idx, acc);
-                }
-              }
-              if (json.usage) {
-                usageSeen = true;
-                const u = normalizeUsage(json.usage);
-                yield {
-                  type: 'usage',
-                  input: u.input,
-                  output: u.output,
-                  cachedInput: u.cachedInput,
-                  missInput: u.missInput,
-                  cacheWrite: u.cacheWrite,
-                  ...(u.incomplete ? { incomplete: true } : {}),
-                };
-              }
-            } catch { /* 非 JSON 行（keep-alive 等）跳过 */ }
+        if (process.env.TRACE_LLM_BODY === 'on') {
+          const { appendFileSync } = await import('node:fs');
+          try {
+            appendFileSync('llm-body.log', JSON.stringify(messages) + '\n');
+          } catch {
+            /* ignore */
           }
         }
-      } finally {
-        await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
-        reader.releaseLock();
-      }
-      // Some OpenAI-compatible gateways close after a terminal finish_reason without
-      // sending [DONE]. An absent finish_reason still indicates an untrusted partial stream.
-      if (!finished && rawReason === undefined) {
-        throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
-      }
-      yield* flushToolCalls();
-      // M7 usage 缺失：按 token 估算计费 + console.warn（成本记 0 会让成本熔断失效——
-      // 免费错觉是最危险的错觉；估算仅用于成本核算口径，非精确值）
-      if (!usageSeen) {
-      const estIn = messages.reduce((total, m) => total + estimateTokens(m.content ?? ''), 0);
-        const estOut = estimateTokens(outText);
-        console.warn(`[provider:${cfg.id}] 流结束但 usage 缺失，按估算计费（in≈${estIn}, out≈${estOut} tokens）`);
-        yield { type: 'usage', input: estIn, output: estOut, estimated: true };
-      }
-      yield { type: 'done', reason: normalizeFinishReason(rawReason), rawReason };
+        const body: Record<string, unknown> = {
+          model: opts.model,
+          messages: serializeMessages(messages),
+          stream: true,
+          temperature: opts.temperature ?? 0.7,
+          stream_options: { include_usage: true },
+        };
+        if (opts.maxTokens) body.max_tokens = opts.maxTokens;
+        if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
+        if (opts.tools?.length) {
+          body.tools = opts.tools.map((t: ToolDef) => ({
+            type: 'function',
+            function: { name: t.name, description: t.description, parameters: t.parameters },
+          }));
+        }
+        const responseFormat = openAIResponseFormat(opts.responseFormat);
+        if (responseFormat) body.response_format = responseFormat;
+        if (process.env.TRACE_LLM_BODY === 'on') {
+          const { appendFileSync } = await import('node:fs');
+          try {
+            appendFileSync('llm-full.log', JSON.stringify(body) + '\n');
+          } catch {
+            /* ignore */
+          }
+        }
+
+        const res = await fetch(`${baseUrl}/chat/completions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${cfg.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal: requestSignal,
+        });
+        if (!res.ok) {
+          const text = await res.text().catch(() => '');
+          throw new LLMHttpError(
+            res.status,
+            `LLM 请求失败 [${cfg.id}] ${res.status}: ${text.slice(0, 400)}`,
+            parseRetryAfterMs(res.headers.get('retry-after')),
+          );
+        }
+        if (!res.body) throw new Error('LLM 响应无 body');
+
+        // ---- SSE 流式解析（自研，逐行） ----
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = '';
+        const toolAcc = new Map<number, { id: string; name: string; args: string }>();
+        let finished = false;
+        // M7：记录是否收到 usage / 累积输出文本（usage 缺失时估算计费用的）
+        let usageSeen = false;
+        let outText = '';
+        let rawReason: string | undefined;
+
+        const flushToolCalls = function* (): Generator<LLMChunk> {
+          for (const tc of toolAcc.values()) {
+            if (!tc.name) continue;
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: tc.id || `call_${Math.random().toString(36).slice(2, 10)}`,
+                type: 'function',
+                function: { name: tc.name, arguments: tc.args },
+              },
+            };
+          }
+          toolAcc.clear();
+        };
+
+        try {
+          while (!finished) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop() ?? '';
+            for (const line of lines) {
+              const trimmed = line.trim();
+              if (!trimmed.startsWith('data:')) continue;
+              const payload = trimmed.slice(5).trim();
+              if (payload === '[DONE]') {
+                finished = true;
+                break;
+              }
+              try {
+                const json = JSON.parse(payload);
+                if (typeof json.model === 'string') yield { type: 'model', model: json.model };
+                const delta = json.choices?.[0]?.delta;
+                if (typeof json.choices?.[0]?.finish_reason === 'string') rawReason = json.choices[0].finish_reason;
+                outText += (delta?.content ?? '') + (delta?.reasoning_content ?? delta?.reasoning ?? '');
+                if (delta?.content) yield { type: 'delta', text: delta.content };
+                // 推理模型思考过程：DeepSeek 系 reasoning_content / OpenAI o1 系 reasoning
+                const reasoning = delta?.reasoning_content ?? delta?.reasoning;
+                if (reasoning) yield { type: 'reasoning', text: reasoning };
+                if (delta?.tool_calls) {
+                  for (const tc of delta.tool_calls) {
+                    const idx = tc.index ?? 0;
+                    const acc = toolAcc.get(idx) ?? { id: '', name: '', args: '' };
+                    if (tc.id) acc.id = tc.id;
+                    if (tc.function?.name) acc.name += tc.function.name;
+                    if (tc.function?.arguments) acc.args += tc.function.arguments;
+                    outText += tc.function?.arguments ?? '';
+                    toolAcc.set(idx, acc);
+                  }
+                }
+                if (json.usage) {
+                  usageSeen = true;
+                  const u = normalizeUsage(json.usage);
+                  yield {
+                    type: 'usage',
+                    input: u.input,
+                    output: u.output,
+                    cachedInput: u.cachedInput,
+                    missInput: u.missInput,
+                    cacheWrite: u.cacheWrite,
+                    ...(u.incomplete ? { incomplete: true } : {}),
+                  };
+                }
+              } catch {
+                /* 非 JSON 行（keep-alive 等）跳过 */
+              }
+            }
+          }
+        } finally {
+          await reader.cancel().catch(() => {
+            /* fetch abort/流已结束时忽略 */
+          });
+          reader.releaseLock();
+        }
+        // Some OpenAI-compatible gateways close after a terminal finish_reason without
+        // sending [DONE]. An absent finish_reason still indicates an untrusted partial stream.
+        if (!finished && rawReason === undefined) {
+          throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${cfg.id}]：连接已关闭但未收到 [DONE] 结束标记`);
+        }
+        yield* flushToolCalls();
+        // M7 usage 缺失：按 token 估算计费 + console.warn（成本记 0 会让成本熔断失效——
+        // 免费错觉是最危险的错觉；估算仅用于成本核算口径，非精确值）
+        if (!usageSeen) {
+          const estIn = messages.reduce((total, m) => total + estimateTokens(m.content ?? ''), 0);
+          const estOut = estimateTokens(outText);
+          console.warn(`[provider:${cfg.id}] 流结束但 usage 缺失，按估算计费（in≈${estIn}, out≈${estOut} tokens）`);
+          yield { type: 'usage', input: estIn, output: estOut, estimated: true };
+        }
+        yield { type: 'done', reason: normalizeFinishReason(rawReason), rawReason };
       } catch (error) {
         if (!opts.signal?.aborted && requestSignal.aborted) {
           throw new ModelResponseError('REQUEST_TIMEOUT', '模型请求超时，已保存的内容保留，可重试或继续任务');
         }
-        if (!opts.signal?.aborted && error instanceof Error && error.name === 'AbortError') throw new ModelResponseError('STREAM_INTERRUPTED', '模型连接异常中断，已保存的内容保留');
+        if (!opts.signal?.aborted && error instanceof Error && error.name === 'AbortError')
+          throw new ModelResponseError('STREAM_INTERRUPTED', '模型连接异常中断，已保存的内容保留');
         throw error;
       }
     },
@@ -376,15 +426,25 @@ export function createProvider(cfg: ProviderConfig): ProviderDef {
 /** Anthropic Messages API 原生流式调用（请求组装与事件归约见 anthropic.ts，均已单测）。
  *  与 OpenAI 路径同契约：产出 delta/reasoning/tool_call/usage/done，异常一律抛出交给 failover。 */
 async function* anthropicStream(
-  providerId: string, baseUrl: string, apiKey: string,
-  messages: LLMMessage[], opts: ChatOptions, timeoutMs: number,
+  providerId: string,
+  baseUrl: string,
+  apiKey: string,
+  messages: LLMMessage[],
+  opts: ChatOptions,
+  timeoutMs: number,
 ): AsyncGenerator<LLMChunk> {
   const body = buildAnthropicBody(opts.model, messages, {
-    maxTokens: opts.maxTokens, temperature: opts.temperature, tools: opts.tools,
+    maxTokens: opts.maxTokens,
+    temperature: opts.temperature,
+    tools: opts.tools,
   });
   if (process.env.TRACE_LLM_BODY === 'on') {
     const { appendFileSync } = await import('node:fs');
-    try { appendFileSync('llm-body.log', JSON.stringify(body) + '\n'); } catch { /* ignore */ }
+    try {
+      appendFileSync('llm-body.log', JSON.stringify(body) + '\n');
+    } catch {
+      /* ignore */
+    }
   }
   const res = await fetch(`${baseUrl}/v1/messages`, {
     method: 'POST',
@@ -399,7 +459,11 @@ async function* anthropicStream(
   });
   if (!res.ok) {
     const text = await res.text().catch(() => '');
-    throw new LLMHttpError(res.status, `LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`, parseRetryAfterMs(res.headers.get('retry-after')));
+    throw new LLMHttpError(
+      res.status,
+      `LLM 请求失败 [${providerId}] ${res.status}: ${text.slice(0, 400)}`,
+      parseRetryAfterMs(res.headers.get('retry-after')),
+    );
   }
   if (!res.body) throw new Error('LLM 响应无 body');
 
@@ -421,8 +485,13 @@ async function* anthropicStream(
         const payload = trimmed.slice(5).trim();
         if (!payload || payload === '[DONE]') continue;
         let json: Record<string, unknown>;
-        try { json = JSON.parse(payload) as Record<string, unknown>; } catch { continue; }
-        if (json.type === 'message_start' && typeof (json.message as { model?: unknown })?.model === 'string') yield { type: 'model', model: (json.message as { model: string }).model };
+        try {
+          json = JSON.parse(payload) as Record<string, unknown>;
+        } catch {
+          continue;
+        }
+        if (json.type === 'message_start' && typeof (json.message as { model?: unknown })?.model === 'string')
+          yield { type: 'model', model: (json.message as { model: string }).model };
         const delta = json.delta as { text?: string; thinking?: string; partial_json?: string } | undefined;
         outText += delta?.text ?? delta?.thinking ?? delta?.partial_json ?? '';
         for (const chunk of reduceAnthropicEvent(json, st)) yield chunk;
@@ -431,7 +500,9 @@ async function* anthropicStream(
       }
     }
   } finally {
-    await reader.cancel().catch(() => { /* fetch abort/流已结束时忽略 */ });
+    await reader.cancel().catch(() => {
+      /* fetch abort/流已结束时忽略 */
+    });
     reader.releaseLock();
   }
   if (!st.finished) throw new ModelResponseError('STREAM_INTERRUPTED', `LLM 流异常中断 [${providerId}]：连接已关闭但未收到 message_stop`);
@@ -457,18 +528,19 @@ export function setupEmbedding(ctx: PluginContext): EmbeddingService | undefined
   const apiKey = process.env.EMBEDDING_API_KEY;
   const model = process.env.EMBEDDING_MODEL;
   if (!baseUrl || !apiKey || !model) return undefined;
-  const embed = async (text: string): Promise<number[]> => callEmbedding(model, text, async signal => {
-    // 本地 embedding（本机 Ollama 等）常见，不做私网限制；超时防 L1 查询被无期限网络请求拖住
-    const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
-      body: JSON.stringify({ model, input: text }),
-      signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+  const embed = async (text: string): Promise<number[]> =>
+    callEmbedding(model, text, async (signal) => {
+      // 本地 embedding（本机 Ollama 等）常见，不做私网限制；超时防 L1 查询被无期限网络请求拖住
+      const res = await fetch(`${baseUrl.replace(/\/+$/, '')}/embeddings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, input: text }),
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(30_000)]) : AbortSignal.timeout(30_000),
+      });
+      if (!res.ok) throw new Error(`Embedding 请求失败 ${res.status}`);
+      const json = (await res.json()) as { data: { embedding: number[] }[] };
+      return json.data[0]?.embedding ?? [];
     });
-    if (!res.ok) throw new Error(`Embedding 请求失败 ${res.status}`);
-    const json = (await res.json()) as { data: { embedding: number[] }[] };
-    return json.data[0]?.embedding ?? [];
-  });
   ctx.cache.setEmbeddingFn(embed);
   ctx.logger.info(`L1 语义缓存已激活（${model}）`);
   return { model, embed };

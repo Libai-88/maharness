@@ -103,44 +103,59 @@ function MessageMenu({
 }) {
   return (
     <ContextMenu>
-      <ContextMenuTrigger asChild data-slot="bubble-content" className="select-text" onKeyDown={(event) => {
-        if (event.target !== event.currentTarget) return;
-        if (event.key === 'Enter' || (event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
-          event.preventDefault();
-          const rect = event.currentTarget.getBoundingClientRect();
-          event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }));
-        }
-      }}>
+      <ContextMenuTrigger
+        asChild
+        data-slot="bubble-content"
+        className="select-text"
+        onKeyDown={(event) => {
+          if (event.target !== event.currentTarget) return;
+          if (event.key === 'Enter' || (event.shiftKey && event.key === 'F10') || event.key === 'ContextMenu') {
+            event.preventDefault();
+            const rect = event.currentTarget.getBoundingClientRect();
+            event.currentTarget.dispatchEvent(
+              new MouseEvent('contextmenu', { bubbles: true, clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2 }),
+            );
+          }
+        }}
+      >
         {children}
       </ContextMenuTrigger>
       <ContextMenuContent data-testid="bubble-menu" aria-label="消息操作">
         <ContextMenuGroup>
-        <ContextMenuItem data-testid="menu-copy" onSelect={() => { void navigator.clipboard.writeText(message.content).catch(() => toast.error('复制失败，请重试')); }}>
-          <IconCopy />复制
-        </ContextMenuItem>
-        {message.role === 'user' ? (
-          canResend && (
-            <ContextMenuItem data-testid="menu-resend" onSelect={() => onResend(message.content)}>
-              <IconRefresh />重新发送
-            </ContextMenuItem>
-          )
-        ) : (
-          <ContextMenuItem data-testid="menu-quote" onSelect={() => onQuote?.(message)}>
-            <IconReturn />引用
+          <ContextMenuItem
+            data-testid="menu-copy"
+            onSelect={() => {
+              void navigator.clipboard.writeText(message.content).catch(() => toast.error('复制失败，请重试'));
+            }}
+          >
+            <IconCopy />
+            复制
           </ContextMenuItem>
-        )}
+          {message.role === 'user' ? (
+            canResend && (
+              <ContextMenuItem data-testid="menu-resend" onSelect={() => onResend(message.content)}>
+                <IconRefresh />
+                重新发送
+              </ContextMenuItem>
+            )
+          ) : (
+            <ContextMenuItem data-testid="menu-quote" onSelect={() => onQuote?.(message)}>
+              <IconReturn />
+              引用
+            </ContextMenuItem>
+          )}
         </ContextMenuGroup>
         <ContextMenuSeparator />
         <ContextMenuGroup>
-        <ContextMenuItem
-          variant="destructive"
-          data-testid="menu-remove"
-          title="仅从当前视图移除（服务端记录保留）"
-          onSelect={() => onRemove?.(message.id)}
-        >
-          <IconTrash size={13} />
-          删除
-        </ContextMenuItem>
+          <ContextMenuItem
+            variant="destructive"
+            data-testid="menu-remove"
+            title="仅从当前视图移除（服务端记录保留）"
+            onSelect={() => onRemove?.(message.id)}
+          >
+            <IconTrash size={13} />
+            删除
+          </ContextMenuItem>
         </ContextMenuGroup>
       </ContextMenuContent>
     </ContextMenu>
@@ -184,9 +199,7 @@ const ToolTrace = memo(function ToolTrace({ tool }: { tool: ToolStep }) {
   const output = tool.summary ? describeToolOutcome(tool.name, tool.summary, !failed) : '';
   const line = (
     <TraceLine status={running ? 'running' : failed ? 'error' : undefined}>
-      <TraceIcon>
-        {running ? <Spinner /> : failed ? <IconWarn /> : <IconCheck />}
-      </TraceIcon>
+      <TraceIcon>{running ? <Spinner /> : failed ? <IconWarn /> : <IconCheck />}</TraceIcon>
       <TraceTitle title={tool.name}>{toolDisplayName(tool.name)}</TraceTitle>
       {tool.args ? (
         <TraceDescription className="hidden max-w-48 truncate sm:block" title={argsSummary(tool.args)}>
@@ -194,7 +207,8 @@ const ToolTrace = memo(function ToolTrace({ tool }: { tool: ToolStep }) {
         </TraceDescription>
       ) : null}
       <TraceDescription>
-        {statusText}{tool.durationMs !== undefined ? ` · ${fmtMs(tool.durationMs)}` : ''}
+        {statusText}
+        {tool.durationMs !== undefined ? ` · ${fmtMs(tool.durationMs)}` : ''}
       </TraceDescription>
     </TraceLine>
   );
@@ -209,40 +223,55 @@ const ToolTrace = memo(function ToolTrace({ tool }: { tool: ToolStep }) {
 
   return (
     <TraceCollapsible data-testid="tool-step" data-status={running ? 'running' : failed ? 'error' : 'done'} defaultOpen={running || failed}>
-        <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
-        <TraceCollapsibleContent className="flex flex-col gap-2">
-          {output && <CodeBlock size="sm" variant={failed ? 'destructive' : 'default'}><CodeBlockContent wrap className="max-h-64">{output}</CodeBlockContent></CodeBlock>}
-          {tool.stored && (
-            <Badge variant="secondary" className="w-fit">
-              <IconPaperclip />
-              完整结果已存入结果存储，可无副作用重读
-            </Badge>
-          )}
-          {tool.evidence?.length ? (
-            <div className="flex flex-wrap gap-2" data-testid="tool-evidence">
-              {tool.evidence.map((item, index) => (
-                <Badge key={`${item.kind}-${item.ref ?? item.label}-${index}`} variant="outline" className="max-w-full gap-1">
-                  <IconPaperclip />
-                  <span className="truncate" title={item.ref ?? item.label}>{item.label}</span>
-                  {item.ref && item.ref !== item.label ? <span className="truncate font-mono text-muted-foreground" title={item.ref}>{item.ref}</span> : null}
-                </Badge>
-              ))}
-            </div>
-          ) : null}
-          {tool.warnings?.length ? (
-            <div className="flex flex-col gap-1" data-testid="tool-warnings">
-              {tool.warnings.map((warning, index) => (
-                <div key={`${warning.kind}-${warning.label}-${index}`} className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400">
-                  <IconWarn className="mt-0.5 size-3.5 shrink-0" />
-                  <span>
-                    {warning.kind === 'prompt-injection' ? '提示注入风险' : '敏感信息'}：{warning.label}
-                    <code className="ml-1 text-muted-foreground">{warning.preview}</code>
+      <TraceCollapsibleTrigger>{line}</TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="flex flex-col gap-2">
+        {output && (
+          <CodeBlock size="sm" variant={failed ? 'destructive' : 'default'}>
+            <CodeBlockContent wrap className="max-h-64">
+              {output}
+            </CodeBlockContent>
+          </CodeBlock>
+        )}
+        {tool.stored && (
+          <Badge variant="secondary" className="w-fit">
+            <IconPaperclip />
+            完整结果已存入结果存储，可无副作用重读
+          </Badge>
+        )}
+        {tool.evidence?.length ? (
+          <div className="flex flex-wrap gap-2" data-testid="tool-evidence">
+            {tool.evidence.map((item) => (
+              <Badge key={`${item.kind}|${item.ref ?? item.label}|${item.label}`} variant="outline" className="max-w-full gap-1">
+                <IconPaperclip />
+                <span className="truncate" title={item.ref ?? item.label}>
+                  {item.label}
+                </span>
+                {item.ref && item.ref !== item.label ? (
+                  <span className="truncate font-mono text-muted-foreground" title={item.ref}>
+                    {item.ref}
                   </span>
-                </div>
-              ))}
-            </div>
-          ) : null}
-        </TraceCollapsibleContent>
+                ) : null}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+        {tool.warnings?.length ? (
+          <div className="flex flex-col gap-1" data-testid="tool-warnings">
+            {tool.warnings.map((warning) => (
+              <div
+                key={`${warning.kind}|${warning.label}|${warning.preview}`}
+                className="flex items-start gap-2 text-xs text-amber-600 dark:text-amber-400"
+              >
+                <IconWarn className="mt-0.5 size-3.5 shrink-0" />
+                <span>
+                  {warning.kind === 'prompt-injection' ? '提示注入风险' : '敏感信息'}：{warning.label}
+                  <code className="ml-1 text-muted-foreground">{warning.preview}</code>
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : null}
+      </TraceCollapsibleContent>
     </TraceCollapsible>
   );
 });
@@ -274,56 +303,68 @@ const MemberSpeech = memo(function MemberSpeech({
       : objective || (tool.ok === false ? '这事儿我没办成' : '办好了');
 
   return (
-    <TraceCollapsible data-testid="subagent-step" data-status={running ? 'running' : tool.ok === false ? 'error' : 'done'} open={userOpen ?? (running || tool.ok === false)} onOpenChange={setUserOpen}>
-        <TraceCollapsibleTrigger>
-          <TraceLine status={running ? 'running' : tool.ok === false ? 'error' : undefined}>
-            <TraceIcon>
-              {tool.name === 'run_review' ? <IconEye size={13} /> : tool.name === 'run_parallel' ? <IconParallel size={13} /> : <IconRobot size={13} />}
-            </TraceIcon>
-            <TraceTitle>{label}</TraceTitle>
-            <TraceDescription>
-              {running ? '正在做' : tool.ok === false ? '没办成' : '已完成'}
-              {tool.durationMs !== undefined ? ` · ${fmtMs(tool.durationMs)}` : ''}
-            </TraceDescription>
-          </TraceLine>
-        </TraceCollapsibleTrigger>
-        <TraceCollapsibleContent className="flex flex-col gap-2 whitespace-pre-wrap">
-          <p>{bubble}</p>
-          {running && progress && progress.total > 0 && (
-            <div className="flex max-w-[260px] flex-col gap-1.5">
-              <Progress value={Math.round(((progress.done + progress.failed) / progress.total) * 100)} />
-              <span className="text-[11px] text-muted-foreground">
-                {progress.done + progress.failed}/{progress.total} 交回
-                {progress.failed > 0 ? ` · ${progress.failed} 没成` : ''}
-                {progress.running[0] ? ` · 正在做：${tidySentence(progress.running[0], 18)}` : ''}
-              </span>
-            </div>
-          )}
-          {!running && tool.ok === false && (
-            <span className="inline-flex items-center gap-1 text-destructive">
-              <IconWarn size={11} />没办成
+    <TraceCollapsible
+      data-testid="subagent-step"
+      data-status={running ? 'running' : tool.ok === false ? 'error' : 'done'}
+      open={userOpen ?? (running || tool.ok === false)}
+      onOpenChange={setUserOpen}
+    >
+      <TraceCollapsibleTrigger>
+        <TraceLine status={running ? 'running' : tool.ok === false ? 'error' : undefined}>
+          <TraceIcon>
+            {tool.name === 'run_review' ? (
+              <IconEye size={13} />
+            ) : tool.name === 'run_parallel' ? (
+              <IconParallel size={13} />
+            ) : (
+              <IconRobot size={13} />
+            )}
+          </TraceIcon>
+          <TraceTitle>{label}</TraceTitle>
+          <TraceDescription>
+            {running ? '正在做' : tool.ok === false ? '没办成' : '已完成'}
+            {tool.durationMs !== undefined ? ` · ${fmtMs(tool.durationMs)}` : ''}
+          </TraceDescription>
+        </TraceLine>
+      </TraceCollapsibleTrigger>
+      <TraceCollapsibleContent className="flex flex-col gap-2 whitespace-pre-wrap">
+        <p>{bubble}</p>
+        {running && progress && progress.total > 0 && (
+          <div className="flex max-w-[260px] flex-col gap-1.5">
+            <Progress value={Math.round(((progress.done + progress.failed) / progress.total) * 100)} />
+            <span className="text-[11px] text-muted-foreground">
+              {progress.done + progress.failed}/{progress.total} 交回
+              {progress.failed > 0 ? ` · ${progress.failed} 没成` : ''}
+              {progress.running[0] ? ` · 正在做：${tidySentence(progress.running[0], 18)}` : ''}
             </span>
-          )}
-          {!running && detail && <CodeBlock size="sm"><CodeBlockContent wrap className="max-h-64">{detail}</CodeBlockContent></CodeBlock>}
-        </TraceCollapsibleContent>
+          </div>
+        )}
+        {!running && tool.ok === false && (
+          <span className="inline-flex items-center gap-1 text-destructive">
+            <IconWarn size={11} />
+            没办成
+          </span>
+        )}
+        {!running && detail && (
+          <CodeBlock size="sm">
+            <CodeBlockContent wrap className="max-h-64">
+              {detail}
+            </CodeBlockContent>
+          </CodeBlock>
+        )}
+      </TraceCollapsibleContent>
     </TraceCollapsible>
   );
 });
 
-function ReasoningTrace({
-  part,
-}: {
-  part: Extract<ChatPart, { kind: 'reasoning' }>;
-}) {
+function ReasoningTrace({ part }: { part: Extract<ChatPart, { kind: 'reasoning' }> }) {
   const [open, setOpen] = useState(false);
 
   return (
     <TraceCollapsible open={open} onOpenChange={setOpen}>
       <TraceCollapsibleTrigger>
         <TraceLine status={part.streaming ? 'running' : undefined}>
-          <TraceIcon>
-            {part.streaming ? <Spinner className="size-3.5" /> : <IconBrain />}
-          </TraceIcon>
+          <TraceIcon>{part.streaming ? <Spinner className="size-3.5" /> : <IconBrain />}</TraceIcon>
           <TraceTitle>{part.streaming ? '正在思考' : '思考过程'}</TraceTitle>
           <TraceDescription>{open ? '收起' : '展开'}</TraceDescription>
         </TraceLine>
@@ -342,13 +383,19 @@ function NarrationTrace({ part }: { part: Extract<ChatPart, { kind: 'narration' 
     <TraceCollapsible>
       <TraceCollapsibleTrigger>
         <TraceLine status={part.streaming ? 'running' : undefined}>
-          <TraceIcon><IconBrain size={13} /></TraceIcon>
+          <TraceIcon>
+            <IconBrain size={13} />
+          </TraceIcon>
           <TraceTitle>{part.streaming ? `${AGENT_NAME}边想边做` : `${AGENT_NAME}当时在想`}</TraceTitle>
           <TraceDescription>{part.paragraphs.length} 段</TraceDescription>
         </TraceLine>
       </TraceCollapsibleTrigger>
       <TraceCollapsibleContent className="flex flex-col gap-2">
-        {part.paragraphs.map((paragraph, index) => <p key={index} className="text-xs leading-relaxed">{paragraph}</p>)}
+        {part.paragraphs.map((paragraph) => (
+          <p key={`${paragraph.length}:${paragraph.slice(0, 40)}`} className="text-xs leading-relaxed">
+            {paragraph}
+          </p>
+        ))}
       </TraceCollapsibleContent>
     </TraceCollapsible>
   );
@@ -362,23 +409,30 @@ function VerificationPart({ part }: { part: Extract<ChatPart, { kind: 'verificat
         <TraceCollapsibleTrigger>
           <TraceLine status={verification.status === 'verified' ? undefined : 'error'}>
             <TraceIcon>{verification.status === 'verified' ? <IconCheck /> : <IconWarn />}</TraceIcon>
-            <TraceTitle>{verification.status === 'verified' ? '验收通过' : verification.status === 'partial' ? '部分完成' : '验收未通过'}</TraceTitle>
-            <TraceDescription>{verification.checks.filter((check) => check.ok).length}/{verification.checks.length}</TraceDescription>
+            <TraceTitle>
+              {verification.status === 'verified' ? '验收通过' : verification.status === 'partial' ? '部分完成' : '验收未通过'}
+            </TraceTitle>
+            <TraceDescription>
+              {verification.checks.filter((check) => check.ok).length}/{verification.checks.length}
+            </TraceDescription>
           </TraceLine>
         </TraceCollapsibleTrigger>
-        <TraceCollapsibleContent><Trace>
-        {verification.checks.map((check, index) => (
-          <TraceLine key={index} status={check.ok ? undefined : 'error'}>
-            <TraceIcon>{check.ok ? <IconCheck size={13} /> : <IconWarn size={13} />}</TraceIcon>
-            <TraceTitle>{check.reason ?? '验收条件'}</TraceTitle>
-            {verification.evidence[index]?.traceStepId && (
-              <TraceDescription className="font-mono">
-                <code title="对应 Trace 步骤">#{verification.evidence[index]!.traceStepId!.slice(0, 8)}</code>
-              </TraceDescription>
-            )}
-          </TraceLine>
-        ))}
-        </Trace></TraceCollapsibleContent>
+        <TraceCollapsibleContent>
+          <Trace>
+            {verification.checks.map((check, index) => (
+              // biome-ignore lint/suspicious/noArrayIndexKey: 验收条件可能重复同名，index 同时用于定位 evidence
+              <TraceLine key={index} status={check.ok ? undefined : 'error'}>
+                <TraceIcon>{check.ok ? <IconCheck size={13} /> : <IconWarn size={13} />}</TraceIcon>
+                <TraceTitle>{check.reason ?? '验收条件'}</TraceTitle>
+                {verification.evidence[index]?.traceStepId && (
+                  <TraceDescription className="font-mono">
+                    <code title="对应 Trace 步骤">#{verification.evidence[index]!.traceStepId!.slice(0, 8)}</code>
+                  </TraceDescription>
+                )}
+              </TraceLine>
+            ))}
+          </Trace>
+        </TraceCollapsibleContent>
       </TraceCollapsible>
     </Trace>
   );
@@ -425,15 +479,18 @@ function ActivityTrace({
           {traceParts.map((part) => {
             if (part.kind === 'narration') return <NarrationTrace key={part.id} part={part} />;
             if (part.kind === 'reasoning') return <ReasoningTrace key={part.id} part={part} />;
-            if (part.kind === 'tool' && isSubagentTool(part.tool.name)) return (
-              <MemberSpeech
-                key={part.id}
-                tool={part.tool}
-                progress={part.tool.name === 'run_parallel' && squad && squad.total > 0
-                  ? { total: squad.total, done: squad.done, failed: squad.failed, running: Object.values(squad.running) }
-                  : undefined}
-              />
-            );
+            if (part.kind === 'tool' && isSubagentTool(part.tool.name))
+              return (
+                <MemberSpeech
+                  key={part.id}
+                  tool={part.tool}
+                  progress={
+                    part.tool.name === 'run_parallel' && squad && squad.total > 0
+                      ? { total: squad.total, done: squad.done, failed: squad.failed, running: Object.values(squad.running) }
+                      : undefined
+                  }
+                />
+              );
             if (part.kind === 'tool') return <ToolTrace key={part.id} tool={part.tool} />;
             return null;
           })}
@@ -462,18 +519,20 @@ export function UserMessage({
         <MessageContent className="min-w-0 items-end">
           <Bubble align="end" variant="muted" className="max-w-[86%]">
             <MessageMenu message={message} canResend={canResend} onResend={onResend} onQuote={onQuote} onRemove={onRemove}>
-            <BubbleContent
-              data-testid="msg-bubble-user"
-              tabIndex={0}
-              aria-label="你发送的消息，按 Enter 打开操作菜单"
-            >
-              <span className="whitespace-pre-wrap">{message.content}</span>
-            </BubbleContent>
+              <BubbleContent data-testid="msg-bubble-user" tabIndex={0} aria-label="你发送的消息，按 Enter 打开操作菜单">
+                <span className="whitespace-pre-wrap">{message.content}</span>
+              </BubbleContent>
             </MessageMenu>
           </Bubble>
           {canResend && (
             <MessageFooter className="justify-end opacity-100 transition-opacity sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100 motion-reduce:transition-none">
-              <Button variant="ghost" size="icon-xs" title="重试这条消息" aria-label="重试这条消息" onClick={() => onResend(message.content)}>
+              <Button
+                variant="ghost"
+                size="icon-xs"
+                title="重试这条消息"
+                aria-label="重试这条消息"
+                onClick={() => onResend(message.content)}
+              >
                 <IconRefresh size={12} />
               </Button>
             </MessageFooter>
@@ -516,55 +575,60 @@ export const AssistantRun = memo(function AssistantRun({
 
   return (
     <>
-      <Message
-        align="start"
-        className={cn(
-          'min-w-0',
-        )}
-      >
+      <Message align="start" className={cn('min-w-0')}>
         <MessageAvatar
-          className={cn('mt-0.5 self-start transition-transform group-has-data-[slot=message-footer]/message:translate-y-0', patted && 'animate-bounce')}
+          className={cn(
+            'mt-0.5 self-start transition-transform group-has-data-[slot=message-footer]/message:translate-y-0',
+            patted && 'animate-bounce',
+          )}
           onDoubleClick={onPat}
           title="双击拍一拍"
         >
           <Avatar size="sm">
             <AvatarImage src={BRAND_MARK_SRC} alt="" className="bg-[#fff8ed] p-0.5" />
-            <AvatarFallback><BrandMark size={14} /></AvatarFallback>
+            <AvatarFallback>
+              <BrandMark size={14} />
+            </AvatarFallback>
           </Avatar>
         </MessageAvatar>
         <MessageContent className="min-w-0">
           <MessageHeader className="gap-2">
             <span>{AGENT_ID}</span>
-            <Badge variant="outline">
-              {modelTag || 'AI'}
-            </Badge>
+            <Badge variant="outline">{modelTag || 'AI'}</Badge>
             {!run.streaming && run.cached && (
-              <Badge variant="secondary"><IconBolt />秒回</Badge>
+              <Badge variant="secondary">
+                <IconBolt />
+                秒回
+              </Badge>
             )}
           </MessageHeader>
 
-          <ActivityTrace
-            parts={run.parts}
-            squad={squad}
-          />
+          <ActivityTrace parts={run.parts} squad={squad} />
 
           {verification && <VerificationPart part={verification} />}
 
           {text ? (
             <Bubble variant="ghost" className="w-full">
-            <MessageMenu message={run.message} canResend={canResend} onResend={onResend} onQuote={onQuote} onRemove={onRemove}>
-            <BubbleContent
-              data-testid="msg-bubble-assistant"
-              tabIndex={0}
-              aria-label={`${AGENT_NAME}的消息，按 Enter 打开操作菜单`}
-              className="w-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
-            >
-              <MessageContentText text={text.text} />
-            </BubbleContent>
-            </MessageMenu>
+              <MessageMenu message={run.message} canResend={canResend} onResend={onResend} onQuote={onQuote} onRemove={onRemove}>
+                <BubbleContent
+                  data-testid="msg-bubble-assistant"
+                  tabIndex={0}
+                  aria-label={`${AGENT_NAME}的消息，按 Enter 打开操作菜单`}
+                  className="w-full outline-none focus-visible:ring-3 focus-visible:ring-ring/50"
+                >
+                  <MessageContentText text={text.text} />
+                </BubbleContent>
+              </MessageMenu>
             </Bubble>
           ) : status && !hasTraceActivity ? (
-            <Trace role="status"><TraceLine status="running"><TraceIcon><Spinner /></TraceIcon><TraceTitle>{status.text}</TraceTitle></TraceLine></Trace>
+            <Trace role="status">
+              <TraceLine status="running">
+                <TraceIcon>
+                  <Spinner />
+                </TraceIcon>
+                <TraceTitle>{status.text}</TraceTitle>
+              </TraceLine>
+            </Trace>
           ) : null}
 
           {stopped && (
@@ -573,20 +637,17 @@ export const AssistantRun = memo(function AssistantRun({
             </Marker>
           )}
 
-          {failure && (
-            <FailurePart
-              part={failure}
-              retryText={retryText}
-              canResend={canResend}
-              onResend={onResend}
-            />
-          )}
+          {failure && <FailurePart part={failure} retryText={retryText} canResend={canResend} onResend={onResend} />}
 
           {!run.streaming && (text || run.message.usage) && (
             <MessageFooter className="gap-2 opacity-100 transition-opacity sm:opacity-0 sm:group-hover/message:opacity-100 sm:group-focus-within/message:opacity-100 motion-reduce:transition-none">
               {run.message.usage && (
-                <span className="inline-flex items-center gap-1" title={`输入 ${run.message.usage.input} tokens · 输出 ${run.message.usage.output} tokens · 花费 ${money(run.message.cost ?? 0)}`}>
-                  <IconCoin size={11} />{money(run.message.cost ?? 0)}
+                <span
+                  className="inline-flex items-center gap-1"
+                  title={`输入 ${run.message.usage.input} tokens · 输出 ${run.message.usage.output} tokens · 花费 ${money(run.message.cost ?? 0)}`}
+                >
+                  <IconCoin size={11} />
+                  {money(run.message.cost ?? 0)}
                 </span>
               )}
               {text && <CopyButton text={text.text} />}

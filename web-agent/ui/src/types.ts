@@ -1,125 +1,19 @@
 // ui/src/types.ts —— 前端共享类型
-export interface Session {
-  id: string;
-  title: string;
-  model: string;
-  /** model 所属 provider id（发送/恢复时需与 model 匹配） */
-  provider?: string;
-  mode: string;
-  planPending: number;
-  /** 当前接管角色（handoff）：空 = 主代理；有值 = 该角色接管会话 */
-  role?: string;
-  archived: number;
-  pinned: number;
-  createdAt: number;
-  updatedAt: number;
-  /** 侧栏摘要数据源：最后一句"真正说出口的话"及其角色（服务端派生，非 sessions 列） */
-  lastMsg?: string;
-  lastRole?: 'user' | 'assistant';
-}
-
-export interface Message {
-  id: string;
-  sessionId: string;
-  role: 'user' | 'assistant' | 'system' | 'tool';
-  content: string | null;
-  reasoning?: string;
-  tokensIn?: number;
-  tokensOut?: number;
-  cost?: number;
-  createdAt: number;
-  /** 原生工具调用（assistant 行）：演出重建的数据源——刷新后工具卡/群成员靠它复原 */
-  toolCalls?: { id: string; type?: string; function: { name: string; arguments?: string } }[];
-  /** tool 行回填所对应的 tool_call_id（与 assistant.toolCalls[].id 配对） */
-  toolCallId?: string;
-  /** 一次 run 的关联键（结算回填后才有） */
-  traceId?: string;
-  taskVerification?: TaskVerificationInfo;
-}
-
-export interface TaskVerificationInfo {
-  status: 'verified' | 'partial' | 'failed';
-  objective: string;
-  checks: { ok: boolean; reason?: string }[];
-  evidence: { source: string; detail: string; traceStepId?: string }[];
-}
-
-export interface ModelInfo {
-  schemaVersion?: number;
-  /** provider@model（新旧 UI 兼容） */
-  id: string;
-  /** 纯 provider id：旧版前端按此匹配，新前端也用它解析 */
-  provider: string;
-  label: string;
-  model: string;
-}
-
-export interface ModelCapabilityInfo {
-  providerId?: string;
-  modelId: string;
-  modelKey?: string;
-  pricingId?: string;
-  contextWindow: number | null;
-  maxOutput: number | null;
-  vision: number;
-  tools: number;
-  reasoning: number;
-  priceIn: number | null;
-  priceOut: number | null;
-  enabled: number;
-  source: string;
-  latencyMs?: number | null;
-  privacyTier?: 'local' | 'trusted' | 'external' | null;
-  riskLevel?: 'low' | 'medium' | 'high' | null;
-}
-
-export interface ProviderInfo {
-  protocolToolCalls?: boolean;
-  toolCheck?: { status: 'confirmed' | 'not_confirmed' | 'unknown'; checkedAt?: number; reason?: string };
-  id: string;
-  label: string;
-  baseUrl: string;
-  model: string;
-  protocol?: string;
-  priceIn?: number | null;
-  priceOut?: number | null;
-  enabled: boolean;
-  apiKeyMasked: string;
-  hasKey: boolean;
-  createdAt: number;
-  updatedAt: number;
-  models?: ModelCapabilityInfo[];
-  /** 健康状态（failover 链真实调用回报）：401/403 → authFailed（需人工换 key） */
-  health?: { failures: number; authFailed: boolean; lastError: string; lastErrorAt: number };
-}
-
-export interface ProviderDiagnostic {
-  schemaVersion: number;
-  providerId: string;
-  protocol: string;
-  configured: { baseUrl: boolean; apiKey: boolean; defaultModel: boolean };
-  health: ProviderInfo['health'] | null;
-  models: ModelCapabilityInfo[];
-  issues: string[];
-}
-
-/** /api/providers/models 拉取结果（含推断能力，用于免手填） */
-export interface PulledModel {
-  id: string;
-  providerId?: string;
-  modelKey?: string;
-  pricingId?: string;
-  label?: string;
-  contextWindow: number;
-  maxOutput: number;
-  vision: boolean;
-  tools: boolean;
-  reasoning: boolean;
-  priceIn: number;
-  priceOut: number;
-  source: string;
-}
-
+//
+// 服务端同名的线上类型不再手写第二份：单一来源是 contracts/api.ts（ADR 0009），
+// 下面这行 re-export 指向生成物；本文件只保留 UI 专有类型与纯前端工具函数。
+export type {
+  Session,
+  Message,
+  ModelInfo,
+  ModelCapabilityInfo,
+  ProviderInfo,
+  ProviderDiagnostic,
+  PulledModel,
+  BusEvent,
+} from './generated/contracts';
+/** 任务验收信息（与契约里的 TaskVerification 同形，旧名字保留给现有调用点） */
+export type TaskVerificationInfo = import('./generated/contracts').TaskVerification;
 export interface ProviderForm {
   label: string;
   baseUrl: string;
@@ -138,13 +32,6 @@ export interface PersonaInfo {
   sortOrder: number;
   createdAt: number;
   updatedAt: number;
-}
-
-export interface BusEvent {
-  type: string;
-  traceId?: string;
-  data?: unknown;
-  ts: number;
 }
 
 export interface PluginInfo {
@@ -318,7 +205,16 @@ export interface StatsInfo {
     tenant: { id: string; sessions: number; storageBytes?: number; maxStorageBytes?: number };
     plugins: { total: number; started: number; error: number; watched: number };
     diagnostics: PluginDiagnostic[];
-    mcp: { name: string; type: string; state: string; tools: number; health?: { state: string; failures: number }; auth?: { state: string } }[] | null;
+    mcp:
+      | {
+          name: string;
+          type: string;
+          state: string;
+          tools: number;
+          health?: { state: string; failures: number };
+          auth?: { state: string };
+        }[]
+      | null;
   };
   cache: {
     l1Enabled: boolean;
@@ -330,8 +226,12 @@ export interface StatsInfo {
     l2: { hits: number; misses: number; rate: number };
     /** L3 双口径：hits/tokens 为本地估算（相邻调用公共前缀）；real* 为 provider usage 确认的真实命中 */
     l3: {
-      hits: number; tokens: number;
-      realHits: number; realTokens: number; realMissTokens: number; realRate: number;
+      hits: number;
+      tokens: number;
+      realHits: number;
+      realTokens: number;
+      realMissTokens: number;
+      realRate: number;
     };
     savedCost: number;
     overall: { served: number; total: number; rate: number };
@@ -367,9 +267,9 @@ export interface TraceStep {
 // 前端会话中的本地消息（含流式状态与工具调用过程）
 export interface ChatMessage {
   id: string;
-  role: 'user' | 'assistant' | 'system';   // system = 斜杠命令等系统提示
+  role: 'user' | 'assistant' | 'system'; // system = 斜杠命令等系统提示
   content: string;
-  reasoning?: string;       // 思考过程（推理模型）
+  reasoning?: string; // 思考过程（推理模型）
   streaming?: boolean;
   tools?: ToolStep[];
   /** 旁白：模型在"决定调工具"的那些轮里说出口的话（多为英文工作日志）。
@@ -387,7 +287,7 @@ export interface ChatMessage {
   errorRaw?: string;
   usage?: { input: number; output: number };
   cost?: number;
-  cached?: boolean;         // L1 语义缓存命中（零 LLM 成本直接回答）
+  cached?: boolean; // L1 语义缓存命中（零 LLM 成本直接回答）
   taskVerification?: TaskVerificationInfo;
   /** 微信式系统提示种类：join = 「邀请 XX 加入群聊」（子代理入群） */
   sysKind?: 'join';

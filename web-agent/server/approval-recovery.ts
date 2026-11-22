@@ -34,7 +34,8 @@ export function recoverOrphanedApprovals(
   if (scheduler) {
     for (const item of sessions.values()) {
       if (!store.loadCheckpoint(item.sessionId)) continue;
-      const queued = scheduler.list(item.tenantId)
+      const queued = scheduler
+        .list(item.tenantId)
         .some((job) => job.sessionId === item.sessionId && (job.state === 'pending' || job.state === 'running'));
       if (queued) continue;
       scheduler.schedule({ sessionId: item.sessionId, tenantId: item.tenantId, dueAt: now + 1_000 });

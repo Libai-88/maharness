@@ -79,7 +79,10 @@ export class ReplayProvider implements ProviderDef {
   mismatches = 0;
   private cursor = 0;
 
-  constructor(private recording: Recording, private opts: { strict?: boolean; prices?: { in: number; out: number } } = {}) {
+  constructor(
+    private recording: Recording,
+    private opts: { strict?: boolean; prices?: { in: number; out: number } } = {},
+  ) {
     this.prices = opts.prices;
   }
 
@@ -100,7 +103,7 @@ export class ReplayProvider implements ProviderDef {
     if (!req) {
       throw new Error(
         `[replay] LLM 请求序列耗尽（第 ${this.cursor + 1} 次调用无录音）。` +
-        '说明 agent 循环行为与录制时不一致（调用次数/顺序变了）——这正是回归测试要暴露的差异。',
+          '说明 agent 循环行为与录制时不一致（调用次数/顺序变了）——这正是回归测试要暴露的差异。',
       );
     }
     this.cursor++;

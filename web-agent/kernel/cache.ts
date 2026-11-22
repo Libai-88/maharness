@@ -28,8 +28,8 @@ interface L2Entry {
   createdAt: number;
   expiresAt: number;
   hits: number;
-  lastAccess: number;   // LRU：淘汰最久未访问
-  tenantId?: string;    // 租户标记：按租户清理时无需反解哈希键
+  lastAccess: number; // LRU：淘汰最久未访问
+  tenantId?: string; // 租户标记：按租户清理时无需反解哈希键
 }
 
 interface L2Flight {
@@ -43,21 +43,21 @@ interface L2Flight {
 interface L1Entry {
   vector?: number[];
   bigrams: Set<string>; // 内容词 bigram 特征（语义归一化后）
-  actions: string[];    // 动作类别（query/write/delete/execute）：方向不一致不串答案
+  actions: string[]; // 动作类别（query/write/delete/execute）：方向不一致不串答案
   answer: string;
   hits: number;
   createdAt: number;
-  promptKey: string;    // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
-  scope?: string;       // 会话级隔离：undefined=全局（纯问答产物，所有会话可见）；
-                        // 有值=会话自产（答案依赖本会话工具观察，仅本会话可见，防跨会话串陈旧答案）
-  tenantId?: string;    // 非 default 租户的条目只对同租户可见
-  expiresAt: number;    // TTL：时效性内容（天气/新闻/用户数据）不永久缓存
+  promptKey: string; // systemPrompt 指纹：答案依赖完整输入（人设/插件规则不同则不串用）
+  scope?: string; // 会话级隔离：undefined=全局（纯问答产物，所有会话可见）；
+  // 有值=会话自产（答案依赖本会话工具观察，仅本会话可见，防跨会话串陈旧答案）
+  tenantId?: string; // 非 default 租户的条目只对同租户可见
+  expiresAt: number; // TTL：时效性内容（天气/新闻/用户数据）不永久缓存
 }
 
-const L1_THRESHOLD = 0.95;        // 向量余弦相似度命中阈值
-const L1_TTL = 24 * 3600_000;     // L1 答案 TTL 24h：时效性内容（天气/新闻/用户数据）不永久缓存
-const MAX_L1_ANSWER = 4000;       // 超过该长度的答案不进 L1 缓存
-const MIN_L1_ANSWER = 4;          // 低于该长度的答案不进 L1（"好的""完成"等无信息量）
+const L1_THRESHOLD = 0.95; // 向量余弦相似度命中阈值
+const L1_TTL = 24 * 3600_000; // L1 答案 TTL 24h：时效性内容（天气/新闻/用户数据）不永久缓存
+const MAX_L1_ANSWER = 4000; // 超过该长度的答案不进 L1 缓存
+const MIN_L1_ANSWER = 4; // 低于该长度的答案不进 L1（"好的""完成"等无信息量）
 
 /**
  * L1 入队质量过滤：低质量/不确定/无信息量的答案不进缓存，避免污染语义空间。
@@ -88,9 +88,9 @@ function isAnswerCacheable(answer: string, question: string): boolean {
 
   // 3. 纯工具输出不缓存（包含 JSON 代码块或大量技术日志）
   const toolOutputPatterns = [
-    /^\s*```/,                    // 以代码块开头
-    /\{[\s\S]{50,}\}/,           // 大段 JSON
-    /^\s*\</,                     // 以 HTML/XML 开头
+    /^\s*```/, // 以代码块开头
+    /\{[\s\S]{50,}\}/, // 大段 JSON
+    /^\s*</, // 以 HTML/XML 开头
     /exit code[:\s]/i,
     /stack trace/i,
   ];
@@ -123,17 +123,106 @@ function l1EntryKey(promptKey: string, norm: string, tenantId?: string): string 
  * 多字词单独成组：单字剔除按字符、多字词按整词剔除（否则永远匹配不上）。
  */
 const STOPWORDS_SINGLE = new Set([
-  '的', '了', '吗', '呢', '吧', '啊', '呀', '哦', '噢', '嗯',
-  '在', '是', '有', '和', '与', '及', '或', '把', '被', '给', '对', '从', '向', '到', '于', '着', '过',
-  '请', '帮', '我', '你', '他', '她', '它', '们', '什', '么', '怎', '哪', '些', '个',
-  '可', '以', '要', '会', '该', '能', '用', '之', '其', '这', '那',
-  '很', '也', '都', '就', '才', '再', '还', '又', '更', '最', '只', '但', '而', '且', '并',
-  '下', '中', '里', '内', '上',
+  '的',
+  '了',
+  '吗',
+  '呢',
+  '吧',
+  '啊',
+  '呀',
+  '哦',
+  '噢',
+  '嗯',
+  '在',
+  '是',
+  '有',
+  '和',
+  '与',
+  '及',
+  '或',
+  '把',
+  '被',
+  '给',
+  '对',
+  '从',
+  '向',
+  '到',
+  '于',
+  '着',
+  '过',
+  '请',
+  '帮',
+  '我',
+  '你',
+  '他',
+  '她',
+  '它',
+  '们',
+  '什',
+  '么',
+  '怎',
+  '哪',
+  '些',
+  '个',
+  '可',
+  '以',
+  '要',
+  '会',
+  '该',
+  '能',
+  '用',
+  '之',
+  '其',
+  '这',
+  '那',
+  '很',
+  '也',
+  '都',
+  '就',
+  '才',
+  '再',
+  '还',
+  '又',
+  '更',
+  '最',
+  '只',
+  '但',
+  '而',
+  '且',
+  '并',
+  '下',
+  '中',
+  '里',
+  '内',
+  '上',
 ]);
 const STOPWORDS_MULTI = [
-  '我们', '你们', '他们', '她们', '一个', '一下', '当前', '现在', '这个', '那个',
-  '什么', '怎么', '为什么', '如何', '哪些', '哪个', '可以', '应该', '需要',
-  '因为', '所以', '如果', '然后', '请问', '给我', '或者',
+  '我们',
+  '你们',
+  '他们',
+  '她们',
+  '一个',
+  '一下',
+  '当前',
+  '现在',
+  '这个',
+  '那个',
+  '什么',
+  '怎么',
+  '为什么',
+  '如何',
+  '哪些',
+  '哪个',
+  '可以',
+  '应该',
+  '需要',
+  '因为',
+  '所以',
+  '如果',
+  '然后',
+  '请问',
+  '给我',
+  '或者',
 ];
 
 /** 内容词提取：去标点空格 → 去停用词（先整词后单字）→ 内容词序列（用于 bigram 特征） */
@@ -159,7 +248,30 @@ export function normalizeText(text: string): string {
  */
 const ACTION_GROUPS: [string, string[]][] = [
   ['query', ['读', '查看', '列出', '查询', '搜索', '查', '打开', '统计', '分析', '比较', '解释', '显示', '浏览', '获取']],
-  ['write', ['写', '创建', '新建', '生成', '设计', '实现', '修改', '改', '编辑', '更新', '添加', '重命名', '转换', '下载', '上传', '复制', '移动', '安装', '重构']],
+  [
+    'write',
+    [
+      '写',
+      '创建',
+      '新建',
+      '生成',
+      '设计',
+      '实现',
+      '修改',
+      '改',
+      '编辑',
+      '更新',
+      '添加',
+      '重命名',
+      '转换',
+      '下载',
+      '上传',
+      '复制',
+      '移动',
+      '安装',
+      '重构',
+    ],
+  ],
   ['delete', ['删', '删除', '卸载', '移除', '清理', '关闭']],
   ['execute', ['运行', '执行', '修复', '测试']],
 ];
@@ -229,13 +341,23 @@ export class Cache {
    *  刷屏没有价值，但完全静默又会让人以为缓存在正常工作） */
   private readonly warned = new Set<string>();
   private counter: CacheStats = {
-    l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
-    l3Hits: 0, l3Tokens: 0,
-    l3RealHits: 0, l3RealTokens: 0, l3RealMissTokens: 0,
+    l2Hits: 0,
+    l2Misses: 0,
+    l1Hits: 0,
+    l1Misses: 0,
+    l3Hits: 0,
+    l3Tokens: 0,
+    l3RealHits: 0,
+    l3RealTokens: 0,
+    l3RealMissTokens: 0,
     savedCost: 0,
   };
 
-  constructor(private embeddingFn?: EmbeddingFn, cfg: CacheConfig = {}, private persistFile?: string) {
+  constructor(
+    private embeddingFn?: EmbeddingFn,
+    cfg: CacheConfig = {},
+    private persistFile?: string,
+  ) {
     if (cfg.l1TextThreshold !== undefined) this.l1TextThreshold = cfg.l1TextThreshold;
     if (cfg.l2TtlMs !== undefined) this.l2TtlMs = cfg.l2TtlMs;
     if (cfg.maxL1 !== undefined) this.maxL1 = cfg.maxL1;
@@ -268,9 +390,16 @@ export class Cache {
       const payload = JSON.stringify({
         v: 2, // 版本号：升级时可做迁移
         l1: [...this.l1.entries()].map(([k, e]) => ({
-          k, answer: e.answer, hits: e.hits, promptKey: e.promptKey,
-          scope: e.scope, createdAt: e.createdAt, expiresAt: e.expiresAt,
-          bigrams: [...e.bigrams], actions: e.actions, vector: e.vector ? [...e.vector] : undefined,
+          k,
+          answer: e.answer,
+          hits: e.hits,
+          promptKey: e.promptKey,
+          scope: e.scope,
+          createdAt: e.createdAt,
+          expiresAt: e.expiresAt,
+          bigrams: [...e.bigrams],
+          actions: e.actions,
+          vector: e.vector ? [...e.vector] : undefined,
         })),
         l2: [...this.l2.entries()].map(([k, e]) => ({ k, value: e.value, createdAt: e.createdAt, expiresAt: e.expiresAt, hits: e.hits })),
       });
@@ -290,7 +419,22 @@ export class Cache {
     try {
       if (!existsSync(this.persistFile)) return;
       const raw = readFileSync(this.persistFile, 'utf8');
-      let data: { v?: number; l1?: { k: string; answer: string; hits: number; promptKey: string; scope?: string; createdAt?: number; expiresAt: number; bigrams: string[]; actions?: string[]; vector?: number[] }[]; l2?: { k: string; value: unknown; createdAt?: number; expiresAt: number; hits: number }[] };
+      let data: {
+        v?: number;
+        l1?: {
+          k: string;
+          answer: string;
+          hits: number;
+          promptKey: string;
+          scope?: string;
+          createdAt?: number;
+          expiresAt: number;
+          bigrams: string[];
+          actions?: string[];
+          vector?: number[];
+        }[];
+        l2?: { k: string; value: unknown; createdAt?: number; expiresAt: number; hits: number }[];
+      };
       try {
         data = JSON.parse(raw) as typeof data;
       } catch {
@@ -311,31 +455,65 @@ export class Cache {
         return;
       }
       const now = Date.now();
-      let l1Restored = 0, l2Restored = 0, l1Skipped = 0, l2Skipped = 0;
+      let l1Restored = 0,
+        l2Restored = 0,
+        l1Skipped = 0,
+        l2Skipped = 0;
       for (const item of data.l1 ?? []) {
         try {
-          if (item.expiresAt < now) { l1Skipped++; continue; }
-          if (!item.k || !item.answer || !item.bigrams) { l1Skipped++; continue; } // 必填字段缺失
+          if (item.expiresAt < now) {
+            l1Skipped++;
+            continue;
+          }
+          if (!item.k || !item.answer || !item.bigrams) {
+            l1Skipped++;
+            continue;
+          } // 必填字段缺失
           this.l1.set(item.k, {
-            answer: item.answer, hits: item.hits ?? 0, promptKey: item.promptKey ?? '',
-            scope: item.scope, createdAt: item.createdAt ?? now, expiresAt: item.expiresAt,
-            bigrams: new Set(item.bigrams), actions: item.actions ?? [], vector: item.vector,
+            answer: item.answer,
+            hits: item.hits ?? 0,
+            promptKey: item.promptKey ?? '',
+            scope: item.scope,
+            createdAt: item.createdAt ?? now,
+            expiresAt: item.expiresAt,
+            bigrams: new Set(item.bigrams),
+            actions: item.actions ?? [],
+            vector: item.vector,
           });
           l1Restored++;
-        } catch { l1Skipped++; }
+        } catch {
+          l1Skipped++;
+        }
       }
       for (const item of data.l2 ?? []) {
         try {
-          if (item.expiresAt < now) { l2Skipped++; continue; }
-          if (!item.k) { l2Skipped++; continue; }
-          this.l2.set(item.k, { value: item.value, createdAt: item.createdAt ?? now, expiresAt: item.expiresAt, hits: item.hits ?? 0, lastAccess: now });
+          if (item.expiresAt < now) {
+            l2Skipped++;
+            continue;
+          }
+          if (!item.k) {
+            l2Skipped++;
+            continue;
+          }
+          this.l2.set(item.k, {
+            value: item.value,
+            createdAt: item.createdAt ?? now,
+            expiresAt: item.expiresAt,
+            hits: item.hits ?? 0,
+            lastAccess: now,
+          });
           l2Restored++;
-        } catch { l2Skipped++; }
+        } catch {
+          l2Skipped++;
+        }
       }
       const parts = [];
       if (l1Restored) parts.push(`L1 ${l1Restored} 条`);
       if (l2Restored) parts.push(`L2 ${l2Restored} 条`);
-      if (parts.length) console.log(`[cache] 已从磁盘恢复缓存：${parts.join(' / ')}${l1Skipped + l2Skipped ? `（跳过 ${l1Skipped + l2Skipped} 条过期/损坏）` : ''}`);
+      if (parts.length)
+        console.log(
+          `[cache] 已从磁盘恢复缓存：${parts.join(' / ')}${l1Skipped + l2Skipped ? `（跳过 ${l1Skipped + l2Skipped} 条过期/损坏）` : ''}`,
+        );
     } catch (err) {
       console.warn('[cache] 缓存加载失败（从空开始）:', err instanceof Error ? err.message : String(err));
     }
@@ -344,7 +522,10 @@ export class Cache {
   private scheduleSave(): void {
     if (!this.persistFile) return;
     if (this.saveTimer) clearTimeout(this.saveTimer);
-    this.saveTimer = setTimeout(() => { this.saveTimer = null; this.save(); }, 5000);
+    this.saveTimer = setTimeout(() => {
+      this.saveTimer = null;
+      this.save();
+    }, 5000);
   }
 
   /** L1 始终可用（自研文本相似度）；配置 embedding 后自动升级为向量语义匹配 */
@@ -374,7 +555,10 @@ export class Cache {
 
   l2Get(key: string): { hit: boolean; value?: unknown; meta?: CacheHitMeta } {
     const e = this.l2.get(key);
-    if (!e) { this.counter.l2Misses++; return { hit: false }; }
+    if (!e) {
+      this.counter.l2Misses++;
+      return { hit: false };
+    }
     if (e.expiresAt < Date.now()) {
       this.l2.delete(key);
       this.counter.l2Misses++;
@@ -406,7 +590,11 @@ export class Cache {
     // LRU O(1)：已有 key 先 delete 再 set（移到尾部）；新 key 直接 set
     if (this.l2.has(key)) this.l2.delete(key);
     this.l2.set(key, {
-      value, createdAt: now, expiresAt: now + ttlMs, hits: 0, lastAccess: now,
+      value,
+      createdAt: now,
+      expiresAt: now + ttlMs,
+      hits: 0,
+      lastAccess: now,
       ...(tenantId ? { tenantId } : {}),
     });
     // LRU 淘汰：超容量时删除队首（最久未访问）
@@ -434,7 +622,7 @@ export class Cache {
       let promise: Promise<unknown>;
       promise = Promise.resolve()
         .then(() => load(controller.signal))
-        .then(value => {
+        .then((value) => {
           if (!controller.signal.aborted) this.l2Set(key, value, opts.ttlMs, tenantId);
           return value;
         })
@@ -449,7 +637,7 @@ export class Cache {
     const current = flight;
     current.waiters++;
     try {
-      return { hit: false, value: await abortable(current.promise, opts.signal) as T };
+      return { hit: false, value: (await abortable(current.promise, opts.signal)) as T };
     } finally {
       current.waiters--;
       if (current.waiters === 0 && this.l2Inflight.get(flightId) === current) {
@@ -476,7 +664,10 @@ export class Cache {
     const prefix = `${ns}:`;
     let changed = false;
     for (const key of this.l2.keys()) {
-      if (key.startsWith(prefix)) { this.l2.delete(key); changed = true; }
+      if (key.startsWith(prefix)) {
+        this.l2.delete(key);
+        changed = true;
+      }
     }
     for (const [flightId, flight] of this.l2Inflight) {
       if (flight.key.startsWith(prefix)) this.cancelL2Flight(flightId);
@@ -527,7 +718,12 @@ export class Cache {
    *  会话可见（纯问答产物，不依赖工具观察）；会话条目只对本会话可见（答案依赖本会话
    *  工具结果，跨会话复用会串「看过的东西」，即陈旧事实）。
    *  返回 hitScope：命中条目的作用域，供命中学习回填时沿用（保持同域扩展）。 */
-  async l1Get(question: string, promptKey = '', scope?: string, tenantId?: string): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string; meta?: L1HitMeta }> {
+  async l1Get(
+    question: string,
+    promptKey = '',
+    scope?: string,
+    tenantId?: string,
+  ): Promise<{ hit: boolean; answer?: string; key?: string; hitScope?: string; meta?: L1HitMeta }> {
     const norm = question.replace(/\s+/g, ' ').trim();
     if (!norm || norm.length < 8) {
       // 短问题（"继续/你好"等）不参与语义匹配，避免跨上下文误命中
@@ -544,7 +740,10 @@ export class Cache {
       try {
         vec = await this.embeddingFn(norm);
       } catch (err) {
-        this.warnOnce('embedding-failed', `[cache] L1 向量召回失败，本轮降级为文本相似度：${err instanceof Error ? err.message : String(err)}`);
+        this.warnOnce(
+          'embedding-failed',
+          `[cache] L1 向量召回失败，本轮降级为文本相似度：${err instanceof Error ? err.message : String(err)}`,
+        );
       }
       if (vec && vec.length) {
         let best: { key: string; score: number; scope?: string } | null = null;
@@ -561,7 +760,10 @@ export class Cache {
           if (ev.length !== vec.length) {
             // B9 修复②：换了 embedding 模型后维度不一致，cosine 会算出 NaN →
             // `NaN >= 阈值` 恒 false，于是**静默永不命中**且毫无告警。显式跳过并告警一次。
-            this.warnOnce('embedding-dim', `[cache] L1 向量维度不一致（查询 ${vec.length} vs 存量 ${ev.length}）：疑似换了 embedding 模型，旧向量已失效，请 clear 语义缓存`);
+            this.warnOnce(
+              'embedding-dim',
+              `[cache] L1 向量维度不一致（查询 ${vec.length} vs 存量 ${ev.length}）：疑似换了 embedding 模型，旧向量已失效，请 clear 语义缓存`,
+            );
             continue;
           }
           const score = cosine(vec, ev);
@@ -610,7 +812,8 @@ export class Cache {
       if (entry.promptKey !== promptKey) continue;
       if (!tenantEntryVisible(entry.tenantId, tenantId)) continue;
       if (entry.scope && entry.scope !== scope) continue; // 会话自产答案：仅本会话可见
-      if (entry.expiresAt < Date.now()) { // TTL 过期：删除并按未命中处理
+      if (entry.expiresAt < Date.now()) {
+        // TTL 过期：删除并按未命中处理
         this.l1.delete(key);
         continue;
       }
@@ -651,8 +854,15 @@ export class Cache {
     const entryKey = l1EntryKey(promptKey, norm, tenantId);
     const createdAt = Date.now();
     const entry: L1Entry = {
-      bigrams: bigramSet(contentWords(norm)), actions: [...actionGroups(norm)], answer, hits: 0, promptKey,
-      scope: scope || undefined, tenantId: tenantId || undefined, createdAt, expiresAt: createdAt + L1_TTL,
+      bigrams: bigramSet(contentWords(norm)),
+      actions: [...actionGroups(norm)],
+      answer,
+      hits: 0,
+      promptKey,
+      scope: scope || undefined,
+      tenantId: tenantId || undefined,
+      createdAt,
+      expiresAt: createdAt + L1_TTL,
     };
     if (this.embeddingFn) entry.vector = await this.embeddingFn(norm);
     // LRU 修复：已有 key 必须先 delete 再 set，否则 Map 保留原位置（频繁写入的条目
@@ -755,10 +965,7 @@ export class Cache {
     return this.stats();
   }
 
-  private l2GetForTenant(
-    key: string,
-    tenantId: string,
-  ): { hit: boolean; value?: unknown; meta?: CacheHitMeta } {
+  private l2GetForTenant(key: string, tenantId: string): { hit: boolean; value?: unknown; meta?: CacheHitMeta } {
     const entry = this.l2.get(key);
     if (entry && entry.expiresAt >= Date.now()) {
       const entryTenant = entry.tenantId ?? (tenantId === 'default' ? 'default' : undefined);
@@ -792,14 +999,16 @@ function abortable<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
     const abort = () => settle(() => reject(signal.reason ?? new DOMException('Aborted', 'AbortError')));
     signal.addEventListener('abort', abort, { once: true });
     promise.then(
-      value => settle(() => resolve(value)),
-      error => settle(() => reject(error)),
+      (value) => settle(() => resolve(value)),
+      (error) => settle(() => reject(error)),
     );
   });
 }
 
 function cosine(a: number[], b: number[]): number {
-  let dot = 0, na = 0, nb = 0;
+  let dot = 0,
+    na = 0,
+    nb = 0;
   for (let i = 0; i < a.length; i++) {
     dot += a[i] * b[i];
     na += a[i] * a[i];

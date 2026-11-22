@@ -22,9 +22,16 @@ const pluginContext = {
 const cache = new Cache();
 const trace = { startStep: () => ({ finish: () => {} }) } as unknown as ToolContext['trace'];
 const ctx = {
-  sandboxRoot: root, sessionId: 'quota-test', traceId: 'quota-test', turn: 1, cache, trace,
+  sandboxRoot: root,
+  sessionId: 'quota-test',
+  traceId: 'quota-test',
+  turn: 1,
+  cache,
+  trace,
   quota: {
-    assertWritable(bytes: number) { if (bytes > 10) throw new Error(`quota exceeded: ${bytes}`); },
+    assertWritable(bytes: number) {
+      if (bytes > 10) throw new Error(`quota exceeded: ${bytes}`);
+    },
     invalidate() {},
   },
 } as ToolContext;

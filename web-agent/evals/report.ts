@@ -45,7 +45,12 @@ export interface EvalReport {
     costUsd: number;
     averageCostPerProviderCallUsd: number | null;
     latencyMs: { p50: number; p95: number; max: number };
-    securityAttacks: { total: number; blocked: number; blockRate: number | null; byCategory: Record<string, { total: number; blocked: number }> };
+    securityAttacks: {
+      total: number;
+      blocked: number;
+      blockRate: number | null;
+      byCategory: Record<string, { total: number; blocked: number }>;
+    };
   };
   pricingUsdPerMillionTokens: { input: number; output: number };
   cases: EvalCaseResult[];
@@ -89,7 +94,11 @@ export function buildEvalReport(results: EvalCaseResult[]): EvalReport {
   const securityByCategory: EvalReport['metrics']['securityAttacks']['byCategory'] = {};
   for (const attack of attacks) {
     const category = attack.securityCategory!;
-    const current = securityByCategory[category] ??= { total: 0, blocked: 0 };
+    let current = securityByCategory[category];
+    if (!current) {
+      current = { total: 0, blocked: 0 };
+      securityByCategory[category] = current;
+    }
     current.total++;
     if (attack.securityBlocked) current.blocked++;
   }
@@ -127,7 +136,12 @@ export function buildEvalReport(results: EvalCaseResult[]): EvalReport {
         p95: percentile(durations, 0.95),
         max: round(durations.at(-1) ?? 0),
       },
-      securityAttacks: { total: attacks.length, blocked: securityBlocked, blockRate: ratio(securityBlocked, attacks.length), byCategory: securityByCategory },
+      securityAttacks: {
+        total: attacks.length,
+        blocked: securityBlocked,
+        blockRate: ratio(securityBlocked, attacks.length),
+        byCategory: securityByCategory,
+      },
     },
     pricingUsdPerMillionTokens: REPLAY_PRICING_USD_PER_MILLION,
     cases,
@@ -143,16 +157,41 @@ export function compareEvalReports(current: EvalReport, baseline: EvalReport, th
   if (securityRate !== null && securityRate < thresholds.minSecurityAttackBlockRate) {
     regressions.push(`securityAttackBlockRate ${format(securityRate)} 低于下限 ${format(thresholds.minSecurityAttackBlockRate)}`);
   }
-  compareRateDrop(current.metrics.correctToolRate, baseline.metrics.correctToolRate, thresholds.maxCorrectToolRateRegressionPoints,
-    'correctToolRate', regressions);
-  compareRateDrop(current.metrics.completionRate, baseline.metrics.completionRate, thresholds.maxCompletionRateRegressionPoints,
-    'completionRate', regressions);
-  compareRateIncrease(current.metrics.invalidToolCallRate, baseline.metrics.invalidToolCallRate, thresholds.maxInvalidToolCallRateIncreasePoints,
-    'invalidToolCallRate', regressions);
-  compareRateIncrease(current.metrics.toolFailureRate, baseline.metrics.toolFailureRate, thresholds.maxToolFailureRateIncreasePoints,
-    'toolFailureRate', regressions);
-  compareRateIncrease(current.metrics.retryRate, baseline.metrics.retryRate, thresholds.maxRetryRateIncreasePoints,
-    'retryRate', regressions);
+  compareRateDrop(
+    current.metrics.correctToolRate,
+    baseline.metrics.correctToolRate,
+    thresholds.maxCorrectToolRateRegressionPoints,
+    'correctToolRate',
+    regressions,
+  );
+  compareRateDrop(
+    current.metrics.completionRate,
+    baseline.metrics.completionRate,
+    thresholds.maxCompletionRateRegressionPoints,
+    'completionRate',
+    regressions,
+  );
+  compareRateIncrease(
+    current.metrics.invalidToolCallRate,
+    baseline.metrics.invalidToolCallRate,
+    thresholds.maxInvalidToolCallRateIncreasePoints,
+    'invalidToolCallRate',
+    regressions,
+  );
+  compareRateIncrease(
+    current.metrics.toolFailureRate,
+    baseline.metrics.toolFailureRate,
+    thresholds.maxToolFailureRateIncreasePoints,
+    'toolFailureRate',
+    regressions,
+  );
+  compareRateIncrease(
+    current.metrics.retryRate,
+    baseline.metrics.retryRate,
+    thresholds.maxRetryRateIncreasePoints,
+    'retryRate',
+    regressions,
+  );
   const currentCases = new Map(current.cases.map((c) => [c.name, c]));
   for (const oldCase of baseline.cases) {
     const newCase = currentCases.get(oldCase.name);
@@ -161,7 +200,9 @@ export function compareEvalReports(current: EvalReport, baseline: EvalReport, th
   if (sameEnvironment(current, baseline)) {
     const oldP95 = baseline.metrics.latencyMs.p95;
     if (oldP95 > 0 && exceedsPercent(current.metrics.latencyMs.p95, oldP95, thresholds.maxLatencyRegressionPercent)) {
-      regressions.push(`latency P95 ${current.metrics.latencyMs.p95}ms 超出 baseline ${oldP95}ms +${thresholds.maxLatencyRegressionPercent}%`);
+      regressions.push(
+        `latency P95 ${current.metrics.latencyMs.p95}ms 超出 baseline ${oldP95}ms +${thresholds.maxLatencyRegressionPercent}%`,
+      );
     }
   }
   if (JSON.stringify(current.pricingUsdPerMillionTokens) !== JSON.stringify(baseline.pricingUsdPerMillionTokens)) {
@@ -197,9 +238,11 @@ function round(value: number): number {
 }
 
 function sameEnvironment(a: EvalReport, b: EvalReport): boolean {
-  return a.environment.platform === b.environment.platform
-    && a.environment.arch === b.environment.arch
-    && a.environment.nodeMajor === b.environment.nodeMajor;
+  return (
+    a.environment.platform === b.environment.platform &&
+    a.environment.arch === b.environment.arch &&
+    a.environment.nodeMajor === b.environment.nodeMajor
+  );
 }
 
 function exceedsPercent(value: number, baseline: number, limitPercent: number): boolean {
@@ -213,11 +256,19 @@ function format(value: number): string {
 function compareRateDrop(current: number | null, baseline: number | null, maxPoints: number, name: string, regressions: string[]): void {
   if (current === null || baseline === null) return;
   const drop = baseline - current;
-  if (drop > maxPoints) regressions.push(`${name} 下降 ${(drop * 100).toFixed(2)} 个百分点，超过上限 ${(maxPoints * 100).toFixed(2)} 个百分点`);
+  if (drop > maxPoints)
+    regressions.push(`${name} 下降 ${(drop * 100).toFixed(2)} 个百分点，超过上限 ${(maxPoints * 100).toFixed(2)} 个百分点`);
 }
 
-function compareRateIncrease(current: number | null, baseline: number | null, maxPoints: number, name: string, regressions: string[]): void {
+function compareRateIncrease(
+  current: number | null,
+  baseline: number | null,
+  maxPoints: number,
+  name: string,
+  regressions: string[],
+): void {
   if (current === null || baseline === null) return;
   const increase = current - baseline;
-  if (increase > maxPoints) regressions.push(`${name} 上升 ${(increase * 100).toFixed(2)} 个百分点，超过上限 ${(maxPoints * 100).toFixed(2)} 个百分点`);
+  if (increase > maxPoints)
+    regressions.push(`${name} 上升 ${(increase * 100).toFixed(2)} 个百分点，超过上限 ${(maxPoints * 100).toFixed(2)} 个百分点`);
 }

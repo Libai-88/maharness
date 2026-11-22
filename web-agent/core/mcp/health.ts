@@ -97,8 +97,7 @@ export class McpCircuitBreaker {
 
   snapshot(): McpHealthSnapshot {
     const now = this.now();
-    const state: McpCircuitState = !this.openedUntil ? 'closed'
-      : now < this.openedUntil ? 'open' : 'half-open';
+    const state: McpCircuitState = !this.openedUntil ? 'closed' : now < this.openedUntil ? 'open' : 'half-open';
     return {
       state,
       calls: this.calls,

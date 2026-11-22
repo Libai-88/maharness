@@ -18,11 +18,7 @@ const rec: Recording = {
     {
       messages: [{ role: 'user', content: 'q1' }],
       model: 'm',
-      chunks: [
-        { type: 'delta', text: '你好' },
-        { type: 'usage', input: 10, output: 2 },
-        { type: 'done' },
-      ],
+      chunks: [{ type: 'delta', text: '你好' }, { type: 'usage', input: 10, output: 2 }, { type: 'done' }],
     },
     {
       messages: [{ role: 'user', content: 'q2' }],
@@ -51,11 +47,19 @@ describe('ReplayProvider 确定性回放', () => {
 
   test('序列耗尽时抛错（agent 循环行为与录制不一致的信号）', async () => {
     const p = new ReplayProvider(rec);
-    for await (const _ of p.chat([], { model: 'm' })) { /* 消耗 1 */ }
-    for await (const _ of p.chat([], { model: 'm' })) { /* 消耗 2 */ }
+    for await (const _ of p.chat([], { model: 'm' })) {
+      /* 消耗 1 */
+    }
+    for await (const _ of p.chat([], { model: 'm' })) {
+      /* 消耗 2 */
+    }
     await assert.rejects(() => {
       const gen = p.chat([], { model: 'm' });
-      return (async () => { for await (const _ of gen) { /* 应抛错 */ } })();
+      return (async () => {
+        for await (const _ of gen) {
+          /* 应抛错 */
+        }
+      })();
     }, /序列耗尽/);
   });
 });
@@ -98,14 +102,21 @@ describe('ReplayProvider 请求内容比对（R5）', () => {
 
   test('消息轮廓一致时不产生 mismatch', async () => {
     const p = new ReplayProvider(rec);
-    for await (const _ of p.chat(rec.requests[0].messages, { model: 'm' })) { /* 消费 */ }
+    for await (const _ of p.chat(rec.requests[0].messages, { model: 'm' })) {
+      /* 消费 */
+    }
     assert.equal(p.mismatches, 0);
   });
 
   test('strict 模式：不一致直接抛错（CI 强化回归门禁）', async () => {
     const p = new ReplayProvider(rec, { strict: true });
     await assert.rejects(
-      () => (async () => { for await (const _ of p.chat([], { model: 'm' })) { /* 触发比对 */ } })(),
+      () =>
+        (async () => {
+          for await (const _ of p.chat([], { model: 'm' })) {
+            /* 触发比对 */
+          }
+        })(),
       /请求与录音不一致/,
     );
   });
@@ -114,7 +125,9 @@ describe('ReplayProvider 请求内容比对（R5）', () => {
 describe('RecordingProvider 录制', () => {
   test('包裹真实 provider：请求与响应被完整记录，输出原样透传', async () => {
     const inner = {
-      id: 'inner', label: 'INNER', defaultModel: 'm',
+      id: 'inner',
+      label: 'INNER',
+      defaultModel: 'm',
       async *chat(): AsyncIterable<LLMChunk> {
         yield { type: 'delta', text: 'x' };
         yield { type: 'done' };

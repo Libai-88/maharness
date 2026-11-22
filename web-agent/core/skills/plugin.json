@@ -15,22 +15,10 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "list_skills",
-        "get_skill",
-        "get_skill_file",
-        "list_skill_backups",
-        "rollback_skill"
-      ],
-      "persona": [
-        "skills-rules"
-      ],
-      "context": [
-        "skills-index"
-      ],
-      "service": [
-        "skills"
-      ]
+      "tool": ["list_skills", "get_skill", "get_skill_file", "list_skill_backups", "rollback_skill"],
+      "persona": ["skills-rules"],
+      "context": ["skills-index"],
+      "service": ["skills"]
     }
   },
   "apiVersion": 2

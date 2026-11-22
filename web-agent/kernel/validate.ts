@@ -34,7 +34,11 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
   if (Array.isArray(schema.enum) && !(schema.enum as unknown[]).some((item) => sameJsonValue(item, value))) {
     issues.push(`${path}: 值 ${JSON.stringify(value)} 不在允许枚举内`);
   }
-  for (const [keyword, mode] of [['allOf', 'all'], ['anyOf', 'any'], ['oneOf', 'one']] as const) {
+  for (const [keyword, mode] of [
+    ['allOf', 'all'],
+    ['anyOf', 'any'],
+    ['oneOf', 'one'],
+  ] as const) {
     const branches = schema[keyword];
     if (!Array.isArray(branches)) continue;
     const results = branches.map((branch) => {
@@ -71,7 +75,7 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
     for (const key of required) {
       if (!Object.hasOwn(obj, key) || obj[key] === undefined) issues.push(`${path}.${key}: 缺少必填字段`);
     }
-    const propertyCount = Object.values(obj).filter(value => value !== undefined).length;
+    const propertyCount = Object.values(obj).filter((value) => value !== undefined).length;
     if (typeof schema.minProperties === 'number' && propertyCount < schema.minProperties) {
       issues.push(`${path}: 属性数 ${propertyCount} < minProperties ${schema.minProperties}`);
     }
@@ -89,7 +93,12 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
       let matchedPattern = false;
       for (const [pattern, patternSchema] of Object.entries(patterns)) {
         let re: RegExp;
-        try { re = new RegExp(pattern); } catch { issues.push(`${path}: patternProperties 正则无效 ${pattern}`); continue; }
+        try {
+          re = new RegExp(pattern);
+        } catch {
+          issues.push(`${path}: patternProperties 正则无效 ${pattern}`);
+          continue;
+        }
         if (!re.test(key)) continue;
         matchedPattern = true;
         issues.push(...check(valueOfKey, patternSchema, `${path}.${key}`));
@@ -117,7 +126,11 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
       }
     }
     const items = schema.items as Record<string, unknown> | undefined;
-    if (items) value.forEach((item, i) => issues.push(...check(item, items, `${path}[${i}]`)));
+    if (items) {
+      value.forEach((item, i) => {
+        issues.push(...check(item, items, `${path}[${i}]`));
+      });
+    }
   } else if (typeName === 'string' || (type === undefined && typeof value === 'string')) {
     // 未显式声明 type 时按值的实际类型应用规则：string 值照常校验 enum/minLength/maxLength
     // （旧实现只认 type==='string'，无 type 声明的 schema 三条规则全部静默跳过）
@@ -140,8 +153,10 @@ function check(value: unknown, schema: Record<string, unknown>, path: string): V
     if (typeName === 'integer' && !Number.isInteger(value)) issues.push(`${path}: 期望整数，实际 ${value}`);
     if (typeof schema.minimum === 'number' && value < schema.minimum) issues.push(`${path}: ${value} < minimum ${schema.minimum}`);
     if (typeof schema.maximum === 'number' && value > schema.maximum) issues.push(`${path}: ${value} > maximum ${schema.maximum}`);
-    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum) issues.push(`${path}: ${value} <= exclusiveMinimum ${schema.exclusiveMinimum}`);
-    if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum) issues.push(`${path}: ${value} >= exclusiveMaximum ${schema.exclusiveMaximum}`);
+    if (typeof schema.exclusiveMinimum === 'number' && value <= schema.exclusiveMinimum)
+      issues.push(`${path}: ${value} <= exclusiveMinimum ${schema.exclusiveMinimum}`);
+    if (typeof schema.exclusiveMaximum === 'number' && value >= schema.exclusiveMaximum)
+      issues.push(`${path}: ${value} >= exclusiveMaximum ${schema.exclusiveMaximum}`);
   }
   return issues;
 }
@@ -150,7 +165,11 @@ function sameJsonValue(a: unknown, b: unknown): boolean {
   if (Object.is(a, b)) return true;
   if (typeof a !== typeof b || a === null || b === null) return false;
   if (typeof a !== 'object') return false;
-  try { return JSON.stringify(a) === JSON.stringify(b); } catch { return false; }
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
 }
 
 /** 支持的类型子集（与文件头声明一致）。 */
@@ -159,7 +178,8 @@ const SUPPORTED_TYPES = ['object', 'array', 'string', 'number', 'integer', 'bool
 function isSupportedType(type: unknown): boolean {
   if (typeof type === 'string') return (SUPPORTED_TYPES as readonly string[]).includes(type);
   // JSONSchema 允许 type 为数组（联合类型）：其中每一项都必须在子集内
-  if (Array.isArray(type)) return type.length > 0 && type.every((t) => typeof t === 'string' && (SUPPORTED_TYPES as readonly string[]).includes(t));
+  if (Array.isArray(type))
+    return type.length > 0 && type.every((t) => typeof t === 'string' && (SUPPORTED_TYPES as readonly string[]).includes(t));
   return false;
 }
 
@@ -170,14 +190,22 @@ function formatType(type: unknown): string {
 function typeMatches(value: unknown, type: unknown): boolean {
   const one = (t: string): boolean => {
     switch (t) {
-      case 'object': return value !== null && typeof value === 'object' && !Array.isArray(value);
-      case 'array': return Array.isArray(value);
-      case 'string': return typeof value === 'string';
-      case 'number': return typeof value === 'number';
-      case 'integer': return typeof value === 'number' && Number.isInteger(value);
-      case 'boolean': return typeof value === 'boolean';
-      case 'null': return value === null;
-      default: return false; // 未知类型一律不匹配（配合上方 isSupportedType 的显式报错）
+      case 'object':
+        return value !== null && typeof value === 'object' && !Array.isArray(value);
+      case 'array':
+        return Array.isArray(value);
+      case 'string':
+        return typeof value === 'string';
+      case 'number':
+        return typeof value === 'number';
+      case 'integer':
+        return typeof value === 'number' && Number.isInteger(value);
+      case 'boolean':
+        return typeof value === 'boolean';
+      case 'null':
+        return value === null;
+      default:
+        return false; // 未知类型一律不匹配（配合上方 isSupportedType 的显式报错）
     }
   };
   if (Array.isArray(type)) return type.some((t) => one(String(t)));

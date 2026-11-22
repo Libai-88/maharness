@@ -16,9 +16,17 @@ import { auditSseLifecycle } from '../security-policy';
 // parallel.progress：并行小队的分头进度——不让它进白名单，用户就只能干等一条
 // 4 分钟超时后的结果（"小队在干嘛"完全没有回声）。
 const SSE_EVENT_TYPES = new Set([
-  'trace.step', 'plan.updated', 'todo.updated', 'workbench.updated', 'items.updated',
-  'approval.requested', 'provider.error', 'provider.ok', 'parallel.progress',
-  'experience.review.updated', 'experience.finding.updated',
+  'trace.step',
+  'plan.updated',
+  'todo.updated',
+  'workbench.updated',
+  'items.updated',
+  'approval.requested',
+  'provider.error',
+  'provider.ok',
+  'parallel.progress',
+  'experience.review.updated',
+  'experience.finding.updated',
 ]);
 /** SSE 单连接待发缓冲上限：write 返回 false（内核缓冲满）且超过该值 → 销毁连接（慢客户端背压保护） */
 const SSE_BACKPRESSURE_BYTES = 1_048_576;
@@ -35,8 +43,14 @@ export function sseEventVisible(
   if (eventTenant) return eventTenant === tenantId;
   const sessionId = typeof d.sessionId === 'string' ? d.sessionId : undefined;
   if (sessionId) return sessionTenant(sessionId) === tenantId;
-  if (type === 'trace.step' || type === 'plan.updated' || type === 'todo.updated'
-    || type === 'workbench.updated' || type === 'items.updated' || type === 'approval.requested') {
+  if (
+    type === 'trace.step' ||
+    type === 'plan.updated' ||
+    type === 'todo.updated' ||
+    type === 'workbench.updated' ||
+    type === 'items.updated' ||
+    type === 'approval.requested'
+  ) {
     return tenantId === 'default';
   }
   return true;
@@ -44,9 +58,7 @@ export function sseEventVisible(
 
 export function registerEventRoutes(app: Express, deps: RouteDeps): void {
   const { kernel, tracker } = deps;
-  const connectionLimiter = deps.sseLimiter ?? new SseConnectionLimiter(
-    Math.max(1, kernel.config.get<number>('sse.maxConnections', 8)),
-  );
+  const connectionLimiter = deps.sseLimiter ?? new SseConnectionLimiter(Math.max(1, kernel.config.get<number>('sse.maxConnections', 8)));
 
   // ---------- 全局事件流（前端实时面板） ----------
   app.get('/api/events', (req, res) => {
@@ -83,7 +95,9 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
         // M2 背压：write 返回 false（内核发送缓冲满）且待发缓冲超上限 → 销毁连接，
         // 慢客户端不无限占用内存（其 EventSource 会自动重连）
         if (!res.write(frame) && res.writableLength > SSE_BACKPRESSURE_BYTES) res.destroy();
-      } catch { /* 已关闭 */ }
+      } catch {
+        /* 已关闭 */
+      }
     };
     // ---- 连接即回放：断开/刷新期间错过的"未完成事项"补一遍 ----
     // 审批是唯一"服务端在等用户、用户却看不见"的状态（挂起最长 10 分钟），
@@ -91,11 +105,27 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
     try {
       for (const a of getChatService(kernel)?.listApprovals() ?? []) {
         if (!a.sessionId || !deps.store.getSession(a.sessionId, tenantId)) continue;
-        writeEvent('approval.requested', { approvalId: a.id, name: a.name, summary: a.summary, sessionId: a.sessionId, createdAt: a.createdAt, expiresAt: a.expiresAt, approvalToken: approvalTokens.issue(a.id, a.sessionId, a.expiresAt) });
+        writeEvent('approval.requested', {
+          approvalId: a.id,
+          name: a.name,
+          summary: a.summary,
+          sessionId: a.sessionId,
+          createdAt: a.createdAt,
+          expiresAt: a.expiresAt,
+          approvalToken: approvalTokens.issue(a.id, a.sessionId, a.expiresAt),
+        });
       }
-    } catch { /* 服务未就绪时静默：事件流本身仍可用 */ }
+    } catch {
+      /* 服务未就绪时静默：事件流本身仍可用 */
+    }
     // SSE 心跳：长连接保活
-    const heartbeat = setInterval(() => { try { res.write(': ping\n\n'); } catch { /* 已关闭 */ } }, 15000);
+    const heartbeat = setInterval(() => {
+      try {
+        res.write(': ping\n\n');
+      } catch {
+        /* 已关闭 */
+      }
+    }, 15000);
     const off = kernel.bus.on('*', (e) => {
       // M2 事件类型白名单：只转发前端实际消费的事件（见 SSE_EVENT_TYPES 注释）
       if (!SSE_EVENT_TYPES.has(e.type)) return;
@@ -108,18 +138,24 @@ export function registerEventRoutes(app: Express, deps: RouteDeps): void {
       if (e.type === 'approval.requested') {
         const d = (e.data ?? {}) as { approvalId?: string; sessionId?: string };
         if (d.approvalId) {
-          const live = getChatService(kernel)?.listApprovals().find((a) => a.id === d.approvalId);
-          writeEvent(e.type, {
-            ...d,
-            sessionId: d.sessionId ?? live?.sessionId,
-            createdAt: (d as { createdAt?: number }).createdAt ?? live?.createdAt,
-            expiresAt: live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
-            approvalToken: approvalTokens.issue(
-              d.approvalId,
-              d.sessionId ?? live?.sessionId,
-              live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
-            ),
-          }, e.traceId);
+          const live = getChatService(kernel)
+            ?.listApprovals()
+            .find((a) => a.id === d.approvalId);
+          writeEvent(
+            e.type,
+            {
+              ...d,
+              sessionId: d.sessionId ?? live?.sessionId,
+              createdAt: (d as { createdAt?: number }).createdAt ?? live?.createdAt,
+              expiresAt: live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
+              approvalToken: approvalTokens.issue(
+                d.approvalId,
+                d.sessionId ?? live?.sessionId,
+                live?.expiresAt ?? Date.now() + APPROVAL_TIMEOUT,
+              ),
+            },
+            e.traceId,
+          );
           return;
         }
       }

@@ -26,11 +26,11 @@ describe('A1：脚本块/成员调用不得借只读白名单免审批', () => {
     `dir | Where-Object { [scriptblock]::Create('calc.exe') }`,
     `Get-Content a.txt | Where-Object { $(Invoke-Expression 'x') }`,
     `Get-ChildItem -Recurse | Where-Object { New-Object System.IO.FileInfo 'x' }`,
-    `Get-ChildItem | Where-Object { $_.Name -eq 'a' ; Remove-Item $_ }`,   // 脚本块内多语句
+    `Get-ChildItem | Where-Object { $_.Name -eq 'a' ; Remove-Item $_ }`, // 脚本块内多语句
     `Get-Process | Where-Object { $_.Name -eq 'a' } | ForEach-Object { $_.Kill() }`,
-    `$x = Get-Process`,                                                    // 变量赋值
-    `& calc.exe`,                                                         // 调用运算符
-    `Get-ChildItem (& calc.exe)`,                                                // 参数位调用运算符
+    `$x = Get-Process`, // 变量赋值
+    `& calc.exe`, // 调用运算符
+    `Get-ChildItem (& calc.exe)`, // 参数位调用运算符
   ];
   for (const cmd of payloads) {
     it(`需审批: ${cmd.slice(0, 56)}`, () => {
@@ -48,14 +48,14 @@ describe('A1：脚本块/成员调用不得借只读白名单免审批', () => {
 describe('A10：安全子集只读命令不得被误拦', () => {
   const free = [
     'Get-ChildItem',
-    'Get-ChildItem | Where-Object { $_.Name -like \'*.ts\' }',
+    "Get-ChildItem | Where-Object { $_.Name -like '*.ts' }",
     'Get-ChildItem -Recurse | Where-Object { $_.PSIsContainer -eq $false } | Select-Object -First 5',
     'Get-Process | Where-Object { $_.WorkingSet64 -gt 100000000 } | Sort-Object -Descending WorkingSet64 | Select-Object -First 5 Name,WorkingSet64',
-    'Get-Content a.txt | Select-String \'a|b\'',        // 引号内的 | 不是管道
-    'Get-Content README.md | Select-String \'foo > bar\'', // 引号内的 > 不是重定向
-    'Get-ChildItem 2>$null | Measure-Object',            // 丢弃错误流不是写文件
+    "Get-Content a.txt | Select-String 'a|b'", // 引号内的 | 不是管道
+    "Get-Content README.md | Select-String 'foo > bar'", // 引号内的 > 不是重定向
+    'Get-ChildItem 2>$null | Measure-Object', // 丢弃错误流不是写文件
     'Get-ChildItem | Sort-Object Length -Descending | Select-Object -First 3 Name',
-    'Get-Date -Format \'yyyy-MM-dd HH:mm:ss\'',
+    "Get-Date -Format 'yyyy-MM-dd HH:mm:ss'",
     'git status | Select-String modified',
     'npm run typecheck',
     'rg -n "class Foo"',
@@ -68,21 +68,16 @@ describe('A10：安全子集只读命令不得被误拦', () => {
 });
 
 describe('脚本块安全子集（单元级）', () => {
-  const safe = [
-    ' $_.Name -like \'*.log\' ',
-    ' $_.PSIsContainer -eq $false ',
-    ' $_.Length -gt 1000 -or $_.Name -match \'x\' ',
-    ' ',
-  ];
+  const safe = [" $_.Name -like '*.log' ", ' $_.PSIsContainer -eq $false ', " $_.Length -gt 1000 -or $_.Name -match 'x' ", ' '];
   for (const b of safe) {
     it(`安全: ${JSON.stringify(b.trim())}`, () => assert.equal(scriptBlockIsSafe(b), true));
   }
   const unsafe = [
     " [IO.File]::Delete('x') ",
     ' $(Get-Random) ',
-    ' @{n=\'x\';e={1}} ',
-    ' $_.Name -eq \'a\' ; Remove-Item $_ ',
-    ' New-Object System.IO.StreamWriter \'x\' ',
+    " @{n='x';e={1}} ",
+    " $_.Name -eq 'a' ; Remove-Item $_ ",
+    " New-Object System.IO.StreamWriter 'x' ",
     ' $_.Kill() ',
     " $_ = 'x' ",
     ' & calc.exe ',
@@ -97,11 +92,7 @@ describe('脚本块安全子集（单元级）', () => {
 });
 
 describe('双引号内的子表达式必须审批', () => {
-  for (const cmd of [
-    'Write-Output "$(Get-Content .env)"',
-    'Get-ChildItem "$(Remove-Item x)"',
-    'Write-Host "@(Get-Process)"',
-  ]) {
+  for (const cmd of ['Write-Output "$(Get-Content .env)"', 'Get-ChildItem "$(Remove-Item x)"', 'Write-Host "@(Get-Process)"']) {
     it(`需审批: ${cmd}`, () => {
       assert.equal(isReadOnlyCommand(cmd), false);
       assert.equal(assessCommand(cmd).needsApproval, true);

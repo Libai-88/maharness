@@ -21,7 +21,7 @@ interface ResultEntry {
 }
 
 const MAX_ENTRIES_PER_SESSION = 50; // LRU：每会话最多保留 50 条结果
-const MAX_SESSIONS = 20;            // LRU：最多保留 20 个会话的结果存储（防会话数膨胀）
+const MAX_SESSIONS = 20; // LRU：最多保留 20 个会话的结果存储（防会话数膨胀）
 
 export class ResultStore {
   /** 会话级 LRU（M3）：Map 尾部 = 最近使用（delete+set 即刷新位置） */
@@ -38,14 +38,20 @@ export class ResultStore {
 
   put(sessionKey: string, callId: string, content: string): void {
     let session = this.touchSession(sessionKey);
-    if (!session) { session = new Map(); this.sessions.set(sessionKey, session); }
+    if (!session) {
+      session = new Map();
+      this.sessions.set(sessionKey, session);
+    }
     session.set(callId, { content, ts: Date.now() });
     // 条目级 LRU 淘汰最旧条目（防内存膨胀）
     if (session.size > MAX_ENTRIES_PER_SESSION) {
       let oldestKey: string | undefined;
       let oldest = Infinity;
       for (const [k, e] of session) {
-        if (e.ts < oldest) { oldest = e.ts; oldestKey = k; }
+        if (e.ts < oldest) {
+          oldest = e.ts;
+          oldestKey = k;
+        }
       }
       if (oldestKey !== undefined) session.delete(oldestKey);
     }

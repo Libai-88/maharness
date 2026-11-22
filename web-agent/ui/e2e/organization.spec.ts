@@ -20,10 +20,7 @@ async function setup(page: Page) {
       budgetLimitUsd: 0.5,
       updatedAt: 2,
     });
-    const roles = [
-      role('role-1', '资料分析员', rolePersistent),
-      role('role-2', '结构审校员', true),
-    ];
+    const roles = [role('role-1', '资料分析员', rolePersistent), role('role-2', '结构审校员', true)];
     const contracts = [
       {
         id: 'contract-1',
@@ -126,96 +123,135 @@ async function setup(page: Page) {
       },
       organization: {
         schemaVersion: 1,
-        workOrders: [{
-          id: 'order-1',
-          projectId: 'project-1',
-          sessionId: 'session-1',
-          rootRunId: 'run-1',
-          objective: '整理资料并交付可核对结论',
-          budgetUsd: 0.25,
-          status: 'active',
-          createdAt: 1,
-          updatedAt: 2,
-          contracts,
-          teamCycles: [{
-            id: 'team-1',
-            assignmentIds: ['contract-1', 'contract-2'],
-            soloEstimateUsd: 0.3,
-            teamEstimateUsd: 0.2,
-            status: teamState,
-          }],
-          roles,
-          receipt,
-          exceptions: [exception],
-          economics: {
-            singleAgentEstimateUsd: 0.3,
-            teamEstimateUsd: 0.2,
-            actualCostUsd: 0.04,
-            cacheSavingsUsd: null,
-            duplicateEvidenceReads: 0,
-            coordinationRounds: 1,
-            roi: 0.867,
-            usageKnown: true,
+        workOrders: [
+          {
+            id: 'order-1',
+            projectId: 'project-1',
+            sessionId: 'session-1',
+            rootRunId: 'run-1',
+            objective: '整理资料并交付可核对结论',
+            budgetUsd: 0.25,
+            status: 'active',
+            createdAt: 1,
+            updatedAt: 2,
+            contracts,
+            teamCycles: [
+              {
+                id: 'team-1',
+                assignmentIds: ['contract-1', 'contract-2'],
+                soloEstimateUsd: 0.3,
+                teamEstimateUsd: 0.2,
+                status: teamState,
+              },
+            ],
+            roles,
+            receipt,
+            exceptions: [exception],
+            economics: {
+              singleAgentEstimateUsd: 0.3,
+              teamEstimateUsd: 0.2,
+              actualCostUsd: 0.04,
+              cacheSavingsUsd: null,
+              duplicateEvidenceReads: 0,
+              coordinationRounds: 1,
+              roi: 0.867,
+              usageKnown: true,
+            },
+            scorecards: roles.map((item) => ({
+              roleId: item.id,
+              evaluationVersion: 1,
+              evaluationHash: 'evaluation-hash-1',
+              sampleSize: 1,
+              confidence: 'insufficient',
+              completionRate: 1,
+              acceptanceRate: 1,
+              reworkRate: null,
+              budgetCompliance: 1,
+              recoveryRate: 0,
+              evidenceCompleteness: 1,
+              reviewConsistency: null,
+              costUsd: 0.04,
+            })),
+            wellbeing: roles.map((item) => ({
+              roleId: item.id,
+              activeAssignments: 0,
+              consecutiveFailures: 0,
+              waitingApproval: 0,
+              reworkAssignments: 0,
+              state: 'ready',
+            })),
           },
-          scorecards: roles.map(item => ({
-            roleId: item.id,
-            evaluationVersion: 1,
-            evaluationHash: 'evaluation-hash-1',
-            sampleSize: 1,
-            confidence: 'insufficient',
-            completionRate: 1,
-            acceptanceRate: 1,
-            reworkRate: null,
-            budgetCompliance: 1,
-            recoveryRate: 0,
-            evidenceCompleteness: 1,
-            reviewConsistency: null,
-            costUsd: 0.04,
-          })),
-          wellbeing: roles.map(item => ({
-            roleId: item.id,
-            activeAssignments: 0,
-            consecutiveFailures: 0,
-            waitingApproval: 0,
-            reworkAssignments: 0,
-            state: 'ready',
-          })),
-        }],
+        ],
         roles,
         scorecards: [],
         wellbeing: [],
         receipts: [receipt],
         exceptions: [exception],
-        proposals: [{
-          id: 'proposal-1',
-          workOrderId: 'order-1',
-          category: 'cache',
-          title: '复用共同资料前缀',
-          detail: '两个分支读取同一来源时先建立共享前缀。',
-          impact: 'medium',
-          status: 'pending',
-        }],
+        proposals: [
+          {
+            id: 'proposal-1',
+            workOrderId: 'order-1',
+            category: 'cache',
+            title: '复用共同资料前缀',
+            detail: '两个分支读取同一来源时先建立共享前缀。',
+            impact: 'medium',
+            status: 'pending',
+          },
+        ],
       },
     };
   };
 
-  await page.route('**/api/**', route => {
+  await page.route('**/api/**', (route) => {
     const request = route.request();
     const path = new URL(request.url()).pathname;
     if (path === '/api/events') return route.fulfill({ contentType: 'text/event-stream', body: '' });
-    if (path === '/api/sessions') return route.fulfill({ json: [{
-      id: 'session-1', title: '组织交付', model: 'fixture-model', provider: 'fixture',
-      mode: 'normal', planPending: 0, archived: 0, pinned: 0, createdAt: 1, updatedAt: 2,
-    }] });
+    if (path === '/api/sessions')
+      return route.fulfill({
+        json: [
+          {
+            id: 'session-1',
+            title: '组织交付',
+            model: 'fixture-model',
+            provider: 'fixture',
+            mode: 'normal',
+            planPending: 0,
+            archived: 0,
+            pinned: 0,
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      });
     if (/\/api\/sessions\/session-1\/messages$/.test(path)) return route.fulfill({ json: [] });
     if (path === '/api/v2/runs') return route.fulfill({ json: [] });
-    if (path === '/api/models') return route.fulfill({ json: [{
-      id: 'fixture@fixture-model', provider: 'fixture', label: 'Fixture', model: 'fixture-model',
-    }] });
-    if (path === '/api/providers') return route.fulfill({ json: [{
-      id: 'fixture', label: 'Fixture', baseUrl: 'fixture', model: 'fixture-model',
-      enabled: true, hasKey: true, apiKeyMasked: '***', createdAt: 1, updatedAt: 2,
-    }] });
+    if (path === '/api/models')
+      return route.fulfill({
+        json: [
+          {
+            id: 'fixture@fixture-model',
+            provider: 'fixture',
+            label: 'Fixture',
+            model: 'fixture-model',
+          },
+        ],
+      });
+    if (path === '/api/providers')
+      return route.fulfill({
+        json: [
+          {
+            id: 'fixture',
+            label: 'Fixture',
+            baseUrl: 'fixture',
+            model: 'fixture-model',
+            enabled: true,
+            hasKey: true,
+            apiKeyMasked: '***',
+            createdAt: 1,
+            updatedAt: 2,
+          },
+        ],
+      });
     if (path === '/api/plugins' || path === '/api/plugins/diagnostics') return route.fulfill({ json: [] });
     if (path === '/api/nav') return route.fulfill({ json: { items: [] } });
     if (path === '/api/workbench/summary') return route.fulfill({ json: summary() });
@@ -272,7 +308,7 @@ test('项目组织视图展示回执并完成暂停、改派、异常和关闭�
 
   await dialog.getByRole('button', { name: '暂停新分支', exact: true }).click();
   await dialog.getByRole('button', { name: '恢复', exact: true }).click();
-  page.once('dialog', dialog => dialog.accept());
+  page.once('dialog', (dialog) => dialog.accept());
   await dialog.getByRole('button', { name: '解散团队', exact: true }).click();
   await expect(dialog.getByRole('button', { name: '解散团队', exact: true })).toHaveCount(0);
   await expect(dialog.getByText('cancelled', { exact: true })).toBeVisible();

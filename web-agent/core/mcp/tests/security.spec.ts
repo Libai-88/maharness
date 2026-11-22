@@ -33,14 +33,14 @@ import {
 } from '../index';
 
 const MCP_FIXTURE = [
-  "let cancelled=false;",
+  'let cancelled=false;',
   "const readline=require('node:readline');",
-  "const rl=readline.createInterface({input:process.stdin});",
+  'const rl=readline.createInterface({input:process.stdin});',
   "rl.on('line',line=>{ const m=JSON.parse(line);",
   "if(m.method==='initialize') process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2026-07-28'}})+'\\n');",
   "else if(m.method==='tools/call' && m.params.name==='fast') process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:cancelled?'cancel-seen':'cancel-missing'}]}})+'\\n');",
   "else if(m.method==='$/cancelRequest') cancelled=true;",
-  "});",
+  '});',
 ].join('');
 
 /** 模拟宿主进程环境：含密钥/代理/内核配置 + Windows 运行必需项（故意混排大小写，如 Path/PATHEXT） */
@@ -75,10 +75,8 @@ describe('A4-1 stdio spawn env：默认最小透传', () => {
   it('默认不透传任何 *_API_KEY / 代理 / AGENT_* / 连接串', () => {
     const env = buildSpawnEnv({ type: 'stdio', command: 'npx' }, FAKE_PARENT_ENV);
     const leaked = Object.keys(env).filter(
-      (k) => /_API_KEY$|^API_KEY$/i.test(k)
-        || /_PROXY$/i.test(k)
-        || /^AGENT_/i.test(k)
-        || /^(AWS_SECRET|DATABASE_URL|SECRET|TOKEN)/i.test(k),
+      (k) =>
+        /_API_KEY$|^API_KEY$/i.test(k) || /_PROXY$/i.test(k) || /^AGENT_/i.test(k) || /^(AWS_SECRET|DATABASE_URL|SECRET|TOKEN)/i.test(k),
     );
     assert.deepEqual(leaked, [], `env 泄漏敏感变量: ${leaked.join(', ')}`);
     assert.equal(env.TAVILY_API_KEY, undefined);
@@ -90,8 +88,7 @@ describe('A4-1 stdio spawn env：默认最小透传', () => {
   it('默认仍透传运行必需项（大小写不敏感）——Windows 上 npx 靠 PATH+PATHEXT 解析', () => {
     const env = buildSpawnEnv({ type: 'stdio', command: 'npx' }, FAKE_PARENT_ENV);
     const lowered = new Set(Object.keys(env).map((k) => k.toLowerCase()));
-    for (const need of ['path', 'pathext', 'systemroot', 'windir', 'comspec', 'userprofile',
-      'home', 'temp', 'tmp', 'lang', 'lc_all']) {
+    for (const need of ['path', 'pathext', 'systemroot', 'windir', 'comspec', 'userprofile', 'home', 'temp', 'tmp', 'lang', 'lc_all']) {
       assert.ok(lowered.has(need), `缺少运行必需 env: ${need}`);
     }
     // 保留父进程原始键名大小写（Windows 子进程按原键名读取）
@@ -185,15 +182,15 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
     await reject('http://127.0.0.1:3000/mcp', /内网|回环/);
     await reject('http://[::ffff:7f00:1]:3000/mcp', /内网|回环/); // WHATWG 规范化后的 127.0.0.1
     await reject('http://[::ffff:127.0.0.1]:3000/mcp', /内网|回环/);
-    await reject('http://[::ffff:c0a8:1]:8080/mcp', /内网|回环/);  // 192.168.0.1
+    await reject('http://[::ffff:c0a8:1]:8080/mcp', /内网|回环/); // 192.168.0.1
     await reject('http://[::ffff:a9fe:a9fe]:80/mcp', /内网|回环/); // 169.254.169.254 云 metadata
     await reject('http://[::1]:8080/mcp', /内网|回环/);
     await reject('http://[::]:8080/mcp', /内网|回环/);
     await reject('http://10.1.2.3:9000/mcp', /内网|回环/);
     await reject('http://192.168.1.10/mcp', /内网|回环/);
     await reject('http://172.16.0.1/mcp', /内网|回环/);
-    await reject('http://100.64.0.1/mcp', /内网|回环/);            // CGNAT/Tailscale
-    await reject('http://198.18.0.1/mcp', /内网|回环/);            // 基准测试段
+    await reject('http://100.64.0.1/mcp', /内网|回环/); // CGNAT/Tailscale
+    await reject('http://198.18.0.1/mcp', /内网|回环/); // 基准测试段
     await reject('http://0.0.0.0/mcp', /内网|回环/);
     await reject('http://[fe80::1]/mcp', /内网|回环/);
     await reject('http://[fc00::1]/mcp', /内网|回环/);
@@ -209,7 +206,10 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
     const seen: string[] = [];
     const u = await assertSafeMcpUrl('https://mcp.example.com/mcp', {
       allowPrivate: false,
-      resolve: async (host) => { seen.push(host); return ['93.184.216.34']; },
+      resolve: async (host) => {
+        seen.push(host);
+        return ['93.184.216.34'];
+      },
     });
     assert.equal(u.hostname, 'mcp.example.com');
     assert.deepEqual(seen, ['mcp.example.com'], '应调用注入的解析器而非真实 DNS');
@@ -245,11 +245,26 @@ describe('A4-4 http 传输 URL 校验（与 search/providers 防护对齐）', (
 
   it('isPrivateHostAddress 表驱动（覆盖 A3 同族的十六进制映射绕过与保留段）', () => {
     const cases: [string, boolean][] = [
-      ['127.0.0.1', true], ['7f00:1', true], ['::ffff:7f00:1', true], ['::ffff:127.0.0.1', true],
-      ['a9fe:a9fe', true], ['169.254.169.254', true], ['100.64.0.1', true], ['100.127.255.255', true],
-      ['100.128.0.0', false], ['198.18.0.1', true], ['192.0.0.1', true], ['192.0.2.1', false],
-      ['8.8.8.8', false], ['::1', true], ['::', true], ['fe80::1', true], ['fec0::1', true],
-      ['2001:4860:4860::8888', false], ['2002:7f00:1::1', true], ['[::ffff:7f00:1]', true],
+      ['127.0.0.1', true],
+      ['7f00:1', true],
+      ['::ffff:7f00:1', true],
+      ['::ffff:127.0.0.1', true],
+      ['a9fe:a9fe', true],
+      ['169.254.169.254', true],
+      ['100.64.0.1', true],
+      ['100.127.255.255', true],
+      ['100.128.0.0', false],
+      ['198.18.0.1', true],
+      ['192.0.0.1', true],
+      ['192.0.2.1', false],
+      ['8.8.8.8', false],
+      ['::1', true],
+      ['::', true],
+      ['fe80::1', true],
+      ['fec0::1', true],
+      ['2001:4860:4860::8888', false],
+      ['2002:7f00:1::1', true],
+      ['[::ffff:7f00:1]', true],
       ['garbage', true],
     ];
     for (const [addr, priv] of cases) {
@@ -268,10 +283,7 @@ describe('MCP HTTP 认证头', () => {
       buildHttpHeaders({ auth: { type: 'bearer', tokenEnv: 'MCP_TOKEN' } }, { MCP_TOKEN: 'secret' }).Authorization,
       'Bearer secret',
     );
-    assert.equal(
-      buildHttpHeaders({ auth: { type: 'bearer', token: 'literal' } }, {}).Authorization,
-      'Bearer literal',
-    );
+    assert.equal(buildHttpHeaders({ auth: { type: 'bearer', token: 'literal' } }, {}).Authorization, 'Bearer literal');
     assert.deepEqual(buildHttpHeaders({}, {}), {});
   });
 
@@ -301,7 +313,9 @@ describe('MCP server 调用配额', () => {
 describe('LR-05 MCP 取消传播与 pending 回收', () => {
   it('取消发送 $/cancelRequest，释放 pending，连接可继续调用', async () => {
     const conn = new StdioConnection('fixture', {
-      type: 'stdio', command: process.execPath, args: ['-e', MCP_FIXTURE],
+      type: 'stdio',
+      command: process.execPath,
+      args: ['-e', MCP_FIXTURE],
     });
     await conn.initialize();
     const controller = new AbortController();
@@ -316,9 +330,13 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
   it('HTTP MCP 调用取消后关闭底层请求连接', { timeout: 10_000 }, async () => {
     let closed = false;
     let observeRequest!: () => void;
-    const requestObserved = new Promise<void>(resolve => { observeRequest = resolve; });
+    const requestObserved = new Promise<void>((resolve) => {
+      observeRequest = resolve;
+    });
     const server = createServer((_req, res) => {
-      res.on('close', () => { closed = true; });
+      res.on('close', () => {
+        closed = true;
+      });
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.write('{"jsonrpc":"2.0","id":3,"result":{"content":[');
       observeRequest();
@@ -326,7 +344,9 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
     const conn = new HttpConnection('fixture-http', {
-      type: 'http', url: `http://127.0.0.1:${port}/mcp`, allowPrivate: true,
+      type: 'http',
+      url: `http://127.0.0.1:${port}/mcp`,
+      allowPrivate: true,
     });
     const controller = new AbortController();
     try {
@@ -341,7 +361,7 @@ describe('LR-05 MCP 取消传播与 pending 回收', () => {
     } finally {
       controller.abort();
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 });
@@ -352,10 +372,22 @@ describe('MCP 工具 allowlist', () => {
       { name: 'echo', inputSchema: { type: 'object' } },
       { name: 'write', inputSchema: { type: 'object' } },
     ];
-    assert.deepEqual(filterMcpToolsByAllowlist(tools).map((t) => t.name), ['echo', 'write']);
-    assert.deepEqual(filterMcpToolsByAllowlist(tools, []).map((t) => t.name), ['echo', 'write']);
-    assert.deepEqual(filterMcpToolsByAllowlist(tools, ['echo']).map((t) => t.name), ['echo']);
-    assert.deepEqual(filterMcpToolsByAllowlist(tools, [' echo ', 'missing']).map((t) => t.name), ['echo']);
+    assert.deepEqual(
+      filterMcpToolsByAllowlist(tools).map((t) => t.name),
+      ['echo', 'write'],
+    );
+    assert.deepEqual(
+      filterMcpToolsByAllowlist(tools, []).map((t) => t.name),
+      ['echo', 'write'],
+    );
+    assert.deepEqual(
+      filterMcpToolsByAllowlist(tools, ['echo']).map((t) => t.name),
+      ['echo'],
+    );
+    assert.deepEqual(
+      filterMcpToolsByAllowlist(tools, [' echo ', 'missing']).map((t) => t.name),
+      ['echo'],
+    );
   });
 });
 
@@ -389,8 +421,7 @@ describe('stdio 启动计划（B18：Windows .cmd 垫片必须经 cmd.exe）', (
     const p = buildSpawnPlan('npx', ['-y', '@modelcontextprotocol/server-filesystem', 'D:\\My Files'], 'win32');
     assert.equal(p.shell, true);
     assert.deepEqual(p.args, [], '参数不得再交给 Node 拼接（引号规则要可控）');
-    assert.equal(p.file, 'npx -y @modelcontextprotocol/server-filesystem "D:\\My Files"',
-      '含空格的路径参数整体加引号，其余保持原样');
+    assert.equal(p.file, 'npx -y @modelcontextprotocol/server-filesystem "D:\\My Files"', '含空格的路径参数整体加引号，其余保持原样');
   });
 
   test('win32 + .exe → 保持直接 spawn（不绕 shell）', () => {

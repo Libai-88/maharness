@@ -85,9 +85,8 @@ async function languageFor(file: string): Promise<Parser.Language | null> {
 
 function nameOf(node: Record<string, unknown>): string | undefined {
   const field = (name: string): string | undefined => {
-    const child = typeof node.childForFieldName === 'function'
-      ? (node.childForFieldName as (field: string) => { text?: string } | null)(name)
-      : null;
+    const child =
+      typeof node.childForFieldName === 'function' ? (node.childForFieldName as (field: string) => { text?: string } | null)(name) : null;
     return child?.text;
   };
   const direct = field('name');
@@ -109,7 +108,7 @@ function walk(node: Record<string, unknown>, out: CodeSymbol[], limit: number): 
       out.push({ name, kind, line: (start?.row ?? 0) + 1 });
     }
   }
-  const children = Array.isArray(node.namedChildren) ? node.namedChildren as Record<string, unknown>[] : [];
+  const children = Array.isArray(node.namedChildren) ? (node.namedChildren as Record<string, unknown>[]) : [];
   for (const child of children) walk(child, out, limit);
 }
 

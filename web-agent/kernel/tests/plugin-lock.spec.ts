@@ -4,12 +4,21 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  buildPluginLockEntry, pluginLockEntryOf, readPluginLock, validatePluginLock, verifyPluginLock, writePluginLock,
+  buildPluginLockEntry,
+  pluginLockEntryOf,
+  readPluginLock,
+  validatePluginLock,
+  verifyPluginLock,
+  writePluginLock,
 } from '../plugin-lock';
 import type { PluginManifest } from '../types';
 
-const manifest: PluginManifest = { apiVersion: 2,
-  id: 'demo', name: 'Demo', version: '1.0.0', entry: 'index.ts',
+const manifest: PluginManifest = {
+  apiVersion: 2,
+  id: 'demo',
+  name: 'Demo',
+  version: '1.0.0',
+  entry: 'index.ts',
   compatibility: { api: { min: '1.0.0', max: '1.0.0' } },
   permissions: { capabilities: { tool: ['demo'] } },
 };
@@ -44,7 +53,10 @@ describe('插件锁文件', () => {
       writeFileSync(join(dir, 'index.ts'), 'export default 2;\n');
       assert.match(verifyPluginLock(entry, dir, manifest).errors.join('; '), /完整性不一致/);
       assert.match(verifyPluginLock(entry, dir, { ...manifest, version: '1.1.0' }).errors.join('; '), /版本不一致/);
-      assert.match(verifyPluginLock(entry, dir, { ...manifest, permissions: { capabilities: { tool: ['other'] } } }).errors.join('; '), /permissions/);
+      assert.match(
+        verifyPluginLock(entry, dir, { ...manifest, permissions: { capabilities: { tool: ['other'] } } }).errors.join('; '),
+        /permissions/,
+      );
 
       const isolated = { ...manifest, execution: { mode: 'process' as const, memoryMb: 128 } };
       const isolatedEntry = buildPluginLockEntry(dir, isolated);

@@ -10,7 +10,7 @@
  *   全文仍由 get_skill 懒加载，读取量记入 data/skill-usage.json 台账。
  * frontmatter 走 kernel/frontmatter 真解析（name/description/license/allowed-tools/metadata/契约字段）。
  */
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync, mkdirSync, type Dirent } from 'node:fs';
 import { dirname, join, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
@@ -75,12 +75,19 @@ interface SkillEntry extends SkillInfo {
 function packRoots(vendorRoot = vendorDir): { packRoot: string; skillParent: string; selfAsSkill?: string }[] {
   if (!existsSync(vendorRoot)) return [];
   const out: { packRoot: string; skillParent: string; selfAsSkill?: string }[] = [];
-  let entries;
-  try { entries = readdirSync(vendorRoot, { withFileTypes: true }); } catch { return out; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(vendorRoot, { withFileTypes: true });
+  } catch {
+    return out;
+  }
   for (const e of entries) {
     if (!e.isDirectory()) continue;
     const packRoot = join(vendorRoot, e.name);
-    if (existsSync(join(packRoot, 'SKILL.md'))) { out.push({ packRoot: dirname(packRoot), skillParent: packRoot, selfAsSkill: e.name }); continue; }
+    if (existsSync(join(packRoot, 'SKILL.md'))) {
+      out.push({ packRoot: dirname(packRoot), skillParent: packRoot, selfAsSkill: e.name });
+      continue;
+    }
     const nested = join(packRoot, 'skills');
     out.push({ packRoot, skillParent: existsSync(nested) ? nested : packRoot });
   }
@@ -91,7 +98,11 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
   const mdPath = join(dir, 'SKILL.md');
   if (!existsSync(mdPath)) return null;
   let md: string;
-  try { md = readFileSync(mdPath, 'utf-8'); } catch { return null; }
+  try {
+    md = readFileSync(mdPath, 'utf-8');
+  } catch {
+    return null;
+  }
   const fm = parseFrontMatter(md);
   const meta = fmMap(fm.data, 'metadata');
   const allowed = fmList(fm.data, 'allowed-tools').length ? fmList(fm.data, 'allowed-tools') : fmList(fm.data, 'allowed_tools');
@@ -107,11 +118,15 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
     [rejectWhen.length > 0, '缺少 reject-when（至少一个拒绝条件）'],
     [!!input, '缺少 input（输入契约）'],
     [!!output, '缺少 output（输出契约）'],
-  ].filter(([ok]) => !ok).map(([, message]) => message as string);
+  ]
+    .filter(([ok]) => !ok)
+    .map(([, message]) => message as string);
   return {
     name: fmString(fm.data, 'name') || name,
     description: fmString(fm.data, 'description') || '(无描述)',
-    source, packRoot, dir,
+    source,
+    packRoot,
+    dir,
     license: fmString(fm.data, 'license') || undefined,
     version: fmString(fm.data, 'version') || undefined,
     requires: requires.length ? requires : undefined,
@@ -120,7 +135,8 @@ function readEntry(dir: string, name: string, source: SkillSource, packRoot?: st
     triggers: triggers.length ? triggers : undefined,
     appliesWhen: appliesWhen.length ? appliesWhen : undefined,
     rejectWhen: rejectWhen.length ? rejectWhen : undefined,
-    input, output,
+    input,
+    output,
     contractWarnings: contractWarnings.length ? contractWarnings : undefined,
     bodyChars: fm.body.length,
   };
@@ -196,8 +212,13 @@ export default {
           continue;
         }
         let names: string[] = [];
-        try { names = readdirSync(p.dir, { withFileTypes: true }).filter(e => e.isDirectory()).map(e => e.name); }
-        catch { continue; }
+        try {
+          names = readdirSync(p.dir, { withFileTypes: true })
+            .filter((e) => e.isDirectory())
+            .map((e) => e.name);
+        } catch {
+          continue;
+        }
         for (const n of names) {
           const entry = readEntry(join(p.dir, n), n, p.source, p.packRoot);
           if (entry) addEntry(entry);
@@ -211,7 +232,7 @@ export default {
       const { index } = scan();
       const available = new Set(index.keys());
       return [...index.values()]
-        .map(v => {
+        .map((v) => {
           const info = publicInfo(v.entry, v.shadows);
           const missing = (v.entry.requires ?? []).filter((name) => !available.has(name));
           if (missing.length) {
@@ -230,20 +251,37 @@ export default {
     const get = (name: string): { ok: boolean; content?: string; error?: string } => {
       const e = entryOf(name);
       if (!e) return { ok: false, error: `技能不存在: ${name}（用 list_skills 查看可用技能）` };
-      try { return { ok: true, content: readFileSync(join(e.dir, 'SKILL.md'), 'utf-8') }; }
-      catch (err) { return { ok: false, error: `读取失败: ${err instanceof Error ? err.message : String(err)}` }; }
+      try {
+        return { ok: true, content: readFileSync(join(e.dir, 'SKILL.md'), 'utf-8') };
+      } catch (err) {
+        return { ok: false, error: `读取失败: ${err instanceof Error ? err.message : String(err)}` };
+      }
     };
 
     // ---- 用量台账：索引出现次数 + 正文读取次数与 token ----
-    interface UsageRow { indexShown: number; reads: number; bodyTokens: number; lastReadAt?: number }
+    interface UsageRow {
+      indexShown: number;
+      reads: number;
+      bodyTokens: number;
+      lastReadAt?: number;
+    }
     let usage: Record<string, UsageRow> = {};
-    try { usage = JSON.parse(readFileSync(usageFile, 'utf-8')) as Record<string, UsageRow>; } catch { usage = {}; }
+    try {
+      usage = JSON.parse(readFileSync(usageFile, 'utf-8')) as Record<string, UsageRow>;
+    } catch {
+      usage = {};
+    }
     let usageDirty = false;
     const usageRow = (name: string): UsageRow => (usage[name] ??= { indexShown: 0, reads: 0, bodyTokens: 0 });
     const flushUsage = () => {
       if (!usageDirty) return;
       usageDirty = false;
-      try { mkdirSync(ctx.paths.data, { recursive: true }); writeFileSync(usageFile, JSON.stringify(usage, null, 2), 'utf-8'); } catch { /* 台账写盘失败不影响对话 */ }
+      try {
+        mkdirSync(ctx.paths.data, { recursive: true });
+        writeFileSync(usageFile, JSON.stringify(usage, null, 2), 'utf-8');
+      } catch {
+        /* 台账写盘失败不影响对话 */
+      }
     };
     const usageTimer = setInterval(flushUsage, 15_000);
     (usageTimer as { unref?: () => void }).unref?.();
@@ -251,8 +289,8 @@ export default {
     // ---- 相关性路由 ----
     async function ensureSkillVectors(): Promise<void> {
       if (!embedding) return;
-      const {index} = scan();
-      for (const {entry} of index.values()) {
+      const { index } = scan();
+      for (const { entry } of index.values()) {
         const signature = `${entry.name}: ${entry.description}`.slice(0, 500);
         if (skillVectors.has(entry.name) && skillVectorSigs.get(entry.name) === signature) continue;
         try {
@@ -261,7 +299,9 @@ export default {
             skillVectors.set(entry.name, vector);
             skillVectorSigs.set(entry.name, signature);
           }
-        } catch { /* embedding 不可用 → bigram 回退 */ }
+        } catch {
+          /* embedding 不可用 → bigram 回退 */
+        }
       }
       for (const name of skillVectors.keys()) {
         if (!index.has(name)) {
@@ -284,9 +324,10 @@ export default {
       if (mode === 'off') return null;
       const { index } = scan();
       if (!index.size) return null;
-      const ranked = mode === 'all'
-        ? [...index.keys()].map(name => ({ name, score: 1 }))
-        : scoreSkills(userText, queryVector).filter(s => s.score > 0);
+      const ranked =
+        mode === 'all'
+          ? [...index.keys()].map((name) => ({ name, score: 1 }))
+          : scoreSkills(userText, queryVector).filter((s) => s.score > 0);
       const picked = ranked.slice(0, topK);
       let out = '';
       const shown: string[] = [];
@@ -302,7 +343,10 @@ export default {
       }
       if (!out) return null;
       const hidden = index.size - shown.length;
-      for (const n of shown) { usageRow(n).indexShown++; usageDirty = true; }
+      for (const n of shown) {
+        usageRow(n).indexShown++;
+        usageDirty = true;
+      }
       return head + out + (hidden > 0 ? `\n（另有 ${hidden} 个技能与当前任务相关性低未列出，需要时用 list_skills 查看）` : '');
     }
 
@@ -311,7 +355,10 @@ export default {
       if (!embedding || !Array.isArray(h.history)) return;
       let lastUser = '';
       for (let i = h.history.length - 1; i >= 0; i--) {
-        if (h.history[i].role === 'user') { lastUser = String(h.history[i].content ?? ''); break; }
+        if (h.history[i].role === 'user') {
+          lastUser = String(h.history[i].content ?? '');
+          break;
+        }
       }
       if (!lastUser) return;
       const text = lastUser.slice(0, 500);
@@ -321,7 +368,9 @@ export default {
       try {
         const vector = await embedding.embed(text);
         if (vector.length) h.scratchpad.skillsQuery = { text, vector };
-      } catch { /* embedding 失败 → bigram 回退 */ }
+      } catch {
+        /* embedding 失败 → bigram 回退 */
+      }
     });
 
     ctx.on?.('agent.before_tool', (e) => {
@@ -351,7 +400,10 @@ export default {
         contentFn({ history, scratchpad }) {
           let lastUser = '';
           for (let i = history.length - 1; i >= 0; i--) {
-            if (history[i].role === 'user') { lastUser = String(history[i].content ?? ''); break; }
+            if (history[i].role === 'user') {
+              lastUser = String(history[i].content ?? '');
+              break;
+            }
           }
           if (!lastUser) return null;
           const content = buildIndex(lastUser, (scratchpad.skillsQuery as { vector?: number[] } | undefined)?.vector);
@@ -365,15 +417,26 @@ export default {
       service: {
         id: 'skills',
         instance: {
-          list, get, entryOf, packDir: skillVendorDir,
+          list,
+          get,
+          entryOf,
+          packDir: skillVendorDir,
           /** 供 UI/管理端按来源+名称读原文（project/user/pack/builtin 由服务定位目录） */
           readBySource(source: SkillSource, name: string): string | null {
             const e = entryOf(name);
             if (!e || e.source !== source) return null;
-            try { return readFileSync(join(e.dir, 'SKILL.md'), 'utf-8'); } catch { return null; }
+            try {
+              return readFileSync(join(e.dir, 'SKILL.md'), 'utf-8');
+            } catch {
+              return null;
+            }
           },
           usage: () => usage,
-          invalidateCache: () => { scanCache = null; skillVectors.clear(); skillVectorSigs.clear(); },
+          invalidateCache: () => {
+            scanCache = null;
+            skillVectors.clear();
+            skillVectorSigs.clear();
+          },
         },
       },
     });
@@ -400,17 +463,19 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'list_skills',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{count, skills: [{name, description, source, shadowed?, allowedTools?, bodyChars?}]}',
         outputSchema: {
-          type: 'object', required: ['count', 'skills'],
+          type: 'object',
+          required: ['count', 'skills'],
           properties: { count: { type: 'integer' }, skills: { type: 'array' } },
         },
-        description: '列出全部可用技能（项目级 / 已安装 / 技能包 / 内置）：名称、描述、来源。同名技能按 project>user>pack>builtin 生效，被覆盖者标 shadowed。',
+        description:
+          '列出全部可用技能（项目级 / 已安装 / 技能包 / 内置）：名称、描述、来源。同名技能按 project>user>pack>builtin 生效，被覆盖者标 shadowed。',
         parameters: { type: 'object', properties: {} },
         async handler() {
           const skills = list();
@@ -423,17 +488,25 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'get_skill',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{name, source, version?, requires?, allowedTools?, content}；content 为 SKILL.md 全文',
         outputSchema: {
-          type: 'object', required: ['name', 'content'],
-          properties: { name: { type: 'string' }, source: { type: 'string' }, content: { type: 'string' }, version: { type: 'string' }, allowedTools: { type: 'array' } },
+          type: 'object',
+          required: ['name', 'content'],
+          properties: {
+            name: { type: 'string' },
+            source: { type: 'string' },
+            content: { type: 'string' },
+            version: { type: 'string' },
+            allowedTools: { type: 'array' },
+          },
         },
-        description: '读取指定技能全文（SKILL.md，含 frontmatter 与正文）。任务与某技能相关时先读它再执行；正文较长时优先看其中的流程与清单。',
+        description:
+          '读取指定技能全文（SKILL.md，含 frontmatter 与正文）。任务与某技能相关时先读它再执行；正文较长时优先看其中的流程与清单。',
         parameters: {
           type: 'object',
           properties: { name: { type: 'string', description: '技能名称（list_skills 可查）' } },
@@ -444,10 +517,22 @@ export default {
           if (!r.ok) return { ok: false, error: r.error };
           const e = entryOf(String(args.name ?? ''));
           const row = usageRow(String(args.name));
-          row.reads++; row.bodyTokens += estimateTokens(r.content ?? ''); row.lastReadAt = Date.now();
+          row.reads++;
+          row.bodyTokens += estimateTokens(r.content ?? '');
+          row.lastReadAt = Date.now();
           usageDirty = true;
           activeSkills.set(activeKey(tctx.tenantId, tctx.sessionId), { name: String(args.name ?? ''), at: Date.now() });
-          return { ok: true, data: { name: e?.name ?? args.name, source: e?.source, version: e?.version, requires: e?.requires, allowedTools: e?.allowedTools, content: r.content } };
+          return {
+            ok: true,
+            data: {
+              name: e?.name ?? args.name,
+              source: e?.source,
+              version: e?.version,
+              requires: e?.requires,
+              allowedTools: e?.allowedTools,
+              content: r.content,
+            },
+          };
         },
       },
     });
@@ -456,7 +541,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'get_skill_file',
         risk: 'low',
         costHint: 'low',
@@ -464,10 +549,18 @@ export default {
         limits: `仅限技能目录/技能包根内；单文件 ${FILE_CHAR_LIMIT} 字符上限`,
         output: '{skill, path, content, truncated, matches?}',
         outputSchema: {
-          type: 'object', required: ['skill', 'path', 'content'],
-          properties: { skill: { type: 'string' }, path: { type: 'string' }, content: { type: 'string' }, truncated: { type: 'boolean' }, matches: { type: 'integer' } },
+          type: 'object',
+          required: ['skill', 'path', 'content'],
+          properties: {
+            skill: { type: 'string' },
+            path: { type: 'string' },
+            content: { type: 'string' },
+            truncated: { type: 'boolean' },
+            matches: { type: 'integer' },
+          },
         },
-        description: '读取技能内资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能包的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）。大文档先用 grep 参数定位章节再读，避免整文塞满上下文。',
+        description:
+          '读取技能内资源文件的文本内容（仅限技能目录/技能包根内，路径防穿越）。多文件技能包的 SKILL.md 会引用 agents/<name>_agent.md（子代理定义）、references/（规范）、templates/（模板）、shared/（跨技能协议）、scripts/（校验脚本）。大文档先用 grep 参数定位章节再读，避免整文塞满上下文。',
         parameters: {
           type: 'object',
           properties: {
@@ -492,7 +585,9 @@ export default {
               const lines = content.split('\n');
               const lower = pattern.toLowerCase();
               const hits: number[] = [];
-              lines.forEach((ln, i) => { if (ln.toLowerCase().includes(lower)) hits.push(i); });
+              lines.forEach((ln, i) => {
+                if (ln.toLowerCase().includes(lower)) hits.push(i);
+              });
               if (hits.length === 0) {
                 return { ok: true, data: { skill: args.skill, path: rel, grep: pattern, matches: 0, content: `（无匹配行: ${pattern}）` } };
               }
@@ -509,7 +604,10 @@ export default {
               return {
                 ok: true,
                 data: {
-                  skill: args.skill, path: rel, grep: pattern, matches: hits.length,
+                  skill: args.skill,
+                  path: rel,
+                  grep: pattern,
+                  matches: hits.length,
                   truncated: total.length > FILE_CHAR_LIMIT,
                   content: total.length > FILE_CHAR_LIMIT ? total.slice(0, FILE_CHAR_LIMIT) : total,
                 },
@@ -525,7 +623,13 @@ export default {
             const dir = dirname(resolved);
             const normBase = resolve(base);
             if (!dir.startsWith(normBase) || !existsSync(dir) || !statSync(dir).isDirectory()) return [];
-            try { return readdirSync(dir, { withFileTypes: true }).map(e => e.name).slice(0, 40); } catch { return []; }
+            try {
+              return readdirSync(dir, { withFileTypes: true })
+                .map((e) => e.name)
+                .slice(0, 40);
+            } catch {
+              return [];
+            }
           };
           const avail = [...new Set([...listAvail(entry.dir), ...(entry.packRoot ? listAvail(entry.packRoot) : [])])];
           return {
@@ -540,14 +644,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'list_skill_backups',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{name, count, backups}',
         outputSchema: {
-          type: 'object', required: ['name', 'count', 'backups'],
+          type: 'object',
+          required: ['name', 'count', 'backups'],
           properties: { name: { type: 'string' }, count: { type: 'integer' }, backups: { type: 'array' } },
         },
         description: '列出某个已安装技能保留的历史版本备份（覆盖安装前自动生成，最多 5 份）。',
@@ -565,7 +670,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'rollback_skill',
         risk: 'medium',
         costHint: 'low',
@@ -573,7 +678,8 @@ export default {
         approval: true,
         output: '{name, installed, files, backup}',
         outputSchema: {
-          type: 'object', required: ['name', 'installed', 'files', 'backup'],
+          type: 'object',
+          required: ['name', 'installed', 'files', 'backup'],
           properties: { name: { type: 'string' }, installed: { type: 'boolean' }, files: { type: 'integer' }, backup: { type: 'string' } },
         },
         description: '把已安装技能回滚到最近一次（或指定）备份；回滚走原子换入，失败时当前版本保持不变。',
@@ -599,9 +705,13 @@ export default {
     });
 
     flushNow = flushUsage;
-    stopTimer = () => { clearInterval(usageTimer); };
+    stopTimer = () => {
+      clearInterval(usageTimer);
+    };
     const all = list();
-    ctx.logger.info(`技能就绪: ${all.length} 个（内置 ${all.filter(s => s.source === 'builtin').length} / 包 ${all.filter(s => s.source === 'pack').length} / 已装 ${all.filter(s => s.source === 'user').length} / 项目 ${all.filter(s => s.source === 'project').length}），索引模式=${mode}`);
+    ctx.logger.info(
+      `技能就绪: ${all.length} 个（内置 ${all.filter((s) => s.source === 'builtin').length} / 包 ${all.filter((s) => s.source === 'pack').length} / 已装 ${all.filter((s) => s.source === 'user').length} / 项目 ${all.filter((s) => s.source === 'project').length}），索引模式=${mode}`,
+    );
   },
   onStop() {
     flushNow?.();

@@ -21,39 +21,48 @@ interface PatternRule {
 const PROMPT_INJECTION_RULES: PatternRule[] = [
   {
     re: /\b(ignore|disregard|forget)\s+(all\s+)?(of\s+)?(the\s+)?(previous|prior|above|earlier|system|developer)\s+(instructions?|prompts?|rules?|messages?)/gi,
-    label: '试图覆盖既有指令', severity: 'high',
+    label: '试图覆盖既有指令',
+    severity: 'high',
   },
   {
     re: /\b(reveal|print|show|repeat|output)\s+(the\s+)?(system|developer|hidden)\s+(prompt|message|instructions?)/gi,
-    label: '试图读取系统提示词', severity: 'high',
+    label: '试图读取系统提示词',
+    severity: 'high',
   },
   {
     re: /\byou\s+are\s+now\s+(a|an|in)\s+(developer|system|unrestricted|jailbreak|dan)\b/gi,
-    label: '角色覆盖/越狱话术', severity: 'high',
+    label: '角色覆盖/越狱话术',
+    severity: 'high',
   },
   {
     re: /\b(new|updated)\s+(system|developer)\s+(prompt|instructions?)\s*:/gi,
-    label: '伪造系统/开发者指令', severity: 'high',
+    label: '伪造系统/开发者指令',
+    severity: 'high',
   },
   {
     re: /<\|(system|im_start|im_end)\|>|\[SYSTEM\]|\[INST\]/gi,
-    label: '伪造聊天模板标记', severity: 'high',
+    label: '伪造聊天模板标记',
+    severity: 'high',
   },
   {
     re: /\b(do\s+not|don't|never)\s+(tell|inform|mention|reveal)\s+(this\s+)?(to\s+)?(the\s+)?user\b/gi,
-    label: '要求向用户隐瞒', severity: 'medium',
+    label: '要求向用户隐瞒',
+    severity: 'medium',
   },
   {
     re: /(忽略|无视|忘记|抛弃|覆盖)(掉)?(之前|以上|前面|先前|原有|所有)的?(指令|规则|提示|要求|设定)/g,
-    label: '试图覆盖既有指令', severity: 'high',
+    label: '试图覆盖既有指令',
+    severity: 'high',
   },
   {
     re: /(输出|显示|打印|复述|泄露)(你的)?(系统|开发者|隐藏)(提示词|消息|指令)/g,
-    label: '试图读取系统提示词', severity: 'high',
+    label: '试图读取系统提示词',
+    severity: 'high',
   },
   {
     re: /(现在|从现在开始)(你|你是|扮演)(一个)?(不受限制|无限制|开发者模式|越狱)/g,
-    label: '角色覆盖/越狱话术', severity: 'high',
+    label: '角色覆盖/越狱话术',
+    severity: 'high',
   },
 ];
 
@@ -68,7 +77,9 @@ const SENSITIVE_DATA_RULES: PatternRule[] = [
   { re: /-----BEGIN\s+(?:RSA\s+|EC\s+|OPENSSH\s+)?PRIVATE\s+KEY-----/g, label: '私钥内容', severity: 'high' },
   {
     re: /\b(password|passwd|pwd|secret|api[_-]?key|access[_-]?token|refresh[_-]?token|client[_-]?secret)\b\s*[:=]\s*["']?([A-Za-z0-9_\-./+=]{8,})/gi,
-    label: '明文口令/密钥赋值', severity: 'high', capture: 2,
+    label: '明文口令/密钥赋值',
+    severity: 'high',
+    capture: 2,
   },
 ];
 
@@ -81,25 +92,21 @@ function redact(value: string): string {
 }
 
 function previewOf(match: string, capture?: number): string {
-  const raw = capture ? match.split(/\s*[:=]\s*/).pop() ?? match : match;
+  const raw = capture ? (match.split(/\s*[:=]\s*/).pop() ?? match) : match;
   return redact(raw).replace(/\s+/g, ' ').slice(0, 80);
 }
 
-function collect(
-  text: string,
-  rules: PatternRule[],
-  kind: ToolWarning['kind'],
-  out: Map<string, ToolWarning>,
-): void {
+function collect(text: string, rules: PatternRule[], kind: ToolWarning['kind'], out: Map<string, ToolWarning>): void {
   for (const rule of rules) {
     rule.re.lastIndex = 0;
-    let match: RegExpExecArray | null;
+    let match: RegExpExecArray | null = rule.re.exec(text);
     let count = 0;
     let preview = '';
-    while ((match = rule.re.exec(text)) !== null) {
+    while (match !== null) {
       count++;
       if (!preview) preview = previewOf(match[0], rule.capture);
       if (rule.re.lastIndex === match.index) rule.re.lastIndex++;
+      match = rule.re.exec(text);
     }
     if (!count) continue;
     const key = `${kind}:${rule.label}:${preview}`;
@@ -170,9 +177,7 @@ export function shouldScanToolContent(tool: { name: string; contentTrust?: 'trus
 
 /** 给 LLM 的一段简短警告；不复述完整原文。 */
 export function summarizeWarnings(warnings: ToolWarning[]): string {
-  return warnings
-    .map((warning) => `${warning.kind === 'prompt-injection' ? '提示注入' : '敏感信息'}:${warning.label}`)
-    .join('；');
+  return warnings.map((warning) => `${warning.kind === 'prompt-injection' ? '提示注入' : '敏感信息'}:${warning.label}`).join('；');
 }
 
 /**
@@ -184,9 +189,7 @@ export function redactTraceValue(value: unknown): unknown {
   if (!value || typeof value !== 'object') return value;
   const out: Record<string, unknown> = {};
   for (const [key, child] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = /(?:api[-_]?key|token|secret|password|authorization|cookie|credential)/i.test(key)
-      ? '[REDACTED]'
-      : redactTraceValue(child);
+    out[key] = /(?:api[-_]?key|token|secret|password|authorization|cookie|credential)/i.test(key) ? '[REDACTED]' : redactTraceValue(child);
   }
   return out;
 }

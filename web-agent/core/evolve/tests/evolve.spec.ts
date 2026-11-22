@@ -15,8 +15,12 @@ function load(root: string): { tools: Map<string, any>; service: any } {
       if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
       if (value.kind === 'service') service = value.service.instance;
     },
-    inject() { return { value: undefined }; },
-    on() { return () => undefined; },
+    inject() {
+      return { value: undefined };
+    },
+    on() {
+      return () => undefined;
+    },
     bus: { emit() {} },
     logger: { info() {}, warn() {} },
   };
@@ -50,7 +54,9 @@ describe('自进化提案', () => {
       assert.equal(traversal.ok, false);
       assert.match(String(traversal.error), /非法/);
       assert.equal(service.remove('../../outside').ok, false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('提案按租户隔离，跨租户不可见也不可采纳', async () => {
@@ -62,11 +68,19 @@ describe('自进化提案', () => {
       const b = await propose.handler({ name: 'tenant-b-skill', description: 'B', body: 'B', reason: 'B' }, { tenantId: 'tenant-b' });
       assert.equal(a.ok, true, a.error);
       assert.equal(b.ok, true, b.error);
-      assert.deepEqual(service.list('tenant-a').map((p: any) => p.name), ['tenant-a-skill']);
-      assert.deepEqual(service.list('tenant-b').map((p: any) => p.name), ['tenant-b-skill']);
+      assert.deepEqual(
+        service.list('tenant-a').map((p: any) => p.name),
+        ['tenant-a-skill'],
+      );
+      assert.deepEqual(
+        service.list('tenant-b').map((p: any) => p.name),
+        ['tenant-b-skill'],
+      );
       const stolen = service.accept(b.data.id, 'tenant-a');
       assert.equal(stolen.ok, false);
       assert.match(String(stolen.error), /不属于当前租户/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

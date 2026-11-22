@@ -1,6 +1,6 @@
 # maharness 开发交接
 
-更新日期：2026-11-21（v0.2.0 架构收敛）。
+更新日期：2026-11-22（v4 架构提案五期迁移落地）。
 
 ## 本地版本与启动
 
@@ -38,26 +38,40 @@
 - `plugin:validate` 支持无参数校验 `plugins/` 下全部插件，并保持单目录参数兼容。
 - 浏览器回归固定单 worker，避免并行运行时社会调度用例的时序竞争；本地全量 133/133 通过。
 - v0.2.0 架构收敛：`server/host/` 建立宿主服务边界（`container.ts` 装配、`ports.ts` 窄接口、`adapters/` 是唯一访问 core 的入口），`server/tests/boundary.spec.ts` 强制 server 不得直接 import core；`server/services/society/` 拆出 `policy` / `selection` / `health` / `snapshot` / `experiments` / `institutions` / `types`（入口 2,264→1,706 行）；`server/services/organization/` 拆出 `projections`（评分卡与福祉，入口 1,860→1,770 行）；`server/experience.ts` 拆出 `services/experience/facts`（事实账本、证据索引、定价、预算）与 `shared`（入口 1,639→1,077 行）；删除 `Store.MIGRATIONS` 与 `migration-lock.ts`，改为 `server/migrations/` 不可变 SQL + manifest checksum + `schema_migrations` 审计表，最低支持 v15。
+- v4 五期迁移（ADR 0007–0011，提案见 [plan/architecture-v4.md](plan/architecture-v4.md)）：
+  - 0 期：`scripts/check-complexity.mjs`（文件 400 行 / 函数 60 行 / 圈复杂度 15 / 导出 12，基线只降不升）与 `scripts/check-contracts.mjs`（`contracts/api.ts` 逐字生成 `ui/src/generated/contracts.ts`），`check:quality` 与 CI 同步接入。
+  - 1 期：`server/run/`（`state` / `journal` / `usage` / `recovery` / `executor`），`run-service.ts` 1381→719 行改为门面；4 期收尾再抽 `run/{create,society,delegate}`，最终 **289 行**，公开签名不变。
+  - 2 期：`server/http/`（`scope` / `sse` / `security` / `exec` / `chat-service`）承接传输工具，`routes/shared.ts` 506→18 行 barrel；Provider 编排下沉到 `server/usecases/`，`routes/providers.ts` 658→86 行只做协议与状态码；`layering.spec.ts` 用 AST 固化"路由不碰 services、用例不碰 express/core"。
+  - 3 期：`contracts/api.ts` 成为唯一契约源（零 import），`ui/src/types.ts` 630→518 行改为 re-export 生成物；`contracts.spec.ts` 用真实 Store 载荷验证形状，`check:contracts` 字节比对防漂移。
+  - 4 期：`server/store/ports.ts`（按聚合根收窄的仓储端口，`Pick<Store>` 推导）、`server/store/sqlite.ts`（SQLite 适配器与端口统计）、`server/store/write-queue.ts`（进程内单写者：串行可计数、`SQLITE_BUSY` 只重试一次），`RunRepository.transaction` 全部经单写者；SQL 按聚合根搬进 `server/store/sqlite/{providers,models,sessions,tenants}.ts`，`db.ts` 1784→1447 行只剩委托与装配；路由收口：`rules.ts` 411→190（`rules-support` + `rules-policy`）、`runs.ts` 423→210（`run-workspace` + `run-events`）、`organization.ts` 418→202（`organization-society` + `organization-governance`）、`index.ts` 356→241（`health.ts`）；`run/executor.ts` 361→**33**（`executor-start.ts` 109 / `executor-flow.ts` 158 / `executor-support.ts` 243，`executeRun` 只剩编排）；`check:coverage` 目标扩到 **21** 个文件（新增 `run/recovery`、`run/executor`/`-start`/`-flow`、`store/*`、`http/security`、`usecases/*`）。
 - 社会语义：删除 `/100` 聚合健康分，改为带公式/分子分母/样本量的 `observations[]`；协作关系分只由人工复核事件写入；社会任务要求显式 `requiredCapabilities` 与 `needsWrite`。
 - 体验复盘：评价标准可配置独立 reviewer；输出上限可借用总预算余量；默认复盘预算按完整复盘所需调整为 fast 8,000 / focused 14,000 / multi 16,000 token，并在截断时以加倍上限重试一次；`evals/experience-v2.ts` 用真实工具事实样本按通过率/裁决一致/证据有效/建议可用四项门禁验收。
 
 ## 验收与发布
 
+> 下表的数字是 2026-11-23 **复杂度收口轮**的本地实测快照；用例数会随测试新增变化，
+> 以 `npm test` / `npm run test:security` / `npm run check:coverage` 的实际输出为准。
+
 | 验收 | 结果 |
 | --- | --- |
-| 双端类型检查与构建 | 通过 |
-| 单测 | 1536 通过、2 跳过、0 失败 |
+| 双端类型检查与构建 | 通过（`npm run build`：ui:typecheck + ui:build + tsc） |
+| 单测 | **1610 通过、1 跳过、0 失败**（`npm test`，1611 个用例） |
 | 数据库迁移 | 本机 v15 → v16 实测通过（57→58 表，审计表记录两条 checksum） |
 | 体验复盘 v2 真实模型 | 6/7，四项门禁通过（通过率 86%、裁决一致 86%、证据有效 100%、建议可用 100%） |
 | 安全回归 | 402/402 |
 | 产品自检 | 90/90 |
-| 确定性回放 | 28/28 |
+| 确定性回放 | 28/28（安全攻击阻断 4/4） |
 | 优化回归 | 108/108 |
-| 浏览器 E2E | 133/133（单 worker 全量） |
-| 生产依赖审计 | 前后端均 0 漏洞（`npm audit --omit=dev`） |
+| 浏览器 E2E | 133/133（单 worker 全量，3.4 分钟） |
+| 代码风格门禁 | `biome check` error 0（warning 1495，见质量审查报告） |
+| 关键文件覆盖率 | **21/21 达标**（≥70%，逐文件 73.89%~100%，`npm run check:coverage`；`run/executor` 100%、`run/executor-start` 99.08%、`run/executor-flow` 100%、`run/recovery` 97.28%） |
+| 分层边界 / 复杂度预算 | `check:boundaries` 3/3；`check:complexity` 通过（382 文件，基线 **186**，5 处搬迁登记与 `executeRun` 已全部拆到达标） |
+| 契约单一来源 | `check:contracts` 一致（188 行，字节比对） |
+| 前端单测 | 10/10（`npm --prefix ui run test`） |
+| 生产依赖审计 | 前后端均 0 漏洞（`npm audit --omit=dev`）；UI dev 依赖 minimatch 已升至 11.0.9 |
 | 插件清单 | 2 个插件 manifest 通过；插件锁通过 |
 | 技能锁 / 技能路由 | 通过，5/5 |
-| 威胁模型 / 文档事实 | 通过 |
+| 威胁模型 / 文档事实 | 通过（24 个引用文件 / 11 个安全 spec / 6 个契约字段） |
 
 v0.2.0 已发布并打 tag；发布门禁仍以 [发布清单](plan/release-checklist.md) 为准：双 workflow（quality + e2e）必须全绿，版本号与 CHANGELOG 一致。后续提交需重新跑完整验收并确认远端 Actions 结果。
 

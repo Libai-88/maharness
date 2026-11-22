@@ -26,19 +26,13 @@
       "id": "B1",
       "domain": "持久社会成员",
       "status": "passed",
-      "evidence": [
-        "持久角色 4 个，均有 appointment 生命史。",
-        "角色记录包含岗位、权限、模型策略、聘用状态和修订号。"
-      ]
+      "evidence": ["持久角色 4 个，均有 appointment 生命史。", "角色记录包含岗位、权限、模型策略、聘用状态和修订号。"]
     },
     {
       "id": "B2",
       "domain": "制度调度而非硬派活",
       "status": "passed",
-      "evidence": [
-        "机构 v1 作出 team 决策，角色 2 个。",
-        "系统 tick 在无主 Agent 调用时创建了 2 个真实社会 Run 和 2 份分工契约。"
-      ]
+      "evidence": ["机构 v1 作出 team 决策，角色 2 个。", "系统 tick 在无主 Agent 调用时创建了 2 个真实社会 Run 和 2 份分工契约。"]
     },
     {
       "id": "B3",
@@ -108,10 +102,7 @@
       "id": "E2",
       "domain": "可审计与可干预",
       "status": "passed",
-      "evidence": [
-        "模型不能批准自身高额任务；人类批准后才进入调度。",
-        "人类调整部门配额后，调度被事实门禁阻断并记录具体原因。"
-      ]
+      "evidence": ["模型不能批准自身高额任务；人类批准后才进入调度。", "人类调整部门配额后，调度被事实门禁阻断并记录具体原因。"]
     },
     {
       "id": "F1",
@@ -135,27 +126,19 @@
       "id": "F3",
       "domain": "调度受福利与资源约束",
       "status": "passed",
-      "evidence": [
-        "福利负载、部门并发、预算和角色可用性共同决定是否派工。"
-      ]
+      "evidence": ["福利负载、部门并发、预算和角色可用性共同决定是否派工。"]
     },
     {
       "id": "F4",
       "domain": "制度可版本化演化",
       "status": "passed",
-      "evidence": [
-        "制度从 v1 更新到 v2，再以 v3 发布回滚。",
-        "历史版本、策略哈希和审计记录保持可查。"
-      ]
+      "evidence": ["制度从 v1 更新到 v2，再以 v3 发布回滚。", "历史版本、策略哈希和审计记录保持可查。"]
     },
     {
       "id": "G1",
       "domain": "token 三级预算",
       "status": "passed",
-      "evidence": [
-        "社会预算=20 USD / 2000000 token。",
-        "部门配额、角色账本和任务预算均进入同一快照与调度门禁。"
-      ]
+      "evidence": ["社会预算=20 USD / 2000000 token。", "部门配额、角色账本和任务预算均进入同一快照与调度门禁。"]
     },
     {
       "id": "G2",
@@ -172,10 +155,7 @@
       "id": "G3",
       "domain": "最小必要团队与动态解散",
       "status": "passed",
-      "evidence": [
-        "团队 Run 数=2，全部真实契约交付后调度释放。",
-        "角色处于空闲状态，但身份、记忆和关系继续保留。"
-      ]
+      "evidence": ["团队 Run 数=2，全部真实契约交付后调度释放。", "角色处于空闲状态，但身份、记忆和关系继续保留。"]
     },
     {
       "id": "G4",
@@ -399,17 +379,8 @@
               "providerCalls": 1,
               "institutionVersion": 3,
               "institutionBudgetUsd": 20,
-              "auditActions": [
-                "rollback",
-                "update",
-                "initialize"
-              ],
-              "societyAuditActions": [
-                "queued",
-                "scheduled",
-                "release_completed",
-                "human_accepted"
-              ],
+              "auditActions": ["rollback", "update", "initialize"],
+              "societyAuditActions": ["queued", "scheduled", "release_completed", "human_accepted"],
               "screenshotSha256": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66"
             },
             {
@@ -421,17 +392,8 @@
               "contractCount": 2,
               "networkNodeCount": 5,
               "networkEdgeCount": 0,
-              "bottleneckKinds": [
-                "budget"
-              ],
-              "selectionFactors": [
-                "capability",
-                "memory",
-                "tools",
-                "collaboration",
-                "history",
-                "load"
-              ],
+              "bottleneckKinds": ["budget"],
+              "selectionFactors": ["capability", "memory", "tools", "collaboration", "history", "load"],
               "wellbeingRoleCount": 5,
               "officialTokenCount": 120,
               "actualTokenCount": 100,
@@ -463,17 +425,8 @@
               "fallbackRunStatus": "completed",
               "rollbackMarker": "ROLLBACK_TO_SOLO",
               "failedChildCount": 1,
-              "contractStatuses": [
-                "collapsed",
-                "delivered"
-              ],
-              "societyAuditActions": [
-                "queued",
-                "scheduled",
-                "fallback_solo",
-                "release_completed",
-                "human_accepted"
-              ],
+              "contractStatuses": ["collapsed", "delivered"],
+              "societyAuditActions": ["queued", "scheduled", "fallback_solo", "release_completed", "human_accepted"],
               "providerCalls": 6,
               "schedulerTickApiCalls": 0,
               "schedulerAutoAdvanced": true,
@@ -508,11 +461,7 @@
         "archiveData": {
           "kind": "playwright-sanitized-evidence",
           "sourceSha256": "2e3631d1c77cdb63ceedf374ce0362ac11c0f2781a70446665065195be421c2a",
-          "targetFiles": [
-            "organization.spec.ts",
-            "society-real-backend.spec.ts",
-            "society.spec.ts"
-          ],
+          "targetFiles": ["organization.spec.ts", "society-real-backend.spec.ts", "society.spec.ts"],
           "specs": [
             {
               "file": "organization.spec.ts",

@@ -1,28 +1,31 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  aggregateParallelResults,
-  normalizeParallelTasks,
-  parallelToolSucceeded,
-  planParallelWaves,
-  splitBudget,
-} from '../index';
+import { aggregateParallelResults, normalizeParallelTasks, parallelToolSucceeded, planParallelWaves, splitBudget } from '../index';
 
 describe('并行任务编排纯函数', () => {
   it('拒绝少于 2 个任务、重复 id、未知依赖和环', () => {
     assert.match(normalizeParallelTasks([{ objective: 'one' }]).error ?? '', /至少 2 个/);
-    assert.match(normalizeParallelTasks([
-      { id: 'a', objective: 'A' },
-      { id: 'a', objective: 'B' },
-    ]).error ?? '', /重复/);
-    assert.match(normalizeParallelTasks([
-      { id: 'a', objective: 'A' },
-      { id: 'b', objective: 'B', dependsOn: ['missing'] },
-    ]).error ?? '', /不存在/);
-    assert.match(normalizeParallelTasks([
-      { id: 'a', objective: 'A', dependsOn: ['b'] },
-      { id: 'b', objective: 'B', dependsOn: ['a'] },
-    ]).error ?? '', /环/);
+    assert.match(
+      normalizeParallelTasks([
+        { id: 'a', objective: 'A' },
+        { id: 'a', objective: 'B' },
+      ]).error ?? '',
+      /重复/,
+    );
+    assert.match(
+      normalizeParallelTasks([
+        { id: 'a', objective: 'A' },
+        { id: 'b', objective: 'B', dependsOn: ['missing'] },
+      ]).error ?? '',
+      /不存在/,
+    );
+    assert.match(
+      normalizeParallelTasks([
+        { id: 'a', objective: 'A', dependsOn: ['b'] },
+        { id: 'b', objective: 'B', dependsOn: ['a'] },
+      ]).error ?? '',
+      /环/,
+    );
   });
 
   it('按依赖波次调度并保留原顺序', () => {

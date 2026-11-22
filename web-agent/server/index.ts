@@ -25,7 +25,12 @@ import { approvalBoard, discoverProviders } from './host/adapters/chat';
 import { ClientTracker } from './client-tracker';
 import { Scheduler } from './scheduler';
 import { recoverOrphanedApprovals } from './approval-recovery';
-import { auditAuthorizationDenial, auditAuthorizationGrant, CredentialFailureLimiter, decideCredentialAuthorization } from './security-policy';
+import {
+  auditAuthorizationDenial,
+  auditAuthorizationGrant,
+  CredentialFailureLimiter,
+  decideCredentialAuthorization,
+} from './security-policy';
 import { apiContractFor, setApiSchemaHeaders } from './api-contract';
 import { validateAgainstSchema } from '../kernel/validate';
 import { resolveDeployMode, methodRequiresAuth, type DeployConfig } from './deploy-mode';
@@ -40,9 +45,15 @@ const port = Number(process.env.PORT ?? 3000);
 // routes 包裹 chat 端点调用 beginRun/endRun（导出供其 import）；
 // 自动停止 tick 在 activeRuns > 0 时只重置空闲基准，等 run 结束再计宽限期。
 let activeRuns = 0;
-export function beginRun(): void { activeRuns++; }
-export function endRun(): void { activeRuns = Math.max(0, activeRuns - 1); }
-export function activeRunCount(): number { return activeRuns; }
+export function beginRun(): void {
+  activeRuns++;
+}
+export function endRun(): void {
+  activeRuns = Math.max(0, activeRuns - 1);
+}
+export function activeRunCount(): number {
+  return activeRuns;
+}
 
 // ---- A6-b 变更类端点的可选 token 门 ----
 /** 校验头名（前端接线时用同一个常量，避免拼写漂移） */
@@ -51,11 +62,7 @@ export const MUTATION_TOKEN_HEADER = 'x-maharness-token';
 const MUTATING_METHODS = new Set(['POST', 'PATCH', 'PUT', 'DELETE']);
 
 function auditRouteObject(req: express.Request): string {
-  const path = typeof req.path === 'string'
-    ? req.path
-    : typeof req.originalUrl === 'string'
-      ? req.originalUrl.split('?', 1)[0]
-      : '';
+  const path = typeof req.path === 'string' ? req.path : typeof req.originalUrl === 'string' ? req.originalUrl.split('?', 1)[0] : '';
   const segments = path.split('/');
   return `/api/${segments[2] ?? segments[1] ?? ''}`;
 }
@@ -136,9 +143,16 @@ export function createApiTokenGuard(
     const auditObject = auditRouteObject(req);
     // trusted/remote 下「服务端没配 token」也要拒绝（防御性兜底）；local 门关闭 = 完全放行（既有语义）
     if (accepted.length === 0 && !config.authRequired) {
-      if (kernel) auditAuthorizationGrant(kernel, {
-        subject: 'local-client', capability: `http:${method.toLowerCase()}`, object: auditObject,
-      }, store);
+      if (kernel)
+        auditAuthorizationGrant(
+          kernel,
+          {
+            subject: 'local-client',
+            capability: `http:${method.toLowerCase()}`,
+            object: auditObject,
+          },
+          store,
+        );
       return next(); // 本机免 token 模式仍记录通过来源校验的变更
     }
     if (accepted.length === 0) {
@@ -146,10 +160,7 @@ export function createApiTokenGuard(
       return res.status(401).json({ error: '未授权：当前部署模式要求 API token，但服务端未配置' });
     }
     const forwardedFor = req.headers['x-forwarded-for'];
-    const clientKey = req.socket?.remoteAddress
-      ?? req.ip
-      ?? (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor)
-      ?? 'unknown';
+    const clientKey = req.socket?.remoteAddress ?? req.ip ?? (Array.isArray(forwardedFor) ? forwardedFor[0] : forwardedFor) ?? 'unknown';
     const retryAfter = limiter.retryAfterMs(clientKey);
     if (retryAfter > 0) {
       res.setHeader('Retry-After', String(Math.ceil(retryAfter / 1000)));
@@ -158,36 +169,54 @@ export function createApiTokenGuard(
     const raw = req.headers[MUTATION_TOKEN_HEADER] ?? req.headers.authorization;
     const one = Array.isArray(raw) ? raw[0] : raw;
     const bearer = typeof one === 'string' ? /^Bearer\s+(.+)$/i.exec(one.trim()) : null;
-    const provided = bearer ? bearer[1].trim() : (typeof one === 'string' ? one.trim() : '');
+    const provided = bearer ? bearer[1].trim() : typeof one === 'string' ? one.trim() : '';
     const registered = provided && store ? store.findApiToken(provided) : undefined;
     if (registered) {
       if (mutating && registered.role === 'readonly') {
-        if (kernel) auditAuthorizationDenial(kernel, {
-          subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
-          object: auditObject, reason: 'tenant-scope-denied',
-        }, store);
+        if (kernel)
+          auditAuthorizationDenial(
+            kernel,
+            {
+              subject: 'anonymous',
+              capability: `http:${method.toLowerCase()}`,
+              object: auditObject,
+              reason: 'tenant-scope-denied',
+            },
+            store,
+          );
         return res.status(403).json({ error: 'Forbidden: 只读 token 不能执行变更请求' });
       }
       const rawTenant = req.headers[TENANT_HEADER];
       const headerTenant = Array.isArray(rawTenant) ? rawTenant[0] : rawTenant;
-      const requested = typeof headerTenant === 'string' && TENANT_ID_RE.test(headerTenant.trim())
-        ? headerTenant.trim()
-        : '';
+      const requested = typeof headerTenant === 'string' && TENANT_ID_RE.test(headerTenant.trim()) ? headerTenant.trim() : '';
       if (registered.role !== 'admin' && requested && requested !== registered.tenantId) {
-        if (kernel) auditAuthorizationDenial(kernel, {
-          subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
-          object: auditObject, reason: 'tenant-scope-denied',
-        }, store);
+        if (kernel)
+          auditAuthorizationDenial(
+            kernel,
+            {
+              subject: 'anonymous',
+              capability: `http:${method.toLowerCase()}`,
+              object: auditObject,
+              reason: 'tenant-scope-denied',
+            },
+            store,
+          );
         return res.status(403).json({ error: 'Forbidden: token 无权访问该租户' });
       }
-      (req as express.Request & { tenantId?: string }).tenantId = registered.role === 'admin' && requested
-        ? requested
-        : registered.tenantId;
+      (req as express.Request & { tenantId?: string }).tenantId =
+        registered.role === 'admin' && requested ? requested : registered.tenantId;
       (req as express.Request & { apiRole?: string }).apiRole = registered.role;
       limiter.recordSuccess(clientKey);
-      if (kernel) auditAuthorizationGrant(kernel, {
-        subject: 'api-token', capability: `http:${method.toLowerCase()}`, object: auditObject,
-      }, store);
+      if (kernel)
+        auditAuthorizationGrant(
+          kernel,
+          {
+            subject: 'api-token',
+            capability: `http:${method.toLowerCase()}`,
+            object: auditObject,
+          },
+          store,
+        );
       return next();
     }
     const matched = accepted.find((candidate) => tokenMatches(provided, candidate));
@@ -200,27 +229,45 @@ export function createApiTokenGuard(
       if (matched === readonly && matched !== expected) {
         const requested = (req as express.Request & { tenantId?: string }).tenantId ?? 'default';
         if (requested !== readonlyTenant()) {
-          if (kernel) auditAuthorizationDenial(kernel, {
-            subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
-            object: auditObject, reason: 'tenant-scope-denied',
-          }, store);
+          if (kernel)
+            auditAuthorizationDenial(
+              kernel,
+              {
+                subject: 'anonymous',
+                capability: `http:${method.toLowerCase()}`,
+                object: auditObject,
+                reason: 'tenant-scope-denied',
+              },
+              store,
+            );
           return res.status(403).json({ error: 'Forbidden: 只读 token 无权访问该租户' });
         }
       }
       limiter.recordSuccess(clientKey);
-      if (expected && provided && kernel) auditAuthorizationGrant(kernel, {
-        subject: matched === readonly && readonly !== expected ? 'api-token:viewer' : 'api-token',
-        capability: `http:${method.toLowerCase()}`,
-        object: auditObject,
-      }, store);
+      if (expected && provided && kernel)
+        auditAuthorizationGrant(
+          kernel,
+          {
+            subject: matched === readonly && readonly !== expected ? 'api-token:viewer' : 'api-token',
+            capability: `http:${method.toLowerCase()}`,
+            object: auditObject,
+          },
+          store,
+        );
       return next();
     }
     // 不回显期望值、不区分「没带」与「带错」的细节（只说需要哪个头），避免给探测者提示
-    if (kernel) auditAuthorizationDenial(kernel, {
-      subject: 'anonymous', capability: `http:${method.toLowerCase()}`,
-      object: req.route?.path ? `${req.baseUrl}${req.route.path}` : auditObject,
-      reason: decision.reason === 'invalid' ? 'api-token-invalid' : 'api-token-required',
-    }, store);
+    if (kernel)
+      auditAuthorizationDenial(
+        kernel,
+        {
+          subject: 'anonymous',
+          capability: `http:${method.toLowerCase()}`,
+          object: req.route?.path ? `${req.baseUrl}${req.route.path}` : auditObject,
+          reason: decision.reason === 'invalid' ? 'api-token-invalid' : 'api-token-required',
+        },
+        store,
+      );
     if (decision.reason === 'invalid') limiter.recordFailure(clientKey);
     return res.status(401).json({
       error: `未授权：服务端已启用 MAHARNESS_API_TOKEN，变更类请求必须携带 ${MUTATION_TOKEN_HEADER} 头`,
@@ -234,9 +281,13 @@ function seedDefaults(store: Store): void {
     const envCfgs = discoverProviders();
     for (const c of envCfgs) {
       store.upsertProvider({
-        id: c.id, label: c.id.toUpperCase(),
-        baseUrl: c.baseUrl, apiKey: c.apiKey, model: c.model,
-        priceIn: c.inputPrice, priceOut: c.outputPrice,
+        id: c.id,
+        label: c.id.toUpperCase(),
+        baseUrl: c.baseUrl,
+        apiKey: c.apiKey,
+        model: c.model,
+        priceIn: c.inputPrice,
+        priceOut: c.outputPrice,
       });
     }
     if (envCfgs.length) console.log(`[seed] 已从 .env 导入 ${envCfgs.length} 个供应商到本地数据库`);
@@ -260,7 +311,15 @@ function seedDefaults(store: Store): void {
   }
 }
 
-export async function startServer(): Promise<{ kernel: Kernel; app: express.Express; server: ReturnType<express.Express['listen']>; tracker: ClientTracker; store: Store; closeEnvWatcher: () => void; runs: import('./run-service').RunService }> {
+export async function startServer(): Promise<{
+  kernel: Kernel;
+  app: express.Express;
+  server: ReturnType<express.Express['listen']>;
+  tracker: ClientTracker;
+  store: Store;
+  closeEnvWatcher: () => void;
+  runs: import('./run-service').RunService;
+}> {
   // API-02：部署模式解析与启动自检——local/trusted/remote；安全前置不满足时 fail-closed 拒绝启动。
   const deploy = resolveDeployMode();
   if (!deploy.ok) {
@@ -271,11 +330,15 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   // 数据目录/用户插件目录可经环境变量覆盖（AGENT_DATA_DIR / AGENT_USER_PLUGINS_DIR）：
   // selftest 等嵌入场景用临时目录隔离，不污染生产 DB；不设置时与默认行为完全一致。
   const secretBox = createSecretBox();
-  const kernel = new Kernel(rootDir, { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir }, {
-    dataDir: process.env.AGENT_DATA_DIR || undefined,
-    userPluginsDir: process.env.AGENT_USER_PLUGINS_DIR || undefined,
-    secrets: secretBox,
-  });
+  const kernel = new Kernel(
+    rootDir,
+    { sandboxRoot: process.env.SANDBOX_ROOT ?? rootDir },
+    {
+      dataDir: process.env.AGENT_DATA_DIR || undefined,
+      userPluginsDir: process.env.AGENT_USER_PLUGINS_DIR || undefined,
+      secrets: secretBox,
+    },
+  );
 
   // 凭据加密：data/secret.key 主密钥；api_key 加密落库，读取时解密。
   // A7-3：主密钥缺失/异常时不再静默重建——先问「库里是否已有 v1: 密文」（只在异常分支才查，
@@ -295,10 +358,18 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   const store = new Store(kernel.paths.dbFile, {
     secretKey: keyInfo.key,
     masterKey: keyInfo,
-    migrationSources: { configFile: kernel.paths.configFile, pluginDirs: [join(kernel.paths.root, 'core'), process.env.AGENT_USER_PLUGINS_DIR || join(kernel.paths.root, 'plugins')] },
+    migrationSources: {
+      configFile: kernel.paths.configFile,
+      pluginDirs: [join(kernel.paths.root, 'core'), process.env.AGENT_USER_PLUGINS_DIR || join(kernel.paths.root, 'plugins')],
+    },
     checkpointRetentionMs: kernel.config.get<number>('checkpoint.retentionDays', 30) * 24 * 60 * 60 * 1000,
   });
-  try { await kernel.start(); } catch (error) { store.close(); throw error; }
+  try {
+    await kernel.start();
+  } catch (error) {
+    store.close();
+    throw error;
+  }
   const approvals = approvalBoard();
   approvals.onRegister = (approval) => {
     const session = approval.sessionId ? store.getSession(approval.sessionId) : undefined;
@@ -341,11 +412,16 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   {
     const ks = store.keyStatus();
     if (!ks.hasMasterKey && ks.hasCiphertext) {
-      console.error(`[secret] 本次运行没有可用主密钥：${ks.broken.length} 个供应商的密钥无法解密，`
-        + '请在设置页重新录入，或恢复 data/secret.key 后重启（详见 /api/security）');
+      console.error(
+        `[secret] 本次运行没有可用主密钥：${ks.broken.length} 个供应商的密钥无法解密，` +
+          '请在设置页重新录入，或恢复 data/secret.key 后重启（详见 /api/security）',
+      );
     } else if (ks.broken.length) {
-      console.error(`[secret] ${ks.broken.length} 个供应商的 api_key 不可解：`
-        + ks.broken.map((b) => `${b.id}(${b.reason})`).join(', ') + ' —— 请在设置页重新录入');
+      console.error(
+        `[secret] ${ks.broken.length} 个供应商的 api_key 不可解：` +
+          ks.broken.map((b) => `${b.id}(${b.reason})`).join(', ') +
+          ' —— 请在设置页重新录入',
+      );
     }
   }
   // 种子工作区：当前沙箱根目录始终可选（沙箱可切换，切换后工具边界随之热更新）
@@ -357,7 +433,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     else console.warn(`[seed] 已跳过危险的 SANDBOX_ROOT 工作区登记：${sandbox}（文件系统根/家目录/系统目录不可作为工作区）`);
   }
   refreshChatProviders(kernel, store); // 以 DB 配置热注入对话服务
-  refreshChatPersonas(kernel, store);  // 以 DB 人设热注入对话服务
+  refreshChatPersonas(kernel, store); // 以 DB 人设热注入对话服务
   const app = express();
 
   // API-01：统一错误外壳。保留既有 `error` 文案，补充可机器消费的版本、状态和错误码。
@@ -387,9 +463,15 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
         const value = body as Record<string, unknown>;
         if (typeof value.error === 'string' && value.schemaVersion === undefined) {
           const codeByStatus: Record<number, string> = {
-            400: 'invalid_request', 401: 'unauthorized', 403: 'forbidden', 428: 'precondition_required',
-            404: 'not_found', 409: 'conflict', 429: 'rate_limited',
-            500: 'internal_error', 503: 'service_unavailable',
+            400: 'invalid_request',
+            401: 'unauthorized',
+            403: 'forbidden',
+            428: 'precondition_required',
+            404: 'not_found',
+            409: 'conflict',
+            429: 'rate_limited',
+            500: 'internal_error',
+            503: 'service_unavailable',
           };
           body = { schemaVersion: 1, ok: false, code: codeByStatus[res.statusCode] ?? 'request_failed', ...value };
         }
@@ -410,34 +492,56 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   // （逗号分隔；transport 层由 TLS + 全 API token 兜底）。
   // 必须注册在所有路由之前（含下方插件 API 与静态托管）。
   const allowedHosts = new Set([
-    `localhost:${port}`, `127.0.0.1:${port}`, `[::1]:${port}`,
+    `localhost:${port}`,
+    `127.0.0.1:${port}`,
+    `[::1]:${port}`,
     ...(deployConfig.mode === 'remote'
-      ? (process.env.MAHARNESS_ALLOWED_HOSTS ?? '').split(',').map((h) => h.trim().toLowerCase()).filter(Boolean)
+      ? (process.env.MAHARNESS_ALLOWED_HOSTS ?? '')
+          .split(',')
+          .map((h) => h.trim().toLowerCase())
+          .filter(Boolean)
       : []),
   ]);
   const devOriginPort = process.env.DEV_ORIGIN_PORT ?? '5173';
   const allowedOrigins = new Set([
-    `http://localhost:${port}`, `http://127.0.0.1:${port}`,
-    `http://localhost:${devOriginPort}`, `http://127.0.0.1:${devOriginPort}`,
+    `http://localhost:${port}`,
+    `http://127.0.0.1:${port}`,
+    `http://localhost:${devOriginPort}`,
+    `http://127.0.0.1:${devOriginPort}`,
     ...(deployConfig.mode === 'remote'
-      ? (process.env.MAHARNESS_ALLOWED_ORIGINS ?? '').split(',').map((o) => o.trim()).filter(Boolean)
+      ? (process.env.MAHARNESS_ALLOWED_ORIGINS ?? '')
+          .split(',')
+          .map((o) => o.trim())
+          .filter(Boolean)
       : []),
   ]);
   app.use((req, res, next) => {
     const host = String(req.headers.host ?? '').toLowerCase();
     if (!allowedHosts.has(host)) {
-      auditAuthorizationDenial(kernel, {
-        subject: 'anonymous', capability: `http:${String(req.method).toLowerCase()}`,
-        object: `/api/${req.path.split('/')[2] ?? ''}`, reason: 'source-host-denied',
-      }, store);
+      auditAuthorizationDenial(
+        kernel,
+        {
+          subject: 'anonymous',
+          capability: `http:${String(req.method).toLowerCase()}`,
+          object: `/api/${req.path.split('/')[2] ?? ''}`,
+          reason: 'source-host-denied',
+        },
+        store,
+      );
       return res.status(403).json({ error: 'Forbidden: Host 头不在本机白名单' });
     }
     const origin = req.headers.origin;
     if (origin !== undefined && !allowedOrigins.has(origin)) {
-      auditAuthorizationDenial(kernel, {
-        subject: 'anonymous', capability: `http:${String(req.method).toLowerCase()}`,
-        object: `/api/${req.path.split('/')[2] ?? ''}`, reason: 'source-origin-denied',
-      }, store);
+      auditAuthorizationDenial(
+        kernel,
+        {
+          subject: 'anonymous',
+          capability: `http:${String(req.method).toLowerCase()}`,
+          object: `/api/${req.path.split('/')[2] ?? ''}`,
+          reason: 'source-origin-denied',
+        },
+        store,
+      );
       return res.status(403).json({ error: 'Forbidden: Origin 不在白名单' });
     }
     next();
@@ -464,9 +568,7 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
 
   // 团队模式：共享基础设施（Provider/配置/插件/技能/工作区/人设/规则）只允许 admin 变更；
   // member 可在自己的租户内读写会话、文件、审批与 Trace。local 免 token 模式无 apiRole，保持放行。
-  const ADMIN_ONLY_PREFIXES = [
-    '/providers', '/config', '/plugins', '/skills', '/workspaces', '/personas', '/rules', '/evolve',
-  ];
+  const ADMIN_ONLY_PREFIXES = ['/providers', '/config', '/plugins', '/skills', '/workspaces', '/personas', '/rules', '/evolve'];
   app.use('/api', (req, res, next) => {
     const role = (req as express.Request & { apiRole?: string }).apiRole;
     if (!role || role === 'admin') return next();
@@ -474,8 +576,10 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     if (path === '/tenants' || path.startsWith('/tenants/') || path === '/tokens' || path.startsWith('/tokens/')) {
       return res.status(403).json({ error: 'Forbidden: 需要 admin token' });
     }
-    if (MUTATING_METHODS.has(String(req.method ?? '').toUpperCase())
-      && ADMIN_ONLY_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))) {
+    if (
+      MUTATING_METHODS.has(String(req.method ?? '').toUpperCase()) &&
+      ADMIN_ONLY_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`))
+    ) {
       return res.status(403).json({ error: 'Forbidden: 共享基础设施的变更需要 admin token' });
     }
     next();
@@ -527,7 +631,8 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   app.post('/api/maintenance/db/backup', async (_req, res) => {
     store.vacuum();
     const name = `agent-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`;
-    const dataDir = kernel.paths.dbFile.slice(0, kernel.paths.dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
+    const dataDir =
+      kernel.paths.dbFile.slice(0, kernel.paths.dbFile.lastIndexOf(process.platform === 'win32' ? '\\' : '/') || undefined) || '.';
     const target = join(dataDir, 'backups', name);
     try {
       await store.backupTo(target);
@@ -605,15 +710,24 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   /** 关闭 .env 监听（watcher + 防抖定时器）——嵌入场景（selftest/测试）多次
    *  start/stop 需要显式清理，否则 watcher 句柄持续存在并保持事件循环存活 */
   const closeEnvWatcher = () => {
-    if (envTimer) { clearTimeout(envTimer); envTimer = null; }
-    try { envWatcher?.close(); } catch { /* 忽略 */ }
+    if (envTimer) {
+      clearTimeout(envTimer);
+      envTimer = null;
+    }
+    try {
+      envWatcher?.close();
+    } catch {
+      /* 忽略 */
+    }
     envWatcher = null;
   };
   // 上次 .env 解析快照（diff 用）：首帧读不到（文件不存在）也不报错
   let lastEnv: Record<string, string> = {};
   try {
     lastEnv = dotenv.parse(readFileSync(envPath, 'utf-8'));
-  } catch { /* .env 尚不存在：以空快照起步 */ }
+  } catch {
+    /* .env 尚不存在：以空快照起步 */
+  }
   try {
     envWatcher = watch(envDir, (_event, filename) => {
       if (filename !== '.env') return;
@@ -626,15 +740,15 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
           parsed = {}; // .env 被删除/暂不可读：视为全部 key 清空
         }
         // diff 变化 key（含新增/删除）：只 bump 真正变化的，避免无谓重载
-        const changed = [...new Set([...Object.keys(parsed), ...Object.keys(lastEnv)])]
-          .filter((k) => parsed[k] !== lastEnv[k]);
+        const changed = [...new Set([...Object.keys(parsed), ...Object.keys(lastEnv)])].filter((k) => parsed[k] !== lastEnv[k]);
         lastEnv = parsed;
         if (!changed.length) return;
         dotenv.config({ override: true }); // 重新读取 .env 覆盖旧值
         console.log(`[env] .env 已变更（${changed.join(', ')}），刷新环境变量并热重载受影响插件`);
         // v3.1 依赖驱动智能重载：env 依赖版本递增 → 只重载声明了 watchEnv 的插件
         kernel.plugins.bumpEnv(changed);
-        void kernel.plugins.reloadChanged()
+        void kernel.plugins
+          .reloadChanged()
           .then((changedIds) => {
             if (changedIds.length) console.log(`[env] 已重载依赖变化的插件: ${changedIds.join(', ')}`);
           })
@@ -654,10 +768,13 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
   if (deployConfig.tls) {
     const { createServer } = await import('node:https');
     const { readFileSync } = await import('node:fs');
-    const httpsServer = createServer({
-      cert: readFileSync(deployConfig.tls.cert),
-      key: readFileSync(deployConfig.tls.key),
-    }, app);
+    const httpsServer = createServer(
+      {
+        cert: readFileSync(deployConfig.tls.cert),
+        key: readFileSync(deployConfig.tls.key),
+      },
+      app,
+    );
     httpsServer.listen(port, deployConfig.bindHost, () => {
       console.log(`\n  Web Agent 已启动（remote 模式，HTTPS）: https://<host>:${port}（绑定 ${deployConfig.bindHost}）`);
       console.log(`  沙箱根目录: ${kernel.config.get<string>('sandboxRoot', kernel.rootDir)}\n`);
@@ -665,16 +782,25 @@ export async function startServer(): Promise<{ kernel: Kernel; app: express.Expr
     server = httpsServer;
   } else {
     server = app.listen(port, deployConfig.bindHost, () => {
-    console.log(`\n  Web Agent 已启动: http://localhost:${port}`);
-    console.log(`  沙箱根目录: ${kernel.config.get<string>('sandboxRoot', kernel.rootDir)}\n`);
+      console.log(`\n  Web Agent 已启动: http://localhost:${port}`);
+      console.log(`  沙箱根目录: ${kernel.config.get<string>('sandboxRoot', kernel.rootDir)}\n`);
     });
   }
   // L6 监听失败（端口占用等）以 reject 呈现给调用方——嵌入场景（selftest）可在
   // finally 中清理资源后优雅退出，而不是被 process.exit 直接击穿。
   await new Promise<void>((resolve, reject) => {
-    const onListening = () => { detach(); resolve(); };
-    const onError = (err: Error) => { detach(); reject(err); };
-    const detach = () => { server.off('listening', onListening); server.off('error', onError); };
+    const onListening = () => {
+      detach();
+      resolve();
+    };
+    const onError = (err: Error) => {
+      detach();
+      reject(err);
+    };
+    const detach = () => {
+      server.off('listening', onListening);
+      server.off('error', onError);
+    };
     server.on('listening', onListening);
     server.on('error', onError);
   });

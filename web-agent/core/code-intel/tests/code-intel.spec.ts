@@ -10,7 +10,9 @@ type Tool = { name: string; handler: (args: Record<string, unknown>, ctx: any) =
 function loadTools(): Map<string, Tool> {
   const tools = new Map<string, Tool>();
   (codeIntel as any).onLoad({
-    register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); },
+    register(value: any) {
+      if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
+    },
     logger: { info() {} },
   });
   return tools;
@@ -18,13 +20,11 @@ function loadTools(): Map<string, Tool> {
 
 describe('代码智能', () => {
   it('提取 TS/Python 顶层符号', () => {
-    const symbols = extractSymbols([
-      'export function alpha() {}',
-      'export class Beta {}',
-      'export const gamma = 1;',
-      'def delta(): pass',
-      'class Epsilon: pass',
-    ].join('\n'));
+    const symbols = extractSymbols(
+      ['export function alpha() {}', 'export class Beta {}', 'export const gamma = 1;', 'def delta(): pass', 'class Epsilon: pass'].join(
+        '\n',
+      ),
+    );
     assert.deepEqual(symbols.map((s) => s.name).sort(), ['Beta', 'Epsilon', 'alpha', 'delta', 'gamma']);
   });
 
@@ -44,7 +44,9 @@ describe('代码智能', () => {
       assert.equal(found.ok, true);
       assert.ok(found.data.matches.length >= 3);
       assert.ok(found.data.matches.every((m: any) => !String(m.file).includes('node_modules')));
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('TS 文件使用编译器 AST 提取，覆盖箭头常量、接口与默认类', async () => {
@@ -78,19 +80,30 @@ describe('代码智能', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-code-intel-'));
     try {
       mkdirSync(join(root, 'src'), { recursive: true });
-      writeFileSync(join(root, 'tsconfig.json'), JSON.stringify({
-        compilerOptions: { strict: true, noEmit: true, target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', skipLibCheck: true },
-        include: ['src/**/*.ts'],
-      }));
+      writeFileSync(
+        join(root, 'tsconfig.json'),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            noEmit: true,
+            target: 'ES2022',
+            module: 'ESNext',
+            moduleResolution: 'Bundler',
+            skipLibCheck: true,
+          },
+          include: ['src/**/*.ts'],
+        }),
+      );
       writeFileSync(join(root, 'src', 'bad.ts'), 'export const count: string = 1;\n');
       const tools = loadTools();
-      const result = await tools.get('project_diagnostics')!.handler(
-        { path: '.', maxDiagnostics: 20 },
-        { sandboxRoot: root, turn: 0, cache: {}, trace: {} },
-      );
+      const result = await tools
+        .get('project_diagnostics')!
+        .handler({ path: '.', maxDiagnostics: 20 }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, true, result.error);
       assert.ok(result.data.counts.error >= 1);
       assert.ok(result.data.diagnostics.some((item: any) => item.file === 'src/bad.ts' && item.line === 1));
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

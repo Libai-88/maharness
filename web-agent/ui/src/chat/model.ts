@@ -41,9 +41,7 @@ export type ChatTimelineItem = ChatTurn | ChatMarkerItem;
 function buildParts(message: ChatMessage, statusText?: string | null): ChatPart[] {
   const parts: ChatPart[] = [];
   const content = message.retryFrom ? message.content.slice(message.retryFrom) : message.content;
-  const reasoning = message.retryFromReasoning
-    ? (message.reasoning ?? '').slice(message.retryFromReasoning)
-    : message.reasoning;
+  const reasoning = message.retryFromReasoning ? (message.reasoning ?? '').slice(message.retryFromReasoning) : message.reasoning;
   const narration = (message.narration ?? []).filter((part) => part.trim());
   const thinking = !!message.streaming && !content && !(message.tools ?? []).some((tool) => tool.status === 'running');
 
@@ -117,10 +115,7 @@ function buildParts(message: ChatMessage, statusText?: string | null): ChatPart[
   return parts;
 }
 
-export function buildChatTimeline(
-  messages: ChatMessage[],
-  statusText?: string | null,
-): ChatTimelineItem[] {
+export function buildChatTimeline(messages: ChatMessage[], statusText?: string | null): ChatTimelineItem[] {
   const timeline: ChatTimelineItem[] = [];
   const nodes = withJoins(messages);
   let currentTurn: ChatTurn | null = null;

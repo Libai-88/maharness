@@ -9,5 +9,11 @@
 | [0003](0003-social-observations.md) | 社会健康改为观察指标 | accepted |
 | [0004](0004-database-migration-v16.md) | 数据库 v16 与不可变迁移 | accepted |
 | [0005](0005-experience-review-v2.md) | Experience Review v2 与真实模型验收 | accepted |
+| [0006](0006-kernel-scope.md) | 内核边界判据：机制与契约，不放产品能力 | accepted |
+| [0007](0007-deployment-envelope.md) | 部署定位与扩展路径（单机单库 + 三条升级触发） | accepted |
+| [0008](0008-run-engine-layering.md) | Run 引擎分层：journal/state/ledger/recovery/executor | accepted |
+| [0009](0009-contract-single-source.md) | 契约单一来源与前端类型生成 | accepted |
+| [0010](0010-routes-to-usecases.md) | 路由只做协议，编排下沉 usecases | accepted |
+| [0011](0011-complexity-budget.md) | 热点度量改用复杂度预算（基线只降不升） | accepted |
 
 与本文关联的既有权威文档：威胁模型 [threat-model-v1.md](../threat-model-v1.md)、版本与兼容策略 [release-policy-v1.md](../release-policy-v1.md)、插件 manifest 兼容 [manifest-v1-compatibility.md](../manifest-v1-compatibility.md)、API 契约 [api-contract-v1.md](../api-contract-v1.md)、供应链策略 [supply-chain-policy-v1.md](../supply-chain-policy-v1.md)。

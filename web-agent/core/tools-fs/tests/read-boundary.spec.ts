@@ -12,7 +12,14 @@ test('search engines and directory tools enforce the same private-data boundary 
   const trace = { startStep: () => ({ finish() {} }) };
   const cache = { makeKey: () => '', l2Get: () => ({ hit: false }), l2Set() {} };
   const context = { sandboxRoot: root, turn: 0, cache, trace } as unknown as ToolContext;
-  const ctx = { paths: { root }, config: { get: (_key: string, fallback: unknown) => fallback }, register: (cap: Capability) => { if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool); }, logger: { info() {} } } as unknown as PluginContext;
+  const ctx = {
+    paths: { root },
+    config: { get: (_key: string, fallback: unknown) => fallback },
+    register: (cap: Capability) => {
+      if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool);
+    },
+    logger: { info() {} },
+  } as unknown as PluginContext;
   try {
     mkdirSync(join(root, 'data'));
     mkdirSync(join(root, 'nested'));
@@ -34,18 +41,30 @@ test('search engines and directory tools enforce the same private-data boundary 
     }
     const listing = await tools.get('list_dir')!.handler({ path: 'nested' }, context);
     assert.doesNotMatch(JSON.stringify(listing.data), /\.env/);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 test('contract writes stay on the named file and recheck junctions at execution time', async () => {
   const root = mkdtempSync(join(tmpdir(), 'mh-contract-boundary-'));
   const tools = new Map<string, ToolDef>();
   const context = {
-    sandboxRoot: root, turn: 0, runId: 'child', tenantId: 'tenant-a',
+    sandboxRoot: root,
+    turn: 0,
+    runId: 'child',
+    tenantId: 'tenant-a',
     cache: { l2DeleteNamespace() {} },
     authorization: { workspace: root, profile: 'standard', revision: 0, readOnly: false, artifactWritePaths: ['delivery/result.md'] },
   } as unknown as ToolContext;
-  const ctx = { paths: { root }, config: { get: (_key: string, fallback: unknown) => fallback }, register: (cap: Capability) => { if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool); }, logger: { info() {} } } as unknown as PluginContext;
+  const ctx = {
+    paths: { root },
+    config: { get: (_key: string, fallback: unknown) => fallback },
+    register: (cap: Capability) => {
+      if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool);
+    },
+    logger: { info() {} },
+  } as unknown as PluginContext;
   try {
     await plugin.onLoad(ctx);
     const write = (path: string) => tools.get('write_file')!.handler({ path, content: 'approved result', expectedVersion: null }, context);
@@ -56,7 +75,9 @@ test('contract writes stay on the named file and recheck junctions at execution 
     const written = await write('delivery/result.md');
     assert.equal(written.ok, true);
     const expectedVersion = (written.data as { version: string }).version;
-    const edited = await tools.get('edit_file')!.handler({ path: 'delivery/result.md', edits: [{ oldText: 'approved', newText: 'reviewed' }], expectedVersion }, context);
+    const edited = await tools
+      .get('edit_file')!
+      .handler({ path: 'delivery/result.md', edits: [{ oldText: 'approved', newText: 'reviewed' }], expectedVersion }, context);
     assert.equal(edited.ok, true);
     assert.equal(readFileSync(join(root, 'delivery/result.md'), 'utf8'), 'reviewed result');
     context.authorization!.readOnly = true;
@@ -67,5 +88,7 @@ test('contract writes stay on the named file and recheck junctions at execution 
     symlinkSync(join(root, 'other-tenant'), join(root, 'delivery'), process.platform === 'win32' ? 'junction' : 'dir');
     assert.equal((await write('delivery/result.md')).ok, false);
     assert.equal(existsSync(join(root, 'other-tenant/result.md')), false);
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

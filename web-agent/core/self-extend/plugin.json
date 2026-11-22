@@ -15,18 +15,9 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "create_plugin",
-        "plugin_status",
-        "enable_plugin",
-        "disable_plugin"
-      ],
-      "persona": [
-        "self-extend-rules"
-      ],
-      "api": [
-        "panel"
-      ]
+      "tool": ["create_plugin", "plugin_status", "enable_plugin", "disable_plugin"],
+      "persona": ["self-extend-rules"],
+      "api": ["panel"]
     }
   },
   "apiVersion": 2

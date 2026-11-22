@@ -183,7 +183,17 @@ export interface ReviewSuggestion {
   id: string;
   title: string;
   detail: string;
-  category: 'capability' | 'tool-contract' | 'result-feedback' | 'state' | 'recovery' | 'context' | 'authorization' | 'performance' | 'artifact' | 'organization';
+  category:
+    | 'capability'
+    | 'tool-contract'
+    | 'result-feedback'
+    | 'state'
+    | 'recovery'
+    | 'context'
+    | 'authorization'
+    | 'performance'
+    | 'artifact'
+    | 'organization';
   impact: 'high' | 'medium' | 'low';
   confidence: number;
   evidenceRefs: string[];
@@ -342,7 +352,8 @@ export class ExperienceRepository {
   constructor(private readonly db: Database.Database) {}
 
   putReview(record: AIUserReview, requestKey?: string): void {
-    this.db.prepare(`
+    this.db
+      .prepare(`
       INSERT INTO experience_reviews_v1(id,tenant_id,status,request_key,run_ids,record,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
@@ -350,45 +361,48 @@ export class ExperienceRepository {
         run_ids=excluded.run_ids,
         record=excluded.record,
         updated_at=excluded.updated_at
-    `).run(
-      record.id,
-      record.tenantId,
-      record.status,
-      requestKey ?? record.requestKey ?? null,
-      JSON.stringify(record.sourceRunIds),
-      JSON.stringify(record),
-      record.createdAt,
-      record.updatedAt,
-    );
+    `)
+      .run(
+        record.id,
+        record.tenantId,
+        record.status,
+        requestKey ?? record.requestKey ?? null,
+        JSON.stringify(record.sourceRunIds),
+        JSON.stringify(record),
+        record.createdAt,
+        record.updatedAt,
+      );
   }
 
   review(id: string, tenantId: string): AIUserReview | undefined {
-    const row = this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE id=? AND tenant_id=?')
-      .get(id, tenantId) as ReviewRow | undefined;
-    return row ? JSON.parse(row.record) as AIUserReview : undefined;
+    const row = this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE id=? AND tenant_id=?').get(id, tenantId) as
+      | ReviewRow
+      | undefined;
+    return row ? (JSON.parse(row.record) as AIUserReview) : undefined;
   }
 
   reviewByRequestKey(tenantId: string, requestKey: string): AIUserReview | undefined {
-    const row = this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE tenant_id=? AND request_key=?')
-      .get(tenantId, requestKey) as ReviewRow | undefined;
-    return row ? JSON.parse(row.record) as AIUserReview : undefined;
+    const row = this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE tenant_id=? AND request_key=?').get(tenantId, requestKey) as
+      | ReviewRow
+      | undefined;
+    return row ? (JSON.parse(row.record) as AIUserReview) : undefined;
   }
 
   listReviews(tenantId: string, limit = 100, runId?: string): AIUserReview[] {
     const cap = Math.max(1, Math.min(500, Math.floor(limit)));
     const rows = runId
-      ? this.db.prepare(`SELECT record FROM experience_reviews_v1
+      ? this.db
+          .prepare(`SELECT record FROM experience_reviews_v1
           WHERE tenant_id=? AND EXISTS (
             SELECT 1 FROM json_each(experience_reviews_v1.run_ids) WHERE value=?
-          ) ORDER BY updated_at DESC LIMIT ?`).all(tenantId, runId, cap)
-      : this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?')
-        .all(tenantId, cap);
-    return (rows as ReviewRow[]).map(row => JSON.parse(row.record) as AIUserReview);
+          ) ORDER BY updated_at DESC LIMIT ?`)
+          .all(tenantId, runId, cap)
+      : this.db.prepare('SELECT record FROM experience_reviews_v1 WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?').all(tenantId, cap);
+    return (rows as ReviewRow[]).map((row) => JSON.parse(row.record) as AIUserReview);
   }
 
   interruptRunning(): void {
-    const rows = this.db.prepare("SELECT record FROM experience_reviews_v1 WHERE status IN ('queued','running')")
-      .all() as ReviewRow[];
+    const rows = this.db.prepare("SELECT record FROM experience_reviews_v1 WHERE status IN ('queued','running')").all() as ReviewRow[];
     for (const row of rows) {
       const review = JSON.parse(row.record) as AIUserReview;
       review.status = 'failed';
@@ -399,71 +413,88 @@ export class ExperienceRepository {
   }
 
   putFinding(record: ExperienceFinding): void {
-    this.db.prepare(`
+    this.db
+      .prepare(`
       INSERT INTO experience_findings_v1(id,tenant_id,review_id,fingerprint,status,record,created_at,updated_at)
       VALUES(?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         status=excluded.status, record=excluded.record, updated_at=excluded.updated_at
-    `).run(
-      record.id, record.tenantId, record.reviewId, record.fingerprint, record.status,
-      JSON.stringify(record), record.createdAt, record.updatedAt,
-    );
+    `)
+      .run(
+        record.id,
+        record.tenantId,
+        record.reviewId,
+        record.fingerprint,
+        record.status,
+        JSON.stringify(record),
+        record.createdAt,
+        record.updatedAt,
+      );
   }
 
   finding(id: string, tenantId: string): ExperienceFinding | undefined {
-    const row = this.db.prepare('SELECT record FROM experience_findings_v1 WHERE id=? AND tenant_id=?')
-      .get(id, tenantId) as ReviewRow | undefined;
-    return row ? JSON.parse(row.record) as ExperienceFinding : undefined;
+    const row = this.db.prepare('SELECT record FROM experience_findings_v1 WHERE id=? AND tenant_id=?').get(id, tenantId) as
+      | ReviewRow
+      | undefined;
+    return row ? (JSON.parse(row.record) as ExperienceFinding) : undefined;
   }
 
   findings(tenantId: string, fingerprint?: string, limit = 100): ExperienceFinding[] {
     const cap = Math.max(1, Math.min(500, Math.floor(limit)));
     const rows = fingerprint
-      ? this.db.prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND fingerprint=? ORDER BY updated_at DESC LIMIT ?')
-        .all(tenantId, fingerprint, cap)
-      : this.db.prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?')
-        .all(tenantId, cap);
-    return (rows as ReviewRow[]).map(row => JSON.parse(row.record) as ExperienceFinding);
+      ? this.db
+          .prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND fingerprint=? ORDER BY updated_at DESC LIMIT ?')
+          .all(tenantId, fingerprint, cap)
+      : this.db.prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? ORDER BY updated_at DESC LIMIT ?').all(tenantId, cap);
+    return (rows as ReviewRow[]).map((row) => JSON.parse(row.record) as ExperienceFinding);
   }
 
   findingsByStatus(tenantId: string, status: FindingStatus, limit = 100): ExperienceFinding[] {
     const cap = Math.max(1, Math.min(500, Math.floor(limit)));
-    const rows = this.db.prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND status=? ORDER BY updated_at DESC LIMIT ?')
+    const rows = this.db
+      .prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND status=? ORDER BY updated_at DESC LIMIT ?')
       .all(tenantId, status, cap) as ReviewRow[];
-    return rows.map(row => JSON.parse(row.record) as ExperienceFinding);
+    return rows.map((row) => JSON.parse(row.record) as ExperienceFinding);
   }
 
   findingByFingerprint(tenantId: string, fingerprint: string): ExperienceFinding | undefined {
-    const row = this.db.prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND fingerprint=? ORDER BY created_at ASC LIMIT 1')
+    const row = this.db
+      .prepare('SELECT record FROM experience_findings_v1 WHERE tenant_id=? AND fingerprint=? ORDER BY created_at ASC LIMIT 1')
       .get(tenantId, fingerprint) as ReviewRow | undefined;
-    return row ? JSON.parse(row.record) as ExperienceFinding : undefined;
+    return row ? (JSON.parse(row.record) as ExperienceFinding) : undefined;
   }
 
   putAudit(record: ReviewAudit): void {
-    this.db.prepare(`
+    this.db
+      .prepare(`
       INSERT OR REPLACE INTO experience_audits_v1(id,tenant_id,review_id,record,created_at)
       VALUES(?,?,?,?,?)
-    `).run(record.id, record.tenantId, record.reviewId, JSON.stringify(record), record.createdAt);
+    `)
+      .run(record.id, record.tenantId, record.reviewId, JSON.stringify(record), record.createdAt);
   }
 
   audits(reviewId: string, tenantId: string): ReviewAudit[] {
-    const rows = this.db.prepare('SELECT record FROM experience_audits_v1 WHERE review_id=? AND tenant_id=? ORDER BY created_at DESC')
+    const rows = this.db
+      .prepare('SELECT record FROM experience_audits_v1 WHERE review_id=? AND tenant_id=? ORDER BY created_at DESC')
       .all(reviewId, tenantId) as ReviewRow[];
-    return rows.map(row => JSON.parse(row.record) as ReviewAudit);
+    return rows.map((row) => JSON.parse(row.record) as ReviewAudit);
   }
 
   putRegression(record: ExperienceRegressionCase): void {
-    this.db.prepare(`
+    this.db
+      .prepare(`
       INSERT INTO experience_regressions_v1(id,tenant_id,finding_id,record,created_at)
       VALUES(?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET record=excluded.record
-    `).run(record.id, record.tenantId, record.findingId, JSON.stringify(record), record.createdAt);
+    `)
+      .run(record.id, record.tenantId, record.findingId, JSON.stringify(record), record.createdAt);
   }
 
   regressions(findingId: string, tenantId: string): ExperienceRegressionCase[] {
-    const rows = this.db.prepare('SELECT record FROM experience_regressions_v1 WHERE finding_id=? AND tenant_id=? ORDER BY created_at DESC')
+    const rows = this.db
+      .prepare('SELECT record FROM experience_regressions_v1 WHERE finding_id=? AND tenant_id=? ORDER BY created_at DESC')
       .all(findingId, tenantId) as ReviewRow[];
-    return rows.map(row => JSON.parse(row.record) as ExperienceRegressionCase);
+    return rows.map((row) => JSON.parse(row.record) as ExperienceRegressionCase);
   }
 
   transaction<T>(work: () => T): T {

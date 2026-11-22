@@ -13,18 +13,9 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "handoff_to",
-        "recall_tool_result"
-      ],
-      "role": [
-        "main"
-      ],
-      "service": [
-        "chat",
-        "provider-gateway",
-        "embedding"
-      ]
+      "tool": ["handoff_to", "recall_tool_result"],
+      "role": ["main"],
+      "service": ["chat", "provider-gateway", "embedding"]
     }
   },
   "limits": {

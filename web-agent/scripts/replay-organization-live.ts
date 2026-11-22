@@ -6,10 +6,7 @@ import { Store } from '../server/db';
 import { OrganizationService } from '../server/services/organization/service';
 
 const root = resolve(import.meta.dirname, '..');
-const reportDir = resolve(
-  root,
-  process.env.EVAL_REPORT_DIR ?? 'evals/reports/organization-live/20261117-social-os-v4',
-);
+const reportDir = resolve(root, process.env.EVAL_REPORT_DIR ?? 'evals/reports/organization-live/20261117-social-os-v4');
 const sourcePath = join(reportDir, 'report.json');
 if (!existsSync(sourcePath)) throw new Error(`Missing live report: ${sourcePath}`);
 const replayDir = resolve(
@@ -54,23 +51,26 @@ async function copyDatabase(sourcePath: string, destinationPath: string): Promis
 function readCacheUsage(path: string) {
   const database = new Database(path, { readonly: true });
   try {
-    const rows = database.prepare('SELECT record FROM run_model_calls_v2 ORDER BY rowid').all()
-      .map(row => JSON.parse((row as { record: string }).record) as {
-        usageStatus?: string;
-        cachedInput?: number;
-        missInput?: number;
-        cacheWriteTokens?: number;
-      });
-    const valid = (value: unknown): value is number =>
-      Number.isSafeInteger(value) && Number(value) >= 0;
-    const hitMissKnown = rows.length > 0 && rows.every(row =>
-      row.usageStatus === 'reported' && valid(row.cachedInput) && valid(row.missInput));
-    const writeKnown = rows.length > 0 && rows.every(row =>
-      row.usageStatus === 'reported' && valid(row.cacheWriteTokens));
+    const rows = database
+      .prepare('SELECT record FROM run_model_calls_v2 ORDER BY rowid')
+      .all()
+      .map(
+        (row) =>
+          JSON.parse((row as { record: string }).record) as {
+            usageStatus?: string;
+            cachedInput?: number;
+            missInput?: number;
+            cacheWriteTokens?: number;
+          },
+      );
+    const valid = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) >= 0;
+    const hitMissKnown =
+      rows.length > 0 && rows.every((row) => row.usageStatus === 'reported' && valid(row.cachedInput) && valid(row.missInput));
+    const writeKnown = rows.length > 0 && rows.every((row) => row.usageStatus === 'reported' && valid(row.cacheWriteTokens));
     return {
       calls: rows.length,
-      hitMissStatus: hitMissKnown ? 'known' as const : 'unknown' as const,
-      writeStatus: writeKnown ? 'known' as const : 'unknown' as const,
+      hitMissStatus: hitMissKnown ? ('known' as const) : ('unknown' as const),
+      writeStatus: writeKnown ? ('known' as const) : ('unknown' as const),
       cachedInputTokens: hitMissKnown ? rows.reduce((sum, row) => sum + row.cachedInput!, 0) : null,
       missInputTokens: hitMissKnown ? rows.reduce((sum, row) => sum + row.missInput!, 0) : null,
       cacheWriteTokens: writeKnown ? rows.reduce((sum, row) => sum + row.cacheWriteTokens!, 0) : null,
@@ -114,7 +114,7 @@ for (const sample of source.samples) {
     const order = organization.workOrderForRun(run);
     const detail = organization.detail(order.id, 'default');
     const team = detail.teamCycles.at(-1);
-    const contracts = detail.contracts.filter(contract => contract.teamCycleId === team?.id);
+    const contracts = detail.contracts.filter((contract) => contract.teamCycleId === team?.id);
     const checks: Array<{ name: string; passed: boolean }> = [
       { name: 'work receipt exists', passed: Boolean(receipt) },
       { name: 'terminal receipt matches work order', passed: receipt?.workOrderId === order.id },
@@ -132,13 +132,14 @@ for (const sample of source.samples) {
         { name: 'collapsed team remains partial', passed: team?.status === 'partial' },
       );
     }
-    const preserved = sample.checks.filter(check =>
-      check.name !== 'work receipt exists' && check.name !== 'failed branches collapse to solo');
+    const preserved = sample.checks.filter(
+      (check) => check.name !== 'work receipt exists' && check.name !== 'failed branches collapse to solo',
+    );
     const effective = [...preserved, ...checks];
     replay.push({
       id: sample.id,
       name: sample.name,
-      pass: effective.every(check => check.passed),
+      pass: effective.every((check) => check.passed),
       rawPassed: sample.passed,
       checks: effective,
       receiptStatus: receipt?.status ?? null,
@@ -152,12 +153,14 @@ for (const sample of source.samples) {
   }
 }
 
-const hitMissKnown = replay.length > 0 && replay.every(item =>
-  (item.cacheUsage as { hitMissStatus?: string } | null | undefined)?.hitMissStatus === 'known');
-const cacheWriteKnown = replay.length > 0 && replay.every(item =>
-  (item.cacheUsage as { writeStatus?: string } | null | undefined)?.writeStatus === 'known');
-const cacheUsages = replay.map(item =>
-  item.cacheUsage as { cachedInputTokens: number; missInputTokens: number; cacheWriteTokens: number } | null);
+const hitMissKnown =
+  replay.length > 0 &&
+  replay.every((item) => (item.cacheUsage as { hitMissStatus?: string } | null | undefined)?.hitMissStatus === 'known');
+const cacheWriteKnown =
+  replay.length > 0 && replay.every((item) => (item.cacheUsage as { writeStatus?: string } | null | undefined)?.writeStatus === 'known');
+const cacheUsages = replay.map(
+  (item) => item.cacheUsage as { cachedInputTokens: number; missInputTokens: number; cacheWriteTokens: number } | null,
+);
 
 const output = {
   kind: 'organization-live-trace-replay',
@@ -166,7 +169,8 @@ const output = {
   source: sourcePath,
   sourceReportHash,
   sourceDatabases,
-  semantics: 'Replays persisted model outputs and tool calls through the corrected deterministic finalizer. It does not claim a second model run.',
+  semantics:
+    'Replays persisted model outputs and tool calls through the corrected deterministic finalizer. It does not claim a second model run.',
   isolation: 'Each source database is backed up before replay; only the replay copy is finalized.',
   providerCacheUsage: {
     hitMissStatus: hitMissKnown ? 'known' : 'unknown',
@@ -177,17 +181,23 @@ const output = {
     cacheSavingsUsd: null,
     source: 'run_model_calls_v2.record',
   },
-  rawPassed: replay.filter(item => item.rawPassed).length,
-  reconciledPassed: replay.filter(item => item.pass).length,
+  rawPassed: replay.filter((item) => item.rawPassed).length,
+  reconciledPassed: replay.filter((item) => item.pass).length,
   total: replay.length,
   samples: replay,
 };
 
 mkdirSync(replayDir, { recursive: true });
 writeFileSync(outputPath, JSON.stringify(output, null, 2), 'utf8');
-console.log(JSON.stringify({
-  output: outputPath,
-  rawPassed: output.rawPassed,
-  reconciledPassed: output.reconciledPassed,
-  total: output.total,
-}, null, 2));
+console.log(
+  JSON.stringify(
+    {
+      output: outputPath,
+      rawPassed: output.rawPassed,
+      reconciledPassed: output.reconciledPassed,
+      total: output.total,
+    },
+    null,
+    2,
+  ),
+);

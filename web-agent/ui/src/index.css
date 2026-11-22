@@ -1,9 +1,9 @@
 @layer theme, base, components, utilities;
 
-@import 'tailwindcss';
-@import 'tw-animate-css';
-@import 'shadcn/tailwind.css';
-@import '@fontsource-variable/geist';
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+@import "@fontsource-variable/geist";
 
 @source "../node_modules/streamdown/dist/*.js";
 
@@ -11,7 +11,7 @@
 
 @theme inline {
   --font-heading: var(--font-sans);
-  --font-sans: 'Geist Variable', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
+  --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -53,8 +53,8 @@
 }
 
 :root {
-  --font-sans: 'Geist Variable', 'PingFang SC', 'Microsoft YaHei', system-ui, sans-serif;
-  --font-mono: 'Cascadia Mono', Consolas, ui-monospace, monospace;
+  --font-sans: "Geist Variable", "PingFang SC", "Microsoft YaHei", system-ui, sans-serif;
+  --font-mono: "Cascadia Mono", Consolas, ui-monospace, monospace;
   --radius: 0.625rem;
   --background: #f7f7f5;
   --foreground: #1c1b19;
@@ -85,7 +85,7 @@
 }
 
 .dark,
-:root[data-theme='dark'] {
+:root[data-theme="dark"] {
   --background: #141413;
   --foreground: #f1efe9;
   --card: #1b1a18;
@@ -111,10 +111,34 @@
   color-scheme: dark;
 }
 
-:root[data-brand='ink'] { --brand-primary: #3e3d3a; --brand-secondary: #696964; --brand-accent: #7d776d; --brand-highlight: #ece9e2; --brand-highlight-soft: #f2f0eb; }
-:root[data-theme='dark'][data-brand='ink'] { --brand-primary: #d8d3ca; --brand-secondary: #aaa59b; --brand-accent: #b0a79d; --brand-highlight: #34312c; --brand-highlight-soft: #2a2824; }
-:root[data-brand='moss'] { --brand-primary: #477553; --brand-secondary: #3f8274; --brand-accent: #96713a; --brand-highlight: #e7efe4; --brand-highlight-soft: #eff4ed; }
-:root[data-theme='dark'][data-brand='moss'] { --brand-primary: #79ab88; --brand-secondary: #63a998; --brand-accent: #c2a467; --brand-highlight: #26332a; --brand-highlight-soft: #202b24; }
+:root[data-brand="ink"] {
+  --brand-primary: #3e3d3a;
+  --brand-secondary: #696964;
+  --brand-accent: #7d776d;
+  --brand-highlight: #ece9e2;
+  --brand-highlight-soft: #f2f0eb;
+}
+:root[data-theme="dark"][data-brand="ink"] {
+  --brand-primary: #d8d3ca;
+  --brand-secondary: #aaa59b;
+  --brand-accent: #b0a79d;
+  --brand-highlight: #34312c;
+  --brand-highlight-soft: #2a2824;
+}
+:root[data-brand="moss"] {
+  --brand-primary: #477553;
+  --brand-secondary: #3f8274;
+  --brand-accent: #96713a;
+  --brand-highlight: #e7efe4;
+  --brand-highlight-soft: #eff4ed;
+}
+:root[data-theme="dark"][data-brand="moss"] {
+  --brand-primary: #79ab88;
+  --brand-secondary: #63a998;
+  --brand-accent: #c2a467;
+  --brand-highlight: #26332a;
+  --brand-highlight-soft: #202b24;
+}
 
 :root {
   --primary: var(--brand-primary);
@@ -144,7 +168,13 @@
 }
 
 @layer base {
-  * { @apply border-border outline-ring/50; }
-  body { @apply bg-background text-foreground; }
-  html { @apply font-sans; }
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  html {
+    @apply font-sans;
+  }
 }

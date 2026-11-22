@@ -7,10 +7,15 @@ import { join } from 'node:path';
 import { Kernel } from '../index';
 import type { PluginManifest, ToolContext } from '../types';
 
-function setup(plugins: Record<string, {
-  manifest: Partial<PluginManifest>;
-  entry: string;
-}>): { kernel: Kernel; rootDir: string; cleanup: () => Promise<void> } {
+function setup(
+  plugins: Record<
+    string,
+    {
+      manifest: Partial<PluginManifest>;
+      entry: string;
+    }
+  >,
+): { kernel: Kernel; rootDir: string; cleanup: () => Promise<void> } {
   const rootDir = mkdtempSync(join(tmpdir(), 'mh-process-plugin-'));
   const dataDir = join(rootDir, 'data');
   const userPluginsDir = join(rootDir, 'plugins');
@@ -18,9 +23,30 @@ function setup(plugins: Record<string, {
   for (const [id, plugin] of Object.entries(plugins)) {
     const dir = join(userPluginsDir, id);
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id, name: id, version: '0.1.0', entry: 'index.ts', ...plugin.manifest,
-    }));
+    writeFileSync(
+      join(dir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id,
+        name: id,
+        version: '0.1.0',
+        entry: 'index.ts',
+        ...plugin.manifest,
+      }),
+    );
     writeFileSync(join(dir, 'index.ts'), plugin.entry);
   }
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
@@ -28,8 +54,16 @@ function setup(plugins: Record<string, {
     kernel,
     rootDir,
     cleanup: async () => {
-      try { await kernel.stop(); } catch { /* 已停止 */ }
-      try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* Windows 句柄迟释放 */ }
+      try {
+        await kernel.stop();
+      } catch {
+        /* 已停止 */
+      }
+      try {
+        rmSync(rootDir, { recursive: true, force: true });
+      } catch {
+        /* Windows 句柄迟释放 */
+      }
     },
   };
 }
@@ -44,38 +78,70 @@ const execution = {
 };
 
 describe('插件进程执行边界', () => {
-  test('non-cooperative cancellation settles only after the child process exits', async t => {
-    const f=setup({stubborn:{manifest:execution,entry:`export default {id:'stubborn',name:'stubborn',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},async handler(args){if(!args.wait)return {ok:true,data:{pid:process.pid}};ctx.bus.emit({type:'stubborn.entered',ts:Date.now()});await new Promise(()=>{});return {ok:true}}}})}}`}});
-    t.after(f.cleanup);await f.kernel.plugins.loadAll();
-    const tool=toolOf(f.kernel,'proc_pid')!;const ctx={turn:0,sandboxRoot:f.rootDir,cache:f.kernel.cache,trace:f.kernel.trace} as ToolContext;
-    const pid=((await tool.handler({},ctx)).data as {pid:number}).pid;
-    const ac=new AbortController();let entered!:()=>void;const started=new Promise<void>(resolve=>{entered=resolve});
-    const off=f.kernel.bus.on('stubborn.entered',()=>entered());
-    const pending=tool.handler({wait:true},{...ctx,signal:ac.signal});await started;off();
-    ac.abort();const result=await pending;
-    assert.equal(result.ok,false);assert.equal(result.failure?.outcome,'unknown');
-    assert.throws(()=>process.kill(pid,0));
+  test('non-cooperative cancellation settles only after the child process exits', async (t) => {
+    const f = setup({
+      stubborn: {
+        manifest: execution,
+        entry: `export default {id:'stubborn',name:'stubborn',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},async handler(args){if(!args.wait)return {ok:true,data:{pid:process.pid}};ctx.bus.emit({type:'stubborn.entered',ts:Date.now()});await new Promise(()=>{});return {ok:true}}}})}}`,
+      },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
+    const tool = toolOf(f.kernel, 'proc_pid')!;
+    const ctx = { turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace } as ToolContext;
+    const pid = ((await tool.handler({}, ctx)).data as { pid: number }).pid;
+    const ac = new AbortController();
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => {
+      entered = resolve;
+    });
+    const off = f.kernel.bus.on('stubborn.entered', () => entered());
+    const pending = tool.handler({ wait: true }, { ...ctx, signal: ac.signal });
+    await started;
+    off();
+    ac.abort();
+    const result = await pending;
+    assert.equal(result.ok, false);
+    assert.equal(result.failure?.outcome, 'unknown');
+    assert.throws(() => process.kill(pid, 0));
   });
   test('process mode rejects composite tools whose invocation callback cannot cross IPC', async (t) => {
-    const f = setup({ composite: { manifest: execution, entry: `export default {id:'composite',name:'composite',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',description:'composite',parameters:{type:'object'},outputSchema:{type:'object'},permissions:[],sideEffect:'read',invokesTools:true,async handler(_args,tctx){return tctx.invoke('read_file',{});}}});}};` } });
+    const f = setup({
+      composite: {
+        manifest: execution,
+        entry: `export default {id:'composite',name:'composite',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',description:'composite',parameters:{type:'object'},outputSchema:{type:'object'},permissions:[],sideEffect:'read',invokesTools:true,async handler(_args,tctx){return tctx.invoke('read_file',{});}}});}};`,
+      },
+    });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
-    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED')));
+    assert.ok(f.kernel.plugins.diagnostics().some((item) => item.message.includes('PLUGIN_PROCESS_COMPOSITION_UNSUPPORTED')));
   });
 
-  test('process mode rejects dynamic deadlines instead of silently dropping the resolver', async t => {
-    const f = setup({ dynamic: { manifest: execution, entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},executionTimeoutMs:()=>2000,async handler(){return {ok:true}}}})}}` } });
-    t.after(f.cleanup); await f.kernel.plugins.loadAll();
+  test('process mode rejects dynamic deadlines instead of silently dropping the resolver', async (t) => {
+    const f = setup({
+      dynamic: {
+        manifest: execution,
+        entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},executionTimeoutMs:()=>2000,async handler(){return {ok:true}}}})}}`,
+      },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
     assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
-    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('executionTimeoutMs')));
+    assert.ok(f.kernel.plugins.diagnostics().some((item) => item.message.includes('executionTimeoutMs')));
   });
 
-  test('process mode rejects call-specific side-effect classifiers instead of hiding the loss', async t => {
-    const f = setup({ dynamic: { manifest: execution, entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},classifySideEffect:()=> 'read',async handler(){return {ok:true}}}})}}` } });
-    t.after(f.cleanup); await f.kernel.plugins.loadAll();
+  test('process mode rejects call-specific side-effect classifiers instead of hiding the loss', async (t) => {
+    const f = setup({
+      dynamic: {
+        manifest: execution,
+        entry: `export default {id:'dynamic',name:'dynamic',version:'0.1.0',onLoad(ctx){ctx.register({kind:'tool',tool:{name:'proc_pid',version:'2.0.0',permissions:[],sideEffect:'read',description:'test',parameters:{type:'object'},outputSchema:{},classifySideEffect:()=> 'read',async handler(){return {ok:true}}}})}}`,
+      },
+    });
+    t.after(f.cleanup);
+    await f.kernel.plugins.loadAll();
     assert.equal(toolOf(f.kernel, 'proc_pid'), undefined);
-    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('classifySideEffect')));
+    assert.ok(f.kernel.plugins.diagnostics().some((item) => item.message.includes('classifySideEffect')));
   });
 
   test('filesystem=storage 只允许插件存储目录，越界读取被运行时拒绝', async (t) => {
@@ -85,19 +151,25 @@ describe('插件进程执行边界', () => {
           execution: { mode: 'process', timeoutMs: 5_000, memoryMb: 64 },
           permissions: { capabilities: { tool: ['proc_fs_probe'] }, runtime: { filesystem: 'storage' } },
         },
-        entry: "\nexport default {\n  id: 'fsprobe', name: 'fsprobe', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_fs_probe',\n      description: 'read a path under the plugin filesystem policy',\n      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },\n      sideEffect: 'read',\n      async handler(args) {\n        try {\n          const fs = await import('node:' + 'fs');\n          const handle = await fs.promises.open(args.path, 'r');\n          const buffer = Buffer.alloc(64);\n          const { bytesRead } = await handle.read(buffer, 0, 64, 0);\n          await handle.close();\n          ctx.storage.write('owned.txt', 'storage-ok');\n          return { ok: true, data: { text: buffer.subarray(0, bytesRead).toString('utf8'), storage: ctx.storage.read('owned.txt') } };\n        } catch (error) {\n          return { ok: false, error: error instanceof Error ? error.message : String(error) };\n        }\n      },\n    } });\n  },\n};\n",
+        entry:
+          "\nexport default {\n  id: 'fsprobe', name: 'fsprobe', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_fs_probe',\n      description: 'read a path under the plugin filesystem policy',\n      parameters: { type: 'object', properties: { path: { type: 'string' } }, required: ['path'] },\n      sideEffect: 'read',\n      async handler(args) {\n        try {\n          const fs = await import('node:' + 'fs');\n          const handle = await fs.promises.open(args.path, 'r');\n          const buffer = Buffer.alloc(64);\n          const { bytesRead } = await handle.read(buffer, 0, 64, 0);\n          await handle.close();\n          ctx.storage.write('owned.txt', 'storage-ok');\n          return { ok: true, data: { text: buffer.subarray(0, bytesRead).toString('utf8'), storage: ctx.storage.read('owned.txt') } };\n        } catch (error) {\n          return { ok: false, error: error instanceof Error ? error.message : String(error) };\n        }\n      },\n    } });\n  },\n};\n",
       },
     });
-    t.after(async () => { await f.cleanup(); });
+    t.after(async () => {
+      await f.cleanup();
+    });
 
     const outside = join(f.rootDir, 'outside.txt');
     writeFileSync(outside, 'must-not-leak');
     await f.kernel.plugins.loadAll();
     const tool = toolOf(f.kernel, 'proc_fs_probe');
     assert.ok(tool);
-    const result = await tool.handler({ path: outside }, {
-      turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace,
-    } as ToolContext) as { ok: boolean; error?: string };
+    const result = (await tool.handler({ path: outside }, {
+      turn: 0,
+      sandboxRoot: f.rootDir,
+      cache: f.kernel.cache,
+      trace: f.kernel.trace,
+    } as ToolContext)) as { ok: boolean; error?: string };
     assert.equal(result.ok, false);
     assert.match(result.error ?? '', /插件文件系统访问被策略拒绝/);
   });
@@ -108,7 +180,8 @@ describe('插件进程执行边界', () => {
     const f = setup({
       proc: {
         manifest: execution,
-        entry: "\nexport default {\n  id: 'proc', name: 'proc', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_pid',\n      description: 'return process identity',\n      parameters: { type: 'object', properties: {} },\n      sideEffect: 'none',\n      async handler(_args, tctx) {\n        return {\n          ok: true,\n          data: {\n            pid: process.pid,\n            cwd: process.cwd(),\n            secret: process.env.MAHARNESS_PROCESS_SECRET ?? null,\n            sessionId: tctx.sessionId ?? null,\n          },\n        };\n      },\n    } });\n  },\n};\n",
+        entry:
+          "\nexport default {\n  id: 'proc', name: 'proc', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], outputSchema: {},\n      name: 'proc_pid',\n      description: 'return process identity',\n      parameters: { type: 'object', properties: {} },\n      sideEffect: 'none',\n      async handler(_args, tctx) {\n        return {\n          ok: true,\n          data: {\n            pid: process.pid,\n            cwd: process.cwd(),\n            secret: process.env.MAHARNESS_PROCESS_SECRET ?? null,\n            sessionId: tctx.sessionId ?? null,\n          },\n        };\n      },\n    } });\n  },\n};\n",
       },
     });
     t.after(async () => {
@@ -122,10 +195,14 @@ describe('插件进程执行边界', () => {
     const tool = toolOf(f.kernel, 'proc_pid');
     assert.ok(tool, 'process 插件工具应已注册');
 
-    const result = await tool.handler({}, {
-      turn: 0, sessionId: 'session-x', tenantId: 'default', sandboxRoot: f.rootDir,
-      cache: f.kernel.cache, trace: f.kernel.trace,
-    } as ToolContext) as { ok: boolean; data?: { pid: number; cwd: string; secret: string | null; sessionId: string | null } };
+    const result = (await tool.handler({}, {
+      turn: 0,
+      sessionId: 'session-x',
+      tenantId: 'default',
+      sandboxRoot: f.rootDir,
+      cache: f.kernel.cache,
+      trace: f.kernel.trace,
+    } as ToolContext)) as { ok: boolean; data?: { pid: number; cwd: string; secret: string | null; sessionId: string | null } };
     assert.equal(result.ok, true);
     assert.notEqual(result.data?.pid, process.pid, '工具必须在独立子进程执行');
     assert.equal(result.data?.secret, null, '父进程密钥不得默认透传');
@@ -143,7 +220,8 @@ describe('插件进程执行边界', () => {
           execution: { mode: 'process', timeoutMs: 1_000, memoryMb: 64 },
           permissions: { capabilities: { tool: ['proc_slow'] } },
         },
-        entry: "\nexport default {\n  id: 'slow', name: 'slow', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {},\n      name: 'proc_slow', description: 'sleep', parameters: { type: 'object', properties: {} },\n      async handler() { await new Promise((r) => setTimeout(r, 10_000)); return { ok: true }; },\n    } });\n  },\n};\n",
+        entry:
+          "\nexport default {\n  id: 'slow', name: 'slow', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {},\n      name: 'proc_slow', description: 'sleep', parameters: { type: 'object', properties: {} },\n      async handler() { await new Promise((r) => setTimeout(r, 10_000)); return { ok: true }; },\n    } });\n  },\n};\n",
       },
     });
     t.after(f.cleanup);
@@ -152,19 +230,26 @@ describe('插件进程执行边界', () => {
     const tool = toolOf(f.kernel, 'proc_slow');
     assert.ok(tool);
     const started = Date.now();
-    const result = await tool.handler({}, {
-      turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace,
-    } as ToolContext) as { ok: boolean; error?: string };
+    const result = (await tool.handler({}, {
+      turn: 0,
+      sandboxRoot: f.rootDir,
+      cache: f.kernel.cache,
+      trace: f.kernel.trace,
+    } as ToolContext)) as { ok: boolean; error?: string };
     assert.equal(result.ok, false);
     assert.match(String(result.error), /超时|终止/);
     assert.ok(Date.now() - started < 4_000, '超时应在硬上限附近返回，而不是等满 handler');
   });
 
   test('network=allowlist 在子进程内按主机与端口阻断出口', async (t) => {
-    const server = createServer((_req, res) => { res.end('ok'); });
+    const server = createServer((_req, res) => {
+      res.end('ok');
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const allowedPort = (server.address() as { port: number }).port;
-    const blocked = createServer((_req, res) => { res.end('should-not-reach'); });
+    const blocked = createServer((_req, res) => {
+      res.end('should-not-reach');
+    });
     await new Promise<void>((resolve) => blocked.listen(0, '127.0.0.1', resolve));
     const blockedPort = (blocked.address() as { port: number }).port;
     t.after(async () => {
@@ -203,10 +288,19 @@ export default {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const tool = toolOf(f.kernel, 'net_probe');
-    assert.ok(tool, `process 插件应加载: ${f.kernel.plugins.diagnostics().map((item) => item.message).join('; ')}`);
-    const result = await tool.handler({}, {
-      turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace,
-    } as ToolContext) as { ok: boolean; data?: { allowed: string; blockedError: string } };
+    assert.ok(
+      tool,
+      `process 插件应加载: ${f.kernel.plugins
+        .diagnostics()
+        .map((item) => item.message)
+        .join('; ')}`,
+    );
+    const result = (await tool.handler({}, {
+      turn: 0,
+      sandboxRoot: f.rootDir,
+      cache: f.kernel.cache,
+      trace: f.kernel.trace,
+    } as ToolContext)) as { ok: boolean; data?: { allowed: string; blockedError: string } };
     assert.equal(result.ok, true);
     assert.equal(result.data?.allowed, 'ok');
     assert.match(String(result.data?.blockedError), /网络出口被策略拒绝/);

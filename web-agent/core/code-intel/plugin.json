@@ -15,17 +15,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "repo_map",
-        "find_symbol",
-        "project_diagnostics",
-        "lsp_definition",
-        "lsp_hover",
-        "lsp_diagnostics"
-      ],
-      "persona": [
-        "code-intel-rules"
-      ]
+      "tool": ["repo_map", "find_symbol", "project_diagnostics", "lsp_definition", "lsp_hover", "lsp_diagnostics"],
+      "persona": ["code-intel-rules"]
     }
   },
   "apiVersion": 2

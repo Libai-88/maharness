@@ -13,18 +13,35 @@
 import { fork, type ChildProcess } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import type {
-  Event, EventListener, Plugin, PluginContext, PluginManifest, ToolContext, ToolDef, ToolResult,
-} from './types';
+import type { Event, EventListener, Plugin, PluginContext, PluginManifest, ToolContext, ToolDef, ToolResult } from './types';
 import type { HostToParent, ParentToHost, ProcessCallContext, ProcessToolDescriptor } from './plugin-process-protocol';
 
 const HOST_PATH = fileURLToPath(new URL('./plugin-process-host.ts', import.meta.url));
 const ENV_ALLOWLIST = new Set([
-  'path', 'pathext', 'comspec', 'systemroot', 'windir', 'systemdrive',
-  'home', 'userprofile', 'homedrive', 'homepage', 'temp', 'tmp',
-  'appdata', 'localappdata', 'allusersprofile', 'programdata',
-  'programfiles', 'programfiles(x86)', 'programw6432',
-  'lang', 'lc_all', 'tz', 'term', 'terminfo',
+  'path',
+  'pathext',
+  'comspec',
+  'systemroot',
+  'windir',
+  'systemdrive',
+  'home',
+  'userprofile',
+  'homedrive',
+  'homepage',
+  'temp',
+  'tmp',
+  'appdata',
+  'localappdata',
+  'allusersprofile',
+  'programdata',
+  'programfiles',
+  'programfiles(x86)',
+  'programw6432',
+  'lang',
+  'lc_all',
+  'tz',
+  'term',
+  'terminfo',
 ]);
 
 export function buildProcessEnv(
@@ -47,7 +64,11 @@ function childExecArgv(memoryMb: number): string[] {
   const require = createRequire(import.meta.url);
   const resolveTsx = (specifier: string): string | undefined => {
     if (specifier !== 'tsx' && !specifier.startsWith('tsx/')) return undefined;
-    try { return pathToFileURL(require.resolve(specifier)).href; } catch { return undefined; }
+    try {
+      return pathToFileURL(require.resolve(specifier)).href;
+    } catch {
+      return undefined;
+    }
   };
   const args: string[] = [];
   for (let i = 0; i < process.execArgv.length; i++) {
@@ -154,9 +175,15 @@ export class ProcessPluginHost {
     child.stderr?.setEncoding('utf8');
     child.stdout?.on('data', (chunk: string) => process.stdout.write(`[plugin:${this.opts.manifest.id}] ${chunk}`));
     child.stderr?.on('data', (chunk: string) => process.stderr.write(`[plugin:${this.opts.manifest.id}] ${chunk}`));
-    child.on('exit', (code, signal) => { if (this.child === child) this.onExit(code, signal); });
-    child.on('error', (err) => { if (this.child === child) this.onExit(1, err.message); });
-    child.on('message', (raw: unknown) => { if (this.child === child) this.onMessage(raw as HostToParent); });
+    child.on('exit', (code, signal) => {
+      if (this.child === child) this.onExit(code, signal);
+    });
+    child.on('error', (err) => {
+      if (this.child === child) this.onExit(1, err.message);
+    });
+    child.on('message', (raw: unknown) => {
+      if (this.child === child) this.onMessage(raw as HostToParent);
+    });
 
     return new Promise<ProcessToolDescriptor[]>((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -165,8 +192,14 @@ export class ProcessPluginHost {
         reject(new Error(`插件 ${this.opts.manifest.id} 子进程加载超时`));
       }, this.opts.timeoutMs + 5_000);
       this.ready = {
-        resolve: (tools) => { clearTimeout(timer); resolve(tools); },
-        reject: (err) => { clearTimeout(timer); reject(err); },
+        resolve: (tools) => {
+          clearTimeout(timer);
+          resolve(tools);
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
       };
       this.send({
         type: 'load',
@@ -203,7 +236,11 @@ export class ProcessPluginHost {
     const off = this.toolUnregisters.get(name);
     if (!off) return;
     this.toolUnregisters.delete(name);
-    try { off(); } catch { /* 作用域回收时可能已执行 */ }
+    try {
+      off();
+    } catch {
+      /* 作用域回收时可能已执行 */
+    }
   }
 
   private requestStart(): Promise<void> {
@@ -213,8 +250,14 @@ export class ProcessPluginHost {
       const timer = setTimeout(() => reject(new Error(`插件 ${this.opts.manifest.id} 子进程启动超时`)), this.opts.timeoutMs);
       const previous = this.startWaiter;
       this.startWaiter = {
-        resolve: () => { clearTimeout(timer); resolve(); },
-        reject: (err) => { clearTimeout(timer); reject(err); },
+        resolve: () => {
+          clearTimeout(timer);
+          resolve();
+        },
+        reject: (err) => {
+          clearTimeout(timer);
+          reject(err);
+        },
       };
       if (previous) previous.reject(new Error('启动请求被新的请求覆盖'));
     });
@@ -224,19 +267,24 @@ export class ProcessPluginHost {
 
   private async ensureLive(): Promise<void> {
     if (this.termination) await this.termination;
-    if ([...this.pending.values()].some(call => call.interruption)) throw new Error('PLUGIN_PROCESS_STOPPING');
+    if ([...this.pending.values()].some((call) => call.interruption)) throw new Error('PLUGIN_PROCESS_STOPPING');
     if (!this.dead) return;
     if (this.stopped) throw new Error(`插件 ${this.opts.manifest.id} 已停用`);
     if (!this.restarting) {
       this.restarting = this.spawnAndLoad()
-        .then((tools) => { for (const tool of tools) this.registerTool(tool); })
-        .finally(() => { this.restarting = undefined; });
+        .then((tools) => {
+          for (const tool of tools) this.registerTool(tool);
+        })
+        .finally(() => {
+          this.restarting = undefined;
+        });
     }
     await this.restarting;
   }
 
   private async callTool(name: string, args: unknown, tctx: ToolContext): Promise<ToolResult> {
-    if (tctx.signal?.aborted) return { ok: false, error: '调用已取消', failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'not_started' } };
+    if (tctx.signal?.aborted)
+      return { ok: false, error: '调用已取消', failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'not_started' } };
     try {
       await this.ensureLive();
     } catch (err) {
@@ -246,8 +294,10 @@ export class ProcessPluginHost {
     const descriptor = this.tools.get(name);
     const timeoutMs = Math.max(1_000, descriptor?.timeoutMs ?? this.opts.timeoutMs);
     const context: ProcessCallContext = {
-      runId: tctx.runId, parentRunId: tctx.parentRunId,
-      authorization: tctx.authorization, remainingBudget: tctx.remainingBudget,
+      runId: tctx.runId,
+      parentRunId: tctx.parentRunId,
+      authorization: tctx.authorization,
+      remainingBudget: tctx.remainingBudget,
       traceId: tctx.traceId,
       turn: tctx.turn,
       sessionId: tctx.sessionId,
@@ -274,18 +324,30 @@ export class ProcessPluginHost {
         if (!pending || pending.interruption) return;
         pending.interruption = reason;
         clearTimeout(pending.timer);
-        try { this.send({ type: 'abort', id }); } catch { /* Exit confirmation settles the call. */ }
-        pending.timer = setTimeout(() => { void this.terminate(); }, 1_000);
+        try {
+          this.send({ type: 'abort', id });
+        } catch {
+          /* Exit confirmation settles the call. */
+        }
+        pending.timer = setTimeout(() => {
+          void this.terminate();
+        }, 1_000);
       };
       const timer = setTimeout(() => interrupt(`工具执行超时（${timeoutMs}ms）`), timeoutMs);
       const pending: PendingCall = {
-        resolve, reject: () => undefined, timer,
+        resolve,
+        reject: () => undefined,
+        timer,
         signal: tctx.signal,
         onAbort: () => interrupt('工具调用已取消'),
       };
       if (tctx.signal?.aborted) {
         clearTimeout(timer);
-        resolve({ ok: false, error: `插件 ${this.opts.manifest.id} 工具 ${name} 未开始`, failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'not_started' } });
+        resolve({
+          ok: false,
+          error: `插件 ${this.opts.manifest.id} 工具 ${name} 未开始`,
+          failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: 'not_started' },
+        });
         return;
       }
       this.pending.set(id, pending);
@@ -330,7 +392,16 @@ export class ProcessPluginHost {
         return;
       case 'result': {
         const pending = this.pending.get(message.id);
-        pending?.resolve(pending.interruption ? { ...message.result, ok: false, error: pending.interruption, failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: message.result.failure?.outcome ?? 'unknown' } } : message.result);
+        pending?.resolve(
+          pending.interruption
+            ? {
+                ...message.result,
+                ok: false,
+                error: pending.interruption,
+                failure: { code: 'TOOL_INTERRUPTED', retryable: false, outcome: message.result.failure?.outcome ?? 'unknown' },
+              }
+            : message.result,
+        );
         this.settle(message.id);
         return;
       }
@@ -348,7 +419,11 @@ export class ProcessPluginHost {
         return;
       case 'subscribe': {
         const listener: EventListener = (event) => {
-          this.send({ type: 'event', token: message.token, event: { type: event.type, data: event.data, ts: event.ts, traceId: event.traceId } });
+          this.send({
+            type: 'event',
+            token: message.token,
+            event: { type: event.type, data: event.data, ts: event.ts, traceId: event.traceId },
+          });
         };
         const off = this.opts.eventBus.on(message.event, listener, message.priority);
         this.subscriptions.set(message.token, off);
@@ -357,7 +432,11 @@ export class ProcessPluginHost {
       case 'unsubscribe': {
         const off = this.subscriptions.get(message.token);
         this.subscriptions.delete(message.token);
-        try { off?.(); } catch { /* 已退订 */ }
+        try {
+          off?.();
+        } catch {
+          /* 已退订 */
+        }
         return;
       }
       case 'emit':
@@ -401,11 +480,19 @@ export class ProcessPluginHost {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
       if (pending.signal && pending.onAbort) pending.signal.removeEventListener('abort', pending.onAbort);
-      pending.resolve({ ok: false, error: `${pending.interruption ?? '插件进程退出'}；插件 ${this.opts.manifest.id} 子进程已终止`, failure: { code: pending.interruption ? 'TOOL_INTERRUPTED' : 'PLUGIN_PROCESS_EXIT', retryable: false, outcome: 'unknown' } });
+      pending.resolve({
+        ok: false,
+        error: `${pending.interruption ?? '插件进程退出'}；插件 ${this.opts.manifest.id} 子进程已终止`,
+        failure: { code: pending.interruption ? 'TOOL_INTERRUPTED' : 'PLUGIN_PROCESS_EXIT', retryable: false, outcome: 'unknown' },
+      });
     }
     this.pending.clear();
     for (const off of this.subscriptions.values()) {
-      try { off(); } catch { /* 忽略 */ }
+      try {
+        off();
+      } catch {
+        /* 忽略 */
+      }
     }
     this.subscriptions.clear();
   }
@@ -424,12 +511,26 @@ export class ProcessPluginHost {
     if (this.termination) return this.termination;
     const child = this.child;
     if (!child || child.exitCode !== null || child.signalCode !== null) {
-      this.child = undefined; this.markDead(); return Promise.resolve();
+      this.child = undefined;
+      this.markDead();
+      return Promise.resolve();
     }
-    this.termination = new Promise<void>(resolve => {
-      child.once('exit', () => { if (this.child === child) { this.child = undefined; this.markDead(); } resolve(); });
-      try { child.kill('SIGKILL'); } catch { /* Keep physical capacity until an exit is observed. */ }
-    }).finally(() => { this.termination = undefined; });
+    this.termination = new Promise<void>((resolve) => {
+      child.once('exit', () => {
+        if (this.child === child) {
+          this.child = undefined;
+          this.markDead();
+        }
+        resolve();
+      });
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* Keep physical capacity until an exit is observed. */
+      }
+    }).finally(() => {
+      this.termination = undefined;
+    });
     return this.termination;
   }
 
@@ -437,10 +538,17 @@ export class ProcessPluginHost {
     if (this.stopped) return;
     this.stopped = true;
     if (this.child?.connected) {
-      try { this.send({ type: 'stop', reason: 'dispose' }); } catch { /* 忽略 */ }
+      try {
+        this.send({ type: 'stop', reason: 'dispose' });
+      } catch {
+        /* 忽略 */
+      }
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 1_000);
-        this.child?.once('exit', () => { clearTimeout(timer); resolve(); });
+        this.child?.once('exit', () => {
+          clearTimeout(timer);
+          resolve();
+        });
       });
     }
     await this.terminate();

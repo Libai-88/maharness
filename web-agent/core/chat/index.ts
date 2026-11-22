@@ -98,21 +98,33 @@ export default {
       getRuntimePrompt: makeBasePrompt,
       getUserContext: () => {
         const configured = service.userPersonas.map((persona, index) => ({
-          id: `user-persona:${index}`, ...persona,
-          source: `user-persistent:${persona.name}`, trust: 'user' as const,
+          id: `user-persona:${index}`,
+          ...persona,
+          source: `user-persistent:${persona.name}`,
+          trust: 'user' as const,
         }));
-        const plugins = ctx.kernel.plugins.capabilities('persona')
-          .map(cap => cap.persona)
-          .filter(persona => persona.id !== 'user-rules')
+        const plugins = ctx.kernel.plugins
+          .capabilities('persona')
+          .map((cap) => cap.persona)
+          .filter((persona) => persona.id !== 'user-rules')
           .sort((left, right) => (right.priority ?? 0) - (left.priority ?? 0) || left.id.localeCompare(right.id))
-          .map(persona => ({
-            id: persona.id, name: persona.name, content: persona.content,
+          .map((persona) => ({
+            id: persona.id,
+            name: persona.name,
+            content: persona.content,
             source: `${persona.id === 'skills-rules' ? 'skill-guidance' : 'plugin-persona'}:${persona.name}`,
             trust: 'reference' as const,
           }));
-        return [...configured, ...plugins].map(persona => ({
-          role: 'user' as const, content: persona.content,
-          context: { id: persona.id, source: persona.source, scope: 'workspace' as const, trust: persona.trust, retention: 'required' as const },
+        return [...configured, ...plugins].map((persona) => ({
+          role: 'user' as const,
+          content: persona.content,
+          context: {
+            id: persona.id,
+            source: persona.source,
+            scope: 'workspace' as const,
+            trust: persona.trust,
+            retention: 'required' as const,
+          },
         }));
       },
       /** 挂起审批清单（可按会话过滤）：前端首屏/刷新后据此恢复审批卡 */
@@ -160,10 +172,12 @@ export default {
         sideEffect: 'none',
         output: '{handedOff, role, name}',
         outputSchema: {
-          type: 'object', required: ['handedOff', 'role', 'name'],
+          type: 'object',
+          required: ['handedOff', 'role', 'name'],
           properties: { handedOff: { type: 'boolean' }, role: { type: 'string' }, name: { type: 'string' } },
         },
-        description: '把当前任务移交给指定角色（专业化分工）：移交后本代理立即停止，后续对话由目标角色接管（其提示词与工具集热切换，无需重启）。' +
+        description:
+          '把当前任务移交给指定角色（专业化分工）：移交后本代理立即停止，后续对话由目标角色接管（其提示词与工具集热切换，无需重启）。' +
           '适用：任务类型超出本角色定位（如深度编码/审查/规划）；移交时说明任务目标、已完成与未完成的部分、对新角色的要求。' +
           '角色不存在时错误信息会列出当前全部可用角色。交回主代理：role=main。',
         parameters: {
@@ -182,7 +196,10 @@ export default {
           const defs = roleDefs();
           const def = defs.find((r) => r.id === role);
           if (!def) {
-            return { ok: false, error: `角色不存在: ${role}。可用角色: ${defs.map((r) => `${r.id}(${r.name})`).join('、') || '无（仅主代理可用 main）'}` };
+            return {
+              ok: false,
+              error: `角色不存在: ${role}。可用角色: ${defs.map((r) => `${r.id}(${r.name})`).join('、') || '无（仅主代理可用 main）'}`,
+            };
           }
           return {
             ok: true,
@@ -202,13 +219,16 @@ export default {
       call: callModel,
       providers: () => service.providers,
       getProvider: (id) => service.providers.find((provider) => provider.id === id),
-      models: (providerId) => service.providers
-        .filter((provider) => !providerId || provider.id === providerId)
-        .flatMap((provider) => (provider.models ?? []).map((model) => ({
-          providerId: provider.id,
-          providerLabel: provider.label,
-          model,
-        }))),
+      models: (providerId) =>
+        service.providers
+          .filter((provider) => !providerId || provider.id === providerId)
+          .flatMap((provider) =>
+            (provider.models ?? []).map((model) => ({
+              providerId: provider.id,
+              providerLabel: provider.label,
+              model,
+            })),
+          ),
       routeTask: (taskText, routing) => routeForTask(taskText, routing, service.providers),
       routeCapability: (need, current) => routeForCapability(need as CapabilityNeed, service.providers, current),
       health: (providerId) => getProviderHealth(providerId),

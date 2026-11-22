@@ -1,8 +1,13 @@
 import type { Kernel } from '../kernel';
 import type { Store } from './db';
 
-export type AuthorizationDenialReason = 'api-token-required' | 'api-token-invalid'
-  | 'approval-token-required' | 'approval-token-invalid' | 'source-host-denied' | 'source-origin-denied'
+export type AuthorizationDenialReason =
+  | 'api-token-required'
+  | 'api-token-invalid'
+  | 'approval-token-required'
+  | 'approval-token-invalid'
+  | 'source-host-denied'
+  | 'source-origin-denied'
   | 'tenant-scope-denied';
 
 export interface AuthorizationDenial {
@@ -77,12 +82,21 @@ export function decideCredentialAuthorization(input: {
 }
 
 /** Emit an authorization audit record containing route metadata only, never request credentials or payloads. */
-function persistAudit(store: Store | undefined, entry: {
-  outcome: 'granted' | 'denied' | 'connected' | 'disconnected';
-  subject: string; capability: string; object: string; reason: string | null;
-}): void {
-  try { store?.appendAuthorizationAudit(entry); }
-  catch (error) { console.error('[security-audit] 授权审计写入失败:', error); }
+function persistAudit(
+  store: Store | undefined,
+  entry: {
+    outcome: 'granted' | 'denied' | 'connected' | 'disconnected';
+    subject: string;
+    capability: string;
+    object: string;
+    reason: string | null;
+  },
+): void {
+  try {
+    store?.appendAuthorizationAudit(entry);
+  } catch (error) {
+    console.error('[security-audit] 授权审计写入失败:', error);
+  }
 }
 
 export function auditAuthorizationDenial(kernel: Kernel, denial: AuthorizationDenial, store?: Store): void {
@@ -103,7 +117,12 @@ export function auditAuthorizationGrant(kernel: Kernel, grant: AuthorizationGran
   });
 }
 
-export function auditSseLifecycle(kernel: Kernel, store: Store | undefined, state: 'connected' | 'disconnected', connectionId?: string): void {
+export function auditSseLifecycle(
+  kernel: Kernel,
+  store: Store | undefined,
+  state: 'connected' | 'disconnected',
+  connectionId?: string,
+): void {
   const data = { subject: 'local-client' as const, capability: 'sse:events', object: '/api/events' };
   persistAudit(store, { ...data, outcome: state, reason: connectionId ?? null });
   kernel.bus.emit({ type: `security.sse.${state}`, ts: Date.now(), data });

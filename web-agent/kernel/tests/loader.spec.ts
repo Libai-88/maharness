@@ -31,8 +31,34 @@ function setup(pluginDefs: Record<string, string>, manifests: Record<string, Rec
   for (const [id, onLoadBody] of Object.entries(pluginDefs)) {
     const pdir = join(userPluginsDir, id);
     mkdirSync(pdir, { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id, name: id, version: '0.1.0', entry: 'index.ts', ...(manifests[id] ?? {}) }));
-    writeFileSync(join(pdir, 'index.ts'), `export default {\n  id: '${id}',\n  name: '${id}',\n  version: '0.1.0',\n  onLoad: async (ctx) => { ${onLoadBody} },\n}`);
+    writeFileSync(
+      join(pdir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id,
+        name: id,
+        version: '0.1.0',
+        entry: 'index.ts',
+        ...(manifests[id] ?? {}),
+      }),
+    );
+    writeFileSync(
+      join(pdir, 'index.ts'),
+      `export default {\n  id: '${id}',\n  name: '${id}',\n  version: '0.1.0',\n  onLoad: async (ctx) => { ${onLoadBody} },\n}`,
+    );
   }
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
   return {
@@ -40,8 +66,16 @@ function setup(pluginDefs: Record<string, string>, manifests: Record<string, Rec
     rootDir,
     userPluginsDir,
     cleanup: async () => {
-      try { await kernel.stop(); } catch { /* 资源释放失败仍继续清理临时目录 */ }
-      try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* 句柄迟释放时留待系统清理 */ }
+      try {
+        await kernel.stop();
+      } catch {
+        /* 资源释放失败仍继续清理临时目录 */
+      }
+      try {
+        rmSync(rootDir, { recursive: true, force: true });
+      } catch {
+        /* 句柄迟释放时留待系统清理 */
+      }
     },
   };
 }
@@ -75,9 +109,29 @@ describe('PluginLoader 事务性热重载', () => {
     // 触发新版本失败：plugin.json 的 entry 改为不存在的文件 → import 抛错 → 走回滚。
     // 注：不依赖「入口文件内容变化」——tsx 运行时会 strip 模块 URL 的 query（hash busting
     // 失效），内容变化也命中旧模块记录；entry 指向缺失文件在任何运行时都可靠触发失败。
-    writeFileSync(join(f.userPluginsDir, 'alpha', 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'alpha', name: 'alpha', version: '0.1.0', entry: 'gone.ts',
-    }));
+    writeFileSync(
+      join(f.userPluginsDir, 'alpha', 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'alpha',
+        name: 'alpha',
+        version: '0.1.0',
+        entry: 'gone.ts',
+      }),
+    );
     await f.kernel.plugins.reload('alpha');
 
     const inst = f.kernel.plugins.get('alpha')!;
@@ -105,13 +159,17 @@ describe('PluginLoader 事务性热重载', () => {
 
 describe('PluginLoader 工具运行时配额', () => {
   test('单插件并发与频率上限在执行前拒绝，不进入 handler', async (t) => {
-    const f = setup({
-      limited: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'limited_tool', description: 'limited', parameters: { type: 'object' }, handler: async () => { await new Promise((r) => setTimeout(r, 150)); return { ok: true, data: 'ok' }; } } });",
-      rate: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'rate_tool', description: 'rate', parameters: { type: 'object' }, handler: async () => ({ ok: true, data: 'ok' }) } });",
-    }, {
-      limited: { limits: { maxConcurrentToolCalls: 1 } },
-      rate: { limits: { maxToolCallsPerMinute: 1 } },
-    });
+    const f = setup(
+      {
+        limited:
+          "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'limited_tool', description: 'limited', parameters: { type: 'object' }, handler: async () => { await new Promise((r) => setTimeout(r, 150)); return { ok: true, data: 'ok' }; } } });",
+        rate: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'rate_tool', description: 'rate', parameters: { type: 'object' }, handler: async () => ({ ok: true, data: 'ok' }) } });",
+      },
+      {
+        limited: { limits: { maxConcurrentToolCalls: 1 } },
+        rate: { limits: { maxToolCallsPerMinute: 1 } },
+      },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const tools = f.kernel.plugins.capabilities('tool').map((c) => c.tool);
@@ -131,23 +189,35 @@ describe('PluginLoader 工具运行时配额', () => {
   });
 
   test('非法 limits 在 manifest 加载阶段拒绝', async (t) => {
-    const f = setup({ bad: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'bad_tool', description: 'bad', parameters: { type: 'object' }, handler: async () => ({ ok: true }) } });" }, {
-      bad: { limits: { maxConcurrentToolCalls: -1 } },
-    });
+    const f = setup(
+      {
+        bad: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'bad_tool', description: 'bad', parameters: { type: 'object' }, handler: async () => ({ ok: true }) } });",
+      },
+      {
+        bad: { limits: { maxConcurrentToolCalls: -1 } },
+      },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('bad'), undefined, '非法 limits 的插件不得进入 registry');
   });
 
   test('插件私有存储按字节与文件数配额拒绝超限写入', async (t) => {
-    const f = setup({
-      store: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'store_tool', description: 'store', parameters: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] }, handler: async (args) => { try { ctx.storage.write(args.name, args.value); return { ok: true }; } catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) }; } } } });",
-    }, {
-      store: { limits: { maxStorageBytes: 20, maxStorageFiles: 1 } },
-    });
+    const f = setup(
+      {
+        store:
+          "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'store_tool', description: 'store', parameters: { type: 'object', properties: { name: { type: 'string' }, value: { type: 'string' } }, required: ['name', 'value'] }, handler: async (args) => { try { ctx.storage.write(args.name, args.value); return { ok: true }; } catch (err) { return { ok: false, error: err instanceof Error ? err.message : String(err) }; } } } });",
+      },
+      {
+        store: { limits: { maxStorageBytes: 20, maxStorageFiles: 1 } },
+      },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
-    const tool = f.kernel.plugins.capabilities('tool').map((c) => c.tool).find((item) => item.name === 'store_tool')!;
+    const tool = f.kernel.plugins
+      .capabilities('tool')
+      .map((c) => c.tool)
+      .find((item) => item.name === 'store_tool')!;
     const ctx = { turn: 0, sandboxRoot: f.rootDir, cache: f.kernel.cache, trace: f.kernel.trace };
     assert.equal((await tool.handler({ name: 'a.txt', value: '1234567890' }, ctx)).ok, true);
     const files = await tool.handler({ name: 'b.txt', value: 'x' }, ctx);
@@ -159,25 +229,32 @@ describe('PluginLoader 工具运行时配额', () => {
   });
 
   test('声明 runtime 的插件在加载前拒绝越界源码', async (t) => {
-    const f = setup({
-      unsafe: "const fs = require('node:fs'); ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'unsafe_tool', description: 'unsafe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true, data: fs.existsSync('.') }) } });",
-    }, {
-      unsafe: {
-        permissions: {
-          capabilities: { tool: ['unsafe_tool'] },
-          runtime: { filesystem: 'sandbox', network: 'none', process: false },
+    const f = setup(
+      {
+        unsafe:
+          "const fs = require('node:fs'); ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'unsafe_tool', description: 'unsafe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true, data: fs.existsSync('.') }) } });",
+      },
+      {
+        unsafe: {
+          permissions: {
+            capabilities: { tool: ['unsafe_tool'] },
+            runtime: { filesystem: 'sandbox', network: 'none', process: false },
+          },
         },
       },
-    });
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('unsafe'), undefined);
   });
 
   test('runtime 声明值非法时插件不加载', async (t) => {
-    const f = setup({ badRuntime: `` }, {
-      badRuntime: { permissions: { capabilities: {}, runtime: { filesystem: 'everything' } } },
-    });
+    const f = setup(
+      { badRuntime: `` },
+      {
+        badRuntime: { permissions: { capabilities: {}, runtime: { filesystem: 'everything' } } },
+      },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('badRuntime'), undefined);
@@ -252,10 +329,13 @@ describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
   test('R4 跨扫描顺序依赖：requires 指向后注册的插件不再误删（注册期只查存在性）', async (t) => {
     // 目录/注册顺序：a-scan（依赖方）先于 b-scan（被依赖方）——修复前 a 在
     // register 阶段因 b 尚未注册而被删除，topoSort 救不回来
-    const f = setup({
-      'a-scan': `ctx.inject('helper');`,
-      'b-scan': `ctx.provide('helper', { ok: true });`,
-    }, { 'a-scan': { requires: ['b-scan'] } });
+    const f = setup(
+      {
+        'a-scan': `ctx.inject('helper');`,
+        'b-scan': `ctx.provide('helper', { ok: true });`,
+      },
+      { 'a-scan': { requires: ['b-scan'] } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('a-scan')?.state, 'started', '依赖方应正常启动');
@@ -264,10 +344,13 @@ describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
   });
 
   test('R4 requires 完全缺失：启动前置校验失败进 error 态，其余插件不受影响', async (t) => {
-    const f = setup({
-      'needs-missing': `ctx.on('x', () => {});`,
-      'ok-plugin': ``,
-    }, { 'needs-missing': { requires: ['never-exists'] } });
+    const f = setup(
+      {
+        'needs-missing': `ctx.on('x', () => {});`,
+        'ok-plugin': ``,
+      },
+      { 'needs-missing': { requires: ['never-exists'] } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const inst = f.kernel.plugins.get('needs-missing');
@@ -281,9 +364,29 @@ describe('PluginLoader 依赖驱动智能重载（reloadChanged）', () => {
     t.after(f.cleanup);
     const duplicateDir = join(f.userPluginsDir, 'duplicate-copy');
     mkdirSync(duplicateDir, { recursive: true });
-    writeFileSync(join(duplicateDir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'duplicate', name: 'duplicate-copy', version: '0.1.0', entry: 'index.ts',
-    }));
+    writeFileSync(
+      join(duplicateDir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'duplicate',
+        name: 'duplicate-copy',
+        version: '0.1.0',
+        entry: 'index.ts',
+      }),
+    );
     writeFileSync(join(duplicateDir, 'index.ts'), `export default { id: 'duplicate', name: 'duplicate-copy', version: '0.1.0' };`);
     await f.kernel.plugins.loadAll();
     const diagnostic = f.kernel.plugins.diagnostics().find((d) => d.kind === 'conflict' && d.id === 'duplicate');
@@ -307,11 +410,7 @@ describe('PluginLoader enable/disable 生命周期', () => {
 
     await f.kernel.plugins.enable('delta');
     assert.equal(f.kernel.plugins.get('delta')?.state, 'started');
-    assert.equal(
-      depHookSignatures(f.kernel, 'delta').length,
-      2,
-      'enable 重部署后依赖声明重新登记，不残留旧代分量',
-    );
+    assert.equal(depHookSignatures(f.kernel, 'delta').length, 2, 'enable 重部署后依赖声明重新登记，不残留旧代分量');
   });
 
   test('disable 后服务绑定撤回，capabilities 不可见', async (t) => {
@@ -327,7 +426,8 @@ describe('PluginLoader enable/disable 生命周期', () => {
 });
 
 describe('PluginLoader 配置 schema 校验（v3.2）', () => {
-  const TOOL_BODY = "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'cfg_tool', description: 'x', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });";
+  const TOOL_BODY =
+    "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'cfg_tool', description: 'x', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });";
   const SCHEMA = {
     config: {
       type: 'object',
@@ -378,19 +478,33 @@ describe('PluginLoader 配置 schema 校验（v3.2）', () => {
 
 describe('PluginLoader capability 权限白名单', () => {
   test('声明的 capability/name 可注册并启动', async (t) => {
-    const f = setup({
-      allowed: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'safe_read', description: 'read', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
-    }, { allowed: { permissions: { capabilities: { tool: ['safe_read'] } } } });
+    const f = setup(
+      {
+        allowed:
+          "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'safe_read', description: 'read', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
+      },
+      { allowed: { permissions: { capabilities: { tool: ['safe_read'] } } } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('allowed')?.state, 'started');
-    assert.deepEqual(f.kernel.plugins.capabilities('tool').map((c) => c.tool.name).filter((name) => name === 'safe_read'), ['safe_read']);
+    assert.deepEqual(
+      f.kernel.plugins
+        .capabilities('tool')
+        .map((c) => c.tool.name)
+        .filter((name) => name === 'safe_read'),
+      ['safe_read'],
+    );
   });
 
   test('显式 * 允许动态能力名（用于 MCP 这类运行时发现工具的插件）', async (t) => {
-    const f = setup({
-      dynamic: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'mcp_runtime_tool', description: 'dynamic', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
-    }, { dynamic: { permissions: { capabilities: { tool: ['*'] } } } });
+    const f = setup(
+      {
+        dynamic:
+          "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'mcp_runtime_tool', description: 'dynamic', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
+      },
+      { dynamic: { permissions: { capabilities: { tool: ['*'] } } } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('dynamic')?.state, 'started');
@@ -398,18 +512,26 @@ describe('PluginLoader capability 权限白名单', () => {
   });
 
   test('未声明的 capability/name 拒绝注册、发审计事件并回收插件效应', async (t) => {
-    const f = setup({
-      denied: "ctx.on('probe', () => {}); ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'delete_data', description: 'delete', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
-    }, { denied: { permissions: { capabilities: { tool: ['safe_read'] } } } });
+    const f = setup(
+      {
+        denied:
+          "ctx.on('probe', () => {}); ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: 'delete_data', description: 'delete', parameters: { type: 'object', properties: {} }, async handler() { return { ok: true, data: {} }; } } });",
+      },
+      { denied: { permissions: { capabilities: { tool: ['safe_read'] } } } },
+    );
     t.after(f.cleanup);
     const events: { pluginId?: string; kind?: string; name?: string; reason?: string }[] = [];
-    f.kernel.bus.on('plugin.permission.denied', (event) => events.push(event.data as typeof events[number]));
+    f.kernel.bus.on('plugin.permission.denied', (event) => events.push(event.data as (typeof events)[number]));
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('denied'), undefined, '越权注册失败后不保留实例');
-    assert.equal(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'delete_data'), false);
-    assert.deepEqual(events.map(({ pluginId, kind, name }) => ({ pluginId, kind, name })), [
-      { pluginId: 'denied', kind: 'tool', name: 'delete_data' },
-    ]);
+    assert.equal(
+      f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'delete_data'),
+      false,
+    );
+    assert.deepEqual(
+      events.map(({ pluginId, kind, name }) => ({ pluginId, kind, name })),
+      [{ pluginId: 'denied', kind: 'tool', name: 'delete_data' }],
+    );
     const entries = (f.kernel.bus as unknown as { entries: { pattern: string }[] }).entries;
     assert.equal(entries.filter((entry) => entry.pattern === 'probe').length, 0, '失败插件已登记 listener 被清理');
   });
@@ -426,29 +548,45 @@ describe('PluginLoader capability 权限白名单', () => {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('legacy'), undefined);
-    assert.ok(f.kernel.plugins.diagnostics().some(item => item.message.includes('apiVersion: 2')));
+    assert.ok(f.kernel.plugins.diagnostics().some((item) => item.message.includes('apiVersion: 2')));
   });
 });
 
 describe('PluginLoader manifest API 兼容范围', () => {
   test('v2 兼容清单不获得 v3 capabilityIndex，v3 能力只能引用已授权工具', () => {
     const base: PluginManifest = {
-      apiVersion: 2, id: 'legacy', name: 'Legacy', version: '1.0.0', entry: 'index.ts',
+      apiVersion: 2,
+      id: 'legacy',
+      name: 'Legacy',
+      version: '1.0.0',
+      entry: 'index.ts',
       permissions: { capabilities: { tool: ['legacy_tool'] } },
     };
     assert.doesNotThrow(() => validatePluginManifest(base));
-    assert.throws(() => validatePluginManifest({
-      ...base,
-      capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
-    }), /需要 apiVersion: 3/);
-    assert.doesNotThrow(() => validatePluginManifest({
-      ...base, apiVersion: 3,
-      capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
-    }));
-    assert.throws(() => validatePluginManifest({
-      ...base, apiVersion: 3,
-      capabilityIndex: [{ id: 'legacy.write', name: 'Write', description: 'Write data', tools: ['write_without_permission'] }],
-    }), /未授权工具/);
+    assert.throws(
+      () =>
+        validatePluginManifest({
+          ...base,
+          capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
+        }),
+      /需要 apiVersion: 3/,
+    );
+    assert.doesNotThrow(() =>
+      validatePluginManifest({
+        ...base,
+        apiVersion: 3,
+        capabilityIndex: [{ id: 'legacy.read', name: 'Read', description: 'Read data', tools: ['legacy_tool'] }],
+      }),
+    );
+    assert.throws(
+      () =>
+        validatePluginManifest({
+          ...base,
+          apiVersion: 3,
+          capabilityIndex: [{ id: 'legacy.write', name: 'Write', description: 'Write data', tools: ['write_without_permission'] }],
+        }),
+      /未授权工具/,
+    );
   });
 
   test('当前 API 在声明范围内时插件正常加载', async (t) => {
@@ -516,12 +654,18 @@ describe('Service 抽象基类（v3.2）', () => {
 describe('熔断器（v8）', () => {
   test('连续失败达阈值后进入熔断态', async (t) => {
     const { writeFileSync } = await import('node:fs');
-    const f = setup({
-      flaky: `void 0;`,
-    }, { flaky: { limits: { circuitBreakerThreshold: 2, circuitBreakerResetMs: 60000 } } });
+    const f = setup(
+      {
+        flaky: `void 0;`,
+      },
+      { flaky: { limits: { circuitBreakerThreshold: 2, circuitBreakerResetMs: 60000 } } },
+    );
     t.after(f.cleanup);
     // onStart 抽错
-    writeFileSync(f.userPluginsDir + '/flaky/index.ts', "export default {\n  id: 'flaky',\n  name: 'flaky',\n  version: '0.1.0',\n  onLoad: async (ctx) => {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 'flaky_t', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });\n  },\n  onStart: async () => { throw new Error('模拟启动失败'); },\n}");
+    writeFileSync(
+      f.userPluginsDir + '/flaky/index.ts',
+      "export default {\n  id: 'flaky',\n  name: 'flaky',\n  version: '0.1.0',\n  onLoad: async (ctx) => {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 'flaky_t', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });\n  },\n  onStart: async () => { throw new Error('模拟启动失败'); },\n}",
+    );
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('flaky')?.state, 'error', '首次启动失败');
     // 第二次失败
@@ -538,9 +682,12 @@ describe('熔断器（v8）', () => {
   });
 
   test('essential 插件 disable 有警告但不报错', async (t) => {
-    const f = setup({
-      core: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 't', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });",
-    }, { core: { essential: true } });
+    const f = setup(
+      {
+        core: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 't', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });",
+      },
+      { core: { essential: true } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     await f.kernel.plugins.disable('core');
@@ -552,28 +699,31 @@ describe('熔断器（v8）', () => {
 describe('卸载（v8）', () => {
   test('卸载用户插件：目录删除 + 注册表移除', async (t) => {
     const f = setup({
-      disposable: "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 'temp_tool', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });",
+      disposable:
+        "ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', parameters: { type: 'object' }, name: 'temp_tool', description: 't', risk: 'low', costHint: 0, outputSchema: {}, handler: async () => 'ok' } });",
     });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     assert.equal(f.kernel.plugins.get('disposable')?.state, 'started', '卸载前应为 started');
-    assert.ok(f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'temp_tool'), '卸载前 tool 应可见');
+    assert.ok(
+      f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'temp_tool'),
+      '卸载前 tool 应可见',
+    );
     await f.kernel.plugins.uninstall('disposable');
     assert.equal(f.kernel.plugins.get('disposable'), undefined, '卸载后注册表应移除');
     assert.ok(!f.kernel.plugins.capabilities('tool').some((c) => c.tool.name === 'temp_tool'), '卸载后 tool 应不可见');
   });
 
   test('essential 插件禁止卸载', async (t) => {
-    const f = setup({
-      vital: `void 0;`,
-    }, { vital: { essential: true } });
+    const f = setup(
+      {
+        vital: `void 0;`,
+      },
+      { vital: { essential: true } },
+    );
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
-    await assert.rejects(
-      () => f.kernel.plugins.uninstall('vital'),
-      /核心必要插件/,
-      'essential 插件应拒绝卸载',
-    );
+    await assert.rejects(() => f.kernel.plugins.uninstall('vital'), /核心必要插件/, 'essential 插件应拒绝卸载');
   });
 
   test('core 插件禁止卸载', async (t) => {
@@ -581,11 +731,7 @@ describe('卸载（v8）', () => {
     t.after(f.cleanup);
     // core 插件在 coreDir 下，不在 userDir 下
     // 尝试卸载一个不存在的 core 插件 id 应抛错
-    await assert.rejects(
-      () => f.kernel.plugins.uninstall('nonexistent-core-plugin'),
-      /不存在/,
-      '不存在的插件应抛错',
-    );
+    await assert.rejects(() => f.kernel.plugins.uninstall('nonexistent-core-plugin'), /不存在/, '不存在的插件应抛错');
   });
 
   test('插件来源边界：user 插件受 watcher，core 插件明确标记为非 watcher', async (t) => {
@@ -594,11 +740,35 @@ describe('卸载（v8）', () => {
     const coreDir = join(f.rootDir, 'core');
     const corePluginDir = join(coreDir, 'builtin');
     mkdirSync(corePluginDir, { recursive: true });
-    writeFileSync(join(corePluginDir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'builtin', name: 'builtin', version: '0.1.0', entry: 'index.ts',
-    }));
+    writeFileSync(
+      join(corePluginDir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'builtin',
+        name: 'builtin',
+        version: '0.1.0',
+        entry: 'index.ts',
+      }),
+    );
     writeFileSync(join(corePluginDir, 'index.ts'), `export default { id: 'builtin', name: 'builtin', version: '0.1.0' };`);
-    const isolated = new Kernel(f.rootDir, {}, { dataDir: join(f.rootDir, 'data-2'), userPluginsDir: f.userPluginsDir, corePluginsDir: coreDir });
+    const isolated = new Kernel(
+      f.rootDir,
+      {},
+      { dataDir: join(f.rootDir, 'data-2'), userPluginsDir: f.userPluginsDir, corePluginsDir: coreDir },
+    );
     try {
       await isolated.plugins.loadAll();
       const states = new Map(isolated.plugins.list().map((p) => [p.manifest.id, p.watched]));
@@ -616,13 +786,41 @@ describe('卸载（v8）', () => {
     mkdirSync(join(userPluginsDir, 'live'), { recursive: true });
     mkdirSync(join(corePluginsDir, 'builtin'), { recursive: true });
     const writePlugin = (dir: string, id: string, tool: string) => {
-      writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id, name: id, version: '0.1.0', entry: 'index.ts' }));
-      writeFileSync(join(dir, 'index.ts'), `export default { id: '${id}', name: '${id}', version: '0.1.0', onLoad(ctx) { ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: '${tool}', description: 'probe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true }) } }); } };`);
+      writeFileSync(
+        join(dir, 'plugin.json'),
+        JSON.stringify({
+          apiVersion: 2,
+          permissions: {
+            capabilities: {
+              tool: ['*'],
+              service: ['*'],
+              context: ['*'],
+              provider: ['*'],
+              persona: ['*'],
+              listener: ['*'],
+              command: ['*'],
+              role: ['*'],
+              api: ['*'],
+            },
+          },
+          id,
+          name: id,
+          version: '0.1.0',
+          entry: 'index.ts',
+        }),
+      );
+      writeFileSync(
+        join(dir, 'index.ts'),
+        `export default { id: '${id}', name: '${id}', version: '0.1.0', onLoad(ctx) { ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: '${tool}', description: 'probe', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true }) } }); } };`,
+      );
     };
     writePlugin(join(userPluginsDir, 'live'), 'live', 'watch_v1');
     writePlugin(join(corePluginsDir, 'builtin'), 'builtin', 'core_v1');
     const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir, corePluginsDir });
-    t.after(async () => { await kernel.stop(); rmSync(rootDir, { recursive: true, force: true }); });
+    t.after(async () => {
+      await kernel.stop();
+      rmSync(rootDir, { recursive: true, force: true });
+    });
     await kernel.start();
     assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v1'));
     assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v1'));
@@ -631,10 +829,19 @@ describe('卸载（v8）', () => {
     while (Date.now() < deadline && !kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v2')) {
       await new Promise((resolve) => setTimeout(resolve, 100));
     }
-    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v2'), '用户插件保存后应自动热重载');
+    assert.ok(
+      kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'watch_v2'),
+      '用户插件保存后应自动热重载',
+    );
     writePlugin(join(corePluginsDir, 'builtin'), 'builtin', 'core_v2');
     await new Promise((resolve) => setTimeout(resolve, 700));
-    assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v1'), 'core 修改不应触发 watcher 热重载');
-    assert.equal(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v2'), false);
+    assert.ok(
+      kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v1'),
+      'core 修改不应触发 watcher 热重载',
+    );
+    assert.equal(
+      kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'core_v2'),
+      false,
+    );
   });
 });

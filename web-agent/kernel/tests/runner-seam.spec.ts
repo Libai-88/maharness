@@ -25,7 +25,12 @@ import type { ToolDef, ToolContext } from '../types';
 const CHAT_PLUGIN_ID = 'chat';
 
 /** 替身循环的调用记录：经事件总线采集（不借助 globalThis——多用例共享进程会串扰） */
-interface StubCall { systemPrompt?: string; model?: string; objective?: string; hasSignal?: boolean }
+interface StubCall {
+  systemPrompt?: string;
+  model?: string;
+  objective?: string;
+  hasSignal?: boolean;
+}
 
 function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup: () => void } {
   const rootDir = mkdtempSync(join(tmpdir(), 'mh-runner-'));
@@ -39,10 +44,32 @@ function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup:
   // 每次 run 发一条 bus 事件作为「替身确实被调用」的证据。
   const pdir = join(userPluginsDir, 'runner-stub');
   mkdirSync(pdir, { recursive: true });
-  writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-    id: 'runner-stub', name: 'runner-stub', version: '0.1.0', entry: 'index.ts',
-  }));
-  writeFileSync(join(pdir, 'index.ts'), `
+  writeFileSync(
+    join(pdir, 'plugin.json'),
+    JSON.stringify({
+      apiVersion: 2,
+      permissions: {
+        capabilities: {
+          tool: ['*'],
+          service: ['*'],
+          context: ['*'],
+          provider: ['*'],
+          persona: ['*'],
+          listener: ['*'],
+          command: ['*'],
+          role: ['*'],
+          api: ['*'],
+        },
+      },
+      id: 'runner-stub',
+      name: 'runner-stub',
+      version: '0.1.0',
+      entry: 'index.ts',
+    }),
+  );
+  writeFileSync(
+    join(pdir, 'index.ts'),
+    `
     let activeParallel = 0;
     const stubFactory = (kernel, bus) => ({
       async *run(opts) {
@@ -83,7 +110,8 @@ function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup:
       version: '0.1.0',
       onLoad: (ctx) => { ctx.provide('service:runner', stubFactory, 10); },
     };
-  `);
+  `,
+  );
   // 装载【真实 core 插件栈】：core 目录不在临时 rootDir 下，需显式指向仓库的 core/
   const corePluginsDir = join(process.cwd(), 'core');
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir, corePluginsDir });
@@ -93,8 +121,16 @@ function setup(): { kernel: Kernel; rootDir: string; calls: StubCall[]; cleanup:
     rootDir,
     calls,
     cleanup: () => {
-      try { kernel.trace.flush(); } catch { /* 落盘失败不影响清理 */ }
-      try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* 句柄迟释放时留待系统清理 */ }
+      try {
+        kernel.trace.flush();
+      } catch {
+        /* 落盘失败不影响清理 */
+      }
+      try {
+        rmSync(rootDir, { recursive: true, force: true });
+      } catch {
+        /* 句柄迟释放时留待系统清理 */
+      }
     },
   };
 }
@@ -180,10 +216,19 @@ describe('执行循环可替换（service:runner）', () => {
 
     // 子代理需要一个可用的 provider（它从 chat 服务取第一个启用的 provider）
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
 
     const before = f.calls.length;
     const tool = toolOf(f.kernel, 'run_subagent');
@@ -201,17 +246,23 @@ describe('执行循环可替换（service:runner）', () => {
     await f.kernel.plugins.loadAll();
 
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
 
     const before = f.calls.length;
     const tool = toolOf(f.kernel, 'run_parallel');
-    const res = await tool.handler(
-      { tasks: [{ objective: 'A' }, { objective: 'B' }] },
-      toolCtx(f.rootDir, f.kernel),
-    );
+    const res = await tool.handler({ tasks: [{ objective: 'A' }, { objective: 'B' }] }, toolCtx(f.rootDir, f.kernel));
 
     assert.equal(res.ok, true, `并行应成功: ${JSON.stringify(res)}`);
     assert.equal(f.calls.length - before, 2, '两个并行子任务各调用一次被接管的循环');
@@ -225,10 +276,19 @@ describe('执行循环可替换（service:runner）', () => {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
     const before = f.calls.length;
     const res = await toolOf(f.kernel, 'run_parallel').handler(
       { tasks: [{ objective: 'A' }, { objective: 'B' }, { objective: 'C' }, { objective: 'D' }] },
@@ -248,10 +308,19 @@ describe('执行循环可替换（service:runner）', () => {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
     let active = 0;
     let peak = 0;
     f.kernel.bus.on('stub.runner.capacity', (event) => {
@@ -259,7 +328,11 @@ describe('执行循环可替换（service:runner）', () => {
       peak = Math.max(peak, active);
     });
     const tool = toolOf(f.kernel, 'run_parallel');
-      const batch = (name: string) => tool.handler({ tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) }, toolCtx(f.rootDir, f.kernel));
+    const batch = (name: string) =>
+      tool.handler(
+        { tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
+        toolCtx(f.rootDir, f.kernel),
+      );
     const p1 = batch('one');
     const p2 = batch('two');
     const p3 = batch('three');
@@ -277,22 +350,37 @@ describe('执行循环可替换（service:runner）', () => {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
     let subagentStarted!: () => void;
-    const started = new Promise<void>((resolve) => { subagentStarted = resolve; });
+    const started = new Promise<void>((resolve) => {
+      subagentStarted = resolve;
+    });
     const off = f.kernel.bus.on('stub.runner.capacity', (event) => {
-      if ((event.data as { active: number }).active === 1) { off(); subagentStarted(); }
+      if ((event.data as { active: number }).active === 1) {
+        off();
+        subagentStarted();
+      }
     });
     const subagent = toolOf(f.kernel, 'run_subagent').handler({ objective: 'capacity-delay standalone' }, toolCtx(f.rootDir, f.kernel));
     await started;
     const parallel = toolOf(f.kernel, 'run_parallel');
-    const batch = (name: string) => parallel.handler(
-      { tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
-      toolCtx(f.rootDir, f.kernel),
-    );
+    const batch = (name: string) =>
+      parallel.handler(
+        { tasks: Array.from({ length: 8 }, (_, i) => ({ objective: `capacity-delay ${name}-${i}` })) },
+        toolCtx(f.rootDir, f.kernel),
+      );
     const [accepted, rejected] = await Promise.all([batch('accepted'), batch('rejected')]);
     assert.equal(accepted.ok, true);
     assert.equal(rejected.ok, false);
@@ -307,15 +395,27 @@ describe('执行循环可替换（service:runner）', () => {
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
     const chat = f.kernel.plugins.resolveService('service:chat') as { setProviders: (p: unknown[]) => void };
-    chat.setProviders([{
-      id: 'stub', label: 'stub', baseUrl: 'http://127.0.0.1:1', apiKey: 'k', model: 'stub-model',
-      protocol: 'openai', models: [], inputPrice: 1, outputPrice: 2,
-    }]);
+    chat.setProviders([
+      {
+        id: 'stub',
+        label: 'stub',
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'k',
+        model: 'stub-model',
+        protocol: 'openai',
+        models: [],
+        inputPrice: 1,
+        outputPrice: 2,
+      },
+    ]);
 
     const controller = new AbortController();
     const started = new Promise<void>((resolve) => {
       const off = f.kernel.bus.on('stub.runner.called', () => {
-        if (f.calls.length === 2) { off(); resolve(); }
+        if (f.calls.length === 2) {
+          off();
+          resolve();
+        }
       });
     });
     const handlerPromise = toolOf(f.kernel, 'run_parallel').handler(
@@ -323,11 +423,20 @@ describe('执行循环可替换（service:runner）', () => {
       { ...toolCtx(f.rootDir, f.kernel), signal: controller.signal },
     );
     await started;
-    assert.ok(f.calls.every((c) => c.hasSignal), '父取消信号已透传到每个子 runner');
+    assert.ok(
+      f.calls.every((c) => c.hasSignal),
+      '父取消信号已透传到每个子 runner',
+    );
     controller.abort();
     const res = await handlerPromise;
     assert.equal(res.ok, false, '全部子任务取消属于并行工具失败，不应伪装为成功');
-    const data = res.data as { status: string; cancelled: number; completed: number; results: { cancelled?: boolean }[]; subagentCost: { cost: number; tokensIn: number } };
+    const data = res.data as {
+      status: string;
+      cancelled: number;
+      completed: number;
+      results: { cancelled?: boolean }[];
+      subagentCost: { cost: number; tokensIn: number };
+    };
     assert.equal(data.status, 'failed');
     assert.equal(data.cancelled, 2);
     assert.equal(data.completed, 0);
@@ -345,7 +454,11 @@ describe('执行循环可替换（service:runner）', () => {
 
     await f.kernel.plugins.disable('runner-stub');
     const afterDisable = f.kernel.plugins.bindingCandidates(SERVICE_KEYS.runner);
-    assert.deepEqual(afterDisable.map((c) => c.pluginId), [CHAT_PLUGIN_ID], '回退到默认循环');
+    assert.deepEqual(
+      afterDisable.map((c) => c.pluginId),
+      [CHAT_PLUGIN_ID],
+      '回退到默认循环',
+    );
     assert.ok(makeRunner(f.kernel, f.kernel.bus), '服务不消失（回退而非清空）');
 
     await f.kernel.plugins.enable('runner-stub');

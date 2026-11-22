@@ -22,8 +22,12 @@ export function describeModelInput(messages: LLMMessage[], tools: unknown[], tok
   }
   return {
     measurement: tokenizer ? 'tokenizer' : 'estimated',
-    toolSources: tools.map(tool => ({ name: String((tool as { name?: string }).name ?? ''), tokens: estimateTokens(JSON.stringify(tool)) })),
-    messageTokens: countMessageTokens(messages, tokenizer), toolTokens: estimateTokens(JSON.stringify(tools)),
+    toolSources: tools.map((tool) => ({
+      name: String((tool as { name?: string }).name ?? ''),
+      tokens: estimateTokens(JSON.stringify(tool)),
+    })),
+    messageTokens: countMessageTokens(messages, tokenizer),
+    toolTokens: estimateTokens(JSON.stringify(tools)),
     sources: [...sources].map(([source, tokens]) => ({ source, tokens })),
     fingerprint: createHash('sha256').update(JSON.stringify({ messages, tools })).digest('hex'),
   };

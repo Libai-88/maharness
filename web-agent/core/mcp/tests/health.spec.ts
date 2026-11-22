@@ -7,7 +7,12 @@ import type { ToolContext } from '../../../kernel/types';
 
 function clock(start = 1_000_000) {
   let now = start;
-  return { now: () => now, advance: (ms: number) => { now += ms; } };
+  return {
+    now: () => now,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
 }
 
 describe('MCP server 熔断', () => {
@@ -87,19 +92,19 @@ describe('MCP 工具调用接入熔断', () => {
     } as unknown as McpConnection;
     const tool = wrapMcpTool('demo', mt, conn, { type: 'stdio', command: 'node' }, undefined, breaker);
 
-    const first = await tool.handler({}, {} as ToolContext) as { ok: boolean; error?: string };
+    const first = (await tool.handler({}, {} as ToolContext)) as { ok: boolean; error?: string };
     assert.equal(first.ok, false);
     assert.match(String(first.error), /network down/);
     assert.equal(calls, 1);
 
-    const blocked = await tool.handler({}, {} as ToolContext) as { ok: boolean; error?: string };
+    const blocked = (await tool.handler({}, {} as ToolContext)) as { ok: boolean; error?: string };
     assert.equal(blocked.ok, false);
     assert.match(String(blocked.error), /熔断中/);
     assert.equal(calls, 1, '熔断期间不得再触达 server');
 
     c.advance(3_000);
     mode = 'ok';
-    const probe = await tool.handler({}, {} as ToolContext) as { ok: boolean; data?: { text?: string } };
+    const probe = (await tool.handler({}, {} as ToolContext)) as { ok: boolean; data?: { text?: string } };
     assert.equal(probe.ok, true);
     assert.equal(probe.data?.text, 'done');
     assert.equal(calls, 2);
@@ -119,7 +124,7 @@ describe('MCP 工具调用接入熔断', () => {
     const tool = wrapMcpTool('demo', mt, conn, { type: 'stdio', command: 'node' }, undefined, breaker);
 
     for (let i = 0; i < 2; i++) {
-      const result = await tool.handler({}, {} as ToolContext) as { ok: boolean; error?: string };
+      const result = (await tool.handler({}, {} as ToolContext)) as { ok: boolean; error?: string };
       assert.equal(result.ok, false);
       assert.equal(result.error, 'invalid argument');
     }

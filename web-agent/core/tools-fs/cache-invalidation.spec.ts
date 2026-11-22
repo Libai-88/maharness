@@ -27,7 +27,7 @@ const ctx = { sandboxRoot: root, sessionId: 'cache-test', traceId: 'cache-test',
 async function call(name: string, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   const tool = tools.get(name);
   assert.ok(tool, `tool ${name} is registered`);
-  return await tool.handler(args, ctx) as unknown as Record<string, unknown>;
+  return (await tool.handler(args, ctx)) as unknown as Record<string, unknown>;
 }
 
 after(() => rmSync(root, { recursive: true, force: true }));

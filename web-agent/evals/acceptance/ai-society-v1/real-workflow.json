@@ -36,17 +36,8 @@
       "providerCalls": 1,
       "institutionVersion": 3,
       "institutionBudgetUsd": 20,
-      "auditActions": [
-        "rollback",
-        "update",
-        "initialize"
-      ],
-      "societyAuditActions": [
-        "queued",
-        "scheduled",
-        "release_completed",
-        "human_accepted"
-      ],
+      "auditActions": ["rollback", "update", "initialize"],
+      "societyAuditActions": ["queued", "scheduled", "release_completed", "human_accepted"],
       "screenshotSha256": "708fa4a75eae6040e4a2908b5bd9aad19941bc7fe444174f3f60beb50b6ebc66"
     },
     {
@@ -58,17 +49,8 @@
       "contractCount": 2,
       "networkNodeCount": 5,
       "networkEdgeCount": 0,
-      "bottleneckKinds": [
-        "budget"
-      ],
-      "selectionFactors": [
-        "capability",
-        "memory",
-        "tools",
-        "collaboration",
-        "history",
-        "load"
-      ],
+      "bottleneckKinds": ["budget"],
+      "selectionFactors": ["capability", "memory", "tools", "collaboration", "history", "load"],
       "wellbeingRoleCount": 5,
       "officialTokenCount": 120,
       "actualTokenCount": 100,
@@ -100,17 +82,8 @@
       "fallbackRunStatus": "completed",
       "rollbackMarker": "ROLLBACK_TO_SOLO",
       "failedChildCount": 1,
-      "contractStatuses": [
-        "collapsed",
-        "delivered"
-      ],
-      "societyAuditActions": [
-        "queued",
-        "scheduled",
-        "fallback_solo",
-        "release_completed",
-        "human_accepted"
-      ],
+      "contractStatuses": ["collapsed", "delivered"],
+      "societyAuditActions": ["queued", "scheduled", "fallback_solo", "release_completed", "human_accepted"],
       "providerCalls": 6,
       "schedulerTickApiCalls": 0,
       "schedulerAutoAdvanced": true,

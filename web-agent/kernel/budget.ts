@@ -34,8 +34,12 @@ export function reserveBudget(total: number, count: number): BudgetReservation {
   return {
     shares,
     reserved: safeTotal,
-    get settled() { return settledTotal; },
-    get remaining() { return remaining; },
+    get settled() {
+      return settledTotal;
+    },
+    get remaining() {
+      return remaining;
+    },
     settle(index, actual) {
       if (index < 0 || index >= n || settled[index]) return { reserved: 0, actual: 0, refund: 0 };
       settled[index] = true;
@@ -62,7 +66,9 @@ export class Budget {
       try {
         const raw = JSON.parse(readFileSync(persistFile, 'utf-8')) as { tasks?: TaskRecord[] };
         if (Array.isArray(raw.tasks)) this.tasks = raw.tasks.slice(-TASK_PROFILE_MAX);
-      } catch { /* 无历史画像：首次启动或文件损坏，忽略 */ }
+      } catch {
+        /* 无历史画像：首次启动或文件损坏，忽略 */
+      }
     }
   }
 
@@ -75,7 +81,9 @@ export class Budget {
       try {
         mkdirSync(dirname(this.persistFile), { recursive: true });
         writeFileSync(this.persistFile, JSON.stringify({ version: 1, tasks: this.tasks }), 'utf-8');
-      } catch { /* 写盘失败不影响对话主流程 */ }
+      } catch {
+        /* 写盘失败不影响对话主流程 */
+      }
     }, 2000);
     (this.saveTimer as { unref?: () => void }).unref?.();
   }
@@ -136,7 +144,9 @@ export class Budget {
 }
 
 /** Compatibility helper: task labels never alter the configured reasoning allowance. */
-export function reasoningBudgetFor(_taskType: string, base: number): number { return base; }
+export function reasoningBudgetFor(_taskType: string, base: number): number {
+  return base;
+}
 
 /** 任务类型分类：按最后 user 消息的关键词（harness 视角的任务画像） */
 export function classifyTask(userText: string): string {

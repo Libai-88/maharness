@@ -12,7 +12,8 @@ import type { SocietyService } from '../services/society';
  * services. New route code must extend a port here instead of importing a
  * concrete service implementation.
  */
-export type OrganizationPort = Pick<OrganizationService,
+export type OrganizationPort = Pick<
+  OrganizationService,
   | 'createForRun'
   | 'detail'
   | 'updateRole'
@@ -32,7 +33,8 @@ export type OrganizationPort = Pick<OrganizationService,
   | 'decideProposal'
 >;
 
-export type SocietyPort = Pick<SocietyService,
+export type SocietyPort = Pick<
+  SocietyService,
   | 'snapshot'
   | 'createTask'
   | 'tick'
@@ -44,7 +46,8 @@ export type SocietyPort = Pick<SocietyService,
   | 'rollbackInstitution'
 >;
 
-export type ExperiencePort = Pick<ExperienceService,
+export type ExperiencePort = Pick<
+  ExperienceService,
   | 'estimate'
   | 'create'
   | 'list'
@@ -62,18 +65,9 @@ export type ExperiencePort = Pick<ExperienceService,
   | 'evolveFinding'
 >;
 
-export type AutomationPort = Pick<AutomationService,
-  | 'list'
-  | 'occurrences'
-  | 'create'
-  | 'get'
-  | 'update'
-  | 'confirm'
-  | 'pause'
-  | 'resume'
-  | 'runNow'
-  | 'cancelRun'
-  | 'cancel'
+export type AutomationPort = Pick<
+  AutomationService,
+  'list' | 'occurrences' | 'create' | 'get' | 'update' | 'confirm' | 'pause' | 'resume' | 'runNow' | 'cancelRun' | 'cancel'
 >;
 
 export interface HostPorts {

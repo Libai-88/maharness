@@ -43,9 +43,7 @@
   ],
   "expect": {
     "repeats": 2,
-    "answerContains": [
-      "薄内核"
-    ],
+    "answerContains": ["薄内核"],
     "llmCalls": 2,
     "cachedOn": [],
     "noErrors": true

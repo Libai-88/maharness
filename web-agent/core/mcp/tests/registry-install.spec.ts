@@ -32,14 +32,16 @@ describe('MCP registry 安装链路', () => {
 
     const registry = createServer((_req, res) => {
       json(res, {
-        servers: [{
-          server: {
-            name: 'io.example/demo',
-            title: 'Demo',
-            version: '1.0.0',
-            remotes: [{ type: 'streamable-http', url: `http://127.0.0.1:${mcpPort}/mcp` }],
+        servers: [
+          {
+            server: {
+              name: 'io.example/demo',
+              title: 'Demo',
+              version: '1.0.0',
+              remotes: [{ type: 'streamable-http', url: `http://127.0.0.1:${mcpPort}/mcp` }],
+            },
           },
-        }],
+        ],
       });
     });
     await new Promise<void>((resolve) => registry.listen(0, '127.0.0.1', resolve));
@@ -48,23 +50,38 @@ describe('MCP registry 安装链路', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-registry-install-'));
     const userPluginsDir = join(root, 'plugins');
     mkdirSync(userPluginsDir, { recursive: true });
-    writeFileSync(join(root, 'config.json'), JSON.stringify({
-      mcp: {
-        servers: {},
-        registry: { url: `http://127.0.0.1:${registryPort}`, allowPrivate: true },
-      },
-    }));
+    writeFileSync(
+      join(root, 'config.json'),
+      JSON.stringify({
+        mcp: {
+          servers: {},
+          registry: { url: `http://127.0.0.1:${registryPort}`, allowPrivate: true },
+        },
+      }),
+    );
     const webAgentRoot = fileURLToPath(new URL('../../..', import.meta.url));
-    const kernel = new Kernel(root, {}, {
-      dataDir: join(root, 'data'),
-      userPluginsDir,
-      corePluginsDir: join(webAgentRoot, 'core'),
-    });
+    const kernel = new Kernel(
+      root,
+      {},
+      {
+        dataDir: join(root, 'data'),
+        userPluginsDir,
+        corePluginsDir: join(webAgentRoot, 'core'),
+      },
+    );
     t.after(async () => {
-      try { await kernel.stop(); } catch { /* 已停止 */ }
+      try {
+        await kernel.stop();
+      } catch {
+        /* 已停止 */
+      }
       await new Promise<void>((resolve) => mcp.close(() => resolve()));
       await new Promise<void>((resolve) => registry.close(() => resolve()));
-      try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows 句柄迟释放 */ }
+      try {
+        rmSync(root, { recursive: true, force: true });
+      } catch {
+        /* Windows 句柄迟释放 */
+      }
     });
 
     await kernel.plugins.loadAll();
@@ -72,12 +89,18 @@ describe('MCP registry 安装链路', () => {
     assert.equal(mcpPlugin?.state, 'started', `mcp 插件应启动: ${mcpPlugin?.error ?? ''}`);
     const install = kernel.plugins.capabilities('tool').find((cap) => cap.tool.name === 'mcp_registry_install')?.tool;
     assert.ok(install, 'mcp_registry_install 应可用');
-    const result = await install.handler({ name: 'io.example/demo', server: 'demo' }, {
-      turn: 0, sandboxRoot: root, cache: kernel.cache, trace: kernel.trace,
-    } as ToolContext) as { ok: boolean; data?: { server?: string; tools?: number }; error?: string };
+    const result = (await install.handler({ name: 'io.example/demo', server: 'demo' }, {
+      turn: 0,
+      sandboxRoot: root,
+      cache: kernel.cache,
+      trace: kernel.trace,
+    } as ToolContext)) as { ok: boolean; data?: { server?: string; tools?: number }; error?: string };
     assert.equal(result.ok, true, result.error);
     assert.equal(result.data?.server, 'demo');
     assert.equal(result.data?.tools, 1);
-    assert.ok(kernel.plugins.capabilities('tool').some((cap) => cap.tool.name === 'mcp_demo_echo'), '安装后 MCP 工具应注册');
+    assert.ok(
+      kernel.plugins.capabilities('tool').some((cap) => cap.tool.name === 'mcp_demo_echo'),
+      '安装后 MCP 工具应注册',
+    );
   });
 });

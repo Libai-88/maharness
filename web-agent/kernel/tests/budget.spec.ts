@@ -14,7 +14,8 @@ describe('委派次数与模型方法独立', () => {
     for (let i = 0; i < 100; i++) {
       const reservation = budget.consumeSubagentQuota('s');
       assert.equal(reservation.allowed, true);
-      reservation.refund?.(); reservation.refund?.();
+      reservation.refund?.();
+      reservation.refund?.();
       budget.consumeSubagent();
     }
     assert.equal(budget.subagentQuota().allowed, true);
@@ -28,7 +29,10 @@ describe('委派次数与模型方法独立', () => {
 describe('并行预算预留与结算', () => {
   test('份额总和等于预算，实际消耗后释放未用部分', () => {
     const r = reserveBudget(1, 3);
-    assert.equal(r.shares.reduce((a, b) => a + b, 0), 1);
+    assert.equal(
+      r.shares.reduce((a, b) => a + b, 0),
+      1,
+    );
     assert.equal(r.reserved, 1);
     assert.equal(r.settle(0, 0.1).refund, r.shares[0] - 0.1);
     assert.equal(r.settle(0, 0.2).actual, 0, '重复结算幂等');
@@ -45,20 +49,22 @@ describe('并行子任务全局并发上限', () => {
   test('子代理、审查与并行批次共用原子槽位，release 幂等', () => {
     const dir = tmp();
     try {
-    const budget = new Budget(24, join(dir, 'task-profile.json'));
-    const releaseA = budget.reserveSubagentSlots(8)!;
-    const releaseB = budget.reserveSubagentSlots(8)!;
-    assert.equal(budget.activeSubagentCount(), 16);
-    assert.equal(budget.reserveSubagentSlots(1), undefined);
-    releaseA();
-    releaseA();
-    assert.equal(budget.activeSubagentCount(), 8);
-    const releaseC = budget.reserveSubagentSlots(8);
-    assert.ok(releaseC);
-    releaseB();
-    releaseC();
-    assert.equal(budget.activeSubagentCount(), 0);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+      const budget = new Budget(24, join(dir, 'task-profile.json'));
+      const releaseA = budget.reserveSubagentSlots(8)!;
+      const releaseB = budget.reserveSubagentSlots(8)!;
+      assert.equal(budget.activeSubagentCount(), 16);
+      assert.equal(budget.reserveSubagentSlots(1), undefined);
+      releaseA();
+      releaseA();
+      assert.equal(budget.activeSubagentCount(), 8);
+      const releaseC = budget.reserveSubagentSlots(8);
+      assert.ok(releaseC);
+      releaseB();
+      releaseC();
+      assert.equal(budget.activeSubagentCount(), 0);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('重叠压力：100 个并发申请最多允许 16 个活动槽位，最终完全释放', async () => {
@@ -67,14 +73,16 @@ describe('并行子任务全局并发上限', () => {
       const budget = new Budget(24, join(dir, 'task-profile.json'));
       let peak = 0;
       const releases: (() => void)[] = [];
-      await Promise.all(Array.from({ length: 100 }, async () => {
-        await Promise.resolve();
-        const release = budget.reserveSubagentSlots(1);
-        if (release) {
-          releases.push(release);
-          peak = Math.max(peak, budget.activeSubagentCount());
-        }
-      }));
+      await Promise.all(
+        Array.from({ length: 100 }, async () => {
+          await Promise.resolve();
+          const release = budget.reserveSubagentSlots(1);
+          if (release) {
+            releases.push(release);
+            peak = Math.max(peak, budget.activeSubagentCount());
+          }
+        }),
+      );
       assert.equal(releases.length, 16);
       assert.equal(peak, 16);
       for (const release of releases) release();
@@ -83,6 +91,8 @@ describe('并行子任务全局并发上限', () => {
       assert.ok(finalRelease, '释放后应可重新取得完整容量');
       finalRelease?.();
       assert.equal(budget.activeSubagentCount(), 0);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

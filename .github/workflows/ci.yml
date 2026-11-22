@@ -31,6 +31,14 @@ jobs:
         run: npm run test:security
       - name: 威胁模型与安全测试映射检查
         run: npm run check:threat-model
+      - name: 分层边界（路由/用例/内核的依赖方向）
+        run: npm run check:boundaries
+      - name: 复杂度预算（文件/函数/圈复杂度/导出，只降不升）
+        run: npm run check:complexity
+      - name: 契约单一来源（contracts/api.ts 与 UI 生成物字节一致）
+        run: npm run check:contracts
+      - name: 关键文件覆盖率门禁（逐文件下限，低于即失败）
+        run: npm run check:coverage
       - name: 契约文档事实校验（api-contract 字段一致性）
         run: node scripts/check-doc-facts.mjs
       - name: 插件 manifest 校验
@@ -39,8 +47,12 @@ jobs:
           npm run plugin:validate -- plugins/workbench
       - name: 后端类型检查
         run: npm run typecheck
+      - name: 代码风格与静态检查（Biome：格式 + lint，error 即失败）
+        run: npm run lint
       - name: 前端类型检查
         run: npm run ui:typecheck
+      - name: 前端单元测试（Vitest + Testing Library）
+        run: npm --prefix ui run test
       - name: 产品级冒烟（selftest：隔离数据目录，不触发 LLM）
         run: npm run selftest
       - name: golden 回归、baseline 阈值门禁与 JSON 报告（ReplayProvider 确定性回放）

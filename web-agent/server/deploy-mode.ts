@@ -26,9 +26,7 @@ export interface DeployConfig {
   tls?: { cert: string; key: string };
 }
 
-export type DeployResolveResult =
-  | { ok: true; config: DeployConfig }
-  | { ok: false; errors: string[] };
+export type DeployResolveResult = { ok: true; config: DeployConfig } | { ok: false; errors: string[] };
 
 const MODES: readonly DeployMode[] = ['local', 'trusted', 'remote'];
 
@@ -88,7 +86,13 @@ export function methodRequiresAuth(config: DeployConfig): boolean {
 }
 
 /** /api/security 展示用摘要（不含任何密钥材料） */
-export function deployPosture(config: DeployConfig): { mode: DeployMode; bind: string; tls: boolean; apiAuthRequired: boolean; approvalEnforced: boolean } {
+export function deployPosture(config: DeployConfig): {
+  mode: DeployMode;
+  bind: string;
+  tls: boolean;
+  apiAuthRequired: boolean;
+  approvalEnforced: boolean;
+} {
   return {
     mode: config.mode,
     bind: config.bindHost,

@@ -57,14 +57,38 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         circuitBreakerResetMs: kernel.config.get<number>('provider.circuitBreakerResetMs', 60_000),
       },
       // 路由目标候选（provider@model 全清单，含能力标注）——前端下拉用，避免手敲
-      routingTargets: (kernel.plugins.resolveService('service:chat') as
-        { providers?: { id: string; label: string; defaultModel: string; models?: { modelId: string; vision: boolean; tools: boolean; reasoning: boolean; contextWindow: number; latencyMs?: number; privacyTier?: string; riskLevel?: string }[] }[] } | undefined)
-        ?.providers?.flatMap((p) => {
-          const models = p.models?.length ? p.models : [{ modelId: p.defaultModel, vision: false, tools: true, reasoning: false, contextWindow: 0 }];
-          return models.map(m => ({
+      routingTargets:
+        (
+          kernel.plugins.resolveService('service:chat') as
+            | {
+                providers?: {
+                  id: string;
+                  label: string;
+                  defaultModel: string;
+                  models?: {
+                    modelId: string;
+                    vision: boolean;
+                    tools: boolean;
+                    reasoning: boolean;
+                    contextWindow: number;
+                    latencyMs?: number;
+                    privacyTier?: string;
+                    riskLevel?: string;
+                  }[];
+                }[];
+              }
+            | undefined
+        )?.providers?.flatMap((p) => {
+          const models = p.models?.length
+            ? p.models
+            : [{ modelId: p.defaultModel, vision: false, tools: true, reasoning: false, contextWindow: 0 }];
+          return models.map((m) => ({
             value: `${p.id}@${m.modelId}`,
             label: `${p.label} · ${m.modelId}`,
-            vision: m.vision, tools: m.tools, reasoning: m.reasoning, contextWindow: m.contextWindow,
+            vision: m.vision,
+            tools: m.tools,
+            reasoning: m.reasoning,
+            contextWindow: m.contextWindow,
             ...(m.latencyMs === undefined ? {} : { latencyMs: m.latencyMs }),
             ...(m.privacyTier === undefined ? {} : { privacyTier: m.privacyTier }),
             ...(m.riskLevel === undefined ? {} : { riskLevel: m.riskLevel }),
@@ -84,7 +108,9 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
       }
       const { context, cache, agent, provider, checkpoint } = req.body ?? {};
       const changes: [string, unknown][] = [];
-      const persist = (key: string, value: unknown): void => { changes.push([key, value]); };
+      const persist = (key: string, value: unknown): void => {
+        changes.push([key, value]);
+      };
       let warmupOff = false;
       let retentionMs: number | undefined;
       if (context?.maxTokens !== undefined) {
@@ -109,7 +135,13 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
       }
       if (agent?.fallbackProviders !== undefined) {
         const ids = agent.fallbackProviders;
-        if (!Array.isArray(ids) || ids.length > 16 || ids.some(id => typeof id !== 'string' || !deps.store.getProvider(id)?.enabled) || new Set(ids).size !== ids.length) throw new Error('备用线路必须为已启用 Provider 的不重复标识');
+        if (
+          !Array.isArray(ids) ||
+          ids.length > 16 ||
+          ids.some((id) => typeof id !== 'string' || !deps.store.getProvider(id)?.enabled) ||
+          new Set(ids).size !== ids.length
+        )
+          throw new Error('备用线路必须为已启用 Provider 的不重复标识');
         persist('agent.fallbackProviders', ids);
       }
       if (agent?.reasoningBudget !== undefined) {
@@ -122,10 +154,16 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         persist('agent.thinkInEnglish', Boolean(agent.thinkInEnglish));
       }
       if (provider?.circuitBreakerThreshold !== undefined) {
-        persist('provider.circuitBreakerThreshold', boundedNumber(provider.circuitBreakerThreshold, 'circuitBreakerThreshold', 1, 20, true));
+        persist(
+          'provider.circuitBreakerThreshold',
+          boundedNumber(provider.circuitBreakerThreshold, 'circuitBreakerThreshold', 1, 20, true),
+        );
       }
       if (provider?.circuitBreakerResetMs !== undefined) {
-        persist('provider.circuitBreakerResetMs', boundedNumber(provider.circuitBreakerResetMs, 'circuitBreakerResetMs', 1_000, 3_600_000, true));
+        persist(
+          'provider.circuitBreakerResetMs',
+          boundedNumber(provider.circuitBreakerResetMs, 'circuitBreakerResetMs', 1_000, 3_600_000, true),
+        );
       }
       if (checkpoint?.retentionDays !== undefined) {
         const days = boundedNumber(checkpoint.retentionDays, 'checkpoint.retentionDays', 1, 3650, true);
@@ -142,7 +180,7 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
           const value = String(v ?? '').trim();
           if (!key) continue;
           if (!value) continue;
-          if (!/^[\w.\-]+(@[\w.\-:/]+)?$/.test(value)) throw new Error(`路由目标格式非法: ${value}（应为 providerId 或 providerId@model）`);
+          if (!/^[\w.-]+(@[\w.\-:/]+)?$/.test(value)) throw new Error(`路由目标格式非法: ${value}（应为 providerId 或 providerId@model）`);
           clean[key] = value;
         }
         persist('agent.modelRouting', clean);
@@ -158,9 +196,12 @@ export function registerConfigRoutes(app: Express, deps: RouteDeps): void {
         persist('agent.maxTurnsGoal', Math.max(1, Math.min(400, Number(agent.maxTurnsGoal))));
       }
       if (!setPersistentBatch(changes, revision)) {
-        const code = (kernel.config as typeof kernel.config & { getPersistentFailureCode?: () => string | undefined }).getPersistentFailureCode?.();
+        const code = (
+          kernel.config as typeof kernel.config & { getPersistentFailureCode?: () => string | undefined }
+        ).getPersistentFailureCode?.();
         const latest = revisionReader.getPersistedRevision?.();
-        if (code === 'concurrent_write') return res.status(409).json({ error: '配置已被其他写入者修改，请重新读取后再保存', revision: latest });
+        if (code === 'concurrent_write')
+          return res.status(409).json({ error: '配置已被其他写入者修改，请重新读取后再保存', revision: latest });
         return res.status(503).json({ error: '配置未提交，原配置保持不变' });
       }
       if (warmupOff) stopAllWarmups();

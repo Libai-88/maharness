@@ -16,14 +16,18 @@ test('social observations expose formula, sample size and quality instead of a c
     spentUsd: 5,
     budgetUsd: 100,
   });
-  assert.deepEqual(full.map(item => item.id), [
-    'load_balance', 'welfare', 'exception_backlog', 'budget_utilization', 'collaboration',
-  ]);
-  assert.equal(full.every(item => item.formula.length > 0), true);
-  const collaboration = full.find(item => item.id === 'collaboration')!;
+  assert.deepEqual(
+    full.map((item) => item.id),
+    ['load_balance', 'welfare', 'exception_backlog', 'budget_utilization', 'collaboration'],
+  );
+  assert.equal(
+    full.every((item) => item.formula.length > 0),
+    true,
+  );
+  const collaboration = full.find((item) => item.id === 'collaboration')!;
   assert.equal(collaboration.quality, 'observed');
   assert.equal(collaboration.sampleSize, 6);
-  const budget = full.find(item => item.id === 'budget_utilization')!;
+  const budget = full.find((item) => item.id === 'budget_utilization')!;
   assert.equal(budget.numerator, 25);
   assert.equal(budget.denominator, 100);
   assert.equal(budget.value, 0.25);
@@ -41,9 +45,12 @@ test('social observations expose formula, sample size and quality instead of a c
     spentUsd: 0,
     budgetUsd: 0,
   });
-  assert.equal(empty.find(item => item.id === 'collaboration')!.quality, 'unknown');
-  assert.equal(empty.find(item => item.id === 'load_balance')!.value, null);
-  assert.equal(empty.find(item => item.id === 'budget_utilization')!.quality, 'unknown');
+  assert.equal(empty.find((item) => item.id === 'collaboration')!.quality, 'unknown');
+  assert.equal(empty.find((item) => item.id === 'load_balance')!.value, null);
+  assert.equal(empty.find((item) => item.id === 'budget_utilization')!.quality, 'unknown');
   // No composite score field is exposed at all.
-  assert.equal(empty.some(item => (item as unknown as { score?: number }).score !== undefined), false);
+  assert.equal(
+    empty.some((item) => (item as unknown as { score?: number }).score !== undefined),
+    false,
+  );
 });

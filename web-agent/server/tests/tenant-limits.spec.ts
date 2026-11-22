@@ -1,8 +1,6 @@
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  assertTenantToolCall, resetTenantToolLimit, TenantToolQuotaError, tenantToolCallCount,
-} from '../tenant-limits';
+import { assertTenantToolCall, resetTenantToolLimit, TenantToolQuotaError, tenantToolCallCount } from '../tenant-limits';
 
 describe('租户工具调用频率配额', () => {
   test('0 不限制；窗口内超过上限抛出 429 语义错误', () => {
@@ -13,9 +11,7 @@ describe('租户工具调用频率配额', () => {
     assert.equal(tenantToolCallCount('t', 1600), 2);
     assert.throws(
       () => assertTenantToolCall('t', 2, 2000),
-      (error: unknown) => error instanceof TenantToolQuotaError
-        && error.status === 429
-        && error.code === 'TENANT_TOOL_QUOTA',
+      (error: unknown) => error instanceof TenantToolQuotaError && error.status === 429 && error.code === 'TENANT_TOOL_QUOTA',
     );
   });
 

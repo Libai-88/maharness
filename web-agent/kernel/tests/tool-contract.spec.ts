@@ -5,12 +5,16 @@ import { effectiveToolSideEffect, shouldJournalToolEffect, toolSideEffectLabel }
 import type { ToolDef } from '../types';
 
 const tool = (sideEffect: ToolDef['sideEffect'] = 'external'): ToolDef => ({
-  version: '2.0.0', permissions: [], outputSchema: {},
+  version: '2.0.0',
+  permissions: [],
+  outputSchema: {},
   name: 'demo',
   description: 'demo',
   parameters: { type: 'object', properties: {} },
   sideEffect,
-  async handler() { return { ok: true }; },
+  async handler() {
+    return { ok: true };
+  },
 });
 
 describe('工具副作用契约', () => {
@@ -36,7 +40,18 @@ describe('工具副作用契约', () => {
     assert.equal(toolSideEffectLabel(dynamic, { read: true }), 'read');
     assert.equal(effectiveToolSideEffect(dynamic, { read: false }), 'irreversible');
     assert.equal(shouldJournalToolEffect(dynamic, { read: false }), true);
-    assert.equal(effectiveToolSideEffect({ ...dynamic, classifySideEffect() { throw new Error('bad input'); } }, {}), 'irreversible');
+    assert.equal(
+      effectiveToolSideEffect(
+        {
+          ...dynamic,
+          classifySideEffect() {
+            throw new Error('bad input');
+          },
+        },
+        {},
+      ),
+      'irreversible',
+    );
   });
 
   test('工具描述保留副作用边界', () => {

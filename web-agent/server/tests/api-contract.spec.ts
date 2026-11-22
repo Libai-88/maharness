@@ -26,18 +26,33 @@ describe('API-01 v1 contract registry', () => {
   test('覆盖所有显式核心路由的契约登记', async () => {
     const { readFile } = await import('node:fs/promises');
     const routeFiles = [
-      '../routes/index.ts', '../routes/approvals.ts', '../routes/chat.ts', '../routes/commands.ts',
+      '../routes/index.ts',
+      '../routes/approvals.ts',
+      '../routes/chat.ts',
+      '../routes/commands.ts',
       '../routes/automations.ts',
       '../routes/experience.ts',
-      '../routes/items.ts', '../routes/config.ts', '../routes/evolve.ts', '../routes/files.ts', '../routes/git.ts', '../routes/materials.ts',
-      '../routes/personas.ts', '../routes/plugins.ts', '../routes/providers.ts', '../routes/rules.ts',
-      '../routes/sessions.ts', '../routes/skills.ts', '../routes/stats.ts', '../routes/trace.ts',
+      '../routes/items.ts',
+      '../routes/config.ts',
+      '../routes/evolve.ts',
+      '../routes/files.ts',
+      '../routes/git.ts',
+      '../routes/materials.ts',
+      '../routes/personas.ts',
+      '../routes/plugins.ts',
+      '../routes/providers.ts',
+      '../routes/rules.ts',
+      '../routes/sessions.ts',
+      '../routes/skills.ts',
+      '../routes/stats.ts',
+      '../routes/trace.ts',
       '../routes/workspaces.ts',
       '../routes/workbench.ts',
     ];
     const source = (await Promise.all(routeFiles.map((file) => readFile(new URL(file, import.meta.url), 'utf8')))).join('\n');
-    const routes = [...source.matchAll(/app\.(get|post|patch|put|delete)\(['"](\/api\/[^'"`]+)['"]/gi)]
-      .map((match) => `${match[1].toUpperCase()} ${match[2]}`);
+    const routes = [...source.matchAll(/app\.(get|post|patch|put|delete)\(['"](\/api\/[^'"`]+)['"]/gi)].map(
+      (match) => `${match[1].toUpperCase()} ${match[2]}`,
+    );
     const registered = new Set(API_CONTRACT_V1.map((entry) => `${entry.method} ${entry.path}`));
     const missing = routes.filter((route) => !registered.has(route));
     assert.deepEqual([...new Set(missing)], []);

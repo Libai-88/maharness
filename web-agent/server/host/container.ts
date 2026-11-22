@@ -30,7 +30,7 @@ export interface HostServices {
 export function createHostServices(kernel: Kernel, store: Store): HostServices {
   const automations = new AutomationService(
     store,
-    tenant => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
+    (tenant) => tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant),
     Date.now,
     {
       filePollMs: kernel.config.get<number>('automation.filePollMs', 5_000),
@@ -42,7 +42,7 @@ export function createHostServices(kernel: Kernel, store: Store): HostServices {
   const organization = new OrganizationService({
     store,
     emit: (type, data) => kernel.bus.emit({ type, data, ts: Date.now() }),
-    runtimeAuthority: tenant => {
+    runtimeAuthority: (tenant) => {
       const workspace = tenantSandboxRoot(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenant);
       return {
         workspace,
@@ -69,10 +69,10 @@ export function createHostServices(kernel: Kernel, store: Store): HostServices {
   });
   const orgTools = organizationTools(organization, store);
   const runTools = (): ToolDef[] => [
-    ...kernel.plugins.capabilities('tool').map(capability => capability.tool),
+    ...kernel.plugins.capabilities('tool').map((capability) => capability.tool),
     ...automationTools,
     ...orgTools,
   ];
-  runtimeToolNames = () => runTools().map(tool => tool.name);
+  runtimeToolNames = () => runTools().map((tool) => tool.name);
   return { automations, organization, society, experience, automationTools, organizationTools: orgTools, runTools };
 }

@@ -17,11 +17,17 @@ describe('reference plugin', () => {
     try {
       await kernel.plugins.loadAll();
       assert.equal(kernel.plugins.get('reference-hello')?.state, 'loaded');
-      assert.equal(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'reference_hello'), false);
+      assert.equal(
+        kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'reference_hello'),
+        false,
+      );
       await kernel.plugins.enable('reference-hello');
       assert.ok(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'reference_hello'));
       await kernel.plugins.disable('reference-hello');
-      assert.equal(kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'reference_hello'), false);
+      assert.equal(
+        kernel.plugins.capabilities('tool').some(({ tool }) => tool.name === 'reference_hello'),
+        false,
+      );
     } finally {
       await kernel.stop();
       rmSync(pluginsDir, { recursive: true, force: true });

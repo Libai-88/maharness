@@ -11,9 +11,20 @@ import type { SkillSource } from '../host/adapters/skills';
 
 interface SkillsService {
   list: () => {
-    name: string; description: string; source: string; shadowed?: string[]; bodyChars?: number;
-    license?: string; allowedTools?: string[]; metadata?: Record<string, string>;
-    triggers?: string[]; appliesWhen?: string[]; rejectWhen?: string[]; input?: string; output?: string; contractWarnings?: string[];
+    name: string;
+    description: string;
+    source: string;
+    shadowed?: string[];
+    bodyChars?: number;
+    license?: string;
+    allowedTools?: string[];
+    metadata?: Record<string, string>;
+    triggers?: string[];
+    appliesWhen?: string[];
+    rejectWhen?: string[];
+    input?: string;
+    output?: string;
+    contractWarnings?: string[];
   }[];
   get: (n: string) => { ok: boolean; content?: string; error?: string };
   readBySource?: (source: SkillSource, name: string) => string | null;
@@ -23,8 +34,7 @@ interface SkillsService {
 
 export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
   const { kernel } = deps;
-  const getSkillsService = (): SkillsService | undefined =>
-    kernel.plugins.resolveService('service:skills') as SkillsService | undefined;
+  const getSkillsService = (): SkillsService | undefined => kernel.plugins.resolveService('service:skills') as SkillsService | undefined;
   const marketDir = join(kernel.rootDir, 'market');
   const userSkillsDir = join(kernel.rootDir, 'data', 'skills');
 
@@ -32,7 +42,9 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
     try {
       const fm = parseFrontMatter(readFileSync(join(dir, 'SKILL.md'), 'utf-8'));
       return fmString(fm.data, 'description') || '(无描述)';
-    } catch { return '(无描述)'; }
+    } catch {
+      return '(无描述)';
+    }
   };
 
   app.get('/api/skills', (_req, res) => {
@@ -54,7 +66,7 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/skills/lock', (_req, res) => {
     const { file, data, error } = readLockFile(kernel.rootDir);
     const validation = data ? validateLockFile(data) : undefined;
-    const installed = new Set((getSkillsService()?.list() ?? []).map(s => s.name));
+    const installed = new Set((getSkillsService()?.list() ?? []).map((s) => s.name));
     const skills = Object.entries(data?.skills ?? {}).map(([name, e]) => ({
       name,
       source: e.source,
@@ -88,11 +100,15 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
       if (only && !only.includes(name)) continue;
       results.push(await installSkill(name, entry, userSkillsDir, { force }));
     }
-    if (results.some(r => r.installed)) {
+    if (results.some((r) => r.installed)) {
       getSkillsService()?.invalidateCache?.();
-      try { await kernel.plugins.reload('skills'); } catch { /* 重载失败：下次加载仍会看到新目录 */ }
+      try {
+        await kernel.plugins.reload('skills');
+      } catch {
+        /* 重载失败：下次加载仍会看到新目录 */
+      }
     }
-    res.json({ ok: results.every(r => r.ok), results });
+    res.json({ ok: results.every((r) => r.ok), results });
   });
 
   app.get('/api/skills/usage', (_req, res) => {
@@ -135,11 +151,12 @@ export function registerSkillRoutes(app: Express, deps: RouteDeps): void {
     const content = svc?.readBySource ? svc.readBySource(source, name) : null;
     if (content !== null) return res.json({ name, content });
     // 兜底：老式按来源目录直读（服务未提供 readBySource 时）
-    const dir = source === 'builtin'
-      ? join(kernel.rootDir, 'core', 'skills', 'builtin')
-      : source === 'pack'
-        ? join(kernel.rootDir, 'vendor')
-        : userSkillsDir;
+    const dir =
+      source === 'builtin'
+        ? join(kernel.rootDir, 'core', 'skills', 'builtin')
+        : source === 'pack'
+          ? join(kernel.rootDir, 'vendor')
+          : userSkillsDir;
     const direct = join(dir, name, 'SKILL.md');
     if (existsSync(direct)) return res.json({ name, content: readFileSync(direct, 'utf-8') });
     if (source === 'pack') {

@@ -4,7 +4,7 @@
  * 提供 repo_map（文件 + 顶层符号）与 find_symbol（按名称查符号）。
  * 当前提取器为轻量正则实现，接口稳定；后续可替换为 tree-sitter/LSP，不改变工具契约。
  */
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, type Dirent } from 'node:fs';
 import { dirname, extname, join, relative, sep } from 'node:path';
 import type { Plugin, ToolContext } from '../../kernel/plugin-sdk';
 import { isDeniedReadPath, resolveInSandbox } from '../../kernel/plugin-sdk';
@@ -105,8 +105,12 @@ export async function extractSymbolsForFile(source: string, file: string): Promi
 
 function walk(root: string, dir: string, files: string[], limit: number): void {
   if (files.length >= limit) return;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
   for (const entry of entries) {
     if (files.length >= limit) return;
     const full = join(dir, entry.name);
@@ -141,16 +145,28 @@ export async function collectProjectDiagnostics(
   root: string,
   configInput?: string,
   maxDiagnostics = 100,
-): Promise<{ config?: string; files: number; total: number; truncated: boolean; counts: Record<ProjectDiagnostic['severity'], number>; diagnostics: ProjectDiagnostic[] }> {
+): Promise<{
+  config?: string;
+  files: number;
+  total: number;
+  truncated: boolean;
+  counts: Record<ProjectDiagnostic['severity'], number>;
+  diagnostics: ProjectDiagnostic[];
+}> {
   const ts = await import('typescript');
   const candidate = resolveInSandbox(root, configInput ?? '.');
   let configFile: string | undefined;
   let rootNames: string[] = [];
   let compilerOptions: import('typescript').CompilerOptions = {
-    noEmit: true, skipLibCheck: true, strict: true,
-    target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler, jsx: ts.JsxEmit.ReactJSX,
-    allowJs: true, checkJs: false,
+    noEmit: true,
+    skipLibCheck: true,
+    strict: true,
+    target: ts.ScriptTarget.ES2022,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    jsx: ts.JsxEmit.ReactJSX,
+    allowJs: true,
+    checkJs: false,
   };
 
   if (existsSync(candidate)) {
@@ -161,7 +177,10 @@ export async function collectProjectDiagnostics(
     if (read.error) {
       const message = ts.flattenDiagnosticMessageText(read.error.messageText, '\n');
       return {
-        config: configFile, files: 0, total: 1, truncated: false,
+        config: configFile,
+        files: 0,
+        total: 1,
+        truncated: false,
         counts: { error: 1, warning: 0, info: 0 },
         diagnostics: [{ file: relative(root, configFile), line: 1, column: 1, severity: 'error', code: read.error.code, message }],
       };
@@ -197,7 +216,10 @@ export async function collectProjectDiagnostics(
   }
   diagnostics.sort((a, b) => a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column);
   const counts = diagnostics.reduce(
-    (out, item) => { out[item.severity]++; return out; },
+    (out, item) => {
+      out[item.severity]++;
+      return out;
+    },
     { error: 0, warning: 0, info: 0 } as Record<ProjectDiagnostic['severity'], number>,
   );
   const total = diagnostics.length;
@@ -217,15 +239,11 @@ export default {
   name: '代码智能',
   version: '0.1.0',
   onLoad(ctx) {
-    const lspConfigs = typeof ctx.config?.get === 'function'
-      ? ctx.config.get<Record<string, LspServerConfig>>('codeIntel.lsp', {})
-      : {};
+    const lspConfigs = typeof ctx.config?.get === 'function' ? ctx.config.get<Record<string, LspServerConfig>>('codeIntel.lsp', {}) : {};
     const lspClients = new Map<string, LspClient>();
     const lspClientFor = (file: string, tctx: ToolContext, server?: string): { client: LspClient; root: string } | undefined => {
       const configs = lspConfigs ?? {};
-      const picked = server
-        ? (configs[server] ? { name: server, cfg: configs[server] } : undefined)
-        : pickLspServer(configs, file);
+      const picked = server ? (configs[server] ? { name: server, cfg: configs[server] } : undefined) : pickLspServer(configs, file);
       if (!picked) return undefined;
       const root = tctx.sandboxRoot;
       const key = `${picked.name}:${root}`;
@@ -237,10 +255,13 @@ export default {
       return { client, root };
     };
     if (typeof ctx.effect === 'function') {
-      void ctx.effect(() => undefined, () => () => {
-        for (const client of lspClients.values()) void client.stop();
-        lspClients.clear();
-      });
+      void ctx.effect(
+        () => undefined,
+        () => () => {
+          for (const client of lspClients.values()) void client.stop();
+          lspClients.clear();
+        },
+      );
     }
     ctx.register({
       kind: 'persona',
@@ -260,7 +281,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'repo_map',
         risk: 'low',
         costHint: 'low',
@@ -269,8 +290,15 @@ export default {
         limits: `最多 ${MAX_FILES} 个代码文件 / ${MAX_SYMBOLS} 个符号 / ${MAX_OUTPUT_CHARS} 字符`,
         output: '{root, files, symbols, truncated, text}',
         outputSchema: {
-          type: 'object', required: ['root', 'files', 'symbols', 'truncated', 'text'],
-          properties: { root: { type: 'string' }, files: { type: 'integer' }, symbols: { type: 'integer' }, truncated: { type: 'boolean' }, text: { type: 'string' } },
+          type: 'object',
+          required: ['root', 'files', 'symbols', 'truncated', 'text'],
+          properties: {
+            root: { type: 'string' },
+            files: { type: 'integer' },
+            symbols: { type: 'integer' },
+            truncated: { type: 'boolean' },
+            text: { type: 'string' },
+          },
         },
         description: '生成代码仓库地图：列出代码文件与顶层符号（函数/类/接口/类型/常量）。用于重构、导航和多文件任务。',
         parameters: {
@@ -289,17 +317,27 @@ export default {
           const lines: string[] = [];
           for (const file of selected) {
             let source = '';
-            try { source = readFileSync(file, 'utf8'); } catch { continue; }
+            try {
+              source = readFileSync(file, 'utf8');
+            } catch {
+              continue;
+            }
             const symbols = await extractSymbolsForFile(source, file);
             if (!symbols.length) continue;
             const rel = relative(root, file).split(sep).join('/');
             lines.push(`${rel}`);
             for (const symbol of symbols) {
-              if (symbolCount >= MAX_SYMBOLS) { truncated = true; break; }
+              if (symbolCount >= MAX_SYMBOLS) {
+                truncated = true;
+                break;
+              }
               lines.push(`  ${symbol.line}: ${symbol.name} (${symbol.kind})`);
               symbolCount++;
             }
-            if (symbolCount >= MAX_SYMBOLS) { truncated = true; break; }
+            if (symbolCount >= MAX_SYMBOLS) {
+              truncated = true;
+              break;
+            }
           }
           let text = lines.join('\n');
           if (text.length > MAX_OUTPUT_CHARS) {
@@ -315,13 +353,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'find_symbol',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         outputSchema: {
-          type: 'object', required: ['count', 'matches'],
+          type: 'object',
+          required: ['count', 'matches'],
           properties: { count: { type: 'integer' }, matches: { type: 'array' } },
         },
         description: '按名称查找代码符号定义（子串匹配，返回文件、行号和类型）。',
@@ -334,13 +373,19 @@ export default {
           required: ['name'],
         },
         async handler(args: { name?: string; path?: string }, tctx: ToolContext) {
-          const needle = String(args.name ?? '').trim().toLowerCase();
+          const needle = String(args.name ?? '')
+            .trim()
+            .toLowerCase();
           if (!needle) return { ok: false, error: '缺少 name' };
           const { root, files } = repoFiles(tctx, args.path);
           const matches: { file: string; line: number; name: string; kind: string }[] = [];
           for (const file of files) {
             let source = '';
-            try { source = readFileSync(file, 'utf8'); } catch { continue; }
+            try {
+              source = readFileSync(file, 'utf8');
+            } catch {
+              continue;
+            }
             for (const symbol of await extractSymbolsForFile(source, file)) {
               if (!symbol.name.toLowerCase().includes(needle)) continue;
               matches.push({ file: relative(root, file).split(sep).join('/'), line: symbol.line, name: symbol.name, kind: symbol.kind });
@@ -357,22 +402,29 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'project_diagnostics',
         risk: 'low',
         costHint: 'medium',
         timeoutMs: 120_000,
         sideEffect: 'read',
         limits: `默认读取 tsconfig.json；最多 ${MAX_FILES} 个根文件、返回 200 条诊断`,
-        output: '{config?, files, total, truncated, counts: {error, warning, info}, diagnostics: [{file, line, column, severity, code, message}]}',
+        output:
+          '{config?, files, total, truncated, counts: {error, warning, info}, diagnostics: [{file, line, column, severity, code, message}]}',
         outputSchema: {
-          type: 'object', required: ['files', 'total', 'truncated', 'counts', 'diagnostics'],
+          type: 'object',
+          required: ['files', 'total', 'truncated', 'counts', 'diagnostics'],
           properties: {
-            config: { type: 'string' }, files: { type: 'integer' }, total: { type: 'integer' }, truncated: { type: 'boolean' },
-            counts: { type: 'object' }, diagnostics: { type: 'array' },
+            config: { type: 'string' },
+            files: { type: 'integer' },
+            total: { type: 'integer' },
+            truncated: { type: 'boolean' },
+            counts: { type: 'object' },
+            diagnostics: { type: 'array' },
           },
         },
-        description: '运行 TypeScript 编译器获取项目级类型诊断。用于修改代码后的验证；只返回沙箱内文件，未找到 tsconfig.json 时扫描项目中的 TS/JS 文件。',
+        description:
+          '运行 TypeScript 编译器获取项目级类型诊断。用于修改代码后的验证；只返回沙箱内文件，未找到 tsconfig.json 时扫描项目中的 TS/JS 文件。',
         parameters: {
           type: 'object',
           properties: {
@@ -386,7 +438,9 @@ export default {
             return {
               ok: true,
               data: result,
-              evidence: [{ kind: 'state', label: `项目诊断：${result.counts.error} error / ${result.counts.warning} warning`, value: result.counts }],
+              evidence: [
+                { kind: 'state', label: `项目诊断：${result.counts.error} error / ${result.counts.warning} warning`, value: result.counts },
+              ],
             };
           } catch (err) {
             return { ok: false, error: `项目诊断失败: ${err instanceof Error ? err.message : String(err)}` };
@@ -408,7 +462,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'lsp_definition',
         risk: 'low',
         costHint: 'low',
@@ -416,7 +470,8 @@ export default {
         sideEffect: 'read',
         output: '{definitions: [{file, line, character}], count}',
         outputSchema: {
-          type: 'object', required: ['count', 'definitions'],
+          type: 'object',
+          required: ['count', 'definitions'],
           properties: { count: { type: 'integer' }, definitions: { type: 'array' } },
         },
         description: '通过已配置的 language server 查找符号定义（精确跳转，优于文本搜索）。',
@@ -434,12 +489,18 @@ export default {
           const target = lspTarget(tctx, args.path, args.server);
           if ('error' in target) return { ok: false, error: target.error };
           try {
-            const locations = await target.client.definition(target.file, Math.max(0, Number(args.line) - 1), Math.max(0, Number(args.character) - 1));
-            const definitions = locations.map((loc) => ({
-              file: relative(target.root, target.client.pathOf(loc.uri)).split(sep).join('/'),
-              line: loc.range.start.line + 1,
-              character: loc.range.start.character + 1,
-            })).filter((loc) => !loc.file.startsWith('..'));
+            const locations = await target.client.definition(
+              target.file,
+              Math.max(0, Number(args.line) - 1),
+              Math.max(0, Number(args.character) - 1),
+            );
+            const definitions = locations
+              .map((loc) => ({
+                file: relative(target.root, target.client.pathOf(loc.uri)).split(sep).join('/'),
+                line: loc.range.start.line + 1,
+                character: loc.range.start.character + 1,
+              }))
+              .filter((loc) => !loc.file.startsWith('..'));
             return { ok: true, data: { count: definitions.length, definitions } };
           } catch (err) {
             return { ok: false, error: `LSP definition 失败: ${err instanceof Error ? err.message : String(err)}` };
@@ -452,7 +513,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'lsp_hover',
         risk: 'low',
         costHint: 'low',
@@ -460,7 +521,8 @@ export default {
         sideEffect: 'read',
         output: '{text, truncated}',
         outputSchema: {
-          type: 'object', required: ['text', 'truncated'],
+          type: 'object',
+          required: ['text', 'truncated'],
           properties: { text: { type: 'string' }, truncated: { type: 'boolean' } },
         },
         description: '通过 language server 获取光标位置的类型/文档悬停信息。',
@@ -478,7 +540,11 @@ export default {
           const target = lspTarget(tctx, args.path, args.server);
           if ('error' in target) return { ok: false, error: target.error };
           try {
-            const text = await target.client.hover(target.file, Math.max(0, Number(args.line) - 1), Math.max(0, Number(args.character) - 1));
+            const text = await target.client.hover(
+              target.file,
+              Math.max(0, Number(args.line) - 1),
+              Math.max(0, Number(args.character) - 1),
+            );
             return { ok: true, data: { text: text.slice(0, 8_000), truncated: text.length > 8_000 } };
           } catch (err) {
             return { ok: false, error: `LSP hover 失败: ${err instanceof Error ? err.message : String(err)}` };
@@ -491,7 +557,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'lsp_diagnostics',
         risk: 'low',
         costHint: 'medium',
@@ -499,7 +565,8 @@ export default {
         sideEffect: 'read',
         output: '{file, diagnostics: [{line, character, severity, message}], count}',
         outputSchema: {
-          type: 'object', required: ['file', 'count', 'diagnostics'],
+          type: 'object',
+          required: ['file', 'count', 'diagnostics'],
           properties: { file: { type: 'string' }, count: { type: 'integer' }, diagnostics: { type: 'array' } },
         },
         description: '读取 language server 对单个文件发布的诊断（需要 server 支持 publishDiagnostics）。',
@@ -523,7 +590,10 @@ export default {
               severity: severity[Math.max(0, Math.min(4, Number(item.severity) || 0))],
               message: item.message,
             }));
-            return { ok: true, data: { file: relative(target.root, target.file).split(sep).join('/'), count: diagnostics.length, diagnostics } };
+            return {
+              ok: true,
+              data: { file: relative(target.root, target.file).split(sep).join('/'), count: diagnostics.length, diagnostics },
+            };
           } catch (err) {
             return { ok: false, error: `LSP diagnostics 失败: ${err instanceof Error ? err.message : String(err)}` };
           }

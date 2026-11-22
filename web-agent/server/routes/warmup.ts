@@ -24,10 +24,11 @@ interface WarmupEntry {
 }
 
 const warmups = new Map<string, WarmupEntry>();
-const CONTINUE_HINT = '【继续】上一条 tool 消息是刚执行完成的真实结果，请基于它继续处理任务；如任务已完成，直接给出最终回答，不要重复调用已完成的工具。';
-const WARMUP_DELAY_MS = 12_000;       // 首次预热延迟（网关缓存写入窗口）
-const WARMUP_INTERVAL_MS = 90_000;  // 保活间隔（缓存 TTL 刷新）
-const WARMUP_MAX_ROUNDS = 20;       // 最长保活 30 分钟（会话无新活动则停止）
+const CONTINUE_HINT =
+  '【继续】上一条 tool 消息是刚执行完成的真实结果，请基于它继续处理任务；如任务已完成，直接给出最终回答，不要重复调用已完成的工具。';
+const WARMUP_DELAY_MS = 12_000; // 首次预热延迟（网关缓存写入窗口）
+const WARMUP_INTERVAL_MS = 90_000; // 保活间隔（缓存 TTL 刷新）
+const WARMUP_MAX_ROUNDS = 20; // 最长保活 30 分钟（会话无新活动则停止）
 
 function stopWarmup(entry: WarmupEntry): void {
   if (entry.timer) clearTimeout(entry.timer);
@@ -74,7 +75,13 @@ export function scheduleWarmup(
   warmups.set(sessionId, {
     timer: setTimeout(() => void warmupOnce(sessionId, kernel), WARMUP_DELAY_MS),
     controller: new AbortController(),
-    systemPrompt, seq, contextMessages, provider, model, rounds: 0, lastRunAt: Date.now(),
+    systemPrompt,
+    seq,
+    contextMessages,
+    provider,
+    model,
+    rounds: 0,
+    lastRunAt: Date.now(),
   });
 }
 
@@ -85,7 +92,11 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
   if (entry.timer) clearTimeout(entry.timer);
   entry.timer = null;
   const chat = getChatService(kernel);
-  if (!chat) { stopWarmup(entry); warmups.delete(sessionId); return; } // 对话服务不可用：本次预热放弃
+  if (!chat) {
+    stopWarmup(entry);
+    warmups.delete(sessionId);
+    return;
+  } // 对话服务不可用：本次预热放弃
   // 保活上限：会话长时间无新活动则停止（避免无限消耗）
   if (entry.rounds >= WARMUP_MAX_ROUNDS) {
     stopWarmup(entry);
@@ -111,16 +122,28 @@ export async function warmupOnce(sessionId: string, kernel: Kernel): Promise<voi
   try {
     // 预热请求：与最后发送序列同前缀 + 相同 tools（网关缓存键含 tools 参数，
     // 不带 tools 的预热建立的缓存对真实请求无效）。auto 首轮使用 1 token 探针。
-    const pluginTools = typeof kernel.plugins.tools === 'function'
-      ? kernel.plugins.tools()
-      : kernel.plugins.capabilities('tool').map((c) => c.tool);
+    const pluginTools =
+      typeof kernel.plugins.tools === 'function' ? kernel.plugins.tools() : kernel.plugins.capabilities('tool').map((c) => c.tool);
     const tools = pluginTools.map(chat.annotateToolDef);
-    let hit = 0, miss = 0;
+    let hit = 0,
+      miss = 0;
     const mode = kernel.config.get<'off' | 'light' | 'auto'>('cache.warmup', 'auto');
-    if (mode === 'off') { stopWarmup(entry); warmups.delete(sessionId); return; }
+    if (mode === 'off') {
+      stopWarmup(entry);
+      warmups.delete(sessionId);
+      return;
+    }
     const probe = mode === 'auto' && entry.rounds === 1;
-    for await (const chunk of callModel(entry.provider, msgs, { model: entry.model, maxTokens: probe ? 1 : 64, tools, signal: entry.controller.signal }, 'connection_check')) {
-      if (chunk.type === 'usage') { hit = chunk.cachedInput ?? 0; miss = chunk.missInput ?? 0; }
+    for await (const chunk of callModel(
+      entry.provider,
+      msgs,
+      { model: entry.model, maxTokens: probe ? 1 : 64, tools, signal: entry.controller.signal },
+      'connection_check',
+    )) {
+      if (chunk.type === 'usage') {
+        hit = chunk.cachedInput ?? 0;
+        miss = chunk.missInput ?? 0;
+      }
     }
     console.log(`[warmup] ${sessionId.slice(0, 8)} 完成（round ${entry.rounds}，${msgs.length} 条，hit=${hit} miss=${miss}）`);
     if (probe && miss > 0) {

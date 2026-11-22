@@ -13,10 +13,16 @@ import { dirname, join } from 'node:path';
 // L5：基于模块路径定位项目 data 目录——任意 cwd 运行行为一致（原 './data/...' 依赖 cwd）
 const rootDir = join(dirname(fileURLToPath(import.meta.url)), '..');
 
-let pass = 0, fail = 0;
+let pass = 0,
+  fail = 0;
 const ok = (name: string, cond: boolean, detail = '') => {
-  if (cond) { pass++; console.log(`  ✓ ${name}`); }
-  else { fail++; console.log(`  ✗ ${name} ${detail}`); }
+  if (cond) {
+    pass++;
+    console.log(`  ✓ ${name}`);
+  } else {
+    fail++;
+    console.log(`  ✗ ${name} ${detail}`);
+  }
 };
 
 // ---- usage 归一化：各厂商缓存命中字段统一口径 ----
@@ -94,7 +100,7 @@ console.log('[L2] LRU 淘汰');
   c.l2Set('overflow', 'x'); // 触发淘汰（>2000）
   const kept = c.l2Get('k0');
   const keptNewest = c.l2Get('k1999'); // 最新插入，保留
-  const dropped = c.l2Get('k1');       // 未被访问的最旧条目（k0 已刷新）→ 被淘汰
+  const dropped = c.l2Get('k1'); // 未被访问的最旧条目（k0 已刷新）→ 被淘汰
   const overflow = c.l2Get('overflow');
   ok('访问过的旧条目保留', kept.hit && kept.value === 0, `(${kept.hit})`);
   ok('最新插入条目保留', keptNewest.hit && keptNewest.value === 1999, `(${keptNewest.hit})`);

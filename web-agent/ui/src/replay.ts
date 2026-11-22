@@ -19,7 +19,11 @@ import { isSubagentTool, subagentLabel } from './types';
 /** tool_calls 的 arguments 是 JSON 字符串（模型生成，可能残缺）：解不出就原样带着走 */
 export function parseToolArgs(raw: string | undefined): unknown {
   if (!raw) return {};
-  try { return JSON.parse(raw); } catch { return { _raw: raw }; }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    return { _raw: raw };
+  }
 }
 
 /** 过程轮 vs 最终轮：带 tool_calls 的就是"还在办事的那几轮"，它的文本是说给自己听的旁白 */
@@ -70,7 +74,7 @@ export function replayMessages(rows: Message[]): ChatMessage[] {
   };
 
   for (const m of rows) {
-    if (m.role === 'system') continue;                 // 内部注入（记忆/摘要/预警）不进对话
+    if (m.role === 'system') continue; // 内部注入（记忆/摘要/预警）不进对话
     if (m.role === 'tool') {
       // 回填配对：按 tool_call_id 找那张卡（找不到 = 别的 run 的孤儿回填，忽略即可）
       const target = run.cur?.tools?.find((t) => t.id && t.id === m.toolCallId);
@@ -93,16 +97,19 @@ export function replayMessages(rows: Message[]): ChatMessage[] {
       const text = (m.content ?? '').trim();
       if (text) b.narration = [...(b.narration ?? []), text];
       for (const tc of m.toolCalls ?? []) {
-        b.tools = [...(b.tools ?? []), {
-          id: tc.id,
-          name: tc.function?.name ?? '',
-          args: parseToolArgs(tc.function?.arguments),
-          // 未回填（工具没跑完就被打断 / 进程被杀）：画成"没成"，比悄悄消失诚实
-          status: 'error' as const,
-          ok: false,
-          summary: '',
-          startedAt: m.createdAt,
-        }];
+        b.tools = [
+          ...(b.tools ?? []),
+          {
+            id: tc.id,
+            name: tc.function?.name ?? '',
+            args: parseToolArgs(tc.function?.arguments),
+            // 未回填（工具没跑完就被打断 / 进程被杀）：画成"没成"，比悄悄消失诚实
+            status: 'error' as const,
+            ok: false,
+            summary: '',
+            startedAt: m.createdAt,
+          },
+        ];
       }
       continue;
     }

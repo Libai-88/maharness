@@ -9,15 +9,23 @@ import { resolveDeployMode, methodRequiresAuth, deployPosture } from '../deploy-
 import { approvalTokenRequired } from '../routes/approvals';
 import { createApiTokenGuard } from '../index';
 
-function guardCall(deployMode: string | undefined, method: string, headers: Record<string, string>): Promise<{ next: boolean; status: number }> {
-  if (deployMode) process.env.MAHARNESS_MODE = deployMode; else delete process.env.MAHARNESS_MODE;
+function guardCall(
+  deployMode: string | undefined,
+  method: string,
+  headers: Record<string, string>,
+): Promise<{ next: boolean; status: number }> {
+  if (deployMode) process.env.MAHARNESS_MODE = deployMode;
+  else delete process.env.MAHARNESS_MODE;
   process.env.MAHARNESS_API_TOKEN = 'tok-test';
   const resolved = resolveDeployMode();
   const guard = createApiTokenGuard(undefined, undefined, undefined, resolved.ok ? resolved.config : undefined);
   return new Promise((done) => {
     let next = false;
     const res = { status: (c: number) => ({ json: () => done({ next, status: c }) }) };
-    guard({ method, headers } as never, res as never, () => { next = true; done({ next, status: 0 }); });
+    guard({ method, headers } as never, res as never, () => {
+      next = true;
+      done({ next, status: 0 });
+    });
   });
 }
 
@@ -27,8 +35,10 @@ const savedMode = process.env.MAHARNESS_MODE;
 const savedToken = process.env.MAHARNESS_API_TOKEN;
 import { after } from 'node:test';
 after(() => {
-  if (savedMode === undefined) delete process.env.MAHARNESS_MODE; else process.env.MAHARNESS_MODE = savedMode;
-  if (savedToken === undefined) delete process.env.MAHARNESS_API_TOKEN; else process.env.MAHARNESS_API_TOKEN = savedToken;
+  if (savedMode === undefined) delete process.env.MAHARNESS_MODE;
+  else process.env.MAHARNESS_MODE = savedMode;
+  if (savedToken === undefined) delete process.env.MAHARNESS_API_TOKEN;
+  else process.env.MAHARNESS_API_TOKEN = savedToken;
 });
 
 describe('部署模式解析（API-02）', () => {
@@ -47,7 +57,12 @@ describe('部署模式解析（API-02）', () => {
   test('trusted：必须带 token；TLS 配置拒绝', () => {
     const missing = resolveDeployMode({ MAHARNESS_MODE: 'trusted' });
     assert.ok(!missing.ok && missing.errors.some((e) => /MAHARNESS_API_TOKEN/.test(e)));
-    const withTls = resolveDeployMode({ MAHARNESS_MODE: 'trusted', MAHARNESS_API_TOKEN: 'x', MAHARNESS_TLS_CERT: 'a', MAHARNESS_TLS_KEY: 'b' });
+    const withTls = resolveDeployMode({
+      MAHARNESS_MODE: 'trusted',
+      MAHARNESS_API_TOKEN: 'x',
+      MAHARNESS_TLS_CERT: 'a',
+      MAHARNESS_TLS_KEY: 'b',
+    });
     assert.ok(!withTls.ok && withTls.errors.some((e) => /trusted 模式只绑回环/.test(e)));
     const ok = resolveDeployMode({ MAHARNESS_MODE: 'trusted', MAHARNESS_API_TOKEN: 'x' });
     assert.ok(ok.ok);
@@ -65,12 +80,24 @@ describe('部署模式解析（API-02）', () => {
     assert.ok(!noToken.ok && noToken.errors.some((e) => /MAHARNESS_API_TOKEN/.test(e)));
     const halfTls = resolveDeployMode({ MAHARNESS_MODE: 'remote', MAHARNESS_API_TOKEN: 'x', MAHARNESS_TLS_CERT: 'a' });
     assert.ok(!halfTls.ok && halfTls.errors.some((e) => /成对/.test(e)));
-    const ok = resolveDeployMode({ MAHARNESS_MODE: 'remote', MAHARNESS_API_TOKEN: 'x', MAHARNESS_TLS_CERT: 'a', MAHARNESS_TLS_KEY: 'b', MAHARNESS_BIND: '192.168.1.10' });
+    const ok = resolveDeployMode({
+      MAHARNESS_MODE: 'remote',
+      MAHARNESS_API_TOKEN: 'x',
+      MAHARNESS_TLS_CERT: 'a',
+      MAHARNESS_TLS_KEY: 'b',
+      MAHARNESS_BIND: '192.168.1.10',
+    });
     assert.ok(ok.ok);
     if (ok.ok) {
       assert.equal(ok.config.bindHost, '192.168.1.10');
       assert.ok(ok.config.tls);
-      assert.deepEqual(deployPosture(ok.config), { mode: 'remote', bind: '192.168.1.10', tls: true, apiAuthRequired: true, approvalEnforced: true });
+      assert.deepEqual(deployPosture(ok.config), {
+        mode: 'remote',
+        bind: '192.168.1.10',
+        tls: true,
+        apiAuthRequired: true,
+        approvalEnforced: true,
+      });
     }
   });
 

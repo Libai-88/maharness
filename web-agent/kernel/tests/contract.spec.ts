@@ -8,7 +8,7 @@
  */
 import { describe, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { readdirSync, readFileSync, mkdtempSync, mkdirSync, writeFileSync, rmSync, type Dirent } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
@@ -19,8 +19,12 @@ const FORBIDDEN = /ctx\.bus\.(?:on|once|onPhase)\s*\(/;
 const SKIP_DIR = new Set(['node_modules', 'dist']);
 
 function sourceFiles(dir: string, out: string[] = []): string[] {
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
   for (const e of entries) {
     if (SKIP_DIR.has(e.name) || /@[0-9a-f]{10}$/.test(e.name)) continue;
     const full = join(dir, e.name);
@@ -48,8 +52,32 @@ describe('契约：可逆性旁路', () => {
     const dir = join(pluginsDir, 'tmp-facade');
     mkdirSync(dir, { recursive: true });
     mkdirSync(coreDir, { recursive: true });
-    writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id: 'tmp-facade', name: '门面探针', version: '0.1.0', entry: 'index.ts' }));
-    writeFileSync(join(dir, 'index.ts'), `
+    writeFileSync(
+      join(dir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'tmp-facade',
+        name: '门面探针',
+        version: '0.1.0',
+        entry: 'index.ts',
+      }),
+    );
+    writeFileSync(
+      join(dir, 'index.ts'),
+      `
 export default {
   id: 'tmp-facade', name: '门面探针', version: '0.1.0',
   onLoad(ctx) {
@@ -61,10 +89,12 @@ export default {
     };
   },
 };
-`);
+`,
+    );
     const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir: pluginsDir, corePluginsDir: coreDir });
     await kernel.plugins.loadAll();
-    const facade = (globalThis as unknown as { __mhFacade?: { hasOn: boolean; hasEmit: boolean; hasOnCtx: boolean; keys: string[] } }).__mhFacade;
+    const facade = (globalThis as unknown as { __mhFacade?: { hasOn: boolean; hasEmit: boolean; hasOnCtx: boolean; keys: string[] } })
+      .__mhFacade;
     assert.ok(facade, '插件应已加载并记录门面信息');
     assert.equal(facade.hasOn, false, '总线门面不得暴露 on');
     assert.equal(facade.hasEmit, true, '发射能力应保留');

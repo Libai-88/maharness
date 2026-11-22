@@ -89,7 +89,9 @@ export class ApprovalTokenRegistry {
     }
   }
 
-  size(): number { return this.map.size; }
+  size(): number {
+    return this.map.size;
+  }
 }
 
 /** 进程级单例（与全局 ApprovalBoard 同一量级的生命周期） */
@@ -146,7 +148,9 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
     const approved = req.body?.approved === true;
     const id = req.params.id;
     const tenantSessions = new Set(deps.store.listSessions(tenantIdOf(req)).map((session) => session.id));
-    const target = getChatService(kernel)?.listApprovals().find((approval) => approval.id === id);
+    const target = getChatService(kernel)
+      ?.listApprovals()
+      .find((approval) => approval.id === id);
     if (target?.sessionId && !tenantSessions.has(target.sessionId)) {
       return res.status(404).json({ error: '这个请求已经过期了' });
     }
@@ -160,29 +164,48 @@ export function registerApprovalRoutes(app: Express, deps: RouteDeps): void {
     });
     if (!decision.allowed) {
       if (decision.reason === 'invalid') {
-        auditAuthorizationDenial(kernel, {
-          subject: 'anonymous', capability: 'approval:respond',
-          object: '/api/approvals/:id', reason: 'approval-token-invalid',
-        }, deps.store);
+        auditAuthorizationDenial(
+          kernel,
+          {
+            subject: 'anonymous',
+            capability: 'approval:respond',
+            object: '/api/approvals/:id',
+            reason: 'approval-token-invalid',
+          },
+          deps.store,
+        );
         return res.status(403).json({ error: '审批凭据无效或已使用（一次性凭据不可重放）' });
       }
-      auditAuthorizationDenial(kernel, {
-        subject: 'anonymous', capability: 'approval:respond',
-        object: '/api/approvals/:id', reason: 'approval-token-required',
-      }, deps.store);
+      auditAuthorizationDenial(
+        kernel,
+        {
+          subject: 'anonymous',
+          capability: 'approval:respond',
+          object: '/api/approvals/:id',
+          reason: 'approval-token-required',
+        },
+        deps.store,
+      );
       return res.status(401).json({
-        error: `未授权：回答审批必须携带一次性凭据（先 GET /api/approvals 取 approvalToken，`
-          + `回带于 ${APPROVAL_TOKEN_HEADER} 头或 body.approvalToken）`,
+        error:
+          `未授权：回答审批必须携带一次性凭据（先 GET /api/approvals 取 approvalToken，` +
+          `回带于 ${APPROVAL_TOKEN_HEADER} 头或 body.approvalToken）`,
       });
     }
-    if (provided && verdict === 'ok') auditAuthorizationGrant(kernel, {
-      subject: 'approval-token', capability: 'approval:respond', object: '/api/approvals/:id',
-    }, deps.store);
+    if (provided && verdict === 'ok')
+      auditAuthorizationGrant(
+        kernel,
+        {
+          subject: 'approval-token',
+          capability: 'approval:respond',
+          object: '/api/approvals/:id',
+        },
+        deps.store,
+      );
     // expired：交给挂起判定；已过期的审批会按既有语义被拒绝并清理。
     if (!approvalTokenRequired() && !warnedLooseMode) {
       warnedLooseMode = true;
-      console.warn('[approvals] MAHARNESS_APPROVAL_TOKEN=0：本地兼容模式未强制一次性审批凭据；'
-        + '远程或受信部署仍会强制。');
+      console.warn('[approvals] MAHARNESS_APPROVAL_TOKEN=0：本地兼容模式未强制一次性审批凭据；' + '远程或受信部署仍会强制。');
     }
     // 审批走执行循环服务（service:runner）的共享审批板入口——与 chat 服务解耦：
     // 循环被别的插件接管时，审批语义（含子代理/并行的审批）仍由接管者负责兑现。

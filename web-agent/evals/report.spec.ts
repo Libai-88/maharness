@@ -16,17 +16,32 @@ const thresholds: EvalThresholds = {
 
 function result(name: string, overrides: Partial<EvalCaseResult> = {}): EvalCaseResult {
   return {
-    name, passed: true, durationMs: 100, providerCalls: 2, toolCalls: 2, toolResults: 2, invalidToolCalls: 1,
-    successfulToolCalls: 1, failedToolCalls: 1, retryEvents: 1,
-    taskOutcomes: ['verified', 'partial'], approvalOutcomes: ['approved', 'rejected'],
-    tokensIn: 100, tokensOut: 25, costUsd: 0.2, ...overrides,
+    name,
+    passed: true,
+    durationMs: 100,
+    providerCalls: 2,
+    toolCalls: 2,
+    toolResults: 2,
+    invalidToolCalls: 1,
+    successfulToolCalls: 1,
+    failedToolCalls: 1,
+    retryEvents: 1,
+    taskOutcomes: ['verified', 'partial'],
+    approvalOutcomes: ['approved', 'rejected'],
+    tokensIn: 100,
+    tokensOut: 25,
+    costUsd: 0.2,
+    ...overrides,
   };
 }
 
 describe('evaluation metrics and baseline gates', () => {
   it('computes deterministic count, rate, cost, and latency metrics', () => {
     const report = buildEvalReport([result('b', { durationMs: 300 }), result('a', { durationMs: 100 })]);
-    assert.deepEqual(report.cases.map((c) => c.name), ['a', 'b']);
+    assert.deepEqual(
+      report.cases.map((c) => c.name),
+      ['a', 'b'],
+    );
     assert.equal(report.suite.casePassRate, 1);
     assert.equal(report.metrics.correctToolRate, 0.5);
     assert.equal(report.metrics.invalidToolCallRate, 0.5);
@@ -66,7 +81,9 @@ describe('evaluation metrics and baseline gates', () => {
       result('escaped', { securityCategory: 'tool_output_injection', securityBlocked: false }),
     ]);
     assert.deepEqual(report.metrics.securityAttacks, {
-      total: 2, blocked: 1, blockRate: 0.5,
+      total: 2,
+      blocked: 1,
+      blockRate: 0.5,
       byCategory: { tool_output_injection: { total: 2, blocked: 1 } },
     });
     assert.match(compareEvalReports(report, report, thresholds).join('\n'), /securityAttackBlockRate 50.00%/);
@@ -74,13 +91,15 @@ describe('evaluation metrics and baseline gates', () => {
 
   it('gates quality-rate regressions by percentage points', () => {
     const baseline = buildEvalReport([result('case')]);
-    const degraded = buildEvalReport([result('case', {
-      successfulToolCalls: 0,
-      failedToolCalls: 2,
-      invalidToolCalls: 2,
-      taskOutcomes: ['failed', 'failed'],
-      retryEvents: 2,
-    })]);
+    const degraded = buildEvalReport([
+      result('case', {
+        successfulToolCalls: 0,
+        failedToolCalls: 2,
+        invalidToolCalls: 2,
+        taskOutcomes: ['failed', 'failed'],
+        retryEvents: 2,
+      }),
+    ]);
     const regressions = compareEvalReports(degraded, baseline, thresholds).join('\n');
     assert.match(regressions, /correctToolRate/);
     assert.match(regressions, /completionRate/);

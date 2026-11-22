@@ -6,8 +6,13 @@ import type { EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, Trace
 import type { TaskContract } from '../loop';
 
 const bus: EventBusLike = {
-  on: () => () => {}, emit: () => {}, emitAsync: async () => {}, serial: async () => undefined,
-  bail: () => undefined, parallel: async () => {}, waterfall: async () => undefined as never,
+  on: () => () => {},
+  emit: () => {},
+  emitAsync: async () => {},
+  serial: async () => undefined,
+  bail: () => undefined,
+  parallel: async () => {},
+  waterfall: async () => undefined as never,
   onPhase: () => () => {},
 };
 
@@ -16,23 +21,36 @@ function fixture(answer: string, contextMaxTokens = 60_000) {
   const recorded: { failed: boolean }[] = [];
   let cacheWrites = 0;
   const cfg = new Map<string, unknown>([
-    ['agent.toolTimeoutMs', 1000], ['agent.reasoningBudget', 640], ['agent.reasoningTotalBudget', 2000],
-    ['agent.maxTurns', 2], ['agent.thinkInEnglish', true], ['context.maxTokens', contextMaxTokens], ['sandboxRoot', rootDir],
+    ['agent.toolTimeoutMs', 1000],
+    ['agent.reasoningBudget', 640],
+    ['agent.reasoningTotalBudget', 2000],
+    ['agent.maxTurns', 2],
+    ['agent.thinkInEnglish', true],
+    ['context.maxTokens', contextMaxTokens],
+    ['sandboxRoot', rootDir],
   ]);
   const kernel = {
     rootDir,
     paths: { root: rootDir, data: rootDir, traces: rootDir, configFile: '', dbFile: '', cacheFile: '' },
-    config: { get: <T>(key: string, def?: T): T => (cfg.has(key) ? cfg.get(key) as T : def as T) },
+    config: { get: <T>(key: string, def?: T): T => (cfg.has(key) ? (cfg.get(key) as T) : (def as T)) },
     trace: { startStep: (_init: TraceStepInit): StepHandle => ({ id: 'step', finish: () => {}, fail: () => {}, cancel: () => {} }) },
     cache: {
-      l1Enabled: true, l1Get: () => undefined, l1Set: async () => { cacheWrites++; },
-      recordPrefixRepeat: () => {}, recordProviderCacheHit: () => {}, recordSavedCost: () => {},
+      l1Enabled: true,
+      l1Get: () => undefined,
+      l1Set: async () => {
+        cacheWrites++;
+      },
+      recordPrefixRepeat: () => {},
+      recordProviderCacheHit: () => {},
+      recordSavedCost: () => {},
     },
     budget: { recordTask: (row: { failed: boolean }) => recorded.push({ failed: row.failed }) },
     plugins: { capabilities: (): [] => [] },
   } as unknown as KernelLike;
   const provider: ProviderDef = {
-    id: 'mock', label: 'MOCK', defaultModel: 'm',
+    id: 'mock',
+    label: 'MOCK',
+    defaultModel: 'm',
     async *chat(): AsyncIterable<LLMChunk> {
       yield { type: 'delta', text: answer };
       yield { type: 'done' };
@@ -45,9 +63,14 @@ async function run(answer: string, task: TaskContract) {
   const f = fixture(answer);
   const events: import('../loop').AgentEvent[] = [];
   for await (const event of new AgentRunner(f.kernel, bus).run({
-    provider: f.provider, model: 'm', messages: [{ role: 'user', content: 'Complete the requested work' }],
-    traceId: 'task-completion', maxTurns: 2, task,
-  })) events.push(event);
+    provider: f.provider,
+    model: 'm',
+    messages: [{ role: 'user', content: 'Complete the requested work' }],
+    traceId: 'task-completion',
+    maxTurns: 2,
+    task,
+  }))
+    events.push(event);
   return { ...f, events };
 }
 
@@ -56,33 +79,61 @@ describe('AgentRunner 任务完成验收', () => {
     const f = fixture('done');
     let calls = 0;
     const events: import('../loop').AgentEvent[] = [];
-    const provider: ProviderDef = { ...f.provider, async *chat() { calls++; yield { type: 'done' as const }; } };
+    const provider: ProviderDef = {
+      ...f.provider,
+      async *chat() {
+        calls++;
+        yield { type: 'done' as const };
+      },
+    };
     for await (const event of new AgentRunner(f.kernel, bus).run({
-      provider, model: 'm', messages: [{ role: 'user', content: 'finish within budget' }],
-      traceId: 'budget-only', task: { objective: 'finish', acceptance: [], costBudgetUsd: 0 },
-    })) events.push(event);
+      provider,
+      model: 'm',
+      messages: [{ role: 'user', content: 'finish within budget' }],
+      traceId: 'budget-only',
+      task: { objective: 'finish', acceptance: [], costBudgetUsd: 0 },
+    }))
+      events.push(event);
     assert.equal(calls, 0);
     assert.ok(events.some((event) => event.type === 'budget_hit'));
-    assert.equal(events.some((event) => event.type === 'assistant_done'), false);
+    assert.equal(
+      events.some((event) => event.type === 'assistant_done'),
+      false,
+    );
   });
 
   test('只有期限的任务到期停止，期限内有正文即可交付', async () => {
     const expired = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() - 1 });
     assert.ok(expired.events.some((event) => event.type === 'error' && event.kind === 'deadline'));
     const unverified = await run('done', { objective: 'finish', acceptance: [], deadlineAt: Date.now() + 60_000 });
-    assert.equal(unverified.events.some((event) => event.type === 'task_verified'), false);
+    assert.equal(
+      unverified.events.some((event) => event.type === 'task_verified'),
+      false,
+    );
     assert.ok(unverified.events.some((event) => event.type === 'assistant_done'));
-    assert.equal(unverified.events.some((event) => event.type === 'task_failed'), false);
+    assert.equal(
+      unverified.events.some((event) => event.type === 'task_failed'),
+      false,
+    );
     assert.equal(unverified.cacheWrites(), 0);
     assert.deepEqual(unverified.recorded, [{ failed: false }]);
   });
-  const task: TaskContract = { objective: 'Return the expected marker', acceptance: [{ type: 'output_contains', value: 'verified marker' }] };
+  const task: TaskContract = {
+    objective: 'Return the expected marker',
+    acceptance: [{ type: 'output_contains', value: 'verified marker' }],
+  };
 
   test('验收失败独立展示，模型回答仍结束执行且默认不缓存', async () => {
     const result = await run('unsupported claim', task);
     assert.ok(result.events.some((event) => event.type === 'task_failed'));
-    assert.equal(result.events.some((event) => event.type === 'error'), false);
-    assert.equal(result.events.some((event) => event.type === 'assistant_done'), true);
+    assert.equal(
+      result.events.some((event) => event.type === 'error'),
+      false,
+    );
+    assert.equal(
+      result.events.some((event) => event.type === 'assistant_done'),
+      true,
+    );
     assert.equal(result.cacheWrites(), 0);
     assert.deepEqual(result.recorded, [{ failed: false }]);
   });
@@ -95,7 +146,11 @@ describe('AgentRunner 任务完成验收', () => {
     assert.ok(verified.evidence?.every((e) => e.traceStepId === 'step'));
     const done = result.events.find((event) => event.type === 'assistant_done') as { content?: string } | undefined;
     assert.equal(done?.content, 'verified marker');
-    assert.equal(result.events.findIndex((event) => event.type === 'task_verified') < result.events.findIndex((event) => event.type === 'assistant_done'), true);
+    assert.equal(
+      result.events.findIndex((event) => event.type === 'task_verified') <
+        result.events.findIndex((event) => event.type === 'assistant_done'),
+      true,
+    );
     assert.equal(result.cacheWrites(), 0);
     assert.deepEqual(result.recorded, [{ failed: false }]);
   });
@@ -104,18 +159,27 @@ describe('AgentRunner 任务完成验收', () => {
     const result = await run('verified marker', { ...task, deadlineAt: Date.now() - 1 });
     assert.ok(result.events.some((event) => event.type === 'task_failed'));
     assert.ok(result.events.some((event) => event.type === 'error'));
-    assert.equal(result.events.some((event) => event.type === 'assistant_done'), false);
+    assert.equal(
+      result.events.some((event) => event.type === 'assistant_done'),
+      false,
+    );
     assert.equal(result.cacheWrites(), 0);
     assert.deepEqual(result.recorded, [{ failed: true }]);
   });
 
   test('部分满足验收条件时发 task_partial 和 assistant_done', async () => {
-    const result = await run('verified marker', { objective: 'Two conditions', acceptance: [
-      { type: 'output_contains', value: 'verified marker' },
-      { type: 'output_contains', value: 'missing marker' },
-    ] });
+    const result = await run('verified marker', {
+      objective: 'Two conditions',
+      acceptance: [
+        { type: 'output_contains', value: 'verified marker' },
+        { type: 'output_contains', value: 'missing marker' },
+      ],
+    });
     assert.ok(result.events.some((event) => event.type === 'task_partial'));
-    assert.equal(result.events.some((event) => event.type === 'assistant_done'), true);
+    assert.equal(
+      result.events.some((event) => event.type === 'assistant_done'),
+      true,
+    );
     assert.deepEqual(result.recorded, [{ failed: false }]);
   });
 
@@ -124,7 +188,9 @@ describe('AgentRunner 任务完成验收', () => {
     const seen: import('../types').LLMMessage[][] = [];
     let calls = 0;
     const provider: ProviderDef = {
-      id: 'compact-e2e', label: 'COMPACT-E2E', defaultModel: 'm',
+      id: 'compact-e2e',
+      label: 'COMPACT-E2E',
+      defaultModel: 'm',
       async *chat(messages) {
         seen.push(messages.map((message) => ({ ...message })));
         calls++;
@@ -142,23 +208,46 @@ describe('AgentRunner 任务完成验收', () => {
     };
     const events: import('../loop').AgentEvent[] = [];
     for await (const event of new AgentRunner(f.kernel, bus).run({
-      provider, model: 'm', traceId: 'compact-e2e', maxTurns: 2,
+      provider,
+      model: 'm',
+      traceId: 'compact-e2e',
+      maxTurns: 2,
       messages: [
-        { role: 'system', content: '【任务约束】必须在工作区完成任务。', context: { id: 'constraint:378591', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
-        { role: 'system', content: '【验收条件】最终答案必须包含 verified marker。', context: { id: 'constraint:374048', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
-        { role: 'system', content: '【长期记忆】项目主目录是 maharness。', context: { id: 'constraint:333357', source: 'user', scope: 'run', trust: 'user', retention: 'required' } },
+        {
+          role: 'system',
+          content: '【任务约束】必须在工作区完成任务。',
+          context: { id: 'constraint:378591', source: 'user', scope: 'run', trust: 'user', retention: 'required' },
+        },
+        {
+          role: 'system',
+          content: '【验收条件】最终答案必须包含 verified marker。',
+          context: { id: 'constraint:374048', source: 'user', scope: 'run', trust: 'user', retention: 'required' },
+        },
+        {
+          role: 'system',
+          content: '【长期记忆】项目主目录是 maharness。',
+          context: { id: 'constraint:333357', source: 'user', scope: 'run', trust: 'user', retention: 'required' },
+        },
         ...Array.from({ length: 40 }, (_, i) => ({ role: 'assistant' as const, content: `历史消息 ${i}：${'长文本'.repeat(40)}` })),
         { role: 'user', content: '请完成这项长任务，并基于最新约束执行。' },
       ],
       contextMessages: [],
       task,
       compactFn: (history) => compactHistory(history, 100, { provider, model: 'm' }).then((result) => result.messages),
-    })) events.push(event);
+    }))
+      events.push(event);
     assert.ok(calls >= 2, '应包含一次摘要调用和一次真实任务调用');
     const taskRequest = seen.find((messages) => !String(messages[0]?.content ?? '').includes('历史摘要器'));
     assert.ok(taskRequest, '应捕获压缩后的真实任务请求');
-    for (const required of ['【任务约束】必须在工作区完成任务。', '【验收条件】最终答案必须包含 verified marker。', '【长期记忆】项目主目录是 maharness。']) {
-      assert.ok(taskRequest!.some((message) => message.content === required), `压缩后仍应保留：${required}`);
+    for (const required of [
+      '【任务约束】必须在工作区完成任务。',
+      '【验收条件】最终答案必须包含 verified marker。',
+      '【长期记忆】项目主目录是 maharness。',
+    ]) {
+      assert.ok(
+        taskRequest!.some((message) => message.content === required),
+        `压缩后仍应保留：${required}`,
+      );
     }
     assert.ok(events.some((event) => event.type === 'task_verified'));
     assert.ok(events.some((event) => event.type === 'assistant_done'));

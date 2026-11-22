@@ -50,12 +50,20 @@ export class ApprovalBoard {
     const timer = setTimeout(() => {
       if (this.map.delete(id)) {
         resolve(false);
-        try { this.onResolve?.(id, false, 'timeout'); } catch { /* 审计失败不影响审批 */ }
+        try {
+          this.onResolve?.(id, false, 'timeout');
+        } catch {
+          /* 审计失败不影响审批 */
+        }
       }
     }, this.timeoutMs);
     timer.unref?.();
     this.map.set(id, { resolve, timer, info, createdAt, expiresAt });
-    try { this.onRegister?.({ id, ...info, createdAt, expiresAt }); } catch { /* 审计失败不影响审批 */ }
+    try {
+      this.onRegister?.({ id, ...info, createdAt, expiresAt });
+    } catch {
+      /* 审计失败不影响审批 */
+    }
   }
 
   /** 批准/拒绝：命中返回 true 并解除挂起（含超时计时器清理）；未知 ID 返回 false */
@@ -65,7 +73,11 @@ export class ApprovalBoard {
     this.map.delete(id);
     if (rec.timer) clearTimeout(rec.timer);
     rec.resolve(approved);
-    try { this.onResolve?.(id, approved, 'user'); } catch { /* 审计失败不影响审批 */ }
+    try {
+      this.onResolve?.(id, approved, 'user');
+    } catch {
+      /* 审计失败不影响审批 */
+    }
     return true;
   }
 
@@ -80,7 +92,11 @@ export class ApprovalBoard {
     if (!rec) return;
     this.map.delete(id);
     if (rec.timer) clearTimeout(rec.timer);
-    try { this.onWithdraw?.(id); } catch { /* 审计失败不影响审批 */ }
+    try {
+      this.onWithdraw?.(id);
+    } catch {
+      /* 审计失败不影响审批 */
+    }
   }
 
   get(id: string): ApprovalInfo | undefined {

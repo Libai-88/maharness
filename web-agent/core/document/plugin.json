@@ -27,12 +27,8 @@
         "update_document_draft",
         "finalize_document_draft"
       ],
-      "persona": [
-        "document-rules"
-      ],
-      "service": [
-        "document"
-      ]
+      "persona": ["document-rules"],
+      "service": ["document"]
     }
   },
   "apiVersion": 3,
@@ -52,7 +48,14 @@
       "id": "document.author",
       "name": "创建与修改文件",
       "description": "创建和定点修改 DOCX、XLSX、CSV、PPTX，并保留来源版本与修改摘要。",
-      "tools": ["create_document", "patch_document", "begin_document_draft", "read_document_draft", "update_document_draft", "finalize_document_draft"],
+      "tools": [
+        "create_document",
+        "patch_document",
+        "begin_document_draft",
+        "read_document_draft",
+        "update_document_draft",
+        "finalize_document_draft"
+      ],
       "aliases": ["写 Word", "做表格", "做 PPT", "生成文档"],
       "inputs": ["structured-content", "source-version", "target-anchor"],
       "outputs": ["docx", "xlsx", "csv", "pptx"],

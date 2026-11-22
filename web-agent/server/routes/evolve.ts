@@ -14,11 +14,14 @@ interface EvolveService {
 
 export function registerEvolveRoutes(app: Express, deps: RouteDeps): void {
   const { kernel } = deps;
-  const svc = (): EvolveService | undefined =>
-    kernel.plugins.resolveService('service:evolve') as EvolveService | undefined;
+  const svc = (): EvolveService | undefined => kernel.plugins.resolveService('service:evolve') as EvolveService | undefined;
 
   const reloadSkills = async (): Promise<void> => {
-    try { await kernel.plugins.reload('skills'); } catch { /* 重载失败：下次加载生效 */ }
+    try {
+      await kernel.plugins.reload('skills');
+    } catch {
+      /* 重载失败：下次加载生效 */
+    }
   };
 
   app.get('/api/evolve/proposals', (req, res) => {

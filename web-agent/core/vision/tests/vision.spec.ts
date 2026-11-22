@@ -14,14 +14,20 @@ const ctx = {
   logger: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {} },
   inject: (_key: string, _cb: unknown) => () => undefined,
   trace: { startStep: () => ({ finish: () => {}, fail: () => {} }) },
-  register(cap: { kind: string; tool?: ToolDef }) { if (cap.kind === 'tool' && cap.tool) tools.set(cap.tool.name, cap.tool); },
+  register(cap: { kind: string; tool?: ToolDef }) {
+    if (cap.kind === 'tool' && cap.tool) tools.set(cap.tool.name, cap.tool);
+  },
 };
 (visionPlugin as unknown as { onLoad(ctx: unknown): void }).onLoad(ctx);
 after(() => rmSync(root, { recursive: true, force: true }));
 
-const tctx = (tenantId: string, sessionId: string): ToolContext => ({
-  turn: 0, tenantId, sessionId, sandboxRoot: root,
-} as ToolContext);
+const tctx = (tenantId: string, sessionId: string): ToolContext =>
+  ({
+    turn: 0,
+    tenantId,
+    sessionId,
+    sandboxRoot: root,
+  }) as ToolContext;
 
 describe('vision tenant and path boundaries', () => {
   it('imageId 只能被登记它的租户/会话使用', async () => {

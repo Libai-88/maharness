@@ -10,38 +10,107 @@ import { RunService } from '../run-service';
 import { registerItemRoutes } from '../routes/items';
 import type { RouteDeps } from '../routes/shared';
 import type { ProviderDef } from '../../kernel/types';
-const provider: ProviderDef={id:'test',label:'Test',defaultModel:'test',async *chat(){}};
-test('items HTTP executes once in a dedicated reusable session, reconciles results and enforces versions and tenancy',async()=>{
-  const root=mkdtempSync(join(tmpdir(),'mh-items-http-')),store=new Store(':memory:'),items=new PersonalItems(root);
-  let calls=0;let release!:()=>void;const gate=new Promise<void>(resolve=>release=resolve);
-  const runs=new RunService({store,workspace:()=>root,provider:()=>({id:'test',model:'test'}),prepare:()=>({provider,model:'test',messages:[],traceId:''}),runner:()=>({approveApproval:()=>false,async *run(){calls++;await gate;yield {type:'assistant_done',content:'结果',reasoning:'',usage:{input:1,output:1},cost:0};}})});
-  const app=express();app.use(express.json());app.use((req,_res,next)=>{(req as any).tenantId=req.get('x-maharness-tenant')??'default';next();});
-  const kernel={rootDir:root,paths:{data:root},config:{get:(_key:string,fallback:unknown)=>fallback},plugins:{resolveService:(key:string)=>key==='service:personal-items'?items:{providers:[provider]}}};
-  registerItemRoutes(app,{store,kernel} as unknown as RouteDeps,runs);
-  const server=app.listen(0,'127.0.0.1');await new Promise<void>(resolve=>server.once('listening',resolve));const base=`http://127.0.0.1:${(server.address() as {port:number}).port}`;
-  const request=async(path:string,method='GET',body?:unknown,key?:string,tenant='default')=>{const response=await fetch(base+path,{method,headers:{'Content-Type':'application/json','x-maharness-tenant':tenant,...(key?{'Idempotency-Key':key}:{})},body:body?JSON.stringify(body):undefined});return {status:response.status,data:await response.json() as any};};
-  const waitCompleted=async(runId:string)=>{for(let i=0;i<100;i++){if(store.runs.get(runId,'default')?.status==='completed')return;await new Promise(resolve=>setTimeout(resolve,10));}assert.fail(`任务未完成: ${runId}`);};
+const provider: ProviderDef = { id: 'test', label: 'Test', defaultModel: 'test', async *chat() {} };
+test('items HTTP executes once in a dedicated reusable session, reconciles results and enforces versions and tenancy', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'mh-items-http-')),
+    store = new Store(':memory:'),
+    items = new PersonalItems(root);
+  let calls = 0;
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => (release = resolve));
+  const runs = new RunService({
+    store,
+    workspace: () => root,
+    provider: () => ({ id: 'test', model: 'test' }),
+    prepare: () => ({ provider, model: 'test', messages: [], traceId: '' }),
+    runner: () => ({
+      approveApproval: () => false,
+      async *run() {
+        calls++;
+        await gate;
+        yield { type: 'assistant_done', content: '结果', reasoning: '', usage: { input: 1, output: 1 }, cost: 0 };
+      },
+    }),
+  });
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    (req as any).tenantId = req.get('x-maharness-tenant') ?? 'default';
+    next();
+  });
+  const kernel = {
+    rootDir: root,
+    paths: { data: root },
+    config: { get: (_key: string, fallback: unknown) => fallback },
+    plugins: { resolveService: (key: string) => (key === 'service:personal-items' ? items : { providers: [provider] }) },
+  };
+  registerItemRoutes(app, { store, kernel } as unknown as RouteDeps, runs);
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise<void>((resolve) => server.once('listening', resolve));
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+  const request = async (path: string, method = 'GET', body?: unknown, key?: string, tenant = 'default') => {
+    const response = await fetch(base + path, {
+      method,
+      headers: { 'Content-Type': 'application/json', 'x-maharness-tenant': tenant, ...(key ? { 'Idempotency-Key': key } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    return { status: response.status, data: (await response.json()) as any };
+  };
+  const waitCompleted = async (runId: string) => {
+    for (let i = 0; i < 100; i++) {
+      if (store.runs.get(runId, 'default')?.status === 'completed') return;
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    assert.fail(`任务未完成: ${runId}`);
+  };
   try {
-    assert.equal((await request('/api/items','POST',{title:'无效资料',materials:[null]})).status,400);
-    const source=store.createSession('test','test');const item=items.create('default',{title:'整理'},source.id);
-    assert.equal((await request(`/api/items/${item.id}/execute`,'POST',{revision:0},'wrong')).status,409);
-    const first=await request(`/api/items/${item.id}/execute`,'POST',{revision:item.revision},'one');assert.equal(first.status,202);assert.notEqual(first.data.sessionId,source.id);
-    const duplicate=await request(`/api/items/${item.id}/execute`,'POST',{revision:item.revision},'one');assert.equal(duplicate.data.run.id,first.data.run.id);
-    const active=await request(`/api/items/${item.id}/execute`,'POST',{revision:item.revision},'two');assert.equal(active.data.run.id,first.data.run.id);
-    release();await new Promise<void>(resolve=>{const stop=runs.subscribe(first.data.run.id,event=>{if(event.type==='state'&&event.data.status==='completed'){stop();resolve();}});});
-    const result=await request(`/api/items/${item.id}`);assert.equal(result.data.item.lifecycle,'review');assert.equal(result.data.attempts.length,1);assert.equal(calls,1);
-    const retry=await request(`/api/items/${item.id}/execute`,'POST',{revision:item.revision},'one');assert.equal(retry.data.run.id,first.data.run.id);
-    const reopened=items.update('default',item.id,result.data.item.revision,{lifecycle:'todo'});
-    const again=await request(`/api/items/${item.id}/execute`,'POST',{revision:reopened.revision},'three');assert.equal(again.data.sessionId,first.data.sessionId);
+    assert.equal((await request('/api/items', 'POST', { title: '无效资料', materials: [null] })).status, 400);
+    const source = store.createSession('test', 'test');
+    const item = items.create('default', { title: '整理' }, source.id);
+    assert.equal((await request(`/api/items/${item.id}/execute`, 'POST', { revision: 0 }, 'wrong')).status, 409);
+    const first = await request(`/api/items/${item.id}/execute`, 'POST', { revision: item.revision }, 'one');
+    assert.equal(first.status, 202);
+    assert.notEqual(first.data.sessionId, source.id);
+    const duplicate = await request(`/api/items/${item.id}/execute`, 'POST', { revision: item.revision }, 'one');
+    assert.equal(duplicate.data.run.id, first.data.run.id);
+    const active = await request(`/api/items/${item.id}/execute`, 'POST', { revision: item.revision }, 'two');
+    assert.equal(active.data.run.id, first.data.run.id);
+    release();
+    await new Promise<void>((resolve) => {
+      const stop = runs.subscribe(first.data.run.id, (event) => {
+        if (event.type === 'state' && event.data.status === 'completed') {
+          stop();
+          resolve();
+        }
+      });
+    });
+    const result = await request(`/api/items/${item.id}`);
+    assert.equal(result.data.item.lifecycle, 'review');
+    assert.equal(result.data.attempts.length, 1);
+    assert.equal(calls, 1);
+    const retry = await request(`/api/items/${item.id}/execute`, 'POST', { revision: item.revision }, 'one');
+    assert.equal(retry.data.run.id, first.data.run.id);
+    const reopened = items.update('default', item.id, result.data.item.revision, { lifecycle: 'todo' });
+    const again = await request(`/api/items/${item.id}/execute`, 'POST', { revision: reopened.revision }, 'three');
+    assert.equal(again.data.sessionId, first.data.sessionId);
     await waitCompleted(again.data.run.id);
-    const interrupted=store.runs.get(again.data.run.id,'default')!;store.runs.update(interrupted,{status:'interrupted'});
-    const interruptedItem=items.get('default',item.id);
-    const reopenedAgain=items.update('default',item.id,interruptedItem.revision,{lifecycle:'todo'});
-    const resumed=await request(`/api/items/${item.id}/execute`,'POST',{revision:reopenedAgain.revision},'resume');
-    assert.equal(resumed.status,202);assert.equal(resumed.data.run.id,again.data.run.id);
+    const interrupted = store.runs.get(again.data.run.id, 'default')!;
+    store.runs.update(interrupted, { status: 'interrupted' });
+    const interruptedItem = items.get('default', item.id);
+    const reopenedAgain = items.update('default', item.id, interruptedItem.revision, { lifecycle: 'todo' });
+    const resumed = await request(`/api/items/${item.id}/execute`, 'POST', { revision: reopenedAgain.revision }, 'resume');
+    assert.equal(resumed.status, 202);
+    assert.equal(resumed.data.run.id, again.data.run.id);
     await waitCompleted(resumed.data.run.id);
-    assert.equal(items.get('default',item.id).lifecycle,'review');
-    const spoof=await request(`/api/items/${item.id}`,'PATCH',{revision:reopened.revision,executionSessionId:source.id});assert.equal(spoof.status,400);
-    assert.equal((await request(`/api/items/${item.id}`,'GET',undefined,undefined,'other')).status,404);
-  }finally{release();await runs.shutdown();await new Promise<void>(resolve=>server.close(()=>resolve()));store.close();rmSync(root,{recursive:true,force:true});}
+    assert.equal(items.get('default', item.id).lifecycle, 'review');
+    const spoof = await request(`/api/items/${item.id}`, 'PATCH', { revision: reopened.revision, executionSessionId: source.id });
+    assert.equal(spoof.status, 400);
+    assert.equal((await request(`/api/items/${item.id}`, 'GET', undefined, undefined, 'other')).status, 404);
+  } finally {
+    release();
+    await runs.shutdown();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    store.close();
+    rmSync(root, { recursive: true, force: true });
+  }
 });

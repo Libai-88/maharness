@@ -16,18 +16,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "list_dir",
-        "read_file",
-        "glob",
-        "grep",
-        "write_file",
-        "edit_file",
-        "delete_file"
-      ],
-      "persona": [
-        "tools-fs-rules"
-      ]
+      "tool": ["list_dir", "read_file", "glob", "grep", "write_file", "edit_file", "delete_file"],
+      "persona": ["tools-fs-rules"]
     }
   },
   "apiVersion": 2

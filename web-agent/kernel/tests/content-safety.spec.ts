@@ -1,11 +1,6 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  scanTextForWarnings,
-  scanValueForWarnings,
-  shouldScanToolContent,
-  summarizeWarnings,
-} from '../content-safety';
+import { scanTextForWarnings, scanValueForWarnings, shouldScanToolContent, summarizeWarnings } from '../content-safety';
 
 describe('content safety', () => {
   it('识别英文与中文提示注入', () => {
@@ -32,8 +27,14 @@ describe('content safety', () => {
         { nested: { token: `sk-${'test'}${'1234567890abcdef'}` } },
       ],
     });
-    assert.equal(warnings.some((warning) => warning.kind === 'prompt-injection'), true);
-    assert.equal(warnings.some((warning) => warning.kind === 'sensitive-data'), true);
+    assert.equal(
+      warnings.some((warning) => warning.kind === 'prompt-injection'),
+      true,
+    );
+    assert.equal(
+      warnings.some((warning) => warning.kind === 'sensitive-data'),
+      true,
+    );
     assert.ok(warnings.length <= 8);
   });
 

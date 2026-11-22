@@ -15,7 +15,8 @@ const plugin: Plugin = {
         parameters: { type: 'object', properties: {}, additionalProperties: false },
         output: '{ ok: true, plugin: "reference-hello" }',
         outputSchema: {
-          type: 'object', required: ['ok', 'plugin'],
+          type: 'object',
+          required: ['ok', 'plugin'],
           properties: { ok: { type: 'boolean' }, plugin: { type: 'string' } },
         },
         risk: 'low',

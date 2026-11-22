@@ -11,14 +11,21 @@ describe('插件静态审查', () => {
       ctx.register({kind:'listener',event:'data.ready',listener:()=>{}});
       ctx.register({kind:'service',service:{id:'prices'}});
     `);
-    assert.deepEqual(result.capabilities, [{kind:'role',name:'review-id'},{kind:'api',name:'panel'},{kind:'listener',name:'data.ready'},{kind:'service',name:'prices'}]);
+    assert.deepEqual(result.capabilities, [
+      { kind: 'role', name: 'review-id' },
+      { kind: 'api', name: 'panel' },
+      { kind: 'listener', name: 'data.ready' },
+      { kind: 'service', name: 'prices' },
+    ]);
     assert.equal(result.capabilityInferenceComplete, true);
     assert.equal(reviewPluginSource('ctx.register(capability)').capabilityInferenceComplete, false);
     assert.equal(reviewPluginSource("ctx.register({kind:'role',role:{id:dynamic,name:'Display'}})").capabilityInferenceComplete, false);
     assert.equal(reviewPluginSource("ctx.register({kind:'role',role:{id:'review',...dynamic}})").capabilityInferenceComplete, false);
-    const unrelated = reviewPluginSource("const data={kind:'role',role:{id:dynamic}}; const file={kind:'file'}; ctx.register({kind:'service',service:{id:'prices'}})");
+    const unrelated = reviewPluginSource(
+      "const data={kind:'role',role:{id:dynamic}}; const file={kind:'file'}; ctx.register({kind:'service',service:{id:'prices'}})",
+    );
     assert.equal(unrelated.capabilityInferenceComplete, true);
-    assert.deepEqual(unrelated.capabilities, [{kind:'service',name:'prices'}]);
+    assert.deepEqual(unrelated.capabilities, [{ kind: 'service', name: 'prices' }]);
   });
   test('安全的 ctx.register 插件通过并提取能力', () => {
     const r = reviewPluginSource("ctx.register({ kind: 'tool', tool: { name: 'safe_read' } });", {
@@ -40,11 +47,16 @@ describe('插件静态审查', () => {
     const r = reviewPluginSource(source);
     assert.equal(r.ok, false);
     assert.equal(r.highRisk, true);
-    assert.deepEqual(new Set(r.issues.map((i) => i.code)), new Set(['native-process', 'raw-filesystem', 'dynamic-code', 'secret-access', 'network-egress', 'dependency-policy']));
+    assert.deepEqual(
+      new Set(r.issues.map((i) => i.code)),
+      new Set(['native-process', 'raw-filesystem', 'dynamic-code', 'secret-access', 'network-egress', 'dependency-policy']),
+    );
   });
 
   test('能力未列入白名单时拒绝并给出可修复原因', () => {
-    const r = reviewPluginSource("ctx.register({ kind: 'tool', tool: { name: 'delete_data' } });", { capabilities: { tool: ['safe_read'] } });
+    const r = reviewPluginSource("ctx.register({ kind: 'tool', tool: { name: 'delete_data' } });", {
+      capabilities: { tool: ['safe_read'] },
+    });
     assert.equal(r.ok, false);
     assert.equal(r.highRisk, false);
     assert.equal(r.issues[0]?.code, 'missing-permissions');
@@ -65,11 +77,7 @@ describe('插件静态审查', () => {
   });
 
   test('外部依赖默认拒绝，白名单内包与安全 Node 内置模块放行', () => {
-    const source = [
-      "import path from 'node:path';",
-      "import { z } from 'zod';",
-      'export default { onLoad() {} };',
-    ].join('\n');
+    const source = ["import path from 'node:path';", "import { z } from 'zod';", 'export default { onLoad() {} };'].join('\n');
     const denied = reviewPluginSource(source);
     assert.equal(denied.ok, false);
     assert.ok(denied.issues.some((issue) => issue.code === 'dependency-policy' && issue.message.includes('zod')));
@@ -94,7 +102,10 @@ describe('插件静态审查', () => {
     ].join('\n');
     const restricted = reviewPluginRuntimeSource(source, { filesystem: 'sandbox', network: 'none', process: false });
     assert.equal(restricted.ok, false);
-    assert.deepEqual(new Set(restricted.issues.map((issue) => issue.code)), new Set(['raw-filesystem', 'native-process', 'network-egress', 'dependency-policy']));
+    assert.deepEqual(
+      new Set(restricted.issues.map((issue) => issue.code)),
+      new Set(['raw-filesystem', 'native-process', 'network-egress', 'dependency-policy']),
+    );
     const full = reviewPluginRuntimeSource(source, { filesystem: 'full', network: 'full', process: true });
     assert.equal(full.ok, true, JSON.stringify(full.issues));
   });

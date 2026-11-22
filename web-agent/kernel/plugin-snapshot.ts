@@ -9,7 +9,7 @@
  * 整张模块图按内容重建；同层同深度保证插件内的相对导入（含 `../../kernel/*`）
  * 路径关系完全不变——跨目录导入仍指向真实内核文件，内核模块保持进程内单例。
  */
-import { readFileSync, readdirSync, cpSync, rmSync, statSync, existsSync } from 'node:fs';
+import { readFileSync, readdirSync, cpSync, rmSync, statSync, existsSync, type Dirent } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { basename, dirname, join, relative } from 'node:path';
 
@@ -37,8 +37,12 @@ export interface Snapshot {
 /** 递归收集目录内的文件（跳过依赖目录、历史快照与深层子树） */
 function walkFiles(dir: string, depth = 0, out: string[] = []): string[] {
   if (depth > MAX_DEPTH) return out;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
   for (const e of entries) {
     if (SKIP_DIR.has(e.name) || SNAPSHOT_SUFFIX.test(e.name)) continue;
     const full = join(dir, e.name);
@@ -60,10 +64,16 @@ export function fileDigest(file: string): string {
 /** 目录内源码文件的内容聚合摘要（相对路径 + 内容，顺序稳定） */
 export function dirDigest(dir: string): string {
   const h = createHash('sha256');
-  const files = walkFiles(dir).filter((f) => SOURCE_EXT.test(f)).sort();
+  const files = walkFiles(dir)
+    .filter((f) => SOURCE_EXT.test(f))
+    .sort();
   for (const f of files) {
     h.update(relative(dir, f).replace(/\\/g, '/'));
-    try { h.update(readFileSync(f)); } catch { /* 读不到的文件不参与版本 */ }
+    try {
+      h.update(readFileSync(f));
+    } catch {
+      /* 读不到的文件不参与版本 */
+    }
   }
   return files.length ? h.digest('hex').slice(0, 10) : '';
 }
@@ -71,7 +81,11 @@ export function dirDigest(dir: string): string {
 function totalBytes(dir: string): number {
   let total = 0;
   for (const f of walkFiles(dir)) {
-    try { total += statSync(f).size; } catch { /* 忽略 */ }
+    try {
+      total += statSync(f).size;
+    } catch {
+      /* 忽略 */
+    }
   }
   return total;
 }
@@ -102,7 +116,11 @@ export function pruneSnapshots(pluginDir: string, keep: string[] = []): void {
   const parent = dirname(pluginDir);
   const prefix = `${basename(pluginDir)}@`;
   let entries: string[];
-  try { entries = readdirSync(parent); } catch { return; }
+  try {
+    entries = readdirSync(parent);
+  } catch {
+    return;
+  }
   for (const name of entries) {
     if (!name.startsWith(prefix) || !SNAPSHOT_SUFFIX.test(name)) continue;
     const full = join(parent, name);

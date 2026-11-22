@@ -20,7 +20,7 @@ async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   return port;
 }
 
@@ -38,9 +38,13 @@ const base = `http://127.0.0.1:${port}`;
 let started: Awaited<ReturnType<typeof startServer>> | undefined;
 
 async function executeV2(sessionId: string, input: Record<string, unknown>) {
-  const created = await fetch(`${base}/api/v2/sessions/${sessionId}/runs`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(input) });
+  const created = await fetch(`${base}/api/v2/sessions/${sessionId}/runs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(input),
+  });
   assert.equal(created.status, 202);
-  const { runId } = await created.json() as { runId: string };
+  const { runId } = (await created.json()) as { runId: string };
   return fetch(`${base}/api/v2/runs/${runId}/events`);
 }
 
@@ -48,12 +52,20 @@ function enableForMock(provider: ProviderDef, nextNames: () => string[]) {
   const original = provider.chat.bind(provider);
   const state = { calls: 0 };
   provider.chat = async function* (messages, options) {
-    const missing = nextNames().filter(name => !options.tools?.some(tool => tool.name === name));
+    const missing = nextNames().filter((name) => !options.tools?.some((tool) => tool.name === name));
     if (missing.length) {
-      assert.ok(options.tools?.some(tool => tool.name === 'enable_tools'));
+      assert.ok(options.tools?.some((tool) => tool.name === 'enable_tools'));
       state.calls++;
-      yield { type: 'tool_call', toolCall: { id: `enable-${state.calls}`, type: 'function', function: { name: 'enable_tools', arguments: JSON.stringify({ names: missing }) } } };
-      yield { type: 'usage', input: 0, output: 0 }; yield { type: 'done' };
+      yield {
+        type: 'tool_call',
+        toolCall: {
+          id: `enable-${state.calls}`,
+          type: 'function',
+          function: { name: 'enable_tools', arguments: JSON.stringify({ names: missing }) },
+        },
+      };
+      yield { type: 'usage', input: 0, output: 0 };
+      yield { type: 'done' };
       return;
     }
     yield* original(messages, options);
@@ -72,8 +84,7 @@ function teamAssignments(prefix: string, count: number, budgetUsd = 0.02) {
 }
 
 function activeTeamContractIds(providerId: string, count: number): string[] {
-  const root = started!.store.runs.active('default')
-    .find(run => !run.parentId && run.providerId === providerId);
+  const root = started!.store.runs.active('default').find((run) => !run.parentId && run.providerId === providerId);
   assert.ok(root?.teamCycleId);
   const cycle = started!.store.organization.getTeamCycle(root.teamCycleId!, 'default');
   const ids = cycle?.assignmentIds.slice(0, count) ?? [];
@@ -115,7 +126,11 @@ after(async () => {
   started?.closeEnvWatcher();
   await started?.runs.shutdown();
   started?.store.close();
-  try { await started?.kernel.stop(); } catch { /* 测试清理不影响断言结果 */ }
+  try {
+    await started?.kernel.stop();
+  } catch {
+    /* 测试清理不影响断言结果 */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -132,17 +147,21 @@ describe('GET /api/providers/:id/diagnose', () => {
     try {
       for (const protocol of ['openai', 'anthropic', 'ollama']) {
         const response = await fetch(`${base}/api/providers/test`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ baseUrl: `http://127.0.0.1:${probePort}`, apiKey: 'test-key', model: 'test-model', protocol }),
         });
         assert.equal(response.status, 400);
-        const body = await response.json() as { ok: boolean; error?: string; authFailed?: boolean };
-        assert.deepEqual({ ok: body.ok, error: body.error, authFailed: body.authFailed }, { ok: false, error: 'HTTP 401', authFailed: true });
+        const body = (await response.json()) as { ok: boolean; error?: string; authFailed?: boolean };
+        assert.deepEqual(
+          { ok: body.ok, error: body.error, authFailed: body.authFailed },
+          { ok: false, error: 'HTTP 401', authFailed: true },
+        );
         assert.equal(JSON.stringify(body).includes('remote-provider-internal-detail'), false);
       }
     } finally {
       delete process.env.AGENT_ALLOW_PRIVATE_URLS;
-      await new Promise<void>((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
@@ -158,7 +177,8 @@ describe('GET /api/providers/:id/diagnose', () => {
     try {
       for (let attempt = 0; attempt < 3; attempt++) {
         const response = await fetch(`${base}/api/providers/test`, {
-          method: 'POST', headers: { 'content-type': 'application/json' },
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             baseUrl: `http://127.0.0.1:${probePort}`,
             providerId: 'diagnostic-provider',
@@ -167,13 +187,25 @@ describe('GET /api/providers/:id/diagnose', () => {
           }),
         });
         assert.equal(response.status, 400);
-        const body = await response.json() as { ok: boolean; error?: string; authFailed?: boolean };
-        assert.deepEqual({ ok: body.ok, error: body.error, authFailed: body.authFailed }, { ok: false, error: 'HTTP 503', authFailed: false });
+        const body = (await response.json()) as { ok: boolean; error?: string; authFailed?: boolean };
+        assert.deepEqual(
+          { ok: body.ok, error: body.error, authFailed: body.authFailed },
+          { ok: false, error: 'HTTP 503', authFailed: false },
+        );
         assert.equal(JSON.stringify(body).includes('provider-secret-detail'), false);
       }
       const diagnostic = await fetch(`${base}/api/providers/diagnostic-provider/diagnose`);
       assert.equal(diagnostic.status, 200);
-      const body = await diagnostic.json() as { health: { failures: number; transientFailures?: number; circuitOpenedAt?: number; circuitResetAt?: number; lastError: string } | null; issues: string[] };
+      const body = (await diagnostic.json()) as {
+        health: {
+          failures: number;
+          transientFailures?: number;
+          circuitOpenedAt?: number;
+          circuitResetAt?: number;
+          lastError: string;
+        } | null;
+        issues: string[];
+      };
       assert.equal(body.health?.failures, 3);
       assert.equal(body.health?.transientFailures, 3);
       assert.equal(typeof body.health?.circuitOpenedAt, 'number');
@@ -184,30 +216,37 @@ describe('GET /api/providers/:id/diagnose', () => {
 
       const listed = await fetch(`${base}/api/providers`);
       assert.equal(listed.status, 200);
-      const providers = await listed.json() as Array<{ id: string; health?: { failures: number } | null }>;
+      const providers = (await listed.json()) as Array<{ id: string; health?: { failures: number } | null }>;
       assert.equal(providers.find((provider) => provider.id === 'diagnostic-provider')?.health?.failures, 3);
     } finally {
       const { noteProviderSuccess } = await import('../../core/chat/provider-health');
       noteProviderSuccess('diagnostic-provider');
       delete process.env.AGENT_ALLOW_PRIVATE_URLS;
-      await new Promise<void>((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => probe.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
   test('Trace 工具参数递归脱敏凭据键', () => {
-    assert.deepEqual(redactTraceValue({
-      path: 'reports/out.txt', apiKey: 'sk-live', nested: { token: 'approval-secret', password: 'pw' },
-      values: [{ authorization: 'Bearer secret', keep: 'visible' }],
-    }), {
-      path: 'reports/out.txt', apiKey: '[REDACTED]', nested: { token: '[REDACTED]', password: '[REDACTED]' },
-      values: [{ authorization: '[REDACTED]', keep: 'visible' }],
-    });
+    assert.deepEqual(
+      redactTraceValue({
+        path: 'reports/out.txt',
+        apiKey: 'sk-live',
+        nested: { token: 'approval-secret', password: 'pw' },
+        values: [{ authorization: 'Bearer secret', keep: 'visible' }],
+      }),
+      {
+        path: 'reports/out.txt',
+        apiKey: '[REDACTED]',
+        nested: { token: '[REDACTED]', password: '[REDACTED]' },
+        values: [{ authorization: '[REDACTED]', keep: 'visible' }],
+      },
+    );
   });
 
   test('返回配置、能力、健康与可操作问题，且不回显 API Key', async () => {
     const response = await fetch(`${base}/api/providers/diagnostic-provider/diagnose`);
     assert.equal(response.status, 200);
-    const body = await response.json() as {
+    const body = (await response.json()) as {
       providerId: string;
       schemaVersion: number;
       protocol: string;
@@ -220,10 +259,22 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.equal(body.schemaVersion, 1);
     assert.equal(body.protocol, 'openai');
     assert.deepEqual(body.configured, { baseUrl: true, apiKey: true, defaultModel: true });
-    assert.deepEqual(body.models, [{
-      providerId: 'diagnostic-provider', modelId: 'gpt-diagnostic', modelKey: 'diagnostic-provider@gpt-diagnostic', pricingId: 'diagnostic-provider@gpt-diagnostic', contextWindow: 128000, maxOutput: 8192,
-      vision: true, tools: true, reasoning: false, priceIn: 1, priceOut: 2, source: 'pulled',
-    }]);
+    assert.deepEqual(body.models, [
+      {
+        providerId: 'diagnostic-provider',
+        modelId: 'gpt-diagnostic',
+        modelKey: 'diagnostic-provider@gpt-diagnostic',
+        pricingId: 'diagnostic-provider@gpt-diagnostic',
+        contextWindow: 128000,
+        maxOutput: 8192,
+        vision: true,
+        tools: true,
+        reasoning: false,
+        priceIn: 1,
+        priceOut: 2,
+        source: 'pulled',
+      },
+    ]);
     assert.deepEqual(body.issues, []);
     assert.equal('health' in body, true);
     const serialized = JSON.stringify(body);
@@ -240,58 +291,87 @@ describe('GET /api/providers/:id/diagnose', () => {
   test('已保存模型端点返回同一 schema 版本和稳定身份', async () => {
     const response = await fetch(`${base}/api/providers/diagnostic-provider/models`);
     assert.equal(response.status, 200);
-    const body = await response.json() as { schemaVersion: number; models: Array<{ providerId: string; modelId: string; modelKey: string; pricingId: string }> };
+    const body = (await response.json()) as {
+      schemaVersion: number;
+      models: Array<{ providerId: string; modelId: string; modelKey: string; pricingId: string }>;
+    };
     assert.equal(body.schemaVersion, 1);
-    assert.deepEqual({
-      providerId: body.models[0]?.providerId, modelId: body.models[0]?.modelId,
-      modelKey: body.models[0]?.modelKey, pricingId: body.models[0]?.pricingId,
-    }, {
-      providerId: 'diagnostic-provider', modelId: 'gpt-diagnostic',
-      modelKey: 'diagnostic-provider@gpt-diagnostic', pricingId: 'diagnostic-provider@gpt-diagnostic',
-    });
+    assert.deepEqual(
+      {
+        providerId: body.models[0]?.providerId,
+        modelId: body.models[0]?.modelId,
+        modelKey: body.models[0]?.modelKey,
+        pricingId: body.models[0]?.pricingId,
+      },
+      {
+        providerId: 'diagnostic-provider',
+        modelId: 'gpt-diagnostic',
+        modelKey: 'diagnostic-provider@gpt-diagnostic',
+        pricingId: 'diagnostic-provider@gpt-diagnostic',
+      },
+    );
 
     const selectable = await fetch(`${base}/api/models`);
     assert.equal(selectable.status, 200);
-    const models = await selectable.json() as Array<{ schemaVersion: number; id: string; provider: string; model: string; modelKey: string; pricingId: string }>;
+    const models = (await selectable.json()) as Array<{
+      schemaVersion: number;
+      id: string;
+      provider: string;
+      model: string;
+      modelKey: string;
+      pricingId: string;
+    }>;
     const selected = models.find((model) => model.model === 'gpt-diagnostic');
     assert.deepEqual(selected, {
-      schemaVersion: 1, toolCheck: { status: 'unknown' },
-      providerId: 'diagnostic-provider', modelId: 'gpt-diagnostic',
-      modelKey: 'diagnostic-provider@gpt-diagnostic', pricingId: 'diagnostic-provider@gpt-diagnostic',
-      id: 'diagnostic-provider@gpt-diagnostic', provider: 'diagnostic-provider',
-      label: 'DIAGNOSTIC-PROVIDER', model: 'gpt-diagnostic',
-      vision: true, tools: true, reasoning: false, contextWindow: 128000,
+      schemaVersion: 1,
+      toolCheck: { status: 'unknown' },
+      providerId: 'diagnostic-provider',
+      modelId: 'gpt-diagnostic',
+      modelKey: 'diagnostic-provider@gpt-diagnostic',
+      pricingId: 'diagnostic-provider@gpt-diagnostic',
+      id: 'diagnostic-provider@gpt-diagnostic',
+      provider: 'diagnostic-provider',
+      label: 'DIAGNOSTIC-PROVIDER',
+      model: 'gpt-diagnostic',
+      vision: true,
+      tools: true,
+      reasoning: false,
+      contextWindow: 128000,
     });
 
     const configResponse = await fetch(`${base}/api/config`);
     assert.equal(configResponse.status, 200);
-    const config = await configResponse.json() as {
+    const config = (await configResponse.json()) as {
       routingTargets: Array<{ value: string; contextWindow?: number; latencyMs?: number; privacyTier?: string; riskLevel?: string }>;
     };
     const target = config.routingTargets.find((item) => item.value === 'diagnostic-provider@gpt-diagnostic');
-    assert.deepEqual({
-      value: 'diagnostic-provider@gpt-diagnostic',
-      contextWindow: target?.contextWindow,
-      latencyMs: 120,
-      privacyTier: 'local',
-      riskLevel: 'low',
-    }, {
-      value: 'diagnostic-provider@gpt-diagnostic',
-      contextWindow: 128000,
-      latencyMs: 120,
-      privacyTier: 'local',
-      riskLevel: 'low',
-    });
+    assert.deepEqual(
+      {
+        value: 'diagnostic-provider@gpt-diagnostic',
+        contextWindow: target?.contextWindow,
+        latencyMs: 120,
+        privacyTier: 'local',
+        riskLevel: 'low',
+      },
+      {
+        value: 'diagnostic-provider@gpt-diagnostic',
+        contextWindow: 128000,
+        latencyMs: 120,
+        privacyTier: 'local',
+        riskLevel: 'low',
+      },
+    );
   });
 
   test('Ollama 本地网关无需 API Key 即可保存', async () => {
     const response = await fetch(`${base}/api/providers`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ label: 'Local Ollama', baseUrl: 'http://localhost:11434/v1', model: 'llama3', protocol: 'ollama' }),
     });
     // local 模式下 Provider 地址默认允许连本机网关：免 Key 且免私网拦截，开箱即用。
     assert.equal(response.status, 200);
-    const body = await response.json() as { id?: string };
+    const body = (await response.json()) as { id?: string };
     assert.ok(body.id, '保存成功应返回 provider id');
   });
 
@@ -300,25 +380,46 @@ describe('GET /api/providers/:id/diagnose', () => {
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     const calls: string[] = [];
     let receivedClockContext = false;
-    chat.providers = [{
-      id: 'diagnostic-provider', label: 'Diagnostic Provider', defaultModel: 'gpt-diagnostic',
-      models: [{
-        modelId: 'gpt-diagnostic', contextWindow: 128000, maxOutput: 8192,
-        vision: true, tools: true, reasoning: false, priceIn: 1, priceOut: 2,
-        enabled: true, source: 'test', latencyMs: 120, privacyTier: 'local', riskLevel: 'low',
-      }],
-      async *chat(messages, options) {
-        calls.push(`${options.model}:${messages.find(message => message.context?.source === 'user')?.content ?? ''}`);
-        receivedClockContext = messages.some(message => message.context?.id === 'runtime-clock'
-          && message.context.trust === 'core' && /UTC 时间：\d{4}-\d{2}-\d{2}T/.test(message.content ?? ''));
-        yield { type: 'delta', text: ' routed' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'diagnostic-provider',
+        label: 'Diagnostic Provider',
+        defaultModel: 'gpt-diagnostic',
+        models: [
+          {
+            modelId: 'gpt-diagnostic',
+            contextWindow: 128000,
+            maxOutput: 8192,
+            vision: true,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+            latencyMs: 120,
+            privacyTier: 'local',
+            riskLevel: 'low',
+          },
+        ],
+        async *chat(messages, options) {
+          calls.push(`${options.model}:${messages.find((message) => message.context?.source === 'user')?.content ?? ''}`);
+          receivedClockContext = messages.some(
+            (message) =>
+              message.context?.id === 'runtime-clock' &&
+              message.context.trust === 'core' &&
+              /UTC 时间：\d{4}-\d{2}-\d{2}T/.test(message.content ?? ''),
+          );
+          yield { type: 'delta', text: ' routed' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', { 默认: 'diagnostic-provider@gpt-diagnostic' });
     const session = started.store.createSession('gpt-diagnostic', 'diagnostic-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '你好，请简短回答' }),
     });
     assert.equal(response.status, 200);
@@ -332,7 +433,7 @@ describe('GET /api/providers/:id/diagnose', () => {
 
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=model-route`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ outputSummary?: string; status: string }> };
+    const trace = (await traceResponse.json()) as { steps: Array<{ outputSummary?: string; status: string }> };
     assert.equal(trace.steps.length, 0);
   });
 
@@ -340,21 +441,39 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'goal-provider', label: 'Goal Provider', defaultModel: 'goal-model',
-      models: [{ modelId: 'goal-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-      async *chat() {
-        calls++;
-        yield { type: 'delta', text: 'should not run' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'goal-provider',
+        label: 'Goal Provider',
+        defaultModel: 'goal-model',
+        models: [
+          {
+            modelId: 'goal-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          calls++;
+          yield { type: 'delta', text: 'should not run' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('tools.writeRequiresApproval', true);
     const session = started.store.createSession('goal-model', 'goal-provider');
     started.store.updateSession(session.id, { mode: 'goal' });
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '请整理项目结构' }),
     });
     assert.equal(response.status, 200);
@@ -368,32 +487,57 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'confirmed-goal-provider', label: 'Confirmed Goal Provider', defaultModel: 'confirmed-goal-model',
-      models: [{ modelId: 'confirmed-goal-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-      async *chat() {
-        calls++;
-        yield { type: 'delta', text: '已完成，README.md 已检查' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'confirmed-goal-provider',
+        label: 'Confirmed Goal Provider',
+        defaultModel: 'confirmed-goal-model',
+        models: [
+          {
+            modelId: 'confirmed-goal-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          calls++;
+          yield { type: 'delta', text: '已完成，README.md 已检查' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     const session = started.store.createSession('confirmed-goal-model', 'confirmed-goal-provider');
     started.store.updateSession(session.id, { mode: 'goal' });
     const first = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '请整理项目结构' }),
     });
     assert.equal(first.status, 200);
     assert.doesNotMatch(await first.text(), /event: task_inference/);
     assert.equal(calls, 1);
-    const second = await executeV2(session.id, { message: '请整理项目结构\n验收条件：必须包含“README.md”', acceptance: [{ type: 'output_contains', value: 'README.md' }] });
+    const second = await executeV2(session.id, {
+      message: '请整理项目结构\n验收条件：必须包含“README.md”',
+      acceptance: [{ type: 'output_contains', value: 'README.md' }],
+    });
     assert.equal(second.status, 200);
     const sse = await second.text();
     assert.match(sse, /event: done\ndata:/);
     assert.match(sse, /event: task_verified\ndata:/);
     assert.equal(calls, 2, '两次用户请求各执行一次模型调用');
-    assert.ok(started.store.listMessages(session.id).some((message) => message.role === 'user' && message.content === '请整理项目结构\n验收条件：必须包含“README.md”'));
+    assert.ok(
+      started.store
+        .listMessages(session.id)
+        .some((message) => message.role === 'user' && message.content === '请整理项目结构\n验收条件：必须包含“README.md”'),
+    );
   });
 
   test('视觉工具在文本模型上真实借道视觉模型并记录 vision-route Trace', async () => {
@@ -401,13 +545,48 @@ describe('GET /api/providers/:id/diagnose', () => {
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     const targetCalls: { model: string; hasImage: boolean }[] = [];
     const textProvider: ProviderDef = {
-      id: 'text-provider', label: 'Text Provider', defaultModel: 'text-model',
-      models: [{ modelId: 'text-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-      async *chat() { yield { type: 'done' }; },
+      id: 'text-provider',
+      label: 'Text Provider',
+      defaultModel: 'text-model',
+      models: [
+        {
+          modelId: 'text-model',
+          contextWindow: 32000,
+          maxOutput: 4096,
+          vision: false,
+          tools: true,
+          reasoning: false,
+          priceIn: 1,
+          priceOut: 2,
+          enabled: true,
+          source: 'test',
+        },
+      ],
+      async *chat() {
+        yield { type: 'done' };
+      },
     };
     const visionProvider: ProviderDef = {
-      id: 'vision-provider', label: 'Vision Provider', defaultModel: 'vision-model',
-      models: [{ modelId: 'vision-model', contextWindow: 128000, maxOutput: 8192, vision: true, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test', latencyMs: 80, privacyTier: 'local', riskLevel: 'low' }],
+      id: 'vision-provider',
+      label: 'Vision Provider',
+      defaultModel: 'vision-model',
+      models: [
+        {
+          modelId: 'vision-model',
+          contextWindow: 128000,
+          maxOutput: 8192,
+          vision: true,
+          tools: true,
+          reasoning: false,
+          priceIn: 1,
+          priceOut: 2,
+          enabled: true,
+          source: 'test',
+          latencyMs: 80,
+          privacyTier: 'local',
+          riskLevel: 'low',
+        },
+      ],
       async *chat(messages, options) {
         targetCalls.push({ model: options.model, hasImage: !!messages[0]?.images?.length });
         yield { type: 'delta', text: 'image read' };
@@ -415,14 +594,51 @@ describe('GET /api/providers/:id/diagnose', () => {
       },
     };
     const externalVisionProvider: ProviderDef = {
-      id: 'external-vision-provider', label: 'External Vision Provider', defaultModel: 'external-vision-model',
-      models: [{ modelId: 'external-vision-model', contextWindow: 128000, maxOutput: 8192, vision: true, tools: true, reasoning: false, priceIn: 0.2, priceOut: 0.4, enabled: true, source: 'test', latencyMs: 900, privacyTier: 'external', riskLevel: 'high' }],
-      async *chat() { yield { type: 'done' }; },
+      id: 'external-vision-provider',
+      label: 'External Vision Provider',
+      defaultModel: 'external-vision-model',
+      models: [
+        {
+          modelId: 'external-vision-model',
+          contextWindow: 128000,
+          maxOutput: 8192,
+          vision: true,
+          tools: true,
+          reasoning: false,
+          priceIn: 0.2,
+          priceOut: 0.4,
+          enabled: true,
+          source: 'test',
+          latencyMs: 900,
+          privacyTier: 'external',
+          riskLevel: 'high',
+        },
+      ],
+      async *chat() {
+        yield { type: 'done' };
+      },
     };
     const unprofiledVisionProvider: ProviderDef = {
-      id: 'unprofiled-vision-provider', label: 'Unprofiled Vision Provider', defaultModel: 'unprofiled-vision-model',
-      models: [{ modelId: 'unprofiled-vision-model', contextWindow: 128000, maxOutput: 8192, vision: true, tools: true, reasoning: false, priceIn: 0.001, priceOut: 0.001, enabled: true, source: 'test' }],
-      async *chat() { yield { type: 'done' }; },
+      id: 'unprofiled-vision-provider',
+      label: 'Unprofiled Vision Provider',
+      defaultModel: 'unprofiled-vision-model',
+      models: [
+        {
+          modelId: 'unprofiled-vision-model',
+          contextWindow: 128000,
+          maxOutput: 8192,
+          vision: true,
+          tools: true,
+          reasoning: false,
+          priceIn: 0.001,
+          priceOut: 0.001,
+          enabled: true,
+          source: 'test',
+        },
+      ],
+      async *chat() {
+        yield { type: 'done' };
+      },
     };
     chat.providers = [textProvider, visionProvider, externalVisionProvider, unprofiledVisionProvider];
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
@@ -431,26 +647,46 @@ describe('GET /api/providers/:id/diagnose', () => {
     const analyze = started.kernel.plugins.capabilities('tool').find((c) => c.tool.name === 'analyze_image')?.tool;
     assert.ok(analyze);
     const ctx: ToolContext = {
-      traceId: 'vision-http-contract', turn: 0, sandboxRoot: process.env.SANDBOX_ROOT!,
-      cache: started.kernel.cache, trace: started.kernel.trace,
-      providerId: 'text-provider', model: 'text-model', sessionId: 'vision-contract',
+      traceId: 'vision-http-contract',
+      turn: 0,
+      sandboxRoot: process.env.SANDBOX_ROOT!,
+      cache: started.kernel.cache,
+      trace: started.kernel.trace,
+      providerId: 'text-provider',
+      model: 'text-model',
+      sessionId: 'vision-contract',
     };
-    const result = await analyze.handler({ path: 'routing-sample.png', question: '读取图片内容', maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'medium' }, ctx);
+    const result = await analyze.handler(
+      { path: 'routing-sample.png', question: '读取图片内容', maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'medium' },
+      ctx,
+    );
     assert.equal(result.ok, true);
     assert.deepEqual(targetCalls, [{ model: 'vision-model', hasImage: true }]);
     const visionResult = (result.data ?? {}) as { provider: string; model: string; routed: boolean; backTo?: string };
-    assert.deepEqual({ provider: visionResult.provider, model: visionResult.model, routed: visionResult.routed, backTo: visionResult.backTo }, {
-      provider: 'vision-provider', model: 'vision-model', routed: true, backTo: 'text-provider@text-model',
-    });
+    assert.deepEqual(
+      { provider: visionResult.provider, model: visionResult.model, routed: visionResult.routed, backTo: visionResult.backTo },
+      {
+        provider: 'vision-provider',
+        model: 'vision-model',
+        routed: true,
+        backTo: 'text-provider@text-model',
+      },
+    );
     const traceResponse = await fetch(`${base}/api/trace?trace_id=vision-http-contract&name=vision-route`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
+    const trace = (await traceResponse.json()) as { steps: Array<{ status: string; outputSummary?: string }> };
     assert.equal(trace.steps.length, 1);
     assert.equal(trace.steps[0]?.status, 'done');
-    const decision = JSON.parse(trace.steps[0]?.outputSummary ?? '{}') as { target?: string; candidates?: Array<{ model: string; accepted: boolean; reasons: string[] }> };
+    const decision = JSON.parse(trace.steps[0]?.outputSummary ?? '{}') as {
+      target?: string;
+      candidates?: Array<{ model: string; accepted: boolean; reasons: string[] }>;
+    };
     assert.equal(decision.target, 'vision-provider@vision-model');
     assert.equal(decision.candidates?.find((candidate) => candidate.model === 'external-vision-model')?.accepted, false);
-    assert.match(decision.candidates?.find((candidate) => candidate.model === 'external-vision-model')?.reasons.join(' ') ?? '', /延迟 900ms 超过上限 200ms/);
+    assert.match(
+      decision.candidates?.find((candidate) => candidate.model === 'external-vision-model')?.reasons.join(' ') ?? '',
+      /延迟 900ms 超过上限 200ms/,
+    );
     const unprofiled = decision.candidates?.find((candidate) => candidate.model === 'unprofiled-vision-model');
     assert.equal(unprofiled?.accepted, false);
     assert.match(unprofiled?.reasons.join(' ') ?? '', /未登记隐私画像/);
@@ -461,27 +697,41 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'flaky-provider', label: 'Flaky Provider', defaultModel: 'flaky-model',
-      prices: { in: 9, out: 11 },
-      models: [{
-        modelId: 'flaky-model', contextWindow: 32000, maxOutput: 4096,
-        vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2,
-        enabled: true, source: 'test',
-      }],
-      async *chat() {
-        calls++;
-        if (calls === 1) throw new LLMHttpError(500, 'deterministic transient failure');
-        yield { type: 'delta', text: 'recovered' };
-        yield { type: 'usage', input: 100, output: 20, cachedInput: 40, missInput: 60 };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'flaky-provider',
+        label: 'Flaky Provider',
+        defaultModel: 'flaky-model',
+        prices: { in: 9, out: 11 },
+        models: [
+          {
+            modelId: 'flaky-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          calls++;
+          if (calls === 1) throw new LLMHttpError(500, 'deterministic transient failure');
+          yield { type: 'delta', text: 'recovered' };
+          yield { type: 'usage', input: 100, output: 20, cachedInput: 40, missInput: 60 };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     const cacheBefore = started.kernel.cache.statsSnapshot();
     const session = started.store.createSession('flaky-model', 'flaky-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '触发一次可恢复错误' }),
     });
     assert.equal(response.status, 200);
@@ -493,16 +743,35 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=retry-policy`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
+    const trace = (await traceResponse.json()) as { steps: Array<{ status: string; outputSummary?: string }> };
     assert.equal(trace.steps.length, 1);
     assert.equal(trace.steps[0]?.status, 'done');
     assert.match(trace.steps[0]?.outputSummary ?? '', /HTTP_500: retry/);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=llm_call`);
     assert.equal(llmResponse.status, 200);
-    const llmTrace = await llmResponse.json() as { steps: Array<{ tokensIn?: number; tokensOut?: number; tokensCached?: number; cost?: number; cacheLayer?: string; durationMs?: number; ts: number; endTs?: number; name: string }> };
-    assert.deepEqual(llmTrace.steps.map((step) => ({
-      name: step.name, tokensIn: step.tokensIn, tokensOut: step.tokensOut, tokensCached: step.tokensCached, cacheLayer: step.cacheLayer,
-    })), [{ name: 'flaky-provider/flaky-model', tokensIn: 100, tokensOut: 20, tokensCached: 40, cacheLayer: 'L3' }]);
+    const llmTrace = (await llmResponse.json()) as {
+      steps: Array<{
+        tokensIn?: number;
+        tokensOut?: number;
+        tokensCached?: number;
+        cost?: number;
+        cacheLayer?: string;
+        durationMs?: number;
+        ts: number;
+        endTs?: number;
+        name: string;
+      }>;
+    };
+    assert.deepEqual(
+      llmTrace.steps.map((step) => ({
+        name: step.name,
+        tokensIn: step.tokensIn,
+        tokensOut: step.tokensOut,
+        tokensCached: step.tokensCached,
+        cacheLayer: step.cacheLayer,
+      })),
+      [{ name: 'flaky-provider/flaky-model', tokensIn: 100, tokensOut: 20, tokensCached: 40, cacheLayer: 'L3' }],
+    );
     assert.ok(Number.isFinite(llmTrace.steps[0]?.durationMs));
     assert.ok((llmTrace.steps[0]?.endTs ?? 0) >= llmTrace.steps[0]?.ts);
     assert.ok(Math.abs((llmTrace.steps[0]?.cost ?? 0) - 0.00014) < 1e-12);
@@ -511,15 +780,19 @@ describe('GET /api/providers/:id/diagnose', () => {
     const cacheAfter = started.kernel.cache.statsSnapshot();
     assert.equal(cacheAfter.l3RealTokens - cacheBefore.l3RealTokens, 40);
     assert.equal(cacheAfter.l3RealMissTokens - cacheBefore.l3RealMissTokens, 60);
-    assert.ok(Math.abs((cacheAfter.savedCost - cacheBefore.savedCost) - 0.00004) < 1e-12);
+    assert.ok(Math.abs(cacheAfter.savedCost - cacheBefore.savedCost - 0.00004) < 1e-12);
     const statsResponse = await fetch(`${base}/api/stats`);
     assert.equal(statsResponse.status, 200);
-    const stats = await statsResponse.json() as { cache: { metrics: {
-      hits: { l3Provider: number };
-      avoidedCalls: { llm: number; tool: number };
-      tokensSaved: { l3Provider: number };
-      costSaved: number;
-    } } };
+    const stats = (await statsResponse.json()) as {
+      cache: {
+        metrics: {
+          hits: { l3Provider: number };
+          avoidedCalls: { llm: number; tool: number };
+          tokensSaved: { l3Provider: number };
+          costSaved: number;
+        };
+      };
+    };
     assert.equal(typeof stats.cache.metrics.avoidedCalls.llm, 'number');
     assert.equal(typeof stats.cache.metrics.avoidedCalls.tool, 'number');
     assert.ok(stats.cache.metrics.hits.l3Provider >= 1);
@@ -534,21 +807,59 @@ describe('GET /api/providers/:id/diagnose', () => {
     let fallbackCalls = 0;
     chat.providers = [
       {
-        id: 'trace-primary-provider', label: 'Trace Primary', defaultModel: 'primary-model',
-        models: [{ modelId: 'primary-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-        async *chat() { primaryCalls++; throw new LLMHttpError(401, 'primary credentials rejected'); },
+        id: 'trace-primary-provider',
+        label: 'Trace Primary',
+        defaultModel: 'primary-model',
+        models: [
+          {
+            modelId: 'primary-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          primaryCalls++;
+          throw new LLMHttpError(401, 'primary credentials rejected');
+        },
       },
       {
-        id: 'trace-fallback-provider', label: 'Trace Fallback', defaultModel: 'fallback-model',
-        models: [{ modelId: 'fallback-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 3, priceOut: 4, enabled: true, source: 'test' }],
-        async *chat() { fallbackCalls++; yield { type: 'delta', text: 'fallback complete' }; yield { type: 'done' }; },
+        id: 'trace-fallback-provider',
+        label: 'Trace Fallback',
+        defaultModel: 'fallback-model',
+        models: [
+          {
+            modelId: 'fallback-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 3,
+            priceOut: 4,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          fallbackCalls++;
+          yield { type: 'delta', text: 'fallback complete' };
+          yield { type: 'done' };
+        },
       },
     ];
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('agent.fallbackProviders', ['trace-fallback-provider']);
     const session = started.store.createSession('primary-model', 'trace-primary-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '验证 failover 的实际 Provider Trace' }),
     });
     assert.equal(response.status, 200);
@@ -561,13 +872,17 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(traceId);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=llm_call`);
     assert.equal(llmResponse.status, 200);
-    const llmTrace = await llmResponse.json() as { steps: Array<{ name?: string; status?: string; errorCategory?: string }> };
-    assert.deepEqual(llmTrace.steps.map((step) => ({ name: step.name, status: step.status, errorCategory: step.errorCategory })), [
-      { name: 'trace-fallback-provider/fallback-model', status: 'done', errorCategory: undefined },
-    ]);
+    const llmTrace = (await llmResponse.json()) as { steps: Array<{ name?: string; status?: string; errorCategory?: string }> };
+    assert.deepEqual(
+      llmTrace.steps.map((step) => ({ name: step.name, status: step.status, errorCategory: step.errorCategory })),
+      [{ name: 'trace-fallback-provider/fallback-model', status: 'done', errorCategory: undefined }],
+    );
     const retryResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&name=retry-policy`);
-    const retryTrace = await retryResponse.json() as { steps: Array<{ errorCode?: string; retryable?: boolean }> };
-    assert.deepEqual(retryTrace.steps.map((step) => ({ errorCode: step.errorCode, retryable: step.retryable })), [{ errorCode: 'HTTP_401', retryable: false }]);
+    const retryTrace = (await retryResponse.json()) as { steps: Array<{ errorCode?: string; retryable?: boolean }> };
+    assert.deepEqual(
+      retryTrace.steps.map((step) => ({ errorCode: step.errorCode, retryable: step.retryable })),
+      [{ errorCode: 'HTTP_401', retryable: false }],
+    );
   });
 
   test('真实聊天入口并行委派在 Provider 负载下保持并发上限与完整聚合', async () => {
@@ -576,63 +891,90 @@ describe('GET /api/providers/:id/diagnose', () => {
     let calls = 0;
     let active = 0;
     let peakActive = 0;
-    chat.providers = [{
-      id: 'parallel-load-provider', label: 'Parallel Load Provider', defaultModel: 'parallel-load-model',
-      prices: { in: 1, out: 2 }, priceSource: 'configured', outputLimitGuaranteed: true,
-      models: [{ modelId: 'parallel-load-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-      async *chat() {
-        const call = ++calls;
-        if (call === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'parallel-team-create', type: 'function',
-            function: {
-              name: 'team_create',
-              arguments: JSON.stringify({ assignments: teamAssignments('parallel-load-child', 4, 0.2) }),
-            },
-          } };
-          return;
-        }
-        if (call === 2) {
-          const teamContracts = activeTeamContractIds('parallel-load-provider', 4);
-          yield { type: 'tool_call', toolCall: {
-            id: 'parallel-load-call', type: 'function',
-            function: {
-              name: 'run_parallel',
-              arguments: JSON.stringify({ tasks: teamContracts.map((contractId, index) => ({
-                contractId,
-                objective: `parallel-load-child-${index + 1}`,
-              })) }),
-            },
-          } };
-          return;
-        }
-        if (call <= 6) {
-          active++;
-          peakActive = Math.max(peakActive, active);
-          await new Promise((resolve) => setTimeout(resolve, 35));
-          active--;
-          yield { type: 'delta', text: `child-${call}` };
+    chat.providers = [
+      {
+        id: 'parallel-load-provider',
+        label: 'Parallel Load Provider',
+        defaultModel: 'parallel-load-model',
+        prices: { in: 1, out: 2 },
+        priceSource: 'configured',
+        outputLimitGuaranteed: true,
+        models: [
+          {
+            modelId: 'parallel-load-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          const call = ++calls;
+          if (call === 1) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'parallel-team-create',
+                type: 'function',
+                function: {
+                  name: 'team_create',
+                  arguments: JSON.stringify({ assignments: teamAssignments('parallel-load-child', 4, 0.2) }),
+                },
+              },
+            };
+            return;
+          }
+          if (call === 2) {
+            const teamContracts = activeTeamContractIds('parallel-load-provider', 4);
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'parallel-load-call',
+                type: 'function',
+                function: {
+                  name: 'run_parallel',
+                  arguments: JSON.stringify({
+                    tasks: teamContracts.map((contractId, index) => ({
+                      contractId,
+                      objective: `parallel-load-child-${index + 1}`,
+                    })),
+                  }),
+                },
+              },
+            };
+            return;
+          }
+          if (call <= 6) {
+            active++;
+            peakActive = Math.max(peakActive, active);
+            await new Promise((resolve) => setTimeout(resolve, 35));
+            active--;
+            yield { type: 'delta', text: `child-${call}` };
+            yield { type: 'usage', input: 10, output: 5 };
+            yield { type: 'done' };
+            return;
+          }
+          yield { type: 'delta', text: 'parallel aggregate complete' };
           yield { type: 'usage', input: 10, output: 5 };
           yield { type: 'done' };
-          return;
-        }
-        yield { type: 'delta', text: 'parallel aggregate complete' };
-        yield { type: 'usage', input: 10, output: 5 };
-        yield { type: 'done' };
+        },
       },
-    }];
-    const enabled = enableForMock(
-      chat.providers[0],
-      () => calls === 0 ? ['team_create'] : calls === 1 ? ['run_parallel'] : [],
-    );
+    ];
+    const enabled = enableForMock(chat.providers[0], () => (calls === 0 ? ['team_create'] : calls === 1 ? ['run_parallel'] : []));
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     const parallelEvents: { phase?: string; detail?: { cost?: number; tokensIn?: number; tokensOut?: number } }[] = [];
     const eventBus = started.kernel.bus as unknown as { on(type: string, listener: (event: { data: unknown }) => void): () => void };
-    const offProgress = eventBus.on('parallel.progress', (event) => parallelEvents.push(event.data as typeof parallelEvents[number]));
+    const offProgress = eventBus.on('parallel.progress', (event) => parallelEvents.push(event.data as (typeof parallelEvents)[number]));
     const session = started.store.createSession('parallel-load-model', 'parallel-load-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         message: '组织团队并行执行四项独立负载回归并汇总结果',
         budgetUsd: 0.8,
@@ -647,9 +989,10 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.equal(calls, 7, '应包含团队建约、并行委派、四个并行子任务和最终汇总轮');
     assert.equal(active, 0, 'Provider 负载结束后无活动请求');
     assert.equal(peakActive, 4, '四个并行子任务应同时运行但不超过批次上限');
-    const parentRun = started.store.runs.list('default', session.id).find(run => !run.parentId)!;
+    const parentRun = started.store.runs.list('default', session.id).find((run) => !run.parentId)!;
     const children = started.store.runs.children(parentRun.id, 'default');
-    assert.equal(children.length, 4); assert.ok(children.every(run => run.status === 'completed'));
+    assert.equal(children.length, 4);
+    assert.ok(children.every((run) => run.status === 'completed'));
     const childCost = children.reduce((sum, run) => sum + run.cost, 0);
     assert.ok(childCost > 0);
     const finalEvent = /event: done\ndata: (\{[^\n]+\})/.exec(sse)?.[1];
@@ -661,32 +1004,47 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(traceId);
     const traceResponse = await fetch(`${base}/api/trace?session_id=${encodeURIComponent(session.id)}&type=llm_call&limit=50`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ traceId: string; status: string; parentId?: string; name?: string }> };
+    const trace = (await traceResponse.json()) as { steps: Array<{ traceId: string; status: string; parentId?: string; name?: string }> };
     assert.equal(trace.steps.length, 7 + enabled.calls);
     assert.ok(trace.steps.every((step) => step.status === 'done'));
-    assert.equal(trace.steps.filter((step) => step.traceId === traceId).length, 3 + enabled.calls,
-      '主 run 应包含工具启用、团队建约、并行委派和汇总轮');
-    assert.equal(trace.steps.filter((step) => step.traceId !== traceId && step.parentId).length, 4, '四个子 run 的 Provider 步骤均应挂到并行工具父步骤');
+    assert.equal(
+      trace.steps.filter((step) => step.traceId === traceId).length,
+      3 + enabled.calls,
+      '主 run 应包含工具启用、团队建约、并行委派和汇总轮',
+    );
+    assert.equal(
+      trace.steps.filter((step) => step.traceId !== traceId && step.parentId).length,
+      4,
+      '四个子 run 的 Provider 步骤均应挂到并行工具父步骤',
+    );
     const toolResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(traceId!)}&type=tool_call&name=run_parallel`);
-    const toolTrace = await toolResponse.json() as { steps: Array<{ status: string; outputSummary?: string }> };
-    assert.deepEqual(toolTrace.steps.map((step) => step.status), ['done']);
+    const toolTrace = (await toolResponse.json()) as { steps: Array<{ status: string; outputSummary?: string }> };
+    assert.deepEqual(
+      toolTrace.steps.map((step) => step.status),
+      ['done'],
+    );
   });
 
   test('真实聊天入口遇到参数错误时停止并记录错误终态字段', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'parameter-error-provider', label: 'Parameter Error Provider', defaultModel: 'parameter-model',
-      async *chat() {
-        calls++;
-        throw new LLMHttpError(400, 'invalid parameter payload');
+    chat.providers = [
+      {
+        id: 'parameter-error-provider',
+        label: 'Parameter Error Provider',
+        defaultModel: 'parameter-model',
+        async *chat() {
+          calls++;
+          throw new LLMHttpError(400, 'invalid parameter payload');
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     const session = started.store.createSession('parameter-model', 'parameter-error-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '触发参数错误终态' }),
     });
     assert.equal(response.status, 200);
@@ -696,7 +1054,9 @@ describe('GET /api/providers/:id/diagnose', () => {
     const start = /event: start\ndata: \{"traceId":"([^"]+)"[^\n]*\}/.exec(sse);
     assert.ok(start?.[1]);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=llm_call`);
-    const llmTrace = await llmResponse.json() as { steps: Array<{ status: string; errorCategory?: string; errorCode?: string; error?: string; durationMs?: number }> };
+    const llmTrace = (await llmResponse.json()) as {
+      steps: Array<{ status: string; errorCategory?: string; errorCode?: string; error?: string; durationMs?: number }>;
+    };
     assert.equal(llmTrace.steps.length, 1);
     assert.equal(llmTrace.steps[0]?.status, 'error');
     assert.equal(llmTrace.steps[0]?.errorCategory, 'parameter');
@@ -704,7 +1064,9 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.match(llmTrace.steps[0]?.error ?? '', /invalid parameter payload/);
     assert.ok(Number.isFinite(llmTrace.steps[0]?.durationMs));
     const retryResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=retry-policy`);
-    const retryTrace = await retryResponse.json() as { steps: Array<{ outputSummary?: string; retryable?: boolean; retryDelayMs?: number }> };
+    const retryTrace = (await retryResponse.json()) as {
+      steps: Array<{ outputSummary?: string; retryable?: boolean; retryDelayMs?: number }>;
+    };
     assert.equal(retryTrace.steps.length, 1);
     assert.match(retryTrace.steps[0]?.outputSummary ?? '', /HTTP_400: stop/);
     assert.equal(retryTrace.steps[0]?.retryable, false);
@@ -717,10 +1079,25 @@ describe('GET /api/providers/:id/diagnose', () => {
     const primaryCalls: number[] = [];
     const fallbackCalls: number[] = [];
     const retryDecisions: Array<{ code?: string; retryable?: boolean; delayMs?: number }> = [];
-    const providerModels = (modelId: string) => [{ modelId, contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' as const }];
+    const providerModels = (modelId: string) => [
+      {
+        modelId,
+        contextWindow: 32000,
+        maxOutput: 4096,
+        vision: false,
+        tools: true,
+        reasoning: false,
+        priceIn: 1,
+        priceOut: 2,
+        enabled: true,
+        source: 'test' as const,
+      },
+    ];
     chat.providers = [
       {
-        id: 'mixed-distribution-provider', label: 'Mixed Distribution Provider', defaultModel: 'mixed-distribution-model',
+        id: 'mixed-distribution-provider',
+        label: 'Mixed Distribution Provider',
+        defaultModel: 'mixed-distribution-model',
         models: providerModels('mixed-distribution-model'),
         async *chat() {
           primaryCalls.push(Date.now());
@@ -729,7 +1106,9 @@ describe('GET /api/providers/:id/diagnose', () => {
         },
       },
       {
-        id: 'mixed-distribution-fallback', label: 'Mixed Distribution Fallback', defaultModel: 'mixed-distribution-fallback-model',
+        id: 'mixed-distribution-fallback',
+        label: 'Mixed Distribution Fallback',
+        defaultModel: 'mixed-distribution-fallback-model',
         models: providerModels('mixed-distribution-fallback-model'),
         async *chat() {
           fallbackCalls.push(Date.now());
@@ -744,7 +1123,8 @@ describe('GET /api/providers/:id/diagnose', () => {
     started.kernel.config.set('agent.fallbackProviders', ['mixed-distribution-fallback']);
     const session = started.store.createSession('mixed-distribution-model', 'mixed-distribution-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '混合故障分布回放' }),
     });
     assert.equal(response.status, 200);
@@ -763,25 +1143,40 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const retryResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=retry-policy`);
     assert.equal(retryResponse.status, 200);
-    const retryTrace = await retryResponse.json() as { steps: Array<{ outputSummary?: string; errorCode?: string; retryable?: boolean; retryDelayMs?: number }> };
-    retryDecisions.push(...retryTrace.steps.map((step) => ({ code: step.errorCode, retryable: step.retryable, delayMs: step.retryDelayMs })));
+    const retryTrace = (await retryResponse.json()) as {
+      steps: Array<{ outputSummary?: string; errorCode?: string; retryable?: boolean; retryDelayMs?: number }>;
+    };
+    retryDecisions.push(
+      ...retryTrace.steps.map((step) => ({ code: step.errorCode, retryable: step.retryable, delayMs: step.retryDelayMs })),
+    );
     assert.deepEqual(retryDecisions, [
       { code: 'HTTP_503', retryable: true, delayMs: 1200 },
       { code: 'HTTP_429', retryable: false, delayMs: 40 },
       { code: 'NETWORK_TRANSIENT', retryable: true, delayMs: 1200 },
     ]);
     const llmResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=llm_call`);
-    const llmTrace = await llmResponse.json() as { steps: Array<{ name?: string; status?: string }> };
-    assert.deepEqual(llmTrace.steps.map((step) => ({ name: step.name, status: step.status })), [
-      { name: 'mixed-distribution-fallback/mixed-distribution-fallback-model', status: 'done' },
-    ]);
+    const llmTrace = (await llmResponse.json()) as { steps: Array<{ name?: string; status?: string }> };
+    assert.deepEqual(
+      llmTrace.steps.map((step) => ({ name: step.name, status: step.status })),
+      [{ name: 'mixed-distribution-fallback/mixed-distribution-fallback-model', status: 'done' }],
+    );
   });
 
   test('显式硬预算无法可靠预留时不发起模型调用', async () => {
     assert.ok(started);
     let calls = 0;
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
-    chat.providers = [{ id: 'budget-provider', label: 'Budget', defaultModel: 'm', async *chat() { calls++; yield { type: 'delta', text: 'done' }; } }];
+    chat.providers = [
+      {
+        id: 'budget-provider',
+        label: 'Budget',
+        defaultModel: 'm',
+        async *chat() {
+          calls++;
+          yield { type: 'delta', text: 'done' };
+        },
+      },
+    ];
     const session = started.store.createSession('m', 'budget-provider');
     const response = await executeV2(session.id, { message: 'work', budgetUsd: 0.42, budgetPolicy: 'enforce' });
     const sse = await response.text();
@@ -794,27 +1189,36 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'tool-provider', label: 'Tool Provider', defaultModel: 'tool-model',
-      async *chat() {
-        calls++;
-        if (calls <= 2) {
-          yield { type: 'tool_call', toolCall: {
-            id: `read-trace-fixture-${calls}`, type: 'function',
-            function: { name: 'read_file', arguments: '{"path":"trace-fixture.txt"}' },
-          } };
-          return;
-        }
-        yield { type: 'delta', text: '工具结果已读取' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'tool-provider',
+        label: 'Tool Provider',
+        defaultModel: 'tool-model',
+        async *chat() {
+          calls++;
+          if (calls <= 2) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: `read-trace-fixture-${calls}`,
+                type: 'function',
+                function: { name: 'read_file', arguments: '{"path":"trace-fixture.txt"}' },
+              },
+            };
+            return;
+          }
+          yield { type: 'delta', text: '工具结果已读取' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
     writeFileSync(join(process.env.SANDBOX_ROOT!, 'trace-fixture.txt'), 'trace fixture content');
     const session = started.store.createSession('tool-model', 'tool-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '读取测试文件并告诉我结果' }),
     });
     assert.equal(response.status, 200);
@@ -826,7 +1230,9 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ name: string; status: string; outputSummary?: string; durationMs?: number; ts: number; endTs?: number }> };
+    const trace = (await traceResponse.json()) as {
+      steps: Array<{ name: string; status: string; outputSummary?: string; durationMs?: number; ts: number; endTs?: number }>;
+    };
     assert.equal(trace.steps.length, 2);
     assert.ok(trace.steps.every((step) => step.name === 'read_file' && step.status === 'done'));
     assert.ok(trace.steps.every((step) => /trace fixture content/.test(step.outputSummary ?? '')));
@@ -834,18 +1240,25 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(trace.steps.every((step) => (step.endTs ?? 0) >= step.ts));
     const cacheResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=cache_hit&name=L2`);
     assert.equal(cacheResponse.status, 200);
-    const cacheTrace = await cacheResponse.json() as { steps: Array<{ cacheLayer?: string; name: string; status: string; cacheKey?: string }> };
+    const cacheTrace = (await cacheResponse.json()) as {
+      steps: Array<{ cacheLayer?: string; name: string; status: string; cacheKey?: string }>;
+    };
     assert.equal(cacheTrace.steps.length, 1);
-    assert.deepEqual({ name: cacheTrace.steps[0]?.name, cacheLayer: cacheTrace.steps[0]?.cacheLayer, status: cacheTrace.steps[0]?.status }, { name: 'L2', cacheLayer: 'L2', status: 'done' });
+    assert.deepEqual(
+      { name: cacheTrace.steps[0]?.name, cacheLayer: cacheTrace.steps[0]?.cacheLayer, status: cacheTrace.steps[0]?.status },
+      { name: 'L2', cacheLayer: 'L2', status: 'done' },
+    );
     assert.match(cacheTrace.steps[0]?.cacheKey ?? '', /read_file/);
     const pageResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&limit=1`);
     assert.equal(pageResponse.status, 200);
-    const page = await pageResponse.json() as { steps: Array<{ ts: number }>; nextCursor?: string };
+    const page = (await pageResponse.json()) as { steps: Array<{ ts: number }>; nextCursor?: string };
     assert.equal(page.steps.length, 1);
     assert.ok(page.nextCursor);
-    const olderResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&before_ts=${encodeURIComponent(page.nextCursor!)}`);
+    const olderResponse = await fetch(
+      `${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&before_ts=${encodeURIComponent(page.nextCursor!)}`,
+    );
     assert.equal(olderResponse.status, 200);
-    const older = await olderResponse.json() as { steps: Array<{ ts: number }> };
+    const older = (await olderResponse.json()) as { steps: Array<{ ts: number }> };
     assert.ok(older.steps.length > 0);
     assert.ok(older.steps.every((step) => step.ts < Number(page.nextCursor)));
   });
@@ -855,35 +1268,48 @@ describe('GET /api/providers/:id/diagnose', () => {
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
     const secretPayload = 'sk-leaky-key-20261031';
-    chat.providers = [{
-      id: 'redact-provider', label: 'Redact Provider', defaultModel: 'redact-model',
-      async *chat() {
-        calls++;
-        if (calls === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'redact-write-call', type: 'function',
-            function: { name: 'write_file', arguments: JSON.stringify({ path: 'redact-fixture.txt', content: '脱敏夹具内容' }) },
-          } };
-          return;
-        }
-        if (calls === 2) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'redact-read-call', type: 'function',
-            function: { name: 'read_file', arguments: JSON.stringify({ path: 'redact-fixture.txt', apiKey: secretPayload }) },
-          } };
-          return;
-        }
-        yield { type: 'delta', text: '脱敏检查完成' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'redact-provider',
+        label: 'Redact Provider',
+        defaultModel: 'redact-model',
+        async *chat() {
+          calls++;
+          if (calls === 1) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'redact-write-call',
+                type: 'function',
+                function: { name: 'write_file', arguments: JSON.stringify({ path: 'redact-fixture.txt', content: '脱敏夹具内容' }) },
+              },
+            };
+            return;
+          }
+          if (calls === 2) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'redact-read-call',
+                type: 'function',
+                function: { name: 'read_file', arguments: JSON.stringify({ path: 'redact-fixture.txt', apiKey: secretPayload }) },
+              },
+            };
+            return;
+          }
+          yield { type: 'delta', text: '脱敏检查完成' };
+          yield { type: 'done' };
+        },
       },
-    }];
-    enableForMock(chat.providers[0], () => calls === 0 ? ['write_file'] : calls === 1 ? ['read_file'] : []);
+    ];
+    enableForMock(chat.providers[0], () => (calls === 0 ? ['write_file'] : calls === 1 ? ['read_file'] : []));
     started.kernel.config.set('agent.modelRouting', {});
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
     writeFileSync(join(process.env.SANDBOX_ROOT!, 'redact-fixture.txt'), `token=${secretPayload}`);
     const session = started.store.createSession('redact-model', 'redact-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '写入带凭据标记的文件并读取' }),
     });
     assert.equal(response.status, 200);
@@ -904,7 +1330,8 @@ describe('GET /api/providers/:id/diagnose', () => {
     const pendingBody = JSON.stringify(await pendingList.json());
     assert.equal(pendingBody.includes(secretPayload), false, '审批清单不得携带凭据内容');
     const decision = await fetch(`${base}/api/approvals/${approval.approvalId}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ approved: true, approvalToken: approval.approvalToken }),
     });
     assert.equal(decision.status, 200);
@@ -929,63 +1356,102 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'trace-link-provider', label: 'Trace Link Provider', defaultModel: 'trace-link-model',
-      prices: { in: 1, out: 2 }, priceSource: 'configured', outputLimitGuaranteed: true,
-      models: [{ modelId: 'trace-link-model', contextWindow: 32000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'test' }],
-      async *chat() {
-        calls++;
-        if (calls === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'enable-trace-team', type: 'function',
-            function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
-          } };
-          return;
-        }
-        if (calls === 2) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'trace-team-create', type: 'function',
-            function: {
-              name: 'team_create',
-              arguments: JSON.stringify({ assignments: teamAssignments('trace-link-child', 2, 0.2) }),
-            },
-          } };
-          return;
-        }
-        if (calls === 3) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'enable-trace-subagent', type: 'function',
-            function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['run_subagent'] }) },
-          } };
-          return;
-        }
-        if (calls === 4) {
-          const [contractId] = activeTeamContractIds('trace-link-provider', 1);
-          assert.ok(contractId);
-          yield { type: 'tool_call', toolCall: {
-            id: 'delegate-trace-child', type: 'function',
-            function: {
-              name: 'run_subagent',
-              arguments: JSON.stringify({
-                objective: '读取 trace 因果链测试文件',
-                tools: 'read',
-                contractId,
-              }),
-            },
-          } };
-          return;
-        }
-        if (calls === 5) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'read-trace-child-fixture', type: 'function',
-            function: { name: 'read_file', arguments: JSON.stringify({ path: 'subagent-trace-fixture.txt' }) },
-          } };
-          return;
-        }
-        yield { type: 'delta', text: calls === 6 ? '子代理读取完成' : '主任务完成' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'trace-link-provider',
+        label: 'Trace Link Provider',
+        defaultModel: 'trace-link-model',
+        prices: { in: 1, out: 2 },
+        priceSource: 'configured',
+        outputLimitGuaranteed: true,
+        models: [
+          {
+            modelId: 'trace-link-model',
+            contextWindow: 32000,
+            maxOutput: 4096,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'test',
+          },
+        ],
+        async *chat() {
+          calls++;
+          if (calls === 1) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'enable-trace-team',
+                type: 'function',
+                function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
+              },
+            };
+            return;
+          }
+          if (calls === 2) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'trace-team-create',
+                type: 'function',
+                function: {
+                  name: 'team_create',
+                  arguments: JSON.stringify({ assignments: teamAssignments('trace-link-child', 2, 0.2) }),
+                },
+              },
+            };
+            return;
+          }
+          if (calls === 3) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'enable-trace-subagent',
+                type: 'function',
+                function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['run_subagent'] }) },
+              },
+            };
+            return;
+          }
+          if (calls === 4) {
+            const [contractId] = activeTeamContractIds('trace-link-provider', 1);
+            assert.ok(contractId);
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'delegate-trace-child',
+                type: 'function',
+                function: {
+                  name: 'run_subagent',
+                  arguments: JSON.stringify({
+                    objective: '读取 trace 因果链测试文件',
+                    tools: 'read',
+                    contractId,
+                  }),
+                },
+              },
+            };
+            return;
+          }
+          if (calls === 5) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'read-trace-child-fixture',
+                type: 'function',
+                function: { name: 'read_file', arguments: JSON.stringify({ path: 'subagent-trace-fixture.txt' }) },
+              },
+            };
+            return;
+          }
+          yield { type: 'delta', text: calls === 6 ? '子代理读取完成' : '主任务完成' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     started.kernel.config.set('cache.warmup', 'off');
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
@@ -993,7 +1459,8 @@ describe('GET /api/providers/:id/diagnose', () => {
 
     const session = started.store.createSession('trace-link-model', 'trace-link-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         message: '组织团队并行，通过子代理读取测试文件',
         budgetUsd: 0.8,
@@ -1010,7 +1477,9 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const parentResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(parentResponse.status, 200);
-    const parentTrace = await parentResponse.json() as { steps: Array<{ id: string; traceId: string; name?: string; type: string; parentId?: string }> };
+    const parentTrace = (await parentResponse.json()) as {
+      steps: Array<{ id: string; traceId: string; name?: string; type: string; parentId?: string }>;
+    };
     const parent = parentTrace.steps.find((step) => step.name === 'run_subagent');
     assert.ok(parent, '父 run 应记录 run_subagent 工具步骤');
     assert.equal(parent.traceId, start![1]);
@@ -1018,61 +1487,111 @@ describe('GET /api/providers/:id/diagnose', () => {
 
     const childrenResponse = await fetch(`${base}/api/trace?parent_id=${encodeURIComponent(parent.id)}`);
     assert.equal(childrenResponse.status, 200);
-    const children = await childrenResponse.json() as { steps: Array<{ id: string; traceId: string; type: string; name?: string; parentId?: string }> };
+    const children = (await childrenResponse.json()) as {
+      steps: Array<{ id: string; traceId: string; type: string; name?: string; parentId?: string }>;
+    };
     assert.ok(children.steps.length > 0, '父步骤应能查询到子代理的步骤');
     const childTraceIds = [...new Set(children.steps.map((step) => step.traceId))];
     assert.equal(childTraceIds.length, 1, '本次单一子代理的步骤应属于同一个子 run');
     const childTraceId = childTraceIds[0]!;
     assert.notEqual(childTraceId, parent.traceId, '子代理应拥有独立 traceId');
-    assert.ok(children.steps.some((step) => step.type === 'llm_call'), '子代理 Provider 调用应关联父工具步骤');
-    assert.ok(children.steps.some((step) => step.type === 'tool_call' && step.name === 'read_file'), '子代理工具调用应关联父工具步骤');
-    assert.ok(children.steps.every((step) => step.parentId === parent.id), 'Provider 与工具步骤不得成为孤儿或挂到错误父节点');
+    assert.ok(
+      children.steps.some((step) => step.type === 'llm_call'),
+      '子代理 Provider 调用应关联父工具步骤',
+    );
+    assert.ok(
+      children.steps.some((step) => step.type === 'tool_call' && step.name === 'read_file'),
+      '子代理工具调用应关联父工具步骤',
+    );
+    assert.ok(
+      children.steps.every((step) => step.parentId === parent.id),
+      'Provider 与工具步骤不得成为孤儿或挂到错误父节点',
+    );
 
     const graphResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(childTraceId)}&include_parents=1`);
     assert.equal(graphResponse.status, 200);
-    const graph = await graphResponse.json() as {
-      steps: Array<{ id: string; traceId: string; turn: number; attempt: number; type: 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system' | 'service_call'; status: 'running' | 'done' | 'error' | 'cancelled'; ts: number; parentId?: string }>;
+    const graph = (await graphResponse.json()) as {
+      steps: Array<{
+        id: string;
+        traceId: string;
+        turn: number;
+        attempt: number;
+        type: 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system' | 'service_call';
+        status: 'running' | 'done' | 'error' | 'cancelled';
+        ts: number;
+        parentId?: string;
+      }>;
       parentChainComplete: boolean;
       unresolvedParentIds: string[];
     };
     assert.equal(graph.parentChainComplete, true);
     assert.deepEqual(graph.unresolvedParentIds, []);
-    assert.ok(graph.steps.some((step) => step.id === parent.id && step.traceId === parent.traceId), 'include_parents 应跨 trace 补齐父工具步骤');
+    assert.ok(
+      graph.steps.some((step) => step.id === parent.id && step.traceId === parent.traceId),
+      'include_parents 应跨 trace 补齐父工具步骤',
+    );
     assert.deepEqual(validateTraceSteps(graph.steps, { requireResolvedParents: true }), [], '补齐后的 API 图应通过完整 schema 与父链校验');
 
     const serviceResponse = await fetch(`${base}/api/trace?type=service_call&limit=500`);
     assert.equal(serviceResponse.status, 200);
-    const serviceTrace = await serviceResponse.json() as { steps: Array<{ id: string; traceId: string; turn: number; attempt: number; type: 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system' | 'service_call'; status: 'running' | 'done' | 'error' | 'cancelled'; ts: number; pluginId?: string }> };
+    const serviceTrace = (await serviceResponse.json()) as {
+      steps: Array<{
+        id: string;
+        traceId: string;
+        turn: number;
+        attempt: number;
+        type: 'llm_call' | 'tool_call' | 'cache_hit' | 'user_msg' | 'system' | 'service_call';
+        status: 'running' | 'done' | 'error' | 'cancelled';
+        ts: number;
+        pluginId?: string;
+      }>;
+    };
     assert.ok(serviceTrace.steps.length > 0, '真实服务启动与子代理路径应产生可追踪的 service_call 事件');
-    assert.deepEqual(validateTraceSteps(serviceTrace.steps, { requireResolvedParents: true }), [], '真实 API 返回的 service_call 事件应全部通过 Trace schema');
-    assert.ok(serviceTrace.steps.every((step) => step.traceId && step.pluginId), 'service_call 应同时保留 Trace ID 与提供插件身份');
+    assert.deepEqual(
+      validateTraceSteps(serviceTrace.steps, { requireResolvedParents: true }),
+      [],
+      '真实 API 返回的 service_call 事件应全部通过 Trace schema',
+    );
+    assert.ok(
+      serviceTrace.steps.every((step) => step.traceId && step.pluginId),
+      'service_call 应同时保留 Trace ID 与提供插件身份',
+    );
   });
 
   test('真实聊天审批链路下发凭据、批准工具并保留 Trace 关联', async () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'approval-provider', label: 'Approval Provider', defaultModel: 'approval-model',
-      async *chat() {
-        calls++;
-        if (calls === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'delete-approval-fixture', type: 'function',
-            function: { name: 'delete_file', arguments: '{"path":"approval-fixture.txt"}' },
-          } };
-          return;
-        }
-        yield { type: 'delta', text: '已完成批准操作' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'approval-provider',
+        label: 'Approval Provider',
+        defaultModel: 'approval-model',
+        async *chat() {
+          calls++;
+          if (calls === 1) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'delete-approval-fixture',
+                type: 'function',
+                function: { name: 'delete_file', arguments: '{"path":"approval-fixture.txt"}' },
+              },
+            };
+            return;
+          }
+          yield { type: 'delta', text: '已完成批准操作' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
     writeFileSync(join(process.env.SANDBOX_ROOT!, 'approval-fixture.txt'), 'approval fixture');
     const session = started.store.createSession('approval-model', 'approval-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '删除测试文件' }),
     });
     assert.equal(response.status, 200);
@@ -1091,7 +1610,8 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(approval.approvalId);
     assert.ok(approval.approvalToken);
     const decision = await fetch(`${base}/api/approvals/${approval.approvalId}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ approved: true, approvalToken: approval.approvalToken }),
     });
     assert.equal(decision.status, 200);
@@ -1109,14 +1629,18 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ name: string; status: string; outputSummary?: string; durationMs?: number; ts: number; endTs?: number }> };
+    const trace = (await traceResponse.json()) as {
+      steps: Array<{ name: string; status: string; outputSummary?: string; durationMs?: number; ts: number; endTs?: number }>;
+    };
     assert.equal(trace.steps.length, 1);
     assert.deepEqual({ name: trace.steps[0]?.name, status: trace.steps[0]?.status }, { name: 'delete_file', status: 'done' });
     assert.match(trace.steps[0]?.outputSummary ?? '', /approval-fixture/);
     assert.ok(Number.isFinite(trace.steps[0]?.durationMs));
     assert.ok((trace.steps[0]?.endTs ?? 0) >= trace.steps[0]?.ts);
     const approvalTraceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=approval`);
-    const approvalTrace = await approvalTraceResponse.json() as { steps: Array<{ status: string; outputSummary?: string; durationMs?: number }> };
+    const approvalTrace = (await approvalTraceResponse.json()) as {
+      steps: Array<{ status: string; outputSummary?: string; durationMs?: number }>;
+    };
     assert.equal(approvalTrace.steps.length, 1);
     assert.equal(approvalTrace.steps[0]?.status, 'done');
     assert.match(approvalTrace.steps[0]?.outputSummary ?? '', /已批准/);
@@ -1127,27 +1651,36 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(started);
     const chat = started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] };
     let calls = 0;
-    chat.providers = [{
-      id: 'reject-provider', label: 'Reject Provider', defaultModel: 'reject-model',
-      async *chat() {
-        calls++;
-        if (calls === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: 'reject-approval-fixture', type: 'function',
-            function: { name: 'delete_file', arguments: '{"path":"reject-fixture.txt"}' },
-          } };
-          return;
-        }
-        yield { type: 'delta', text: '已按拒绝结果收敛' };
-        yield { type: 'done' };
+    chat.providers = [
+      {
+        id: 'reject-provider',
+        label: 'Reject Provider',
+        defaultModel: 'reject-model',
+        async *chat() {
+          calls++;
+          if (calls === 1) {
+            yield {
+              type: 'tool_call',
+              toolCall: {
+                id: 'reject-approval-fixture',
+                type: 'function',
+                function: { name: 'delete_file', arguments: '{"path":"reject-fixture.txt"}' },
+              },
+            };
+            return;
+          }
+          yield { type: 'delta', text: '已按拒绝结果收敛' };
+          yield { type: 'done' };
+        },
       },
-    }];
+    ];
     started.kernel.config.set('agent.modelRouting', {});
     mkdirSync(process.env.SANDBOX_ROOT!, { recursive: true });
     writeFileSync(join(process.env.SANDBOX_ROOT!, 'reject-fixture.txt'), 'reject fixture');
     const session = started.store.createSession('reject-model', 'reject-provider');
     const response = await fetch(`${base}/api/sessions/${session.id}/chat`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ message: '删除测试文件但先等待审批' }),
     });
     assert.equal(response.status, 200);
@@ -1164,7 +1697,8 @@ describe('GET /api/providers/:id/diagnose', () => {
       if (match) approval = JSON.parse(match[1]) as { approvalId: string; approvalToken: string };
     }
     const decision = await fetch(`${base}/api/approvals/${approval.approvalId}`, {
-      method: 'POST', headers: { 'content-type': 'application/json' },
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ approved: false, approvalToken: approval.approvalToken }),
     });
     assert.equal(decision.status, 200);
@@ -1182,13 +1716,13 @@ describe('GET /api/providers/:id/diagnose', () => {
     assert.ok(start?.[1]);
     const traceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&type=tool_call`);
     assert.equal(traceResponse.status, 200);
-    const trace = await traceResponse.json() as { steps: Array<{ name: string; status: string; error?: string; durationMs?: number }> };
+    const trace = (await traceResponse.json()) as { steps: Array<{ name: string; status: string; error?: string; durationMs?: number }> };
     assert.equal(trace.steps.length, 1);
     assert.deepEqual({ name: trace.steps[0]?.name, status: trace.steps[0]?.status }, { name: 'delete_file', status: 'error' });
     assert.match(trace.steps[0]?.error ?? '', /拒绝/);
     assert.ok(Number.isFinite(trace.steps[0]?.durationMs));
     const approvalTraceResponse = await fetch(`${base}/api/trace?trace_id=${encodeURIComponent(start![1])}&name=approval`);
-    const approvalTrace = await approvalTraceResponse.json() as { steps: Array<{ status: string; error?: string; durationMs?: number }> };
+    const approvalTrace = (await approvalTraceResponse.json()) as { steps: Array<{ status: string; error?: string; durationMs?: number }> };
     assert.equal(approvalTrace.steps.length, 1);
     assert.equal(approvalTrace.steps[0]?.status, 'error');
     assert.match(approvalTrace.steps[0]?.error ?? '', /拒绝|超时/);

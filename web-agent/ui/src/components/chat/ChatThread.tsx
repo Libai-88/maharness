@@ -59,8 +59,15 @@ export default function ChatThread({
   const [capabilities, setCapabilities] = useState<MaterialCapabilities | null>(null);
   useEffect(() => {
     let alive = true;
-    void materialApi.capabilities().then(value => { if (alive) setCapabilities(value); }).catch(() => undefined);
-    return () => { alive = false; };
+    void materialApi
+      .capabilities()
+      .then((value) => {
+        if (alive) setCapabilities(value);
+      })
+      .catch(() => undefined);
+    return () => {
+      alive = false;
+    };
   }, []);
   return (
     <MessageScrollerProvider defaultScrollPosition="end">
@@ -69,11 +76,18 @@ export default function ChatThread({
           <MessageScrollerContent aria-busy={streaming} className="mx-auto w-full max-w-3xl min-w-0 gap-6 px-4 py-6 sm:px-6">
             {timeline.length === 0 && (
               <MessageScrollerItem messageId="hero">
-                <div data-testid="chat-welcome" className="flex min-h-[min(54dvh,30rem)] flex-col items-center justify-center gap-6 py-4 sm:flex-row sm:gap-8 sm:py-8">
+                <div
+                  data-testid="chat-welcome"
+                  className="flex min-h-[min(54dvh,30rem)] flex-col items-center justify-center gap-6 py-4 sm:flex-row sm:gap-8 sm:py-8"
+                >
                   <Empty className="min-w-0 flex-1 px-0">
                     <EmptyHeader>
-                      <EmptyMedia variant="icon"><BrandMark size={52} /></EmptyMedia>
-                      <EmptyTitle>{greet}，我是 {AGENT_NAME}</EmptyTitle>
+                      <EmptyMedia variant="icon">
+                        <BrandMark size={52} />
+                      </EmptyMedia>
+                      <EmptyTitle>
+                        {greet}，我是 {AGENT_NAME}
+                      </EmptyTitle>
                       <EmptyDescription>
                         导入文件，说出你想完成的办公或学习任务。
                         <br />
@@ -87,13 +101,21 @@ export default function ChatThread({
                           ['文件处理', capabilities?.document ?? false],
                           ['联网', capabilities?.search ?? false],
                           ['OCR', Boolean(capabilities?.ocr?.status && capabilities.ocr.status !== 'disabled')],
-                        ].map(([label, available]) => <Badge key={String(label)} variant={available ? 'secondary' : 'outline'}>{String(label)} · {available ? '可用' : '未配置'}</Badge>)}
+                        ].map(([label, available]) => (
+                          <Badge key={String(label)} variant={available ? 'secondary' : 'outline'}>
+                            {String(label)} · {available ? '可用' : '未配置'}
+                          </Badge>
+                        ))}
                       </div>
                       {hasModels ? (
                         <div className="flex flex-wrap justify-center gap-2">
-                          {['总结文件并标注来源', '整理表格并生成汇总', '把资料制作成汇报演示', '读懂并对比论文', '批量整理工作区文件'].map((suggestion) => (
-                            <Button key={suggestion} variant="outline" size="sm" onClick={() => (onDraft ?? onSend)(suggestion)}>{suggestion}</Button>
-                          ))}
+                          {['总结文件并标注来源', '整理表格并生成汇总', '把资料制作成汇报演示', '读懂并对比论文', '批量整理工作区文件'].map(
+                            (suggestion) => (
+                              <Button key={suggestion} variant="outline" size="sm" onClick={() => (onDraft ?? onSend)(suggestion)}>
+                                {suggestion}
+                              </Button>
+                            ),
+                          )}
                         </div>
                       ) : (
                         <>
@@ -110,7 +132,7 @@ export default function ChatThread({
 
             {timeline.flatMap((item) => {
               if (item.kind === 'marker') {
-                return [(
+                return [
                   <MessageScrollerItem key={item.id} messageId={item.id}>
                     <Marker
                       variant={item.marker === 'time' ? 'separator' : 'default'}
@@ -118,43 +140,47 @@ export default function ChatThread({
                       data-testid={item.marker === 'system' ? 'system-message' : undefined}
                       role={item.marker === 'join' ? 'status' : undefined}
                     >
-                      {item.marker === 'join' && <MarkerIcon><IconParallel size={13} /></MarkerIcon>}
+                      {item.marker === 'join' && (
+                        <MarkerIcon>
+                          <IconParallel size={13} />
+                        </MarkerIcon>
+                      )}
                       <MarkerContent>
-                        {item.marker === 'join' ? <><b>{item.member}</b> 加入了协作</> : item.content}
+                        {item.marker === 'join' ? (
+                          <>
+                            <b>{item.member}</b> 加入了协作
+                          </>
+                        ) : (
+                          item.content
+                        )}
                       </MarkerContent>
                     </Marker>
-                  </MessageScrollerItem>
-                )];
+                  </MessageScrollerItem>,
+                ];
               }
 
               return [
-                  item.user && (
-                    <MessageScrollerItem key={`user:${item.user.id}`} messageId={item.user.id} scrollAnchor>
-                      <UserMessage
-                        message={item.user}
-                        canResend={canResend}
-                        onResend={onResend}
-                        onQuote={onQuote}
-                        onRemove={onRemove}
-                      />
-                    </MessageScrollerItem>
-                  ),
-                  ...item.runs.map((run) => (
-                    <MessageScrollerItem key={run.id} messageId={run.id}>
-                      <AssistantRun
-                        run={run}
-                        retryText={item.user?.content}
-                        canResend={canResend}
-                        onResend={onResend}
-                        modelTag={modelTag}
-                        squad={squad}
-                        patted={pattedId === run.message.id}
-                        onPat={() => onPat(run.message.id)}
-                        onQuote={onQuote}
-                        onRemove={onRemove}
-                      />
-                    </MessageScrollerItem>
-                  )),
+                item.user && (
+                  <MessageScrollerItem key={`user:${item.user.id}`} messageId={item.user.id} scrollAnchor>
+                    <UserMessage message={item.user} canResend={canResend} onResend={onResend} onQuote={onQuote} onRemove={onRemove} />
+                  </MessageScrollerItem>
+                ),
+                ...item.runs.map((run) => (
+                  <MessageScrollerItem key={run.id} messageId={run.id}>
+                    <AssistantRun
+                      run={run}
+                      retryText={item.user?.content}
+                      canResend={canResend}
+                      onResend={onResend}
+                      modelTag={modelTag}
+                      squad={squad}
+                      patted={pattedId === run.message.id}
+                      onPat={() => onPat(run.message.id)}
+                      onQuote={onQuote}
+                      onRemove={onRemove}
+                    />
+                  </MessageScrollerItem>
+                )),
               ];
             })}
           </MessageScrollerContent>

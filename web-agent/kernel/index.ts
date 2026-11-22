@@ -59,24 +59,32 @@ export class Kernel {
    *   装载真实 core 插件栈（否则临时 rootDir 下没有 core/，内核只能跑空插件集）
    * （供 selftest 等场景做临时目录隔离，不污染生产数据；不传时行为与旧签名完全一致）
    */
-  constructor(rootDir: string, defaults: Record<string, unknown> = {}, opts: { dataDir?: string; userPluginsDir?: string; corePluginsDir?: string; secrets?: SecretBox } = {}) {
+  constructor(
+    rootDir: string,
+    defaults: Record<string, unknown> = {},
+    opts: { dataDir?: string; userPluginsDir?: string; corePluginsDir?: string; secrets?: SecretBox } = {},
+  ) {
     this.rootDir = rootDir;
     const base = paths(rootDir);
     this.paths = opts.dataDir
       ? {
-        ...base,
-        data: opts.dataDir,
-        traces: join(opts.dataDir, 'traces'),
-        dbFile: join(opts.dataDir, 'agent.db'),
-        cacheFile: join(opts.dataDir, 'cache.json'),
-      }
+          ...base,
+          data: opts.dataDir,
+          traces: join(opts.dataDir, 'traces'),
+          dbFile: join(opts.dataDir, 'agent.db'),
+          cacheFile: join(opts.dataDir, 'cache.json'),
+        }
       : base;
     this.config = new Config(this.bus, defaults, this.paths.configFile);
     this.builtinTrace = new Trace(this.bus, this.paths.traces, this.config.get<number>('trace.retainDays', 14));
-    this.builtinCache = new Cache(undefined, {
-      l1TextThreshold: this.config.get<number>('cache.l1Threshold', 0.58),
-      l2TtlMs: this.config.get<number>('cache.l2TtlMin', 30) * 60_000,
-    }, this.paths.cacheFile);
+    this.builtinCache = new Cache(
+      undefined,
+      {
+        l1TextThreshold: this.config.get<number>('cache.l1Threshold', 0.58),
+        l2TtlMs: this.config.get<number>('cache.l2TtlMin', 30) * 60_000,
+      },
+      this.paths.cacheFile,
+    );
     // 缓存参数热更新：config.json 的 cache.* 键变化即时生效（无需重启/重建 Cache）
     this.config.watch('cache.*', (key, value) => {
       if (key === 'cache.l1Threshold' && typeof value === 'number') {
@@ -91,10 +99,7 @@ export class Kernel {
         this.builtinTrace.setRetainDays(value);
       }
     });
-    this.builtinBudget = new Budget(
-      this.config.get<number>('budget.subagentMaxTotal', 24),
-      join(this.paths.data, 'task-profile.json'),
-    );
+    this.builtinBudget = new Budget(this.config.get<number>('budget.subagentMaxTotal', 24), join(this.paths.data, 'task-profile.json'));
     this.builtin.set('service:cache', this.builtinCache);
     this.builtin.set('service:trace', this.builtinTrace);
     this.builtin.set('service:budget', this.builtinBudget);
@@ -125,20 +130,28 @@ export class Kernel {
   }
 
   /** 三层缓存（可被插件接管：service:cache） */
-  get cache(): Cache { return this.resolveBuiltin<Cache>('service:cache'); }
+  get cache(): Cache {
+    return this.resolveBuiltin<Cache>('service:cache');
+  }
   /** 可观测性（可被插件接管：service:trace） */
-  get trace(): Trace { return this.resolveBuiltin<Trace>('service:trace'); }
+  get trace(): Trace {
+    return this.resolveBuiltin<Trace>('service:trace');
+  }
   /** 认知资源管理（可被插件接管：service:budget） */
-  get budget(): Budget { return this.resolveBuiltin<Budget>('service:budget'); }
+  get budget(): Budget {
+    return this.resolveBuiltin<Budget>('service:budget');
+  }
 
   async start(): Promise<void> {
     await this.plugins.loadAll();
     this.plugins.watch();
-    this.bus.emit(EventBus.event('kernel.started', {
-      root: this.rootDir,
-      plugins: this.plugins.list().map((p) => `${p.manifest.id}(${p.state})`),
-      l1Cache: this.cache.l1Enabled,
-    }));
+    this.bus.emit(
+      EventBus.event('kernel.started', {
+        root: this.rootDir,
+        plugins: this.plugins.list().map((p) => `${p.manifest.id}(${p.state})`),
+        l1Cache: this.cache.l1Enabled,
+      }),
+    );
   }
 
   async stop(): Promise<void> {

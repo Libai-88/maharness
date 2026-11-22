@@ -8,8 +8,10 @@ describe('Provider/model stable identity schema', () => {
     const renamed = stableModelIdentity('provider-a', 'model-v1');
     assert.equal(MODEL_SCHEMA_VERSION, 1);
     assert.deepEqual(first, {
-      providerId: 'provider-a', modelId: 'model-v1',
-      modelKey: 'provider-a@model-v1', pricingId: 'provider-a@model-v1',
+      providerId: 'provider-a',
+      modelId: 'model-v1',
+      modelKey: 'provider-a@model-v1',
+      pricingId: 'provider-a@model-v1',
     });
     assert.deepEqual(renamed, first, '展示别名变化不应改变计价 ID');
   });

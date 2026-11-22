@@ -4,7 +4,14 @@ import ts from 'typescript';
 import { CAPABILITY_IDENTIFIERS } from './capability-identity';
 
 export interface PluginReviewIssue {
-  code: 'native-process' | 'raw-filesystem' | 'dynamic-code' | 'secret-access' | 'network-egress' | 'missing-permissions' | 'dependency-policy';
+  code:
+    | 'native-process'
+    | 'raw-filesystem'
+    | 'dynamic-code'
+    | 'secret-access'
+    | 'network-egress'
+    | 'missing-permissions'
+    | 'dependency-policy';
   message: string;
 }
 
@@ -30,8 +37,16 @@ export interface PluginRuntimeDeclaration {
 }
 
 const RULES: [PluginReviewIssue['code'], RegExp, string][] = [
-  ['native-process', /(?:from|require\s*\()\s*['"]node:(?:child_process|worker_threads|cluster)['"]|\b(?:spawn|exec|fork)\s*\(/i, '禁止直接启动或控制宿主进程，请使用受审批的宿主工具'],
-  ['raw-filesystem', /(?:from|require\s*\()\s*['"]node:fs['"]|\b(?:readFile|writeFile|rm|mkdir|readdir)Sync?\s*\(/i, '禁止直接访问宿主文件系统，请使用 ctx.storage 或沙箱工具'],
+  [
+    'native-process',
+    /(?:from|require\s*\()\s*['"]node:(?:child_process|worker_threads|cluster)['"]|\b(?:spawn|exec|fork)\s*\(/i,
+    '禁止直接启动或控制宿主进程，请使用受审批的宿主工具',
+  ],
+  [
+    'raw-filesystem',
+    /(?:from|require\s*\()\s*['"]node:fs['"]|\b(?:readFile|writeFile|rm|mkdir|readdir)Sync?\s*\(/i,
+    '禁止直接访问宿主文件系统，请使用 ctx.storage 或沙箱工具',
+  ],
   ['dynamic-code', /\b(?:eval|Function|vm\.runIn(?:New|This)Context)\s*\(/i, '禁止动态执行未审查代码'],
   ['secret-access', /\bprocess\.(?:env|binding|dlopen)\b/i, '禁止直接读取进程环境或原生绑定'],
   ['network-egress', /\b(?:fetch|https?\.request|WebSocket)\s*\(/i, '禁止直接发起网络请求，请使用受策略控制的服务'],
@@ -39,11 +54,22 @@ const RULES: [PluginReviewIssue['code'], RegExp, string][] = [
 
 /** 允许直接导入的 Node 内置模块：纯计算/格式化，不提供进程、文件、网络或动态代码能力。 */
 const SAFE_NODE_BUILTINS = new Set([
-  'assert', 'buffer', 'crypto', 'events', 'path', 'querystring', 'stream', 'string_decoder',
-  'timers', 'timers/promises', 'url', 'util',
+  'assert',
+  'buffer',
+  'crypto',
+  'events',
+  'path',
+  'querystring',
+  'stream',
+  'string_decoder',
+  'timers',
+  'timers/promises',
+  'url',
+  'util',
 ]);
 
-const IMPORT_SPECIFIER_RE = /(?:^|[^\w$])(?:import|export)\s+(?:[^'"]*?\s+from\s*)?['"]([^'"]+)['"]|(?:^|[^\w$])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[^\w$])require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm;
+const IMPORT_SPECIFIER_RE =
+  /(?:^|[^\w$])(?:import|export)\s+(?:[^'"]*?\s+from\s*)?['"]([^'"]+)['"]|(?:^|[^\w$])import\s*\(\s*['"]([^'"]+)['"]\s*\)|(?:^|[^\w$])require\s*\(\s*['"]([^'"]+)['"]\s*\)/gm;
 
 function importSpecifiers(source: string): string[] {
   const out: string[] = [];
@@ -62,19 +88,31 @@ function capabilitiesOf(source: string): { capabilities: { kind: string; name: s
   const out: { kind: string; name: string }[] = [];
   let complete = true;
   const tree = ts.createSourceFile('plugin.ts', source, ts.ScriptTarget.Latest, true);
-  const property = (node: ts.ObjectLiteralExpression, name: string) => node.properties.find((p): p is ts.PropertyAssignment => ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === name)?.initializer;
+  const property = (node: ts.ObjectLiteralExpression, name: string) =>
+    node.properties.find(
+      (p): p is ts.PropertyAssignment =>
+        ts.isPropertyAssignment(p) && (ts.isIdentifier(p.name) || ts.isStringLiteral(p.name)) && p.name.text === name,
+    )?.initializer;
   const visit = (node: ts.Node): void => {
     if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && node.expression.name.text === 'register') {
       const registration = node.arguments[0];
-      if (!registration || !ts.isObjectLiteralExpression(registration)) { complete = false; ts.forEachChild(node, visit); return; }
+      if (!registration || !ts.isObjectLiteralExpression(registration)) {
+        complete = false;
+        ts.forEachChild(node, visit);
+        return;
+      }
       const kind = property(registration, 'kind');
       if (kind && ts.isStringLiteral(kind) && Object.hasOwn(CAPABILITY_IDENTIFIERS, kind.text)) {
         const key = kind.text as keyof typeof CAPABILITY_IDENTIFIERS;
         const def = key === 'listener' ? registration : property(registration, key);
         const value = def && ts.isObjectLiteralExpression(def) ? property(def, CAPABILITY_IDENTIFIERS[key]) : undefined;
-        if (registration.properties.some(ts.isSpreadAssignment) || def && ts.isObjectLiteralExpression(def) && def.properties.some(ts.isSpreadAssignment)) complete = false;
+        if (
+          registration.properties.some(ts.isSpreadAssignment) ||
+          (def && ts.isObjectLiteralExpression(def) && def.properties.some(ts.isSpreadAssignment))
+        )
+          complete = false;
         if (value && (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value))) {
-          if (!out.some(item => item.kind === key && item.name === value.text)) out.push({ kind: key, name: value.text });
+          if (!out.some((item) => item.kind === key && item.name === value.text)) out.push({ kind: key, name: value.text });
         } else complete = false;
       } else complete = false;
     }
@@ -115,7 +153,10 @@ export function reviewPluginSource(
   return {
     ok: issues.length === 0,
     highRisk: issues.some((i) => i.code !== 'missing-permissions' && i.code !== 'dependency-policy'),
-    issues, capabilities, capabilityInferenceComplete: complete, dependencies,
+    issues,
+    capabilities,
+    capabilityInferenceComplete: complete,
+    dependencies,
   };
 }
 
@@ -144,8 +185,11 @@ export function reviewPluginRuntimeSource(
     if (issue.code === 'dependency-policy') {
       if (runtime.filesystem === 'full' && /\bnode:fs\b/.test(issue.message)) return false;
       if (runtime.process === true && /\bnode:(?:child_process|worker_threads|cluster)\b/.test(issue.message)) return false;
-      if ((runtime.network === 'full' || runtime.network === 'allowlist')
-        && /\bnode:(?:http|https|net|tls|dns|dgram)\b/.test(issue.message)) return false;
+      if (
+        (runtime.network === 'full' || runtime.network === 'allowlist') &&
+        /\bnode:(?:http|https|net|tls|dns|dgram)\b/.test(issue.message)
+      )
+        return false;
       return true;
     }
     if (issue.code === 'raw-filesystem') return runtime.filesystem !== 'full';

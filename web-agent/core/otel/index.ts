@@ -15,7 +15,10 @@ interface OtlpAttribute {
 }
 
 function hexId(value: string, bytes: number): string {
-  return createHash('sha256').update(value).digest('hex').slice(0, bytes * 2);
+  return createHash('sha256')
+    .update(value)
+    .digest('hex')
+    .slice(0, bytes * 2);
 }
 
 function attr(key: string, value: string | number | boolean | undefined): OtlpAttribute | null {
@@ -58,10 +61,12 @@ export function stepToOtlpSpan(step: TraceStep): Record<string, unknown> {
 
 export function toOtlpPayload(steps: TraceStep[], serviceName = 'maharness'): Record<string, unknown> {
   return {
-    resourceSpans: [{
-      resource: { attributes: [attr('service.name', serviceName)].filter(Boolean) },
-      scopeSpans: [{ scope: { name: 'maharness.trace', version: '0.1.0' }, spans: steps.map(stepToOtlpSpan) }],
-    }],
+    resourceSpans: [
+      {
+        resource: { attributes: [attr('service.name', serviceName)].filter(Boolean) },
+        scopeSpans: [{ scope: { name: 'maharness.trace', version: '0.1.0' }, spans: steps.map(stepToOtlpSpan) }],
+      },
+    ],
   };
 }
 
@@ -82,9 +87,7 @@ export default {
     }
     const serviceName = ctx.config.get<string>('otel.serviceName', 'maharness');
     const headers = ctx.config.get<Record<string, string>>('otel.headers', {});
-    const url = /\/v1\/traces\/?$/.test(endpoint)
-      ? endpoint
-      : `${endpoint.replace(/\/+$/, '')}/v1/traces`;
+    const url = /\/v1\/traces\/?$/.test(endpoint) ? endpoint : `${endpoint.replace(/\/+$/, '')}/v1/traces`;
     let queue: TraceStep[] = [];
     let timer: NodeJS.Timeout | null = null;
     let sending = false;
@@ -114,12 +117,17 @@ export default {
       queue.push(step);
       if (queue.length >= 100) void flush();
     });
-    timer = setInterval(() => { void flush(); }, 1_000);
-    (timer as { unref?: () => void }).unref?.();
-    ctx.effect<void>(() => undefined, () => () => {
-      if (timer) clearInterval(timer);
+    timer = setInterval(() => {
       void flush();
-    });
+    }, 1_000);
+    (timer as { unref?: () => void }).unref?.();
+    ctx.effect<void>(
+      () => undefined,
+      () => () => {
+        if (timer) clearInterval(timer);
+        void flush();
+      },
+    );
     ctx.logger.info(`OTLP 导出已启用：${url}（service=${serviceName}）`);
   },
 } satisfies Plugin;

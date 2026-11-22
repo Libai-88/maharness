@@ -31,34 +31,29 @@ export function scoreSkillEntries(
   const qWords = new Set(contentWords(qNorm));
   const qBi = bigramSet(contentWords(qNorm));
   const qVector = opts.queryVector;
-  return entries.map((entry) => {
-    const hay = [
-      entry.name,
-      entry.description,
-      ...(entry.triggers ?? []),
-      ...(entry.appliesWhen ?? []),
-    ].join(' ').toLowerCase();
-    const vector = opts.vectors?.get(entry.name);
-    const semantic = qVector?.length && vector?.length === qVector.length
-      ? Math.max(0, cosineSimilarity(qVector, vector))
-      : 0;
-    let score = semantic * 1.2 + dice(qBi, bigramSet(contentWords(hay)));
-    for (const word of qWords) if (word.length > 1 && hay.includes(word)) score += 0.15;
-    if (hay.includes(qNorm)) score += 0.5;
-    for (const trigger of entry.triggers ?? []) {
-      const t = trigger.toLowerCase().trim();
-      if (t && qNorm.includes(t)) score += 0.35;
-    }
-    for (const condition of entry.appliesWhen ?? []) {
-      const c = condition.toLowerCase().trim();
-      if (c && qNorm.includes(c)) score += 0.2;
-    }
-    for (const condition of entry.rejectWhen ?? []) {
-      const c = condition.toLowerCase().trim();
-      if (c && qNorm.includes(c)) score -= 0.8;
-    }
-    return { name: entry.name, score };
-  }).sort((a, b) => b.score - a.score);
+  return entries
+    .map((entry) => {
+      const hay = [entry.name, entry.description, ...(entry.triggers ?? []), ...(entry.appliesWhen ?? [])].join(' ').toLowerCase();
+      const vector = opts.vectors?.get(entry.name);
+      const semantic = qVector?.length && vector?.length === qVector.length ? Math.max(0, cosineSimilarity(qVector, vector)) : 0;
+      let score = semantic * 1.2 + dice(qBi, bigramSet(contentWords(hay)));
+      for (const word of qWords) if (word.length > 1 && hay.includes(word)) score += 0.15;
+      if (hay.includes(qNorm)) score += 0.5;
+      for (const trigger of entry.triggers ?? []) {
+        const t = trigger.toLowerCase().trim();
+        if (t && qNorm.includes(t)) score += 0.35;
+      }
+      for (const condition of entry.appliesWhen ?? []) {
+        const c = condition.toLowerCase().trim();
+        if (c && qNorm.includes(c)) score += 0.2;
+      }
+      for (const condition of entry.rejectWhen ?? []) {
+        const c = condition.toLowerCase().trim();
+        if (c && qNorm.includes(c)) score -= 0.8;
+      }
+      return { name: entry.name, score };
+    })
+    .sort((a, b) => b.score - a.score);
 }
 
 export function topSkills(scores: SkillScore[], limit: number): SkillScore[] {

@@ -21,7 +21,10 @@ function writeLock(file: string, lock: LockFile): void {
 
 if (command === 'sign') {
   const privateKey = process.env.MAHARNESS_LOCK_SIGNING_KEY;
-  if (!privateKey) { console.error('缺少 MAHARNESS_LOCK_SIGNING_KEY（Ed25519 PKCS#8 PEM）'); process.exit(2); }
+  if (!privateKey) {
+    console.error('缺少 MAHARNESS_LOCK_SIGNING_KEY（Ed25519 PKCS#8 PEM）');
+    process.exit(2);
+  }
   const file = lockPath();
   const lock = JSON.parse(readFileSync(file, 'utf8')) as LockFile;
   const signed = signLockFile(lock as unknown as Record<string, unknown>, privateKey, {
@@ -34,14 +37,23 @@ if (command === 'sign') {
   const lock = JSON.parse(readFileSync(file, 'utf8')) as LockFile;
   const publicKey = process.env.MAHARNESS_SKILL_LOCK_PUBLIC_KEY;
   if (lock.signature) {
-    if (!publicKey) { console.error('锁文件已签名但未配置 MAHARNESS_SKILL_LOCK_PUBLIC_KEY'); process.exit(1); }
+    if (!publicKey) {
+      console.error('锁文件已签名但未配置 MAHARNESS_SKILL_LOCK_PUBLIC_KEY');
+      process.exit(1);
+    }
     const result = verifyLockFile(lock as unknown as Record<string, unknown>, publicKey);
-    if (!result.ok) { console.error(`签名校验失败: ${result.reason}`); process.exit(1); }
+    if (!result.ok) {
+      console.error(`签名校验失败: ${result.reason}`);
+      process.exit(1);
+    }
   } else {
     console.warn('skills-lock.json 未签名（仅哈希校验）');
   }
   const validation = validateLockFile(lock, publicKey ? { publicKey } : {});
-  if (!validation.ok) { console.error(validation.errors.join('；')); process.exit(1); }
+  if (!validation.ok) {
+    console.error(validation.errors.join('；'));
+    process.exit(1);
+  }
   console.log(`${file}: ok${lock.signature ? '（已签名）' : '（未签名）'}`);
 } else {
   console.error('用法: tsx scripts/skill-lock.ts sign|verify');

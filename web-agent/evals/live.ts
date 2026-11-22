@@ -88,7 +88,13 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
   if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0) throw new Error('必须显式设置正数评测总费用上限');
   for (const model of new Set([opts.model, opts.judgeModel ?? opts.model])) {
     const price = opts.prices[model];
-    if (!price || !Number.isFinite(price.inputUsdPerMillion) || price.inputUsdPerMillion < 0 || !Number.isFinite(price.outputUsdPerMillion) || price.outputUsdPerMillion < 0)
+    if (
+      !price ||
+      !Number.isFinite(price.inputUsdPerMillion) ||
+      price.inputUsdPerMillion < 0 ||
+      !Number.isFinite(price.outputUsdPerMillion) ||
+      price.outputUsdPerMillion < 0
+    )
       throw new Error(`缺少模型 ${model} 的有效测试价格`);
   }
   let costUsd = 0;
@@ -123,15 +129,20 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
       const body = await res.text().catch(() => '');
       throw new Error(`HTTP ${res.status}${body ? `: ${body.slice(0, 300)}` : ''}`);
     }
-    const data = await res.json() as {
+    const data = (await res.json()) as {
       choices?: { message?: { content?: string } }[];
       usage?: { prompt_tokens?: number; completion_tokens?: number };
     };
     const text = data.choices?.[0]?.message?.content;
-    const validUsage = Number.isSafeInteger(data.usage?.prompt_tokens) && Number(data.usage?.prompt_tokens) >= 0
-      && Number.isSafeInteger(data.usage?.completion_tokens) && Number(data.usage?.completion_tokens) >= 0;
+    const validUsage =
+      Number.isSafeInteger(data.usage?.prompt_tokens) &&
+      Number(data.usage?.prompt_tokens) >= 0 &&
+      Number.isSafeInteger(data.usage?.completion_tokens) &&
+      Number(data.usage?.completion_tokens) >= 0;
     if (validUsage) {
-      const actual = (Number(data.usage!.prompt_tokens) * price.inputUsdPerMillion + Number(data.usage!.completion_tokens) * price.outputUsdPerMillion) / 1_000_000;
+      const actual =
+        (Number(data.usage!.prompt_tokens) * price.inputUsdPerMillion + Number(data.usage!.completion_tokens) * price.outputUsdPerMillion) /
+        1_000_000;
       costUsd += actual - reservation;
     }
     if (typeof text !== 'string' || !text.trim()) throw new Error('模型响应没有 content');
@@ -149,31 +160,43 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
     let tokensIn = 0;
     let tokensOut = 0;
     try {
-      const reply = await chat([
-        ...(item.system ? [{ role: 'system', content: item.system }] : []),
-        { role: 'user', content: item.prompt },
-      ], 1200);
+      const reply = await chat(
+        [...(item.system ? [{ role: 'system', content: item.system }] : []), { role: 'user', content: item.prompt }],
+        1200,
+      );
       answer = reply.text;
       tokensIn += reply.tokensIn;
       tokensOut += reply.tokensOut;
-      const judged = await chat([
-        { role: 'system', content: JUDGE_SYSTEM },
-        {
-          role: 'user',
-          content: [
-            `评分标准：\n${item.rubric.map((line, index) => `${index + 1}. ${line}`).join('\n')}`,
-            `用户问题：\n${item.prompt}`,
-            `候选回答：\n${answer}`,
-          ].join('\n\n'),
-        },
-      ], 400, opts.judgeModel ?? opts.model);
+      const judged = await chat(
+        [
+          { role: 'system', content: JUDGE_SYSTEM },
+          {
+            role: 'user',
+            content: [
+              `评分标准：\n${item.rubric.map((line, index) => `${index + 1}. ${line}`).join('\n')}`,
+              `用户问题：\n${item.prompt}`,
+              `候选回答：\n${answer}`,
+            ].join('\n\n'),
+          },
+        ],
+        400,
+        opts.judgeModel ?? opts.model,
+      );
       tokensIn += judged.tokensIn;
       tokensOut += judged.tokensOut;
       const parsed = parseJudge(judged.text);
       if (!parsed) {
         results.push({
-          name: item.name, pass: false, score: 0, reason: 'judge 输出不是可解析 JSON',
-          answer, latencyMs: Date.now() - started, tokensIn, tokensOut, error: 'judge_parse', judgeRaw: judged.text.slice(0, 1000),
+          name: item.name,
+          pass: false,
+          score: 0,
+          reason: 'judge 输出不是可解析 JSON',
+          answer,
+          latencyMs: Date.now() - started,
+          tokensIn,
+          tokensOut,
+          error: 'judge_parse',
+          judgeRaw: judged.text.slice(0, 1000),
         });
         continue;
       }
@@ -190,8 +213,14 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
       });
     } catch (err) {
       results.push({
-        name: item.name, pass: false, score: 0, reason: '调用失败',
-        answer, latencyMs: Date.now() - started, tokensIn, tokensOut,
+        name: item.name,
+        pass: false,
+        score: 0,
+        reason: '调用失败',
+        answer,
+        latencyMs: Date.now() - started,
+        tokensIn,
+        tokensOut,
         error: err instanceof Error ? err.message : String(err),
       });
     }
@@ -199,7 +228,9 @@ export async function runLiveEval(opts: LiveEvalOptions): Promise<LiveEvalReport
 
   const passed = results.filter((item) => item.pass).length;
   return {
-    kind: 'text-smoke', costUsd, budgetUsd: opts.budgetUsd,
+    kind: 'text-smoke',
+    costUsd,
+    budgetUsd: opts.budgetUsd,
     model: opts.model,
     cases: results,
     passRate: results.length ? passed / results.length : 0,

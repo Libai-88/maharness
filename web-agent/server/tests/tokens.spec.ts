@@ -15,7 +15,7 @@ async function freePort(): Promise<number> {
   const server = createServer();
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const port = (server.address() as { port: number }).port;
-  await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
   return port;
 }
 
@@ -44,7 +44,11 @@ after(async () => {
   started?.closeEnvWatcher();
   await started?.runs.shutdown();
   started?.store.close();
-  try { await started?.kernel.stop(); } catch { /* 清理不影响断言 */ }
+  try {
+    await started?.kernel.stop();
+  } catch {
+    /* 清理不影响断言 */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -57,7 +61,7 @@ async function createToken(body: Record<string, unknown>): Promise<{ id: string;
     body: JSON.stringify(body),
   });
   assert.equal(res.status, 200);
-  return await res.json() as { id: string; token: string };
+  return (await res.json()) as { id: string; token: string };
 }
 
 describe('租户 API token / principal', () => {
@@ -78,7 +82,9 @@ describe('租户 API token / principal', () => {
     const created = await createToken({ tenantId: 'team-a', role: 'member' });
     const headers = { [MUTATION_TOKEN_HEADER]: created.token, 'Content-Type': 'application/json' };
     const providerWrite = await fetch(`${base}/api/providers`, {
-      method: 'POST', headers, body: JSON.stringify({ id: 'x', label: 'X', baseUrl: 'https://x', apiKey: 'k', model: 'm' }),
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ id: 'x', label: 'X', baseUrl: 'https://x', apiKey: 'k', model: 'm' }),
     });
     assert.equal(providerWrite.status, 403);
     const providerRead = await fetch(`${base}/api/providers`, { headers });
@@ -86,7 +92,9 @@ describe('租户 API token / principal', () => {
     const tenants = await fetch(`${base}/api/tenants`, { headers });
     assert.equal(tenants.status, 403);
     const session = await fetch(`${base}/api/sessions`, {
-      method: 'POST', headers, body: JSON.stringify({ title: 'member session' }),
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ title: 'member session' }),
     });
     assert.equal(session.status, 200);
   });
@@ -114,7 +122,7 @@ describe('租户 API token / principal', () => {
   test('数据库只保存 token 哈希，列表不回显 token', async () => {
     const created = await createToken({ tenantId: 'team-a', role: 'member' });
     const list = await fetch(`${base}/api/tokens?tenantId=team-a`, { headers: admin });
-    const rows = await list.json() as { id: string; token?: string }[];
+    const rows = (await list.json()) as { id: string; token?: string }[];
     const row = rows.find((item) => item.id === created.id);
     assert.ok(row);
     assert.equal(row.token, undefined);

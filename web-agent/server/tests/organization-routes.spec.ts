@@ -70,22 +70,17 @@ test('society experiment HTTP route returns the team comparison and enforces ten
     {} as Parameters<typeof registerOrganizationRoutes>[2],
   );
 
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const value = app.listen(0, '127.0.0.1', () => resolve(value));
   });
   const address = server.address() as { port: number };
-  const request = async (
-    path: string,
-    tenantId = 'default',
-    method = 'GET',
-    payload?: Record<string, unknown>,
-  ) => {
+  const request = async (path: string, tenantId = 'default', method = 'GET', payload?: Record<string, unknown>) => {
     const response = await fetch(`http://127.0.0.1:${address.port}${path}`, {
       method,
       headers: { 'x-maharness-tenant': tenantId, ...(payload ? { 'content-type': 'application/json' } : {}) },
       ...(payload ? { body: JSON.stringify(payload) } : {}),
     });
-    return { status: response.status, body: await response.json() as Record<string, unknown> };
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
 
   try {
@@ -104,8 +99,7 @@ test('society experiment HTTP route returns the team comparison and enforces ten
     assert.equal((await request(`/api/organization/society/experiments/${task.id}`, 'tenant-b')).status, 404);
     assert.equal((await request(`/api/organization/society/experiments/${task.id}`)).status, 200);
 
-    const role = store.organization.listRoles('default', undefined, true)
-      .find(item => item.source === 'human')!;
+    const role = store.organization.listRoles('default', undefined, true).find((item) => item.source === 'human')!;
     const roleUpdate = await request(`/api/organization/roles/${role.id}`, 'default', 'PATCH', {
       revision: role.revision,
       patch: { name: '研究执行员（HTTP 版）' },
@@ -140,7 +134,7 @@ test('society experiment HTTP route returns the team comparison and enforces ten
     assert.equal((evaluationRollback.body.evaluation as { version: number }).version, 3);
   } finally {
     server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();
   }
 });
@@ -152,13 +146,16 @@ test('society task creation requires explicit capabilities and write need (API v
   society.ensureInstitution('default');
   const app = express();
   app.use(express.json());
-  app.use((req, _res, next) => { Object.assign(req, { tenantId: 'default' }); next(); });
+  app.use((req, _res, next) => {
+    Object.assign(req, { tenantId: 'default' });
+    next();
+  });
   registerOrganizationRoutes(
     app,
     { store, organization, society } as unknown as Parameters<typeof registerOrganizationRoutes>[1],
     {} as Parameters<typeof registerOrganizationRoutes>[2],
   );
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const value = app.listen(0, '127.0.0.1', () => resolve(value));
   });
   const { port } = server.address() as { port: number };
@@ -168,7 +165,7 @@ test('society task creation requires explicit capabilities and write need (API v
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(payload),
     });
-    return { status: response.status, body: await response.json() as Record<string, unknown> };
+    return { status: response.status, body: (await response.json()) as Record<string, unknown> };
   };
   try {
     const base = { objective: '整理资料', valueUsd: 10, maxBudgetUsd: 0.05 };
@@ -190,7 +187,7 @@ test('society task creation requires explicit capabilities and write need (API v
     assert.equal(task.teamMode, 'solo');
     assert.deepEqual(task.requiredCapabilities, ['research', 'reading']);
   } finally {
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();
   }
 });

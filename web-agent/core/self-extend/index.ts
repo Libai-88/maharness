@@ -152,7 +152,11 @@ export default {
       api: {
         mount: 'panel',
         responses: {
-          'GET /panel': { type: 'object', required: ['title', 'html'], properties: { title: { type: 'string' }, html: { type: 'string' } } },
+          'GET /panel': {
+            type: 'object',
+            required: ['title', 'html'],
+            properties: { title: { type: 'string' }, html: { type: 'string' } },
+          },
         },
         router: ((req: { path?: string }, res: { json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void } }) => {
           if (!req.path || req.path === '/' || req.path === '/panel') {
@@ -180,24 +184,38 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'create_plugin',
         risk: 'high',
         costHint: 'medium',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['id', 'name', 'written', 'state'],
-          properties: { id: { type: 'string' }, name: { type: 'string' }, written: { type: 'array' }, state: { type: 'string' }, caps: { type: 'array' }, error: { type: 'string' }, note: { type: 'string' } },
+          type: 'object',
+          required: ['id', 'name', 'written', 'state'],
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            written: { type: 'array' },
+            state: { type: 'string' },
+            caps: { type: 'array' },
+            error: { type: 'string' },
+            note: { type: 'string' },
+          },
         },
         approval: true,
         limits: '写入 plugins/ 并热加载代码',
-        description: '创建自我扩展插件：生成 plugin.json 与 index.ts 写入 plugins/ 现场目录，等待热加载后回传状态；失败时回传错误信息供修复。',
+        description:
+          '创建自我扩展插件：生成 plugin.json 与 index.ts 写入 plugins/ 现场目录，等待热加载后回传状态；失败时回传错误信息供修复。',
         parameters: {
           type: 'object',
           properties: {
             id: { type: 'string', description: '插件 id：小写字母/数字/连字符，如 demo-clock' },
             name: { type: 'string', description: '插件显示名，如 时钟工具' },
-            source: { type: 'string', description: 'index.ts 完整源码（可选；不传则生成正确的示例骨架）。契约：默认导出 { id, name, version, onLoad(ctx) }，onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册；handler(args, tctx) 返回 { ok, data } 或 { ok, error }；类型 import type { Plugin } from "../../kernel/plugin-sdk"' },
+            source: {
+              type: 'string',
+              description:
+                'index.ts 完整源码（可选；不传则生成正确的示例骨架）。契约：默认导出 { id, name, version, onLoad(ctx) }，onLoad 中用 ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册；handler(args, tctx) 返回 { ok, data } 或 { ok, error }；类型 import type { Plugin } from "../../kernel/plugin-sdk"',
+            },
           },
           required: ['id'],
         },
@@ -247,12 +265,23 @@ export default {
           }
 
           const permissions: Record<string, string[]> = {};
-          for (const cap of review.capabilities) (permissions[cap.kind] ??= []).push(cap.name);
+          for (const cap of review.capabilities) {
+            let list = permissions[cap.kind];
+            if (!list) {
+              list = [];
+              permissions[cap.kind] = list;
+            }
+            list.push(cap.name);
+          }
           const trial = await runPluginTrial({
             id,
             manifest: {
-              id, name, version: '0.1.0', entry: 'index.ts',
-              apiVersion: 3, permissions: { capabilities: permissions, dependencies: review.dependencies },
+              id,
+              name,
+              version: '0.1.0',
+              entry: 'index.ts',
+              apiVersion: 3,
+              permissions: { capabilities: permissions, dependencies: review.dependencies },
             },
             source,
           });
@@ -265,10 +294,23 @@ export default {
           }
 
           mkdirSync(dir, { recursive: true });
-          writeFileSync(join(dir, 'plugin.json'), JSON.stringify({
-            id, name, version: '0.1.0', entry: 'index.ts', enabled: false,
-            apiVersion: 3, permissions: { capabilities: permissions, dependencies: review.dependencies },
-          }, null, 2), 'utf8');
+          writeFileSync(
+            join(dir, 'plugin.json'),
+            JSON.stringify(
+              {
+                id,
+                name,
+                version: '0.1.0',
+                entry: 'index.ts',
+                enabled: false,
+                apiVersion: 3,
+                permissions: { capabilities: permissions, dependencies: review.dependencies },
+              },
+              null,
+              2,
+            ),
+            'utf8',
+          );
           writeFileSync(join(dir, 'index.ts'), source, 'utf8');
 
           // 等待热加载（目录监听防抖 500ms；最多等 3s；仅终态返回）
@@ -281,7 +323,10 @@ export default {
                 return {
                   ok: false,
                   data: {
-                    id, name, written: ['plugin.json', 'index.ts'], state: st.state,
+                    id,
+                    name,
+                    written: ['plugin.json', 'index.ts'],
+                    state: st.state,
                     caps: st.caps,
                     error: '插件已加载但未注册任何能力',
                     note: '检查 index.ts：必须用 onLoad(ctx) + ctx.register({ kind: "tool", tool: { name, description, parameters, handler } }) 注册；读取 plugins/<id>/index.ts 修正后保存会自动重载。',
@@ -291,12 +336,16 @@ export default {
               return {
                 ok: st.state === 'started',
                 data: {
-                  id, name, written: ['plugin.json', 'index.ts'], state: st.state,
+                  id,
+                  name,
+                  written: ['plugin.json', 'index.ts'],
+                  state: st.state,
                   caps: st.caps,
                   error: st.error,
-                    note: st.state === 'started'
-                    ? '插件已加载，注册的能力在下一轮对话生效'
-                    : '插件加载失败：读取 plugins/<id>/ 下文件，按错误信息修复后保存会自动重载；审查通过后用 enable_plugin 试运行',
+                  note:
+                    st.state === 'started'
+                      ? '插件已加载，注册的能力在下一轮对话生效'
+                      : '插件加载失败：读取 plugins/<id>/ 下文件，按错误信息修复后保存会自动重载；审查通过后用 enable_plugin 试运行',
                 },
               };
             }
@@ -305,7 +354,10 @@ export default {
           return {
             ok: true,
             data: {
-              id, name, written: ['plugin.json', 'index.ts'], state: 'pending',
+              id,
+              name,
+              written: ['plugin.json', 'index.ts'],
+              state: 'pending',
               note: '已写入 plugins/ 目录并保持停用，完成审查后用 enable_plugin 进入隔离试运行。',
             },
           };
@@ -318,21 +370,24 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'plugin_status',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         outputSchema: {
-          type: 'object', required: ['dir', 'count', 'plugins'],
+          type: 'object',
+          required: ['dir', 'count', 'plugins'],
           properties: { dir: { type: 'string' }, count: { type: 'integer' }, plugins: { type: 'array' } },
         },
         output: '{plugins: [{id, name, version, state, active, caps, error}]}；active=true 表示能力已在上下文可用',
-        description: '查看 plugins/ 现场插件的状态。state 为机器态（started=运行中/loaded=已注册未激活/lazy=惰性声明/stopped=已停用/error=失败），' +
+        description:
+          '查看 plugins/ 现场插件的状态。state 为机器态（started=运行中/loaded=已注册未激活/lazy=惰性声明/stopped=已停用/error=失败），' +
           'active 为语义判断（是否已进入上下文）：active=false 的插件需要 enable_plugin 激活后才能使用其能力。',
         parameters: { type: 'object', properties: {} },
         async handler() {
-          const plugins: { id: string; name: string; version: string; state: string; active: boolean; caps: string[]; error?: string }[] = [];
+          const plugins: { id: string; name: string; version: string; state: string; active: boolean; caps: string[]; error?: string }[] =
+            [];
           if (existsSync(userPluginsDir)) {
             for (const e of readdirSync(userPluginsDir, { withFileTypes: true })) {
               if (!e.isDirectory()) continue;
@@ -340,7 +395,11 @@ export default {
               const manifestPath = join(userPluginsDir, e.name, 'plugin.json');
               if (!existsSync(manifestPath)) continue;
               let manifest: Record<string, unknown> = {};
-              try { manifest = JSON.parse(readFileSync(manifestPath, 'utf-8')); } catch { /* 清单损坏按目录名兜底 */ }
+              try {
+                manifest = JSON.parse(readFileSync(manifestPath, 'utf-8'));
+              } catch {
+                /* 清单损坏按目录名兜底 */
+              }
               const id = String(manifest.id ?? e.name);
               const rt = runtime.get(id);
               const state = rt?.state ?? 'pending(未加载)';
@@ -367,17 +426,19 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'enable_plugin',
         risk: 'medium',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['id', 'state'],
+          type: 'object',
+          required: ['id', 'state'],
           properties: { id: { type: 'string' }, state: { type: 'string' } },
         },
         approval: true,
-        description: '激活一个插件（加载其能力进入上下文）。用于 lazy 声明或已停用的插件——' +
+        description:
+          '激活一个插件（加载其能力进入上下文）。用于 lazy 声明或已停用的插件——' +
           '插件状态用 plugin_status 查看；激活后其工具/规则立即对后续对话生效。',
         parameters: {
           type: 'object',
@@ -405,17 +466,19 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'disable_plugin',
         risk: 'medium',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['id', 'state'],
+          type: 'object',
+          required: ['id', 'state'],
           properties: { id: { type: 'string' }, state: { type: 'string' } },
         },
         approval: true,
-        description: '停用一个插件（卸载其能力与规则，能力从上下文消失）。用于不再需要的插件——' +
+        description:
+          '停用一个插件（卸载其能力与规则，能力从上下文消失）。用于不再需要的插件——' +
           '停用后其工具不再可用；可随时 enable_plugin 重新激活。',
         parameters: {
           type: 'object',

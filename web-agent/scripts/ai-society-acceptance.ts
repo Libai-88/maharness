@@ -1,13 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import {
-  copyFileSync,
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  statSync,
-  writeFileSync,
-} from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import type { RunEvent, RunRecord } from '../kernel/run';
 import { Store } from '../server/db';
@@ -165,12 +158,10 @@ function fileEvidence(ref: string, path: string) {
   };
 }
 
-const previousReport = existsSync(output)
-  ? JSON.parse(readFileSync(output, 'utf8')) as PreviousAcceptanceReport
-  : undefined;
+const previousReport = existsSync(output) ? (JSON.parse(readFileSync(output, 'utf8')) as PreviousAcceptanceReport) : undefined;
 
 function playwrightSuites(suites: PlaywrightSuite[] = []): PlaywrightSuite[] {
-  return suites.flatMap(suite => [suite, ...playwrightSuites(suite.suites)]);
+  return suites.flatMap((suite) => [suite, ...playwrightSuites(suite.suites)]);
 }
 
 function playwrightEvidence() {
@@ -178,40 +169,41 @@ function playwrightEvidence() {
   const sourceRef = hasLiveInput ? playwrightInputRef : playwrightArchiveRef;
   const sourcePath = hasLiveInput ? playwrightInputPath : playwrightArchivePath;
   const file = fileEvidence(sourceRef, sourcePath);
-  if (file.status === 'missing') return {
-    ...file,
-    status: 'missing' as const,
-    targetedSpec: false,
-    targetedSpecs: { mockedContract: false, realBackend: false },
-    assertionsPassed: false,
-    stats: undefined,
-  };
+  if (file.status === 'missing')
+    return {
+      ...file,
+      status: 'missing' as const,
+      targetedSpec: false,
+      targetedSpecs: { mockedContract: false, realBackend: false },
+      assertionsPassed: false,
+      stats: undefined,
+    };
   try {
     const parsed = JSON.parse(readFileSync(sourcePath, 'utf8')) as PlaywrightJson;
     const stats = parsed.stats;
     const suites = playwrightSuites(parsed.suites);
     const files = suites
-      .flatMap(suite => [suite.file, ...(suite.specs?.map(spec => spec.file) ?? [])])
+      .flatMap((suite) => [suite.file, ...(suite.specs?.map((spec) => spec.file) ?? [])])
       .filter((file): file is string => Boolean(file))
       .concat(parsed.targetFiles ?? [])
-      .map(file => file.replaceAll('\\', '/'));
+      .map((file) => file.replaceAll('\\', '/'));
     const targetedSpecs = {
-      mockedContract: files.some(file => file.endsWith('society.spec.ts')),
-      realBackend: files.some(file => file.endsWith('society-real-backend.spec.ts')),
+      mockedContract: files.some((file) => file.endsWith('society.spec.ts')),
+      realBackend: files.some((file) => file.endsWith('society-real-backend.spec.ts')),
     };
     const targetedSpec = targetedSpecs.mockedContract || targetedSpecs.realBackend;
     const assertionsPassed = Boolean(
-      targetedSpec
-      && stats?.startTime
-      && Number.isFinite(stats.duration)
-      && (stats.expected ?? 0) > 0
-      && stats.unexpected === 0
-      && stats.skipped === 0
-      && stats.flaky === 0,
+      targetedSpec &&
+        stats?.startTime &&
+        Number.isFinite(stats.duration) &&
+        (stats.expected ?? 0) > 0 &&
+        stats.unexpected === 0 &&
+        stats.skipped === 0 &&
+        stats.flaky === 0,
     );
     return {
       ...file,
-      status: assertionsPassed ? 'passed' as const : 'failed' as const,
+      status: assertionsPassed ? ('passed' as const) : ('failed' as const),
       targetedSpec,
       targetedSpecs,
       assertionsPassed,
@@ -221,11 +213,13 @@ function playwrightEvidence() {
             kind: 'playwright-sanitized-evidence',
             sourceSha256: file.sha256,
             targetFiles: [...new Set(files)],
-            specs: suites.flatMap(suite => (suite.specs ?? []).map(spec => ({
-              file: spec.file?.replaceAll('\\', '/'),
-              title: spec.title,
-              passed: spec.ok,
-            }))),
+            specs: suites.flatMap((suite) =>
+              (suite.specs ?? []).map((spec) => ({
+                file: spec.file?.replaceAll('\\', '/'),
+                title: spec.title,
+                passed: spec.ok,
+              })),
+            ),
             stats,
           }
         : parsed,
@@ -246,12 +240,13 @@ function playwrightEvidence() {
 function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, runEnd: number) {
   const file = fileEvidence(realWorkflowRef, realWorkflowPath);
   const screenshot = fileEvidence(realWorkflowScreenshotRef, realWorkflowScreenshotPath);
-  if (file.status === 'missing' || screenshot.status === 'missing') return {
-    file,
-    screenshot,
-    status: 'missing' as const,
-    proven: false,
-  };
+  if (file.status === 'missing' || screenshot.status === 'missing')
+    return {
+      file,
+      screenshot,
+      status: 'missing' as const,
+      proven: false,
+    };
   try {
     const data = JSON.parse(readFileSync(realWorkflowPath, 'utf8')) as {
       kind?: string;
@@ -288,20 +283,21 @@ function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, run
     // `page.route` alone is not mocking: the disconnect scenario registers a route
     // that aborts/continues the SSE stream to exercise offline recovery. Only a
     // route that fulfils a response replaces the real backend.
-    const mockedRoutes = [...source.matchAll(/page\.route\([\s\S]{0,400}?\}\);/g)]
-      .filter(match => /route\.fulfill\(/.test(match[0]));
+    const mockedRoutes = [...source.matchAll(/page\.route\([\s\S]{0,400}?\}\);/g)].filter((match) => /route\.fulfill\(/.test(match[0]));
     const sourceUsesLiveBackend = mockedRoutes.length === 0;
-    const reportFresh = Number.isFinite(runStart)
-      && Number.isFinite(runEnd)
-      && Date.parse(file.modifiedAt!) >= runStart - 1_000
-      && Date.parse(file.modifiedAt!) <= runEnd + 2_000;
+    const reportFresh =
+      Number.isFinite(runStart) &&
+      Number.isFinite(runEnd) &&
+      Date.parse(file.modifiedAt!) >= runStart - 1_000 &&
+      Date.parse(file.modifiedAt!) <= runEnd + 2_000;
     const screenshotChecks = Object.entries(data.screenshots ?? {}).map(([name, expected]) => {
       const path = resolve(root, 'evals/acceptance/ai-society-v1', name);
       const actual = fileEvidence(`evals/acceptance/ai-society-v1/${name}`, path);
-      const valid = actual.status === 'present'
-        && actual.sha256 === expected
-        && Date.parse(actual.modifiedAt!) >= runStart - 1_000
-        && Date.parse(actual.modifiedAt!) <= runEnd + 2_000;
+      const valid =
+        actual.status === 'present' &&
+        actual.sha256 === expected &&
+        Date.parse(actual.modifiedAt!) >= runStart - 1_000 &&
+        Date.parse(actual.modifiedAt!) <= runEnd + 2_000;
       return { name, expected, actual, valid };
     });
     const requiredScreenshots = [
@@ -312,61 +308,60 @@ function realWorkflowEvidence(isPlaywrightTarget: boolean, runStart: number, run
       'real-workflow-rollback-active.png',
       'real-workflow-rollback.png',
     ];
-    const screenshotsValid = requiredScreenshots.every(name =>
-      screenshotChecks.some(item => item.name === name && item.valid));
+    const screenshotsValid = requiredScreenshots.every((name) => screenshotChecks.some((item) => item.name === name && item.valid));
     const coverage = data.coverage ?? {};
     const scenarios = data.scenarios ?? [];
-    const governance = scenarios.find(item => item.scenario === 'governance-version-history');
-    const team = scenarios.find(item => item.scenario === 'team-auto-scheduler-ui');
-    const rollback = scenarios.find(item => item.scenario === 'failed-child-rollback-to-solo');
+    const governance = scenarios.find((item) => item.scenario === 'governance-version-history');
+    const team = scenarios.find((item) => item.scenario === 'team-auto-scheduler-ui');
+    const rollback = scenarios.find((item) => item.scenario === 'failed-child-rollback-to-solo');
     const proven = Boolean(
-      isPlaywrightTarget
-      && sourceUsesLiveBackend
-      && reportFresh
-      && screenshotsValid
-      && data.kind === 'browser-real-backend-workflow-suite'
-      && data.backend === 'maharness server/index.ts'
-      && data.database === 'temporary SQLite'
-      && data.realModel === false
-      && data.mockBoundary?.includes('API, production Scheduler, RunService, SocietyService, persistence and UI are real')
-      && coverage.realTeamTask === true
-      && coverage.childRunsAtLeast2 === true
-      && coverage.contractsAtLeast2 === true
-      && coverage.collaborationNetworkUi === true
-      && coverage.bottleneckUi === true
-      && coverage.sixFactorUi === true
-      && coverage.wellbeingUi === true
-      && coverage.tokenCacheUi === true
-      && coverage.rollbackToSolo === true
-      && coverage.immutableSocietyAudit === true
-      && coverage.schedulerAutoAdvanceWithoutTickApi === true
-      && governance?.taskStatus === 'completed'
-      && governance.scheduleStatus === 'completed'
-      && governance.auditActions?.includes('update')
-      && governance.auditActions.includes('rollback')
-      && (governance.providerCalls ?? 0) > 0
-      && team?.taskStatus === 'completed'
-      && team.scheduleStatus === 'completed'
-      && team.scheduleMode === 'team'
-      && (team.childRunCount ?? 0) >= 2
-      && (team.contractCount ?? 0) >= 2
-      && team.collaborationNetworkUi === true
-      && team.bottleneckUi === true
-      && team.sixFactorUi === true
-      && team.wellbeingUi === true
-      && team.tokenCacheUi === true
-      && rollback?.taskStatus === 'completed'
-      && rollback.initialScheduleMode === 'team'
-      && (rollback.initialChildRunCount ?? 0) >= 2
-      && (rollback.initialContractCount ?? 0) >= 2
-      && rollback.fallbackMode === 'solo'
-      && rollback.rollbackMarker === 'ROLLBACK_TO_SOLO'
-      && (rollback.providerCalls ?? 0) > 0,
+      isPlaywrightTarget &&
+        sourceUsesLiveBackend &&
+        reportFresh &&
+        screenshotsValid &&
+        data.kind === 'browser-real-backend-workflow-suite' &&
+        data.backend === 'maharness server/index.ts' &&
+        data.database === 'temporary SQLite' &&
+        data.realModel === false &&
+        data.mockBoundary?.includes('API, production Scheduler, RunService, SocietyService, persistence and UI are real') &&
+        coverage.realTeamTask === true &&
+        coverage.childRunsAtLeast2 === true &&
+        coverage.contractsAtLeast2 === true &&
+        coverage.collaborationNetworkUi === true &&
+        coverage.bottleneckUi === true &&
+        coverage.sixFactorUi === true &&
+        coverage.wellbeingUi === true &&
+        coverage.tokenCacheUi === true &&
+        coverage.rollbackToSolo === true &&
+        coverage.immutableSocietyAudit === true &&
+        coverage.schedulerAutoAdvanceWithoutTickApi === true &&
+        governance?.taskStatus === 'completed' &&
+        governance.scheduleStatus === 'completed' &&
+        governance.auditActions?.includes('update') &&
+        governance.auditActions.includes('rollback') &&
+        (governance.providerCalls ?? 0) > 0 &&
+        team?.taskStatus === 'completed' &&
+        team.scheduleStatus === 'completed' &&
+        team.scheduleMode === 'team' &&
+        (team.childRunCount ?? 0) >= 2 &&
+        (team.contractCount ?? 0) >= 2 &&
+        team.collaborationNetworkUi === true &&
+        team.bottleneckUi === true &&
+        team.sixFactorUi === true &&
+        team.wellbeingUi === true &&
+        team.tokenCacheUi === true &&
+        rollback?.taskStatus === 'completed' &&
+        rollback.initialScheduleMode === 'team' &&
+        (rollback.initialChildRunCount ?? 0) >= 2 &&
+        (rollback.initialContractCount ?? 0) >= 2 &&
+        rollback.fallbackMode === 'solo' &&
+        rollback.rollbackMarker === 'ROLLBACK_TO_SOLO' &&
+        (rollback.providerCalls ?? 0) > 0,
     );
     return {
       file,
       screenshot,
-      status: proven ? 'passed' as const : 'failed' as const,
+      status: proven ? ('passed' as const) : ('failed' as const),
       proven,
       freshForPlaywrightRun: reportFresh,
       sourceUsesLiveBackend,
@@ -390,11 +385,17 @@ if (playwright.status !== 'missing') {
   mkdirSync(dirname(playwrightArchivePath), { recursive: true });
   writeFileSync(
     playwrightArchivePath,
-    JSON.stringify('archiveData' in playwright ? playwright.archiveData : {
-      kind: 'playwright-sanitized-evidence',
-      sourceSha256: playwright.sha256,
-      error: 'Playwright results could not be parsed.',
-    }, null, 2),
+    JSON.stringify(
+      'archiveData' in playwright
+        ? playwright.archiveData
+        : {
+            kind: 'playwright-sanitized-evidence',
+            sourceSha256: playwright.sha256,
+            error: 'Playwright results could not be parsed.',
+          },
+      null,
+      2,
+    ),
     'utf8',
   );
 }
@@ -402,49 +403,49 @@ const playwrightArchive = fileEvidence(playwrightArchiveRef, playwrightArchivePa
 const societyE2eSource = readFileSync(resolve(root, 'ui/e2e/society.spec.ts'), 'utf8');
 const mockRouteCount = (societyE2eSource.match(/page\.route\(/g) ?? []).length;
 const mockBrowserBoundary = /page\.route\(\s*['"]\*\*\/api\/\*\*/.test(societyE2eSource)
-  ? 'mocked_api' as const
+  ? ('mocked_api' as const)
   : mockRouteCount > 0
-    ? 'mixed_api' as const
-    : 'live_backend' as const;
+    ? ('mixed_api' as const)
+    : ('live_backend' as const);
 const playwrightStart = Date.parse(playwright.stats?.startTime ?? '');
 const playwrightEnd = Number.isFinite(Date.parse(playwright.stats?.endTime ?? ''))
   ? Date.parse(playwright.stats!.endTime!)
   : playwrightStart + (playwright.stats?.duration ?? 0);
-const dashboardFresh = dashboardEvidence.status === 'present'
-  && Number.isFinite(playwrightStart)
-  && Number.isFinite(playwrightEnd)
-  && Date.parse(dashboardEvidence.modifiedAt) >= playwrightStart - 1_000
-  && Date.parse(dashboardEvidence.modifiedAt) <= playwrightEnd + 2_000;
+const dashboardFresh =
+  dashboardEvidence.status === 'present' &&
+  Number.isFinite(playwrightStart) &&
+  Number.isFinite(playwrightEnd) &&
+  Date.parse(dashboardEvidence.modifiedAt) >= playwrightStart - 1_000 &&
+  Date.parse(dashboardEvidence.modifiedAt) <= playwrightEnd + 2_000;
 const realWorkflow = realWorkflowEvidence(
   playwright.status === 'passed' && playwright.targetedSpecs.realBackend,
   playwrightStart,
   playwrightEnd,
 );
-const browserBackendBoundary = realWorkflow.proven
-  ? 'real_backend_with_deterministic_provider' as const
-  : mockBrowserBoundary;
+const browserBackendBoundary = realWorkflow.proven ? ('real_backend_with_deterministic_provider' as const) : mockBrowserBoundary;
 const pairedLive = previousReport?.evidence?.pairedLive;
 // The carried-forward live-model evidence points at a report under the ignored
 // evals/reports/ tree. If that artefact is gone (cleanup, fresh clone), the
 // reference is stale and must not be reported as available evidence.
 const liveEvidenceRaw = previousReport?.liveModelEvidence;
-const liveEvidence = liveEvidenceRaw && liveEvidenceRaw.rawRun?.reportRef
-  && existsSync(resolve(root, liveEvidenceRaw.rawRun.reportRef))
-  ? liveEvidenceRaw
-  : undefined;
+const liveEvidence =
+  liveEvidenceRaw && liveEvidenceRaw.rawRun?.reportRef && existsSync(resolve(root, liveEvidenceRaw.rawRun.reportRef))
+    ? liveEvidenceRaw
+    : undefined;
 const rawLive = liveEvidence?.rawRun;
-const liveReport = liveEvidence?.available && rawLive
-  ? {
-      ...rawLive,
-      requestedModel: liveEvidence.model,
-      cacheUsageStatus: liveEvidence.providerCache?.hitMissStatus ?? 'unknown',
-      cacheWriteUsageStatus: liveEvidence.providerCache?.writeStatus ?? 'unknown',
-      reportedCachedTokens: liveEvidence.providerCache?.cachedInputTokens ?? null,
-      reportedCacheMissTokens: liveEvidence.providerCache?.missInputTokens ?? null,
-      reportedCacheWriteTokens: liveEvidence.providerCache?.cacheWriteTokens ?? null,
-      cacheSavingsUsd: liveEvidence.providerCache?.cacheSavingsUsd ?? null,
-    }
-  : undefined;
+const liveReport =
+  liveEvidence?.available && rawLive
+    ? {
+        ...rawLive,
+        requestedModel: liveEvidence.model,
+        cacheUsageStatus: liveEvidence.providerCache?.hitMissStatus ?? 'unknown',
+        cacheWriteUsageStatus: liveEvidence.providerCache?.writeStatus ?? 'unknown',
+        reportedCachedTokens: liveEvidence.providerCache?.cachedInputTokens ?? null,
+        reportedCacheMissTokens: liveEvidence.providerCache?.missInputTokens ?? null,
+        reportedCacheWriteTokens: liveEvidence.providerCache?.cacheWriteTokens ?? null,
+        cacheSavingsUsd: liveEvidence.providerCache?.cacheSavingsUsd ?? null,
+      }
+    : undefined;
 const replayReport = liveEvidence?.historicalTraceReplay
   ? {
       ...liveEvidence.historicalTraceReplay,
@@ -460,21 +461,23 @@ function partial(id: string, domain: string, evidence: string[]): void {
   criteria.push({ id, domain, status: 'partial', evidence });
 }
 
-function persistentRole(
-  store: Store,
-  tenantId: string,
-  name: string,
-  capabilities: string[],
-): OrganizationRole {
+function persistentRole(store: Store, tenantId: string, name: string, capabilities: string[]): OrganizationRole {
   const now = Date.now();
   return store.organization.createRole({
-    id: randomUUID(), tenantId, projectId: '', name,
+    id: randomUUID(),
+    tenantId,
+    projectId: '',
+    name,
     responsibilities: ['执行可验收的独立分支'],
     capabilities,
     authority: { workspace: '', readOnly: false, profile: 'standard', allowedTools: [] },
     modelPolicy: { providerId: 'institution', model: 'runtime-selected' },
-    persistent: true, employment: 'active', source: 'human', revision: 0,
-    createdAt: now, updatedAt: now,
+    persistent: true,
+    employment: 'active',
+    source: 'human',
+    revision: 0,
+    createdAt: now,
+    updatedAt: now,
   });
 }
 
@@ -511,9 +514,15 @@ function fixture(store: Store, tenantId = 'default') {
       const id = randomUUID();
       const now = Date.now();
       const run: RunRecord = {
-        id, rootId: id, sessionId: session.id, tenantId: input.task.tenantId,
-        depth: 0, status: 'queued', objective: input.contract.branchObjective,
-        providerId: 'fixture', model: 'fixture-model',
+        id,
+        rootId: id,
+        sessionId: session.id,
+        tenantId: input.task.tenantId,
+        depth: 0,
+        status: 'queued',
+        objective: input.contract.branchObjective,
+        providerId: 'fixture',
+        model: 'fixture-model',
         authorization: {
           workspace: process.cwd(),
           profile: input.role.authority.profile,
@@ -535,8 +544,11 @@ function fixture(store: Store, tenantId = 'default') {
         assignmentContractId: input.contract.id,
         organizationRoleId: input.role.id,
         teamCycleId: input.contract.teamCycleId,
-        cost: 0, tokensIn: 0, tokensOut: 0,
-        createdAt: now, updatedAt: now,
+        cost: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        createdAt: now,
+        updatedAt: now,
       };
       organization.prepareSocietyRun(run, input.contract.id);
       store.runs.create(run);
@@ -549,9 +561,13 @@ function fixture(store: Store, tenantId = 'default') {
     },
     subscribe(runId: string, listener: (event: RunEvent) => void): () => void {
       let current = listeners.get(runId);
-      if (!current) listeners.set(runId, current = new Set());
-      current.add(listener);
-      return () => current!.delete(listener);
+      if (!current) {
+        current = new Set();
+        listeners.set(runId, current);
+      }
+      const target = current;
+      target.add(listener);
+      return () => target.delete(listener);
     },
     cancel(runId: string, tenant: string): RunRecord {
       const run = store.runs.get(runId, tenant);
@@ -561,16 +577,10 @@ function fixture(store: Store, tenantId = 'default') {
       return store.runs.get(runId, tenant)!;
     },
   };
-  const finish = (
-    runId: string,
-    status: 'completed' | 'failed' = 'completed',
-    consumeBudget = true,
-  ): RunRecord => {
+  const finish = (runId: string, status: 'completed' | 'failed' = 'completed', consumeBudget = true): RunRecord => {
     const run = store.runs.get(runId, tenantId);
     if (!run) throw new Error(`RUN_NOT_FOUND:${runId}`);
-    const contract = run.assignmentContractId
-      ? store.organization.getContract(run.assignmentContractId, tenantId)
-      : undefined;
+    const contract = run.assignmentContractId ? store.organization.getContract(run.assignmentContractId, tenantId) : undefined;
     if (status === 'completed') {
       for (const artifact of contract?.expectedArtifacts ?? []) {
         const callId = `artifact:${randomUUID()}`;
@@ -581,31 +591,38 @@ function fixture(store: Store, tenantId = 'default') {
         store.runs.finishTool(runId, callId, {
           ok: true,
           data: { artifact },
-          evidence: [{
-            artifact: true,
-            kind: 'file',
-            label: artifact,
-            ref: artifact,
-          }],
+          evidence: [
+            {
+              artifact: true,
+              kind: 'file',
+              label: artifact,
+              ref: artifact,
+            },
+          ],
         });
       }
     }
     const input = consumeBudget ? Math.max(20, Math.floor((run.budgetTokens ?? 100) / 4)) : 0;
-    store.runs.update(run, status === 'completed' ? {
-      status,
-      answer: `真实契约交付：${contract?.branchObjective ?? run.objective}`,
-      usageStatus: 'reported',
-      tokensIn: input,
-      tokensOut: 10,
-      cost: consumeBudget ? run.budgetUsd ?? 0 : 0,
-    } : {
-      status,
-      error: 'fixture branch failed',
-      usageStatus: 'reported',
-      tokensIn: input,
-      tokensOut: 0,
-      cost: consumeBudget ? run.budgetUsd ?? 0 : 0,
-    });
+    store.runs.update(
+      run,
+      status === 'completed'
+        ? {
+            status,
+            answer: `真实契约交付：${contract?.branchObjective ?? run.objective}`,
+            usageStatus: 'reported',
+            tokensIn: input,
+            tokensOut: 10,
+            cost: consumeBudget ? (run.budgetUsd ?? 0) : 0,
+          }
+        : {
+            status,
+            error: 'fixture branch failed',
+            usageStatus: 'reported',
+            tokensIn: input,
+            tokensOut: 0,
+            cost: consumeBudget ? (run.budgetUsd ?? 0) : 0,
+          },
+    );
     emit(runId);
     return store.runs.get(runId, tenantId)!;
   };
@@ -637,18 +654,19 @@ function finishAndAccept(
   task: SocietyTask,
 ): void {
   for (const runId of schedule.runIds) fixtureValue.finish(runId);
-  assert.equal(
-    society.snapshot(task.tenantId).tasks.find(item => item.id === task.id)?.status,
-    'awaiting_acceptance',
-  );
+  assert.equal(society.snapshot(task.tenantId).tasks.find((item) => item.id === task.id)?.status, 'awaiting_acceptance');
   society.releaseTask(task.id, task.tenantId, 'completed', '人工核验真实 Run、契约与产物后验收');
 }
 
 const store = new Store(':memory:');
 store.upsertProvider({
-  id: 'fixture', label: 'Acceptance fixture',
-  baseUrl: 'https://fixture.invalid/v1', apiKey: '',
-  model: 'fixture-model', priceIn: 1, priceOut: 2,
+  id: 'fixture',
+  label: 'Acceptance fixture',
+  baseUrl: 'https://fixture.invalid/v1',
+  apiKey: '',
+  model: 'fixture-model',
+  priceIn: 1,
+  priceOut: 2,
 });
 
 try {
@@ -669,7 +687,10 @@ try {
     `默认制度 v${institution.version} 包含 ${initial.departments.length} 个部门和 ${initial.roles.length} 个持久角色。`,
   ]);
   assert.equal(initial.roles.length, 4);
-  assert.equal(initial.roleLife.every(item => item.memories.some(memory => memory.kind === 'appointment')), true);
+  assert.equal(
+    initial.roleLife.every((item) => item.memories.some((memory) => memory.kind === 'appointment')),
+    true,
+  );
   pass('A2', '与多代理框架区分', [
     '社会运行由独立 SocietyService 与系统调度器推进，不依赖主 Agent 调用链。',
     '角色在任务结束后保留身份、履历、关系和福利状态。',
@@ -709,18 +730,25 @@ try {
   assert.match(teamExperiment.estimate.formula, /quality.*riskReduction.*estimatedCost.*coordinationCost/);
   assert.ok(teamExperiment.estimate.marginalNetBenefitUsd > 0);
   const teamTick = society.tick('default');
-  const teamSchedule = teamTick.decisions.find(item => item.taskId === teamTask.id);
-  assert.equal(teamSchedule?.mode, 'team', JSON.stringify({
-    task: store.organization.getSocietyTask(teamTask.id, 'default'),
-    decision: teamSchedule,
-    institution: society.ensureInstitution('default'),
-    roles: store.organization.listRoles('default', undefined, true),
-    schedules: store.organization.societySchedules('default', 1000),
-  }));
+  const teamSchedule = teamTick.decisions.find((item) => item.taskId === teamTask.id);
+  assert.equal(
+    teamSchedule?.mode,
+    'team',
+    JSON.stringify({
+      task: store.organization.getSocietyTask(teamTask.id, 'default'),
+      decision: teamSchedule,
+      institution: society.ensureInstitution('default'),
+      roles: store.organization.listRoles('default', undefined, true),
+      schedules: store.organization.societySchedules('default', 1000),
+    }),
+  );
   assert.equal(teamSchedule?.roleIds.length, 2);
   assert.equal(teamSchedule?.runIds.length, 2);
   assert.equal(store.runs.list('default').length, 2);
-  assert.equal(store.runs.list('default').every(run => run.origin?.kind === 'society'), true);
+  assert.equal(
+    store.runs.list('default').every((run) => run.origin?.kind === 'society'),
+    true,
+  );
   pass('B2', '制度调度而非硬派活', [
     `机构 v${teamSchedule?.institutionVersion} 作出 ${teamSchedule?.mode} 决策，角色 ${teamSchedule?.roleIds.length} 个。`,
     '系统 tick 在无主 Agent 调用时创建了 2 个真实社会 Run 和 2 份分工契约。',
@@ -737,26 +765,38 @@ try {
     (error: unknown) => error instanceof OrganizationError && error.code === 'SOCIETY_TASK_STATE',
   );
   for (const runId of teamSchedule!.runIds) finish(runId);
-  const awaiting = society.snapshot('default').tasks.find(item => item.id === teamTask.id);
+  const awaiting = society.snapshot('default').tasks.find((item) => item.id === teamTask.id);
   assert.equal(awaiting?.status, 'awaiting_acceptance');
   const postRun = society.snapshot('default');
-  const settledSchedule = postRun.schedules.find(item => item.id === teamSchedule?.id);
+  const settledSchedule = postRun.schedules.find((item) => item.id === teamSchedule?.id);
   assert.equal(settledSchedule?.status, 'completed');
   // Collaboration relations are only written by human review events; scheduling
   // and completion must not fabricate them.
   assert.equal(postRun.network.edges.length, 0);
-  assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'submission')), true);
-  assert.equal(postRun.roleLife.some(item => item.memories.some(memory => memory.kind === 'delivery')), false);
-  const teamLedger = postRun.economics.taskLedger.find(item => item.taskId === teamTask.id)!;
+  assert.equal(
+    postRun.roleLife.some((item) => item.memories.some((memory) => memory.kind === 'submission')),
+    true,
+  );
+  assert.equal(
+    postRun.roleLife.some((item) => item.memories.some((memory) => memory.kind === 'delivery')),
+    false,
+  );
+  const teamLedger = postRun.economics.taskLedger.find((item) => item.taskId === teamTask.id)!;
   assert.ok((teamLedger.actualTokens ?? 0) > 0);
   assert.equal(teamLedger.cachedInputTokens, 0);
   assert.equal(postRun.economics.cacheHitRate, null);
   assert.equal(postRun.economics.cacheSavingsUsd, null);
   assert.equal(postRun.economics.compression.sharedMemoryRefs, 1);
   assert.equal(postRun.economics.compression.reusedRefs, 1);
-  assert.deepEqual(settledSchedule?.assignments.map(item => item.cognitiveTier), ['decision', 'execution']);
-  assert.equal(settledSchedule?.assignments.every(item => item.routingStrategy.length > 0), true);
-  const cacheRuns = teamSchedule!.runIds.map(runId => store.runs.get(runId, 'default')!);
+  assert.deepEqual(
+    settledSchedule?.assignments.map((item) => item.cognitiveTier),
+    ['decision', 'execution'],
+  );
+  assert.equal(
+    settledSchedule?.assignments.every((item) => item.routingStrategy.length > 0),
+    true,
+  );
+  const cacheRuns = teamSchedule!.runIds.map((runId) => store.runs.get(runId, 'default')!);
   for (const run of cacheRuns) {
     store.runs.update(run, { usageStatus: 'reported', tokensCached: 50, tokensCacheMiss: 50 });
   }
@@ -771,7 +811,7 @@ try {
     '每个调度决策记录能力、记忆、工具、协作、履历和负载六项分数及权重。',
     `能力索引=${teamSchedule?.selection?.requiredCapabilities.join('/')}，选中角色=${teamSchedule?.selection?.chosenRoleIds.length}。`,
     '调度事实同时记录任务价值、质量、时延、风险、成本、部门配额和福利负载。',
-    `当前社会观察=${postRun.observations.map(item => `${item.label}:${item.value ?? 'unknown'}`).join('/')}。`,
+    `当前社会观察=${postRun.observations.map((item) => `${item.label}:${item.value ?? 'unknown'}`).join('/')}。`,
   ]);
   pass('F2', '角色跨任务生命史', [
     '团队完成后先记录 submission，人工验收通过后才记录 delivery；失败和拒收记录 failure。',
@@ -790,17 +830,19 @@ try {
     '全部 Run 同时报告缓存命中与未命中 token 时命中率为 0.5；任一 Run 缺字段时命中率恢复为 null。',
     `Provider 缓存节省=${postRun.economics.cacheSavingsUsd}；未知值保持 null。`,
   ]);
-  const acceptedTeam = society.releaseTask(
-    teamTask.id, 'default', 'completed', '人类确认真实分工、产物与证据后完成验收',
-  );
+  const acceptedTeam = society.releaseTask(teamTask.id, 'default', 'completed', '人类确认真实分工、产物与证据后完成验收');
   assert.equal(acceptedTeam.task.status, 'completed');
-  assert.equal(society.snapshot('default').roleLife
-    .some(item => item.memories.some(memory => memory.kind === 'delivery')), true);
+  assert.equal(
+    society.snapshot('default').roleLife.some((item) => item.memories.some((memory) => memory.kind === 'delivery')),
+    true,
+  );
   // Human acceptance is a real review event, so it is the first point where a
   // positive collaboration relation is justified.
   assert.equal(society.snapshot('default').network.edges.length > 0, true);
-  assert.equal(society.snapshot('default').network.edges
-    .every(edge => edge.score === 1), true);
+  assert.equal(
+    society.snapshot('default').network.edges.every((edge) => edge.score === 1),
+    true,
+  );
 
   const paired = society.createPairedExperiment({
     tenantId: 'default',
@@ -813,8 +855,8 @@ try {
     branches: teamBranches(),
   });
   const pairedSchedules = society.tick('default').decisions;
-  const pairedSolo = pairedSchedules.find(item => item.taskId === paired.solo.id)!;
-  const pairedTeam = pairedSchedules.find(item => item.taskId === paired.team.id)!;
+  const pairedSolo = pairedSchedules.find((item) => item.taskId === paired.solo.id)!;
+  const pairedTeam = pairedSchedules.find((item) => item.taskId === paired.team.id)!;
   assert.equal(pairedSolo.mode, 'solo');
   assert.equal(pairedTeam.mode, 'team');
   finish(pairedSolo.runIds[0]!);
@@ -835,7 +877,7 @@ try {
     economics: { qualityGain: 0.2, riskReduction: 0.02 },
     branches: teamBranches(),
   });
-  const guardedSchedule = society.tick('default').decisions.find(item => item.taskId === guarded.id)!;
+  const guardedSchedule = society.tick('default').decisions.find((item) => item.taskId === guarded.id)!;
   assert.equal(guardedSchedule.mode, 'solo');
   assert.match(guardedSchedule.reason, /配对实测边际净收益.*未达到门槛/);
   const pairedEvidence = [
@@ -867,10 +909,10 @@ try {
     valueUsd: 0.1,
     maxBudgetUsd: 0.08,
     departmentId: 'operations',
-    branches: teamBranches().map(item => ({ ...item, departmentId: 'operations' })),
+    branches: teamBranches().map((item) => ({ ...item, departmentId: 'operations' })),
   });
   const lowTick = society.tick('default');
-  const lowSchedule = lowTick.decisions.find(item => item.taskId === lowTask.id);
+  const lowSchedule = lowTick.decisions.find((item) => item.taskId === lowTask.id);
   assert.equal(lowSchedule?.mode, 'solo');
   assert.equal(lowSchedule?.roleIds.length, 1);
   finishAndAccept(primary, society, lowSchedule!, lowTask);
@@ -886,7 +928,7 @@ try {
     branches: teamBranches(),
   });
   const costEstimate = society.estimate(costTask);
-  const costSchedule = society.tick('default').decisions.find(item => item.taskId === costTask.id);
+  const costSchedule = society.tick('default').decisions.find((item) => item.taskId === costTask.id);
   assert.ok(costEstimate.team.costUsd > costEstimate.single.costUsd);
   assert.equal(costSchedule?.mode, 'solo');
   assert.match(costSchedule?.reason ?? '', /团队估算高于单角色方案/);
@@ -922,7 +964,7 @@ try {
     departmentId: 'knowledge',
   });
   const failureTick = society.tick('default');
-  const failureSchedule = failureTick.decisions.find(item => item.taskId === failureTask.id)!;
+  const failureSchedule = failureTick.decisions.find((item) => item.taskId === failureTask.id)!;
   finish(failureSchedule.runIds[0]!, 'failed');
   const failedTask = store.organization.getSocietyTask(failureTask.id, 'default');
   assert.equal(failedTask?.status, 'failed');
@@ -942,7 +984,7 @@ try {
     economics: { qualityGain: 0.1, riskReduction: 0.02 },
     branches: teamBranches(),
   });
-  const fallbackTeam = society.tick('default').decisions.find(item => item.taskId === fallbackTask.id)!;
+  const fallbackTeam = society.tick('default').decisions.find((item) => item.taskId === fallbackTask.id)!;
   assert.equal(fallbackTeam.mode, 'team');
   finish(fallbackTeam.runIds[0]!);
   finish(fallbackTeam.runIds[1]!, 'failed', false);
@@ -958,8 +1000,14 @@ try {
   const budgets = society.snapshot('default').economics;
   assert.ok(budgets.societyBudgetUsd > 0);
   assert.ok(budgets.societyTokenBudget > 0);
-  assert.equal(budgets.departmentBudgets.every(item => item.quotaUsd >= 0 && item.quotaTokens >= 0), true);
-  assert.equal(budgets.roleBudgets.every(item => item.activeAssignments >= 0), true);
+  assert.equal(
+    budgets.departmentBudgets.every((item) => item.quotaUsd >= 0 && item.quotaTokens >= 0),
+    true,
+  );
+  assert.equal(
+    budgets.roleBudgets.every((item) => item.activeAssignments >= 0),
+    true,
+  );
   pass('G1', 'token 三级预算', [
     `社会预算=${budgets.societyBudgetUsd} USD / ${budgets.societyTokenBudget} token。`,
     '部门配额、角色账本和任务预算均进入同一快照与调度门禁。',
@@ -971,7 +1019,7 @@ try {
   });
   const rolledBack = society.rollbackInstitution('default', institution.version, '恢复初始制度');
   assert.equal(rolledBack.version, updated.version + 1);
-  const auditActions = new Set(store.organization.institutionAudits('default').map(item => item.action));
+  const auditActions = new Set(store.organization.institutionAudits('default').map((item) => item.action));
   assert.equal(auditActions.has('initialize'), true);
   assert.equal(auditActions.has('update'), true);
   assert.equal(auditActions.has('rollback'), true);
@@ -989,29 +1037,35 @@ try {
   assert.equal(roleV2Version, 2);
   assert.equal(roleV2.revision > roleBeforeChanges.revision, true);
   assert.equal(roleV3.name, versionedRole.name);
-  assert.deepEqual(roleHistory.versions.map(item => item.version), [3, 2, 1]);
-  assert.deepEqual(roleHistory.audits.map(item => item.action), ['rollback', 'update', 'initialize']);
+  assert.deepEqual(
+    roleHistory.versions.map((item) => item.version),
+    [3, 2, 1],
+  );
+  assert.deepEqual(
+    roleHistory.audits.map((item) => item.action),
+    ['rollback', 'update', 'initialize'],
+  );
 
   const evaluationBeforeChanges = organization.evaluationHistory('default');
-  const evaluationV2 = organization.updateEvaluation('default', {
-    lowConfidenceSamples: 4,
-    mediumConfidenceSamples: 12,
-    highConfidenceSamples: 40,
-  }, '验证评价标准独立版本');
-  const evaluationV3 = organization.rollbackEvaluation(
+  const evaluationV2 = organization.updateEvaluation(
     'default',
-    evaluationBeforeChanges.active.version,
-    '验证评价标准版本回滚',
+    {
+      lowConfidenceSamples: 4,
+      mediumConfidenceSamples: 12,
+      highConfidenceSamples: 40,
+    },
+    '验证评价标准独立版本',
   );
+  const evaluationV3 = organization.rollbackEvaluation('default', evaluationBeforeChanges.active.version, '验证评价标准版本回滚');
   const evaluationHistory = organization.evaluationHistory('default');
   assert.equal(evaluationV2.version, evaluationBeforeChanges.active.version + 1);
   assert.equal(evaluationV3.version, evaluationV2.version + 1);
   assert.deepEqual(
-    evaluationHistory.versions.map(item => item.version),
+    evaluationHistory.versions.map((item) => item.version),
     [evaluationV3.version, evaluationV2.version, evaluationBeforeChanges.active.version],
   );
   assert.deepEqual(
-    evaluationHistory.audits.map(item => item.action),
+    evaluationHistory.audits.map((item) => item.action),
     ['rollback', 'update', 'initialize'],
   );
 
@@ -1039,15 +1093,13 @@ try {
     assert.equal(high.society.tick('default').decisions.length, 0);
     high.society.approveTask(pending.id, 'default', true);
     high.society.updateInstitution('default', {
-      departments: high.society.ensureInstitution('default').policies.departments.map(department =>
-        department.id === 'knowledge' ? { ...department, quotaUsd: 2 } : department),
+      departments: high.society
+        .ensureInstitution('default')
+        .policies.departments.map((department) => (department.id === 'knowledge' ? { ...department, quotaUsd: 2 } : department)),
       reason: '收紧研究部门配额',
     });
     assert.equal(high.society.tick('default').decisions.length, 0);
-    assert.match(
-      highSpendStore.organization.getSocietyTask(pending.id, 'default')?.lastSchedulingReason ?? '',
-      /部门预算配额不足/,
-    );
+    assert.match(highSpendStore.organization.getSocietyTask(pending.id, 'default')?.lastSchedulingReason ?? '', /部门预算配额不足/);
     pass('E2', '可审计与可干预', [
       '模型不能批准自身高额任务；人类批准后才进入调度。',
       '人类调整部门配额后，调度被事实门禁阻断并记录具体原因。',
@@ -1064,48 +1116,64 @@ try {
       reason: '限制单角色并发',
     });
     const first = welfare.society.createTask({
-      tenantId: 'default', objective: '读取论文一', valueUsd: 5,
-      maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      tenantId: 'default',
+      objective: '读取论文一',
+      valueUsd: 5,
+      maxBudgetUsd: 0.08,
+      departmentId: 'knowledge',
     });
     const second = welfare.society.createTask({
-      tenantId: 'default', objective: '读取论文二', valueUsd: 5,
-      maxBudgetUsd: 0.08, departmentId: 'knowledge',
+      tenantId: 'default',
+      objective: '读取论文二',
+      valueUsd: 5,
+      maxBudgetUsd: 0.08,
+      departmentId: 'knowledge',
     });
     const welfareTick = welfare.society.tick('default');
-    assert.equal(welfareTick.decisions.some(item => item.taskId === first.id), true);
-    assert.equal(welfareTick.decisions.some(item => item.taskId === second.id), false);
-    assert.match(
-      welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '',
-      /福利上限|角色预算不足/,
+    assert.equal(
+      welfareTick.decisions.some((item) => item.taskId === first.id),
+      true,
     );
-    const welfareRunId = welfareTick.decisions.find(item => item.taskId === first.id)!.runIds[0]!;
+    assert.equal(
+      welfareTick.decisions.some((item) => item.taskId === second.id),
+      false,
+    );
+    assert.match(welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '', /福利上限|角色预算不足/);
+    const welfareRunId = welfareTick.decisions.find((item) => item.taskId === first.id)!.runIds[0]!;
     const welfareRun = welfareStore.runs.get(welfareRunId, 'default')!;
     welfareStore.runs.startModelCall({
-      id: randomUUID(), runId: welfareRunId, scope: 'run', purpose: 'agent',
-      providerId: welfareRun.providerId, model: welfareRun.model, status: 'running',
-      startedAt: Date.now(), inputEstimate: 850, outputLimit: 50,
-      contextWindow: 1_000, usageStatus: 'unknown', priceSource: 'unknown',
+      id: randomUUID(),
+      runId: welfareRunId,
+      scope: 'run',
+      purpose: 'agent',
+      providerId: welfareRun.providerId,
+      model: welfareRun.model,
+      status: 'running',
+      startedAt: Date.now(),
+      inputEstimate: 850,
+      outputLimit: 50,
+      contextWindow: 1_000,
+      usageStatus: 'unknown',
+      priceSource: 'unknown',
     });
     const modelCallId = welfareStore.runs.modelCalls(welfareRunId)[0]!.id;
     welfareStore.runs.finishModelCall({
-      ...welfareStore.runs.modelCalls(welfareRunId)[0]!, id: modelCallId, status: 'completed',
+      ...welfareStore.runs.modelCalls(welfareRunId)[0]!,
+      id: modelCallId,
+      status: 'completed',
     });
     welfare.society.tick('default');
-    const pressuredRole = welfare.organization.wellbeing('default')
-      .find(item => item.roleId === welfareTick.decisions.find(decision => decision.taskId === first.id)?.roleIds[0]);
+    const pressuredRole = welfare.organization
+      .wellbeing('default')
+      .find((item) => item.roleId === welfareTick.decisions.find((decision) => decision.taskId === first.id)?.roleIds[0]);
     assert.equal(pressuredRole?.contextPressure, 'high');
-    assert.match(
-      welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '',
-      /上下文压力过高/,
-    );
+    assert.match(welfareStore.organization.getSocietyTask(second.id, 'default')?.lastSchedulingReason ?? '', /上下文压力过高/);
     pass('C2', 'AI 社会成员福利', [
       '角色并发上限进入实际调度门禁。',
       '超载时新任务不启动 Run，角色不会被无限占用。',
       'Provider 上下文窗口进入福利快照；最近调用达到窗口 80% 时暂停向该角色分配新任务。',
     ]);
-    pass('F3', '调度受福利与资源约束', [
-      '福利负载、部门并发、预算和角色可用性共同决定是否派工。',
-    ]);
+    pass('F3', '调度受福利与资源约束', ['福利负载、部门并发、预算和角色可用性共同决定是否派工。']);
   } finally {
     welfareStore.close();
   }
@@ -1118,12 +1186,8 @@ try {
     `mock UI 契约边界=${mockBrowserBoundary}，page.route 数量=${mockRouteCount}。`,
     `真实后端浏览器证据=${JSON.stringify(realWorkflow)}，最终边界=${browserBackendBoundary}。`,
   ];
-  browserProven = playwright.status === 'passed'
-    && (realWorkflow.proven || (dashboardFresh && mockBrowserBoundary === 'live_backend'));
-  const interfaceEvidence = [
-    '确定性服务测试覆盖高额审批、制度调度、终端交付、人工验收、制度发布和回滚落库。',
-    ...browserEvidence,
-  ];
+  browserProven = playwright.status === 'passed' && (realWorkflow.proven || (dashboardFresh && mockBrowserBoundary === 'live_backend'));
+  const interfaceEvidence = ['确定性服务测试覆盖高额审批、制度调度、终端交付、人工验收、制度发布和回滚落库。', ...browserEvidence];
   if (browserProven) {
     pass('D1', '人类经营者界面', interfaceEvidence);
     pass('D2', '社会仪表盘', [
@@ -1131,10 +1195,7 @@ try {
       ...browserEvidence,
     ]);
   } else {
-    partial('D1', '人类经营者界面', [
-      ...interfaceEvidence,
-      '浏览器经营流程尚未由未拦截 API 的真实前后端闭环证明。',
-    ]);
+    partial('D1', '人类经营者界面', [...interfaceEvidence, '浏览器经营流程尚未由未拦截 API 的真实前后端闭环证明。']);
     partial('D2', '社会仪表盘', [
       '确定性快照与 UI 组件契约覆盖社会仪表盘字段，但浏览器端 API 被拦截；不能据此证明真实前端到后端链路。',
       ...browserEvidence,
@@ -1148,11 +1209,32 @@ try {
   store.close();
 }
 
-const idOrder = criteria.map(item => item.id);
+const idOrder = criteria.map((item) => item.id);
 assert.equal(new Set(idOrder).size, idOrder.length, '验收编号不能重复');
 const expectedIds = [
-  'A1', 'A2', 'B1', 'B2', 'B3', 'C1', 'C2', 'D1', 'D2', 'E1', 'E2', 'F1',
-  'F2', 'F3', 'F4', 'G1', 'G2', 'G3', 'G4', 'G5', 'G6', 'H1', 'H2',
+  'A1',
+  'A2',
+  'B1',
+  'B2',
+  'B3',
+  'C1',
+  'C2',
+  'D1',
+  'D2',
+  'E1',
+  'E2',
+  'F1',
+  'F2',
+  'F3',
+  'F4',
+  'G1',
+  'G2',
+  'G3',
+  'G4',
+  'G5',
+  'G6',
+  'H1',
+  'H2',
 ];
 assert.deepEqual([...idOrder].sort(), [...expectedIds].sort());
 
@@ -1164,36 +1246,44 @@ const report = {
   criteria: criteria.sort((left, right) => left.id.localeCompare(right.id)),
   summary: {
     total: criteria.length,
-    passed: criteria.filter(item => item.status === 'passed').length,
-    partial: criteria.filter(item => item.status === 'partial').length,
+    passed: criteria.filter((item) => item.status === 'passed').length,
+    partial: criteria.filter((item) => item.status === 'partial').length,
     failed: 0,
-    aToFPassed: criteria.filter(item => /^[A-F]/.test(item.id)).every(item => item.status === 'passed'),
-    gToHPassed: criteria.filter(item => /^[GH]/.test(item.id)).every(item => item.status === 'passed'),
-    fullyPassed: criteria.every(item => item.status === 'passed'),
+    aToFPassed: criteria.filter((item) => /^[A-F]/.test(item.id)).every((item) => item.status === 'passed'),
+    gToHPassed: criteria.filter((item) => /^[GH]/.test(item.id)).every((item) => item.status === 'passed'),
+    fullyPassed: criteria.every((item) => item.status === 'passed'),
   },
-  sourceHashes: Object.fromEntries([
-    'scripts/ai-society-acceptance.ts',
-    'server/db.ts',
-    'server/services/society/index.ts',
-    'server/services/society/policy.ts',
-    'server/services/society/selection.ts',
-    'server/services/society/health.ts',
-    'server/services/organization/service.ts',
-    'server/organization-store.ts',
-    'server/run-service.ts',
-    'kernel/model-call.ts',
-    'kernel/tests/model-call.spec.ts',
-    'server/tests/organization.spec.ts',
-    'server/tests/society.spec.ts',
-    'server/tests/society-restart.integration.spec.ts',
-    'ui/e2e/society.spec.ts',
-    'ui/playwright.config.ts',
-    'ui/e2e/society-real-backend.spec.ts',
-    'scripts/organization-paired-live.ts',
-    'evals/organization-paired-live.spec.ts',
-  ].map(path => [path, createHash('sha256').update(readFileSync(resolve(root, path))).digest('hex')])),
+  sourceHashes: Object.fromEntries(
+    [
+      'scripts/ai-society-acceptance.ts',
+      'server/db.ts',
+      'server/services/society/index.ts',
+      'server/services/society/policy.ts',
+      'server/services/society/selection.ts',
+      'server/services/society/health.ts',
+      'server/services/organization/service.ts',
+      'server/organization-store.ts',
+      'server/run-service.ts',
+      'kernel/model-call.ts',
+      'kernel/tests/model-call.spec.ts',
+      'server/tests/organization.spec.ts',
+      'server/tests/society.spec.ts',
+      'server/tests/society-restart.integration.spec.ts',
+      'ui/e2e/society.spec.ts',
+      'ui/playwright.config.ts',
+      'ui/e2e/society-real-backend.spec.ts',
+      'scripts/organization-paired-live.ts',
+      'evals/organization-paired-live.spec.ts',
+    ].map((path) => [
+      path,
+      createHash('sha256')
+        .update(readFileSync(resolve(root, path)))
+        .digest('hex'),
+    ]),
+  ),
   evidence: {
-    realRuntime: 'Production service classes create persisted Runs with society origin, work-order, contract, role, token and cache facts; execution uses a deterministic local runtime fixture.',
+    realRuntime:
+      'Production service classes create persisted Runs with society origin, work-order, contract, role, token and cache facts; execution uses a deterministic local runtime fixture.',
     humanAcceptance: 'Only awaiting_acceptance with all contracts delivered can enter completed.',
     browser: {
       backendBoundary: browserBackendBoundary,
@@ -1220,49 +1310,51 @@ const report = {
       retained: 'Aggregate counts, hashes, usage and acceptance decisions remain in this report.',
     },
   },
-  blockingGates: criteria
-    .filter(item => item.status === 'partial')
-    .map(item => ({ id: item.id, reason: item.evidence.at(-1) })),
-  liveModelEvidence: liveReport ? {
-    available: true,
-    model: liveReport.requestedModel,
-    rawRun: {
-      reportRef: liveReport.reportRef,
-      reportHash: liveReport.reportHash,
-      createdAt: liveReport.createdAt,
-      expected: liveReport.expected,
-      observed: liveReport.observed,
-      passed: liveReport.passed,
-      allPassed: liveReport.allPassed,
-      calls: liveReport.calls,
-      tokensIn: liveReport.tokensIn,
-      tokensOut: liveReport.tokensOut,
-      configuredCostUsd: liveReport.configuredCostUsd,
-      usageComplete: liveReport.usageComplete,
-      elapsedMs: liveReport.elapsedMs,
-    },
-    ...(replayReport ? {
-      historicalTraceReplay: {
-        createdAt: replayReport.createdAt,
-        sourceReportHash: replayReport.sourceReportHash,
-        rawPassed: replayReport.rawPassed,
-        reconciledPassed: replayReport.reconciledPassed,
-        total: replayReport.total,
-        callsModels: false,
-        semantics: 'Reloads persisted outputs and terminal facts through the corrected deterministic finalizer.',
-      },
-    } : {}),
-    providerCache: {
-      hitMissStatus: liveReport.cacheUsageStatus,
-      writeStatus: liveReport.cacheWriteUsageStatus,
-      cachedInputTokens: liveReport.reportedCachedTokens,
-      missInputTokens: liveReport.reportedCacheMissTokens,
-      cacheWriteTokens: liveReport.reportedCacheWriteTokens,
-      cacheSavingsUsd: liveReport.cacheSavingsUsd,
-      source: 'organization-live report receipts',
-    },
-    billing: 'The configured route declares a zero local price; supplier billing and cache savings remain unverified.',
-  } : { available: false },
+  blockingGates: criteria.filter((item) => item.status === 'partial').map((item) => ({ id: item.id, reason: item.evidence.at(-1) })),
+  liveModelEvidence: liveReport
+    ? {
+        available: true,
+        model: liveReport.requestedModel,
+        rawRun: {
+          reportRef: liveReport.reportRef,
+          reportHash: liveReport.reportHash,
+          createdAt: liveReport.createdAt,
+          expected: liveReport.expected,
+          observed: liveReport.observed,
+          passed: liveReport.passed,
+          allPassed: liveReport.allPassed,
+          calls: liveReport.calls,
+          tokensIn: liveReport.tokensIn,
+          tokensOut: liveReport.tokensOut,
+          configuredCostUsd: liveReport.configuredCostUsd,
+          usageComplete: liveReport.usageComplete,
+          elapsedMs: liveReport.elapsedMs,
+        },
+        ...(replayReport
+          ? {
+              historicalTraceReplay: {
+                createdAt: replayReport.createdAt,
+                sourceReportHash: replayReport.sourceReportHash,
+                rawPassed: replayReport.rawPassed,
+                reconciledPassed: replayReport.reconciledPassed,
+                total: replayReport.total,
+                callsModels: false,
+                semantics: 'Reloads persisted outputs and terminal facts through the corrected deterministic finalizer.',
+              },
+            }
+          : {}),
+        providerCache: {
+          hitMissStatus: liveReport.cacheUsageStatus,
+          writeStatus: liveReport.cacheWriteUsageStatus,
+          cachedInputTokens: liveReport.reportedCachedTokens,
+          missInputTokens: liveReport.reportedCacheMissTokens,
+          cacheWriteTokens: liveReport.reportedCacheWriteTokens,
+          cacheSavingsUsd: liveReport.cacheSavingsUsd,
+          source: 'organization-live report receipts',
+        },
+        billing: 'The configured route declares a zero local price; supplier billing and cache savings remain unverified.',
+      }
+    : { available: false },
   limits: [
     liveReport?.allPassed
       ? `The current real-model gate passed ${liveReport.passed}/${liveReport.observed}; historical trace replay remains separate evidence.`
@@ -1274,9 +1366,7 @@ const report = {
     ...(pairedLive?.complete
       ? []
       : ['H1 remains partial until a real paired live A/B passes both arms, complete usage and hard-budget checks.']),
-    ...(browserProven
-      ? []
-      : ['The browser evidence does not yet prove an un-intercepted frontend-to-backend operating flow.']),
+    ...(browserProven ? [] : ['The browser evidence does not yet prove an un-intercepted frontend-to-backend operating flow.']),
   ],
 };
 

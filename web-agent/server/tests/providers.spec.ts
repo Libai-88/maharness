@@ -42,11 +42,37 @@ describe('assertPublicHttpUrl SSRF 校验', () => {
 
 describe('Provider 配置诊断', () => {
   test('只返回可操作状态，不泄露 key，并区分缺失配置、模型探测和健康故障', () => {
-    const result = buildProviderDiagnostics({
-      id: 'p1', baseUrl: 'https://api.example', apiKey: 'sk-secret', model: 'missing', protocol: 'openai',
-    }, [{ providerId: 'p1', modelId: 'available', modelKey: 'p1@available', pricingId: 'p1@available', contextWindow: 128000, maxOutput: 4096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, source: 'inferred' }], {
-      failures: 2, authFailed: true, lastError: 'HTTP 401', lastErrorAt: 123,
-    });
+    const result = buildProviderDiagnostics(
+      {
+        id: 'p1',
+        baseUrl: 'https://api.example',
+        apiKey: 'sk-secret',
+        model: 'missing',
+        protocol: 'openai',
+      },
+      [
+        {
+          providerId: 'p1',
+          modelId: 'available',
+          modelKey: 'p1@available',
+          pricingId: 'p1@available',
+          contextWindow: 128000,
+          maxOutput: 4096,
+          vision: false,
+          tools: true,
+          reasoning: false,
+          priceIn: 1,
+          priceOut: 2,
+          source: 'inferred',
+        },
+      ],
+      {
+        failures: 2,
+        authFailed: true,
+        lastError: 'HTTP 401',
+        lastErrorAt: 123,
+      },
+    );
     assert.equal(result.configured.apiKey, true);
     assert.equal(result.models[0]?.modelId, 'available');
     assert.ok(result.issues.includes('默认模型未登记或未完成能力探测'));
@@ -67,7 +93,24 @@ describe('Provider Gateway 快照', () => {
       call: callModel,
       providers: () => [{ id: 'p1', label: 'P1', defaultModel: 'm1', protocol: 'openai', chat: async function* () {} }],
       getProvider: () => undefined,
-      models: () => [{ providerId: 'p1', providerLabel: 'P1', model: { modelId: 'm1', contextWindow: 1000, maxOutput: 100, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 2, enabled: true, source: 'manual' } }],
+      models: () => [
+        {
+          providerId: 'p1',
+          providerLabel: 'P1',
+          model: {
+            modelId: 'm1',
+            contextWindow: 1000,
+            maxOutput: 100,
+            vision: false,
+            tools: true,
+            reasoning: false,
+            priceIn: 1,
+            priceOut: 2,
+            enabled: true,
+            source: 'manual',
+          },
+        },
+      ],
       routeTask: () => undefined,
       routeCapability: () => undefined,
       health: () => ({ failures: 1, authFailed: false, lastError: 'timeout', lastErrorAt: 1 }),

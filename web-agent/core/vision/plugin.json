@@ -4,9 +4,7 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "requires": [
-    "chat"
-  ],
+  "requires": ["chat"],
   "compatibility": {
     "api": {
       "min": "2.0.0",
@@ -18,13 +16,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "read_image",
-        "analyze_image"
-      ],
-      "persona": [
-        "vision-rules"
-      ]
+      "tool": ["read_image", "analyze_image"],
+      "persona": ["vision-rules"]
     }
   },
   "apiVersion": 2

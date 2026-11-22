@@ -1,10 +1,21 @@
 import type { RunRecord } from './run';
 import type { Capability, KernelLike, PluginBus, PluginManifest, ToolDef, ToolPermission } from './types';
 
-export interface PluginDevelopmentGrant { enabled: boolean; permissions: ToolPermission[]; dependencies: string[]; }
+export interface PluginDevelopmentGrant {
+  enabled: boolean;
+  permissions: ToolPermission[];
+  dependencies: string[];
+}
 export interface TaskPluginBinding {
-  id: string; version: string; hash: string; scope: 'run' | 'workspace'; owner: string;
-  manifest: PluginManifest; files: Record<string, string>; state: 'staged' | 'validated' | 'active' | 'stopped' | 'error'; error?: string;
+  id: string;
+  version: string;
+  hash: string;
+  scope: 'run' | 'workspace';
+  owner: string;
+  manifest: PluginManifest;
+  files: Record<string, string>;
+  state: 'staged' | 'validated' | 'active' | 'stopped' | 'error';
+  error?: string;
 }
 export interface TaskPluginPersistence {
   get(runId: string): TaskPluginBinding[];

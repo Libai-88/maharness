@@ -15,9 +15,19 @@ import { dirname, join } from 'node:path';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import { signLockFile } from '../lock-signature';
 import {
-  installFromSourceTree, installSkill, listSkillBackups, normalizeManifest, readLockFile, rollbackSkill, sha256File,
-  verifyStagedSkill, validateLockFile, satisfiesVersionRange, isValidVersionRange,
-  type LockFile, type LockSkillEntry,
+  installFromSourceTree,
+  installSkill,
+  listSkillBackups,
+  normalizeManifest,
+  readLockFile,
+  rollbackSkill,
+  sha256File,
+  verifyStagedSkill,
+  validateLockFile,
+  satisfiesVersionRange,
+  isValidVersionRange,
+  type LockFile,
+  type LockSkillEntry,
 } from '../skillsSync';
 
 let root = '';
@@ -69,7 +79,11 @@ before(() => {
 
 after(() => {
   delete process.env.MAHARNESS_ALLOW_SKILL_HASH_MISMATCH;
-  try { rmSync(root, { recursive: true, force: true }); } catch { /* 句柄迟释放 */ }
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* 句柄迟释放 */
+  }
 });
 
 /** 目标目录之外不应有任何临时/让位残留（临时目录落在 data/ 下、点前缀） */
@@ -121,8 +135,7 @@ describe('A9-2 锁文件 files 清单：逐文件校验', () => {
     const r = installFromSourceTree('demo-extra', entry, join(srcRoot, 'skills', 'demo'), skillsDir);
     assert.equal(r.ok, true, '清单内文件都对得上，就应安装成功');
     assert.ok((r.skippedUnlisted ?? []).includes('scripts/not-in-lock.py'), JSON.stringify(r.skippedUnlisted));
-    assert.equal(existsSync(join(skillsDir, 'demo-extra', 'scripts', 'not-in-lock.py')), false,
-      '清单外文件绝不能落盘');
+    assert.equal(existsSync(join(skillsDir, 'demo-extra', 'scripts', 'not-in-lock.py')), false, '清单外文件绝不能落盘');
     assert.equal(r.files, 3, '落盘文件数 = 清单数');
   });
 
@@ -155,8 +168,10 @@ describe('A9-2 向后兼容：只有 computedHash 的现有 skills-lock.json', (
     writeSkillFile('scripts/run.py', SCRIPT_V1);
     writeSkillFile('references/note.md', NOTE);
     const legacy: LockSkillEntry = {
-      source: 'owner/repo', sourceType: 'github',
-      skillPath: 'skills/demo/SKILL.md', computedHash: sha(SKILL_MD),
+      source: 'owner/repo',
+      sourceType: 'github',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: sha(SKILL_MD),
     };
     const r = installFromSourceTree('demo-legacy', legacy, join(srcRoot, 'skills', 'demo'), skillsDir);
     assert.equal(r.ok, true, r.error);
@@ -165,7 +180,10 @@ describe('A9-2 向后兼容：只有 computedHash 的现有 skills-lock.json', (
     assert.match(String(r.warnings?.[0]), /没有哈希锚点/);
     // scripts/** 至少被枚举并哈希（给出可直接钉进锁文件的值）
     const unv = r.unverified ?? [];
-    assert.ok(unv.some((f) => f.path === 'scripts/run.py'), JSON.stringify(unv));
+    assert.ok(
+      unv.some((f) => f.path === 'scripts/run.py'),
+      JSON.stringify(unv),
+    );
     assert.equal(unv.find((f) => f.path === 'scripts/run.py')?.sha256, sha(SCRIPT_V1));
     assert.match(String(r.warnings?.[0]), /scripts\/run\.py/, '脚本类文件要点名');
   });
@@ -173,7 +191,9 @@ describe('A9-2 向后兼容：只有 computedHash 的现有 skills-lock.json', (
   test('SKILL.md 哈希不符 → 无清单同样拒绝', () => {
     writeSkillFile('SKILL.md', SKILL_MD + '篡改\n');
     const legacy: LockSkillEntry = {
-      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: sha(SKILL_MD),
+      source: 'owner/repo',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: sha(SKILL_MD),
     };
     const r = installFromSourceTree('demo-legacy-bad', legacy, join(srcRoot, 'skills', 'demo'), skillsDir);
     assert.equal(r.ok, false);
@@ -196,7 +216,9 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     writeSkillFile('SKILL.md', SKILL_MD);
     writeSkillFile('scripts/run.py', SCRIPT_V1);
     const locked: LockSkillEntry = {
-      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: sha(SKILL_MD),
+      source: 'owner/repo',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: sha(SKILL_MD),
     };
     const first = installFromSourceTree('demo-force', locked, join(srcRoot, 'skills', 'demo'), skillsDir);
     assert.equal(first.ok, true, first.error);
@@ -215,7 +237,9 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     writeSkillFile('scripts/run.py', SCRIPT_V1);
     writeSkillFile('scripts/gone-in-v2.py', 'print("旧版独有")\n');
     const v1: LockSkillEntry = {
-      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: hashOf('SKILL.md'),
+      source: 'owner/repo',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: hashOf('SKILL.md'),
       files: {
         'SKILL.md': hashOf('SKILL.md'),
         'scripts/run.py': hashOf('scripts/run.py'),
@@ -236,8 +260,7 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     const r = installFromSourceTree('demo-swap', v2, join(srcRoot, 'skills', 'demo'), skillsDir, { force: true });
     assert.equal(r.ok, true, r.error);
     assert.equal(readFileSync(join(skillsDir, 'demo-swap', 'scripts', 'run.py'), 'utf-8'), SCRIPT_V2);
-    assert.equal(existsSync(join(skillsDir, 'demo-swap', 'scripts', 'gone-in-v2.py')), false,
-      '换入后不得残留上一版文件');
+    assert.equal(existsSync(join(skillsDir, 'demo-swap', 'scripts', 'gone-in-v2.py')), false, '换入后不得残留上一版文件');
     assert.deepEqual(leftoverTemps(dataDir), [], '让位目录也要清理');
   });
 
@@ -245,7 +268,9 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     writeSkillFile('SKILL.md', SKILL_MD);
     writeSkillFile('scripts/run.py', SCRIPT_V1);
     const v1: LockSkillEntry = {
-      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: hashOf('SKILL.md'),
+      source: 'owner/repo',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: hashOf('SKILL.md'),
       files: { 'SKILL.md': hashOf('SKILL.md'), 'scripts/run.py': hashOf('scripts/run.py') },
     };
     assert.equal(installFromSourceTree('demo-rollback', v1, join(srcRoot, 'skills', 'demo'), skillsDir).ok, true);
@@ -271,7 +296,9 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     writeSkillFile('SKILL.md', SKILL_MD);
     writeSkillFile('scripts/run.py', SCRIPT_V1);
     const stale: LockSkillEntry = {
-      source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: sha('不是真实的哈希'.padEnd(8, '!')),
+      source: 'owner/repo',
+      skillPath: 'skills/demo/SKILL.md',
+      computedHash: sha('不是真实的哈希'.padEnd(8, '!')),
     };
     // 先造一个合法长度但内容不符的哈希
     stale.computedHash = sha(SKILL_MD + '旧版本\n');
@@ -281,8 +308,10 @@ describe('A9-3 force 语义：覆盖已安装，不豁免校验', () => {
     const accepted = installFromSourceTree('demo-accept', stale, join(srcRoot, 'skills', 'demo'), skillsDir, { force: true });
     delete process.env.MAHARNESS_ALLOW_SKILL_HASH_MISMATCH;
     assert.equal(accepted.ok, true, accepted.error);
-    assert.ok((accepted.warnings ?? []).some((w) => /MAHARNESS_ALLOW_SKILL_HASH_MISMATCH/.test(w)),
-      '放行必须留下可见说明');
+    assert.ok(
+      (accepted.warnings ?? []).some((w) => /MAHARNESS_ALLOW_SKILL_HASH_MISMATCH/.test(w)),
+      '放行必须留下可见说明',
+    );
   });
 });
 
@@ -297,13 +326,17 @@ describe('A9-1 校验对象是即将发布的字节 + 锁文件读取兼容', ()
 
   test('readLockFile 读旧格式（只有 computedHash）不报错、新格式 files 原样带出', () => {
     const home = mkdtempSync(join(root, 'lock-'));
-    writeFileSync(join(home, 'skills-lock.json'), JSON.stringify({
-      version: 1,
-      skills: {
-        demo: { source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: sha('x') },
-        pin: { source: 'owner/repo', skillPath: 'skills/pin/SKILL.md', computedHash: sha('y'), files: { 'SKILL.md': sha('y') } },
-      },
-    }), 'utf-8');
+    writeFileSync(
+      join(home, 'skills-lock.json'),
+      JSON.stringify({
+        version: 1,
+        skills: {
+          demo: { source: 'owner/repo', skillPath: 'skills/demo/SKILL.md', computedHash: sha('x') },
+          pin: { source: 'owner/repo', skillPath: 'skills/pin/SKILL.md', computedHash: sha('y'), files: { 'SKILL.md': sha('y') } },
+        },
+      }),
+      'utf-8',
+    );
     const { data, error } = readLockFile(home);
     assert.equal(error, undefined);
     assert.equal(Object.keys(data?.skills ?? {}).length, 2);
@@ -333,32 +366,40 @@ describe('技能锁文件依赖图', () => {
   const base = (skills: LockFile['skills']): LockFile => ({ version: 2, skills });
 
   test('版本范围满足时通过，数组与对象两种依赖写法都支持', () => {
-    const result = validateLockFile(base({
-      base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '1.4.2' },
-      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '2.0.0', requires: { base: '^1.2.0' } },
-      cli: { source: 'o/r', skillPath: 'skills/cli/SKILL.md', version: '2.1.0', requires: ['base@~1.4.0'] },
-    }));
+    const result = validateLockFile(
+      base({
+        base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '1.4.2' },
+        app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '2.0.0', requires: { base: '^1.2.0' } },
+        cli: { source: 'o/r', skillPath: 'skills/cli/SKILL.md', version: '2.1.0', requires: ['base@~1.4.0'] },
+      }),
+    );
     assert.equal(result.ok, true, result.errors.join('; '));
   });
 
   test('缺失依赖、范围不满足与循环依赖均拒绝', () => {
-    const missing = validateLockFile(base({
-      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { absent: '^1.0.0' } },
-    }));
+    const missing = validateLockFile(
+      base({
+        app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { absent: '^1.0.0' } },
+      }),
+    );
     assert.equal(missing.ok, false);
     assert.match(missing.errors.join('; '), /依赖不存在/);
 
-    const mismatch = validateLockFile(base({
-      base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '2.0.0' },
-      app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { base: '^1.0.0' } },
-    }));
+    const mismatch = validateLockFile(
+      base({
+        base: { source: 'o/r', skillPath: 'skills/base/SKILL.md', version: '2.0.0' },
+        app: { source: 'o/r', skillPath: 'skills/app/SKILL.md', version: '1.0.0', requires: { base: '^1.0.0' } },
+      }),
+    );
     assert.equal(mismatch.ok, false);
     assert.match(mismatch.errors.join('; '), /不满足/);
 
-    const cycle = validateLockFile(base({
-      a: { source: 'o/r', skillPath: 'skills/a/SKILL.md', version: '1.0.0', requires: ['b'] },
-      b: { source: 'o/r', skillPath: 'skills/b/SKILL.md', version: '1.0.0', requires: ['a'] },
-    }));
+    const cycle = validateLockFile(
+      base({
+        a: { source: 'o/r', skillPath: 'skills/a/SKILL.md', version: '1.0.0', requires: ['b'] },
+        b: { source: 'o/r', skillPath: 'skills/b/SKILL.md', version: '1.0.0', requires: ['a'] },
+      }),
+    );
     assert.equal(cycle.ok, false);
     assert.match(cycle.errors.join('; '), /环/);
   });

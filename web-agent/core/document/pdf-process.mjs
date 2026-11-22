@@ -1,6 +1,6 @@
 import { register } from 'tsx/esm/api';
 register();
-process.once('message', async job => {
+process.once('message', async (job) => {
   try {
     const { documentJob } = await import('./formats.ts');
     const result = await documentJob(job);

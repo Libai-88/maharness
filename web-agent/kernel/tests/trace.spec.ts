@@ -63,8 +63,10 @@ describe('Trace 生命周期', () => {
     try {
       const dir = join(root, 'traces');
       const t1 = new Trace(new EventBus(), dir);
-      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'tool_call', name: 'read_file', toolVersion: '1.4.0', sideEffect: 'read' })
-        .finish({ outputSummary: 'ok', sideEffectOutcome: 'none' });
+      t1.startStep({ traceId: 'arch-1', turn: 0, type: 'tool_call', name: 'read_file', toolVersion: '1.4.0', sideEffect: 'read' }).finish({
+        outputSummary: 'ok',
+        sideEffectOutcome: 'none',
+      });
       t1.startStep({ traceId: 'arch-1', turn: 0, attempt: 2, type: 'system', name: 'cost-breaker', parentId: 'par-9' }).fail('x');
       t1.flush(); // 同步落盘
       t1.dispose();
@@ -73,7 +75,10 @@ describe('Trace 生命周期', () => {
       const t2 = new Trace(new EventBus(), dir);
       const steps = t2.queryArchive('arch-1');
       assert.equal(steps.length, 2, '归档应命中 2 条');
-      assert.equal(steps.every((s) => s.traceId === 'arch-1'), true);
+      assert.equal(
+        steps.every((s) => s.traceId === 'arch-1'),
+        true,
+      );
       const children = t2.queryArchive(undefined, { parentId: 'par-9' });
       assert.equal(children.length, 1, 'parentId 过滤应命中 1 条');
       assert.equal(children[0]?.attempt, 2, '归档应保留重试序号');
@@ -93,10 +98,22 @@ describe('Trace 生命周期', () => {
     try {
       const dir = join(root, 'traces');
       const t1 = new Trace(new EventBus(), dir);
-      t1.startStep({ traceId: 'indexed', sessionId: 'session-a', pluginId: 'plugin-x', turn: 0, type: 'tool_call', name: 'read_file' })
-        .finish();
-      t1.startStep({ traceId: 'indexed', sessionId: 'session-b', pluginId: 'plugin-y', turn: 0, type: 'tool_call', name: 'write_file' })
-        .fail('denied', { errorCategory: 'parameter' });
+      t1.startStep({
+        traceId: 'indexed',
+        sessionId: 'session-a',
+        pluginId: 'plugin-x',
+        turn: 0,
+        type: 'tool_call',
+        name: 'read_file',
+      }).finish();
+      t1.startStep({
+        traceId: 'indexed',
+        sessionId: 'session-b',
+        pluginId: 'plugin-y',
+        turn: 0,
+        type: 'tool_call',
+        name: 'write_file',
+      }).fail('denied', { errorCategory: 'parameter' });
       t1.flush();
       t1.dispose();
 
@@ -108,7 +125,9 @@ describe('Trace 生命周期', () => {
       assert.equal(byStatus.length, 1);
       assert.equal(byStatus[0]?.name, 'write_file');
       t2.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('可从无索引旧 JSONL 重建索引并恢复随机查询', () => {
@@ -117,7 +136,17 @@ describe('Trace 生命周期', () => {
       const dir = join(root, 'traces');
       mkdirSync(dir, { recursive: true });
       const today = new Date().toISOString().slice(0, 10);
-      const step = { id: 'legacy-1', traceId: 'legacy-run', sessionId: 'legacy-session', pluginId: 'legacy-plugin', turn: 0, type: 'system', name: 'legacy', status: 'done', ts: Date.now() };
+      const step = {
+        id: 'legacy-1',
+        traceId: 'legacy-run',
+        sessionId: 'legacy-session',
+        pluginId: 'legacy-plugin',
+        turn: 0,
+        type: 'system',
+        name: 'legacy',
+        status: 'done',
+        ts: Date.now(),
+      };
       writeFileSync(join(dir, `${today}.jsonl`), `${JSON.stringify(step)}\n`, 'utf8');
       const trace = new Trace(new EventBus(), dir);
       assert.deepEqual(trace.rebuildArchiveIndexes(), { files: 1, entries: 1 });
@@ -127,7 +156,9 @@ describe('Trace 生命周期', () => {
       assert.equal(found[0]?.attempt, 0, '旧 JSONL 缺少 attempt 时读取为首次尝试');
       assert.deepEqual(validateTraceSteps(found, { requireResolvedParents: true }), [], '兼容后的旧 JSONL 通过当前 schema');
       trace.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('步骤默认 attempt=0，并保留显式非负尝试序号', () => {
@@ -140,8 +171,13 @@ describe('Trace 生命周期', () => {
       assert.equal(trace.query('attempts').find((s) => s.id === first.id)?.attempt, 0);
       assert.equal(trace.query('attempts').find((s) => s.id === retry.id)?.attempt, 1);
       assert.equal(trace.query('attempts').find((s) => s.id === invalid.id)?.attempt, 0);
-      first.cancel(); retry.cancel(); invalid.cancel(); trace.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      first.cancel();
+      retry.cancel();
+      invalid.cancel();
+      trace.dispose();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('缺失 traceId 的扩展事件自动进入可查询的 unscoped run', () => {
@@ -155,16 +191,15 @@ describe('Trace 生命周期', () => {
       assert.match(recorded[0]!.traceId, /^p[0-9a-f]+-unscoped-[0-9]+$/);
       assert.deepEqual(validateTraceSteps(recorded, { requireResolvedParents: true }), []);
       trace.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('Trace 步骤 schema 校验稳定 ID、run、尝试序号和父节点自环', () => {
     const valid = { id: 'a', traceId: 'run-1', turn: 0, attempt: 0, type: 'system' as const, status: 'done' as const, ts: 1 };
     assert.deepEqual(validateTraceSteps([valid]), []);
-    assert.deepEqual(validateTraceSteps([
-      valid,
-      { ...valid, id: 'a', attempt: -1, parentId: 'a' },
-    ]), [
+    assert.deepEqual(validateTraceSteps([valid, { ...valid, id: 'a', attempt: -1, parentId: 'a' }]), [
       '重复或缺失步骤 id: a',
       '步骤 a 的 attempt 非法',
       '步骤 a 不能引用自身为 parentId',
@@ -185,11 +220,24 @@ describe('Trace 生命周期', () => {
 
   test('Trace schema 校验可选字段的类型、范围和枚举', () => {
     const invalid = {
-      id: 'optional-invalid', traceId: 'run-optional', turn: 0, attempt: 0,
-      type: 'system' as const, status: 'done' as const, ts: 20,
-      endTs: 10, durationMs: -1, tokensIn: 1.5, tokensOut: -1, tokensCached: 2.2,
-      cost: Number.NaN, cacheLayer: 'L4' as never, errorCategory: 'fatal' as never,
-      retryable: 'yes' as never, retryDelayMs: -5, pluginId: 42 as never,
+      id: 'optional-invalid',
+      traceId: 'run-optional',
+      turn: 0,
+      attempt: 0,
+      type: 'system' as const,
+      status: 'done' as const,
+      ts: 20,
+      endTs: 10,
+      durationMs: -1,
+      tokensIn: 1.5,
+      tokensOut: -1,
+      tokensCached: 2.2,
+      cost: Number.NaN,
+      cacheLayer: 'L4' as never,
+      errorCategory: 'fatal' as never,
+      retryable: 'yes' as never,
+      retryDelayMs: -5,
+      pluginId: 42 as never,
     };
     const errors = validateTraceSteps([invalid]);
     assert.ok(errors.includes('步骤 optional-invalid 的 endTs 非法'));
@@ -208,23 +256,50 @@ describe('Trace 生命周期', () => {
   test('Trace schema 接受全部受支持的步骤类型、状态和枚举值', () => {
     const types = ['llm_call', 'tool_call', 'cache_hit', 'user_msg', 'system', 'service_call'] as const;
     const statuses = ['running', 'done', 'error', 'cancelled'] as const;
-    const steps = types.flatMap((type, typeIndex) => statuses.map((status, statusIndex) => ({
-      id: `valid-${typeIndex}-${statusIndex}`, traceId: 'valid-enums', turn: 0, attempt: 0,
-      type, status, ts: 10, ...(status === 'running' ? {} : { endTs: 11, durationMs: 1 }),
-      sessionId: 'session', pluginId: 'plugin', name: 'step', inputSummary: 'input',
-      cacheLayer: 'L1' as const, cacheKey: 'key', outputSummary: 'output',
-      tokensIn: 2, tokensOut: 3, tokensCached: 1, cost: 0.25,
-      error: 'detail', errorCategory: 'transient' as const, errorCode: 'HTTP_503', retryable: true, retryDelayMs: 1200,
-    })));
+    const steps = types.flatMap((type, typeIndex) =>
+      statuses.map((status, statusIndex) => ({
+        id: `valid-${typeIndex}-${statusIndex}`,
+        traceId: 'valid-enums',
+        turn: 0,
+        attempt: 0,
+        type,
+        status,
+        ts: 10,
+        ...(status === 'running' ? {} : { endTs: 11, durationMs: 1 }),
+        sessionId: 'session',
+        pluginId: 'plugin',
+        name: 'step',
+        inputSummary: 'input',
+        cacheLayer: 'L1' as const,
+        cacheKey: 'key',
+        outputSummary: 'output',
+        tokensIn: 2,
+        tokensOut: 3,
+        tokensCached: 1,
+        cost: 0.25,
+        error: 'detail',
+        errorCategory: 'transient' as const,
+        errorCode: 'HTTP_503',
+        retryable: true,
+        retryDelayMs: 1200,
+      })),
+    );
     assert.deepEqual(validateTraceSteps(steps), []);
   });
 
   test('Trace 完整图校验可拒绝未解析父节点，默认仍兼容跨批次父 span', () => {
-    const child = { id: 'child', traceId: 'run-child', turn: 0, attempt: 0, type: 'tool_call' as const, status: 'done' as const, ts: 2, parentId: 'parent' };
+    const child = {
+      id: 'child',
+      traceId: 'run-child',
+      turn: 0,
+      attempt: 0,
+      type: 'tool_call' as const,
+      status: 'done' as const,
+      ts: 2,
+      parentId: 'parent',
+    };
     assert.deepEqual(validateTraceSteps([child]), []);
-    assert.deepEqual(validateTraceSteps([child], { requireResolvedParents: true }), [
-      '步骤 child 的 parentId 未解析：parent',
-    ]);
+    assert.deepEqual(validateTraceSteps([child], { requireResolvedParents: true }), ['步骤 child 的 parentId 未解析：parent']);
     const parent = { id: 'parent', traceId: 'run-parent', turn: 0, attempt: 0, type: 'system' as const, status: 'done' as const, ts: 1 };
     assert.deepEqual(validateTraceSteps([parent, child], { requireResolvedParents: true }), []);
   });
@@ -239,11 +314,16 @@ describe('Trace 生命周期', () => {
       child.finish();
       const resolved = trace.resolveParentChain([trace.query('child-run')[0]!]);
       assert.deepEqual(resolved.unresolvedParentIds, []);
-      assert.deepEqual(resolved.steps.map((step) => step.id), [parent.id, child.id]);
+      assert.deepEqual(
+        resolved.steps.map((step) => step.id),
+        [parent.id, child.id],
+      );
       const missing = trace.resolveParentChain([{ ...trace.query('child-run')[0]!, parentId: 'missing-parent' } as TraceStep]);
       assert.deepEqual(missing.unresolvedParentIds, ['missing-parent']);
       trace.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -265,13 +345,18 @@ describe('Trace 归档读取与保留期（C2）', () => {
       const real = [
         { id: 'p1-1', traceId: 'big', turn: 0, type: 'llm_call', name: 'llm', status: 'done', ts: Date.now() },
         { id: 'p1-2', traceId: 'big', turn: 0, type: 'tool_call', name: 'tool', status: 'done', ts: Date.now() },
-      ].map((s) => JSON.stringify(s)).join('\n');
+      ]
+        .map((s) => JSON.stringify(s))
+        .join('\n');
       writeFileSync(file, `${junk}\n${real}\n`, 'utf-8');
 
       const t = new Trace(new EventBus(), dir);
       const steps = t.queryArchive('big');
       assert.equal(steps.length, 2, '尾部两条真步骤应命中（前面的坏行被跳过）');
-      assert.deepEqual(steps.map((s) => s.id), ['p1-1', 'p1-2']);
+      assert.deepEqual(
+        steps.map((s) => s.id),
+        ['p1-1', 'p1-2'],
+      );
       t.dispose();
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -290,7 +375,15 @@ describe('Trace 归档读取与保留期（C2）', () => {
       const indexes: string[] = [];
       let offset = 0;
       for (let i = 0; i < 100_000; i++) {
-        const step = { id: `p-${i}`, traceId: i === 12_345 ? 'old-target' : `run-${i}`, turn: 0, type: 'system', name: 'load', status: 'done', ts: i + 1 };
+        const step = {
+          id: `p-${i}`,
+          traceId: i === 12_345 ? 'old-target' : `run-${i}`,
+          turn: 0,
+          type: 'system',
+          name: 'load',
+          status: 'done',
+          ts: i + 1,
+        };
         const line = JSON.stringify(step);
         lines.push(line);
         if (step.traceId === 'old-target') indexes.push(JSON.stringify({ traceId: step.traceId, offset, length: Buffer.byteLength(line) }));
@@ -364,7 +457,9 @@ describe('Trace 归档读取与保留期（C2）', () => {
       samples.sort((a, b) => a - b);
       assert.ok(samples[4]! < 500, `分页 P95 查询耗时 ${samples[4]!.toFixed(1)}ms`);
       trace.dispose();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('pruneOld 按文件名日期删除超期归档，保留期内不动', () => {
@@ -378,7 +473,9 @@ describe('Trace 归档读取与保留期（C2）', () => {
 
       const t = new Trace(new EventBus(), dir, 14); // 保留 14 天
       t.pruneOld();
-      const left = readdirSync(dir).filter((f) => f.endsWith('.jsonl')).sort();
+      const left = readdirSync(dir)
+        .filter((f) => f.endsWith('.jsonl'))
+        .sort();
       assert.ok(!left.includes(`${day(40)}.jsonl`), '40 天前的应删');
       assert.ok(!left.includes(`${day(20)}.jsonl`), '20 天前的应删');
       assert.ok(left.includes(`${day(10)}.jsonl`), '10 天内的应留');

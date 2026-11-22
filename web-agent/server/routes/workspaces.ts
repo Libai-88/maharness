@@ -62,28 +62,38 @@ function systemDirs(): string[] {
  */
 export function assessWorkspaceRoot(rawPath: string): WorkspaceRootVerdict {
   const abs = resolve(String(rawPath ?? '').trim());
-  const home = (() => { try { return os.homedir(); } catch { return ''; } })();
+  const home = (() => {
+    try {
+      return os.homedir();
+    } catch {
+      return '';
+    }
+  })();
 
   if (isFileSystemRoot(abs)) {
     return {
-      ok: false, rule: 'fs-root',
-      message: `拒绝：不能把文件系统根目录（${abs}）设为工作区。沙箱保护区名单按工作区根算相对路径，`
-        + '根目录一旦成为沙箱根，.env / data/ 等写保护就会整体失效（等于任意写）。'
-        + '请改选具体项目目录。',
+      ok: false,
+      rule: 'fs-root',
+      message:
+        `拒绝：不能把文件系统根目录（${abs}）设为工作区。沙箱保护区名单按工作区根算相对路径，` +
+        '根目录一旦成为沙箱根，.env / data/ 等写保护就会整体失效（等于任意写）。' +
+        '请改选具体项目目录。',
     };
   }
   if (home && canonical(abs) === canonical(home)) {
     return {
-      ok: false, rule: 'home',
-      message: `拒绝：不能把家目录本身（${home}）设为工作区——那会把浏览器配置、SSH 密钥、`
-        + '各类凭据文件全部纳入 Agent 的可读写范围。请在其下选一个具体项目目录。',
+      ok: false,
+      rule: 'home',
+      message:
+        `拒绝：不能把家目录本身（${home}）设为工作区——那会把浏览器配置、SSH 密钥、` +
+        '各类凭据文件全部纳入 Agent 的可读写范围。请在其下选一个具体项目目录。',
     };
   }
   if (home && isStrictAncestor(abs, home)) {
     return {
-      ok: false, rule: 'home-ancestor',
-      message: `拒绝：路径（${abs}）是家目录（${home}）的上层目录，等价于交出全部用户配置目录，`
-        + '不能作为工作区。',
+      ok: false,
+      rule: 'home-ancestor',
+      message: `拒绝：路径（${abs}）是家目录（${home}）的上层目录，等价于交出全部用户配置目录，` + '不能作为工作区。',
     };
   }
   // 系统/程序目录：本身、它的祖先、以及它下面的任何一层都拒（这条链上任一节点都不该是工作区根）
@@ -94,7 +104,8 @@ export function assessWorkspaceRoot(rawPath: string): WorkspaceRootVerdict {
   });
   if (hitSystem) {
     return {
-      ok: false, rule: 'system-dir',
+      ok: false,
+      rule: 'system-dir',
       message: `拒绝：路径（${abs}）落在操作系统/程序目录内或其上层（${hitSystem}），不能作为工作区根。`,
     };
   }
@@ -106,9 +117,10 @@ export function assessWorkspaceRoot(rawPath: string): WorkspaceRootVerdict {
   const last = segs[segs.length - 1] ?? '';
   if (!segs.length || last.length < 2 || abs.length < 4) {
     return {
-      ok: false, rule: 'too-shallow',
-      message: `拒绝：工作区路径过浅或过短（${abs}）——目录名至少 2 个字符，`
-        + '且不能只是盘符根/根目录下的一层单字符名。请选一个具体的项目目录。',
+      ok: false,
+      rule: 'too-shallow',
+      message:
+        `拒绝：工作区路径过浅或过短（${abs}）——目录名至少 2 个字符，` + '且不能只是盘符根/根目录下的一层单字符名。请选一个具体的项目目录。',
     };
   }
   return { ok: true };
@@ -124,11 +136,15 @@ export function registerWorkspaceRoutes(app: Express, deps: RouteDeps): void {
 
   app.get('/api/workspaces', (_req, res) => {
     const current = resolve(kernel.config.get<string>('sandboxRoot', kernel.rootDir));
-    res.json(store.listWorkspaces().map((w) => ({
-      id: w.id, path: w.path, current: resolve(w.path) === current,
-      // A6-2：修复前就可能登记过盘符根/家目录；这里如实标出，前端可禁用切换并提示删除
-      dangerous: !isSafeWorkspaceRoot(w.path),
-    })));
+    res.json(
+      store.listWorkspaces().map((w) => ({
+        id: w.id,
+        path: w.path,
+        current: resolve(w.path) === current,
+        // A6-2：修复前就可能登记过盘符根/家目录；这里如实标出，前端可禁用切换并提示删除
+        dangerous: !isSafeWorkspaceRoot(w.path),
+      })),
+    );
   });
 
   app.post('/api/workspaces', (req, res) => {

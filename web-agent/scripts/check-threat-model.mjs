@@ -13,13 +13,11 @@ if (typeof securityCommand !== 'string') {
   throw new Error('package.json must define test:security');
 }
 
-const securityFiles = [...securityCommand.matchAll(/(?:^|\s)([\w./-]+\.spec\.ts)(?=\s|$)/g)]
-  .map((match) => match[1].replaceAll('\\', '/'));
+const securityFiles = [...securityCommand.matchAll(/(?:^|\s)([\w./-]+\.spec\.ts)(?=\s|$)/g)].map((match) => match[1].replaceAll('\\', '/'));
 if (!securityFiles.length) throw new Error('test:security contains no spec files');
 
 const referencedFiles = new Set(
-  [...model.matchAll(/`((?:web-agent\/)?[\w./-]+(?:\.ts|\.spec\.ts|\.mjs))`/g)]
-    .map((match) => match[1].replaceAll('\\', '/')),
+  [...model.matchAll(/`((?:web-agent\/)?[\w./-]+(?:\.ts|\.spec\.ts|\.mjs))`/g)].map((match) => match[1].replaceAll('\\', '/')),
 );
 const resolvesToFile = (file) => existsSync(join(root, file)) || existsSync(join(root, 'web-agent', file));
 const missingFiles = [...referencedFiles].filter((file) => !resolvesToFile(file));

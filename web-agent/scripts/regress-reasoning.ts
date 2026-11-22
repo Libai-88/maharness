@@ -17,17 +17,30 @@ function resolveApiKey(): string | undefined {
   if (fromEnv) return fromEnv;
   try {
     const env = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8');
-    return env.split('\n').find((l) => l.startsWith('NEWAPI_API_KEY='))?.slice('NEWAPI_API_KEY='.length).trim();
-  } catch { return undefined; }
+    return env
+      .split('\n')
+      .find((l) => l.startsWith('NEWAPI_API_KEY='))
+      ?.slice('NEWAPI_API_KEY='.length)
+      .trim();
+  } catch {
+    return undefined;
+  }
 }
 
 function resolveBaseUrl(): string {
   if (process.env.NEWAPI_BASE_URL) return process.env.NEWAPI_BASE_URL;
   try {
     const env = fs.readFileSync(new URL('../.env', import.meta.url), 'utf8');
-    return env.split('\n').find((l) => l.startsWith('NEWAPI_BASE_URL='))?.split('=')[1].trim()
-      ?? 'https://newapi.qwqtao.one/v1';
-  } catch { return 'https://newapi.qwqtao.one/v1'; }
+    return (
+      env
+        .split('\n')
+        .find((l) => l.startsWith('NEWAPI_BASE_URL='))
+        ?.split('=')[1]
+        .trim() ?? 'https://newapi.qwqtao.one/v1'
+    );
+  } catch {
+    return 'https://newapi.qwqtao.one/v1';
+  }
 }
 
 const apiKey = resolveApiKey();
@@ -41,7 +54,9 @@ const baseUrl = resolveBaseUrl();
 
 // 用例：默认 R1 + Qwen 思考系；REGRESS_MODELS 可覆盖（逗号分隔模型名）
 const models = (process.env.REGRESS_MODELS ?? 'deepseek-r1:free,qwen3.6-plus:free')
-  .split(',').map((m) => m.trim()).filter(Boolean);
+  .split(',')
+  .map((m) => m.trim())
+  .filter(Boolean);
 const QUESTION = '在吗？用一句话回答。';
 
 async function jfetch(path: string, init?: RequestInit): Promise<Response> {
@@ -50,21 +65,28 @@ async function jfetch(path: string, init?: RequestInit): Promise<Response> {
   return r;
 }
 
-interface Verdict { ok: boolean; detail: string }
+interface Verdict {
+  ok: boolean;
+  detail: string;
+}
 
 /** 单次执行：建会话 → 流式对话 → 收集事件 → 落库校验（失败由调用方重试） */
 async function runOnce(model: string): Promise<Verdict> {
-  const p = await (await jfetch('/api/providers', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: `tmp-regress-${model}`, baseUrl, apiKey, model }),
-  })).json() as { id: string };
-  try {
-    const s = await (await jfetch('/api/sessions', {
+  const p = (await (
+    await jfetch('/api/providers', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model }),
-    })).json() as { id: string };
+      body: JSON.stringify({ label: `tmp-regress-${model}`, baseUrl, apiKey, model }),
+    })
+  ).json()) as { id: string };
+  try {
+    const s = (await (
+      await jfetch('/api/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model }),
+      })
+    ).json()) as { id: string };
     try {
       const chat = await fetch(`${BASE}/api/sessions/${s.id}/chat`, {
         method: 'POST',
@@ -96,7 +118,11 @@ async function runOnce(model: string): Promise<Verdict> {
           }
           if (!data.length) continue;
           let d: Record<string, unknown>;
-          try { d = JSON.parse(data.join('\n')); } catch { continue; }
+          try {
+            d = JSON.parse(data.join('\n'));
+          } catch {
+            continue;
+          }
           if (ev === 'reasoning') {
             const t = String(d.text ?? '');
             if (!deltaSeen && t) reasoningBeforeDelta = true;
@@ -113,7 +139,11 @@ async function runOnce(model: string): Promise<Verdict> {
           }
         }
       }
-      const msgs = await (await jfetch(`/api/sessions/${s.id}/messages`)).json() as { role: string; content: string | null; reasoning?: string }[];
+      const msgs = (await (await jfetch(`/api/sessions/${s.id}/messages`)).json()) as {
+        role: string;
+        content: string | null;
+        reasoning?: string;
+      }[];
       const a = [...msgs].reverse().find((m) => m.role === 'assistant');
       const storedContent = a?.content ?? '';
       const storedReasoning = a?.reasoning ?? '';
@@ -168,4 +198,7 @@ async function main() {
   if (failed) process.exit(1);
 }
 
-main().catch((e) => { console.error('回归失败:', e); process.exit(1); });
+main().catch((e) => {
+  console.error('回归失败:', e);
+  process.exit(1);
+});

@@ -8,19 +8,32 @@ const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
 
 async function setup(page: Page, theme = 'light') {
   let cards: TodoCard[] = [
-    { id: 'task-1', title: '检查消息布局', desc: '保留中文与工具输出', status: 'todo', priority: 'high', source: 'human', order: 0, createdAt: 1, updatedAt: 1 },
+    {
+      id: 'task-1',
+      title: '检查消息布局',
+      desc: '保留中文与工具输出',
+      status: 'todo',
+      priority: 'high',
+      source: 'human',
+      order: 0,
+      createdAt: 1,
+      updatedAt: 1,
+    },
     { id: 'task-2', title: '构建前端', status: 'doing', priority: 'medium', source: 'agent', order: 1, createdAt: 1, updatedAt: 1 },
   ];
   const mutations: { method: string; body: Record<string, unknown> }[] = [];
-  await page.addInitScript((value) => { localStorage.setItem('maharness-theme', value); localStorage.setItem('maharness-brand', 'moss'); }, theme);
+  await page.addInitScript((value) => {
+    localStorage.setItem('maharness-theme', value);
+    localStorage.setItem('maharness-brand', 'moss');
+  }, theme);
   await page.route('**/api/plugins/todo/board/cards**', async (route) => {
     const request = route.request();
     const method = request.method();
-    const body = method === 'GET' ? {} : request.postDataJSON() ?? {};
+    const body = method === 'GET' ? {} : (request.postDataJSON() ?? {});
     const id = new URL(request.url()).pathname.split('/').pop();
     if (method !== 'GET') mutations.push({ method, body });
     if (method === 'POST') cards = [...cards, { ...cards[0], ...body, id: 'task-new', source: 'human', status: 'todo' }];
-    if (method === 'PATCH') cards = cards.map((card) => card.id === id ? { ...card, ...body } : card);
+    if (method === 'PATCH') cards = cards.map((card) => (card.id === id ? { ...card, ...body } : card));
     if (method === 'DELETE') cards = cards.filter((card) => card.id !== id);
     return route.fulfill({ json: method === 'GET' ? { cards } : { ok: true } });
   });
@@ -34,8 +47,14 @@ async function setup(page: Page, theme = 'light') {
 async function checkAccessibility(page: Page) {
   await page.addScriptTag({ content: axeSource });
   const violations = await page.evaluate(async () => {
-    const result = await (window as unknown as { axe: { run(): Promise<{ violations: { id: string; impact: string; nodes: { target: string[]; failureSummary: string }[] }[] }> } }).axe.run();
-    return result.violations.filter((item) => item.impact === 'critical' || item.impact === 'serious').map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) }));
+    const result = await (
+      window as unknown as {
+        axe: { run(): Promise<{ violations: { id: string; impact: string; nodes: { target: string[]; failureSummary: string }[] }[] }> };
+      }
+    ).axe.run();
+    return result.violations
+      .filter((item) => item.impact === 'critical' || item.impact === 'serious')
+      .map(({ id, nodes }) => ({ id, nodes: nodes.map(({ target, failureSummary }) => ({ target, failureSummary })) }));
   });
   expect(violations).toEqual([]);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
@@ -56,7 +75,12 @@ test('看板新建、搜索、编辑、清空描述与删除保持 API 契约', 
   await checkAccessibility(page);
   await page.getByRole('button', { name: '保存', exact: true }).click();
   await expect(page.getByRole('dialog')).toHaveCount(0);
-  expect(mutations.find((item) => item.method === 'PATCH')?.body).toEqual({ title: '检查新布局', desc: '', status: 'done', priority: 'high' });
+  expect(mutations.find((item) => item.method === 'PATCH')?.body).toEqual({
+    title: '检查新布局',
+    desc: '',
+    status: 'done',
+    priority: 'high',
+  });
   await page.getByLabel('搜索任务').clear();
   await expect(page.locator('[data-status="done"]')).toContainText('检查新布局');
   await page.getByRole('button', { name: '删除任务 检查新布局', exact: true }).click();

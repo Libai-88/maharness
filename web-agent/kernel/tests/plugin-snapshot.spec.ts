@@ -107,7 +107,29 @@ function setup(): Fixture {
   mkdirSync(coreDir, { recursive: true });
   mkdirSync(join(rootDir, 'shared'), { recursive: true });
   writeFileSync(join(rootDir, 'shared', 'kernel.ts'), 'export const SHARED_ID = Math.random().toString(36).slice(2);\n');
-  writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id: 'tmp-a', name: '快照探针', version: '0.1.0', entry: 'index.ts' }));
+  writeFileSync(
+    join(pluginDir, 'plugin.json'),
+    JSON.stringify({
+      apiVersion: 2,
+      permissions: {
+        capabilities: {
+          tool: ['*'],
+          service: ['*'],
+          context: ['*'],
+          provider: ['*'],
+          persona: ['*'],
+          listener: ['*'],
+          command: ['*'],
+          role: ['*'],
+          api: ['*'],
+        },
+      },
+      id: 'tmp-a',
+      name: '快照探针',
+      version: '0.1.0',
+      entry: 'index.ts',
+    }),
+  );
   writeFileSync(join(pluginDir, 'dep.ts'), 'export const tool = () => "probe";\n');
   writeFileSync(join(pluginDir, 'index.ts'), pluginSource());
   const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir: pluginsDir, corePluginsDir: coreDir });
@@ -119,14 +141,11 @@ function pluginSource(): string {
   return "\nimport { tool } from './dep.ts';\nimport { SHARED_ID } from '../../shared/kernel.ts';\nexport default {\n  id: 'tmp-a', name: '快照探针', version: '0.1.0',\n  onLoad(ctx) {\n    ctx.register({ kind: 'tool', tool: { version: '2.0.0', permissions: [], sideEffect: 'none', outputSchema: {}, name: tool(), description: SHARED_ID,\n      parameters: { type: 'object', properties: {} }, async handler() { return { ok: true }; } } });\n  },\n};\n";
 }
 
-const hasTool = (k: Kernel, name: string): boolean =>
-  k.plugins.capabilities('tool').some((c) => c.tool.name === name);
+const hasTool = (k: Kernel, name: string): boolean => k.plugins.capabilities('tool').some((c) => c.tool.name === name);
 
-const toolDesc = (k: Kernel): string | undefined =>
-  k.plugins.capabilities('tool')[0]?.tool.description;
+const toolDesc = (k: Kernel): string | undefined => k.plugins.capabilities('tool')[0]?.tool.description;
 
-const snapshotCount = (pluginsDir: string): number =>
-  readdirSync(pluginsDir).filter((n) => SNAPSHOT_SUFFIX.test(n)).length;
+const snapshotCount = (pluginsDir: string): number => readdirSync(pluginsDir).filter((n) => SNAPSHOT_SUFFIX.test(n)).length;
 
 describe('plugin-snapshot 集成（loader）', () => {
   test('依赖文件变更触发热重载（此前依赖级改动静默失效）', async () => {
@@ -175,7 +194,10 @@ describe('plugin-snapshot 集成（loader）', () => {
     await f.kernel.plugins.loadAll();
     assert.equal(snapshotCount(f.pluginsDir), 1);
     await f.kernel.plugins.loadAll(); // 第二次全量扫描：快照目录必须被跳过
-    assert.deepEqual(f.kernel.plugins.list().map((p) => p.manifest.id), ['tmp-a']);
+    assert.deepEqual(
+      f.kernel.plugins.list().map((p) => p.manifest.id),
+      ['tmp-a'],
+    );
     await f.kernel.stop();
     f.cleanup();
   });

@@ -38,8 +38,33 @@ function setup(pluginDefs: Record<string, string>): Fixture {
   for (const [id, onLoadBody] of Object.entries(pluginDefs)) {
     const pdir = join(userPluginsDir, id);
     mkdirSync(pdir, { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id, name: id, version: '0.1.0', entry: 'index.ts' }));
-    writeFileSync(join(pdir, 'index.ts'), `export default {\n  id: '${id}',\n  name: '${id}',\n  version: '0.1.0',\n  onLoad: async (ctx) => { ${onLoadBody} },\n}`);
+    writeFileSync(
+      join(pdir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id,
+        name: id,
+        version: '0.1.0',
+        entry: 'index.ts',
+      }),
+    );
+    writeFileSync(
+      join(pdir, 'index.ts'),
+      `export default {\n  id: '${id}',\n  name: '${id}',\n  version: '0.1.0',\n  onLoad: async (ctx) => { ${onLoadBody} },\n}`,
+    );
   }
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
   return {
@@ -47,8 +72,16 @@ function setup(pluginDefs: Record<string, string>): Fixture {
     rootDir,
     userPluginsDir,
     cleanup: () => {
-      try { kernel.trace.flush(); } catch { /* 落盘失败不影响清理 */ }
-      try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* 句柄迟释放时留待系统清理 */ }
+      try {
+        kernel.trace.flush();
+      } catch {
+        /* 落盘失败不影响清理 */
+      }
+      try {
+        rmSync(rootDir, { recursive: true, force: true });
+      } catch {
+        /* 句柄迟释放时留待系统清理 */
+      }
     },
   };
 }
@@ -124,7 +157,8 @@ describe('内核子系统可接管（cache / trace / budget 不再是不可替�
 });
 
 describe('服务绑定仲裁（可接管语义）', () => {
-  test('priority 大者生效，低优先级候选并存但不生效', async (t) => {    const f = setup({
+  test('priority 大者生效，低优先级候选并存但不生效', async (t) => {
+    const f = setup({
       base: `ctx.provide('svc', 'base', 0);`,
       plugin: `ctx.provide('svc', 'plugin', 10);`,
     });
@@ -210,9 +244,30 @@ describe('服务绑定仲裁（可接管语义）', () => {
   test('注册期（lazy/未启动）的 provide 不生效——「绑定只在提供者 ACTIVE 时可见」', async (t) => {
     const f = setup({ lazyHigh: `ctx.provide('svc', 'lazy', 99);` });
     t.after(f.cleanup);
-    writeFileSync(join(f.userPluginsDir, 'lazyHigh', 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'lazyHigh', name: 'lazyHigh', version: '0.1.0', entry: 'index.ts', lazy: true,
-    }));
+    writeFileSync(
+      join(f.userPluginsDir, 'lazyHigh', 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'lazyHigh',
+        name: 'lazyHigh',
+        version: '0.1.0',
+        entry: 'index.ts',
+        lazy: true,
+      }),
+    );
     await f.kernel.plugins.loadAll();
 
     assert.equal(f.kernel.plugins.get('lazyHigh')?.state, 'loaded', 'lazy 插件停在 loaded');
@@ -234,9 +289,30 @@ describe('服务绑定仲裁（可接管语义）', () => {
     });
     t.after(f.cleanup);
     // high 延迟启动：先让 base 生效，再观察「活动提供者被接管」的事件语义
-    writeFileSync(join(f.userPluginsDir, 'high', 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'high', name: 'high', version: '0.1.0', entry: 'index.ts', lazy: true,
-    }));
+    writeFileSync(
+      join(f.userPluginsDir, 'high', 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'high',
+        name: 'high',
+        version: '0.1.0',
+        entry: 'index.ts',
+        lazy: true,
+      }),
+    );
 
     const events: string[] = [];
     f.kernel.bus.on('service.provided', (e) => events.push(`provided:${(e.data as { pluginId: string }).pluginId}`));
@@ -247,7 +323,11 @@ describe('服务绑定仲裁（可接管语义）', () => {
     assert.equal(f.kernel.plugins.resolveService('svc'), 'base', 'base 先生效');
     assert.ok(events.includes('provided:base'), '首个生效绑定发 provided');
     assert.ok(events.includes('declared:low1'), '低优先级并存候选发 declared（不惊动依赖方）');
-    assert.equal(events.some((e) => e.startsWith('overridden')), false, '无活动提供者被顶替时不发 overridden');
+    assert.equal(
+      events.some((e) => e.startsWith('overridden')),
+      false,
+      '无活动提供者被顶替时不发 overridden',
+    );
 
     events.length = 0;
     await f.kernel.plugins.enable('high');
@@ -268,8 +348,7 @@ describe('服务绑定仲裁（可接管语义）', () => {
  * 把 ring（1000）里的真实对话步骤挤掉——可观测性反被观测实现破坏。
  */
 describe('service_call 埋点口径（C1）', () => {
-  const countServiceCalls = (f: Fixture) =>
-    f.kernel.trace.query(undefined, { type: 'service_call', limit: 500 }).length;
+  const countServiceCalls = (f: Fixture) => f.kernel.trace.query(undefined, { type: 'service_call', limit: 500 }).length;
 
   test('默认口径：内核内置子系统被解析时不产生任何步骤', async (t) => {
     const f = setup({});
@@ -300,8 +379,7 @@ describe('service_call 埋点口径（C1）', () => {
     // 再解析 200 次（模拟 UI 每 2s 轮询）：同一条 (key,provider,consumer) 边不得继续堆积
     const before = countServiceCalls(f);
     for (let i = 0; i < 200; i++) void f.kernel.cache;
-    assert.equal(countServiceCalls(f), before,
-      '依赖边只留痕一次（C1：旧实现每次解析都记，轮询即可灌满 ring）');
+    assert.equal(countServiceCalls(f), before, '依赖边只留痕一次（C1：旧实现每次解析都记，轮询即可灌满 ring）');
   });
 
   test('service_call 事件拥有独立 traceId 并通过完整 Trace schema', async (t) => {
@@ -328,8 +406,11 @@ describe('service_call 埋点口径（C1）', () => {
     void f.kernel.cache;
     const alwaysSteps = f.kernel.trace.query(undefined, { type: 'service_call', limit: 50 });
     assert.ok(alwaysSteps.length >= 2, 'always：内置提供者也埋点（调试用）');
-    assert.equal(new Set(alwaysSteps.map((step) => step.traceId)).size, alwaysSteps.length,
-      'always 模式下每条 service_call 都必须拥有独立 traceId');
+    assert.equal(
+      new Set(alwaysSteps.map((step) => step.traceId)).size,
+      alwaysSteps.length,
+      'always 模式下每条 service_call 都必须拥有独立 traceId',
+    );
     assert.deepEqual(validateTraceSteps(alwaysSteps, { requireResolvedParents: true }), []);
 
     f.kernel.config.set('trace.serviceCall', 'off');
@@ -375,7 +456,6 @@ describe('接管对插件侧 ctx.* 同样生效（R3）', () => {
     const probe = f.kernel.plugins.resolveService('service:probe2') as { see: () => string };
     assert.equal(probe.see(), 'plugin-cache');
     await f.kernel.plugins.disable('r3Rollback');
-    assert.equal((f.kernel.cache as unknown as { l1Get?: unknown }).l1Get !== undefined, true,
-      '回退后仍是可用的内核内置 Cache');
+    assert.equal((f.kernel.cache as unknown as { l1Get?: unknown }).l1Get !== undefined, true, '回退后仍是可用的内核内置 Cache');
   });
 });

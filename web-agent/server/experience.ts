@@ -7,25 +7,25 @@ import type { Store } from './db';
 import { OrganizationService } from './services/organization/service';
 import type { EvaluationVersion } from './organization-store';
 import { ExperienceError } from './experience-error';
-import {
-  type AIUserReview,
-  type AIUserReviewEstimate,
-  type AIUserReviewRequest,
-  type AIUserReviewSummary,
-  type EvidenceRequest,
-  type EvidenceSlice,
-  type ExperienceFinding,
-  type ExperienceRegressionCase,
-  type FactLedger,
-  type FindingSeverity,
-  type FindingStatus,
-  type ReviewAudit,
-  type ReviewBudget,
-  type ReviewDimensionScore,
-  type ReviewEvidenceRef,
-  type ReviewObservation,
-  type ReviewPath,
-  type ReviewSuggestion,
+import type {
+  AIUserReview,
+  AIUserReviewEstimate,
+  AIUserReviewRequest,
+  AIUserReviewSummary,
+  EvidenceRequest,
+  EvidenceSlice,
+  ExperienceFinding,
+  ExperienceRegressionCase,
+  FactLedger,
+  FindingSeverity,
+  FindingStatus,
+  ReviewAudit,
+  ReviewBudget,
+  ReviewDimensionScore,
+  ReviewEvidenceRef,
+  ReviewObservation,
+  ReviewPath,
+  ReviewSuggestion,
 } from './experience-store';
 
 import {
@@ -64,8 +64,16 @@ const FOCUSED_TOTAL_LIMIT = 9_200;
 const EVIDENCE_SLICE_TOKEN_LIMIT = 600;
 
 const SUGGESTION_CATEGORIES = new Set<ReviewSuggestion['category']>([
-  'capability', 'tool-contract', 'result-feedback', 'state', 'recovery',
-  'context', 'authorization', 'performance', 'artifact', 'organization',
+  'capability',
+  'tool-contract',
+  'result-feedback',
+  'state',
+  'recovery',
+  'context',
+  'authorization',
+  'performance',
+  'artifact',
+  'organization',
 ]);
 
 const FINDING_TRANSITIONS: Record<FindingStatus, readonly FindingStatus[]> = {
@@ -119,7 +127,6 @@ interface StructuredReview {
 
 type EvidencePlan = EvidenceRequest;
 
-
 export class ExperienceService {
   private readonly active = new Map<string, { controller: AbortController; promise: Promise<void> }>();
   private readonly evidenceCache = new Map<string, EvidenceSlice>();
@@ -161,7 +168,7 @@ export class ExperienceService {
     const selection = this.resolve(request, tenantId, true, false);
     const rubric = rubricFromPolicy(selection.evaluation.record);
     const requestFingerprint = stableHash({
-      runIds: selection.runs.map(run => run.id),
+      runIds: selection.runs.map((run) => run.id),
       providerId: selection.provider.id,
       model: selection.model,
       rubricVersion: rubric.version,
@@ -188,7 +195,7 @@ export class ExperienceService {
       ...(key ? { requestKey: key } : {}),
       requestFingerprint,
       scope: selection.scope,
-      sourceRunIds: selection.runs.map(run => run.id),
+      sourceRunIds: selection.runs.map((run) => run.id),
       status: 'queued',
       path: selection.path,
       providerId: selection.provider.id,
@@ -252,7 +259,8 @@ export class ExperienceService {
 
   deepen(id: string, tenantId: string): AIUserReview {
     const review = this.review(id, tenantId);
-    if (review.status !== 'insufficient_evidence') throw new ExperienceError(409, 'REVIEW_NOT_DEEPENABLE', '只有证据不足的复盘可以继续深入分析');
+    if (review.status !== 'insufficient_evidence')
+      throw new ExperienceError(409, 'REVIEW_NOT_DEEPENABLE', '只有证据不足的复盘可以继续深入分析');
     const focused = review.evaluationPolicy?.review?.focused;
     review.status = 'queued';
     review.path = 'focused';
@@ -272,27 +280,35 @@ export class ExperienceService {
 
   async audit(id: string, tenantId: string, input: { providerId?: string; model?: string } = {}): Promise<ReviewAudit> {
     const review = this.review(id, tenantId);
-    if (!['completed', 'insufficient_evidence'].includes(review.status)) throw new ExperienceError(409, 'REVIEW_NOT_AUDITABLE', '完成复盘后才能独立复核');
+    if (!['completed', 'insufficient_evidence'].includes(review.status))
+      throw new ExperienceError(409, 'REVIEW_NOT_AUDITABLE', '完成复盘后才能独立复核');
     const providers = this.deps.providers();
     const provider = providerFor(providers, input.providerId ?? review.providerId, input.model ?? review.model);
     if (!provider || provider.id !== (input.providerId ?? review.providerId)) {
       throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复核模型不可用；请显式选择替代模型');
     }
     const model = input.model ?? review.model;
-    const evidenceIds = new Set(review.evidenceIndex.map(item => item.id));
+    const evidenceIds = new Set(review.evidenceIndex.map((item) => item.id));
     const messages: LLMMessage[] = [
       { role: 'system', content: '你是独立复核者。核对 AI 用户复盘是否被事实账本和证据支持，不替它改写事实。只输出严格 JSON。' },
-      { role: 'user', content: JSON.stringify({
-        facts: review.facts,
-        review: {
-          verdict: review.verdict, dimensions: review.dimensions, observations: review.observations,
-          suggestions: review.suggestions, reuseIntent: review.reuseIntent, confidence: review.confidence,
-          evidenceGaps: review.evidenceGaps,
-        },
-        evidence: review.evidence.map(item => ({ ref: item.ref, text: trimToTokens(item.text, 400, provider.tokenizer) })),
-        validEvidenceRefs: [...evidenceIds],
-        output: { verdict: 'agree|disagree|inconclusive', summary: 'string', correctedEvidenceRefs: ['valid refs'], confidence: '0..1' },
-      }) },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          facts: review.facts,
+          review: {
+            verdict: review.verdict,
+            dimensions: review.dimensions,
+            observations: review.observations,
+            suggestions: review.suggestions,
+            reuseIntent: review.reuseIntent,
+            confidence: review.confidence,
+            evidenceGaps: review.evidenceGaps,
+          },
+          evidence: review.evidence.map((item) => ({ ref: item.ref, text: trimToTokens(item.text, 400, provider.tokenizer) })),
+          validEvidenceRefs: [...evidenceIds],
+          output: { verdict: 'agree|disagree|inconclusive', summary: 'string', correctedEvidenceRefs: ['valid refs'], confidence: '0..1' },
+        }),
+      },
     ];
     const promptTokens = countMessageTokens(messages, provider.tokenizer);
     if (promptTokens > 2_000) throw new ExperienceError(422, 'AUDIT_INPUT_TOO_LARGE', '复核输入超过预算，请缩小复盘证据');
@@ -309,7 +325,7 @@ export class ExperienceService {
       model,
       verdict,
       summary: typeof parsed.summary === 'string' ? parsed.summary.slice(0, 2_000) : '复核未提供摘要',
-      correctedEvidenceRefs: uniqueStrings(parsed.correctedEvidenceRefs).filter(ref => evidenceIds.has(ref)),
+      correctedEvidenceRefs: uniqueStrings(parsed.correctedEvidenceRefs).filter((ref) => evidenceIds.has(ref)),
       confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
@@ -323,23 +339,42 @@ export class ExperienceService {
 
   calibrate(id: string, tenantId: string, input: { verdict?: string; summary?: string; dimensions?: unknown }): ReviewAudit {
     const review = this.review(id, tenantId);
-    if (!['completed', 'insufficient_evidence'].includes(review.status)) throw new ExperienceError(409, 'REVIEW_NOT_CALIBRATABLE', '完成复盘后才能人工校准');
+    if (!['completed', 'insufficient_evidence'].includes(review.status))
+      throw new ExperienceError(409, 'REVIEW_NOT_CALIBRATABLE', '完成复盘后才能人工校准');
     const summary = typeof input.summary === 'string' ? input.summary.trim() : '';
     if (!summary || summary.length > 2_000) throw new ExperienceError(400, 'INVALID_CALIBRATION', '人工校准摘要不能为空且不能超过 2000 字');
     const verdict = input.verdict === 'agree' || input.verdict === 'disagree' ? input.verdict : 'inconclusive';
     const rubric = rubricFromPolicy(review.evaluationPolicy);
     const dimensions = Array.isArray(input.dimensions)
-      ? input.dimensions.flatMap(item => {
-          if (!isRecord(item) || typeof item.id !== 'string' || typeof item.reason !== 'string') return [];
-          const score = item.score === null ? null : Number(item.score);
-          if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5)) return [];
-          return [{ id: item.id, score: score as ReviewDimensionScore['score'], reason: item.reason.slice(0, 1_000), evidenceRefs: uniqueStrings(item.evidenceRefs).filter(ref => review.evidenceIndex.some(evidence => evidence.id === ref)) }];
-        }).slice(0, rubric.dimensions.length)
+      ? input.dimensions
+          .flatMap((item) => {
+            if (!isRecord(item) || typeof item.id !== 'string' || typeof item.reason !== 'string') return [];
+            const score = item.score === null ? null : Number(item.score);
+            if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5)) return [];
+            return [
+              {
+                id: item.id,
+                score: score as ReviewDimensionScore['score'],
+                reason: item.reason.slice(0, 1_000),
+                evidenceRefs: uniqueStrings(item.evidenceRefs).filter((ref) =>
+                  review.evidenceIndex.some((evidence) => evidence.id === ref),
+                ),
+              },
+            ];
+          })
+          .slice(0, rubric.dimensions.length)
       : undefined;
     const audit: ReviewAudit = {
-      id: randomUUID(), tenantId, reviewId: id, source: 'human', kind: 'calibration',
-      providerId: 'human', model: 'human', verdict, summary,
-      correctedEvidenceRefs: review.evidence.map(item => item.ref).slice(0, 10),
+      id: randomUUID(),
+      tenantId,
+      reviewId: id,
+      source: 'human',
+      kind: 'calibration',
+      providerId: 'human',
+      model: 'human',
+      verdict,
+      summary,
+      correctedEvidenceRefs: review.evidence.map((item) => item.ref).slice(0, 10),
       ...(dimensions ? { dimensions } : {}),
       createdAt: this.now(),
     };
@@ -355,8 +390,9 @@ export class ExperienceService {
 
   adoptSuggestion(reviewId: string, suggestionId: string, tenantId: string): ExperienceFinding {
     const review = this.review(reviewId, tenantId);
-    if (review.status !== 'completed' && review.status !== 'insufficient_evidence') throw new ExperienceError(409, 'REVIEW_NOT_ADOPTABLE', '完成复盘后才能采纳建议');
-    const suggestion = review.suggestions.find(item => item.id === suggestionId);
+    if (review.status !== 'completed' && review.status !== 'insufficient_evidence')
+      throw new ExperienceError(409, 'REVIEW_NOT_ADOPTABLE', '完成复盘后才能采纳建议');
+    const suggestion = review.suggestions.find((item) => item.id === suggestionId);
     if (!suggestion) throw new ExperienceError(404, 'SUGGESTION_NOT_FOUND', '复盘建议不存在');
     if (suggestion.adoptedFindingId) {
       const existing = this.deps.store.experience.finding(suggestion.adoptedFindingId, tenantId);
@@ -365,37 +401,50 @@ export class ExperienceService {
     const fingerprint = stableHash({
       category: suggestion.category,
       title: suggestion.title.trim().toLowerCase(),
-      evidenceKinds: suggestion.evidenceRefs.map(ref => {
-        const parts = ref.split(':');
-        const nestedKind = parts.at(-2);
-        return nestedKind && ['event', 'tool', 'artifact', 'model'].includes(nestedKind)
-          ? nestedKind
-          : parts.at(-1) ?? ref;
-      }).sort(),
+      evidenceKinds: suggestion.evidenceRefs
+        .map((ref) => {
+          const parts = ref.split(':');
+          const nestedKind = parts.at(-2);
+          return nestedKind && ['event', 'tool', 'artifact', 'model'].includes(nestedKind) ? nestedKind : (parts.at(-1) ?? ref);
+        })
+        .sort(),
     });
     const prior = this.deps.store.experience.findingByFingerprint(tenantId, fingerprint);
     const now = this.now();
-    const priorReviewIds = prior ? prior.reviewIds ?? [prior.reviewId] : [];
-    const finding: ExperienceFinding = prior ? {
-      ...prior,
-      reviewIds: [...new Set([...priorReviewIds, reviewId])],
-      sourceRunIds: [...new Set([...prior.sourceRunIds, ...review.sourceRunIds])],
-      evidenceRefs: [...new Set([...prior.evidenceRefs, ...suggestion.evidenceRefs])]
-        .filter(ref => review.evidenceIndex.some(item => item.id === ref) || prior.evidenceRefs.includes(ref))
-        .slice(0, 12),
-      severity: severityRank(this.suggestionSeverity(review, suggestion)) < severityRank(prior.severity)
-        ? this.suggestionSeverity(review, suggestion)
-        : prior.severity,
-      occurrences: (prior.occurrences ?? priorReviewIds.length) + (priorReviewIds.includes(reviewId) ? 0 : 1),
-      updatedAt: now,
-    } : {
-      id: randomUUID(), tenantId, reviewId, suggestionId, fingerprint,
-      reviewIds: [reviewId],
-      title: suggestion.title, detail: suggestion.detail, category: suggestion.category,
-      severity: this.suggestionSeverity(review, suggestion), status: 'new',
-      evidenceRefs: suggestion.evidenceRefs.filter(ref => review.evidenceIndex.some(item => item.id === ref)).slice(0, 12),
-      sourceRunIds: review.sourceRunIds, occurrences: 1, createdAt: now, updatedAt: now,
-    };
+    const priorReviewIds = prior ? (prior.reviewIds ?? [prior.reviewId]) : [];
+    const finding: ExperienceFinding = prior
+      ? {
+          ...prior,
+          reviewIds: [...new Set([...priorReviewIds, reviewId])],
+          sourceRunIds: [...new Set([...prior.sourceRunIds, ...review.sourceRunIds])],
+          evidenceRefs: [...new Set([...prior.evidenceRefs, ...suggestion.evidenceRefs])]
+            .filter((ref) => review.evidenceIndex.some((item) => item.id === ref) || prior.evidenceRefs.includes(ref))
+            .slice(0, 12),
+          severity:
+            severityRank(this.suggestionSeverity(review, suggestion)) < severityRank(prior.severity)
+              ? this.suggestionSeverity(review, suggestion)
+              : prior.severity,
+          occurrences: (prior.occurrences ?? priorReviewIds.length) + (priorReviewIds.includes(reviewId) ? 0 : 1),
+          updatedAt: now,
+        }
+      : {
+          id: randomUUID(),
+          tenantId,
+          reviewId,
+          suggestionId,
+          fingerprint,
+          reviewIds: [reviewId],
+          title: suggestion.title,
+          detail: suggestion.detail,
+          category: suggestion.category,
+          severity: this.suggestionSeverity(review, suggestion),
+          status: 'new',
+          evidenceRefs: suggestion.evidenceRefs.filter((ref) => review.evidenceIndex.some((item) => item.id === ref)).slice(0, 12),
+          sourceRunIds: review.sourceRunIds,
+          occurrences: 1,
+          createdAt: now,
+          updatedAt: now,
+        };
     this.deps.store.experience.transaction(() => {
       this.deps.store.experience.putFinding(finding);
       suggestion.adoptedFindingId = finding.id;
@@ -407,7 +456,9 @@ export class ExperienceService {
   }
 
   findings(tenantId: string, status?: FindingStatus, limit = 100): ExperienceFinding[] {
-    return status ? this.deps.store.experience.findingsByStatus(tenantId, status, limit) : this.deps.store.experience.findings(tenantId, undefined, limit);
+    return status
+      ? this.deps.store.experience.findingsByStatus(tenantId, status, limit)
+      : this.deps.store.experience.findings(tenantId, undefined, limit);
   }
 
   updateFinding(id: string, tenantId: string, status: FindingStatus, statusNote?: string): ExperienceFinding {
@@ -417,7 +468,7 @@ export class ExperienceService {
       throw new ExperienceError(409, 'INVALID_FINDING_TRANSITION', `问题不能从 ${finding.status} 直接变为 ${status}`);
     }
     if (status === 'closed') {
-      const regressionPassed = this.deps.store.experience.regressions(id, tenantId).some(item => item.status === 'passed');
+      const regressionPassed = this.deps.store.experience.regressions(id, tenantId).some((item) => item.status === 'passed');
       if (!regressionPassed && !statusNote?.trim()) {
         throw new ExperienceError(409, 'FINDING_CLOSURE_EVIDENCE_REQUIRED', '关闭体验问题需要已通过的回归结果或明确的人工例外说明');
       }
@@ -433,15 +484,22 @@ export class ExperienceService {
   reproduceFinding(id: string, tenantId: string, expected?: string): { finding: ExperienceFinding; regression: ExperienceRegressionCase } {
     const finding = this.deps.store.experience.finding(id, tenantId);
     if (!finding) throw new ExperienceError(404, 'FINDING_NOT_FOUND', '体验问题不存在');
-    if (finding.status !== 'triaged' && finding.status !== 'new') throw new ExperienceError(409, 'FINDING_NOT_REPRODUCIBLE', '只有新问题或已分诊问题可以建立复现案例');
+    if (finding.status !== 'triaged' && finding.status !== 'new')
+      throw new ExperienceError(409, 'FINDING_NOT_REPRODUCIBLE', '只有新问题或已分诊问题可以建立复现案例');
     const source = this.deps.store.runs.get(finding.sourceRunIds[0] ?? '', tenantId);
     if (!source) throw new ExperienceError(404, 'SOURCE_RUN_NOT_FOUND', '问题来源运行不存在');
     const now = this.now();
     const regression = {
-      id: randomUUID(), tenantId, findingId: id, sourceRunIds: finding.sourceRunIds,
+      id: randomUUID(),
+      tenantId,
+      findingId: id,
+      sourceRunIds: finding.sourceRunIds,
       objective: `隔离重放：${finding.title}`,
       expected: expected?.trim().slice(0, 4_000) || `复现“${finding.title}”，修复后不再出现该问题。`,
-      evidenceRefs: finding.evidenceRefs, status: 'ready' as const, createdAt: now, updatedAt: now,
+      evidenceRefs: finding.evidenceRefs,
+      status: 'ready' as const,
+      createdAt: now,
+      updatedAt: now,
     };
     finding.status = 'reproduced';
     finding.regressionId = regression.id;
@@ -473,16 +531,17 @@ export class ExperienceService {
       throw new ExperienceError(409, 'REGRESSION_PASS_CONFLICTS_WITH_VERIFICATION', '运行验收未通过，不能登记为回归通过');
     }
     const summary = input.summary.trim();
-    if (!summary || summary.length > 2_000) throw new ExperienceError(400, 'INVALID_REGRESSION_RESULT', '回归结论不能为空且不能超过 2000 字');
+    if (!summary || summary.length > 2_000)
+      throw new ExperienceError(400, 'INVALID_REGRESSION_RESULT', '回归结论不能为空且不能超过 2000 字');
     const regression = finding.regressionId
-      ? this.deps.store.experience.regressions(finding.id, tenantId).find(item => item.id === finding.regressionId)
+      ? this.deps.store.experience.regressions(finding.id, tenantId).find((item) => item.id === finding.regressionId)
       : this.deps.store.experience.regressions(finding.id, tenantId)[0];
     if (!regression) throw new ExperienceError(409, 'REGRESSION_NOT_FOUND', '体验问题没有可验证的回归案例');
     const evidenceRefs = [
       `run:${run.id}:goal`,
       ...(run.answer ? [`run:${run.id}:answer`] : []),
       ...(run.verification ? [`run:${run.id}:verification`] : []),
-      ...this.deps.store.runs.artifacts(run.id).map(item => `run:${run.id}:artifact:${item.id}`),
+      ...this.deps.store.runs.artifacts(run.id).map((item) => `run:${run.id}:artifact:${item.id}`),
     ].slice(0, 12);
     const now = this.now();
     regression.status = input.outcome;
@@ -525,12 +584,12 @@ export class ExperienceService {
     const reviewIds = finding.reviewIds ?? [finding.reviewId];
     const occurrences = finding.occurrences ?? reviewIds.length;
     const hasRepeatedEvidence = reviewIds.length >= 2 || occurrences >= 2;
-    const hasCriticalRegression = (finding.severity === 'P0' || finding.severity === 'P1')
-      && regressions.some(item => item.status === 'passed');
+    const hasCriticalRegression =
+      (finding.severity === 'P0' || finding.severity === 'P1') && regressions.some((item) => item.status === 'passed');
     if (!hasRepeatedEvidence && !hasCriticalRegression) {
       throw new ExperienceError(409, 'EVOLUTION_EVIDENCE_REQUIRED', '提交自进化需要至少两次复盘证据，或 P0/P1 问题的通过回归');
     }
-    const regression = regressions.find(item => item.status === 'passed');
+    const regression = regressions.find((item) => item.status === 'passed');
     const proposal = submit({
       name: `experience-${finding.category}-${finding.fingerprint.slice(0, 10)}`,
       description: `避免体验问题：${finding.title}`,
@@ -553,14 +612,14 @@ export class ExperienceService {
   summary(tenantId: string): AIUserReviewSummary {
     const reviews = this.deps.store.experience.listReviews(tenantId, 100);
     const findings = this.deps.store.experience.findings(tenantId, undefined, 500);
-    const scores = reviews.map(scoreOf).flatMap(value => value === null ? [] : [value]);
+    const scores = reviews.map(scoreOf).flatMap((value) => (value === null ? [] : [value]));
     return {
-      undecidedFindings: findings.filter(item => item.status === 'new' || item.status === 'triaged').length,
-      openFindings: findings.filter(item => !['closed', 'wont_fix'].includes(item.status)).length,
+      undecidedFindings: findings.filter((item) => item.status === 'new' || item.status === 'triaged').length,
+      openFindings: findings.filter((item) => !['closed', 'wont_fix'].includes(item.status)).length,
       adoptedFindings: findings.length,
       reviewCount: reviews.length,
-      negativeReviews: reviews.filter(item => item.verdict === 'negative').length,
-      averageScore: scores.length ? Math.round(scores.reduce((sum, value) => sum + value, 0) / scores.length * 10) / 10 : null,
+      negativeReviews: reviews.filter((item) => item.verdict === 'negative').length,
+      averageScore: scores.length ? Math.round((scores.reduce((sum, value) => sum + value, 0) / scores.length) * 10) / 10 : null,
       reviewCostUsd: reviews.reduce((sum, item) => sum + item.budget.costUsd, 0),
       recentReviews: reviews.slice(0, 6),
     };
@@ -574,17 +633,17 @@ export class ExperienceService {
     if (!Array.isArray(request.runIds) || request.runIds.length < 1 || request.runIds.length > 10) {
       throw new ExperienceError(400, 'INVALID_REVIEW_SCOPE', '复盘必须选择 1 至 10 个运行');
     }
-    const runIds = [...new Set(request.runIds.filter(item => typeof item === 'string' && item))];
+    const runIds = [...new Set(request.runIds.filter((item) => typeof item === 'string' && item))];
     if (runIds.length !== request.runIds.length) throw new ExperienceError(400, 'INVALID_REVIEW_SCOPE', '复盘运行不能重复');
-    const runs = runIds.map(id => this.deps.store.runs.get(id, tenantId));
-    if (runs.some(run => !run)) throw new ExperienceError(404, 'RUN_NOT_FOUND', '所选运行不存在或不属于当前租户');
+    const runs = runIds.map((id) => this.deps.store.runs.get(id, tenantId));
+    if (runs.some((run) => !run)) throw new ExperienceError(404, 'RUN_NOT_FOUND', '所选运行不存在或不属于当前租户');
     const selected = runs as RunRecord[];
-    if (selected.some(run => !terminal(run))) throw new ExperienceError(409, 'RUN_ACTIVE', '只能复盘已结束的运行');
+    if (selected.some((run) => !terminal(run))) throw new ExperienceError(409, 'RUN_ACTIVE', '只能复盘已结束的运行');
     const first = selected[0]!;
-    if (selected.some(run => run.providerId !== first.providerId || run.model !== first.model)) {
+    if (selected.some((run) => run.providerId !== first.providerId || run.model !== first.model)) {
       throw new ExperienceError(400, 'MIXED_MODELS', '多运行复盘必须使用同一原始模型');
     }
-    if (selected.some(run => run.authorization.workspace !== first.authorization.workspace)) {
+    if (selected.some((run) => run.authorization.workspace !== first.authorization.workspace)) {
       throw new ExperienceError(400, 'MIXED_WORKSPACES', '多运行复盘必须属于同一工作区');
     }
     const providers = this.deps.providers();
@@ -603,10 +662,17 @@ export class ExperienceService {
     if (!!requestedProvider !== !!requestedModel) throw new ExperienceError(400, 'INVALID_MODEL', '复盘模型必须同时提供供应商和模型名称');
     const providerId = requestedProvider || first.providerId;
     const model = requestedModel || first.model;
-    const provider = providerFor(providers, providerId, model) ?? (allowUnavailable ? {
-      id: providerId, label: 'Unavailable', defaultModel: model, priceSource: 'unknown' as const,
-      async *chat() {},
-    } satisfies ProviderDef : undefined);
+    const provider =
+      providerFor(providers, providerId, model) ??
+      (allowUnavailable
+        ? ({
+            id: providerId,
+            label: 'Unavailable',
+            defaultModel: model,
+            priceSource: 'unknown' as const,
+            async *chat() {},
+          } satisfies ProviderDef)
+        : undefined);
     if (!provider) {
       if (requireModel || requestedProvider) throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
       throw new ExperienceError(409, 'MODEL_UNAVAILABLE', '复盘模型当前不可用');
@@ -649,16 +715,21 @@ export class ExperienceService {
       review.updatedAt = this.now();
       this.deps.store.experience.putReview(review, review.requestKey);
       this.emitReview(review);
-      const validRefs = new Set(review.evidenceIndex.map(item => item.id));
+      const validRefs = new Set(review.evidenceIndex.map((item) => item.id));
       let selectedEvidence = [...review.evidence];
       let structured: StructuredReview;
       if (review.path === 'fast') {
-        selectedEvidence = this.pickEvidence(review, review.facts.anomalies.flatMap(item => item.evidenceRefs), 4, 1_200);
+        selectedEvidence = this.pickEvidence(
+          review,
+          review.facts.anomalies.flatMap((item) => item.evidenceRefs),
+          4,
+          1_200,
+        );
         structured = await this.fastReview(review, provider, model, selectedEvidence, signal);
       } else {
         const plan = await this.focusedPlan(review, provider, model, signal);
         if (signal.aborted) throw new ExperienceError(499, 'REVIEW_CANCELLED', '复盘已取消');
-        const requested = plan.evidenceRefs.filter(ref => validRefs.has(ref));
+        const requested = plan.evidenceRefs.filter((ref) => validRefs.has(ref));
         if (plan.evidenceRefs.length > 0 && requested.length === 0) {
           review.status = 'insufficient_evidence';
           review.verdict = 'insufficient_evidence';
@@ -708,7 +779,13 @@ export class ExperienceService {
     }
   }
 
-  private async fastReview(review: AIUserReview, provider: ProviderDef, model: string, evidence: EvidenceSlice[], signal: AbortSignal): Promise<StructuredReview> {
+  private async fastReview(
+    review: AIUserReview,
+    provider: ProviderDef,
+    model: string,
+    evidence: EvidenceSlice[],
+    signal: AbortSignal,
+  ): Promise<StructuredReview> {
     const messages = this.reviewMessages(review, evidence, undefined, false);
     const available = this.remainingInput(review);
     if (countMessageTokens(messages, provider.tokenizer) > available) throw this.insufficient('快速复盘输入超过预算');
@@ -721,14 +798,17 @@ export class ExperienceService {
     const rubric = rubricFromPolicy(review.evaluationPolicy);
     const messages: LLMMessage[] = [
       { role: 'system', content: rubric.systemPrompt },
-      { role: 'user', content: JSON.stringify({
-        mode: 'evidence_plan',
-        facts: review.facts,
-        evidenceIndex: review.evidenceIndex,
-        request: '只判断哪些维度需要验证，以及最多 6 个能改变评分或严重度的证据引用。不要评分。',
-        limits: { refs: 6, hypotheses: 4, gaps: 3, text: '每项不超过 30 个汉字' },
-        output: { evidenceRefs: ['<evidence id>'], evidenceGaps: ['string'], hypotheses: ['string'] },
-      }) },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          mode: 'evidence_plan',
+          facts: review.facts,
+          evidenceIndex: review.evidenceIndex,
+          request: '只判断哪些维度需要验证，以及最多 6 个能改变评分或严重度的证据引用。不要评分。',
+          limits: { refs: 6, hypotheses: 4, gaps: 3, text: '每项不超过 30 个汉字' },
+          output: { evidenceRefs: ['<evidence id>'], evidenceGaps: ['string'], hypotheses: ['string'] },
+        }),
+      },
     ];
     const allocation = review.scope === 'multi_run' ? 3_000 : 2_500;
     const available = Math.min(this.remainingInput(review, allocation), allocation);
@@ -743,14 +823,26 @@ export class ExperienceService {
     };
   }
 
-  private async focusedReview(review: AIUserReview, provider: ProviderDef, model: string, plan: EvidencePlan, evidence: EvidenceSlice[], signal: AbortSignal, _deepen: boolean): Promise<StructuredReview> {
+  private async focusedReview(
+    review: AIUserReview,
+    provider: ProviderDef,
+    model: string,
+    plan: EvidencePlan,
+    evidence: EvidenceSlice[],
+    signal: AbortSignal,
+    _deepen: boolean,
+  ): Promise<StructuredReview> {
     const messages = this.reviewMessages(review, evidence, plan.hypotheses, true);
     const available = this.remainingInput(review);
     if (countMessageTokens(messages, provider.tokenizer) > available) {
       const baseTokens = countMessageTokens(this.reviewMessages(review, [], plan.hypotheses, true), provider.tokenizer);
       const remainingEvidence = Math.max(0, available - baseTokens);
-      const shrunk = evidence.map(item => {
-        const text = trimToTokens(item.text, Math.max(80, Math.floor(Math.max(0, remainingEvidence) / Math.max(1, evidence.length))), provider.tokenizer);
+      const shrunk = evidence.map((item) => {
+        const text = trimToTokens(
+          item.text,
+          Math.max(80, Math.floor(Math.max(0, remainingEvidence) / Math.max(1, evidence.length))),
+          provider.tokenizer,
+        );
         return { ...item, text, tokens: provider.tokenizer?.countText ? provider.tokenizer.countText(text) : estimateTokens(text) };
       });
       const retry = this.reviewMessages(review, shrunk, plan.hypotheses, true);
@@ -760,79 +852,128 @@ export class ExperienceService {
     return this.runFocusedFinal(review, provider, model, messages, signal);
   }
 
-  private async runFocusedFinal(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[], signal: AbortSignal): Promise<StructuredReview> {
+  private async runFocusedFinal(
+    review: AIUserReview,
+    provider: ProviderDef,
+    model: string,
+    messages: LLMMessage[],
+    signal: AbortSignal,
+  ): Promise<StructuredReview> {
     const result = await this.invokeReview(review, provider, model, messages, signal);
     this.account(review, result);
     return this.parseStructured(result.text, review, false);
   }
 
-  private reviewMessages(review: AIUserReview, evidence: EvidenceSlice[], hypotheses: string[] | undefined, focused: boolean): LLMMessage[] {
+  private reviewMessages(
+    review: AIUserReview,
+    evidence: EvidenceSlice[],
+    hypotheses: string[] | undefined,
+    focused: boolean,
+  ): LLMMessage[] {
     const rubric = rubricFromPolicy(review.evaluationPolicy);
     return [
       { role: 'system', content: rubric.systemPrompt },
-      { role: 'user', content: JSON.stringify({
-        kind: 'review_input',
-        facts: review.facts,
-        evidence,
-        ...(hypotheses?.length ? { hypotheses } : {}),
-        rubric: rubric.dimensions,
-        ...(focused ? { priorStep: '已根据异常和冲突主动取证；现在完成评分。' } : { priorStep: '事实清楚时直接复盘。' }),
-        outputLimits: `scores 恰好 ${rubric.dimensions.length} 项；observations 最多 4 项；suggestions 最多 3 项；不输出额外键或解释。`,
-        output: {
-          scores: rubric.dimensions.map(id => ({ id, score: '1..5 或 null', reason: 'string', evidenceRefs: ['valid evidence id'] })),
-          observations: [{ kind: 'positive|friction', summary: 'string', cost: 'optional', evidenceRefs: ['valid evidence id'] }],
-          suggestions: [{ title: 'string', detail: 'string', category: [...SUGGESTION_CATEGORIES], impact: 'high|medium|low', confidence: '0..1', evidenceRefs: ['valid evidence id'] }],
-          reuseIntent: '1..5 或 null',
-          confidence: '0..1',
-          evidenceGaps: ['string'],
-        },
-      }) },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          kind: 'review_input',
+          facts: review.facts,
+          evidence,
+          ...(hypotheses?.length ? { hypotheses } : {}),
+          rubric: rubric.dimensions,
+          ...(focused ? { priorStep: '已根据异常和冲突主动取证；现在完成评分。' } : { priorStep: '事实清楚时直接复盘。' }),
+          outputLimits: `scores 恰好 ${rubric.dimensions.length} 项；observations 最多 4 项；suggestions 最多 3 项；不输出额外键或解释。`,
+          output: {
+            scores: rubric.dimensions.map((id) => ({ id, score: '1..5 或 null', reason: 'string', evidenceRefs: ['valid evidence id'] })),
+            observations: [{ kind: 'positive|friction', summary: 'string', cost: 'optional', evidenceRefs: ['valid evidence id'] }],
+            suggestions: [
+              {
+                title: 'string',
+                detail: 'string',
+                category: [...SUGGESTION_CATEGORIES],
+                impact: 'high|medium|low',
+                confidence: '0..1',
+                evidenceRefs: ['valid evidence id'],
+              },
+            ],
+            reuseIntent: '1..5 或 null',
+            confidence: '0..1',
+            evidenceGaps: ['string'],
+          },
+        }),
+      },
     ];
   }
 
   private parseStructured(text: string, review: AIUserReview, fast: boolean): StructuredReview {
     const parsed = parseJsonObject(text);
-    const valid = new Set(review.evidenceIndex.map(item => item.id));
-    const dimensions = rubricFromPolicy(review.evaluationPolicy).dimensions.map(id => {
-      const raw = Array.isArray(parsed.scores) ? parsed.scores.find(item => isRecord(item) && item.id === id) : undefined;
+    const valid = new Set(review.evidenceIndex.map((item) => item.id));
+    const dimensions = rubricFromPolicy(review.evaluationPolicy).dimensions.map((id) => {
+      const raw = Array.isArray(parsed.scores) ? parsed.scores.find((item) => isRecord(item) && item.id === id) : undefined;
       if (!isRecord(raw)) throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', `复盘缺少维度 ${id}`);
       const score = raw.score === null ? null : Number(raw.score);
-      if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5)) throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', `维度 ${id} 评分无效`);
+      if (score !== null && (!Number.isInteger(score) || score < 1 || score > 5))
+        throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', `维度 ${id} 评分无效`);
       return {
-        id, score: score as ReviewDimensionScore['score'],
+        id,
+        score: score as ReviewDimensionScore['score'],
         reason: typeof raw.reason === 'string' ? raw.reason.slice(0, 1_200) : '',
-        evidenceRefs: uniqueStrings(raw.evidenceRefs).filter(ref => valid.has(ref)),
+        evidenceRefs: uniqueStrings(raw.evidenceRefs).filter((ref) => valid.has(ref)),
       };
     });
-    const observations = (Array.isArray(parsed.observations) ? parsed.observations : []).flatMap<ReviewObservation>(raw => {
-      if (!isRecord(raw) || (raw.kind !== 'positive' && raw.kind !== 'friction') || typeof raw.summary !== 'string') return [];
-      const evidenceRefs = uniqueStrings(raw.evidenceRefs).filter(ref => valid.has(ref));
-      if (!evidenceRefs.length) throw new ExperienceError(502, 'UNSUPPORTED_REVIEW_CLAIM', '复盘观察缺少有效证据');
-      return [{ kind: raw.kind as ReviewObservation['kind'], summary: raw.summary.slice(0, 1_500), ...(typeof raw.cost === 'string' ? { cost: raw.cost.slice(0, 500) } : {}), evidenceRefs }];
-    }).slice(0, 12);
-    const suggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : []).flatMap<ReviewSuggestion>(raw => {
-      // Models frequently emit `category` as a single-element array; accept both
-      // shapes instead of silently dropping otherwise valid suggestions.
-      const rawCategory = Array.isArray(raw?.category) ? raw.category[0] : raw?.category;
-      if (!isRecord(raw) || typeof raw.title !== 'string' || typeof raw.detail !== 'string' || typeof rawCategory !== 'string' || !SUGGESTION_CATEGORIES.has(rawCategory as ReviewSuggestion['category'])) return [];
-      const evidenceRefs = uniqueStrings(raw.evidenceRefs).filter(ref => valid.has(ref));
-      if (!evidenceRefs.length) throw new ExperienceError(502, 'UNSUPPORTED_REVIEW_CLAIM', '复盘建议缺少有效证据');
-      return [{
-        id: stableHash({ title: raw.title, detail: raw.detail, evidenceRefs }).slice(0, 24),
-        title: raw.title.slice(0, 300), detail: raw.detail.slice(0, 2_000),
-        category: rawCategory as ReviewSuggestion['category'],
-        impact: (raw.impact === 'high' || raw.impact === 'low' ? raw.impact : 'medium') as ReviewSuggestion['impact'],
-        confidence: typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : 0,
-        evidenceRefs,
-      }];
-    }).slice(0, 10);
+    const observations = (Array.isArray(parsed.observations) ? parsed.observations : [])
+      .flatMap<ReviewObservation>((raw) => {
+        if (!isRecord(raw) || (raw.kind !== 'positive' && raw.kind !== 'friction') || typeof raw.summary !== 'string') return [];
+        const evidenceRefs = uniqueStrings(raw.evidenceRefs).filter((ref) => valid.has(ref));
+        if (!evidenceRefs.length) throw new ExperienceError(502, 'UNSUPPORTED_REVIEW_CLAIM', '复盘观察缺少有效证据');
+        return [
+          {
+            kind: raw.kind as ReviewObservation['kind'],
+            summary: raw.summary.slice(0, 1_500),
+            ...(typeof raw.cost === 'string' ? { cost: raw.cost.slice(0, 500) } : {}),
+            evidenceRefs,
+          },
+        ];
+      })
+      .slice(0, 12);
+    const suggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])
+      .flatMap<ReviewSuggestion>((raw) => {
+        // Models frequently emit `category` as a single-element array; accept both
+        // shapes instead of silently dropping otherwise valid suggestions.
+        const rawCategory = Array.isArray(raw?.category) ? raw.category[0] : raw?.category;
+        if (
+          !isRecord(raw) ||
+          typeof raw.title !== 'string' ||
+          typeof raw.detail !== 'string' ||
+          typeof rawCategory !== 'string' ||
+          !SUGGESTION_CATEGORIES.has(rawCategory as ReviewSuggestion['category'])
+        )
+          return [];
+        const evidenceRefs = uniqueStrings(raw.evidenceRefs).filter((ref) => valid.has(ref));
+        if (!evidenceRefs.length) throw new ExperienceError(502, 'UNSUPPORTED_REVIEW_CLAIM', '复盘建议缺少有效证据');
+        return [
+          {
+            id: stableHash({ title: raw.title, detail: raw.detail, evidenceRefs }).slice(0, 24),
+            title: raw.title.slice(0, 300),
+            detail: raw.detail.slice(0, 2_000),
+            category: rawCategory as ReviewSuggestion['category'],
+            impact: (raw.impact === 'high' || raw.impact === 'low' ? raw.impact : 'medium') as ReviewSuggestion['impact'],
+            confidence: typeof raw.confidence === 'number' ? Math.max(0, Math.min(1, raw.confidence)) : 0,
+            evidenceRefs,
+          },
+        ];
+      })
+      .slice(0, 10);
     const reuse = parsed.reuseIntent === null ? null : Number(parsed.reuseIntent);
-    if (reuse !== null && (!Number.isInteger(reuse) || reuse < 1 || reuse > 5)) throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', '再次使用意愿评分无效');
-    if (fast && suggestions.some(item => item.confidence < 0.5) && !uniqueStrings(parsed.evidenceGaps).length) {
+    if (reuse !== null && (!Number.isInteger(reuse) || reuse < 1 || reuse > 5))
+      throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', '再次使用意愿评分无效');
+    if (fast && suggestions.some((item) => item.confidence < 0.5) && !uniqueStrings(parsed.evidenceGaps).length) {
       throw new ExperienceError(502, 'REVIEW_OUTPUT_INVALID', '低置信建议需要明确证据缺口');
     }
     return {
-      dimensions, observations, suggestions,
+      dimensions,
+      observations,
+      suggestions,
       reuseIntent: reuse as StructuredReview['reuseIntent'],
       confidence: typeof parsed.confidence === 'number' ? Math.max(0, Math.min(1, parsed.confidence)) : 0,
       evidenceGaps: uniqueStrings(parsed.evidenceGaps, 8),
@@ -841,30 +982,35 @@ export class ExperienceService {
 
   private applyStructured(review: AIUserReview, structured: StructuredReview, valid: Set<string>): void {
     review.dimensions = structured.dimensions;
-    review.observations = structured.observations.filter(item => item.evidenceRefs.some(ref => valid.has(ref)));
-    review.suggestions = structured.suggestions.filter(item => item.evidenceRefs.some(ref => valid.has(ref)));
+    review.observations = structured.observations.filter((item) => item.evidenceRefs.some((ref) => valid.has(ref)));
+    review.suggestions = structured.suggestions.filter((item) => item.evidenceRefs.some((ref) => valid.has(ref)));
     review.reuseIntent = structured.reuseIntent;
     review.confidence = structured.confidence;
     review.evidenceGaps = structured.evidenceGaps;
-    const critical = review.facts.anomalies.some(item => item.severity === 'P0' || item.severity === 'P1');
-    const scores = review.dimensions.flatMap(item => item.score === null ? [] : [item.score]);
+    const critical = review.facts.anomalies.some((item) => item.severity === 'P0' || item.severity === 'P1');
+    const scores = review.dimensions.flatMap((item) => (item.score === null ? [] : [item.score]));
     const average = scores.length ? scores.reduce((sum, score) => sum + score, 0) / scores.length : 0;
     const factGateFailed = ledgerGateFailed(review.facts) || critical;
     const policy = review.evaluationPolicy?.review;
     const positiveAverage = policy?.positiveMinAverage ?? 3.5;
     const positiveReuse = policy?.positiveMinReuse ?? 4;
     const positiveDimension = policy?.positiveMinDimension ?? 3;
-    review.selfEvaluationBias = factGateFailed && average >= positiveAverage
-      && review.reuseIntent !== null && review.reuseIntent >= positiveReuse
-      ? {
-          detected: true,
-          reason: `事实门槛未通过，AI 主观平均 ${Math.round(average * 10) / 10}/5，再次使用意愿 ${review.reuseIntent}/5。`,
-        }
-      : undefined;
-    if (factGateFailed || review.reuseIntent !== null && review.reuseIntent <= 2) {
+    review.selfEvaluationBias =
+      factGateFailed && average >= positiveAverage && review.reuseIntent !== null && review.reuseIntent >= positiveReuse
+        ? {
+            detected: true,
+            reason: `事实门槛未通过，AI 主观平均 ${Math.round(average * 10) / 10}/5，再次使用意愿 ${review.reuseIntent}/5。`,
+          }
+        : undefined;
+    if (factGateFailed || (review.reuseIntent !== null && review.reuseIntent <= 2)) {
       review.verdict = 'negative';
-    } else if (!scores.length || scores.some(score => score < positiveDimension)
-      || average < positiveAverage || review.reuseIntent === null || review.reuseIntent < positiveReuse) {
+    } else if (
+      !scores.length ||
+      scores.some((score) => score < positiveDimension) ||
+      average < positiveAverage ||
+      review.reuseIntent === null ||
+      review.reuseIntent < positiveReuse
+    ) {
       review.verdict = 'neutral';
     } else {
       review.verdict = 'positive';
@@ -890,7 +1036,11 @@ export class ExperienceService {
     review.calls++;
     const used = review.budget.inputTokens + review.budget.outputTokens;
     if (used > review.budget.totalTokenLimit) {
-      throw new ExperienceError(422, 'TOKEN_BUDGET_EXCEEDED', `复盘用量 ${used} token 已超过 ${review.budget.totalTokenLimit} token 上限（输入 ${review.budget.inputTokens}，输出 ${review.budget.outputTokens}）`);
+      throw new ExperienceError(
+        422,
+        'TOKEN_BUDGET_EXCEEDED',
+        `复盘用量 ${used} token 已超过 ${review.budget.totalTokenLimit} token 上限（输入 ${review.budget.inputTokens}，输出 ${review.budget.outputTokens}）`,
+      );
     }
   }
 
@@ -902,11 +1052,8 @@ export class ExperienceService {
   private reviewMaxTokens(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[]): number {
     const inputTokens = countMessageTokens(messages, provider.tokenizer);
     const remainingOutput = review.budget.outputTokenLimit - review.budget.outputTokens;
-    const remainingTotal = review.budget.totalTokenLimit
-      - review.budget.inputTokens
-      - review.budget.outputTokens
-      - inputTokens;
-    const modelCapability = provider.models?.find(item => item.modelId === model);
+    const remainingTotal = review.budget.totalTokenLimit - review.budget.inputTokens - review.budget.outputTokens - inputTokens;
+    const modelCapability = provider.models?.find((item) => item.modelId === model);
     const protocolCap = modelCapability?.maxOutput;
     // The configured output number is a nominal target, not a hard ceiling:
     // verbose models and reasoning tokens otherwise exhaust it before the JSON
@@ -925,17 +1072,19 @@ export class ExperienceService {
 
   private pickEvidence(review: AIUserReview, requested: string[], limit: number, tokenBudget: number): EvidenceSlice[] {
     const provider = providerFor(this.deps.providers(), review.providerId, review.model);
-    const candidates = [...new Set([
-      ...requested,
-      ...review.facts.anomalies.flatMap(item => item.evidenceRefs),
-      ...review.evidenceIndex.filter(item => item.kind === 'verification' || item.kind === 'artifact').map(item => item.id),
-      ...review.evidenceIndex.filter(item => item.kind === 'answer' || item.kind === 'goal').map(item => item.id),
-    ])];
+    const candidates = [
+      ...new Set([
+        ...requested,
+        ...review.facts.anomalies.flatMap((item) => item.evidenceRefs),
+        ...review.evidenceIndex.filter((item) => item.kind === 'verification' || item.kind === 'artifact').map((item) => item.id),
+        ...review.evidenceIndex.filter((item) => item.kind === 'answer' || item.kind === 'goal').map((item) => item.id),
+      ]),
+    ];
     const selected: EvidenceSlice[] = [];
     let used = 0;
     for (const ref of candidates) {
       if (selected.length >= limit) break;
-      const source = review.evidenceIndex.find(item => item.id === ref);
+      const source = review.evidenceIndex.find((item) => item.id === ref);
       if (!source) continue;
       const slice = this.loadEvidence(review, source, provider);
       if (!slice) continue;
@@ -962,20 +1111,22 @@ export class ExperienceService {
     else if (tail === 'verification') value = run.verification;
     else if (tail === 'capability') value = run.capabilityResolution;
     else if (tail === 'rule') value = run.ruleResolution;
-    else if (tail.startsWith('event:')) value = this.deps.store.runs.events(run.id).find(event => event.seq === Number(tail.slice(6)));
+    else if (tail.startsWith('event:')) value = this.deps.store.runs.events(run.id).find((event) => event.seq === Number(tail.slice(6)));
     else if (tail.startsWith('tool:')) {
       const id = tail.slice(5);
-      const call = this.deps.store.runs.toolCalls(run.id).find(item => item.id === id);
+      const call = this.deps.store.runs.toolCalls(run.id).find((item) => item.id === id);
       const page = this.deps.store.runs.readTool(run.id, id);
-      value = call ? {
-        ...call,
-        resultExcerpt: page?.content?.slice(0, 3_000),
-        result: page ? { length: page.length, offset: page.offset, nextOffset: page.nextOffset, truncated: page.truncated } : undefined,
-      } : undefined;
+      value = call
+        ? {
+            ...call,
+            resultExcerpt: page?.content?.slice(0, 3_000),
+            result: page ? { length: page.length, offset: page.offset, nextOffset: page.nextOffset, truncated: page.truncated } : undefined,
+          }
+        : undefined;
     } else if (tail.startsWith('artifact:')) {
-      value = this.deps.store.runs.artifacts(run.id).find(item => item.id === tail.slice(9));
+      value = this.deps.store.runs.artifacts(run.id).find((item) => item.id === tail.slice(9));
     } else if (tail.startsWith('model:')) {
-      value = this.deps.store.runs.modelCalls(run.id, 0, 100).find(item => item.id === tail.slice(6));
+      value = this.deps.store.runs.modelCalls(run.id, 0, 100).find((item) => item.id === tail.slice(6));
     }
     if (value === undefined) return undefined;
     const raw = jsonText(value);
@@ -988,7 +1139,10 @@ export class ExperienceService {
     }
     const text = trimToTokens(raw, EVIDENCE_SLICE_TOKEN_LIMIT, provider?.tokenizer);
     const slice: EvidenceSlice = {
-      ref: index.id, label: index.label, text, hash: stableHash(text),
+      ref: index.id,
+      label: index.label,
+      text,
+      hash: stableHash(text),
       tokens: provider?.tokenizer?.countText ? provider.tokenizer.countText(text) : estimateTokens(text),
     };
     this.evidenceCache.set(cacheKey, slice);
@@ -996,7 +1150,14 @@ export class ExperienceService {
     return slice;
   }
 
-  private async invoke(provider: ProviderDef, model: string, messages: LLMMessage[], maxTokens: number, purpose: 'experience_review' | 'experience_audit', externalSignal?: AbortSignal): Promise<InvocationResult> {
+  private async invoke(
+    provider: ProviderDef,
+    model: string,
+    messages: LLMMessage[],
+    maxTokens: number,
+    purpose: 'experience_review' | 'experience_audit',
+    externalSignal?: AbortSignal,
+  ): Promise<InvocationResult> {
     const controller = new AbortController();
     const abort = () => controller.abort(externalSignal?.reason ?? 'review_cancelled');
     if (externalSignal?.aborted) abort();
@@ -1006,13 +1167,18 @@ export class ExperienceService {
     let outputTokens: number | undefined;
     let structured = false;
     try {
-      for await (const chunk of callModel(provider, messages, {
-        model,
-        maxTokens,
-        reasoningEffort: 'none',
-        signal: controller.signal,
-        ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
-      }, purpose)) {
+      for await (const chunk of callModel(
+        provider,
+        messages,
+        {
+          model,
+          maxTokens,
+          reasoningEffort: 'none',
+          signal: controller.signal,
+          ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
+        },
+        purpose,
+      )) {
         if (chunk.type === 'delta') text += chunk.text;
         else if (chunk.type === 'usage') {
           if (!chunk.incomplete) {
@@ -1042,7 +1208,13 @@ export class ExperienceService {
     };
   }
 
-  private async invokeReview(review: AIUserReview, provider: ProviderDef, model: string, messages: LLMMessage[], signal: AbortSignal): Promise<InvocationResult> {
+  private async invokeReview(
+    review: AIUserReview,
+    provider: ProviderDef,
+    model: string,
+    messages: LLMMessage[],
+    signal: AbortSignal,
+  ): Promise<InvocationResult> {
     const maxTokens = this.reviewMaxTokens(review, provider, model, messages);
     try {
       return await this.invoke(provider, model, messages, maxTokens, 'experience_review', signal);
@@ -1067,20 +1239,37 @@ export class ExperienceService {
 
   private suggestionSeverity(review: AIUserReview, suggestion: ReviewSuggestion): FindingSeverity {
     const refs = new Set(suggestion.evidenceRefs);
-    const matched = review.facts.anomalies.filter(item => item.evidenceRefs.some(ref => refs.has(ref)));
-    return matched.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0]?.severity ?? (suggestion.impact === 'high' ? 'P2' : 'P3');
+    const matched = review.facts.anomalies.filter((item) => item.evidenceRefs.some((ref) => refs.has(ref)));
+    return (
+      matched.sort((a, b) => severityRank(a.severity) - severityRank(b.severity))[0]?.severity ??
+      (suggestion.impact === 'high' ? 'P2' : 'P3')
+    );
   }
 
   private emitReview(review: AIUserReview): void {
-    this.deps.emit('experience.review.updated', {
-      tenantId: review.tenantId, reviewId: review.id, status: review.status, verdict: review.verdict,
-    }, review.id);
+    this.deps.emit(
+      'experience.review.updated',
+      {
+        tenantId: review.tenantId,
+        reviewId: review.id,
+        status: review.status,
+        verdict: review.verdict,
+      },
+      review.id,
+    );
   }
 
   private emitFinding(finding: ExperienceFinding): void {
-    this.deps.emit('experience.finding.updated', {
-      tenantId: finding.tenantId, findingId: finding.id, status: finding.status, severity: finding.severity,
-    }, finding.id);
+    this.deps.emit(
+      'experience.finding.updated',
+      {
+        tenantId: finding.tenantId,
+        findingId: finding.id,
+        status: finding.status,
+        severity: finding.severity,
+      },
+      finding.id,
+    );
   }
 }
 

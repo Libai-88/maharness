@@ -65,7 +65,11 @@ function pathOf(value: unknown): string | null {
   if (typeof value === 'string') return value;
   if (Buffer.isBuffer(value)) return value.toString('utf8');
   if (value instanceof URL) {
-    try { return fileURLToPath(value); } catch { return null; }
+    try {
+      return fileURLToPath(value);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -111,22 +115,59 @@ function wrapTwo(
 }
 
 const READ_ONLY = [
-  'readFileSync', 'readFile', 'readdirSync', 'readdir', 'statSync', 'stat', 'lstatSync', 'lstat',
-  'accessSync', 'access', 'existsSync', 'realpathSync', 'realpath', 'createReadStream', 'watch', 'watchFile',
+  'readFileSync',
+  'readFile',
+  'readdirSync',
+  'readdir',
+  'statSync',
+  'stat',
+  'lstatSync',
+  'lstat',
+  'accessSync',
+  'access',
+  'existsSync',
+  'realpathSync',
+  'realpath',
+  'createReadStream',
+  'watch',
+  'watchFile',
 ] as const;
 
 const WRITE_ONLY = [
-  'writeFileSync', 'writeFile', 'appendFileSync', 'appendFile', 'mkdirSync', 'mkdir', 'rmSync', 'rm',
-  'unlinkSync', 'unlink', 'rmdirSync', 'rmdir', 'createWriteStream', 'truncateSync', 'truncate',
-  'chmodSync', 'chmod', 'utimesSync', 'utimes', 'mkdtempSync', 'mkdtemp',
+  'writeFileSync',
+  'writeFile',
+  'appendFileSync',
+  'appendFile',
+  'mkdirSync',
+  'mkdir',
+  'rmSync',
+  'rm',
+  'unlinkSync',
+  'unlink',
+  'rmdirSync',
+  'rmdir',
+  'createWriteStream',
+  'truncateSync',
+  'truncate',
+  'chmodSync',
+  'chmod',
+  'utimesSync',
+  'utimes',
+  'mkdtempSync',
+  'mkdtemp',
 ] as const;
 
 const TWO_PATH = [
-  ['renameSync', 'write', 'write'], ['rename', 'write', 'write'],
-  ['copyFileSync', 'read', 'write'], ['copyFile', 'read', 'write'],
-  ['linkSync', 'read', 'write'], ['link', 'read', 'write'],
-  ['symlinkSync', 'read', 'write'], ['symlink', 'read', 'write'],
-  ['cpSync', 'read', 'write'], ['cp', 'read', 'write'],
+  ['renameSync', 'write', 'write'],
+  ['rename', 'write', 'write'],
+  ['copyFileSync', 'read', 'write'],
+  ['copyFile', 'read', 'write'],
+  ['linkSync', 'read', 'write'],
+  ['link', 'read', 'write'],
+  ['symlinkSync', 'read', 'write'],
+  ['symlink', 'read', 'write'],
+  ['cpSync', 'read', 'write'],
+  ['cp', 'read', 'write'],
 ] as const;
 
 let installed = false;
@@ -139,14 +180,14 @@ export function installFilesystemGuard(policy: PluginFilesystemPolicy): void {
   for (const name of WRITE_ONLY) wrapOne(holder, name, policy, 'write');
   for (const [name, first, second] of TWO_PATH) wrapTwo(holder, name, policy, first, second);
   // open 的读写取决于 flags；无法判定时按写处理（fail-closed）。
-  wrapOne(holder, 'openSync', policy, (args) => /[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read');
-  wrapOne(holder, 'open', policy, (args) => /[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read');
+  wrapOne(holder, 'openSync', policy, (args) => (/[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read'));
+  wrapOne(holder, 'open', policy, (args) => (/[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read'));
 
   const promises = fs.promises as unknown as Record<string, unknown>;
   for (const name of READ_ONLY) wrapOne(promises, name, policy, 'read');
   for (const name of WRITE_ONLY) wrapOne(promises, name, policy, 'write');
   for (const [name, first, second] of TWO_PATH) wrapTwo(promises, name, policy, first, second);
-  wrapOne(promises, 'open', policy, (args) => /[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read');
+  wrapOne(promises, 'open', policy, (args) => (/[wa+]/.test(String(args[1] ?? 'r')) ? 'write' : 'read'));
 
   syncBuiltinESMExports();
 }

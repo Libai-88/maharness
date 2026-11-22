@@ -1,485 +1,113 @@
-import { observeModelRequest } from '../../kernel/model-call';
 /**
- * server/routes/providers.ts —— Provider 管理（网页端；DB 为唯一来源）
+ * server/routes/providers.ts —— Provider 管理（协议适配层，ADR 0010）
+ *
+ * 这里只解析请求、调用例、映射状态码；校验、SSRF 边界、并发版本与健康联动都在
+ * `server/usecases/providers.ts`。路由文件的体积因此与"端点数"成正比，而不是与业务复杂度成正比。
  */
-import type { Express } from 'express';
-import { assertProviderBaseUrl, fetchWithPublicRedirects, getChatService, maskKey, refreshChatProviders, type RouteDeps } from './shared';
-import { extractFromProviderMeta, resolveCapabilities } from '../../kernel/modelCatalog';
-import { MODEL_SCHEMA_VERSION, stableModelIdentity } from '../../kernel/model-schema';
-import { getProviderHealth, noteProviderFailure, noteProviderSuccess, isAuthError, LLMHttpError } from '../host/adapters/chat';
-import type { ProviderHealth } from '../host/adapters/chat';
-import type { ProviderGateway } from '../../kernel/provider-gateway';
-import { ConcurrentStoreWriteError } from '../db';
-import { buildModelToolCheck, modelCheckFingerprint } from '../model-tool-check';
+import type { Express, Response } from 'express';
+import type { RouteDeps } from './shared';
+import { UsecaseError } from '../usecases/error';
+import {
+  checkToolCall,
+  createProvider,
+  listChatModels,
+  listProviders,
+  providerDiagnostics,
+  providerGateway,
+  removeProvider,
+  testProvider,
+  updateProvider,
+} from '../usecases/providers';
+import { pullModels, readModels, updateModelProfile } from '../usecases/provider-models';
+import { buildProviderDiagnostics, buildProviderGatewaySnapshot } from '../usecases/provider-support';
+import type { ProviderDiagnosticModel, ProviderDiagnostics } from '../usecases/provider-support';
 
-/** 支持的协议族（本地/内网地址需 AGENT_ALLOW_PRIVATE_URLS=1） */
-type ProviderProtocol = 'openai' | 'anthropic' | 'ollama';
-const PROTOCOLS: ProviderProtocol[] = ['openai', 'anthropic', 'ollama'];
+export type { ProviderDiagnosticModel, ProviderDiagnostics };
+export { buildProviderDiagnostics, buildProviderGatewaySnapshot };
 
-function isConcurrentStoreWrite(error: unknown): error is ConcurrentStoreWriteError {
-  return error instanceof ConcurrentStoreWriteError;
-}
-
-interface PulledModel { id: string; label?: string; raw: unknown }
-
-export interface ProviderDiagnosticModel {
-  providerId: string;
-  modelId: string;
-  modelKey: string;
-  pricingId: string;
-  contextWindow: number;
-  maxOutput: number;
-  vision: boolean;
-  tools: boolean;
-  reasoning: boolean;
-  priceIn: number;
-  priceOut: number;
-  source: string;
-}
-
-export interface ProviderDiagnostics {
-  schemaVersion: typeof MODEL_SCHEMA_VERSION;
-  providerId: string;
-  protocol: string;
-  configured: { baseUrl: boolean; apiKey: boolean; defaultModel: boolean };
-  health: ProviderHealth | null;
-  models: ProviderDiagnosticModel[];
-  issues: string[];
-}
-
-/** 生成不含密钥材料的 Provider 配置诊断，供设置页和运维脚本共用。 */
-export function buildProviderDiagnostics(input: {
-  id: string; baseUrl?: string; apiKey?: string; model?: string; protocol?: string;
-}, models: ProviderDiagnosticModel[], health?: ProviderHealth): ProviderDiagnostics {
-  const configured = {
-    baseUrl: !!input.baseUrl?.trim(),
-    apiKey: !!input.apiKey?.trim(),
-    defaultModel: !!input.model?.trim(),
-  };
-  const issues: string[] = [];
-  if (!configured.baseUrl) issues.push('缺少 Provider 地址');
-  if (!configured.apiKey && input.protocol !== 'ollama') issues.push('缺少 API Key');
-  if (!configured.defaultModel) issues.push('缺少默认模型');
-  if (configured.defaultModel && models.length > 0 && !models.some((m) => m.modelId === input.model)) {
-    issues.push('默认模型未登记或未完成能力探测');
-  }
-  if (health?.authFailed) issues.push('最近请求认证失败，请检查 API Key 或权限');
-  else if ((health?.failures ?? 0) > 0) issues.push(`最近请求失败 ${health!.failures} 次`);
-  return { schemaVersion: MODEL_SCHEMA_VERSION, providerId: input.id, protocol: input.protocol ?? 'openai', configured, health: health ?? null, models, issues };
-}
-
-/** Provider Gateway 的公开快照：不含地址、密钥或可执行方法。 */
-export function buildProviderGatewaySnapshot(gateway: ProviderGateway): {
-  schemaVersion: 1;
-  providers: { id: string; label: string; protocol: string; defaultModel: string }[];
-  models: ReturnType<ProviderGateway['models']>;
-  health: Record<string, ReturnType<ProviderGateway['health']>>;
-} {
-  const providers = gateway.providers().map((provider) => ({
-    id: provider.id, label: provider.label, protocol: provider.protocol ?? 'openai', defaultModel: provider.defaultModel,
-  }));
-  return {
-    schemaVersion: 1,
-    providers,
-    models: gateway.models(),
-    health: Object.fromEntries(providers.map((provider) => [provider.id, gateway.health(provider.id)])),
-  };
-}
-
-/** 各协议的最小可用探测请求（URL + 头 + 体） */
-function buildPing(base: string, protocol: string, key: string, model: string): [string, RequestInit] {
-  if (protocol === 'anthropic') {
-    return [`${base}/v1/messages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': key, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model, max_tokens: 1, messages: [{ role: 'user', content: 'ping' }] }),
-      signal: AbortSignal.timeout(15000),
-    }];
-  }
-  if (protocol === 'ollama') {
-    return [`${base}/api/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model, stream: false, messages: [{ role: 'user', content: 'ping' }] }),
-      signal: AbortSignal.timeout(30000),
-    }];
-  }
-  return [`${base}/chat/completions`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${key}` },
-    body: JSON.stringify({ model, messages: [{ role: 'user', content: 'ping' }], max_tokens: 1, stream: false }),
-    signal: AbortSignal.timeout(15000),
-  }];
-}
-
-/** 按协议拉取模型列表（三家协议端点/鉴权头各异）；HTTP 非 2xx 抛错且不回显远端 body */
-async function fetchProviderModels(base: string, protocol: ProviderProtocol, key: string): Promise<PulledModel[]> {
-  // A5：走 fetchWithPublicRedirects（redirect:'manual' + 逐跳 SSRF 校验），不再让 undici 自行
-  // 跟随 30x——/models 会把响应体解析后回吐，重定向不校验就是可读型 SSRF。
-  const doFetch = async (url: string, headers: Record<string, string>): Promise<unknown> => {
-    const r = await fetchWithPublicRedirects(url, { headers, signal: AbortSignal.timeout(15000) });
-    if (!r.ok) throw new Error(`HTTP ${r.status}${r.status === 401 || r.status === 403 ? '（Key 无效或无权限）' : ''}`);
-    return await r.json().catch(() => null);
-  };
-  const asArray = (j: unknown): unknown[] => {
-    if (Array.isArray(j)) return j;
-    const o = j as Record<string, unknown> | null;
-    for (const k of ['data', 'models', 'body']) {
-      if (Array.isArray(o?.[k])) return o![k] as unknown[];
-    }
-    return [];
-  };
-  const pick = (m: unknown): PulledModel | null => {
-    if (typeof m === 'string') return m ? { id: m, raw: {} } : null;
-    if (!m || typeof m !== 'object') return null;
-    const o = m as Record<string, unknown>;
-    const id = (typeof o.id === 'string' && o.id) || (typeof o.model === 'string' && o.model)
-      || (typeof o.name === 'string' && o.name) || '';
-    if (!id) return null;
-    const label = typeof o.display_name === 'string' ? o.display_name : (typeof o.title === 'string' ? o.title : undefined);
-    return { id, label, raw: o };
-  };
-
-  if (protocol === 'anthropic') {
-    const j = await doFetch(`${base}/v1/models?limit=1000`, {
-      'x-api-key': key, 'anthropic-version': '2023-06-01', Accept: 'application/json',
-    });
-    return asArray(j).map(pick).filter((m): m is PulledModel => !!m);
-  }
-  if (protocol === 'ollama') {
-    const j = await doFetch(`${base}/api/tags`, { Accept: 'application/json' });
-    const list = asArray(j);
-    return list.map(pick).filter((m): m is PulledModel => !!m);
-  }
-  const j = await doFetch(`${base}/models`, { Authorization: `Bearer ${key}`, Accept: 'application/json' });
-  return asArray(j).map(pick).filter((m): m is PulledModel => !!m);
+/** 用例错误 → HTTP 响应；其它异常交给 express 的兜底处理（与原实现一致）。 */
+function fail(res: Response, error: unknown): Response | undefined {
+  if (error instanceof UsecaseError) return res.status(error.status).json({ error: error.message });
+  return undefined;
 }
 
 export function registerProviderRoutes(app: Express, deps: RouteDeps): void {
-  const { kernel, store } = deps;
-  const toolCheck = (provider: import('../db').ProviderRow, model: string) => {
-    const check = store.runs.modelToolCheck(provider.id, model);
-    return check?.fingerprint === modelCheckFingerprint(provider) ? { status: check.status, checkedAt: check.checkedAt, reason: check.reason } : { status: 'unknown' as const };
-  };
-  app.post('/api/providers/:id/tool-check', async (req, res) => {
-    const provider = store.getProvider(req.params.id);
-    if (!provider) return res.status(404).json({ error: '供应商不存在' });
-    const model = req.body?.model ?? provider.model;
-    if (typeof model !== 'string' || !model.trim() || model.length > 500) return res.status(400).json({ error: '模型名称无效' });
-    try {
-      await assertProviderBaseUrl(provider.baseUrl);
-      const probe = buildModelToolCheck(provider.baseUrl, provider.protocol, provider.apiKey, model);
-      const response = await observeModelRequest(provider.id, model, 256, async signal => {
-        const value = await fetchWithPublicRedirects(probe.url, { ...probe.init, signal: signal ? AbortSignal.any([signal, probe.init.signal!]) : probe.init.signal });
-        const body = await value.clone().json().catch(() => ({})) as { usage?: { prompt_tokens?: number; completion_tokens?: number; input_tokens?: number; output_tokens?: number }; model?: string };
-        return { value, input: body.usage?.prompt_tokens ?? body.usage?.input_tokens, output: body.usage?.completion_tokens ?? body.usage?.output_tokens, actualModel: body.model };
-      });
-      let confirmed = false;
-      if (response.ok) {
-        const reader = response.body?.getReader();
-        const chunks: Uint8Array[] = []; let size = 0;
-        try {
-          while (reader) { const chunk = await reader.read(); if (chunk.done) break; size += chunk.value.length; if (size > 1_000_000) throw new Error('检测响应超过容量'); chunks.push(chunk.value); }
-          confirmed = probe.confirm(JSON.parse(Buffer.concat(chunks).toString('utf8')));
-        } finally { await reader?.cancel().catch(() => undefined); }
-      } else await response.body?.cancel().catch(() => undefined);
-      const check = { status: confirmed ? 'confirmed' as const : 'not_confirmed' as const, checkedAt: Date.now(), fingerprint: modelCheckFingerprint(provider), ...(confirmed ? {} : { reason: response.ok ? '此次检测未返回有效原生工具调用；可核对模型与协议后重试' : `HTTP ${response.status}` }) };
-      store.runs.saveModelToolCheck(provider.id, model, check);
-      res.json(toolCheck(provider, model));
-    } catch {
-      // Transport failure cannot establish or revoke model capability.
-      res.status(502).json({ error: '工具调用检测失败，请检查连接后重试', status: 'unknown' });
-    }
-  });
-
-  app.get('/api/providers/gateway', (_req, res) => {
-    const gateway = kernel.plugins.resolveService('service:provider-gateway') as ProviderGateway | undefined;
-    if (!gateway) return res.status(503).json({ error: 'Provider Gateway 未加载（对话引擎插件未启用）' });
-    res.json(buildProviderGatewaySnapshot(gateway));
-  });
-
-  app.get('/api/providers', (_req, res) => {
-    const models = store.listModels();
-    res.json(store.listProviders().map((r) => ({
-      id: r.id, label: r.label, baseUrl: r.baseUrl, model: r.model, protocol: r.protocol ?? 'openai',
-      priceIn: r.priceIn, priceOut: r.priceOut, enabled: !!r.enabled,
-      apiKeyMasked: maskKey(r.apiKey), hasKey: !!r.apiKey,
-      createdAt: r.createdAt, updatedAt: r.updatedAt,
-      toolCheck: toolCheck(r, r.model),
-      protocolToolCalls: ['openai', 'anthropic', 'ollama'].includes(r.protocol),
-      models: models.filter(m => m.providerId === r.id).map((m) => ({ ...m, ...stableModelIdentity(r.id, m.modelId) })),
-      // 健康状态（failover 链上的真实调用回报）：401/403 → authFailed，设置页红标 + 会话横幅
-      health: getProviderHealth(r.id),
-    })));
-  });
-
-  app.get('/api/providers/:id/diagnose', (req, res) => {
-    const provider = store.getProvider(req.params.id);
-    if (!provider) return res.status(404).json({ error: '供应商不存在' });
-    const models = store.listModels(provider.id).map((m) => ({
-      ...stableModelIdentity(provider.id, m.modelId),
-      modelId: m.modelId, contextWindow: m.contextWindow ?? 0, maxOutput: m.maxOutput ?? 0,
-      vision: !!m.vision, tools: !!m.tools, reasoning: !!m.reasoning,
-      priceIn: m.priceIn ?? 0, priceOut: m.priceOut ?? 0, source: m.source ?? 'unknown',
-    }));
-    res.json(buildProviderDiagnostics(provider, models, getProviderHealth(provider.id)));
-  });
-
-  app.post('/api/providers', async (req, res) => {
-    const { label, baseUrl, apiKey, model, priceIn, priceOut } = req.body ?? {};
-    const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : 'openai';
-    // Ollama 等本地网关不需要 API Key——Key 必填只约束云端协议（与 /test、/models 的豁免口径一致）
-    const keyOptional = protocol === 'ollama';
-    if (!label?.trim() || !baseUrl?.trim() || !model?.trim() || (!keyOptional && !apiKey?.trim())) {
-      return res.status(400).json({
-        error: keyOptional
-          ? '名称 / 地址 / 模型 均为必填（本地网关无需 Key）'
-          : '名称 / 地址 / Key / 模型 均为必填',
-      });
-    }
-    // H5 SSRF：保存路径与 /test 同规则校验（真实对话会按此地址服务端 fetch）。
-    // AGENT_ALLOW_PRIVATE_URLS=1 显式放行本地/内网地址（本机 Ollama 等本地模型场景）——
-    // 是否豁免统一由 assertProviderBaseUrl 判断（A5：四处入口不再各写一遍 env 比较）。
-    try {
-      await assertProviderBaseUrl(String(baseUrl).trim());
-    } catch (err) {
-      return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
-    }
-    const id = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 20) || 'provider'}-${Math.random().toString(36).slice(2, 6)}`;
-    store.upsertProvider({
-      id, label: label.trim(), baseUrl: baseUrl.trim(), apiKey: (apiKey ?? '').trim(), model: model.trim(), protocol: protocol as ProviderProtocol,
-      priceIn: priceIn === '' || priceIn == null ? undefined : Number(priceIn),
-      priceOut: priceOut === '' || priceOut == null ? undefined : Number(priceOut),
-    });
-    refreshChatProviders(kernel, store);
-    const row = store.getProvider(id)!;
-    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey) });
-  });
-
-  app.patch('/api/providers/:id', async (req, res) => {
-    const existing = store.getProvider(req.params.id);
-    if (!existing) return res.status(404).json({ error: '供应商不存在' });
-    if (!Number.isSafeInteger(req.body?.expectedUpdatedAt)) return res.status(428).json({ error: '更新供应商前须携带读取到的 updatedAt 版本' });
-    const { label, baseUrl, apiKey, model, priceIn, priceOut, enabled } = req.body ?? {};
-    const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : existing.protocol;
-    // H5 SSRF：仅当地址被修改时校验（沿用已保存地址无需重复检查）；豁免判定同 assertProviderBaseUrl
-    if (baseUrl?.trim() && baseUrl.trim() !== existing.baseUrl) {
+  const ctx = { kernel: deps.kernel, store: deps.store };
+  const route =
+    (handler: (req: { params: Record<string, string>; body: unknown; query: Record<string, unknown> }) => unknown) =>
+    async (req: { params?: Record<string, string>; body?: unknown; query?: Record<string, unknown> }, res: Response) => {
       try {
-        await assertProviderBaseUrl(String(baseUrl).trim());
-      } catch (err) {
-        return res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
+        const out = await handler({
+          params: req.params ?? {},
+          body: req.body ?? {},
+          query: req.query ?? {},
+        });
+        if (!res.headersSent) res.json(out);
+      } catch (error) {
+        if (!fail(res, error)) throw error;
       }
-    }
+    };
+
+  app.post('/api/providers/:id/tool-check', async (req, res) => {
     try {
-      const expectedUpdatedAt = Number(req.body.expectedUpdatedAt);
-      store.upsertProvider({
-        id: existing.id,
-        label: label?.trim() || existing.label,
-        baseUrl: baseUrl?.trim() || existing.baseUrl,
-        // Key 留空/不传 = 保持不变
-        apiKey: apiKey?.trim() || existing.apiKey,
-        model: model?.trim() || existing.model,
-        protocol: protocol as ProviderProtocol,
-        priceIn: priceIn === undefined ? (existing.priceIn ?? undefined) : priceIn === '' ? undefined : Number(priceIn),
-        priceOut: priceOut === undefined ? (existing.priceOut ?? undefined) : priceOut === '' ? undefined : Number(priceOut),
-        enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
-        expectedUpdatedAt,
-      });
+      res.json(await checkToolCall(ctx, req.params.id, (req.body ?? {}) as Record<string, unknown>));
     } catch (error) {
-      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '供应商已被其他写入者修改，请重新读取后再保存' });
-      throw error;
+      // Transport failure cannot establish or revoke model capability.
+      if (error instanceof UsecaseError && error.status === 502) return res.status(502).json({ error: error.message, status: 'unknown' });
+      if (!fail(res, error)) throw error;
     }
-    refreshChatProviders(kernel, store);
-    const row = store.getProvider(existing.id)!;
-    res.json({ id: row.id, label: row.label, baseUrl: row.baseUrl, model: row.model, enabled: !!row.enabled, apiKeyMasked: maskKey(row.apiKey), updatedAt: row.updatedAt });
   });
 
-  app.delete('/api/providers/:id', (req, res) => {
-    const existing = store.getProvider(req.params.id);
-    if (!existing) return res.status(404).json({ error: '供应商不存在' });
-    if (!Number.isSafeInteger(req.body?.expectedUpdatedAt)) return res.status(428).json({ error: '删除供应商前须携带读取到的 updatedAt 版本' });
-    try {
-      const expectedUpdatedAt = Number(req.body.expectedUpdatedAt);
-      store.deleteProvider(req.params.id, expectedUpdatedAt);
-    } catch (error) {
-      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '供应商已被其他写入者修改，请重新读取后再删除' });
-      throw error;
-    }
-    refreshChatProviders(kernel, store);
-    res.json({ ok: true });
-  });
+  app.get(
+    '/api/providers/gateway',
+    route(() => providerGateway(ctx)),
+  );
+  app.get(
+    '/api/providers',
+    route(() => listProviders(ctx)),
+  );
+  app.get(
+    '/api/providers/:id/diagnose',
+    route(({ params }) => providerDiagnostics(ctx, params.id)),
+  );
+  app.post(
+    '/api/providers',
+    route(({ body }) => createProvider(ctx, body as Record<string, unknown>)),
+  );
+  app.patch(
+    '/api/providers/:id',
+    route(({ params, body }) => updateProvider(ctx, params.id, body as Record<string, unknown>)),
+  );
+  app.delete(
+    '/api/providers/:id',
+    route(({ params, body }) => removeProvider(ctx, params.id, body as Record<string, unknown>)),
+  );
 
-  /** 连接测试：按协议发最小请求，返回真实往返延迟（替代前端伪造的 Math.random） */
+  /** 连接测试：HTTP 语义与原来一致——失败也是 400，body 带 ok:false。 */
   app.post('/api/providers/test', async (req, res) => {
-    const { baseUrl, apiKey, model, providerId } = req.body ?? {};
-    let useKey = apiKey;
-    if (!useKey && providerId) {
-      const row = store.getProvider(String(providerId));
-      useKey = row?.apiKey;
-    }
-    if (!baseUrl?.trim() || !model?.trim()) {
-      return res.status(400).json({ error: '地址 / 模型 均为必填' });
-    }
-    if (!useKey?.trim() && String(req.body?.protocol ?? '') !== 'ollama') {
-      return res.status(400).json({ error: 'Key 为必填' });
-    }
-    const base = String(baseUrl).trim().replace(/\/+$/, '');
-    // H5 SSRF 防护：协议白名单 + 逐跳校验（redirect:'manual'，见 fetchWithPublicRedirects）
-    //（provider test 是「用户可控 URL + 服务端发请求」的经典 SSRF 入口）
-    // 豁免语义与保存/PATCH/models 一致：AGENT_ALLOW_PRIVATE_URLS=1 时可对本机 Ollama「验证密钥」
-    //（此前这一处无条件校验，导致按注释设了变量仍然连不上本地地址）
     try {
-      await assertProviderBaseUrl(base);
-    } catch (err) {
-      return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-    const protocol = (PROTOCOLS as string[]).includes(String(req.body?.protocol ?? '')) ? String(req.body.protocol) : 'openai';
-    const started = Date.now();
-    // 验证结果联动 provider 健康状态：换 key 后点「验证密钥」立即确认恢复
-    // （成功清除 authFailed 红标/会话横幅；失败标记失效），不等下一条真实消息
-    const pid = providerId ? String(providerId) : undefined;
-    try {
-      const [pingUrl, pingInit] = buildPing(base, protocol, String(useKey ?? ''), String(model));
-      const r = await observeModelRequest(String(providerId ?? 'draft'), String(model), 1, async signal => {
-        const value = await fetchWithPublicRedirects(pingUrl, { ...pingInit, signal: signal ? AbortSignal.any([signal, pingInit.signal!]) : pingInit.signal });
-        const body = await value.clone().json().catch(() => ({})) as { usage?: { prompt_tokens?: number; completion_tokens?: number }; model?: string };
-        return { value, input: body.usage?.prompt_tokens, output: body.usage?.completion_tokens, actualModel: body.model };
-      });
-      const latencyMs = Date.now() - started;
-      if (!r.ok) {
-        // H5：不回显远端 body（内网探针/错误页可能泄露内部信息）——只给状态码
-        const error = `HTTP ${r.status}`;
-        if (pid) noteProviderFailure(pid, new LLMHttpError(r.status, error));
-        return res.status(400).json({ ok: false, latencyMs, error, authFailed: isAuthError(error) });
-      }
-      await r.body?.cancel().catch(() => { /* 忽略 */ });
-      if (pid) noteProviderSuccess(pid);
-      res.json({ ok: true, latencyMs, protocol, message: `连接成功（${latencyMs}ms）——密钥有效，provider 已恢复健康` });
-    } catch (err) {
-      const error = err instanceof Error ? err.message : String(err);
-      if (pid) noteProviderFailure(pid, error);
-      res.status(400).json({ ok: false, latencyMs: Date.now() - started, error, authFailed: isAuthError(error) });
+      const out = await testProvider(ctx, (req.body ?? {}) as Record<string, unknown>);
+      res.status(out.ok ? 200 : 400).json(out);
+    } catch (error) {
+      if (!fail(res, error)) throw error;
     }
   });
 
   // ---------- 模型 ----------
-  /** 拉取模型列表（openai / anthropic / ollama 三协议），并落 models 表：
-   *  每个模型带能力位（contextWindow/vision/tools/reasoning/价格），来源优先级
-   *  provider 真实字段 > 内置目录推断。网页端据此免手敲、免手填能力。
-   *  persist=false 时只返回不落库（新增供应商尚未保存的场景）。 */
-  app.post('/api/providers/models', async (req, res) => {
-    const { baseUrl, apiKey, providerId, persist } = req.body ?? {};
-    let useKey = apiKey;
-    let protocol = String(req.body?.protocol ?? '').trim();
-    const existingRow = providerId ? store.getProvider(String(providerId)) : undefined;
-    if (!useKey && existingRow) useKey = existingRow.apiKey;
-    if (!protocol) protocol = existingRow?.protocol ?? 'openai';
-    if (!PROTOCOLS.includes(protocol as ProviderProtocol)) {
-      return res.status(400).json({ ok: false, error: `protocol 非法: ${protocol}` });
-    }
-    if (!baseUrl?.trim()) return res.status(400).json({ ok: false, error: '地址为必填' });
-    if (!useKey?.trim() && protocol !== 'ollama') {
-      return res.status(400).json({ ok: false, error: '地址 / Key 均为必填（编辑已保存供应商时 Key 可留空）' });
-    }
-    const base = String(baseUrl).trim().replace(/\/+$/, '');
-    // 豁免判定统一走 assertProviderBaseUrl；真正的逐跳防护在 fetchProviderModels 内部
-    // （redirect:'manual' + 每一跳复检），这里先拦一次只为尽早给出可读错误。
-    try {
-      await assertProviderBaseUrl(base);
-    } catch (err) {
-      return res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-    try {
-      const raw = await fetchProviderModels(base, protocol as ProviderProtocol, String(useKey ?? ''));
-      if (!raw.length) {
-        return res.status(400).json({ ok: false, error: '响应中没有模型列表（data 为空或非该协议格式）' });
-      }
-      const pid = existingRow?.id ?? String(req.body?.providerDraftId ?? 'draft');
-      const out = raw.map((m) => {
-        const meta = extractFromProviderMeta(m.raw);
-        const caps = resolveCapabilities(m.id, pid, {}, meta);
-        return {
-          id: m.id, label: m.label, ...stableModelIdentity(pid, m.id),
-          contextWindow: caps.contextWindow, maxOutput: caps.maxOutput,
-          vision: caps.vision, tools: caps.tools, reasoning: caps.reasoning,
-          priceIn: caps.priceIn, priceOut: caps.priceOut,
-          source: Object.keys(meta).length ? 'pulled' : 'inferred',
-        };
-      });
-      if (persist !== false && existingRow) {
-        store.upsertModels(out.map((o) => ({
-            providerId: existingRow.id, modelId: o.id,
-            contextWindow: o.contextWindow, maxOutput: o.maxOutput,
-            vision: o.vision ? 1 : 0, tools: o.tools ? 1 : 0, reasoning: o.reasoning ? 1 : 0,
-            priceIn: o.priceIn, priceOut: o.priceOut, source: o.source, enabled: 1,
-          })));
-        refreshChatProviders(kernel, store);
-      }
-      res.json({ ok: true, protocol, count: out.length, models: out.slice(0, 500) });
-    } catch (err) {
-      res.status(400).json({ ok: false, error: err instanceof Error ? err.message : String(err) });
-    }
-  });
-
-  /** 已保存模型与能力（网页端展示/编辑） */
-  app.get('/api/providers/:id/models', (req, res) => {
-    if (!store.getProvider(req.params.id)) return res.status(404).json({ error: '供应商不存在' });
-    res.json({ schemaVersion: MODEL_SCHEMA_VERSION, models: store.listModels(req.params.id).map((m) => ({
-      ...m, ...stableModelIdentity(m.providerId, m.modelId),
-    })) });
-  });
-
-  /** 手改单个模型的能力位/价格（modelId 走 query：模型名含 / : 等字符，不能进路径） */
-  app.patch('/api/providers/:id/models', async (req, res) => {
-    const provider = store.getProvider(req.params.id);
-    if (!provider) return res.status(404).json({ error: '供应商不存在' });
-    const modelId = String(req.query.model ?? req.body?.modelId ?? '');
-    const prev = store.listModels(provider.id).find(m => m.modelId === modelId);
-    if (!prev) return res.status(404).json({ error: '模型未登记，请先拉取模型列表' });
-    const b = req.body ?? {};
-    if (!Number.isSafeInteger(b.expectedUpdatedAt)) return res.status(428).json({ error: '更新模型画像前须携带读取到的 updatedAt 版本' });
-    try {
-      const expectedUpdatedAt = Number(b.expectedUpdatedAt);
-      store.updateModel({
-        ...prev,
-        contextWindow: b.contextWindow === undefined ? prev.contextWindow : Number(b.contextWindow) || null,
-        maxOutput: b.maxOutput === undefined ? prev.maxOutput : Number(b.maxOutput) || null,
-        vision: b.vision === undefined ? prev.vision : (b.vision ? 1 : 0),
-        tools: b.tools === undefined ? prev.tools : (b.tools ? 1 : 0),
-        reasoning: b.reasoning === undefined ? prev.reasoning : (b.reasoning ? 1 : 0),
-        priceIn: b.priceIn === undefined ? prev.priceIn : Number(b.priceIn),
-        priceOut: b.priceOut === undefined ? prev.priceOut : Number(b.priceOut),
-        enabled: b.enabled === undefined ? prev.enabled : (b.enabled ? 1 : 0),
-        source: 'manual',
-        latencyMs: b.latencyMs === undefined ? prev.latencyMs : Number(b.latencyMs) || null,
-        privacyTier: b.privacyTier === undefined ? prev.privacyTier : (['local', 'trusted', 'external'].includes(String(b.privacyTier)) ? b.privacyTier : null),
-        riskLevel: b.riskLevel === undefined ? prev.riskLevel : (['low', 'medium', 'high'].includes(String(b.riskLevel)) ? b.riskLevel : null),
-      }, expectedUpdatedAt);
-    } catch (error) {
-      if (isConcurrentStoreWrite(error)) return res.status(409).json({ error: '模型画像已被其他写入者修改，请重新读取后再保存' });
-      throw error;
-    }
-    refreshChatProviders(kernel, store);
-    res.json({ ok: true });
-  });
-
-  app.get('/api/models', (_req, res) => {
-    const chat = getChatService(kernel);
-    if (!chat) return res.json([]);
-    // 每个 provider 的全部可用模型（不止 defaultModel），key = provider@model——
-    // 前端据此能在同一个 provider 内切换不同模型（含能力位不同的多模态/推理模型）
-    res.json(chat.providers.flatMap((p) => {
-      const list = p.models?.length ? p.models : [{ modelId: p.defaultModel, enabled: true, contextWindow: 0, maxOutput: 0, vision: false, tools: false, reasoning: false, priceIn: 0, priceOut: 0, source: 'inferred' }];
-      return list.filter((m) => m.enabled).map((m) => ({
-        ...stableModelIdentity(p.id, m.modelId),
-        toolCheck: (() => { const row = store.getProvider(p.id); return row ? toolCheck(row, m.modelId) : { status: 'unknown' }; })(),
-        schemaVersion: MODEL_SCHEMA_VERSION,
-        id: `${p.id}@${m.modelId}`,
-        provider: p.id,
-        label: p.label,
-        model: m.modelId,
-        vision: m.vision, tools: m.tools, reasoning: m.reasoning, contextWindow: m.contextWindow,
-      }));
-    }));
-  });
+  app.post(
+    '/api/providers/models',
+    route(({ body }) => pullModels(ctx, body as Record<string, unknown>)),
+  );
+  app.get(
+    '/api/providers/:id/models',
+    route(({ params }) => readModels(ctx.store, params.id)),
+  );
+  app.patch(
+    '/api/providers/:id/models',
+    route(({ params, query, body }) => updateModelProfile(ctx, params.id, query, body as Record<string, unknown>)),
+  );
+  app.get(
+    '/api/models',
+    route(() => listChatModels(ctx)),
+  );
 }

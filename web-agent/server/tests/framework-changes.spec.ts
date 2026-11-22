@@ -9,12 +9,22 @@ import { FrameworkChanges } from '../framework-changes';
 function setup() {
   const root = mkdtempSync(join(tmpdir(), 'maharness-change-'));
   const git = (...args: string[]) => execFileSync('git', args, { cwd: root, windowsHide: true });
-  git('init'); git('config', 'user.name', 'Test'); git('config', 'user.email', 'test@localhost');
+  git('init');
+  git('config', 'user.name', 'Test');
+  git('config', 'user.email', 'test@localhost');
   writeFileSync(join(root, 'file.txt'), 'committed');
   writeFileSync(join(root, '.env'), 'test-only');
-  writeFileSync(join(root, 'package.json'), JSON.stringify({ scripts: Object.fromEntries(['typecheck', 'test', 'build'].map(name => [name, 'node -e "process.exit(0)"'])) }));
-  git('add', '.'); git('commit', '-m', 'fixture');
-  return { root, changes: new FrameworkChanges(root), cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }) };
+  writeFileSync(
+    join(root, 'package.json'),
+    JSON.stringify({ scripts: Object.fromEntries(['typecheck', 'test', 'build'].map((name) => [name, 'node -e "process.exit(0)"'])) }),
+  );
+  git('add', '.');
+  git('commit', '-m', 'fixture');
+  return {
+    root,
+    changes: new FrameworkChanges(root),
+    cleanup: () => rmSync(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }),
+  };
 }
 
 test('isolated changes preserve dirty baseline, omit credentials, validate and adopt reviewed snapshot', async () => {
@@ -38,7 +48,9 @@ test('isolated changes preserve dirty baseline, omit credentials, validate and a
     await changes.adopt(change.id, 'tenant', validated.review!.digest);
     assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'reviewed edit');
     assert.equal(readFileSync(join(root, '.env'), 'utf8'), 'test-only');
-  } finally { cleanup(); }
+  } finally {
+    cleanup();
+  }
 });
 
 test('adoption refuses source drift', async () => {
@@ -50,5 +62,7 @@ test('adoption refuses source drift', async () => {
     writeFileSync(join(root, 'file.txt'), 'concurrent user edit');
     await assert.rejects(changes.adopt(change.id, 'tenant', validated.review!.digest), /原工作区已变化/);
     assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'concurrent user edit');
-  } finally { cleanup(); }
+  } finally {
+    cleanup();
+  }
 });

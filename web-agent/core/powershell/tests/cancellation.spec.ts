@@ -7,7 +7,9 @@ import { join } from 'node:path';
 import { runPowershell } from '../index';
 
 const tempDirs: string[] = [];
-after(() => { for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true }); });
+after(() => {
+  for (const dir of tempDirs) rmSync(dir, { recursive: true, force: true });
+});
 
 function processExists(pid: number): boolean {
   const result = spawnSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], { encoding: 'utf8', windowsHide: true });
@@ -29,7 +31,9 @@ async function readPidWhenReady(path: string, timeoutMs: number): Promise<number
     try {
       const pid = Number(readFileSync(path, 'utf8').trim());
       if (Number.isInteger(pid) && pid > 0) return pid;
-    } catch { /* PowerShell may still hold the file during the first read. */ }
+    } catch {
+      /* PowerShell may still hold the file during the first read. */
+    }
     await new Promise((resolve) => setTimeout(resolve, 50));
   }
   throw new Error('child PID file did not become readable');

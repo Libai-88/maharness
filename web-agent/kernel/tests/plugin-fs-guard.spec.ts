@@ -19,7 +19,9 @@ describe('plugin filesystem guard', () => {
       assert.equal(isFilesystemAllowed(join(storage, 'a.json'), policy, 'write'), true);
       assert.equal(isFilesystemAllowed(join(outside, 'a.txt'), policy, 'write'), false);
       assert.equal(isFilesystemAllowed(join(outside, 'a.txt'), policy, 'read'), false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('sandbox 允许工作区读写，sandbox 之外仍拒绝', () => {
@@ -33,7 +35,9 @@ describe('plugin filesystem guard', () => {
       assert.equal(isFilesystemAllowed(join(workspace, 'src', 'a.ts'), policy, 'write'), true);
       assert.equal(isFilesystemAllowed(join(workspace, 'src', 'a.ts'), policy, 'read'), true);
       assert.equal(isFilesystemAllowed(join(outside, 'a.ts'), policy, 'read'), false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('readOnlyRoots 只放行读取，不放行写入', () => {
@@ -45,11 +49,14 @@ describe('plugin filesystem guard', () => {
       const policy = { mode: 'none' as const, storageDir: storage, readOnlyRoots: [assets] };
       assert.equal(isFilesystemAllowed(join(assets, 'template.md'), policy, 'read'), true);
       assert.equal(isFilesystemAllowed(join(assets, 'template.md'), policy, 'write'), false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('非 full 文件系统权限必须使用 process 执行模式', () => {
-    const base = { apiVersion: 2,
+    const base = {
+      apiVersion: 2,
       id: 'demo',
       name: 'Demo',
       version: '1.0.0',
@@ -57,13 +64,17 @@ describe('plugin filesystem guard', () => {
       permissions: { capabilities: {}, runtime: { filesystem: 'storage' } },
     } as unknown as PluginManifest;
     assert.throws(() => validateRuntimePermissions(base), /execution.mode=process/);
-    assert.doesNotThrow(() => validateRuntimePermissions({
-      ...base,
-      execution: { mode: 'process' },
-    } as PluginManifest));
-    assert.doesNotThrow(() => validateRuntimePermissions({
-      ...base,
-      permissions: { capabilities: {}, runtime: { filesystem: 'full' } },
-    } as PluginManifest));
+    assert.doesNotThrow(() =>
+      validateRuntimePermissions({
+        ...base,
+        execution: { mode: 'process' },
+      } as PluginManifest),
+    );
+    assert.doesNotThrow(() =>
+      validateRuntimePermissions({
+        ...base,
+        permissions: { capabilities: {}, runtime: { filesystem: 'full' } },
+      } as PluginManifest),
+    );
   });
 });

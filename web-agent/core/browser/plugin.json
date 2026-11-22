@@ -26,9 +26,7 @@
         "browser_close",
         "browser_screenshot"
       ],
-      "persona": [
-        "browser-rules"
-      ]
+      "persona": ["browser-rules"]
     }
   },
   "config": {

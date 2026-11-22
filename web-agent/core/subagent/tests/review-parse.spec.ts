@@ -4,12 +4,14 @@ import { parseReview } from '../index';
 
 describe('审查结构化输出解析', () => {
   it('解析合法 JSON 并标记 parsed', () => {
-    const review = parseReview(JSON.stringify({
-      verdict: 'concern',
-      summary: '有一处缺陷',
-      issues: [{ severity: 'major', point: '缺少验证', evidence: 'file.ts' }],
-      confidence: 0.7,
-    }));
+    const review = parseReview(
+      JSON.stringify({
+        verdict: 'concern',
+        summary: '有一处缺陷',
+        issues: [{ severity: 'major', point: '缺少验证', evidence: 'file.ts' }],
+        confidence: 0.7,
+      }),
+    );
     assert.equal(review.parsed, true);
     assert.equal(review.verdict, 'concern');
     assert.equal(review.confidence, 0.7);

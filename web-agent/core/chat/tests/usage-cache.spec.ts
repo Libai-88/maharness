@@ -76,7 +76,7 @@ test('OpenAI-compatible SSE forwards Anthropic cache creation as usage.cacheWrit
     res.writeHead(200, { 'content-type': 'text/event-stream' });
     res.end(body);
   });
-  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
     const provider = createProvider({ id: 'usage-cache', baseUrl: base, apiKey: 'test', model: 'm' });
@@ -90,6 +90,6 @@ test('OpenAI-compatible SSE forwards Anthropic cache creation as usage.cacheWrit
     assert.equal(usage?.missInput, 140);
     assert.equal(usage?.cacheWrite, 40);
   } finally {
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });

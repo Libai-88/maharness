@@ -1,5 +1,6 @@
 node_modules/
 dist/
+coverage/
 .env
 data/
 # 用户本地运行时配置（由设置页自动写回；示例见 config.example.json）
@@ -12,6 +13,9 @@ ui/node_modules/
 # 插件内容快照（kernel/plugin-snapshot.ts 生成，运行时按内容重建，不入库）
 core/*@*/
 plugins/*@*/
+
+# 插件隔离试运行的临时项目根（kernel/plugin-trial.ts 用 mkdtemp 建在项目根，正常会自清理）
+.plugin-trial-*/
 
 # eval 运行报告（每次运行生成；基线在 evals/replay-v2-baseline.json）
 evals/reports/

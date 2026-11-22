@@ -7,96 +7,44 @@ import { commandsApi, modelsApi, navApi, planApi, pluginsApi, providersApi, sess
 import { useApprovals } from './hooks/useApprovals';
 import { useTraceSteps } from './hooks/useTraceSteps';
 import type { ErrorKind } from './api';
-import type { BusEvent, ChatMessage, CheckpointInfo, ModelInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TaskVerificationInfo, TodoCard, ToolEvidence, ToolWarning, TraceStep } from './types';
+import type {
+  BusEvent,
+  ChatMessage,
+  CheckpointInfo,
+  ModelInfo,
+  PlanState,
+  PluginDiagnostic,
+  PluginInfo,
+  PluginNavItem,
+  ProviderInfo,
+  Session,
+  TaskVerificationInfo,
+  TodoCard,
+  ToolEvidence,
+  ToolWarning,
+  TraceStep,
+} from './types';
 import { toolActivityLabel } from './types';
 // 演出重建：DB 行 → 界面消息（刷新前后同一形态）；文案中心：所有系统话术统一出口
 import { collectMembers, replayMessages } from './replay';
 import { humanizeError, sys } from './voice';
-
-/** 切到后台时的消息提醒：标题角标 + 一声轻响（像微信的消息音） */
-let audioCtxRef: AudioContext | null = null;
-function dingOnce() {
-  try {
-    const AC = window.AudioContext;
-    if (!AC) return;
-    if (!audioCtxRef) audioCtxRef = new AC();
-    const ctx = audioCtxRef;
-    const o = ctx.createOscillator();
-    const g = ctx.createGain();
-    o.connect(g);
-    g.connect(ctx.destination);
-    o.type = 'sine';
-    o.frequency.setValueAtTime(880, ctx.currentTime);
-    o.frequency.exponentialRampToValueAtTime(660, ctx.currentTime + 0.35);
-    g.gain.setValueAtTime(0.0001, ctx.currentTime);
-    g.gain.exponentialRampToValueAtTime(0.05, ctx.currentTime + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + 0.45);
-    o.start();
-    o.stop(ctx.currentTime + 0.5);
-  } catch { /* 音频不可用时静默 */ }
-}
+import {
+  type Brand,
+  type Theme,
+  dingOnce,
+  preloadSecondaryViews,
+  readBrand,
+  readTheme,
+  splitModelId,
+  viewFromLocation,
+  writeViewLocation,
+} from './app-shell';
 import type { MainTab } from './components/Sidebar';
+
+export type { Brand, Theme } from './app-shell';
 import { toast } from 'sonner';
 import { applyFavicon } from './brand/favicon';
 import AppView from './components/AppView';
-
-// 次要视图路由级代码分割：首屏只需 Chat 视图，文件/插件/统计/设置
-// 按需加载（首屏 JS 体积显著下降），挂载后 idle 时预取保证首次点击无感。
-// 注意：插件页面【不在】此列表——它们由插件在 plugin.json 声明 nav，
-// 前端遍历 /api/nav 生成标签页，内容由 PluginTabView 通用渲染（前端不认识任何插件）。
-function preloadSecondaryViews() {
-  void import('./components/FilesView');
-  void import('./components/WorkbenchView');
-  void import('./components/SocietyView');
-  void import('./components/AutomationsView');
-  void import('./components/PluginsView');
-  void import('./components/StatsView');
-  void import('./components/SettingsView');
-}
-
-function viewFromLocation(): { tab: MainTab; settings: boolean; session?: string } {
-  const params = new URLSearchParams(location.search);
-  const view = params.get('view') ?? 'chat';
-  return {
-    tab: view === 'settings' ? 'chat' : view,
-    settings: view === 'settings',
-    session: params.get('session') ?? undefined,
-  };
-}
-
-function writeViewLocation(view: string, sessionId?: string | null, replace = false): void {
-  const params = new URLSearchParams(location.search);
-  params.set('view', view);
-  if (sessionId) params.set('session', sessionId);
-  else if (view === 'chat') params.delete('session');
-  const next = `${location.pathname}?${params.toString()}${location.hash}`;
-  history[replace ? 'replaceState' : 'pushState'](null, '', next);
-}
-
-/** 模型条目 id = provider@model（服务端 /api/models 约定） */
-function splitModelId(id: string): { provider: string; model: string } {
-  const i = id.lastIndexOf('@');
-  return i > 0 ? { provider: id.slice(0, i), model: id.slice(i + 1) } : { provider: id, model: '' };
-}
-
-export type Theme = 'dark' | 'light';
-export type Brand = 'doodle' | 'ink' | 'moss';
-
-function readTheme(): Theme {
-  try {
-    const saved = localStorage.getItem('maharness-theme');
-    if (saved === 'dark' || saved === 'light') return saved;
-  } catch { /* 隐私模式等场景读不到 */ }
-  return typeof matchMedia !== 'undefined' && matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-}
-
-function readBrand(): Brand {
-  try {
-    const b = localStorage.getItem('maharness-brand');
-    if (b === 'ink' || b === 'moss' || b === 'doodle') return b;
-  } catch { /* 忽略 */ }
-  return 'doodle';
-}
 
 export default function App() {
   const initialView = viewFromLocation();
@@ -112,7 +60,9 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<MainTab>(initialView.tab);
   const [settingsOpen, setSettingsOpen] = useState(initialView.settings);
   const { steps: traceSteps, open: traceOpen, setOpen: setTraceOpen, record: recordTraceStep, clear: clearTraceSteps } = useTraceSteps();
-  const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(null);
+  const [traceStats, setTraceStats] = useState<{ trace: Record<string, number>; cache: Record<string, number>; l1Enabled: boolean } | null>(
+    null,
+  );
   const [plan, setPlan] = useState<PlanState | null>(null);
   const [todos, setTodos] = useState<TodoCard[]>([]); // todo 插件：待办看板/模型 to do list（全量，按会话过滤展示）
   const [theme, setTheme] = useState<Theme>(readTheme);
@@ -128,7 +78,9 @@ export default function App() {
   // 前置重活（历史压缩等）的播报文本：让"开口前的十几秒"有话说，而不是干等
   const [streamStatus, setStreamStatus] = useState<string | null>(null);
   const [pendingInference, setPendingInference] = useState<{ objective: string; rationale: string; confidence: number } | null>(null);
-  useEffect(() => { setPendingInference(null); }, [activeId]);
+  useEffect(() => {
+    setPendingInference(null);
+  }, [activeId]);
   // 与后端的常驻事件连接状态：断了要看得见（旧版"实时"灯常亮，数据其实早就不动了）
   const [liveState, setLiveState] = useState<'open' | 'down'>('open');
   // 并行小队进度（parallel.progress 广播）：按会话归集，渲染成"小队"气泡上的进度行。
@@ -153,18 +105,25 @@ export default function App() {
   // trace.step 也混进来，你在 A 会话里看到 B 会话正在干什么）
   const traceIdsRef = useRef(new Set<string>());
   // 审批状态机（挂起集合的三个来源 + 超时撤卡 + 回答）：见 hooks/useApprovals.ts
-  const pushSystemMessage = useCallback((id: string, text: string) => {
-    setMessages((m) => [...m, { id, role: 'system', content: text, ts: Date.now() }]);
-  }, [clearTraceSteps]);
-  const { approvals, onApprovalRequired: onApprovalFromStream, onGlobalApproval: onApprovalFromBus, respond: respondApproval } =
-    useApprovals({ activeId, pushSystemMessage });
+  const pushSystemMessage = useCallback(
+    (id: string, text: string) => {
+      setMessages((m) => [...m, { id, role: 'system', content: text, ts: Date.now() }]);
+    },
+    [clearTraceSteps],
+  );
+  const {
+    approvals,
+    onApprovalRequired: onApprovalFromStream,
+    onGlobalApproval: onApprovalFromBus,
+    respond: respondApproval,
+  } = useApprovals({ activeId, pushSystemMessage });
 
   useEffect(() => {
     const applyLocation = () => {
       const next = viewFromLocation();
       setSettingsOpen(next.settings);
       setActiveTab(next.tab);
-      if (next.tab === 'chat' && next.session && sessionsRef.current.some(session => session.id === next.session)) {
+      if (next.tab === 'chat' && next.session && sessionsRef.current.some((session) => session.id === next.session)) {
         setActiveId(next.session);
       }
     };
@@ -195,28 +154,37 @@ export default function App() {
   const streamRafRef = useRef(0);
 
   const flushStreamBuffer = useCallback(() => {
-    if (streamRafRef.current) { cancelAnimationFrame(streamRafRef.current); streamRafRef.current = 0; }
+    if (streamRafRef.current) {
+      cancelAnimationFrame(streamRafRef.current);
+      streamRafRef.current = 0;
+    }
     const p = pendingStreamRef.current;
     if (!p) return;
     pendingStreamRef.current = null;
-    setMessages((prev) => prev.map((m) => m.id === p.id
-      ? { ...m, content: m.content + p.content, reasoning: (m.reasoning ?? '') + p.reasoning }
-      : m));
+    setMessages((prev) =>
+      prev.map((m) => (m.id === p.id ? { ...m, content: m.content + p.content, reasoning: (m.reasoning ?? '') + p.reasoning } : m)),
+    );
   }, []);
 
-  const queueStreamText = useCallback((id: string, patch: { content?: string; reasoning?: string }) => {
-    const p = pendingStreamRef.current;
-    if (p && p.id === id) {
-      if (patch.content) p.content += patch.content;
-      if (patch.reasoning) p.reasoning += patch.reasoning;
-    } else {
-      if (p) flushStreamBuffer(); // 换消息前冲刷旧缓冲（正常时序下不会发生）
-      pendingStreamRef.current = { id, content: patch.content ?? '', reasoning: patch.reasoning ?? '' };
-    }
-    if (!streamRafRef.current) {
-      streamRafRef.current = requestAnimationFrame(() => { streamRafRef.current = 0; flushStreamBuffer(); });
-    }
-  }, [flushStreamBuffer]);
+  const queueStreamText = useCallback(
+    (id: string, patch: { content?: string; reasoning?: string }) => {
+      const p = pendingStreamRef.current;
+      if (p && p.id === id) {
+        if (patch.content) p.content += patch.content;
+        if (patch.reasoning) p.reasoning += patch.reasoning;
+      } else {
+        if (p) flushStreamBuffer(); // 换消息前冲刷旧缓冲（正常时序下不会发生）
+        pendingStreamRef.current = { id, content: patch.content ?? '', reasoning: patch.reasoning ?? '' };
+      }
+      if (!streamRafRef.current) {
+        streamRafRef.current = requestAnimationFrame(() => {
+          streamRafRef.current = 0;
+          flushStreamBuffer();
+        });
+      }
+    },
+    [flushStreamBuffer],
+  );
 
   // 主题：写 dataset + localStorage + Sonner 主题同步（首帧由 main.tsx 预置，避免闪烁）
   useEffect(() => {
@@ -226,13 +194,21 @@ export default function App() {
     // 浏览器窗口 chrome（标题栏/状态栏）跟随明暗主题
     document.querySelector('meta[name="theme-color"]')?.setAttribute('content', theme === 'dark' ? '#161411' : '#fff8ed');
     applyFavicon();
-    try { localStorage.setItem('maharness-theme', theme); } catch { /* 忽略 */ }
+    try {
+      localStorage.setItem('maharness-theme', theme);
+    } catch {
+      /* 忽略 */
+    }
   }, [theme]);
 
   // 品牌色板预设（与明暗正交）：写 dataset + localStorage，并让 favicon 取新主色
   useEffect(() => {
     document.documentElement.dataset.brand = brand;
-    try { localStorage.setItem('maharness-brand', brand); } catch { /* 忽略 */ }
+    try {
+      localStorage.setItem('maharness-brand', brand);
+    } catch {
+      /* 忽略 */
+    }
     applyFavicon();
   }, [brand, theme]);
 
@@ -245,7 +221,9 @@ export default function App() {
   }, [providers]);
 
   // 初始加载
-  useEffect(() => { void loadAll(); }, []);
+  useEffect(() => {
+    void loadAll();
+  }, []);
 
   useEffect(() => {
     const off = subscribeEvents((e: BusEvent) => {
@@ -254,14 +232,12 @@ export default function App() {
         const step = e.data as TraceStep;
         if (!traceIdsRef.current.has(step.traceId)) return;
         recordTraceStep(step);
-      }
-      else if (e.type === 'plan.updated') {
+      } else if (e.type === 'plan.updated') {
         // 计划同样按会话归属过滤：全局广播里别的会话的目标不该顶到你的窗口上
         const d = e.data as (PlanState & { sessionId?: string }) | null;
         if (d?.sessionId && activeIdRef.current && d.sessionId !== activeIdRef.current) return;
         setPlan(d);
-      }
-      else if (e.type === 'todo.updated') setTodos((e.data as { cards: TodoCard[] } | null)?.cards ?? []);
+      } else if (e.type === 'todo.updated') setTodos((e.data as { cards: TodoCard[] } | null)?.cards ?? []);
       else if (e.type === 'parallel.progress') {
         // 并行小队分头干活的进度：phase=start/done/fail + taskId/objective/total/sessionId
         const d = e.data as { phase: 'start' | 'done' | 'fail'; taskId: string; objective: string; sessionId?: string; total?: number };
@@ -282,13 +258,21 @@ export default function App() {
             },
           };
         });
-      }
-      else if (e.type === 'approval.requested') {
+      } else if (e.type === 'approval.requested') {
         // 子代理/并行任务的审批经全局事件广播（主执行器阻塞在子任务 handler 内，
         // 审批事件无法从其 SSE 流到达）。合并逻辑（去重 + 补凭据）在 useApprovals 内。
-        onApprovalFromBus(e.data as { approvalId: string; name: string; summary: string; sessionId?: string; createdAt?: number; expiresAt?: number; approvalToken?: string });
-      }
-      else if (e.type === 'provider.error') {
+        onApprovalFromBus(
+          e.data as {
+            approvalId: string;
+            name: string;
+            summary: string;
+            sessionId?: string;
+            createdAt?: number;
+            expiresAt?: number;
+            approvalToken?: string;
+          },
+        );
+      } else if (e.type === 'provider.error') {
         // Provider 健康回报（agent failover 链真实调用失败）：刷新健康标记 + 即时提示，
         // 不等整条链耗尽才发现。同类提示 60s 内去重（连续消息失败不刷屏）
         const d = e.data as { providerId: string; providerLabel: string; authFailed: boolean; error: string };
@@ -297,27 +281,42 @@ export default function App() {
         const last = providerToastAtRef.current.get(d.providerId) ?? 0;
         if (now - last < 60_000) return;
         providerToastAtRef.current.set(d.providerId, now);
-        void providersApi.list().then(setProviders).catch(() => undefined);
+        void providersApi
+          .list()
+          .then(setProviders)
+          .catch(() => undefined);
         if (d.authFailed) {
           toast.error(`这条线路的钥匙好像过期了（${d.providerLabel}），我已经换了一条接着陪你聊`);
           toast.warning('有空在「设置」里换一下新钥匙', { duration: 5000 });
         } else {
           toast.warning(`${d.providerLabel} 刚才没接上，我换了条线路再说一遍`);
         }
-      }
-      else if (e.type === 'provider.ok') {
+      } else if (e.type === 'provider.ok') {
         // Provider 恢复（key 换好后首次成功）：清除红标
-        void providersApi.list().then(setProviders).catch(() => undefined);
+        void providersApi
+          .list()
+          .then(setProviders)
+          .catch(() => undefined);
       }
     }, setLiveState);
-    return () => { off(); };
+    return () => {
+      off();
+    };
   }, []);
 
   // trace 统计轮询：只在轨迹面板可见时进行（关面板 = 零后台请求）
   useEffect(() => {
     if (!traceOpen || activeTab !== 'chat') return;
-    void traceApi.stats().then(setTraceStats).catch(() => undefined);
-    const t = setInterval(() => { void traceApi.stats().then(setTraceStats).catch(() => undefined); }, 2000);
+    void traceApi
+      .stats()
+      .then(setTraceStats)
+      .catch(() => undefined);
+    const t = setInterval(() => {
+      void traceApi
+        .stats()
+        .then(setTraceStats)
+        .catch(() => undefined);
+    }, 2000);
     return () => clearInterval(t);
   }, [traceOpen, activeTab]);
 
@@ -335,31 +334,38 @@ export default function App() {
 
   async function loadAll() {
     try {
-      const [ss, ms, pl, pvs, diagnostics] = await Promise.all([sessionApi.list(), modelsApi.list(), pluginsApi.list(), providersApi.list(), pluginsApi.diagnostics()]);
+      const [ss, ms, pl, pvs, diagnostics] = await Promise.all([
+        sessionApi.list(),
+        modelsApi.list(),
+        pluginsApi.list(),
+        providersApi.list(),
+        pluginsApi.diagnostics(),
+      ]);
       setSessions(ss);
       setModels(ms);
       setPlugins(pl);
       setPluginDiagnostics(diagnostics);
       setProviders(pvs);
-      if (ms.length) setSel((prev) => {
-        if (prev) return prev;
-        // 优先用第一个会话保存的 provider + model（如果该 provider 存在且该模型属于它）
-        const firstSession = ss[0];
-        if (firstSession?.provider && firstSession.model) {
-          const m = ms.find((x) => x.provider === firstSession.provider && x.model === firstSession.model);
-          if (m) return { provider: m.provider, model: m.model };
-          const any = ms.find((x) => x.provider === firstSession.provider);
-          if (any) return { provider: any.provider, model: any.model };
-        }
-        return splitModelId(ms[0].id);
-      });
+      if (ms.length)
+        setSel((prev) => {
+          if (prev) return prev;
+          // 优先用第一个会话保存的 provider + model（如果该 provider 存在且该模型属于它）
+          const firstSession = ss[0];
+          if (firstSession?.provider && firstSession.model) {
+            const m = ms.find((x) => x.provider === firstSession.provider && x.model === firstSession.model);
+            if (m) return { provider: m.provider, model: m.model };
+            const any = ms.find((x) => x.provider === firstSession.provider);
+            if (any) return { provider: any.provider, model: any.model };
+          }
+          return splitModelId(ms[0].id);
+        });
       let initialId: string | null = null;
       if (!ss.length) {
         const created = await sessionApi.create(ms[0]?.model ?? '');
         setSessions([created]);
         initialId = created.id;
       } else {
-        initialId = ss.find(session => session.id === new URLSearchParams(location.search).get('session'))?.id ?? ss[0].id;
+        initialId = ss.find((session) => session.id === new URLSearchParams(location.search).get('session'))?.id ?? ss[0].id;
       }
       setActiveId(initialId);
       writeViewLocation(settingsOpen ? 'settings' : activeTab, initialId, true);
@@ -375,17 +381,17 @@ export default function App() {
     writeViewLocation('chat', id);
     if (id === activeIdRef.current) return;
     abortRef.current?.abort();
-    setStreaming(false); setCurrentRun(null);
+    setStreaming(false);
+    setCurrentRun(null);
     setActiveId(id);
     setMessages([]);
     clearTraceSteps();
-    traceIdsRef.current = new Set();   // 换会话 = 换 trace 域：旧会话的步骤不再串进面板
+    traceIdsRef.current = new Set(); // 换会话 = 换 trace 域：旧会话的步骤不再串进面板
     setStreamStatus(null);
     setPlan(null);
     setCheckpoint(null);
     setBudgetHit(null);
     setSessionCost(0);
-
   }, []);
 
   const createSession = useCallback(async () => {
@@ -409,23 +415,32 @@ export default function App() {
     }
   }, [sel, clearTraceSteps]);
 
-  const deleteSession = useCallback(async (id: string) => {
-    try {
-      await sessionApi.remove(id);
-    } catch (err) {
-      toast.error(`删除会话失败：${err instanceof Error ? err.message : String(err)}`);
-      return;
-    }
-    toast.success('会话已删除');
-    setSessions((prev) => {
-      const next = prev.filter((s) => s.id !== id);
-      if (activeId === id) {
-        if (next.length) void selectSession(next[0].id);
-        else { setActiveId(null); setMessages([]); clearTraceSteps(); traceIdsRef.current.clear(); setPlan(null); }
+  const deleteSession = useCallback(
+    async (id: string) => {
+      try {
+        await sessionApi.remove(id);
+      } catch (err) {
+        toast.error(`删除会话失败：${err instanceof Error ? err.message : String(err)}`);
+        return;
       }
-      return next;
-    });
-  }, [activeId, selectSession, clearTraceSteps]);
+      toast.success('会话已删除');
+      setSessions((prev) => {
+        const next = prev.filter((s) => s.id !== id);
+        if (activeId === id) {
+          if (next.length) void selectSession(next[0].id);
+          else {
+            setActiveId(null);
+            setMessages([]);
+            clearTraceSteps();
+            traceIdsRef.current.clear();
+            setPlan(null);
+          }
+        }
+        return next;
+      });
+    },
+    [activeId, selectSession, clearTraceSteps],
+  );
 
   const archiveSession = useCallback(async (id: string, archived: boolean) => {
     try {
@@ -448,21 +463,30 @@ export default function App() {
   }, []);
 
   /** 批量删除（后端事务原子批量接口） */
-  const batchDelete = useCallback(async (ids: string[]) => {
-    if (!ids.length) return;
-    try {
-      const r = await sessionApi.batchRemove(ids);
-      setSessions(await sessionApi.list());
-      if (activeId && ids.includes(activeId)) {
-        const next = sessions.filter((s) => !ids.includes(s.id));
-        if (next.length) void selectSession(next[0].id);
-        else { setActiveId(null); setMessages([]); clearTraceSteps(); traceIdsRef.current.clear(); setPlan(null); }
+  const batchDelete = useCallback(
+    async (ids: string[]) => {
+      if (!ids.length) return;
+      try {
+        const r = await sessionApi.batchRemove(ids);
+        setSessions(await sessionApi.list());
+        if (activeId && ids.includes(activeId)) {
+          const next = sessions.filter((s) => !ids.includes(s.id));
+          if (next.length) void selectSession(next[0].id);
+          else {
+            setActiveId(null);
+            setMessages([]);
+            clearTraceSteps();
+            traceIdsRef.current.clear();
+            setPlan(null);
+          }
+        }
+        toast.success(`已删除 ${r.removed ?? ids.length} 个会话`);
+      } catch (err) {
+        toast.error(`批量删除失败：${err instanceof Error ? err.message : String(err)}`);
       }
-      toast.success(`已删除 ${r.removed ?? ids.length} 个会话`);
-    } catch (err) {
-      toast.error(`批量删除失败：${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [activeId, sessions, selectSession, clearTraceSteps]);
+    },
+    [activeId, sessions, selectSession, clearTraceSteps],
+  );
 
   /** 批量归档（未归档的标记归档） */
   const batchArchive = useCallback(async (ids: string[]) => {
@@ -488,34 +512,41 @@ export default function App() {
     }
   }, []);
 
-  const setSessionMode = useCallback(async (mode: string) => {
-    if (!activeId) return;
-    try {
-      await sessionApi.update(activeId, { mode });
-      setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
-      const label = mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通模式';
-      toast.success(`已切换到${label}`);
-    } catch (err) {
-      toast.error(`切换模式失败：${err instanceof Error ? err.message : String(err)}`);
-    }
-  }, [activeId]);
-
-  const selectModel = useCallback(async (id: string) => {
-    // 兼容两种 key：新格式 `provider@model`；旧格式纯 provider id（浏览器缓存旧 UI 时）
-    let x = splitModelId(id);
-    if (!x.model) {
-      const first = models.find((m) => m.provider === id || m.id === id);
-      if (!first) return;
-      x = { provider: first.provider, model: first.model };
-    }
-    setSel(x);
-    if (activeId) {
+  const setSessionMode = useCallback(
+    async (mode: string) => {
+      if (!activeId) return;
       try {
-        await sessionApi.update(activeId, { model: x.model, provider: x.provider });
+        await sessionApi.update(activeId, { mode });
+        setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, mode } : s)));
+        const label = mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通模式';
+        toast.success(`已切换到${label}`);
+      } catch (err) {
+        toast.error(`切换模式失败：${err instanceof Error ? err.message : String(err)}`);
       }
-      catch (err) { toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`); }
-    }
-  }, [models, activeId]);
+    },
+    [activeId],
+  );
+
+  const selectModel = useCallback(
+    async (id: string) => {
+      // 兼容两种 key：新格式 `provider@model`；旧格式纯 provider id（浏览器缓存旧 UI 时）
+      let x = splitModelId(id);
+      if (!x.model) {
+        const first = models.find((m) => m.provider === id || m.id === id);
+        if (!first) return;
+        x = { provider: first.provider, model: first.model };
+      }
+      setSel(x);
+      if (activeId) {
+        try {
+          await sessionApi.update(activeId, { model: x.model, provider: x.provider });
+        } catch (err) {
+          toast.error(`模型切换失败：${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
+    },
+    [models, activeId],
+  );
 
   const pluginAction = useCallback(async (id: string, action: 'enable' | 'disable' | 'reload' | 'uninstall') => {
     try {
@@ -544,231 +575,397 @@ export default function App() {
    *  实时路径刻意产出与 replayMessages() 完全相同的形状：开始办事的那几轮文本挪进
    *  narration（旁白）、工具卡带 tool_call_id、「加入了群聊」交给渲染期派生——
    *  于是「刷新一次还是这场对话」，而不是换副面孔（旧的空气泡就是这么来的）。 */
-  const makeStreamHandlers = useCallback((assistantId: string) => ({
-    onRun: (run: RunInfo) => { if (run.sessionId === activeIdRef.current) setCurrentRun(run); },
-    onStart: (traceId: string) => {
-      traceIdsRef.current = traceId ? new Set([traceId]) : new Set();
-      clearTraceSteps();
-      // 新一轮开始：清掉上一轮的小队进度（否则"2/4"会挂在新对话上）
-      const sid = activeIdRef.current ?? '';
-      setSquad((prev) => ({ ...prev, [sid]: { total: 0, done: 0, failed: 0, running: {} } }));
-    },
-    onDelta: (t: string) => queueStreamText(assistantId, { content: t }),
-    onReasoning: (t: string) => queueStreamText(assistantId, { reasoning: t }),
-    onStatus: (text: string) => setStreamStatus(text),
-    onToolStart: (id: string | undefined, name: string, args: unknown) => {
-      flushStreamBuffer();
-      setStreamStatus(null);
-      setMessages((prev) => prev.map((m) => {
-        if (m.id !== assistantId) return m;
-        // 这一轮转去办事了：此前流出的文本是说给它自己听的旁白，从正文挪走
-        // （旧行为是让它留在正文里、最后被 done 的全文整体替换——
-        //  用户会看见对方先冒出一串英文工作日志、说完又被抽走）
-        const said = m.content.slice(m.retryFrom ?? 0).trim();
-        return {
-          ...m,
-          narration: said ? [...(m.narration ?? []), said] : m.narration,
-          content: '',
-          retryFrom: undefined,
-          tools: [...(m.tools ?? []), { id, name, args, status: 'running' as const, startedAt: Date.now() }],
-        };
-      }));
-    },
-    onToolResult: (id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean, evidence?: ToolEvidence[], warnings?: ToolWarning[]) => {
-      flushStreamBuffer();
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? {
-        ...m, tools: (m.tools ?? []).map((t) => t.status === 'running' && (t.id ? t.id === id : t.name === name) ? {
-          ...t, summary, ok, stored, evidence, warnings, status: ok ? 'done' as const : 'error' as const, durationMs: Date.now() - (t.startedAt ?? Date.now()),
-        } : t),
-      } : m));
-    },
-    onApprovalRequired: onApprovalFromStream,
-    onHandoff: (role: string, objective: string) => {
-      // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
-      flushStreamBuffer();
-      setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: sys.handoff(role, objective), ts: Date.now() }]);
-      void sessionApi.list().then(setSessions).catch(() => undefined);
-    },
-    onBudgetHit: (cost: number, budget: number) => {
-      // 成本熔断：横幅展示（harness 硬边界）
-      setBudgetHit({ cost, budget });
-    },
-    onTaskVerified: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
-      setStreamStatus('任务验收通过（有执行证据）');
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'verified', objective, checks, evidence: evidence ?? [] } } : m));
-    },
-    onTaskPartial: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
-      setStreamStatus('任务部分完成（请查看未满足的验收条件）');
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'partial', objective, checks, evidence: evidence ?? [] } } : m));
-    },
-    onTaskFailed: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
-      setStreamStatus('任务验收未通过（已保留执行证据）');
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, taskVerification: { status: 'failed', objective, checks, evidence: evidence ?? [] } } : m));
-    },
-    onTaskInference: (objective: string, inference: { confidence: number; basis: 'explicit' | 'inferred' | 'ambiguous'; needsConfirmation: boolean; rationale: string }) => {
-      if (!inference.needsConfirmation) return;
-      flushStreamBuffer();
-      setMessages((prev) => [...prev, {
-        id: `task-inference-${Date.now()}`,
-        role: 'system',
-        content: `目标“${objective}”缺少明确验收标准（置信度 ${Math.round(inference.confidence * 100)}%）：${inference.rationale}。可继续执行，补充验收条件后可自动校验结果。`,
-        ts: Date.now(),
-      }]);
-    },
-    onRetry: (reason: 'attempt' | 'failover' | 'narration', detail?: string) => {
-      // provider 重试/换线路：截断边界记在消息上（含未冲刷增量），从该边界重新累积。
-      // 同时把"刚才那次作废了"说出来——否则用户看到的是说过的话被一口气擦掉。
-      const p = pendingStreamRef.current;
-      const base = messagesRef.current.find((m) => m.id === assistantId);
-      const pending = p?.id === assistantId ? p : null;
-      const cutContent = (base?.content.length ?? 0) + (pending?.content.length ?? 0);
-      const cutReasoning = (base?.reasoning?.length ?? 0) + (pending?.reasoning.length ?? 0);
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, retryFrom: cutContent, retryFromReasoning: cutReasoning } : m));
-      setStreamStatus(detail || (reason === 'failover' ? '这条线路没接通，换一个再说一遍…' : '刚才那下没接上，我再说一遍…'));
-    },
-    onDone: (d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }) => {
-      flushStreamBuffer();
-      setStreamStatus(null);
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? { ...m, content: d.content, reasoning: d.reasoning ?? m.reasoning, streaming: false, usage: d.usage, cost: d.cost, cached: d.cached } : m));
-      setSessionCost((prev) => prev + (d.cost ?? 0));
-    },
-    onError: (e: string, kind?: ErrorKind) => {
-      flushStreamBuffer(); // 失败前已生成的部分内容保留可见
-      setStreamStatus(null);
-      const gentle = kind === 'aborted' || kind === 'busy';
-      const he = humanizeError(e, kind);
-      setMessages((prev) => prev.map((m) => m.id === assistantId ? {
-        ...m,
-        streaming: false,
-        // 用户自己按的停止：留一条温和的话，而不是把取消说成故障
-        stopped: kind === 'aborted' ? true : m.stopped,
-        error: gentle ? (kind === 'busy' ? he.text : undefined) : (he.text || e),
-        errorRaw: gentle ? undefined : e,
-        // 停止时正在说的那半句已经流出去了——归位到旁白，别让它凭空消失
-        ...(kind === 'aborted' ? { narration: (m.content.trim() ? [...(m.narration ?? []), m.content.trim()] : m.narration), content: '' } : {}),
-      } : m));
-      if (!gentle && he.severe) toast.error(he.text);
-      if (!gentle && he.hint) toast.warning(he.hint);
-      // 错误结束（如超轮数/熔断/连接中断）→ 同步断点：未完成任务保留「继续任务」入口；
-      // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
-      // 不复位则输入区与停止按钮锁死在 streaming 状态
-      setStreaming(false);
-      if (activeId) void Promise.resolve(null).then(setCheckpoint).catch(() => undefined);
-    },
-    onEnd: () => {
-      flushStreamBuffer();
-      setStreamStatus(null);
-      setStreaming(false);
-      // 任务正常完成 → 后端已清除断点
-      setCheckpoint(null);
-      setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, updatedAt: Date.now() } : s));
-    },
-  }), [activeId, queueStreamText, flushStreamBuffer, clearTraceSteps]);
+  const makeStreamHandlers = useCallback(
+    (assistantId: string) => ({
+      onRun: (run: RunInfo) => {
+        if (run.sessionId === activeIdRef.current) setCurrentRun(run);
+      },
+      onStart: (traceId: string) => {
+        traceIdsRef.current = traceId ? new Set([traceId]) : new Set();
+        clearTraceSteps();
+        // 新一轮开始：清掉上一轮的小队进度（否则"2/4"会挂在新对话上）
+        const sid = activeIdRef.current ?? '';
+        setSquad((prev) => ({ ...prev, [sid]: { total: 0, done: 0, failed: 0, running: {} } }));
+      },
+      onDelta: (t: string) => queueStreamText(assistantId, { content: t }),
+      onReasoning: (t: string) => queueStreamText(assistantId, { reasoning: t }),
+      onStatus: (text: string) => setStreamStatus(text),
+      onToolStart: (id: string | undefined, name: string, args: unknown) => {
+        flushStreamBuffer();
+        setStreamStatus(null);
+        setMessages((prev) =>
+          prev.map((m) => {
+            if (m.id !== assistantId) return m;
+            // 这一轮转去办事了：此前流出的文本是说给它自己听的旁白，从正文挪走
+            // （旧行为是让它留在正文里、最后被 done 的全文整体替换——
+            //  用户会看见对方先冒出一串英文工作日志、说完又被抽走）
+            const said = m.content.slice(m.retryFrom ?? 0).trim();
+            return {
+              ...m,
+              narration: said ? [...(m.narration ?? []), said] : m.narration,
+              content: '',
+              retryFrom: undefined,
+              tools: [...(m.tools ?? []), { id, name, args, status: 'running' as const, startedAt: Date.now() }],
+            };
+          }),
+        );
+      },
+      onToolResult: (
+        id: string | undefined,
+        name: string,
+        summary: string,
+        ok: boolean,
+        stored?: boolean,
+        evidence?: ToolEvidence[],
+        warnings?: ToolWarning[],
+      ) => {
+        flushStreamBuffer();
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  tools: (m.tools ?? []).map((t) =>
+                    t.status === 'running' && (t.id ? t.id === id : t.name === name)
+                      ? {
+                          ...t,
+                          summary,
+                          ok,
+                          stored,
+                          evidence,
+                          warnings,
+                          status: ok ? ('done' as const) : ('error' as const),
+                          durationMs: Date.now() - (t.startedAt ?? Date.now()),
+                        }
+                      : t,
+                  ),
+                }
+              : m,
+          ),
+        );
+      },
+      onApprovalRequired: onApprovalFromStream,
+      onHandoff: (role: string, objective: string) => {
+        // 角色移交：消息流插入系统通知；会话角色由后端持久化（刷新列表同步）
+        flushStreamBuffer();
+        setMessages((prev) => [...prev, { id: `ho-${Date.now()}`, role: 'system', content: sys.handoff(role, objective), ts: Date.now() }]);
+        void sessionApi
+          .list()
+          .then(setSessions)
+          .catch(() => undefined);
+      },
+      onBudgetHit: (cost: number, budget: number) => {
+        // 成本熔断：横幅展示（harness 硬边界）
+        setBudgetHit({ cost, budget });
+      },
+      onTaskVerified: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+        setStreamStatus('任务验收通过（有执行证据）');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, taskVerification: { status: 'verified', objective, checks, evidence: evidence ?? [] } } : m,
+          ),
+        );
+      },
+      onTaskPartial: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+        setStreamStatus('任务部分完成（请查看未满足的验收条件）');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, taskVerification: { status: 'partial', objective, checks, evidence: evidence ?? [] } } : m,
+          ),
+        );
+      },
+      onTaskFailed: (objective: string, checks: TaskVerificationInfo['checks'], evidence?: TaskVerificationInfo['evidence']) => {
+        setStreamStatus('任务验收未通过（已保留执行证据）');
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId ? { ...m, taskVerification: { status: 'failed', objective, checks, evidence: evidence ?? [] } } : m,
+          ),
+        );
+      },
+      onTaskInference: (
+        objective: string,
+        inference: { confidence: number; basis: 'explicit' | 'inferred' | 'ambiguous'; needsConfirmation: boolean; rationale: string },
+      ) => {
+        if (!inference.needsConfirmation) return;
+        flushStreamBuffer();
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `task-inference-${Date.now()}`,
+            role: 'system',
+            content: `目标“${objective}”缺少明确验收标准（置信度 ${Math.round(inference.confidence * 100)}%）：${inference.rationale}。可继续执行，补充验收条件后可自动校验结果。`,
+            ts: Date.now(),
+          },
+        ]);
+      },
+      onRetry: (reason: 'attempt' | 'failover' | 'narration', detail?: string) => {
+        // provider 重试/换线路：截断边界记在消息上（含未冲刷增量），从该边界重新累积。
+        // 同时把"刚才那次作废了"说出来——否则用户看到的是说过的话被一口气擦掉。
+        const p = pendingStreamRef.current;
+        const base = messagesRef.current.find((m) => m.id === assistantId);
+        const pending = p?.id === assistantId ? p : null;
+        const cutContent = (base?.content.length ?? 0) + (pending?.content.length ?? 0);
+        const cutReasoning = (base?.reasoning?.length ?? 0) + (pending?.reasoning.length ?? 0);
+        setMessages((prev) =>
+          prev.map((m) => (m.id === assistantId ? { ...m, retryFrom: cutContent, retryFromReasoning: cutReasoning } : m)),
+        );
+        setStreamStatus(detail || (reason === 'failover' ? '这条线路没接通，换一个再说一遍…' : '刚才那下没接上，我再说一遍…'));
+      },
+      onDone: (d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }) => {
+        flushStreamBuffer();
+        setStreamStatus(null);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  content: d.content,
+                  reasoning: d.reasoning ?? m.reasoning,
+                  streaming: false,
+                  usage: d.usage,
+                  cost: d.cost,
+                  cached: d.cached,
+                }
+              : m,
+          ),
+        );
+        setSessionCost((prev) => prev + (d.cost ?? 0));
+      },
+      onError: (e: string, kind?: ErrorKind) => {
+        flushStreamBuffer(); // 失败前已生成的部分内容保留可见
+        setStreamStatus(null);
+        const gentle = kind === 'aborted' || kind === 'busy';
+        const he = humanizeError(e, kind);
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === assistantId
+              ? {
+                  ...m,
+                  streaming: false,
+                  // 用户自己按的停止：留一条温和的话，而不是把取消说成故障
+                  stopped: kind === 'aborted' ? true : m.stopped,
+                  error: gentle ? (kind === 'busy' ? he.text : undefined) : he.text || e,
+                  errorRaw: gentle ? undefined : e,
+                  // 停止时正在说的那半句已经流出去了——归位到旁白，别让它凭空消失
+                  ...(kind === 'aborted'
+                    ? { narration: m.content.trim() ? [...(m.narration ?? []), m.content.trim()] : m.narration, content: '' }
+                    : {}),
+                }
+              : m,
+          ),
+        );
+        if (!gentle && he.severe) toast.error(he.text);
+        if (!gentle && he.hint) toast.warning(he.hint);
+        // 错误结束（如超轮数/熔断/连接中断）→ 同步断点：未完成任务保留「继续任务」入口；
+        // 同时复位全局 streaming——错误路径可能没有后续 'end' 事件（传输层断开），
+        // 不复位则输入区与停止按钮锁死在 streaming 状态
+        setStreaming(false);
+        if (activeId)
+          void Promise.resolve(null)
+            .then(setCheckpoint)
+            .catch(() => undefined);
+      },
+      onEnd: () => {
+        flushStreamBuffer();
+        setStreamStatus(null);
+        setStreaming(false);
+        // 任务正常完成 → 后端已清除断点
+        setCheckpoint(null);
+        setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, updatedAt: Date.now() } : s)));
+      },
+    }),
+    [activeId, queueStreamText, flushStreamBuffer, clearTraceSteps],
+  );
 
-  const send = useCallback(async (text: string, frameworkChangeId?: string, materials?: MaterialRef[]) => {
-    if (!activeId || !text.trim() || streaming) return;
-    setPendingInference(null);
+  const send = useCallback(
+    async (text: string, frameworkChangeId?: string, materials?: MaterialRef[]) => {
+      if (!activeId || !text.trim() || streaming) return;
+      setPendingInference(null);
 
-    if (text.trim().startsWith('/')) {
-      const systemMsg = (content: string) => setMessages((prev) => [...prev, { id: `cmd-${Date.now()}`, role: 'system', content, ts: Date.now() }]);
-      try {
-        const r = await commandsApi.exec(text.trim(), activeId);
-        if (r.type === 'message') {
-          systemMsg(r.data?.text ?? '');
-        } else if (r.type === 'action') {
-          const a = r.data?.action;
-          if (a === 'new_session') await createSession();
-          else if (a === 'clear') { setMessages([]); systemMsg(sys.cleared); }
-          else if (a === 'set_mode') {
-            const mode = r.data?.mode ?? 'normal';
-            setSessions((prev) => prev.map((s) => s.id === activeId ? { ...s, mode } : s));
-            systemMsg(sys.modeSet(mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通聊天'));
-          } else if (a === 'set_model') {
-            setSel({ provider: r.data?.provider ?? '', model: r.data?.model ?? '' });
-            systemMsg(sys.modelSet(r.data?.model ?? ''));
+      if (text.trim().startsWith('/')) {
+        const systemMsg = (content: string) =>
+          setMessages((prev) => [...prev, { id: `cmd-${Date.now()}`, role: 'system', content, ts: Date.now() }]);
+        try {
+          const r = await commandsApi.exec(text.trim(), activeId);
+          if (r.type === 'message') {
+            systemMsg(r.data?.text ?? '');
+          } else if (r.type === 'action') {
+            const a = r.data?.action;
+            if (a === 'new_session') await createSession();
+            else if (a === 'clear') {
+              setMessages([]);
+              systemMsg(sys.cleared);
+            } else if (a === 'set_mode') {
+              const mode = r.data?.mode ?? 'normal';
+              setSessions((prev) => prev.map((s) => (s.id === activeId ? { ...s, mode } : s)));
+              systemMsg(sys.modeSet(mode === 'plan' ? '计划模式' : mode === 'goal' ? '目标模式' : '普通聊天'));
+            } else if (a === 'set_model') {
+              setSel({ provider: r.data?.provider ?? '', model: r.data?.model ?? '' });
+              systemMsg(sys.modelSet(r.data?.model ?? ''));
+            }
+          } else if (!r.ok) {
+            systemMsg(sys.commandFailed(r.error ?? '说不清为什么'));
           }
-        } else if (!r.ok) {
-          systemMsg(sys.commandFailed(r.error ?? '说不清为什么'));
+        } catch (err) {
+          systemMsg(sys.commandFailed(err instanceof Error ? err.message : String(err)));
         }
-      } catch (err) {
-        systemMsg(sys.commandFailed(err instanceof Error ? err.message : String(err)));
+        return;
       }
-      return;
-    }
 
-    const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: text, ts: Date.now() };
-    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
-    setMessages((prev) => [...prev, userMsg, assistantMsg]);
-    setStreaming(true);
-    const ac = new AbortController();
-    abortRef.current = ac;
+      const userMsg: ChatMessage = { id: `u-${Date.now()}`, role: 'user', content: text, ts: Date.now() };
+      const assistantMsg: ChatMessage = {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        tools: [],
+        narration: [],
+        ts: Date.now(),
+      };
+      setMessages((prev) => [...prev, userMsg, assistantMsg]);
+      setStreaming(true);
+      const ac = new AbortController();
+      abortRef.current = ac;
 
-    // provider 一并上送：两个 provider 有同名模型时，服务端按 provider 优先解析才不会答错人
-    await streamChat(activeId, { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '', frameworkChangeId, materials }, makeStreamHandlers(assistantMsg.id), ac.signal);
+      // provider 一并上送：两个 provider 有同名模型时，服务端按 provider 优先解析才不会答错人
+      await streamChat(
+        activeId,
+        { message: text, model: sel?.model ?? '', provider: sel?.provider ?? '', frameworkChangeId, materials },
+        makeStreamHandlers(assistantMsg.id),
+        ac.signal,
+      );
 
-    try { setSessions(await sessionApi.list()); } catch { /* 会话列表刷新失败不影响本次回复 */ }
-  }, [activeId, sel, streaming, createSession, makeStreamHandlers]);
+      try {
+        setSessions(await sessionApi.list());
+      } catch {
+        /* 会话列表刷新失败不影响本次回复 */
+      }
+    },
+    [activeId, sel, streaming, createSession, makeStreamHandlers],
+  );
 
-  const confirmInference = useCallback((objective: string, acceptance: string) => {
-    const condition = acceptance.trim();
-    if (!condition) return;
-    void send(`${objective}\n验收条件：${condition}`);
-  }, [send]);
+  const confirmInference = useCallback(
+    (objective: string, acceptance: string) => {
+      const condition = acceptance.trim();
+      if (!condition) return;
+      void send(`${objective}\n验收条件：${condition}`);
+    },
+    [send],
+  );
 
   const resumeTask = useCallback(async () => {
     if (!currentRun || streaming || currentRun.status !== 'interrupted') return;
-    setResuming(true); setStreaming(true);
-    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
-    setMessages(previous => [...previous, assistantMsg]);
-    const ac = new AbortController(); abortRef.current = ac;
-    try { const run = await runsApi.resume(currentRun.id); setCurrentRun(run); await subscribeRun(run.id, makeStreamHandlers(assistantMsg.id), ac.signal, run.eventCursor ?? 0); }
-    catch (error) { toast.error(String(error)); setStreaming(false); }
-    finally { setResuming(false); }
+    setResuming(true);
+    setStreaming(true);
+    const assistantMsg: ChatMessage = {
+      id: `a-${Date.now()}`,
+      role: 'assistant',
+      content: '',
+      streaming: true,
+      tools: [],
+      narration: [],
+      ts: Date.now(),
+    };
+    setMessages((previous) => [...previous, assistantMsg]);
+    const ac = new AbortController();
+    abortRef.current = ac;
+    try {
+      const run = await runsApi.resume(currentRun.id);
+      setCurrentRun(run);
+      await subscribeRun(run.id, makeStreamHandlers(assistantMsg.id), ac.signal, run.eventCursor ?? 0);
+    } catch (error) {
+      toast.error(String(error));
+      setStreaming(false);
+    } finally {
+      setResuming(false);
+    }
   }, [currentRun, streaming, makeStreamHandlers]);
 
   const stop = useCallback(() => {
     const run = currentRunRef.current;
-    if (run && activeRun(run)) void runsApi.cancel(run.id).then(setCurrentRun).catch(error => toast.error(String(error)));
+    if (run && activeRun(run))
+      void runsApi
+        .cancel(run.id)
+        .then(setCurrentRun)
+        .catch((error) => toast.error(String(error)));
   }, []);
 
-  const newTask = useCallback(async (message: string) => {
-    const run = currentRunRef.current;
-    if (!run) return;
-    await runsApi.cancel(run.id);
-    let next = await runsApi.get(run.id);
-    for (let attempt = 0; activeRun(next) && attempt < 60; attempt++) {
-      await new Promise(resolve => setTimeout(resolve, 500)); next = await runsApi.get(run.id);
-    }
-    if (activeRun(next)) throw new Error('任务仍在停止，请等待后重试');
-    abortRef.current?.abort(); setStreaming(true);
-    const assistantMsg: ChatMessage = { id: `a-${Date.now()}`, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: Date.now() };
-    setMessages(previous => [...previous.map(m => ({ ...m, streaming: false })), { id: `u-${Date.now()}`, role: 'user', content: message, ts: Date.now() }, assistantMsg]);
-    const ac = new AbortController(); abortRef.current = ac;
-    await streamChat(run.sessionId, { message, model: sel?.model, provider: sel?.provider, reworkOfRunId: activeRun(run) ? undefined : run.id }, makeStreamHandlers(assistantMsg.id), ac.signal);
-  }, [sel, makeStreamHandlers]);
+  const newTask = useCallback(
+    async (message: string) => {
+      const run = currentRunRef.current;
+      if (!run) return;
+      await runsApi.cancel(run.id);
+      let next = await runsApi.get(run.id);
+      for (let attempt = 0; activeRun(next) && attempt < 60; attempt++) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        next = await runsApi.get(run.id);
+      }
+      if (activeRun(next)) throw new Error('任务仍在停止，请等待后重试');
+      abortRef.current?.abort();
+      setStreaming(true);
+      const assistantMsg: ChatMessage = {
+        id: `a-${Date.now()}`,
+        role: 'assistant',
+        content: '',
+        streaming: true,
+        tools: [],
+        narration: [],
+        ts: Date.now(),
+      };
+      setMessages((previous) => [
+        ...previous.map((m) => ({ ...m, streaming: false })),
+        { id: `u-${Date.now()}`, role: 'user', content: message, ts: Date.now() },
+        assistantMsg,
+      ]);
+      const ac = new AbortController();
+      abortRef.current = ac;
+      await streamChat(
+        run.sessionId,
+        { message, model: sel?.model, provider: sel?.provider, reworkOfRunId: activeRun(run) ? undefined : run.id },
+        makeStreamHandlers(assistantMsg.id),
+        ac.signal,
+      );
+    },
+    [sel, makeStreamHandlers],
+  );
 
   const handlerRef = useRef(makeStreamHandlers);
   handlerRef.current = makeStreamHandlers;
   useEffect(() => {
     if (!activeId) return;
-    setCurrentRun(null); setStreaming(false);
+    setCurrentRun(null);
+    setStreaming(false);
     const ac = new AbortController();
     setStreaming(true);
-    void Promise.all([runsApi.list(activeId), sessionApi.messages(activeId), planApi.get(activeId).catch(() => null)]).then(async ([rows, msgs, pl]) => {
-      if (ac.signal.aborted || activeIdRef.current !== activeId) return;
-      setMessages(replayMessages(msgs));
-      setPlan(pl?.plan ?? null);
-      setSessionCost(msgs.reduce((total, message) => total + (message.cost ?? 0), 0));
-      const run = rows.find(run => !run.parentId);
-      setCurrentRun(run ?? null);
-      if (run && activeRun(run)) {
-        abortRef.current?.abort(); abortRef.current = ac;
-        const assistantId = `run-${run.id}`;
-        setMessages(previous => [...previous, { id: assistantId, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: run.createdAt }]);
-        await subscribeRun(run.id, handlerRef.current(assistantId), ac.signal);
-      } else setStreaming(false);
-    }).catch(error => { if (!ac.signal.aborted) { setStreaming(false); toast.error(String(error)); } });
-    return () => { ac.abort(); abortRef.current?.abort(); };
+    void Promise.all([runsApi.list(activeId), sessionApi.messages(activeId), planApi.get(activeId).catch(() => null)])
+      .then(async ([rows, msgs, pl]) => {
+        if (ac.signal.aborted || activeIdRef.current !== activeId) return;
+        setMessages(replayMessages(msgs));
+        setPlan(pl?.plan ?? null);
+        setSessionCost(msgs.reduce((total, message) => total + (message.cost ?? 0), 0));
+        const run = rows.find((run) => !run.parentId);
+        setCurrentRun(run ?? null);
+        if (run && activeRun(run)) {
+          abortRef.current?.abort();
+          abortRef.current = ac;
+          const assistantId = `run-${run.id}`;
+          setMessages((previous) => [
+            ...previous,
+            { id: assistantId, role: 'assistant', content: '', streaming: true, tools: [], narration: [], ts: run.createdAt },
+          ]);
+          await subscribeRun(run.id, handlerRef.current(assistantId), ac.signal);
+        } else setStreaming(false);
+      })
+      .catch((error) => {
+        if (!ac.signal.aborted) {
+          setStreaming(false);
+          toast.error(String(error));
+        }
+      });
+    return () => {
+      ac.abort();
+      abortRef.current?.abort();
+    };
   }, [activeId]);
 
   // 稳定引用回调：配合 memo 化的 Sidebar/TracePanel，流式渲染期间跳过无关子树 reconcile
@@ -784,7 +981,10 @@ export default function App() {
   }, [activeId]);
 
   const refreshTraceStats = useCallback(() => {
-    void traceApi.stats().then(setTraceStats).catch(() => undefined);
+    void traceApi
+      .stats()
+      .then(setTraceStats)
+      .catch(() => undefined);
   }, []);
 
   const setSettingsOpenWithRoute = useCallback((open: boolean) => {
@@ -844,7 +1044,7 @@ export default function App() {
   const pluginRunning = plugins.filter((p) => p.state === 'started' || p.state === 'loaded').length;
   const modeLabel = currentSession?.mode === 'plan' ? '计划模式' : currentSession?.mode === 'goal' ? '目标模式' : '普通模式';
   const selModel = sel ? models.find((m) => m.id === `${sel.provider}@${sel.model}`) : undefined;
-  const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : (sel?.model ? `${sel.provider} · ${sel.model}` : '');
+  const modelLabel = selModel ? `${selModel.label} · ${selModel.model}` : sel?.model ? `${sel.provider} · ${sel.model}` : '';
   const modelTag = selModel?.model ?? sel?.model ?? '';
   // 当前 provider 密钥失效（健康回报）：会话横幅即时提示，不等 failover 链耗尽
   const activeProvider = sel?.provider ? providers.find((p) => p.id === sel.provider) : undefined;
@@ -866,7 +1066,8 @@ export default function App() {
   // 否则瞬时失败（后端重启/热重载中）会把 activeTab 误判为失效而打回会话页。
   const navLoaded = useRef(false);
   const refreshNav = useCallback(() => {
-    navApi.list()
+    navApi
+      .list()
       .then((r) => {
         navLoaded.current = true;
         setPluginNav([...r.items].sort((a, b) => b.order - a.order));
@@ -875,13 +1076,14 @@ export default function App() {
       // 从插件页踢回会话页（「插件页闪一下就没」的根因就是这里清空列表）
       .catch(() => undefined);
   }, []);
-  useEffect(() => { refreshNav(); }, [refreshNav, plugins]);
+  useEffect(() => {
+    refreshNav();
+  }, [refreshNav, plugins]);
   useEffect(() => {
     // 当前标签页的贡献者确实不在了（插件被停用/卸载）→ 回落到会话页，不留死页面。
     // 必须等成功取过一次导航才判定，避免把「还没加载/取失败」误当「插件没了」。
     if (!navLoaded.current) return;
-    if (typeof activeTab === 'string' && activeTab.startsWith('plugin:')
-      && !pluginNav.some((n) => n.key === activeTab)) {
+    if (typeof activeTab === 'string' && activeTab.startsWith('plugin:') && !pluginNav.some((n) => n.key === activeTab)) {
       setActiveTab('chat');
       writeViewLocation('chat', activeIdRef.current);
     }
@@ -917,8 +1119,15 @@ export default function App() {
       checkpoint={checkpoint}
       currentRun={currentRun}
       onNewTask={newTask}
-      onFrameworkTask={(id, message) => { setActiveTab('chat'); setSettingsOpen(false); writeViewLocation('chat', activeIdRef.current); void send(message, id); }}
-      onRunChanged={() => { if (currentRun) void runsApi.get(currentRun.id).then(setCurrentRun); }}
+      onFrameworkTask={(id, message) => {
+        setActiveTab('chat');
+        setSettingsOpen(false);
+        writeViewLocation('chat', activeIdRef.current);
+        void send(message, id);
+      }}
+      onRunChanged={() => {
+        if (currentRun) void runsApi.get(currentRun.id).then(setCurrentRun);
+      }}
       resuming={resuming}
       budgetHit={budgetHit}
       sessionCost={sessionCost}
@@ -936,7 +1145,7 @@ export default function App() {
       pluginRunning={pluginRunning}
       pluginNav={pluginNav}
       modeItems={modeItems}
-      workbenchTabKey={pluginNav.find(item => item.pluginId === 'workbench')?.key}
+      workbenchTabKey={pluginNav.find((item) => item.pluginId === 'workbench')?.key}
       activePluginNav={activePluginNav}
       pendingInference={pendingInference}
       onTab={onTab}
@@ -951,7 +1160,9 @@ export default function App() {
       onToggleSettings={toggleSettings}
       onSetSessionMode={(mode) => void setSessionMode(mode)}
       onSelectModel={(id) => void selectModel(id)}
-      onSend={(text, materials) => { void send(text, undefined, materials); }}
+      onSend={(text, materials) => {
+        void send(text, undefined, materials);
+      }}
       onStop={stop}
       onResume={() => void resumeTask()}
       onApproval={respondApproval}

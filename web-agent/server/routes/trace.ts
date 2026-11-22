@@ -10,9 +10,7 @@ export function registerTraceRoutes(app: Express, deps: RouteDeps): void {
   app.get('/api/trace', (req, res) => {
     const traceId = req.query.trace_id ? String(req.query.trace_id) : undefined;
     const tenantId = tenantIdOf(req);
-    const tenantSessions = tenantId === DEFAULT_TENANT
-      ? null
-      : new Set(store.listSessions(tenantId).map((session) => session.id));
+    const tenantSessions = tenantId === DEFAULT_TENANT ? null : new Set(store.listSessions(tenantId).map((session) => session.id));
     const type = req.query.type ? String(req.query.type) : undefined;
     const name = req.query.name ? String(req.query.name) : undefined;
     const parentId = req.query.parent_id ? String(req.query.parent_id) : undefined;
@@ -56,7 +54,12 @@ export function registerTraceRoutes(app: Express, deps: RouteDeps): void {
     const pageLimit = includeParents ? Math.min(500, Math.max(limit, steps.length)) : limit;
     const page = steps.slice(-pageLimit);
     const nextCursor = page.length === limit && page.length > 0 ? String(page[0]!.ts) : undefined;
-    res.json({ steps: page, source, ...(nextCursor ? { nextCursor } : {}), ...(includeParents ? { parentChainComplete: unresolvedParentIds.length === 0, unresolvedParentIds } : {}) });
+    res.json({
+      steps: page,
+      source,
+      ...(nextCursor ? { nextCursor } : {}),
+      ...(includeParents ? { parentChainComplete: unresolvedParentIds.length === 0, unresolvedParentIds } : {}),
+    });
   });
 
   app.get('/api/trace/stats', (_req, res) => {

@@ -17,7 +17,12 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Kernel } from '../index';
 
-interface Fixture { kernel: Kernel; rootDir: string; userPluginsDir: string; cleanup: () => void }
+interface Fixture {
+  kernel: Kernel;
+  rootDir: string;
+  userPluginsDir: string;
+  cleanup: () => void;
+}
 
 /** 每个插件：注册一个 api 能力（页面数据通道），是否声明 nav 由 manifests 决定 */
 function setup(plugins: Record<string, { nav?: Record<string, unknown>; withApi?: boolean }>): Fixture {
@@ -28,13 +33,35 @@ function setup(plugins: Record<string, { nav?: Record<string, unknown>; withApi?
   for (const [id, def] of Object.entries(plugins)) {
     const pdir = join(userPluginsDir, id);
     mkdirSync(pdir, { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id, name: `插件${id}`, version: '0.1.0', entry: 'index.ts',
-      ...(def.nav ? { nav: def.nav } : {}),
-    }));
-    const apiBody = def.withApi === false ? '' :
-      `ctx.register({ kind: 'api', api: { mount: 'ui', router: () => {} } });`;
-    writeFileSync(join(pdir, 'index.ts'), `export default {\n  id: '${id}',\n  name: '插件${id}',\n  version: '0.1.0',\n  onLoad: (ctx) => { ${apiBody} },\n}`);
+    writeFileSync(
+      join(pdir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id,
+        name: `插件${id}`,
+        version: '0.1.0',
+        entry: 'index.ts',
+        ...(def.nav ? { nav: def.nav } : {}),
+      }),
+    );
+    const apiBody = def.withApi === false ? '' : `ctx.register({ kind: 'api', api: { mount: 'ui', router: () => {} } });`;
+    writeFileSync(
+      join(pdir, 'index.ts'),
+      `export default {\n  id: '${id}',\n  name: '插件${id}',\n  version: '0.1.0',\n  onLoad: (ctx) => { ${apiBody} },\n}`,
+    );
   }
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir });
   return {
@@ -42,13 +69,23 @@ function setup(plugins: Record<string, { nav?: Record<string, unknown>; withApi?
     rootDir,
     userPluginsDir,
     cleanup: () => {
-      try { kernel.trace.flush(); } catch { /* 落盘失败不影响清理 */ }
-      try { rmSync(rootDir, { recursive: true, force: true }); } catch { /* 句柄迟释放时留待系统清理 */ }
+      try {
+        kernel.trace.flush();
+      } catch {
+        /* 落盘失败不影响清理 */
+      }
+      try {
+        rmSync(rootDir, { recursive: true, force: true });
+      } catch {
+        /* 句柄迟释放时留待系统清理 */
+      }
     },
   };
 }
 
-after(() => { /* 无全局状态：每个夹具独立临时目录 */ });
+after(() => {
+  /* 无全局状态：每个夹具独立临时目录 */
+});
 
 describe('插件声明式前端导航（nav 贡献）', () => {
   test('声明 nav 且已启动的插件进入清单，字段完整', async (t) => {
@@ -73,7 +110,10 @@ describe('插件声明式前端导航（nav 贡献）', () => {
     });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
-    assert.deepEqual(f.kernel.plugins.navContributions().map((c) => c.pluginId), ['board']);
+    assert.deepEqual(
+      f.kernel.plugins.navContributions().map((c) => c.pluginId),
+      ['board'],
+    );
   });
 
   test('停用后从清单消失（页面随能力一起下线）', async (t) => {
@@ -96,7 +136,10 @@ describe('插件声明式前端导航（nav 贡献）', () => {
     });
     t.after(f.cleanup);
     await f.kernel.plugins.loadAll();
-    assert.deepEqual(f.kernel.plugins.navContributions().map((c) => c.pluginId), ['good']);
+    assert.deepEqual(
+      f.kernel.plugins.navContributions().map((c) => c.pluginId),
+      ['good'],
+    );
   });
 
   test('两种渲染模式：iframe 用 page、panel 用 panel，缺省各自取默认路径', async (t) => {
@@ -121,15 +164,40 @@ describe('插件声明式前端导航（nav 贡献）', () => {
     const userPluginsDir = join(rootDir, 'plugins');
     const pdir = join(userPluginsDir, 'mod');
     mkdirSync(join(pdir, 'ui'), { recursive: true });
-    writeFileSync(join(pdir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } },
-      id: 'mod', name: '模块插件', version: '0.1.0', entry: 'index.ts',
-      nav: { label: '模块', mode: 'module', module: 'index.js' },
-    }));
-    writeFileSync(join(pdir, 'index.ts'), `export default { id: 'mod', name: '模块插件', version: '0.1.0',
-      onLoad: (ctx) => { ctx.register({ kind: 'api', api: { mount: 'x', router: () => {} } }); } };`);
+    writeFileSync(
+      join(pdir, 'plugin.json'),
+      JSON.stringify({
+        apiVersion: 2,
+        permissions: {
+          capabilities: {
+            tool: ['*'],
+            service: ['*'],
+            context: ['*'],
+            provider: ['*'],
+            persona: ['*'],
+            listener: ['*'],
+            command: ['*'],
+            role: ['*'],
+            api: ['*'],
+          },
+        },
+        id: 'mod',
+        name: '模块插件',
+        version: '0.1.0',
+        entry: 'index.ts',
+        nav: { label: '模块', mode: 'module', module: 'index.js' },
+      }),
+    );
+    writeFileSync(
+      join(pdir, 'index.ts'),
+      `export default { id: 'mod', name: '模块插件', version: '0.1.0',
+      onLoad: (ctx) => { ctx.register({ kind: 'api', api: { mount: 'x', router: () => {} } }); } };`,
+    );
     writeFileSync(join(pdir, 'ui', 'index.js'), 'export function mount() {}');
     const kernel = new Kernel(rootDir, {}, { dataDir: join(rootDir, 'data'), userPluginsDir });
-    t.after(() => { rmSync(rootDir, { recursive: true, force: true }); });
+    t.after(() => {
+      rmSync(rootDir, { recursive: true, force: true });
+    });
     await kernel.plugins.loadAll();
 
     const first = kernel.plugins.navContributions().find((c) => c.pluginId === 'mod');

@@ -15,14 +15,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "web_search",
-        "web_fetch",
-        "web_crawl"
-      ],
-      "persona": [
-        "search-rules"
-      ]
+      "tool": ["web_search", "web_fetch", "web_crawl"],
+      "persona": ["search-rules"]
     }
   },
   "apiVersion": 2

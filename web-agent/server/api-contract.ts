@@ -39,7 +39,12 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/experience/reviews/:id/deepen', response: 'object', description: '继续深入取证分析' },
   { method: 'POST', path: '/api/experience/reviews/:id/audit', response: 'object', description: '独立复核 AI 用户复盘' },
   { method: 'POST', path: '/api/experience/reviews/:id/calibrate', response: 'object', description: '追加人工校准' },
-  { method: 'POST', path: '/api/experience/reviews/:id/suggestions/:suggestionId/adopt', response: 'object', description: '采纳复盘建议进入问题池' },
+  {
+    method: 'POST',
+    path: '/api/experience/reviews/:id/suggestions/:suggestionId/adopt',
+    response: 'object',
+    description: '采纳复盘建议进入问题池',
+  },
   { method: 'GET', path: '/api/experience/findings', response: 'object', description: '读取体验问题池' },
   { method: 'PATCH', path: '/api/experience/findings/:id', response: 'object', description: '推进体验问题状态' },
   { method: 'POST', path: '/api/experience/findings/:id/reproduce', response: 'object', description: '建立体验问题回归案例' },
@@ -65,7 +70,12 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/organization/exceptions', response: 'object', description: '登记组织异常' },
   { method: 'POST', path: '/api/organization/exceptions/:id/resolve', response: 'object', description: '由人类裁决组织异常' },
   { method: 'POST', path: '/api/organization/teams/:id/:action', response: 'object', description: '暂停、恢复或解散团队' },
-  { method: 'POST', path: '/api/organization/teams/:id/contracts/:contractId/reassign', response: 'object', description: '改派待执行分工契约' },
+  {
+    method: 'POST',
+    path: '/api/organization/teams/:id/contracts/:contractId/reassign',
+    response: 'object',
+    description: '改派待执行分工契约',
+  },
   { method: 'GET', path: '/api/organization/proposals', response: 'object', description: '读取制度提案' },
   { method: 'POST', path: '/api/organization/proposals', response: 'object', description: '登记制度改进提案' },
   { method: 'POST', path: '/api/organization/proposals/:id/decide', response: 'object', description: '由人类采纳或拒绝制度提案' },
@@ -73,8 +83,18 @@ const API_CONTRACT_ENTRIES: readonly Omit<ApiContractEntry, 'schema'>[] = [
   { method: 'POST', path: '/api/organization/society/tasks', response: 'object', description: '由人类提交社会任务' },
   { method: 'POST', path: '/api/organization/society/tick', response: 'object', description: '不调用主 Agent，按制度执行一轮调度' },
   { method: 'POST', path: '/api/organization/society/tasks/:id/approve', response: 'object', description: '由人类批准或拒绝高额社会任务' },
-  { method: 'POST', path: '/api/organization/society/tasks/:id/release', response: 'object', description: '完成后释放短周期团队并更新履历' },
-  { method: 'GET', path: '/api/organization/society/experiments/:taskId', response: 'object', description: '比较单角色与组织的成本、质量、时延和净收益' },
+  {
+    method: 'POST',
+    path: '/api/organization/society/tasks/:id/release',
+    response: 'object',
+    description: '完成后释放短周期团队并更新履历',
+  },
+  {
+    method: 'GET',
+    path: '/api/organization/society/experiments/:taskId',
+    response: 'object',
+    description: '比较单角色与组织的成本、质量、时延和净收益',
+  },
   { method: 'GET', path: '/api/organization/roles/:id/life', response: 'object', description: '读取角色跨任务生命史、记忆和关系' },
   { method: 'POST', path: '/api/organization/institution', response: 'object', description: '由人类发布新的制度版本' },
   { method: 'POST', path: '/api/organization/institution/rollback', response: 'object', description: '由人类回滚制度版本并保留审计' },
@@ -197,8 +217,11 @@ const SCHEMA_BY_ROUTE: Record<string, ApiJsonSchema> = {
         type: 'object',
         required: ['kernel', 'database', 'providers', 'plugins', 'storage'],
         properties: {
-          kernel: { type: 'boolean' }, database: { type: 'boolean' }, providers: { type: 'boolean' },
-          plugins: { type: 'boolean' }, storage: { type: 'boolean' },
+          kernel: { type: 'boolean' },
+          database: { type: 'boolean' },
+          providers: { type: 'boolean' },
+          plugins: { type: 'boolean' },
+          storage: { type: 'boolean' },
         },
       },
       resources: {
@@ -234,16 +257,45 @@ const SCHEMA_BY_ROUTE: Record<string, ApiJsonSchema> = {
   },
   'GET /api/trace': { type: 'object', required: ['steps', 'source'], properties: { steps: { type: 'array' }, source: { type: 'string' } } },
   'GET /api/nav': { type: 'object', required: ['items'], properties: { items: { type: 'array' } } },
-  'GET /api/capabilities': { type: 'object', required: ['tools', 'contexts', 'personas', 'byRisk'], properties: { tools: { type: 'array' }, contexts: { type: 'array' }, personas: { type: 'array' }, byRisk: { type: 'object' } } },
-  'GET /api/security': { type: 'object', required: ['bind', 'deployMode', 'tls', 'mutationAuthRequired', 'mutationTokenHeader', 'approvalTokenRequired'], properties: { bind: { type: 'string' }, deployMode: { type: 'string', enum: ['local', 'trusted', 'remote'] }, tls: { type: 'boolean' }, mutationAuthRequired: { type: 'boolean' }, mutationTokenHeader: { type: 'string' }, approvalTokenRequired: { type: 'boolean' } } },
-  'GET /api/plugins/:id/config': { type: 'object', required: ['id', 'config', 'schema'], properties: { id: { type: 'string' }, config: { type: 'object' }, schema: { type: ['object', 'null'] } } },
-  'POST /api/plugins/:id/actions': { type: 'object', required: ['ok', 'state'], properties: { ok: { type: 'boolean' }, state: { type: 'string' } } },
-  'POST /api/plugins/:id/open': { type: 'object', required: ['ok', 'path'], properties: { ok: { type: 'boolean' }, path: { type: 'string' } } },
+  'GET /api/capabilities': {
+    type: 'object',
+    required: ['tools', 'contexts', 'personas', 'byRisk'],
+    properties: { tools: { type: 'array' }, contexts: { type: 'array' }, personas: { type: 'array' }, byRisk: { type: 'object' } },
+  },
+  'GET /api/security': {
+    type: 'object',
+    required: ['bind', 'deployMode', 'tls', 'mutationAuthRequired', 'mutationTokenHeader', 'approvalTokenRequired'],
+    properties: {
+      bind: { type: 'string' },
+      deployMode: { type: 'string', enum: ['local', 'trusted', 'remote'] },
+      tls: { type: 'boolean' },
+      mutationAuthRequired: { type: 'boolean' },
+      mutationTokenHeader: { type: 'string' },
+      approvalTokenRequired: { type: 'boolean' },
+    },
+  },
+  'GET /api/plugins/:id/config': {
+    type: 'object',
+    required: ['id', 'config', 'schema'],
+    properties: { id: { type: 'string' }, config: { type: 'object' }, schema: { type: ['object', 'null'] } },
+  },
+  'POST /api/plugins/:id/actions': {
+    type: 'object',
+    required: ['ok', 'state'],
+    properties: { ok: { type: 'boolean' }, state: { type: 'string' } },
+  },
+  'POST /api/plugins/:id/open': {
+    type: 'object',
+    required: ['ok', 'path'],
+    properties: { ok: { type: 'boolean' }, path: { type: 'string' } },
+  },
 };
 
 export const API_CONTRACT_V1: readonly ApiContractEntry[] = API_CONTRACT_ENTRIES.map((entry) => ({
   ...entry,
-  schema: SCHEMA_BY_ROUTE[`${entry.method} ${entry.path}`] ?? { type: entry.response === 'array' ? 'array' : entry.response === 'object' ? 'object' : entry.response === 'empty' ? 'null' : 'object' },
+  schema: SCHEMA_BY_ROUTE[`${entry.method} ${entry.path}`] ?? {
+    type: entry.response === 'array' ? 'array' : entry.response === 'object' ? 'object' : entry.response === 'empty' ? 'null' : 'object',
+  },
 }));
 
 export function apiContractFor(method: string, path: string): ApiContractEntry | undefined {

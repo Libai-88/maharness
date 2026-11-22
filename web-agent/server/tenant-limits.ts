@@ -12,7 +12,10 @@ export class TenantToolQuotaError extends Error {
   readonly code = 'TENANT_TOOL_QUOTA' as const;
   readonly status = 429;
   readonly retryAfterMs: number;
-  constructor(readonly limit: number, retryAfterMs: number) {
+  constructor(
+    readonly limit: number,
+    retryAfterMs: number,
+  ) {
     super(`租户工具调用频率超限：每分钟上限 ${limit} 次，请 ${Math.ceil(retryAfterMs / 1000)} 秒后重试`);
     this.name = 'TenantToolQuotaError';
     this.retryAfterMs = retryAfterMs;

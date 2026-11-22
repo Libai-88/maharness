@@ -13,7 +13,11 @@ import type { RunRecord } from '../../kernel/run';
 const roots: string[] = [];
 after(() => {
   for (const root of roots) {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* Windows 可能延迟释放 */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* Windows 可能延迟释放 */
+    }
   }
 });
 
@@ -24,53 +28,92 @@ async function withServer(tenantId: string, inspect: (summary: Record<string, an
   const items = new PersonalItems(root);
   const session = store.createSession('fixture-model', 'fixture', tenantId);
   const run: RunRecord = {
-    id: 'completed-run', sessionId: session.id, tenantId, rootId: 'completed-run', depth: 0,
-    objective: '整理周报', providerId: 'fixture', model: 'fixture-model', status: 'running',
-    createdAt: 1_000, updatedAt: 2_000, cost: 0.02, tokensIn: 10, tokensOut: 5,
+    id: 'completed-run',
+    sessionId: session.id,
+    tenantId,
+    rootId: 'completed-run',
+    depth: 0,
+    objective: '整理周报',
+    providerId: 'fixture',
+    model: 'fixture-model',
+    status: 'running',
+    createdAt: 1_000,
+    updatedAt: 2_000,
+    cost: 0.02,
+    tokensIn: 10,
+    tokensOut: 5,
     authorization: { workspace: root, profile: 'standard', readOnly: false, revision: 0 },
   };
   store.runs.create(run);
   store.runs.update(run, { status: 'completed' });
   store.runs.startTool(run.id, 'call-1', 'read_file', '{"path":"README.md"}');
-  store.runs.finishTool(run.id, 'call-1', { ok: false, error: 'bad path', failure: { code: 'INVALID_PATH', retryable: false, outcome: 'not_started' } });
+  store.runs.finishTool(run.id, 'call-1', {
+    ok: false,
+    error: 'bad path',
+    failure: { code: 'INVALID_PATH', retryable: false, outcome: 'not_started' },
+  });
   for (let index = 0; index < 20; index++) {
     store.runs.startTool(run.id, `artifact-${index}`, 'write_file', JSON.stringify({ path: `outputs/old-${index}.txt` }));
-    store.runs.finishTool(run.id, `artifact-${index}`, { ok: true, evidence: [{ artifact: true, kind: 'file', label: `旧产物 ${index}`, ref: `outputs/old-${index}.txt` }] });
+    store.runs.finishTool(run.id, `artifact-${index}`, {
+      ok: true,
+      evidence: [{ artifact: true, kind: 'file', label: `旧产物 ${index}`, ref: `outputs/old-${index}.txt` }],
+    });
   }
-  await new Promise(resolve => setTimeout(resolve, 10));
+  await new Promise((resolve) => setTimeout(resolve, 10));
   const latestRun: RunRecord = {
-    ...run, id: 'latest-run', rootId: 'latest-run', objective: '生成最新报告', createdAt: 3_000, updatedAt: 4_000,
-    cost: 0, tokensIn: 0, tokensOut: 0,
+    ...run,
+    id: 'latest-run',
+    rootId: 'latest-run',
+    objective: '生成最新报告',
+    createdAt: 3_000,
+    updatedAt: 4_000,
+    cost: 0,
+    tokensIn: 0,
+    tokensOut: 0,
   };
   store.runs.create(latestRun);
   store.runs.update(latestRun, { status: 'completed' });
   store.runs.startTool(latestRun.id, 'artifact-latest', 'write_file', JSON.stringify({ path: 'outputs/latest.txt' }));
-  store.runs.finishTool(latestRun.id, 'artifact-latest', { ok: true, evidence: [{ artifact: true, kind: 'file', label: '最新产物', ref: 'outputs/latest.txt' }] });
+  store.runs.finishTool(latestRun.id, 'artifact-latest', {
+    ok: true,
+    evidence: [{ artifact: true, kind: 'file', label: '最新产物', ref: 'outputs/latest.txt' }],
+  });
   for (let index = 0; index < 12; index++) {
     store.runs.create({
-      ...run, id: `noise-${index}`, rootId: `noise-${index}`, status: 'completed',
-      objective: `空运行 ${index}`, cost: 0, tokensIn: 0, tokensOut: 0, createdAt: 100, updatedAt: 100 + index,
+      ...run,
+      id: `noise-${index}`,
+      rootId: `noise-${index}`,
+      status: 'completed',
+      objective: `空运行 ${index}`,
+      cost: 0,
+      tokensIn: 0,
+      tokensOut: 0,
+      createdAt: 100,
+      updatedAt: 100 + index,
     });
   }
   items.create(tenantId, { title: '核对周报', due: dateInTimeZone(Date.now(), 'Asia/Shanghai'), timeZone: 'Asia/Shanghai' });
   const app = express();
-  app.use((req, _res, next) => { (req as typeof req & { tenantId?: string }).tenantId = tenantId; next(); });
+  app.use((req, _res, next) => {
+    (req as typeof req & { tenantId?: string }).tenantId = tenantId;
+    next();
+  });
   registerWorkbenchRoutes(app, {
     store,
     kernel: { plugins: { resolveService: () => items } },
     automations: { list: () => [{ id: 'auto-1', approval: 'pending' }] },
   } as unknown as RouteDeps);
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const value = app.listen(0, '127.0.0.1', () => resolve(value));
   });
   const address = server.address() as { port: number };
   try {
     const response = await fetch(`http://127.0.0.1:${address.port}/api/workbench/summary?timeZone=Asia%2FShanghai`);
     assert.equal(response.status, 200);
-    inspect(await response.json() as Record<string, any>);
+    inspect((await response.json()) as Record<string, any>);
   } finally {
     server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();
   }
 }
@@ -85,7 +128,7 @@ async function statusFor(path: string): Promise<number> {
     kernel: { plugins: { resolveService: () => new PersonalItems(root) } },
     automations: { list: () => [] },
   } as unknown as RouteDeps);
-  const server = await new Promise<ReturnType<typeof app.listen>>(resolve => {
+  const server = await new Promise<ReturnType<typeof app.listen>>((resolve) => {
     const value = app.listen(0, '127.0.0.1', () => resolve(value));
   });
   try {
@@ -93,7 +136,7 @@ async function statusFor(path: string): Promise<number> {
     return (await fetch(`http://127.0.0.1:${address.port}${path}`)).status;
   } finally {
     server.closeAllConnections();
-    await new Promise<void>(resolve => server.close(() => resolve()));
+    await new Promise<void>((resolve) => server.close(() => resolve()));
     store.close();
   }
 }
@@ -110,7 +153,7 @@ describe('工作台聚合与本地体验指标', () => {
   });
 
   test('普通租户同样返回个人事项、项目与运行指标', async () => {
-    await withServer('tenant-a', summary => {
+    await withServer('tenant-a', (summary) => {
       assert.equal(summary.todayItems[0]?.title, '核对周报');
       assert.equal(summary.pendingAutomations.length, 1);
       assert.equal(summary.recentRuns[0]?.id, 'latest-run');

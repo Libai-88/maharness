@@ -118,7 +118,12 @@ export default function ChatView({
     sessionKey,
     pendingInference,
   });
-  useEffect(() => { if (initialMaterial) { composer.addMaterial(initialMaterial.material, initialMaterial.quote); onMaterialAttached?.(); } }, [initialMaterial, composer.addMaterial, onMaterialAttached]);
+  useEffect(() => {
+    if (initialMaterial) {
+      composer.addMaterial(initialMaterial.material, initialMaterial.quote);
+      onMaterialAttached?.();
+    }
+  }, [initialMaterial, composer.addMaterial, onMaterialAttached]);
 
   useEffect(() => {
     if (!approvals.length) return;
@@ -129,29 +134,45 @@ export default function ChatView({
 
   useEffect(() => () => window.clearTimeout(patTimerRef.current), []);
 
-  const resend = useCallback((text: string) => {
-    if (text.trim() && !streaming) onSend(text);
-  }, [streaming, onSend]);
-
-  const patAgent = useCallback((id: string) => {
-    const lines = [
-      '你拍了拍「maharness」的小脑袋，它愉快地摇了摇尾巴',
-      '你拍了拍「maharness」，它说：在的在的，随叫随到',
-      '你拍了拍「maharness」，它头顶冒出了一个小羊角',
-    ];
-    onSystemMsg?.(lines[Math.floor(Math.random() * lines.length)]);
-    setPatId(id);
-    window.clearTimeout(patTimerRef.current);
-    patTimerRef.current = window.setTimeout(() => setPatId(null), 1100);
-  }, [onSystemMsg]);
-
-  const timeline = useMemo(
-    () => buildChatTimeline(messages, streamStatus),
-    [messages, streamStatus],
+  const resend = useCallback(
+    (text: string) => {
+      if (text.trim() && !streaming) onSend(text);
+    },
+    [streaming, onSend],
   );
 
+  const patAgent = useCallback(
+    (id: string) => {
+      const lines = [
+        '你拍了拍「maharness」的小脑袋，它愉快地摇了摇尾巴',
+        '你拍了拍「maharness」，它说：在的在的，随叫随到',
+        '你拍了拍「maharness」，它头顶冒出了一个小羊角',
+      ];
+      onSystemMsg?.(lines[Math.floor(Math.random() * lines.length)]);
+      setPatId(id);
+      window.clearTimeout(patTimerRef.current);
+      patTimerRef.current = window.setTimeout(() => setPatId(null), 1100);
+    },
+    [onSystemMsg],
+  );
+
+  const timeline = useMemo(() => buildChatTimeline(messages, streamStatus), [messages, streamStatus]);
+
   const hour = new Date().getHours();
-  const greet = hour < 5 ? '夜深了' : hour < 9 ? '早上好' : hour < 12 ? '上午好' : hour < 14 ? '中午好' : hour < 18 ? '下午好' : hour < 23 ? '晚上好' : '夜深了';
+  const greet =
+    hour < 5
+      ? '夜深了'
+      : hour < 9
+        ? '早上好'
+        : hour < 12
+          ? '上午好'
+          : hour < 14
+            ? '中午好'
+            : hour < 18
+              ? '下午好'
+              : hour < 23
+                ? '晚上好'
+                : '夜深了';
 
   const planLineStatus = (status: string): 'running' | 'error' | 'pending' | undefined => {
     if (status === 'in_progress' || status === 'doing') return 'running';
@@ -172,20 +193,28 @@ export default function ChatView({
                 {AGENT_NAME}的一条线路钥匙过期了（{providerAuthFailed.label}），请在模型设置中检查。
               </AlertDescription>
               <AlertAction>
-                <Button variant="outline" size="xs" onClick={onOpenSettings}>去换钥匙</Button>
+                <Button variant="outline" size="xs" onClick={onOpenSettings}>
+                  去换钥匙
+                </Button>
               </AlertAction>
             </Alert>
           )}
           {checkpoint?.exists && !streaming && !resuming && (
             <Marker variant="border" data-testid="resume-banner">
-              <MarkerIcon><IconPause size={13} /></MarkerIcon>
+              <MarkerIcon>
+                <IconPause size={13} />
+              </MarkerIcon>
               <MarkerContent>上次做到第 {checkpoint.turn + 1} 轮停下了，之前做完的都还在。</MarkerContent>
-              <Button variant="outline" size="xs" onClick={onResume} disabled={resuming}>接着说</Button>
+              <Button variant="outline" size="xs" onClick={onResume} disabled={resuming}>
+                接着说
+              </Button>
             </Marker>
           )}
           {resuming && (
             <Marker role="status">
-              <MarkerIcon><Spinner /></MarkerIcon>
+              <MarkerIcon>
+                <Spinner />
+              </MarkerIcon>
               <MarkerContent className="shimmer">{sys.resumed}</MarkerContent>
             </Marker>
           )}
@@ -195,7 +224,9 @@ export default function ChatView({
               <AlertTitle>角色接管</AlertTitle>
               <AlertDescription>这件事现在由「{role}」接手。</AlertDescription>
               <AlertAction>
-                <Button variant="outline" size="xs" onClick={onRoleReset}>换回{AGENT_NAME}</Button>
+                <Button variant="outline" size="xs" onClick={onRoleReset}>
+                  换回{AGENT_NAME}
+                </Button>
               </AlertAction>
             </Alert>
           )}
@@ -207,7 +238,9 @@ export default function ChatView({
                 已用 {money(budgetHit.cost)} / 预算 {money(budgetHit.budget)}，做完的事都留在上面了。
               </AlertDescription>
               <AlertAction>
-                <Button variant="outline" size="xs" onClick={onOpenSettings}>去调预算</Button>
+                <Button variant="outline" size="xs" onClick={onOpenSettings}>
+                  去调预算
+                </Button>
               </AlertAction>
             </Alert>
           )}
@@ -246,106 +279,125 @@ export default function ChatView({
         pendingInference={pendingInference}
         onConfirmInference={onConfirmInference}
       >
-      <LegacyCheckpoint sessionId={sessionKey} disabled={streaming} onSend={onSend} />
-      {runControls}
-      {approvals.length > 0 && (
-        <ItemGroup className="gap-2">
-          {approvals.map((approval) => (
-            <Item key={approval.id} variant="outline" data-testid="approval-card">
-              <ItemMedia variant="icon">
-                <IconLock />
-              </ItemMedia>
-              <ItemContent className="min-w-0">
-                <ItemTitle className="flex-wrap">
-                  {approvalHead(approval.name).title} · {approvalHead(approval.name).sub}
-                  {typeof approval.createdAt === 'number' && (
-                    <Badge variant="secondary" className="font-normal">
-                      {nowTick - approval.createdAt < 60_000
-                        ? `等了 ${Math.max(1, Math.round((nowTick - approval.createdAt) / 1000))} 秒`
-                        : `等了 ${Math.floor((nowTick - approval.createdAt) / 60_000)} 分钟`}
-                      {typeof approval.expiresAt === 'number' && approval.expiresAt > nowTick
-                        ? ` · 还剩 ${Math.max(1, Math.ceil((approval.expiresAt - nowTick) / 60_000))} 分钟`
-                        : ''}
-                    </Badge>
-                  )}
-                </ItemTitle>
-                <ItemDescription className="font-mono text-xs">{tidySentence(approval.summary, 200)}</ItemDescription>
-              </ItemContent>
-              <ItemActions className="ml-auto">
-                <Button
-                  size="sm"
-                  disabled={!!pendingApprovals[approval.id]}
-                  onClick={() => {
-                    setPendingApprovals((current) => ({ ...current, [approval.id]: 'approve' }));
-                    onApproval(approval.id, true);
-                  }}
-                >
-                  {pendingApprovals[approval.id] === 'approve' && <Spinner data-icon="inline-start" />}
-                  可以，去做吧
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  disabled={!!pendingApprovals[approval.id]}
-                  onClick={() => {
-                    setPendingApprovals((current) => ({ ...current, [approval.id]: 'reject' }));
-                    onApproval(approval.id, false);
-                  }}
-                >
-                  {pendingApprovals[approval.id] === 'reject' && <Spinner data-icon="inline-start" />}
-                  先别
-                </Button>
-              </ItemActions>
-            </Item>
-          ))}
-        </ItemGroup>
-      )}
+        <LegacyCheckpoint sessionId={sessionKey} disabled={streaming} onSend={onSend} />
+        {runControls}
+        {approvals.length > 0 && (
+          <ItemGroup className="gap-2">
+            {approvals.map((approval) => (
+              <Item key={approval.id} variant="outline" data-testid="approval-card">
+                <ItemMedia variant="icon">
+                  <IconLock />
+                </ItemMedia>
+                <ItemContent className="min-w-0">
+                  <ItemTitle className="flex-wrap">
+                    {approvalHead(approval.name).title} · {approvalHead(approval.name).sub}
+                    {typeof approval.createdAt === 'number' && (
+                      <Badge variant="secondary" className="font-normal">
+                        {nowTick - approval.createdAt < 60_000
+                          ? `等了 ${Math.max(1, Math.round((nowTick - approval.createdAt) / 1000))} 秒`
+                          : `等了 ${Math.floor((nowTick - approval.createdAt) / 60_000)} 分钟`}
+                        {typeof approval.expiresAt === 'number' && approval.expiresAt > nowTick
+                          ? ` · 还剩 ${Math.max(1, Math.ceil((approval.expiresAt - nowTick) / 60_000))} 分钟`
+                          : ''}
+                      </Badge>
+                    )}
+                  </ItemTitle>
+                  <ItemDescription className="font-mono text-xs">{tidySentence(approval.summary, 200)}</ItemDescription>
+                </ItemContent>
+                <ItemActions className="ml-auto">
+                  <Button
+                    size="sm"
+                    disabled={!!pendingApprovals[approval.id]}
+                    onClick={() => {
+                      setPendingApprovals((current) => ({ ...current, [approval.id]: 'approve' }));
+                      onApproval(approval.id, true);
+                    }}
+                  >
+                    {pendingApprovals[approval.id] === 'approve' && <Spinner data-icon="inline-start" />}
+                    可以，去做吧
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    disabled={!!pendingApprovals[approval.id]}
+                    onClick={() => {
+                      setPendingApprovals((current) => ({ ...current, [approval.id]: 'reject' }));
+                      onApproval(approval.id, false);
+                    }}
+                  >
+                    {pendingApprovals[approval.id] === 'reject' && <Spinner data-icon="inline-start" />}
+                    先别
+                  </Button>
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
+        )}
 
-      {(plan || todos.length > 0) && (
-        <div className="min-w-0">
-          <Trace data-testid="goal-plan">
-            <TraceCollapsible>
-              <TraceCollapsibleTrigger className="py-2">
-                <TraceLine status={plan && !plan.completed ? 'running' : undefined}>
-                <TraceIcon><IconPlan size={13} /></TraceIcon>
-                <TraceTitle>
-                  {plan
-                    ? `${plan.completed ? '目标已完成' : '目标进行中'}：${tidySentence(plan.objective, 40)}`
-                    : `待办 ${todos.filter((todo) => todo.status === 'done').length}/${todos.length}`}
-                </TraceTitle>
-                <TraceDescription>
-                  {plan
-                    ? `${plan.steps.filter((step) => step.status === 'done').length}/${plan.steps.length}`
-                    : `${todos.filter((todo) => todo.status === 'done').length}/${todos.length}`}
-                </TraceDescription>
-                </TraceLine>
-              </TraceCollapsibleTrigger>
-              <TraceCollapsibleContent className="pb-2">
-                <Trace>
-                {plan?.steps.map((step, index) => (
-                  <TraceLine key={`${step.title}-${index}`} status={planLineStatus(step.status)}>
+        {(plan || todos.length > 0) && (
+          <div className="min-w-0">
+            <Trace data-testid="goal-plan">
+              <TraceCollapsible>
+                <TraceCollapsibleTrigger className="py-2">
+                  <TraceLine status={plan && !plan.completed ? 'running' : undefined}>
                     <TraceIcon>
-                      {step.status === 'done' ? <IconCheck size={13} /> : step.status === 'in_progress' ? <IconPlay size={13} /> : step.status === 'blocked' ? <IconBlock size={13} /> : <IconCircle size={13} />}
+                      <IconPlan size={13} />
                     </TraceIcon>
-                    <TraceTitle>{index + 1}. {step.title}</TraceTitle>
+                    <TraceTitle>
+                      {plan
+                        ? `${plan.completed ? '目标已完成' : '目标进行中'}：${tidySentence(plan.objective, 40)}`
+                        : `待办 ${todos.filter((todo) => todo.status === 'done').length}/${todos.length}`}
+                    </TraceTitle>
+                    <TraceDescription>
+                      {plan
+                        ? `${plan.steps.filter((step) => step.status === 'done').length}/${plan.steps.length}`
+                        : `${todos.filter((todo) => todo.status === 'done').length}/${todos.length}`}
+                    </TraceDescription>
                   </TraceLine>
-                ))}
-                {todos.map((todo) => (
-                  <TraceLine key={todo.id} status={planLineStatus(todo.status)}>
-                    <TraceIcon>
-                      {todo.status === 'done' ? <IconCheck size={13} /> : todo.status === 'doing' ? <IconPlay size={13} /> : todo.status === 'blocked' ? <IconBlock size={13} /> : <IconCircle size={13} />}
-                    </TraceIcon>
-                    <TraceTitle>{todo.title}</TraceTitle>
-                    {todo.desc && <TraceDescription className="max-w-[280px] truncate">{todo.desc}</TraceDescription>}
-                  </TraceLine>
-                ))}
-                </Trace>
-              </TraceCollapsibleContent>
-            </TraceCollapsible>
-          </Trace>
-        </div>
-      )}
-
+                </TraceCollapsibleTrigger>
+                <TraceCollapsibleContent className="pb-2">
+                  <Trace>
+                    {plan?.steps.map((step, index) => (
+                      <TraceLine key={`${step.title}|${step.status}`} status={planLineStatus(step.status)}>
+                        <TraceIcon>
+                          {step.status === 'done' ? (
+                            <IconCheck size={13} />
+                          ) : step.status === 'in_progress' ? (
+                            <IconPlay size={13} />
+                          ) : step.status === 'blocked' ? (
+                            <IconBlock size={13} />
+                          ) : (
+                            <IconCircle size={13} />
+                          )}
+                        </TraceIcon>
+                        <TraceTitle>
+                          {index + 1}. {step.title}
+                        </TraceTitle>
+                      </TraceLine>
+                    ))}
+                    {todos.map((todo) => (
+                      <TraceLine key={todo.id} status={planLineStatus(todo.status)}>
+                        <TraceIcon>
+                          {todo.status === 'done' ? (
+                            <IconCheck size={13} />
+                          ) : todo.status === 'doing' ? (
+                            <IconPlay size={13} />
+                          ) : todo.status === 'blocked' ? (
+                            <IconBlock size={13} />
+                          ) : (
+                            <IconCircle size={13} />
+                          )}
+                        </TraceIcon>
+                        <TraceTitle>{todo.title}</TraceTitle>
+                        {todo.desc && <TraceDescription className="max-w-[280px] truncate">{todo.desc}</TraceDescription>}
+                      </TraceLine>
+                    ))}
+                  </Trace>
+                </TraceCollapsibleContent>
+              </TraceCollapsible>
+            </Trace>
+          </div>
+        )}
       </ChatComposer>
     </section>
   );

@@ -23,21 +23,21 @@ export interface ProcessCallContext {
 
 export type ParentToHost =
   | {
-    type: 'load';
-    pluginId: string;
-    entry: string;
-    loadDir: string;
-    storageDir: string;
-    config: Record<string, unknown>;
-    env: Record<string, string | undefined>;
-    limits: { maxStorageBytes?: number; maxStorageFiles?: number };
-    runtime?: {
-      network?: 'none' | 'allowlist' | 'full';
-      networkAllowlist?: string[];
-      filesystem?: 'none' | 'storage' | 'sandbox' | 'full';
-      sandboxRoot?: string;
-    };
-  }
+      type: 'load';
+      pluginId: string;
+      entry: string;
+      loadDir: string;
+      storageDir: string;
+      config: Record<string, unknown>;
+      env: Record<string, string | undefined>;
+      limits: { maxStorageBytes?: number; maxStorageFiles?: number };
+      runtime?: {
+        network?: 'none' | 'allowlist' | 'full';
+        networkAllowlist?: string[];
+        filesystem?: 'none' | 'storage' | 'sandbox' | 'full';
+        sandboxRoot?: string;
+      };
+    }
   | { type: 'start' }
   | { type: 'stop'; reason?: string }
   | { type: 'call'; id: number; tool: string; args: unknown; context: ProcessCallContext }

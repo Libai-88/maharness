@@ -5,11 +5,22 @@
  * 注：plugin_state 是预留位（建表但全仓无读写——插件状态现由内核注册表与 plugin.json 承载）；
  *     缓存**不落库**，落 data/cache.json（见 kernel/cache.ts 的 save/load）。
  */
+import {
+  type AuthorizationAuditRow,
+  ensureTenants,
+  type ModelRow,
+  type PersonaRow,
+  providerPurpose,
+  type ProviderRow,
+  type StoreKeyStatus,
+} from './db-schema';
+
+export * from './db-schema';
 import Database from 'better-sqlite3';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { LLMRole, Message, Session, ToolCall } from '../kernel/types';
+import type { Message, Session } from '../kernel/types';
 import { decryptSecret, encryptSecret, isEncrypted, SECRET_PREFIX } from './secrets';
 import { decryptPurposeSecret, encryptPurposeSecret, isPurposeEncrypted, PURPOSE_SECRET_PREFIX } from '../kernel/secret-box';
 import type { SecretKeyInfo } from './secrets';
@@ -20,121 +31,10 @@ import { RECOVERY_SCHEDULE_SCHEMA, ScheduleRepository } from './schedule-store';
 import { EXPERIENCE_SCHEMA, ExperienceRepository } from './experience-store';
 import { ORGANIZATION_SCHEMA, OrganizationRepository } from './organization-store';
 import { applyMigrations } from './migrations/runner';
-
-function providerPurpose(providerId: string): string {
-  return `provider:${providerId}`;
-}
-
-/** Visibility follows message role; user text is never interpreted as runtime metadata. */
-export function isHiddenMessage(role: string, _content?: string | null): boolean {
-  return role === 'system' || role === 'tool';
-}
-
-/** 网页端管理的 Provider 配置行 */
-export interface ProviderRow {
-  id: string;
-  label: string;
-  baseUrl: string;
-  apiKey: string;
-  model: string;
-  /** 协议族：openai（含各家兼容端点）| anthropic | ollama */
-  protocol: string;
-  priceIn?: number | null;
-  priceOut?: number | null;
-  enabled: number;
-  createdAt: number;
-  updatedAt: number;
-  /**
-   * A7-2：该行存的是 `v1:` 密文，但本次运行解不开（主密钥丢失/更换，或密文损坏）。
-   * **不落库**——由 Store 在读取时现算现填，因此重启后仍会如实复现。
-   * 存在意义：此前解密失败静默返回空串，UI 只能显示「未配置 key」或沿用旧值，
-   * 用户看到的是「莫名其妙 401」而不是「密钥不可解」这个真实故障。
-   * 前端接线（设置页横幅）由 ui/ 侧另行完成；`GET /api/security` 已经聚合暴露（index.ts）。
-   */
-  keyBroken?: boolean;
-  /** 不可解原因：decrypt-failed（密钥不符/密文损坏）| no-master-key（本次无主密钥） */
-  keyBrokenReason?: string;
-}
-
-/** 主密钥状态快照（供 /api/security 与启动日志共用同一口径） */
-export interface StoreKeyStatus {
-  /** 本次运行是否持有可用主密钥 */
-  hasMasterKey: boolean;
-  /** 库里存在 v1: 密文（无论能否解密） */
-  hasCiphertext: boolean;
-  /** 密钥不可解的 provider 明细 */
-  broken: { id: string; label: string; reason: string }[];
-}
-
-export interface AuthorizationAuditRow {
-  id: number;
-  occurredAt: number;
-  outcome: 'granted' | 'denied' | 'connected' | 'disconnected';
-  subject: string;
-  capability: string;
-  object: string;
-  reason: string | null;
-}
-
-/** Optimistic write failure: caller must reload the current row before retrying. */
-export class ConcurrentStoreWriteError extends Error {
-  readonly code = 'concurrent_write';
-  constructor(readonly entity: string, readonly id: string) {
-    super(`${entity} 已被其他写入者修改：${id}`);
-    this.name = 'ConcurrentStoreWriteError';
-  }
-}
-
-/** 模型能力行（一个 Provider 可挂多个模型，路由按能力谓词选路） */
-export interface ModelRow {
-  providerId: string;
-  modelId: string;
-  contextWindow: number | null;
-  maxOutput: number | null;
-  vision: number;
-  tools: number;
-  reasoning: number;
-  priceIn: number | null;
-  priceOut: number | null;
-  enabled: number;
-  /** pulled=拉取时顺带解析 / inferred=内置目录推断 / manual=用户手填 */
-  source: string;
-  latencyMs: number | null;
-  privacyTier: 'local' | 'trusted' | 'external' | null;
-  riskLevel: 'low' | 'medium' | 'high' | null;
-  updatedAt: number;
-}
-
-/** 用户人设行 */
-export interface PersonaRow {
-  id: string;
-  name: string;
-  content: string;
-  enabled: number;
-  sortOrder: number;
-  createdAt: number;
-  updatedAt: number;
-}
-
-/** 默认人设种子（用户可编辑/停用；id=default 这一行随代码升级合并刷新，
- *  自定义人设不受影响）；运行时规则（见 core/chat BASE_PROMPT）不在此重复 */
-export const DEFAULT_PERSONA = {
-  id: 'default',
-  name: '默认人设',
-  content: '',
-};
-
-function ensureTenants(db: Database.Database): void {
-  db.exec(`CREATE TABLE IF NOT EXISTS tenants (
-    id TEXT PRIMARY KEY, name TEXT NOT NULL, max_sessions INTEGER NOT NULL DEFAULT 0,
-    max_active_runs INTEGER NOT NULL DEFAULT 0, max_cost_usd REAL NOT NULL DEFAULT 0,
-    max_storage_bytes INTEGER NOT NULL DEFAULT 0,
-    max_tool_calls_per_minute INTEGER NOT NULL DEFAULT 0,
-    created_at INTEGER NOT NULL
-  )`);
-  db.prepare('INSERT OR IGNORE INTO tenants (id, name, created_at) VALUES (?,?,?)')
-    .run('default', 'Default', Date.now());
-}
+import { SqliteModelRepo } from './store/sqlite/models';
+import { SqliteProviderRepo } from './store/sqlite/providers';
+import { SqliteSessionRepo } from './store/sqlite/sessions';
+import { SqliteTenantRepo } from './store/sqlite/tenants';
 
 export class Store {
   private db: Database.Database;
@@ -144,6 +44,11 @@ export class Store {
   readonly schedules: ScheduleRepository;
   readonly experience: ExperienceRepository;
   readonly organization: OrganizationRepository;
+  /** 聚合根仓库：SQL 已搬到 server/store/sqlite/*，Store 只做装配与门面（ADR 0007） */
+  private readonly providerRepo: SqliteProviderRepo;
+  private readonly modelRepo: SqliteModelRepo;
+  private readonly sessionRepo: SqliteSessionRepo;
+  private readonly tenantRepo: SqliteTenantRepo;
   /** 主密钥：传入则 api_key 加密落库（读取时解密）；缺省（测试/无密钥环境）明文兜底 */
   private secretKey?: Buffer;
   /** 主密钥来历（A7）：决定状态接口里的 hasMasterKey 口径；未传时按有无密钥推断 */
@@ -159,10 +64,20 @@ export class Store {
   /** 库里是否见过 v1: 密文（迁移循环/解密路径顺带记录，供状态接口） */
   private seenCiphertext = false;
 
-  constructor(dbFile: string, opts: { secretKey?: Buffer; masterKey?: SecretKeyInfo; checkpointRetentionMs?: number; migrationSources?: { configFile: string; pluginDirs: string[] } } = {}) {
+  constructor(
+    dbFile: string,
+    opts: {
+      secretKey?: Buffer;
+      masterKey?: SecretKeyInfo;
+      checkpointRetentionMs?: number;
+      migrationSources?: { configFile: string; pluginDirs: string[] };
+    } = {},
+  ) {
     this.secretKey = opts.secretKey;
     this.masterKey = opts.masterKey;
-    this.checkpointRetentionMs = Number.isFinite(opts.checkpointRetentionMs) ? Math.max(60_000, Math.floor(opts.checkpointRetentionMs!)) : Store.CHECKPOINT_RETENTION_MS;
+    this.checkpointRetentionMs = Number.isFinite(opts.checkpointRetentionMs)
+      ? Math.max(60_000, Math.floor(opts.checkpointRetentionMs!))
+      : Store.CHECKPOINT_RETENTION_MS;
     this.db = new Database(dbFile);
     this.db.pragma('journal_mode = WAL');
     try {
@@ -171,7 +86,11 @@ export class Store {
     } catch (err) {
       // 启动自检失败时释放连接：否则损坏/版本不匹配的库会一直占着文件句柄，
       // Windows 下既无法换入恢复备份，进程退出前也无法删除。
-      try { this.db.close(); } catch { /* 已关闭 */ }
+      try {
+        this.db.close();
+      } catch {
+        /* 已关闭 */
+      }
       throw err;
     }
     this.runs = new RunRepository(this.db);
@@ -180,6 +99,18 @@ export class Store {
     this.schedules = new ScheduleRepository(this.db);
     this.experience = new ExperienceRepository(this.db);
     this.organization = new OrganizationRepository(this.db);
+    this.providerRepo = new SqliteProviderRepo(this.db, {
+      decrypt: (blob, id) => this.decryptKey(blob, id),
+      encrypt: (plain, id) => this.encryptKey(plain, id),
+      withKeyState: (row) => this.withKeyState(row),
+      forget: (id) => {
+        this.brokenKeys.delete(id);
+        this.warnedKeys.delete(id);
+      },
+    });
+    this.modelRepo = new SqliteModelRepo(this.db);
+    this.sessionRepo = new SqliteSessionRepo(this.db, { assertIdle: (id) => this.assertSessionIdle(id) });
+    this.tenantRepo = new SqliteTenantRepo(this.db);
     this.experience.interruptRunning();
   }
 
@@ -196,7 +127,11 @@ export class Store {
 
   /** 一致性维护：checkpoint 清理 + WAL 截断（备份前/日常维护调用） */
   vacuum(): void {
-    try { this.db.pragma('wal_checkpoint(TRUNCATE)'); } catch { /* 只读连接等场景下失败不致命 */ }
+    try {
+      this.db.pragma('wal_checkpoint(TRUNCATE)');
+    } catch {
+      /* 只读连接等场景下失败不致命 */
+    }
   }
 
   /** 热备份到目标路径（better-sqlite3 backup API：备份过程中页面写入不中断） */
@@ -215,7 +150,9 @@ export class Store {
   private migrate(dbFile: string, sources?: { configFile: string; pluginDirs: string[] }): void {
     let current = Number(this.db.pragma('user_version', { simple: true }));
     if (current > Store.DB_SCHEMA_VERSION) {
-      throw new Error(`数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`);
+      throw new Error(
+        `数据库 schema 版本 ${current} 高于本程序支持的 ${Store.DB_SCHEMA_VERSION}（库来自更新的版本），已拒绝打开以避免破坏数据——请升级程序或恢复备份`,
+      );
     }
     const hasData = !!this.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' LIMIT 1").get();
     if (current === Store.DB_SCHEMA_VERSION) {
@@ -228,10 +165,16 @@ export class Store {
       this.db.exec(`VACUUM INTO '${backup.replace(/'/g, "''")}'`);
       if (sources) {
         if (existsSync(sources.configFile)) copyFileSync(sources.configFile, `${backup}.config.json`);
-        const plugins = sources.pluginDirs.flatMap(directory => !existsSync(directory) ? [] : readdirSync(directory, { withFileTypes: true }).filter(entry => entry.isDirectory() && !/@[0-9a-f]{10}$/.test(entry.name)).flatMap(entry => {
-          const path = join(directory, entry.name, 'plugin.json');
-          return existsSync(path) ? [{ path, manifest: readFileSync(path, 'utf8') }] : [];
-        }));
+        const plugins = sources.pluginDirs.flatMap((directory) =>
+          !existsSync(directory)
+            ? []
+            : readdirSync(directory, { withFileTypes: true })
+                .filter((entry) => entry.isDirectory() && !/@[0-9a-f]{10}$/.test(entry.name))
+                .flatMap((entry) => {
+                  const path = join(directory, entry.name, 'plugin.json');
+                  return existsSync(path) ? [{ path, manifest: readFileSync(path, 'utf8') }] : [];
+                }),
+        );
         writeFileSync(`${backup}.plugins.json`, JSON.stringify({ schemaVersion: current, plugins }, null, 2), 'utf8');
       }
     }
@@ -257,7 +200,9 @@ export class Store {
         throw new Error(`缺少到 schema ${Store.DB_SCHEMA_VERSION} 的迁移`);
       }
     } catch (err) {
-      throw new Error(`数据库迁移 ${originalVersion} → ${Store.DB_SCHEMA_VERSION} 失败，事务已回滚，可从备份恢复: ${err instanceof Error ? err.message : String(err)}`);
+      throw new Error(
+        `数据库迁移 ${originalVersion} → ${Store.DB_SCHEMA_VERSION} 失败，事务已回滚，可从备份恢复: ${err instanceof Error ? err.message : String(err)}`,
+      );
     }
   }
 
@@ -343,22 +288,36 @@ export class Store {
     if (!existsSync(dbFile)) return;
     const backupDir = join(dataDir, 'backups');
     const backupPath = join(backupDir, `agent-${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}.db`);
-    try { mkdirSync(backupDir, { recursive: true }); } catch { /* 已存在 */ }
+    try {
+      mkdirSync(backupDir, { recursive: true });
+    } catch {
+      /* 已存在 */
+    }
     try {
       copyFileSync(dbFile, backupPath);
       // WAL 内容一并复制（journal_mode=WAL 下主文件可能落后于最新提交）
       for (const suffix of ['-wal', '-shm']) {
         if (existsSync(dbFile + suffix)) copyFileSync(dbFile + suffix, backupPath + suffix);
-        else { try { rmSync(backupPath + suffix, { force: true }); } catch { /* 无伴生文件 */ } }
+        else {
+          try {
+            rmSync(backupPath + suffix, { force: true });
+          } catch {
+            /* 无伴生文件 */
+          }
+        }
       }
     } catch (err) {
       console.warn('[store] 启动备份失败（继续启动，不影响数据）:', err instanceof Error ? err.message : String(err));
     }
     // 轮转：只保留最近 N 份（按文件名排序，时间戳即字典序）
     try {
-      const files = readdirSync(backupDir).filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f)).sort();
+      const files = readdirSync(backupDir)
+        .filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f))
+        .sort();
       while (files.length > Store.BACKUP_KEEP) rmSync(join(backupDir, files.shift()!), { force: true });
-    } catch { /* 轮转失败不阻断启动 */ }
+    } catch {
+      /* 轮转失败不阻断启动 */
+    }
     // 完整性校验：损坏则从最近备份恢复
     try {
       const probe = new Database(dbFile, { readonly: true });
@@ -367,13 +326,21 @@ export class Store {
         const bad = rows.map((r) => r.integrity_check).filter((r) => r !== 'ok');
         if (bad.length === 0) return;
         console.error(`[store] 数据库完整性校验失败: ${bad.slice(0, 5).join('; ')}——尝试从最近备份恢复`);
-      } finally { probe.close(); }
+      } finally {
+        probe.close();
+      }
     } catch (err) {
       console.warn(`[store] 数据库无法只读打开（视为损坏）: ${err instanceof Error ? err.message : String(err)}——尝试从最近备份恢复`);
     }
     const backups = (() => {
-      try { return readdirSync(backupDir).filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f)).sort().reverse(); }
-      catch { return []; }
+      try {
+        return readdirSync(backupDir)
+          .filter((f) => /^agent-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.db$/.test(f))
+          .sort()
+          .reverse();
+      } catch {
+        return [];
+      }
     })();
     for (const candidate of backups) {
       const src = join(backupDir, candidate);
@@ -382,17 +349,27 @@ export class Store {
         try {
           const rows = probe.pragma('integrity_check') as { integrity_check: string }[];
           if (rows.some((r) => r.integrity_check !== 'ok')) continue;
-        } finally { probe.close(); }
+        } finally {
+          probe.close();
+        }
         // 校验通过 → 原子换入（先留损坏现场）
-        try { copyFileSync(dbFile, `${dbFile}.corrupt-${Date.now()}`); } catch { /* 损坏文件可能已不可读 */ }
+        try {
+          copyFileSync(dbFile, `${dbFile}.corrupt-${Date.now()}`);
+        } catch {
+          /* 损坏文件可能已不可读 */
+        }
         copyFileSync(src, dbFile);
         for (const suffix of ['-wal', '-shm']) {
-          try { rmSync(dbFile + suffix, { force: true }); } catch { /* 无伴生文件 */ }
+          try {
+            rmSync(dbFile + suffix, { force: true });
+          } catch {
+            /* 无伴生文件 */
+          }
           if (existsSync(src + suffix)) copyFileSync(src + suffix, dbFile + suffix);
         }
         console.log(`[store] 已从备份 ${candidate} 恢复数据库`);
         return;
-      } catch { continue; }
+      } catch {}
     }
     console.error('[store] 没有可用备份能通过完整性校验——保留损坏现场并继续启动（新写入可能失败）');
   }
@@ -415,7 +392,9 @@ export class Store {
           const st = statSync(join(backupDir, name));
           return { name, sizeBytes: st.size, modifiedAt: st.mtimeMs };
         });
-    } catch { return []; }
+    } catch {
+      return [];
+    }
   }
 
   /** 列级幂等迁移与凭据加密迁移（migrate 版本推进之后执行，兼容旧库增列） */
@@ -440,7 +419,8 @@ export class Store {
     const toolCols = this.db.prepare('PRAGMA table_info(run_tool_calls_v2)').all() as { name: string }[];
     if (!toolCols.some((c) => c.name === 'tool_version')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN tool_version TEXT');
     if (!toolCols.some((c) => c.name === 'side_effect')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN side_effect TEXT');
-    if (!toolCols.some((c) => c.name === 'side_effect_outcome')) this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN side_effect_outcome TEXT');
+    if (!toolCols.some((c) => c.name === 'side_effect_outcome'))
+      this.db.exec('ALTER TABLE run_tool_calls_v2 ADD COLUMN side_effect_outcome TEXT');
     const modelCols = this.db.prepare('PRAGMA table_info(models)').all() as { name: string }[];
     if (!modelCols.some((c) => c.name === 'latency_ms')) this.db.exec('ALTER TABLE models ADD COLUMN latency_ms INTEGER');
     if (!modelCols.some((c) => c.name === 'privacy_tier')) this.db.exec('ALTER TABLE models ADD COLUMN privacy_tier TEXT');
@@ -518,14 +498,19 @@ export class Store {
       const migrate = this.db.transaction((rows: { id: string; apiKey: string }[]) => {
         for (const row of rows) {
           if (!row.apiKey) continue;
-          if (isPurposeEncrypted(row.apiKey)) { this.seenCiphertext = true; continue; }
+          if (isPurposeEncrypted(row.apiKey)) {
+            this.seenCiphertext = true;
+            continue;
+          }
           if (isEncrypted(row.apiKey)) {
             this.seenCiphertext = true; // A7：库里确有密文
             // v1 → v2：把历史全局密钥密文升级为 provider 用途隔离密文（解密失败则保留原值）
             try {
               const plain = decryptSecret(row.apiKey, this.secretKey!);
               upd.run(encryptPurposeSecret(plain, this.secretKey!, providerPurpose(row.id)), row.id);
-            } catch { /* 保留原密文，由 keyBroken 状态暴露 */ }
+            } catch {
+              /* 保留原密文，由 keyBroken 状态暴露 */
+            }
             continue;
           }
           upd.run(this.encryptKey(row.apiKey, row.id), row.id);
@@ -540,25 +525,33 @@ export class Store {
 
   /** 关闭数据库连接（嵌入场景清理临时数据目录前调用，释放 Windows 文件句柄） */
   close(): void {
-    try { this.db.close(); } catch { /* 已关闭 */ }
+    try {
+      this.db.close();
+    } catch {
+      /* 已关闭 */
+    }
   }
 
   appendAuthorizationAudit(entry: Omit<AuthorizationAuditRow, 'id' | 'occurredAt'> & { occurredAt?: number }): void {
     const tx = this.db.transaction(() => {
-      this.db.prepare(`INSERT INTO authorization_audit (occurred_at, outcome, subject, capability, object, reason)
-        VALUES (?, ?, ?, ?, ?, ?)`).run(
-        entry.occurredAt ?? Date.now(), entry.outcome, entry.subject, entry.capability, entry.object, entry.reason,
-      );
-      this.db.prepare(`DELETE FROM authorization_audit WHERE id NOT IN
-        (SELECT id FROM authorization_audit ORDER BY id DESC LIMIT 10000)`).run();
+      this.db
+        .prepare(`INSERT INTO authorization_audit (occurred_at, outcome, subject, capability, object, reason)
+        VALUES (?, ?, ?, ?, ?, ?)`)
+        .run(entry.occurredAt ?? Date.now(), entry.outcome, entry.subject, entry.capability, entry.object, entry.reason);
+      this.db
+        .prepare(`DELETE FROM authorization_audit WHERE id NOT IN
+        (SELECT id FROM authorization_audit ORDER BY id DESC LIMIT 10000)`)
+        .run();
     });
     tx();
   }
 
   listAuthorizationAudit(limit = 100): AuthorizationAuditRow[] {
     const bounded = Math.max(1, Math.min(500, Math.floor(limit) || 100));
-    return this.db.prepare(`SELECT id, occurred_at AS occurredAt, outcome, subject, capability, object, reason
-      FROM authorization_audit ORDER BY id DESC LIMIT ?`).all(bounded) as AuthorizationAuditRow[];
+    return this.db
+      .prepare(`SELECT id, occurred_at AS occurredAt, outcome, subject, capability, object, reason
+      FROM authorization_audit ORDER BY id DESC LIMIT ?`)
+      .all(bounded) as AuthorizationAuditRow[];
   }
 
   /**
@@ -589,8 +582,10 @@ export class Store {
         // 同一行同一原因只报一次：状态接口/列表轮询不该把日志刷满
         if (!this.warnedKeys.has(providerId)) {
           this.warnedKeys.add(providerId);
-          console.warn(`[store] provider ${providerId} 的 api_key 解密失败（密钥变更或密文损坏），该供应商不可用:`,
-            err instanceof Error ? err.message : String(err));
+          console.warn(
+            `[store] provider ${providerId} 的 api_key 解密失败（密钥变更或密文损坏），该供应商不可用:`,
+            err instanceof Error ? err.message : String(err),
+          );
         }
         this.brokenKeys.set(providerId, 'decrypt-failed');
       }
@@ -601,9 +596,7 @@ export class Store {
   /** 加密落库（唯一入口）；无主密钥时明文写入（向后兼容测试/无密钥环境） */
   private encryptKey(plain: string, providerId?: string): string {
     if (!this.secretKey || !plain) return plain;
-    return providerId
-      ? encryptPurposeSecret(plain, this.secretKey, providerPurpose(providerId))
-      : encryptSecret(plain, this.secretKey);
+    return providerId ? encryptPurposeSecret(plain, this.secretKey, providerPurpose(providerId)) : encryptSecret(plain, this.secretKey);
   }
 
   /** 给读取到的行补 keyBroken 字段（唯一装配点，避免各处漏填） */
@@ -629,157 +622,74 @@ export class Store {
     return {
       hasMasterKey: this.masterKey ? !!this.masterKey.key : !!this.secretKey,
       hasCiphertext: this.seenCiphertext || rows.some((r) => r.keyBroken),
-      broken: rows
-        .filter((r) => r.keyBroken)
-        .map((r) => ({ id: r.id, label: r.label, reason: r.keyBrokenReason ?? 'decrypt-failed' })),
+      broken: rows.filter((r) => r.keyBroken).map((r) => ({ id: r.id, label: r.label, reason: r.keyBrokenReason ?? 'decrypt-failed' })),
     };
   }
 
   // ---------- providers（网页端管理，DB 为唯一来源；api_key 加密落库） ----------
 
   listProviders(): ProviderRow[] {
-    const rows = this.db
-      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers ORDER BY created_at ASC')
-      .all() as ProviderRow[];
-    return rows.map((r) => this.withKeyState({ ...r, apiKey: this.decryptKey(r.apiKey, r.id) }));
+    return this.providerRepo.listProviders();
   }
 
   getProvider(id: string): ProviderRow | undefined {
-    const r = this.db
-      .prepare('SELECT id, label, base_url AS baseUrl, api_key AS apiKey, model, protocol, price_in AS priceIn, price_out AS priceOut, enabled, created_at AS createdAt, updated_at AS updatedAt FROM providers WHERE id = ?')
-      .get(id) as ProviderRow | undefined;
-    return r ? this.withKeyState({ ...r, apiKey: this.decryptKey(r.apiKey, r.id) }) : undefined;
+    return this.providerRepo.getProvider(id);
   }
 
-  upsertProvider(p: {
-    id: string; label: string; baseUrl: string; apiKey: string; model: string;
-    protocol?: string; priceIn?: number; priceOut?: number; enabled?: number; expectedUpdatedAt?: number;
-  }): void {
-    const now = Date.now();
-    // A7-2 连带防护：api_key 不可解时 getProvider 返回空串，PATCH 会把它当成「新值」写回，
-    // 于是库里那段仍可恢复的密文被空串覆盖（真·二次数据丢失）。语义改为
-    // 「空 = 不改动」：留空时原样保留已存的密文/明文，绝不用空串覆盖。
-    let storedKey = this.encryptKey(p.apiKey, p.id);
-    if (!p.apiKey) {
-      const raw = (this.db.prepare('SELECT api_key AS k FROM providers WHERE id = ?').get(p.id) as { k?: string } | undefined)?.k;
-      if (raw) storedKey = raw;
-    }
-    const existing = this.getProvider(p.id);
-    const protocol = p.protocol ?? existing?.protocol ?? 'openai';
-    if (existing) {
-      const updatedAt = Math.max(now, existing.updatedAt + 1);
-      const result = p.expectedUpdatedAt === undefined
-        ? this.db.prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=?')
-          .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, updatedAt, p.id)
-        : this.db.prepare('UPDATE providers SET label=?, base_url=?, api_key=?, model=?, protocol=?, price_in=?, price_out=?, enabled=?, updated_at=? WHERE id=? AND updated_at=?')
-          .run(p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? existing.enabled, updatedAt, p.id, p.expectedUpdatedAt);
-      if (p.expectedUpdatedAt !== undefined && result.changes !== 1) throw new ConcurrentStoreWriteError('Provider', p.id);
-    } else {
-      this.db
-        .prepare('INSERT INTO providers (id, label, base_url, api_key, model, protocol, price_in, price_out, enabled, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-        .run(p.id, p.label, p.baseUrl, storedKey, p.model, protocol, p.priceIn ?? null, p.priceOut ?? null, p.enabled ?? 1, now, now);
-    }
+  upsertProvider(p: Parameters<SqliteProviderRepo['upsertProvider']>[0]): void {
+    this.providerRepo.upsertProvider(p);
   }
 
   deleteProvider(id: string, expectedUpdatedAt?: number): void {
-    const tx = this.db.transaction((providerId: string) => {
-      this.db.prepare('DELETE FROM models WHERE provider_id = ?').run(providerId);
-      const result = expectedUpdatedAt === undefined
-        ? this.db.prepare('DELETE FROM providers WHERE id = ?').run(providerId)
-        : this.db.prepare('DELETE FROM providers WHERE id = ? AND updated_at = ?').run(providerId, expectedUpdatedAt);
-      if (expectedUpdatedAt !== undefined && result.changes !== 1) throw new ConcurrentStoreWriteError('Provider', providerId);
-    });
-    tx(id);
-    // 故障记账随行 removal 一并清掉，否则状态接口会报一个不存在的 provider
-    this.brokenKeys.delete(id);
-    this.warnedKeys.delete(id);
+    this.providerRepo.deleteProvider(id, expectedUpdatedAt);
   }
 
   setProviderEnabled(id: string, enabled: number): void {
-    this.db.prepare('UPDATE providers SET enabled=?, updated_at=? WHERE id=?').run(enabled, Date.now(), id);
+    this.providerRepo.setProviderEnabled(id, enabled);
   }
 
   // ---------- models（Provider 下的模型与能力，路由的事实源） ----------
 
   listModels(providerId?: string): ModelRow[] {
-    const sql = 'SELECT provider_id AS providerId, model_id AS modelId, context_window AS contextWindow, max_output AS maxOutput, vision, tools, reasoning, price_in AS priceIn, price_out AS priceOut, enabled, source, latency_ms AS latencyMs, privacy_tier AS privacyTier, risk_level AS riskLevel, updated_at AS updatedAt FROM models';
-    return providerId
-      ? this.db.prepare(`${sql} WHERE provider_id = ? ORDER BY model_id ASC`).all(providerId) as ModelRow[]
-      : this.db.prepare(`${sql} ORDER BY provider_id ASC, model_id ASC`).all() as ModelRow[];
+    return this.modelRepo.listModels(providerId);
   }
 
-  upsertModel(m: Partial<ModelRow> & { providerId: string; modelId: string }): void {
-    this.upsertModels([m]);
+  upsertModel(m: Parameters<SqliteModelRepo['upsertModel']>[0]): void {
+    this.modelRepo.upsertModel(m);
   }
 
-  updateModel(m: Partial<ModelRow> & { providerId: string; modelId: string }, expectedUpdatedAt: number): void {
-    const previous = this.listModels(m.providerId).find((row) => row.modelId === m.modelId);
-    if (!previous) throw new ConcurrentStoreWriteError('Model', `${m.providerId}@${m.modelId}`);
-    const updatedAt = Math.max(Date.now(), previous.updatedAt + 1);
-    const result = this.db.prepare(`UPDATE models SET context_window=?, max_output=?, vision=?, tools=?, reasoning=?, price_in=?, price_out=?, enabled=?, source=?, latency_ms=?, privacy_tier=?, risk_level=?, updated_at=?
-      WHERE provider_id=? AND model_id=? AND updated_at=?`).run(
-      m.contextWindow ?? null, m.maxOutput ?? null, m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
-      m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual',
-      m.latencyMs ?? null, m.privacyTier ?? null, m.riskLevel ?? null, updatedAt,
-      m.providerId, m.modelId, expectedUpdatedAt,
-    );
-    if (result.changes !== 1) throw new ConcurrentStoreWriteError('Model', `${m.providerId}@${m.modelId}`);
+  updateModel(m: Parameters<SqliteModelRepo['updateModel']>[0], expectedUpdatedAt: number): void {
+    this.modelRepo.updateModel(m, expectedUpdatedAt);
   }
 
   /** Batch model refresh is all-or-nothing: a failed capability row cannot leave a partial catalog. */
-  upsertModels(models: (Partial<ModelRow> & { providerId: string; modelId: string })[]): void {
-    if (models.length === 0) return;
-    const statement = this.db.prepare(`
-      INSERT INTO models (provider_id, model_id, context_window, max_output, vision, tools, reasoning, price_in, price_out, enabled, source, latency_ms, privacy_tier, risk_level, updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
-      ON CONFLICT(provider_id, model_id) DO UPDATE SET
-        context_window=COALESCE(excluded.context_window, context_window),
-        max_output=COALESCE(excluded.max_output, max_output),
-        vision=excluded.vision, tools=excluded.tools, reasoning=excluded.reasoning,
-        price_in=COALESCE(excluded.price_in, price_in),
-        price_out=COALESCE(excluded.price_out, price_out),
-        enabled=excluded.enabled,
-        source=CASE WHEN excluded.source = 'manual' THEN 'manual' ELSE models.source END,
-        latency_ms=COALESCE(excluded.latency_ms, latency_ms),
-        privacy_tier=COALESCE(excluded.privacy_tier, privacy_tier),
-        risk_level=COALESCE(excluded.risk_level, risk_level),
-        updated_at=excluded.updated_at
-    `);
-    const tx = this.db.transaction((rows: (Partial<ModelRow> & { providerId: string; modelId: string })[]) => {
-      for (const m of rows) {
-        statement.run(
-          m.providerId, m.modelId, m.contextWindow ?? null, m.maxOutput ?? null,
-          m.vision ?? 0, m.tools ?? 0, m.reasoning ?? 0,
-          m.priceIn ?? null, m.priceOut ?? null, m.enabled ?? 1, m.source ?? 'manual',
-          m.latencyMs ?? null, m.privacyTier ?? null, m.riskLevel ?? null, Date.now(),
-        );
-      }
-    });
-    tx(models);
+  upsertModels(models: Parameters<SqliteModelRepo['upsertModels']>[0]): void {
+    this.modelRepo.upsertModels(models);
   }
 
   deleteModel(providerId: string, modelId: string): void {
-    this.db.prepare('DELETE FROM models WHERE provider_id = ? AND model_id = ?').run(providerId, modelId);
+    this.modelRepo.deleteModel(providerId, modelId);
   }
 
   // ---------- personas（用户人设，网页端管理） ----------
 
   listPersonas(): PersonaRow[] {
     return this.db
-      .prepare('SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas ORDER BY sort_order ASC, created_at ASC')
+      .prepare(
+        'SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas ORDER BY sort_order ASC, created_at ASC',
+      )
       .all() as PersonaRow[];
   }
 
   getPersona(id: string): PersonaRow | undefined {
     return this.db
-      .prepare('SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas WHERE id = ?')
+      .prepare(
+        'SELECT id, name, content, enabled, sort_order AS sortOrder, created_at AS createdAt, updated_at AS updatedAt FROM personas WHERE id = ?',
+      )
       .get(id) as PersonaRow | undefined;
   }
 
-  upsertPersona(p: {
-    id: string; name: string; content: string;
-    enabled?: number; sortOrder?: number;
-  }): void {
+  upsertPersona(p: { id: string; name: string; content: string; enabled?: number; sortOrder?: number }): void {
     const now = Date.now();
     const existing = this.getPersona(p.id);
     if (existing) {
@@ -799,23 +709,58 @@ export class Store {
 
   // ---------- sessions ----------
 
-  listTenants(): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number }[] {
+  listTenants(): {
+    id: string;
+    name: string;
+    maxSessions: number;
+    maxActiveRuns: number;
+    maxCostUsd: number;
+    maxStorageBytes: number;
+    maxToolCallsPerMinute: number;
+    createdAt: number;
+  }[] {
     return this.db
-      .prepare('SELECT id, name, max_sessions AS maxSessions, max_active_runs AS maxActiveRuns, max_cost_usd AS maxCostUsd, max_storage_bytes AS maxStorageBytes, max_tool_calls_per_minute AS maxToolCallsPerMinute, created_at AS createdAt FROM tenants ORDER BY created_at ASC, id ASC')
-      .all() as { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number }[];
+      .prepare(
+        'SELECT id, name, max_sessions AS maxSessions, max_active_runs AS maxActiveRuns, max_cost_usd AS maxCostUsd, max_storage_bytes AS maxStorageBytes, max_tool_calls_per_minute AS maxToolCallsPerMinute, created_at AS createdAt FROM tenants ORDER BY created_at ASC, id ASC',
+      )
+      .all() as {
+      id: string;
+      name: string;
+      maxSessions: number;
+      maxActiveRuns: number;
+      maxCostUsd: number;
+      maxStorageBytes: number;
+      maxToolCallsPerMinute: number;
+      createdAt: number;
+    }[];
   }
 
   hasTenant(id: string): boolean {
     return !!this.db.prepare('SELECT 1 AS x FROM tenants WHERE id = ?').get(id);
   }
 
-  getTenant(id: string): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } | undefined {
-    return this.db
-      .prepare('SELECT id, name, max_sessions AS maxSessions, max_active_runs AS maxActiveRuns, max_cost_usd AS maxCostUsd, max_storage_bytes AS maxStorageBytes, max_tool_calls_per_minute AS maxToolCallsPerMinute, created_at AS createdAt FROM tenants WHERE id = ?')
-      .get(id) as { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } | undefined;
+  getTenant(id: string): ReturnType<SqliteTenantRepo['getTenant']> {
+    return this.tenantRepo.getTenant(id);
   }
 
-  createTenant(id: string, name: string, maxSessions = 0, maxActiveRuns = 0, maxCostUsd = 0, maxStorageBytes = 0, maxToolCallsPerMinute = 0): { id: string; name: string; maxSessions: number; maxActiveRuns: number; maxCostUsd: number; maxStorageBytes: number; maxToolCallsPerMinute: number; createdAt: number } {
+  createTenant(
+    id: string,
+    name: string,
+    maxSessions = 0,
+    maxActiveRuns = 0,
+    maxCostUsd = 0,
+    maxStorageBytes = 0,
+    maxToolCallsPerMinute = 0,
+  ): {
+    id: string;
+    name: string;
+    maxSessions: number;
+    maxActiveRuns: number;
+    maxCostUsd: number;
+    maxStorageBytes: number;
+    maxToolCallsPerMinute: number;
+    createdAt: number;
+  } {
     const safeId = String(id ?? '').trim();
     const safeName = String(name ?? '').trim() || safeId;
     if (!safeId) throw new Error('租户 id 不能为空');
@@ -825,114 +770,205 @@ export class Store {
     const storageLimit = Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(maxStorageBytes) || 0)));
     const toolLimit = Math.max(0, Math.min(1_000_000, Math.trunc(Number(maxToolCallsPerMinute) || 0)));
     const now = Date.now();
-    this.db.prepare('INSERT INTO tenants (id, name, max_sessions, max_active_runs, max_cost_usd, max_storage_bytes, max_tool_calls_per_minute, created_at) VALUES (?,?,?,?,?,?,?,?)')
+    this.db
+      .prepare(
+        'INSERT INTO tenants (id, name, max_sessions, max_active_runs, max_cost_usd, max_storage_bytes, max_tool_calls_per_minute, created_at) VALUES (?,?,?,?,?,?,?,?)',
+      )
       .run(safeId, safeName, limit, runLimit, costLimit, storageLimit, toolLimit, now);
-    return { id: safeId, name: safeName, maxSessions: limit, maxActiveRuns: runLimit, maxCostUsd: costLimit, maxStorageBytes: storageLimit, maxToolCallsPerMinute: toolLimit, createdAt: now };
+    return {
+      id: safeId,
+      name: safeName,
+      maxSessions: limit,
+      maxActiveRuns: runLimit,
+      maxCostUsd: costLimit,
+      maxStorageBytes: storageLimit,
+      maxToolCallsPerMinute: toolLimit,
+      createdAt: now,
+    };
   }
 
-  updateTenantQuotas(id: string, patch: {
-    maxSessions?: number; maxActiveRuns?: number; maxCostUsd?: number; maxStorageBytes?: number; maxToolCallsPerMinute?: number;
-  }): ReturnType<Store['getTenant']> {
+  updateTenantQuotas(
+    id: string,
+    patch: {
+      maxSessions?: number;
+      maxActiveRuns?: number;
+      maxCostUsd?: number;
+      maxStorageBytes?: number;
+      maxToolCallsPerMinute?: number;
+    },
+  ): ReturnType<Store['getTenant']> {
     const existing = this.getTenant(id);
     if (!existing) return undefined;
-    const sessions = patch.maxSessions === undefined ? existing.maxSessions : Math.max(0, Math.min(100_000, Math.trunc(Number(patch.maxSessions) || 0)));
-    const runs = patch.maxActiveRuns === undefined ? existing.maxActiveRuns : Math.max(0, Math.min(1_000, Math.trunc(Number(patch.maxActiveRuns) || 0)));
+    const sessions =
+      patch.maxSessions === undefined ? existing.maxSessions : Math.max(0, Math.min(100_000, Math.trunc(Number(patch.maxSessions) || 0)));
+    const runs =
+      patch.maxActiveRuns === undefined
+        ? existing.maxActiveRuns
+        : Math.max(0, Math.min(1_000, Math.trunc(Number(patch.maxActiveRuns) || 0)));
     const cost = patch.maxCostUsd === undefined ? existing.maxCostUsd : Math.max(0, Math.min(1_000_000_000, Number(patch.maxCostUsd) || 0));
-    const storage = patch.maxStorageBytes === undefined ? existing.maxStorageBytes : Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(patch.maxStorageBytes) || 0)));
-    const tools = patch.maxToolCallsPerMinute === undefined ? existing.maxToolCallsPerMinute : Math.max(0, Math.min(1_000_000, Math.trunc(Number(patch.maxToolCallsPerMinute) || 0)));
-    this.db.prepare('UPDATE tenants SET max_sessions = ?, max_active_runs = ?, max_cost_usd = ?, max_storage_bytes = ?, max_tool_calls_per_minute = ? WHERE id = ?')
+    const storage =
+      patch.maxStorageBytes === undefined
+        ? existing.maxStorageBytes
+        : Math.max(0, Math.min(Number.MAX_SAFE_INTEGER, Math.trunc(Number(patch.maxStorageBytes) || 0)));
+    const tools =
+      patch.maxToolCallsPerMinute === undefined
+        ? existing.maxToolCallsPerMinute
+        : Math.max(0, Math.min(1_000_000, Math.trunc(Number(patch.maxToolCallsPerMinute) || 0)));
+    this.db
+      .prepare(
+        'UPDATE tenants SET max_sessions = ?, max_active_runs = ?, max_cost_usd = ?, max_storage_bytes = ?, max_tool_calls_per_minute = ? WHERE id = ?',
+      )
       .run(sessions, runs, cost, storage, tools, id);
     return this.getTenant(id);
   }
 
-  createApiToken(input: {
+  createApiToken(input: { tenantId: string; role: 'admin' | 'member' | 'readonly'; label?: string; expiresAt?: number }): {
+    id: string;
+    token: string;
     tenantId: string;
-    role: 'admin' | 'member' | 'readonly';
+    role: string;
     label?: string;
+    createdAt: number;
     expiresAt?: number;
-  }): { id: string; token: string; tenantId: string; role: string; label?: string; createdAt: number; expiresAt?: number } {
+  } {
     const id = randomUUID();
     const token = `mh_${randomBytes(32).toString('base64url')}`;
     const createdAt = Date.now();
-    this.db.prepare(`INSERT INTO api_tokens (id, tenant_id, role, token_hash, label, created_at, expires_at)
-      VALUES (?,?,?,?,?,?,?)`).run(
-      id, input.tenantId, input.role, this.hashApiToken(token),
-      input.label ?? null, createdAt, input.expiresAt ?? null,
-    );
+    this.db
+      .prepare(`INSERT INTO api_tokens (id, tenant_id, role, token_hash, label, created_at, expires_at)
+      VALUES (?,?,?,?,?,?,?)`)
+      .run(id, input.tenantId, input.role, this.hashApiToken(token), input.label ?? null, createdAt, input.expiresAt ?? null);
     return {
-      id, token, tenantId: input.tenantId, role: input.role,
-      ...(input.label ? { label: input.label } : {}), createdAt,
+      id,
+      token,
+      tenantId: input.tenantId,
+      role: input.role,
+      ...(input.label ? { label: input.label } : {}),
+      createdAt,
       ...(input.expiresAt ? { expiresAt: input.expiresAt } : {}),
     };
   }
 
-  findApiToken(token: string): {
-    id: string; tenantId: string; role: 'admin' | 'member' | 'readonly'; createdAt: number; expiresAt?: number;
-  } | undefined {
+  findApiToken(token: string):
+    | {
+        id: string;
+        tenantId: string;
+        role: 'admin' | 'member' | 'readonly';
+        createdAt: number;
+        expiresAt?: number;
+      }
+    | undefined {
     if (!token) return undefined;
-    const row = this.db.prepare(`SELECT id, tenant_id AS tenantId, role, created_at AS createdAt, expires_at AS expiresAt
-      FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`).get(this.hashApiToken(token)) as {
-        id: string; tenantId: string; role: 'admin' | 'member' | 'readonly'; createdAt: number; expiresAt?: number;
-      } | undefined;
+    const row = this.db
+      .prepare(`SELECT id, tenant_id AS tenantId, role, created_at AS createdAt, expires_at AS expiresAt
+      FROM api_tokens WHERE token_hash = ? AND revoked_at IS NULL`)
+      .get(this.hashApiToken(token)) as
+      | {
+          id: string;
+          tenantId: string;
+          role: 'admin' | 'member' | 'readonly';
+          createdAt: number;
+          expiresAt?: number;
+        }
+      | undefined;
     if (!row) return undefined;
     if (row.expiresAt && row.expiresAt <= Date.now()) return undefined;
-    try { this.db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), row.id); } catch { /* 统计失败不影响鉴权 */ }
+    try {
+      this.db.prepare('UPDATE api_tokens SET last_used_at = ? WHERE id = ?').run(Date.now(), row.id);
+    } catch {
+      /* 统计失败不影响鉴权 */
+    }
     return row;
   }
 
   listApiTokens(tenantId?: string): {
-    id: string; tenantId: string; role: string; label?: string;
-    createdAt: number; expiresAt?: number; revokedAt?: number; lastUsedAt?: number;
+    id: string;
+    tenantId: string;
+    role: string;
+    label?: string;
+    createdAt: number;
+    expiresAt?: number;
+    revokedAt?: number;
+    lastUsedAt?: number;
   }[] {
     const rows = tenantId
-      ? this.db.prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
+      ? this.db
+          .prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
           expires_at AS expiresAt, revoked_at AS revokedAt, last_used_at AS lastUsedAt
-          FROM api_tokens WHERE tenant_id = ? ORDER BY created_at DESC`).all(tenantId)
-      : this.db.prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
+          FROM api_tokens WHERE tenant_id = ? ORDER BY created_at DESC`)
+          .all(tenantId)
+      : this.db
+          .prepare(`SELECT id, tenant_id AS tenantId, role, label, created_at AS createdAt,
           expires_at AS expiresAt, revoked_at AS revokedAt, last_used_at AS lastUsedAt
-          FROM api_tokens ORDER BY created_at DESC`).all();
+          FROM api_tokens ORDER BY created_at DESC`)
+          .all();
     return rows as {
-      id: string; tenantId: string; role: string; label?: string;
-      createdAt: number; expiresAt?: number; revokedAt?: number; lastUsedAt?: number;
+      id: string;
+      tenantId: string;
+      role: string;
+      label?: string;
+      createdAt: number;
+      expiresAt?: number;
+      revokedAt?: number;
+      lastUsedAt?: number;
     }[];
   }
 
   revokeApiToken(id: string): boolean {
-    const result = this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL')
-      .run(Date.now(), id);
+    const result = this.db.prepare('UPDATE api_tokens SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL').run(Date.now(), id);
     return result.changes > 0;
   }
 
   saveApprovalRequest(input: {
-    id: string; sessionId?: string; tenantId: string; name: string; summary: string;
-    args?: unknown; createdAt: number; expiresAt: number;
+    id: string;
+    sessionId?: string;
+    tenantId: string;
+    name: string;
+    summary: string;
+    args?: unknown;
+    createdAt: number;
+    expiresAt: number;
   }): void {
-    this.db.prepare(`INSERT INTO approval_requests
+    this.db
+      .prepare(`INSERT INTO approval_requests
       (id, session_id, tenant_id, name, summary, args, created_at, expires_at)
       VALUES (?,?,?,?,?,?,?,?)
       ON CONFLICT(id) DO UPDATE SET
         session_id=excluded.session_id, tenant_id=excluded.tenant_id, name=excluded.name,
         summary=excluded.summary, args=excluded.args, created_at=excluded.created_at, expires_at=excluded.expires_at`)
       .run(
-        input.id, input.sessionId ?? null, input.tenantId, input.name, input.summary,
-        input.args === undefined ? null : JSON.stringify(input.args), input.createdAt, input.expiresAt,
+        input.id,
+        input.sessionId ?? null,
+        input.tenantId,
+        input.name,
+        input.summary,
+        input.args === undefined ? null : JSON.stringify(input.args),
+        input.createdAt,
+        input.expiresAt,
       );
   }
 
   decideApprovalRequest(id: string, decision: 'approved' | 'rejected' | 'expired' | 'withdrawn', reason?: string): void {
-    this.db.prepare('UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ?')
+    this.db
+      .prepare('UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ?')
       .run(Date.now(), decision, reason ?? null, id);
   }
 
   /** 进程启动时调用：审批板是内存态，重启后所有未决审批都不再有等待者。
    *  标记为 expired:restart 并返回会话归属，供上层自动 resume，避免幽灵审批卡。 */
   expireOrphanedApprovalRequests(now = Date.now()): { id: string; sessionId: string; tenantId: string }[] {
-    const rows = this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId
-      FROM approval_requests WHERE decided_at IS NULL AND session_id IS NOT NULL`).all() as {
-      id: string; sessionId: string; tenantId: string;
+    const rows = this.db
+      .prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId
+      FROM approval_requests WHERE decided_at IS NULL AND session_id IS NOT NULL`)
+      .all() as {
+      id: string;
+      sessionId: string;
+      tenantId: string;
     }[];
     if (!rows.length) return [];
-    const update = this.db.prepare('UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ? AND decided_at IS NULL');
+    const update = this.db.prepare(
+      'UPDATE approval_requests SET decided_at = ?, decision = ?, reason = ? WHERE id = ? AND decided_at IS NULL',
+    );
     const tx = this.db.transaction((items: typeof rows) => {
       for (const item of items) update.run(now, 'expired', 'restart', item.id);
     });
@@ -940,20 +976,43 @@ export class Store {
     return rows;
   }
 
-  listApprovalRequests(tenantId: string, sessionId?: string): {
-    id: string; sessionId?: string | null; tenantId: string; name: string; summary: string;
-    createdAt: number; expiresAt: number; decidedAt?: number | null; decision?: string | null; reason?: string | null;
+  listApprovalRequests(
+    tenantId: string,
+    sessionId?: string,
+  ): {
+    id: string;
+    sessionId?: string | null;
+    tenantId: string;
+    name: string;
+    summary: string;
+    createdAt: number;
+    expiresAt: number;
+    decidedAt?: number | null;
+    decision?: string | null;
+    reason?: string | null;
   }[] {
     const rows = sessionId
-      ? this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
+      ? this.db
+          .prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
           created_at AS createdAt, expires_at AS expiresAt, decided_at AS decidedAt, decision, reason
-          FROM approval_requests WHERE tenant_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT 100`).all(tenantId, sessionId)
-      : this.db.prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
+          FROM approval_requests WHERE tenant_id = ? AND session_id = ? ORDER BY created_at DESC LIMIT 100`)
+          .all(tenantId, sessionId)
+      : this.db
+          .prepare(`SELECT id, session_id AS sessionId, tenant_id AS tenantId, name, summary,
           created_at AS createdAt, expires_at AS expiresAt, decided_at AS decidedAt, decision, reason
-          FROM approval_requests WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100`).all(tenantId);
+          FROM approval_requests WHERE tenant_id = ? ORDER BY created_at DESC LIMIT 100`)
+          .all(tenantId);
     return rows as {
-      id: string; sessionId?: string | null; tenantId: string; name: string; summary: string;
-      createdAt: number; expiresAt: number; decidedAt?: number | null; decision?: string | null; reason?: string | null;
+      id: string;
+      sessionId?: string | null;
+      tenantId: string;
+      name: string;
+      summary: string;
+      createdAt: number;
+      expiresAt: number;
+      decidedAt?: number | null;
+      decision?: string | null;
+      reason?: string | null;
     }[];
   }
 
@@ -961,89 +1020,31 @@ export class Store {
     return createHash('sha256').update(String(token)).digest('hex');
   }
 
-  countSessions(tenantId: string = 'default'): number {
-    return (this.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?').get(tenantId) as { n: number }).n;
+  countSessions(tenantId = 'default'): number {
+    return this.sessionRepo.countSessions(tenantId);
   }
 
-  listSessions(tenantId: string = 'default'): Session[] {
-    // lastMsg/lastRole：侧栏摘要用「最后一句真正说出口的话」——
-    // 只取 user / assistant，且排除带 tool_calls 的过程轮（那是旁白不是消息）、
-    // 排除空正文（纯工具调用轮的 content 为 null，会渲染成空白气泡/空白摘要）、
-    const rows = this.db
-      .prepare(`SELECT s.id, s.title, s.model, s.provider, s.mode, s.plan_pending AS planPending, s.role, s.tenant_id AS tenantId,
-                       s.archived, s.pinned, s.created_at AS createdAt, s.updated_at AS updatedAt,
-                       (SELECT SUBSTR(m.content, 1, 120) FROM messages m
-                         WHERE m.session_id = s.id AND m.role IN ('user','assistant')
-                           AND m.content IS NOT NULL AND m.content <> ''
-                           AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
-                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastMsg,
-                       (SELECT m.role FROM messages m
-                         WHERE m.session_id = s.id AND m.role IN ('user','assistant')
-                           AND m.content IS NOT NULL AND m.content <> ''
-                           AND (m.tool_calls IS NULL OR m.tool_calls = '' OR m.tool_calls = '[]')
-                         ORDER BY m.created_at DESC, m.rowid DESC LIMIT 1) AS lastRole
-                FROM sessions s WHERE s.tenant_id = ? ORDER BY s.pinned DESC, s.updated_at DESC`)
-      .all(tenantId) as Array<Record<string, unknown>>;
-    return rows.map((r) => ({
-      id: r.id as string, title: r.title as string, model: r.model as string,
-      provider: (r.provider as string) ?? '',
-      mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
-      role: (r.role as string) || undefined,
-      tenantId: (r.tenantId as string) ?? 'default',
-      archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
-      createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
-      lastMsg: (r.lastMsg as string) ?? '',
-      lastRole: (r.lastRole as 'user' | 'assistant' | undefined) ?? undefined,
-    }));
+  listSessions(tenantId = 'default'): Session[] {
+    return this.sessionRepo.listSessions(tenantId);
   }
 
   getSession(id: string, tenantId?: string): Session | undefined {
-    const sql = `SELECT id, title, model, provider, mode, plan_pending AS planPending, role, tenant_id AS tenantId,
-                        archived, pinned, created_at AS createdAt, updated_at AS updatedAt
-                 FROM sessions WHERE id = ?${tenantId ? ' AND tenant_id = ?' : ''}`;
-    const r = (tenantId ? this.db.prepare(sql).get(id, tenantId) : this.db.prepare(sql).get(id)) as Record<string, unknown> | undefined;
-    if (!r) return undefined;
-    return {
-      id: r.id as string, title: r.title as string, model: r.model as string,
-      provider: (r.provider as string) ?? '',
-      mode: (r.mode as string) ?? 'normal', planPending: (r.planPending as number) ?? 0,
-      role: (r.role as string) || undefined,
-      tenantId: (r.tenantId as string) ?? 'default',
-      archived: (r.archived as number) ?? 0, pinned: (r.pinned as number) ?? 0,
-      createdAt: r.createdAt as number, updatedAt: r.updatedAt as number,
-    };
+    return this.sessionRepo.getSession(id, tenantId);
   }
 
-  createSession(model: string, provider: string = '', tenantId: string = 'default'): Session {
-    const s: Session = {
-      id: randomUUID(), title: '新会话', model, provider, mode: 'normal', planPending: 0,
-      archived: 0, pinned: 0, tenantId,
-      createdAt: Date.now(), updatedAt: Date.now(),
-    };
-    this.db
-      .prepare('INSERT INTO sessions (id, title, model, provider, mode, plan_pending, archived, pinned, tenant_id, created_at, updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
-      .run(s.id, s.title, s.model, s.provider, s.mode, s.planPending, s.archived, s.pinned, tenantId, s.createdAt, s.updatedAt);
-    return s;
+  createSession(model: string, provider = '', tenantId = 'default'): Session {
+    return this.sessionRepo.createSession(model, provider, tenantId);
   }
 
-  updateSession(id: string, patch: Partial<Pick<Session, 'title' | 'model' | 'provider' | 'mode' | 'planPending' | 'role' | 'archived' | 'pinned'>>): void {
-    const cur = this.getSession(id);
-    if (!cur) return;
-    this.db
-      .prepare('UPDATE sessions SET title = ?, model = ?, provider = ?, mode = ?, plan_pending = ?, role = ?, archived = ?, pinned = ?, updated_at = ? WHERE id = ?')
-      .run(
-        patch.title ?? cur.title, patch.model ?? cur.model,
-        patch.provider ?? cur.provider,
-        patch.mode ?? cur.mode,
-        patch.planPending ?? cur.planPending,
-        // role 允许显式清空（'' = 交回主代理）：不能用 ??（空串是合法值）
-        patch.role !== undefined ? patch.role : cur.role ?? '',
-        patch.archived ?? cur.archived, patch.pinned ?? cur.pinned, Date.now(), id,
-      );
+  updateSession(
+    id: string,
+    patch: Partial<Pick<Session, 'title' | 'model' | 'provider' | 'mode' | 'planPending' | 'role' | 'archived' | 'pinned'>>,
+  ): void {
+    this.sessionRepo.updateSession(id, patch);
   }
 
   touchSession(id: string): void {
-    this.db.prepare('UPDATE sessions SET updated_at = ? WHERE id = ?').run(Date.now(), id);
+    this.sessionRepo.touchSession(id);
   }
 
   /** 删除会话（事务原子：messages 与 sessions 双删要么都成、要么都不成——参照 deleteSessions 写法） */
@@ -1054,29 +1055,7 @@ export class Store {
   /** 批量删除会话（事务原子：全部成功或全部失败）
    *  同步清理 agent_checkpoints——否则删除后 resume=true 会从孤儿断点"复活"已删会话 */
   deleteSessions(ids: string[], tenantId?: string): number {
-    if (ids.length === 0) return 0;
-    const allowed = tenantId ? ids.filter((id) => !!this.getSession(id, tenantId)) : ids;
-    if (allowed.length === 0) return 0;
-    const delMsg = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
-    const delCp = this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?');
-    const delSess = this.db.prepare('DELETE FROM sessions WHERE id = ?');
-    const tx = this.db.transaction((list: string[]) => {
-      for (const id of list) this.assertSessionIdle(id);
-      for (const id of list) {
-        const runs = this.db.prepare('SELECT id FROM runs_v2 WHERE session_id=?').all(id) as { id: string }[];
-        for (const run of runs) {
-          for (const table of ['run_history_v2', 'run_model_inputs_v2', 'run_tool_calls_v2', 'run_events_v2', 'run_checkpoints_v2', 'run_messages_v2', 'run_materials_v1']) this.db.prepare(`DELETE FROM ${table} WHERE run_id=?`).run(run.id);
-          this.db.prepare('DELETE FROM run_budget_reservations_v2 WHERE run_id=? OR parent_id=?').run(run.id, run.id);
-          this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id=?').run(run.id);
-        }
-        this.db.prepare('DELETE FROM runs_v2 WHERE session_id=?').run(id);
-        delMsg.run(id);
-        delCp.run(id);
-        delSess.run(id);
-      }
-    });
-    tx(allowed);
-    return allowed.length;
+    return this.sessionRepo.deleteSessions(ids, tenantId);
   }
 
   /** 清空会话消息（保留会话本身，/clear 命令用）
@@ -1091,15 +1070,20 @@ export class Store {
   }
 
   private assertSessionIdle(id: string): void {
-    if (this.db.prepare("SELECT 1 FROM runs_v2 WHERE session_id=? AND status IN ('queued','running','waiting_approval','stopping')").get(id)) throw new Error('该会话有活动任务，请先停止任务');
+    if (
+      this.db.prepare("SELECT 1 FROM runs_v2 WHERE session_id=? AND status IN ('queued','running','waiting_approval','stopping')").get(id)
+    )
+      throw new Error('该会话有活动任务，请先停止任务');
   }
 
   // ---------- workspaces ----------
 
   listWorkspaces(): { id: string; path: string; createdAt: number }[] {
-    return this.db
-      .prepare('SELECT id, path, created_at AS createdAt FROM workspaces ORDER BY created_at ASC')
-      .all() as { id: string; path: string; createdAt: number }[];
+    return this.db.prepare('SELECT id, path, created_at AS createdAt FROM workspaces ORDER BY created_at ASC').all() as {
+      id: string;
+      path: string;
+      createdAt: number;
+    }[];
   }
 
   addWorkspace(path: string): { id: string; path: string; createdAt: number } {
@@ -1118,59 +1102,37 @@ export class Store {
   // ---------- messages ----------
 
   listMessages(sessionId: string): Message[] {
-    const rows = this.db
-      // rowid 次排序：created_at 相同的消息（同毫秒写入）顺序固定，
-      // 保证每次组装的历史字节级一致——L3 前缀缓存（provider KV cache）依赖前缀稳定
-      .prepare('SELECT * FROM messages WHERE session_id = ? ORDER BY created_at ASC, rowid ASC')
-      .all(sessionId) as Array<Record<string, unknown>>;
-    return rows.map((r) => ({
-      id: r.id as string,
-      sessionId: r.session_id as string,
-      role: r.role as LLMRole,
-      content: r.content as string | null,
-      reasoning: (r.reasoning as string | null) ?? undefined,
-      toolCalls: r.tool_calls ? JSON.parse(r.tool_calls as string) as ToolCall[] : undefined,
-      toolCallId: (r.tool_call_id as string) ?? undefined,
-      tokensIn: r.tokens_in as number,
-      tokensOut: r.tokens_out as number,
-      cost: r.cost as number,
-      traceId: (r.trace_id as string) ?? undefined,
-      taskVerification: r.task_verification ? JSON.parse(r.task_verification as string) as Message['taskVerification'] : undefined,
-      createdAt: r.created_at as number,
-    }));
+    return this.sessionRepo.listMessages(sessionId);
   }
 
   addMessage(m: Omit<Message, 'id' | 'createdAt'>): Message {
-    const msg: Message = { ...m, id: randomUUID(), createdAt: Date.now() };
-    this.db
-      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, task_verification, created_at)
-                VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`)
-      .run(
-        msg.id, msg.sessionId, msg.role, msg.content,
-        msg.reasoning ?? null,
-        msg.toolCalls ? JSON.stringify(msg.toolCalls) : null,
-        msg.toolCallId ?? null, msg.tokensIn ?? 0, msg.tokensOut ?? 0, msg.cost ?? 0,
-        msg.traceId ?? null, msg.taskVerification ? JSON.stringify(msg.taskVerification) : null, msg.createdAt,
-      );
-    return msg;
+    return this.sessionRepo.addMessage(m);
   }
 
   /** 事务化回写：单事务内 delete + 批量 insert（压缩/截断结果持久化用）——
    *  中途失败整体回滚，不再出现「旧消息已清、新消息未写完」的丢历史窗口。 */
   replaceSessionMessages(sessionId: string, messages: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]): void {
     const del = this.db.prepare('DELETE FROM messages WHERE session_id = ?');
-    const ins = this.db
-      .prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, task_verification, created_at)
+    const ins =
+      this.db.prepare(`INSERT INTO messages (id, session_id, role, content, reasoning, tool_calls, tool_call_id, tokens_in, tokens_out, cost, trace_id, task_verification, created_at)
                 VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)`);
     const tx = this.db.transaction((list: Omit<Message, 'id' | 'createdAt' | 'sessionId'>[]) => {
       del.run(sessionId);
       for (const m of list) {
         ins.run(
-          randomUUID(), sessionId, m.role, m.content,
+          randomUUID(),
+          sessionId,
+          m.role,
+          m.content,
           m.reasoning ?? null,
           m.toolCalls ? JSON.stringify(m.toolCalls) : null,
-          m.toolCallId ?? null, m.tokensIn ?? 0, m.tokensOut ?? 0, m.cost ?? 0,
-          m.traceId ?? null, m.taskVerification ? JSON.stringify(m.taskVerification) : null, Date.now(),
+          m.toolCallId ?? null,
+          m.tokensIn ?? 0,
+          m.tokensOut ?? 0,
+          m.cost ?? 0,
+          m.traceId ?? null,
+          m.taskVerification ? JSON.stringify(m.taskVerification) : null,
+          Date.now(),
         );
       }
     });
@@ -1183,14 +1145,11 @@ export class Store {
 
   /** 消息结算回填：assistant 消息经 onHistoryMessage 先入库（保持历史字节一致），
    *  run 结束后再补写 tokens/cost/reasoning（结算时才有的字段）。 */
-  updateMessageStats(id: string, patch: { reasoning?: string; tokensIn?: number; tokensOut?: number; cost?: number; traceId?: string }): void {
-    this.db
-      .prepare('UPDATE messages SET reasoning=?, tokens_in=?, tokens_out=?, cost=?, trace_id=? WHERE id=?')
-      .run(
-        patch.reasoning ?? null,
-        patch.tokensIn ?? 0, patch.tokensOut ?? 0, patch.cost ?? 0,
-        patch.traceId ?? null, id,
-      );
+  updateMessageStats(
+    id: string,
+    patch: { reasoning?: string; tokensIn?: number; tokensOut?: number; cost?: number; traceId?: string },
+  ): void {
+    this.sessionRepo.updateMessageStats(id, patch);
   }
 
   updateMessageContent(id: string, content: string): void {
@@ -1216,7 +1175,19 @@ export class Store {
    *  assistant 的 tool_calls 与 tool 回填必须配对，否则 provider 校验失败。
    *  M6：超上限时保留最新 200 条并附 truncated/originalLength 标记；头部孤儿 tool
    *  回填（配对的 assistant tool_calls 已被截掉）一并丢弃——provider 拒绝无主 tool 消息。 */
-  saveCheckpoint(sessionId: string, turn: number, history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[], runId?: string, task?: import('../kernel/task-verifier').TaskContract, toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[], costUsd?: number, step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } }): void {
+  saveCheckpoint(
+    sessionId: string,
+    turn: number,
+    history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[],
+    runId?: string,
+    task?: import('../kernel/task-verifier').TaskContract,
+    toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[],
+    costUsd?: number,
+    step?: {
+      phase: 'turn_end' | 'tool_pending';
+      pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string };
+    },
+  ): void {
     let kept = history;
     let truncated = false;
     const originalLength = history.length;
@@ -1225,11 +1196,28 @@ export class Store {
       while (kept.length > 0 && kept[0].role === 'tool') kept = kept.slice(1);
       truncated = true;
     }
-    let payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, ...(truncated ? { truncated: true, originalLength } : {}), ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }), ...(step ? { step } : {}) };
+    let payload = {
+      schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION,
+      messages: kept,
+      ...(truncated ? { truncated: true, originalLength } : {}),
+      ...(task ? { task } : {}),
+      ...(toolResults ? { toolResults } : {}),
+      ...(costUsd === undefined ? {} : { costUsd }),
+      ...(step ? { step } : {}),
+    };
     while (JSON.stringify(payload).length > Store.MAX_CHECKPOINT_BYTES && kept.length > 1) {
       kept = kept.slice(1);
       truncated = true;
-      payload = { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, messages: kept, truncated: true, originalLength, ...(task ? { task } : {}), ...(toolResults ? { toolResults } : {}), ...(costUsd === undefined ? {} : { costUsd }), ...(step ? { step } : {}) };
+      payload = {
+        schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION,
+        messages: kept,
+        truncated: true,
+        originalLength,
+        ...(task ? { task } : {}),
+        ...(toolResults ? { toolResults } : {}),
+        ...(costUsd === undefined ? {} : { costUsd }),
+        ...(step ? { step } : {}),
+      };
     }
     this.db
       .prepare(`INSERT INTO agent_checkpoints (session_id, turn, run_id, history, created_at) VALUES (?,?,?,?,?)
@@ -1238,10 +1226,27 @@ export class Store {
   }
 
   /** 读取会话断点（无断点返回 undefined） */
-  loadCheckpoint(sessionId: string): { schemaVersion: number; turn: number; runId?: string; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[]; costUsd?: number; history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]; createdAt: number; truncated?: boolean; originalLength?: number; step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } } } | undefined {
-    const r = this.db.prepare('SELECT turn, run_id AS runId, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?').get(sessionId) as
-      | { turn: number; runId?: string | null; history: string; createdAt: number }
-      | undefined;
+  loadCheckpoint(sessionId: string):
+    | {
+        schemaVersion: number;
+        turn: number;
+        runId?: string;
+        task?: import('../kernel/task-verifier').TaskContract;
+        toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[];
+        costUsd?: number;
+        history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[];
+        createdAt: number;
+        truncated?: boolean;
+        originalLength?: number;
+        step?: {
+          phase: 'turn_end' | 'tool_pending';
+          pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string };
+        };
+      }
+    | undefined {
+    const r = this.db
+      .prepare('SELECT turn, run_id AS runId, history, created_at AS createdAt FROM agent_checkpoints WHERE session_id = ?')
+      .get(sessionId) as { turn: number; runId?: string | null; history: string; createdAt: number } | undefined;
     if (!r) return undefined;
     if (Date.now() - r.createdAt > this.checkpointRetentionMs) {
       this.clearCheckpoint(sessionId);
@@ -1250,15 +1255,40 @@ export class Store {
     try {
       const parsed = JSON.parse(r.history) as unknown;
       // 兼容两种格式：旧格式 history 列直接存消息数组；新格式存 { messages, truncated?, originalLength? }
-      if (Array.isArray(parsed)) return { schemaVersion: 0, turn: r.turn, runId: r.runId ?? undefined, history: parsed, createdAt: r.createdAt };
-      const obj = parsed as { schemaVersion?: unknown; messages?: unknown; task?: import('../kernel/task-verifier').TaskContract; toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[]; costUsd?: number; truncated?: boolean; originalLength?: number; step?: { phase: 'turn_end' | 'tool_pending'; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string } } };
+      if (Array.isArray(parsed))
+        return { schemaVersion: 0, turn: r.turn, runId: r.runId ?? undefined, history: parsed, createdAt: r.createdAt };
+      const obj = parsed as {
+        schemaVersion?: unknown;
+        messages?: unknown;
+        task?: import('../kernel/task-verifier').TaskContract;
+        toolResults?: { name: string; ok: boolean; evidence?: import('../kernel/types').ToolEvidence[] }[];
+        costUsd?: number;
+        truncated?: boolean;
+        originalLength?: number;
+        step?: {
+          phase: 'turn_end' | 'tool_pending';
+          pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string };
+        };
+      };
       const schemaVersion = obj?.schemaVersion === undefined ? 1 : obj.schemaVersion;
       if (schemaVersion !== Store.CHECKPOINT_SCHEMA_VERSION) {
         this.clearCheckpoint(sessionId);
         return undefined;
       }
       if (obj && Array.isArray(obj.messages)) {
-        return { schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION, turn: r.turn, runId: r.runId ?? undefined, task: obj.task, toolResults: obj.toolResults, costUsd: obj.costUsd, history: obj.messages, truncated: obj.truncated, originalLength: obj.originalLength, ...(obj.step ? { step: obj.step } : {}), createdAt: r.createdAt };
+        return {
+          schemaVersion: Store.CHECKPOINT_SCHEMA_VERSION,
+          turn: r.turn,
+          runId: r.runId ?? undefined,
+          task: obj.task,
+          toolResults: obj.toolResults,
+          costUsd: obj.costUsd,
+          history: obj.messages,
+          truncated: obj.truncated,
+          originalLength: obj.originalLength,
+          ...(obj.step ? { step: obj.step } : {}),
+          createdAt: r.createdAt,
+        };
       }
       return undefined;
     } catch {
@@ -1270,16 +1300,26 @@ export class Store {
   clearCheckpoint(sessionId: string): void {
     const tx = this.db.transaction((id: string) => {
       this.db.prepare('DELETE FROM agent_checkpoints WHERE session_id = ?').run(id);
-      this.db.prepare('DELETE FROM agent_tool_effects WHERE run_id NOT IN (SELECT run_id FROM agent_checkpoints WHERE run_id IS NOT NULL) AND run_id NOT IN (SELECT id FROM runs_v2)').run();
+      this.db
+        .prepare(
+          'DELETE FROM agent_tool_effects WHERE run_id NOT IN (SELECT run_id FROM agent_checkpoints WHERE run_id IS NOT NULL) AND run_id NOT IN (SELECT id FROM runs_v2)',
+        )
+        .run();
     });
     tx(sessionId);
   }
 
   peekToolEffect(runId: string, effectKey: string): { state: 'new' | 'done' | 'pending'; result?: import('../kernel/types').ToolResult } {
-    const row = this.db.prepare('SELECT status,result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as { status: string; result: string | null } | undefined;
+    const row = this.db.prepare('SELECT status,result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as
+      | { status: string; result: string | null }
+      | undefined;
     if (!row) return { state: 'new' };
     if (row.status === 'done' && row.result) {
-      try { return { state: 'done', result: JSON.parse(row.result) }; } catch { return { state: 'pending' }; }
+      try {
+        return { state: 'done', result: JSON.parse(row.result) };
+      } catch {
+        return { state: 'pending' };
+      }
     }
     return { state: 'pending' };
   }
@@ -1293,20 +1333,29 @@ export class Store {
     let inserted: { changes: number } = { changes: 0 };
     let row!: { status: string; result: string | null };
     const tx = this.db.transaction(() => {
-      inserted = this.db.prepare(`INSERT OR IGNORE INTO agent_tool_effects (run_id,effect_key,status,result,created_at,updated_at)
-        VALUES (?,?, 'pending', NULL, ?, ?)`).run(runId, effectKey, now, now);
-      row = this.db.prepare('SELECT status, result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as { status: string; result: string | null };
+      inserted = this.db
+        .prepare(`INSERT OR IGNORE INTO agent_tool_effects (run_id,effect_key,status,result,created_at,updated_at)
+        VALUES (?,?, 'pending', NULL, ?, ?)`)
+        .run(runId, effectKey, now, now);
+      row = this.db.prepare('SELECT status, result FROM agent_tool_effects WHERE run_id=? AND effect_key=?').get(runId, effectKey) as {
+        status: string;
+        result: string | null;
+      };
     });
     tx();
     if (row.status === 'done' && row.result) {
-      try { return { state: 'done', result: JSON.parse(row.result) as import('../kernel/types').ToolResult }; }
-      catch { return { state: 'pending' }; }
+      try {
+        return { state: 'done', result: JSON.parse(row.result) as import('../kernel/types').ToolResult };
+      } catch {
+        return { state: 'pending' };
+      }
     }
     return inserted.changes > 0 ? { state: 'new' } : { state: 'pending' };
   }
 
   completeToolEffect(runId: string, effectKey: string, result: import('../kernel/types').ToolResult): void {
-    this.db.prepare(`UPDATE agent_tool_effects SET status='done', result=?, updated_at=? WHERE run_id=? AND effect_key=? AND status='pending'`)
+    this.db
+      .prepare(`UPDATE agent_tool_effects SET status='done', result=?, updated_at=? WHERE run_id=? AND effect_key=? AND status='pending'`)
       .run(JSON.stringify(result), Date.now(), runId, effectKey);
   }
 
@@ -1320,22 +1369,19 @@ export class Store {
    *  走 GROUP BY，不再逐会话 listMessages 全量拉 content。
    *  truncations = system 注入的截断说明消息计数（与 statsOverview 同口径）；
    *  chars = content 字符数合计（供上下文占用近似估算）。 */
-  aggregateSessions(tenantId: string = 'default'): { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[] {
-    return this.db
-      .prepare(`SELECT m.session_id AS sessionId,
-                  COALESCE(SUM(m.tokens_in), 0) AS tokensIn,
-                  COALESCE(SUM(m.tokens_out), 0) AS tokensOut,
-                  COALESCE(SUM(m.cost), 0) AS cost,
-                  COUNT(*) AS messages,
-                  COALESCE(SUM(CASE WHEN m.role = 'system' AND m.content LIKE '%上下文管理%' THEN 1 ELSE 0 END), 0) AS truncations,
-                  COALESCE(SUM(LENGTH(COALESCE(m.content, ''))), 0) AS chars
-                FROM messages m JOIN sessions s ON s.id = m.session_id
-                WHERE s.tenant_id = ? GROUP BY m.session_id`)
-      .all(tenantId) as { sessionId: string; tokensIn: number; tokensOut: number; cost: number; messages: number; truncations: number; chars: number }[];
+  aggregateSessions(tenantId = 'default'): ReturnType<SqliteTenantRepo['aggregateSessions']> {
+    return this.tenantRepo.aggregateSessions(tenantId);
   }
 
   /** 全局聚合：会话数 / 消息数 / tokens / 成本 / 上下文截断次数（system 注入的截断说明消息计数） */
-  statsOverview(tenantId: string = 'default'): { sessions: number; messages: number; tokensIn: number; tokensOut: number; cost: number; truncations: number } {
+  statsOverview(tenantId: string = 'default'): {
+    sessions: number;
+    messages: number;
+    tokensIn: number;
+    tokensOut: number;
+    cost: number;
+    truncations: number;
+  } {
     const s = this.db.prepare('SELECT COUNT(*) AS n FROM sessions WHERE tenant_id = ?').get(tenantId) as { n: number };
     const m = this.db
       .prepare(`SELECT COUNT(*) AS n,
@@ -1347,8 +1393,12 @@ export class Store {
                 WHERE s.tenant_id = ?`)
       .get(tenantId) as Record<string, number>;
     return {
-      sessions: s.n, messages: m.n,
-      tokensIn: m.tokensIn, tokensOut: m.tokensOut, cost: m.cost, truncations: m.truncations,
+      sessions: s.n,
+      messages: m.n,
+      tokensIn: m.tokensIn,
+      tokensOut: m.tokensOut,
+      cost: m.cost,
+      truncations: m.truncations,
     };
   }
 }
@@ -1371,11 +1421,16 @@ export function hasEncryptedProviderKeys(dbFile: string): boolean {
     try {
       const tables = db.prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name='providers'`).all();
       if (!tables.length) return false; // 老库/空库：没有 providers 表
-      const hit = db.prepare(`SELECT 1 AS x FROM providers WHERE api_key LIKE '${SECRET_PREFIX}%' OR api_key LIKE '${PURPOSE_SECRET_PREFIX}%' LIMIT 1`)
-        .get() as { x?: number } | undefined;
+      const hit = db
+        .prepare('SELECT 1 AS x FROM providers WHERE api_key LIKE ? OR api_key LIKE ? LIMIT 1')
+        .get(`${SECRET_PREFIX}%`, `${PURPOSE_SECRET_PREFIX}%`) as { x?: number } | undefined;
       return !!hit?.x;
     } finally {
-      try { db.close(); } catch { /* 忽略 */ }
+      try {
+        db.close();
+      } catch {
+        /* 忽略 */
+      }
     }
   } catch (err) {
     console.warn('[store] 只读探测 api_key 密文失败，改用字节扫描兜底:', err instanceof Error ? err.message : String(err));

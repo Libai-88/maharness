@@ -4,17 +4,17 @@ import { StdioConnection, normalizeSamplingParams } from '../index';
 
 const FIXTURE = [
   "const readline=require('node:readline');",
-  "const rl=readline.createInterface({input:process.stdin});",
-  "let capabilities=null, sampling=null, roots=null;",
+  'const rl=readline.createInterface({input:process.stdin});',
+  'let capabilities=null, sampling=null, roots=null;',
   "rl.on('line',line=>{ const m=JSON.parse(line);",
   "if(m.method==='initialize'){ capabilities=m.params.capabilities;",
   "process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{protocolVersion:'2026-07-28'}})+'\\n');",
   "process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:99,method:'sampling/createMessage',params:{messages:[{role:'user',content:{type:'text',text:'hello'}}],maxTokens:16}})+'\\n');",
   "process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:100,method:'roots/list',params:{}})+'\\n'); }",
-  "else if(m.id===99) sampling=m.result??m.error;",
-  "else if(m.id===100) roots=m.result??m.error;",
+  'else if(m.id===99) sampling=m.result??m.error;',
+  'else if(m.id===100) roots=m.result??m.error;',
   "else if(m.method==='tools/call') process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:m.id,result:{content:[{type:'text',text:JSON.stringify({capabilities,sampling,roots})}]}})+'\\n');",
-  "});",
+  '});',
 ].join('');
 
 describe('MCP sampling / roots', () => {
@@ -29,15 +29,21 @@ describe('MCP sampling / roots', () => {
     assert.equal(normalized.messages[1].content, 'hello');
     assert.equal(normalized.maxTokens, 8192);
     assert.equal(normalized.temperature, 2);
-    assert.throws(() => normalizeSamplingParams({
-      messages: [{ role: 'user', content: { type: 'image', data: 'x' } }],
-    }), /只支持文本/);
+    assert.throws(
+      () =>
+        normalizeSamplingParams({
+          messages: [{ role: 'user', content: { type: 'image', data: 'x' } }],
+        }),
+      /只支持文本/,
+    );
     assert.throws(() => normalizeSamplingParams({ messages: [] }), /缺少 user/);
   });
 
   test('stdio 拒绝没有任务归属的 sampling，保留 roots/list', async (t) => {
     const conn = new StdioConnection('sampling', {
-      type: 'stdio', command: process.execPath, args: ['-e', FIXTURE],
+      type: 'stdio',
+      command: process.execPath,
+      args: ['-e', FIXTURE],
     });
     conn.samplingHandler = async (_params) => ({
       role: 'assistant',

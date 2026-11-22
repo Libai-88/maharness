@@ -15,16 +15,9 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "list_rules",
-        "check_policy"
-      ],
-      "persona": [
-        "user-rules"
-      ],
-      "service": [
-        "rules"
-      ]
+      "tool": ["list_rules", "check_policy"],
+      "persona": ["user-rules"],
+      "service": ["rules"]
     }
   },
   "apiVersion": 2

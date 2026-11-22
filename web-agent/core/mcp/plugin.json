@@ -27,9 +27,7 @@
         "mcp_registry_search",
         "mcp_registry_install"
       ],
-      "persona": [
-        "mcp-rules"
-      ]
+      "persona": ["mcp-rules"]
     }
   },
   "limits": {

@@ -47,6 +47,8 @@
     "eval:strengthening": "tsx scripts/strengthening-live.ts",
     "eval:release:report": "tsx scripts/release-report.ts",
     "typecheck": "tsc -p tsconfig.json",
+    "lint": "biome check .",
+    "lint:fix": "biome check --write .",
     "ui:dev": "npm --prefix ui run dev",
     "ui:build": "npm --prefix ui run build",
     "ui:typecheck": "npm --prefix ui run typecheck",
@@ -54,12 +56,15 @@
     "build": "npm run ui:typecheck && npm run ui:build && npm run typecheck",
     "eval:composition": "tsx scripts/composition-live.ts",
     "check:boundaries": "node --import tsx --test kernel/tests/dependency-boundary.spec.ts",
-    "check:quality": "npm run typecheck && npm run check:boundaries",
+    "check:quality": "npm run lint && npm run typecheck && npm run check:boundaries && npm run check:complexity && npm run check:contracts && npm run check:coverage",
     "test:coverage": "node scripts/run-tests.mjs --coverage",
     "db:export": "tsx scripts/db-migrate.ts export",
     "db:upgrade": "tsx scripts/db-migrate.ts upgrade",
     "db:verify": "tsx scripts/db-migrate.ts verify",
-    "eval:experience:v2": "tsx evals/experience-v2.ts"
+    "eval:experience:v2": "tsx evals/experience-v2.ts",
+    "check:coverage": "node scripts/check-coverage.mjs",
+ "check:complexity": "node scripts/check-complexity.mjs",
+ "check:contracts": "node scripts/check-contracts.mjs"
   },
   "dependencies": {
     "@xmldom/xmldom": "^0.9.12",
@@ -80,6 +85,7 @@
     "web-tree-sitter": "^0.20.8"
   },
   "devDependencies": {
+    "@biomejs/biome": "^2.6.8",
     "@types/better-sqlite3": "^7.6.12",
     "@types/express": "^5.0.0",
     "@types/node": "^22.10.0"

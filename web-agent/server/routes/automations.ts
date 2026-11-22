@@ -29,14 +29,21 @@ export function registerAutomationRoutes(app: Express, deps: RouteDeps): void {
     try {
       const item = service.create(tenantIdOf(req), req.body ?? {}, 'user');
       res.status(201).json({ automation: item });
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.get('/api/automations/:id', (req, res) => {
     try {
       const tenantId = tenantIdOf(req);
-      res.json({ automation: service.get(tenantId, String(req.params.id)), occurrences: service.occurrences(tenantId, String(req.params.id)) });
-    } catch (error) { sendError(res, error); }
+      res.json({
+        automation: service.get(tenantId, String(req.params.id)),
+        occurrences: service.occurrences(tenantId, String(req.params.id)),
+      });
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.get('/api/automations/:id/runs', (req, res) => {
@@ -44,48 +51,71 @@ export function registerAutomationRoutes(app: Express, deps: RouteDeps): void {
       const tenantId = tenantIdOf(req);
       service.get(tenantId, String(req.params.id));
       res.json({ occurrences: service.occurrences(tenantId, String(req.params.id)) });
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.patch('/api/automations/:id', (req, res) => {
     try {
       const item = service.update(tenantIdOf(req), String(req.params.id), revision(req.body), req.body?.patch ?? {}, 'user');
       res.json({ automation: item });
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.post('/api/automations/:id/confirm', (req, res) => {
-    try { res.json({ automation: service.confirm(tenantIdOf(req), String(req.params.id), revision(req.body)) }); }
-    catch (error) { sendError(res, error); }
+    try {
+      res.json({ automation: service.confirm(tenantIdOf(req), String(req.params.id), revision(req.body)) });
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.post('/api/automations/:id/pause', (req, res) => {
-    try { res.json({ automation: service.pause(tenantIdOf(req), String(req.params.id), revision(req.body)) }); }
-    catch (error) { sendError(res, error); }
+    try {
+      res.json({ automation: service.pause(tenantIdOf(req), String(req.params.id), revision(req.body)) });
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.post('/api/automations/:id/resume', (req, res) => {
-    try { res.json({ automation: service.resume(tenantIdOf(req), String(req.params.id), revision(req.body)) }); }
-    catch (error) { sendError(res, error); }
+    try {
+      res.json({ automation: service.resume(tenantIdOf(req), String(req.params.id), revision(req.body)) });
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.post('/api/automations/:id/run', (req, res) => {
     try {
-      const occurrence = service.runNow(tenantIdOf(req), String(req.params.id), req.body?.revision === undefined ? undefined : revision(req.body));
+      const occurrence = service.runNow(
+        tenantIdOf(req),
+        String(req.params.id),
+        req.body?.revision === undefined ? undefined : revision(req.body),
+      );
       res.status(202).json({ occurrence });
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.post('/api/automations/:id/runs/:runId/cancel', (req, res) => {
     try {
       res.status(202).json(service.cancelRun(tenantIdOf(req), String(req.params.id), String(req.params.runId)));
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 
   app.delete('/api/automations/:id', (req, res) => {
     try {
       const body = { ...(req.body ?? {}), revision: req.body?.revision ?? req.query.revision };
       res.json({ automation: service.cancel(tenantIdOf(req), String(req.params.id), revision(body)) });
-    } catch (error) { sendError(res, error); }
+    } catch (error) {
+      sendError(res, error);
+    }
   });
 }

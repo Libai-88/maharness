@@ -20,20 +20,25 @@ function loadLegacyJobs(file?: string): ScheduleJob[] {
     if (!file || !existsSync(file)) return [];
     const parsed = JSON.parse(readFileSync(file, 'utf8')) as ScheduleFile;
     if (parsed?.version !== 1 || !Array.isArray(parsed.jobs)) return [];
-    return parsed.jobs.filter((job) => job && typeof job.id === 'string' && typeof job.sessionId === 'string')
-      .map(job => ({
+    return parsed.jobs
+      .filter((job) => job && typeof job.id === 'string' && typeof job.sessionId === 'string')
+      .map((job) => ({
         ...job,
         tenantId: job.tenantId || 'default',
         state: ['pending', 'running', 'done', 'failed'].includes(job.state) ? job.state : 'failed',
       }));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 function archiveLegacyJobs(file?: string): void {
   if (!file || !existsSync(file)) return;
   try {
     renameSync(file, `${file}.migrated`);
-  } catch { /* The database import is idempotent; a stale source file is harmless. */ }
+  } catch {
+    /* The database import is idempotent; a stale source file is harmless. */
+  }
 }
 
 export class Scheduler {
@@ -57,14 +62,22 @@ export class Scheduler {
     if (legacy.length) archiveLegacyJobs(opts.file);
     store.schedules.failInterrupted(this.now(), '服务已重启，请核对任务后手动恢复');
   }
-  attach(service: Pick<RunService, 'get' | 'resume'>): void { this.service = service; }
-  attachAutomations(service: AutomationService): void { this.automations = service; }
-  attachSociety(service: Pick<SocietyService, 'tickAll'>): void { this.society = service; }
+  attach(service: Pick<RunService, 'get' | 'resume'>): void {
+    this.service = service;
+  }
+  attachAutomations(service: AutomationService): void {
+    this.automations = service;
+  }
+  attachSociety(service: Pick<SocietyService, 'tickAll'>): void {
+    this.society = service;
+  }
 
   start(): void {
     if (this.timer || this.stopped) return;
     const interval = Math.max(250, this.opts.intervalMs ?? 5_000);
-    this.timer = setInterval(() => { void this.tick().catch(() => undefined); }, interval);
+    this.timer = setInterval(() => {
+      void this.tick().catch(() => undefined);
+    }, interval);
     this.timer.unref?.();
     void this.tick().catch(() => undefined);
   }
@@ -79,12 +92,19 @@ export class Scheduler {
     return this.store.schedules.list(tenantId);
   }
 
-  schedule(input: { sessionId: string; tenantId: string; dueAt: number; runId?: string; principalRole?: ScheduleJob['principalRole'] }): ScheduleJob {
+  schedule(input: {
+    sessionId: string;
+    tenantId: string;
+    dueAt: number;
+    runId?: string;
+    principalRole?: ScheduleJob['principalRole'];
+  }): ScheduleJob {
     const now = this.now();
     const job: ScheduleJob = {
       id: `sch_${now.toString(36)}_${Math.random().toString(36).slice(2, 10)}`,
       sessionId: input.sessionId,
-      runId: input.runId, principalRole: input.principalRole,
+      runId: input.runId,
+      principalRole: input.principalRole,
       tenantId: input.tenantId,
       dueAt: Math.max(now, Math.trunc(input.dueAt)),
       state: 'pending',
@@ -136,10 +156,12 @@ export class Scheduler {
       const run = this.service.get(job.runId, job.tenantId);
       if (run.sessionId !== job.sessionId || run.parentId) throw new Error('任务不属于该会话或为子任务');
       this.service.resume(run.id, job.tenantId, job.principalRole);
-      job.state = 'done'; job.lastError = undefined;
+      job.state = 'done';
+      job.lastError = undefined;
     } catch (error) {
       // Recovery can start side effects: an ambiguous failure must never be retried automatically.
-      job.state = 'failed'; job.lastError = error instanceof Error ? error.message : String(error);
+      job.state = 'failed';
+      job.lastError = error instanceof Error ? error.message : String(error);
     } finally {
       job.updatedAt = this.now();
       this.running.delete(job.id);

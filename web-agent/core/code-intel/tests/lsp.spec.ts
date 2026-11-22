@@ -41,13 +41,21 @@ describe('LSP 客户端', () => {
     const script = join(root, 'mock-lsp.mjs');
     writeFileSync(file, 'const x = 1;\n');
     writeFileSync(script, MOCK_LSP);
-    const client = new LspClient('mock', {
-      command: process.execPath,
-      args: [script],
-      extensions: ['.ts'],
-    }, root);
+    const client = new LspClient(
+      'mock',
+      {
+        command: process.execPath,
+        args: [script],
+        extensions: ['.ts'],
+      },
+      root,
+    );
     t.after(async () => {
-      try { await client.stop(); } catch { /* 已退出 */ }
+      try {
+        await client.stop();
+      } catch {
+        /* 已退出 */
+      }
       rmSync(root, { recursive: true, force: true });
     });
 

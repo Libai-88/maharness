@@ -14,16 +14,40 @@ const INPUT_PLACEHOLDER = '跟 maharness 说点什么…（按 / 看命令）';
 
 async function setup(page: Page) {
   await installRunMocks(page);
-  await page.route('**/api/providers', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider', label: 'E2E Provider', baseUrl: 'http://e2e.local', model: 'e2e-model',
-    enabled: true, apiKeyMasked: 'sk-***', hasKey: true, createdAt: 0, updatedAt: 0,
-  }] }));
-  await page.route('**/api/models', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider@e2e-model', provider: 'e2e-provider', label: 'E2E Model', model: 'e2e-model',
-  }] }));
+  await page.route('**/api/providers', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider',
+          label: 'E2E Provider',
+          baseUrl: 'http://e2e.local',
+          model: 'e2e-model',
+          enabled: true,
+          apiKeyMasked: 'sk-***',
+          hasKey: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/models', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider@e2e-model',
+          provider: 'e2e-provider',
+          label: 'E2E Model',
+          model: 'e2e-model',
+        },
+      ],
+    }),
+  );
   await page.route('**/api/events', (route) => route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: '' }));
   await page.route('**/api/trace/stats', (route) => route.fulfill({ json: { trace: {}, cache: {}, l1Enabled: false } }));
-  await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({ json: { exists: false, turn: 0, historyMessages: 0, createdAt: 0 } }));
+  await page.route('**/api/sessions/*/checkpoint', (route) =>
+    route.fulfill({ json: { exists: false, turn: 0, historyMessages: 0, createdAt: 0 } }),
+  );
   await page.goto('/');
   await expect
     .poll(async () => {
@@ -41,10 +65,19 @@ async function scanA11y(page: Page): Promise<{ id: string; impact: string; nodes
   // toast 挂载动画（opacity 过渡）会让 axe 误读中间帧对比度，等其稳定再扫描
   await page.waitForTimeout(500);
   await page.addScriptTag({ content: axeSource });
-  const result = await page.evaluate(() => (window as unknown as { axe: { run: () => Promise<{ violations: { id: string; impact: string | null; nodes: unknown[] }[] }> } }).axe.run());
+  const result = await page.evaluate(() =>
+    (
+      window as unknown as { axe: { run: () => Promise<{ violations: { id: string; impact: string | null; nodes: unknown[] }[] }> } }
+    ).axe.run(),
+  );
   return result.violations
     .filter((v) => v.impact === 'critical' || v.impact === 'serious')
-    .map((v) => ({ id: v.id, impact: v.impact, nodes: v.nodes.length, summary: v.nodes.map((n: { target: string[] }) => n.target.join(' ')) }));
+    .map((v) => ({
+      id: v.id,
+      impact: v.impact,
+      nodes: v.nodes.length,
+      summary: v.nodes.map((n: { target: string[] }) => n.target.join(' ')),
+    }));
 }
 
 test.describe('可访问性（UX-05）', () => {
@@ -56,24 +89,26 @@ test.describe('可访问性（UX-05）', () => {
 
   test('错误终态：失败状态可被读屏识别（aria-live 区域内文案 + 原始错误 title）', async ({ page }) => {
     await setup(page);
-    await mockTaskEvents(page, (route) => route.fulfill({
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-      body: [
-        'event: start',
-        'data: {"traceId":"a11y-error"}',
-        '',
-        'event: delta',
-        'data: {"text":"前半部分已完成…"}',
-        '',
-        'event: error',
-        'data: {"error":"本任务已达到轮数上限","kind":"max-turns"}',
-        '',
-        'event: end',
-        'data: {}',
-        '',
-      ].join('\n'),
-    }));
+    await mockTaskEvents(page, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          'event: start',
+          'data: {"traceId":"a11y-error"}',
+          '',
+          'event: delta',
+          'data: {"text":"前半部分已完成…"}',
+          '',
+          'event: error',
+          'data: {"error":"本任务已达到轮数上限","kind":"max-turns"}',
+          '',
+          'event: end',
+          'data: {}',
+          '',
+        ].join('\n'),
+      }),
+    );
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('执行一个多阶段任务');
     await expect(page.getByTestId('send-btn')).toBeEnabled();
     await page.keyboard.press('Enter');
@@ -86,21 +121,23 @@ test.describe('可访问性（UX-05）', () => {
 
   test('审批卡与表情面板：键盘可达且 axe 无严重/中度违规', async ({ page }) => {
     await setup(page);
-    await mockTaskEvents(page, (route) => route.fulfill({
-      status: 200,
-      headers: { 'Content-Type': 'text/event-stream' },
-      body: [
-        'event: start',
-        'data: {"traceId":"a11y-approval"}',
-        '',
-        'event: approval_required',
-        'data: {"approvalId":"a11y-ap-1","name":"delete_file","summary":"删除 reports/draft.md","approvalToken":"tok-a11y"}',
-        '',
-        'event: end',
-        'data: {}',
-        '',
-      ].join('\n'),
-    }));
+    await mockTaskEvents(page, (route) =>
+      route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: [
+          'event: start',
+          'data: {"traceId":"a11y-approval"}',
+          '',
+          'event: approval_required',
+          'data: {"approvalId":"a11y-ap-1","name":"delete_file","summary":"删除 reports/draft.md","approvalToken":"tok-a11y"}',
+          '',
+          'event: end',
+          'data: {}',
+          '',
+        ].join('\n'),
+      }),
+    );
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
     await expect(page.getByTestId('send-btn')).toBeEnabled();
     await page.keyboard.press('Enter');
@@ -136,7 +173,7 @@ test.describe('可访问性（UX-05）', () => {
       expect(box!.x + box!.width).toBeLessThanOrEqual(viewport.width);
       // 发送按钮可见且可点击（高度 > 0，不被遮挡）
       const sendBtn = page.getByRole('button', { name: '发送' });
-      if (await sendBtn.count() > 0) {
+      if ((await sendBtn.count()) > 0) {
         const btnBox = await sendBtn.boundingBox();
         expect(btnBox).not.toBeNull();
         expect(btnBox!.height).toBeGreaterThan(0);

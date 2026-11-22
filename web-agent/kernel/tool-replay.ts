@@ -52,10 +52,7 @@ export function recordTools(tools: ToolDef[]): { tools: ToolDef[]; recording: To
 /** 从录音生成桩工具集：同签名、同描述（LLM 视角不变），handler 返回预录结果。
  *  真实 handler 完全不携带——重放 run 无法触碰真实工具实现。
  *  审批语义保留：预录结果原样返回，重放 run 不再触发真实审批门。 */
-export function stubTools(
-  tools: ToolDef[],
-  recording: ToolRecording,
-): { tools: ToolDef[]; calls: { name: string; args: unknown }[] } {
+export function stubTools(tools: ToolDef[], recording: ToolRecording): { tools: ToolDef[]; calls: { name: string; args: unknown }[] } {
   const byKey = new Map<string, RecordedToolCall[]>();
   for (const call of recording.calls) {
     const list = byKey.get(call.name) ?? [];

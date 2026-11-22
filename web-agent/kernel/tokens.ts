@@ -41,13 +41,14 @@ export function deterministicInputTokenUpperBound(
   tools: readonly unknown[] = [],
   responseFormat?: unknown,
 ): number {
-  const serializedBytes = (values: readonly unknown[]): number => values.reduce<number>((sum, value) => {
-    try {
-      return sum + Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
-    } catch {
-      return sum + Number.MAX_SAFE_INTEGER;
-    }
-  }, 0);
+  const serializedBytes = (values: readonly unknown[]): number =>
+    values.reduce<number>((sum, value) => {
+      try {
+        return sum + Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
+      } catch {
+        return sum + Number.MAX_SAFE_INTEGER;
+      }
+    }, 0);
   const bytes = serializedBytes([...messages, ...tools, ...(responseFormat === undefined ? [] : [responseFormat])]);
   const framing = messages.length * 64 + tools.length * 64 + (responseFormat === undefined ? 0 : 64);
   const bound = bytes + framing;
@@ -68,7 +69,10 @@ export interface TokenBudgetAllocation {
  * 将上下文总预算拆成可审计的固定分项。百分比只定义保留区，剩余额度归历史，
  * 因而所有分项之和始终等于 total，调用方可以直接复算超限原因。
  */
-export function allocateTokenBudget(total: number, reserves: Partial<Pick<TokenBudgetAllocation, 'system' | 'task' | 'tools' | 'memory' | 'output'>> = {}): TokenBudgetAllocation {
+export function allocateTokenBudget(
+  total: number,
+  reserves: Partial<Pick<TokenBudgetAllocation, 'system' | 'task' | 'tools' | 'memory' | 'output'>> = {},
+): TokenBudgetAllocation {
   const normalized = Math.max(0, Math.floor(Number.isFinite(total) ? total : 0));
   let remaining = normalized;
   const reserve = (key: keyof typeof reserves, ratio: number): number => {
@@ -99,10 +103,7 @@ interface PrefixMessage {
  *  前缀逐消息严格相等才可复用：role、content、tool_calls、tool_call_id 任一不同即断裂——
  *  旧实现漏比 tool_calls/tool_call_id（assistant 的函数调用与 tool 回执不同但 content 同为
  *  null 时被当作相同），统计虚高、缓存命中率失真。 */
-export function sharedPrefixTokens(
-  a: PrefixMessage[],
-  b: PrefixMessage[],
-): number {
+export function sharedPrefixTokens(a: PrefixMessage[], b: PrefixMessage[]): number {
   let tokens = 0;
   const n = Math.min(a.length, b.length);
   for (let i = 0; i < n; i++) {

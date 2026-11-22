@@ -12,23 +12,43 @@ describe('task verifier', () => {
       'risk 必须是 low/medium/high',
       'acceptance[0].type 不受支持',
     ]);
-    const result = verifyTaskContract({ objective: '', acceptance: [{ type: 'output_contains', value: '' }] }, {
-      answer: 'done', toolResults: [], sandboxRoot: process.cwd(),
-    });
+    const result = verifyTaskContract(
+      { objective: '', acceptance: [{ type: 'output_contains', value: '' }] },
+      {
+        answer: 'done',
+        toolResults: [],
+        sandboxRoot: process.cwd(),
+      },
+    );
     assert.equal(result.status, 'failed');
     assert.equal(result.verified, false);
     assert.ok(result.evidence[0]?.detail.includes('schema'));
   });
 
   test('运行时 schema 校验推断置信度，拒绝越界值', () => {
-    assert.deepEqual(validateTaskContract({ objective: 'x', acceptance: [], inference: {
-      confidence: 2, basis: 'inferred', needsConfirmation: true, rationale: 'x',
-    } }), ['inference.confidence 必须是 0 到 1 之间的数']);
+    assert.deepEqual(
+      validateTaskContract({
+        objective: 'x',
+        acceptance: [],
+        inference: {
+          confidence: 2,
+          basis: 'inferred',
+          needsConfirmation: true,
+          rationale: 'x',
+        },
+      }),
+      ['inference.confidence 必须是 0 到 1 之间的数'],
+    );
   });
   test('没有验收条件不能证明完成', () => {
-    const result = verifyTaskContract({ objective: 'finish', acceptance: [] }, {
-      answer: 'done', toolResults: [], sandboxRoot: process.cwd(),
-    });
+    const result = verifyTaskContract(
+      { objective: 'finish', acceptance: [] },
+      {
+        answer: 'done',
+        toolResults: [],
+        sandboxRoot: process.cwd(),
+      },
+    );
     assert.equal(result.verified, false);
     assert.equal(result.status, 'failed');
   });
@@ -37,58 +57,91 @@ describe('task verifier', () => {
     try {
       mkdirSync(join(root, 'out'));
       writeFileSync(join(root, 'out', 'result.txt'), '完成：42', 'utf8');
-      const result = verifyTaskContract({
-        objective: '生成结果',
-        acceptance: [
-          { type: 'output_contains', value: '完成' },
-          { type: 'output_matches', pattern: '42' },
-          { type: 'tool_succeeded', name: 'write_file' },
-          { type: 'file_exists', path: 'out/result.txt' },
-          { type: 'file_contains', path: 'out/result.txt', value: '42' },
-        ],
-      }, { answer: '完成：42', toolResults: [{ name: 'write_file', ok: true }], sandboxRoot: root });
+      const result = verifyTaskContract(
+        {
+          objective: '生成结果',
+          acceptance: [
+            { type: 'output_contains', value: '完成' },
+            { type: 'output_matches', pattern: '42' },
+            { type: 'tool_succeeded', name: 'write_file' },
+            { type: 'file_exists', path: 'out/result.txt' },
+            { type: 'file_contains', path: 'out/result.txt', value: '42' },
+          ],
+        },
+        { answer: '完成：42', toolResults: [{ name: 'write_file', ok: true }], sandboxRoot: root },
+      );
       assert.equal(result.verified, true);
       assert.equal(result.status, 'verified');
       assert.equal(result.evidence.length, 5);
       assert.ok(result.evidence.every((e) => e.detail.length > 0));
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('一部分条件满足时返回 partial 并保留每项证据', () => {
-    const result = verifyTaskContract({ objective: '部分完成', acceptance: [
-      { type: 'output_contains', value: 'ready' },
-      { type: 'tool_succeeded', name: 'publish' },
-    ] }, { answer: 'ready', toolResults: [], sandboxRoot: process.cwd() });
+    const result = verifyTaskContract(
+      {
+        objective: '部分完成',
+        acceptance: [
+          { type: 'output_contains', value: 'ready' },
+          { type: 'tool_succeeded', name: 'publish' },
+        ],
+      },
+      { answer: 'ready', toolResults: [], sandboxRoot: process.cwd() },
+    );
     assert.equal(result.status, 'partial');
     assert.equal(result.verified, false);
-    assert.deepEqual(result.checks.map((c) => c.ok), [true, false]);
+    assert.deepEqual(
+      result.checks.map((c) => c.ok),
+      [true, false],
+    );
     assert.equal(result.evidence.length, 2);
   });
 
   test('tool_evidence 必须匹配工具返回的结构化证据', () => {
     const criterion = { type: 'tool_evidence' as const, name: 'write_file', kind: 'file' as const, refContains: 'out/result.txt' };
-    const matched = verifyTaskContract({ objective: '证明写入', acceptance: [criterion] }, {
-      answer: '完成',
-      toolResults: [{ name: 'write_file', ok: true, evidence: [{ kind: 'file', label: '已写入 out/result.txt', ref: 'out/result.txt' }] }],
-      sandboxRoot: process.cwd(),
-    });
+    const matched = verifyTaskContract(
+      { objective: '证明写入', acceptance: [criterion] },
+      {
+        answer: '完成',
+        toolResults: [
+          { name: 'write_file', ok: true, evidence: [{ kind: 'file', label: '已写入 out/result.txt', ref: 'out/result.txt' }] },
+        ],
+        sandboxRoot: process.cwd(),
+      },
+    );
     assert.equal(matched.status, 'verified');
     assert.equal(matched.evidence[0]?.source, 'tool');
     assert.match(matched.evidence[0]?.detail ?? '', /out\/result\.txt/);
 
-    const missing = verifyTaskContract({ objective: '证明写入', acceptance: [criterion] }, {
-      answer: '完成', toolResults: [{ name: 'write_file', ok: true }], sandboxRoot: process.cwd(),
-    });
+    const missing = verifyTaskContract(
+      { objective: '证明写入', acceptance: [criterion] },
+      {
+        answer: '完成',
+        toolResults: [{ name: 'write_file', ok: true }],
+        sandboxRoot: process.cwd(),
+      },
+    );
     assert.equal(missing.status, 'failed');
     assert.match(missing.checks[0]?.reason ?? '', /没有匹配的证据/);
   });
 
   test('正则验证异常仍保留与检查项一一对应的证据顺序', () => {
-    const result = verifyTaskContract({ objective: 'regex error', acceptance: [
-      { type: 'output_matches', pattern: '[' },
-      { type: 'output_contains', value: 'later' },
-    ] }, { answer: 'later', toolResults: [], sandboxRoot: process.cwd() });
-    assert.deepEqual(result.checks.map((c) => c.ok), [false, true]);
+    const result = verifyTaskContract(
+      {
+        objective: 'regex error',
+        acceptance: [
+          { type: 'output_matches', pattern: '[' },
+          { type: 'output_contains', value: 'later' },
+        ],
+      },
+      { answer: 'later', toolResults: [], sandboxRoot: process.cwd() },
+    );
+    assert.deepEqual(
+      result.checks.map((c) => c.ok),
+      [false, true],
+    );
     assert.equal(result.evidence.length, result.checks.length);
     assert.equal(result.evidence[0]?.source, 'answer');
     assert.equal(result.evidence[1]?.detail, '答案包含：later');
@@ -97,11 +150,18 @@ describe('task verifier', () => {
   test('拒绝越界文件条件', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-task-'));
     try {
-      const result = verifyTaskContract({ objective: '越界', acceptance: [{ type: 'file_exists', path: '../secret' }] }, {
-        answer: '', toolResults: [], sandboxRoot: root,
-      });
+      const result = verifyTaskContract(
+        { objective: '越界', acceptance: [{ type: 'file_exists', path: '../secret' }] },
+        {
+          answer: '',
+          toolResults: [],
+          sandboxRoot: root,
+        },
+      );
       assert.equal(result.verified, false);
       assert.match(result.checks[0].reason ?? '', /越界/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

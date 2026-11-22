@@ -32,8 +32,7 @@ function isDepthError(err: unknown): boolean {
 
 /** 是否为 thenable（async 监听器的返回值）——bail 需要据此拒绝「未决 Promise 当短路结果」 */
 function isThenable(v: unknown): v is Promise<unknown> {
-  return !!v && (typeof v === 'object' || typeof v === 'function')
-    && typeof (v as { then?: unknown }).then === 'function';
+  return !!v && (typeof v === 'object' || typeof v === 'function') && typeof (v as { then?: unknown }).then === 'function';
 }
 
 /** bail 遇 async 监听器的告警去重（每种事件名只提醒一次，避免高频派发刷屏） */
@@ -41,7 +40,9 @@ const bailAsyncWarned = new Set<string>();
 function warnOnceBailAsync(type: string): void {
   if (bailAsyncWarned.has(type)) return;
   bailAsyncWarned.add(type);
-  console.warn(`[bus] bail("${type}") 的监听器返回 Promise（async 监听器无法参与同步短路）：已跳过该监听器继续派发。需要异步短路请改用 serial。`);
+  console.warn(
+    `[bus] bail("${type}") 的监听器返回 Promise（async 监听器无法参与同步短路）：已跳过该监听器继续派发。需要异步短路请改用 serial。`,
+  );
 }
 
 export class EventBus {
@@ -178,7 +179,10 @@ export class EventBus {
       const results = await Promise.allSettled(this.listenersOf(e.type).map((l) => Promise.resolve().then(() => l(e))));
       const rejected = results.filter((r): r is PromiseRejectedResult => r.status === 'rejected');
       if (rejected.length) {
-        throw new AggregateError(rejected.map((r) => r.reason), `[bus] "${e.type}" 有 ${rejected.length} 个监听器失败`);
+        throw new AggregateError(
+          rejected.map((r) => r.reason),
+          `[bus] "${e.type}" 有 ${rejected.length} 个监听器失败`,
+        );
       }
     } finally {
       this.depth--;
@@ -197,10 +201,7 @@ export class EventBus {
    *  「这一层中间件不生效」，而不应掀翻整轮对话（B7：旧实现异常会穿出 run()）。
    *  深度保护错误除外（必须上抛，见 DEPTH_ERROR）。
    */
-  async waterfall<T = unknown>(
-    type: string,
-    ...args: unknown[]
-  ): Promise<T> {
+  async waterfall<T = unknown>(type: string, ...args: unknown[]): Promise<T> {
     const finalArg = args[args.length - 1];
     if (typeof finalArg !== 'function') throw new TypeError(`[bus] waterfall("${type}") 缺少 final 回调`);
     const final = finalArg as (data: unknown) => T | Promise<T>;
@@ -294,7 +295,9 @@ export class EventBus {
   private watchSlowListener(p: Promise<unknown>, en: ListenerEntry, type: string): Promise<void> {
     let timer: NodeJS.Timeout | undefined = setTimeout(() => {
       timer = undefined;
-      console.warn(`[bus] "${type}" 的监听器（pattern="${en.pattern}"）已执行超过 ${ASYNC_LISTENER_WARN_MS / 1000}s 仍未完成（仅告警，不中断）`);
+      console.warn(
+        `[bus] "${type}" 的监听器（pattern="${en.pattern}"）已执行超过 ${ASYNC_LISTENER_WARN_MS / 1000}s 仍未完成（仅告警，不中断）`,
+      );
     }, ASYNC_LISTENER_WARN_MS);
     return p.finally(() => {
       if (timer) clearTimeout(timer);
@@ -308,10 +311,12 @@ export class EventBus {
   }
 
   /** 进入一次分发：递归深度超限抛错（打断递归链，如 config.set ↔ config.changed 死循环）。
-   *  错误附带 DEPTH_ERROR 标记——emit 识别后向上传播给调用方（不被监听器隔离吞掉）。 */  private enter(type: string): void {
+   *  错误附带 DEPTH_ERROR 标记——emit 识别后向上传播给调用方（不被监听器隔离吞掉）。 */ private enter(type: string): void {
     if (++this.depth > this.MAX_DEPTH) {
       this.depth--;
-      const err = new Error(`[bus] 事件递归深度超过 ${this.MAX_DEPTH}："${type}"（疑似监听器联动死循环，如 config.set ↔ config.changed；请检查事件监听器是否无条件 re-emit）`) as Error & Record<PropertyKey, unknown>;
+      const err = new Error(
+        `[bus] 事件递归深度超过 ${this.MAX_DEPTH}："${type}"（疑似监听器联动死循环，如 config.set ↔ config.changed；请检查事件监听器是否无条件 re-emit）`,
+      ) as Error & Record<PropertyKey, unknown>;
       err[DEPTH_ERROR] = true;
       throw err;
     }

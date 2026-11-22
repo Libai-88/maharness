@@ -53,7 +53,13 @@ class PluginPageBoundary extends Component<{ children: React.ReactNode; pluginId
   render() {
     if (this.state.error) {
       return (
-        <Alert variant="destructive" className="m-4 w-auto"><ShieldAlert /><AlertTitle>插件页面渲染失败</AlertTitle><AlertDescription>{this.props.pluginId}：{this.state.error}</AlertDescription></Alert>
+        <Alert variant="destructive" className="m-4 w-auto">
+          <ShieldAlert />
+          <AlertTitle>插件页面渲染失败</AlertTitle>
+          <AlertDescription>
+            {this.props.pluginId}：{this.state.error}
+          </AlertDescription>
+        </Alert>
       );
     }
     return this.props.children;
@@ -78,7 +84,13 @@ function PluginTabBody({ item, onSelectSession }: Props) {
   const frame = useRef<HTMLIFrameElement>(null);
   useEffect(() => {
     const navigate = (event: MessageEvent) => {
-      if (event.origin === location.origin && event.source === frame.current?.contentWindow && event.data?.type === 'maharness:open-session' && typeof event.data.sessionId === 'string') onSelectSession?.(event.data.sessionId);
+      if (
+        event.origin === location.origin &&
+        event.source === frame.current?.contentWindow &&
+        event.data?.type === 'maharness:open-session' &&
+        typeof event.data.sessionId === 'string'
+      )
+        onSelectSession?.(event.data.sessionId);
     };
     window.addEventListener('message', navigate);
     return () => window.removeEventListener('message', navigate);
@@ -94,12 +106,17 @@ function PluginTabBody({ item, onSelectSession }: Props) {
     let alive = true;
     setPanel(null);
     setPanelError(null);
-    navApi.panel(item.url)
-      .then((p) => { if (alive) setPanel(p); })
+    navApi
+      .panel(item.url)
+      .then((p) => {
+        if (alive) setPanel(p);
+      })
       .catch((err: unknown) => {
         if (alive) setPanelError(err instanceof Error ? err.message : String(err));
       });
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [item.mode, item.url, reloadKey]);
 
   // ---- 页头状态轮询（插件声明才启用） ----
@@ -109,7 +126,7 @@ function PluginTabBody({ item, onSelectSession }: Props) {
       const t = getMutationToken();
       const res = await fetch(item.statusUrl, { headers: t ? { 'x-maharness-token': t } : {} });
       if (!res.ok) throw new Error(String(res.status));
-      setStatus(await res.json() as StatusPayload);
+      setStatus((await res.json()) as StatusPayload);
     } catch {
       setStatus(null); // 端点不可用（插件停机中）：不展示状态，不报错打断页面
     }
@@ -126,33 +143,40 @@ function PluginTabBody({ item, onSelectSession }: Props) {
   const src = item.mode === 'iframe' ? `${item.url}${item.url.includes('?') ? '&' : '?'}_t=${reloadKey}` : '';
 
   return (
-    <div
-      className="flex min-h-0 min-w-0 flex-1 flex-col"
-      data-plugin-id={item.pluginId}
-      data-plugin-mode={item.mode}
-    >
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col" data-plugin-id={item.pluginId} data-plugin-mode={item.mode}>
       <div className="flex flex-wrap items-center gap-3 border-b px-4 py-2">
-        <Badge variant="outline" data-trust={item.mode} title={trust.title}>{trust.text}</Badge>
+        <Badge variant="outline" data-trust={item.mode} title={trust.title}>
+          {trust.text}
+        </Badge>
         <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2 text-sm">
           {item.statusUrl && (
             <>
               <Badge variant={status?.connected ? 'secondary' : 'outline'}>{status?.text ?? item.pluginName}</Badge>
-              {status?.detail && <span className="truncate text-xs text-muted-foreground" title={status.detail}>{status.detail}</span>}
+              {status?.detail && (
+                <span className="truncate text-xs text-muted-foreground" title={status.detail}>
+                  {status.detail}
+                </span>
+              )}
             </>
           )}
           {!item.statusUrl && <span>{item.pluginName}</span>}
         </div>
         <div className="ml-auto flex gap-2">
           {item.url && (
-            <Button variant="outline" size="sm"
+            <Button
+              variant="outline"
+              size="sm"
               onClick={() => window.open(item.url, '_blank', 'noopener,noreferrer')}
               title="在独立窗口打开"
             >
-              <ExternalLink data-icon="inline-start" />独立窗口
+              <ExternalLink data-icon="inline-start" />
+              独立窗口
             </Button>
           )}
           {item.mode === 'iframe' && (
-            <Button variant="ghost" size="icon-sm" onClick={() => setReloadKey((k) => k + 1)} aria-label="刷新插件页面"><RefreshCw /></Button>
+            <Button variant="ghost" size="icon-sm" onClick={() => setReloadKey((k) => k + 1)} aria-label="刷新插件页面">
+              <RefreshCw />
+            </Button>
           )}
         </div>
       </div>
@@ -169,14 +193,30 @@ function PluginTabBody({ item, onSelectSession }: Props) {
           sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-downloads"
         />
       ) : panelError ? (
-        <Alert variant="destructive" className="m-4 w-auto"><ShieldAlert /><AlertTitle>插件面板加载失败</AlertTitle><AlertDescription>{panelError}</AlertDescription></Alert>
+        <Alert variant="destructive" className="m-4 w-auto">
+          <ShieldAlert />
+          <AlertTitle>插件面板加载失败</AlertTitle>
+          <AlertDescription>{panelError}</AlertDescription>
+        </Alert>
       ) : !panel ? (
         <div className="flex min-h-32 flex-1 items-center justify-center gap-2 p-6 text-sm text-muted-foreground" aria-busy="true">
           <Spinner />
           <span>加载插件页面…</span>
         </div>
       ) : (
-        <ScrollArea className="min-h-0 flex-1"><div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 p-4 md:p-6"><Card><CardHeader><CardTitle>{panel.title}</CardTitle></CardHeader><CardContent><div className="min-w-0 wrap-break-word" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} /></CardContent></Card></div></ScrollArea>
+        <ScrollArea className="min-h-0 flex-1">
+          <div className="mx-auto flex w-full max-w-[1200px] flex-col gap-6 p-4 md:p-6">
+            <Card>
+              <CardHeader>
+                <CardTitle>{panel.title}</CardTitle>
+              </CardHeader>
+              <CardContent>
+                {/* biome-ignore lint/security/noDangerouslySetInnerHtml: 面板 HTML 先经 DOMPurify 消毒 */}
+                <div className="min-w-0 wrap-break-word" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(panel.html) }} />
+              </CardContent>
+            </Card>
+          </div>
+        </ScrollArea>
       )}
     </div>
   );

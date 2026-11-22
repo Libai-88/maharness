@@ -5,7 +5,7 @@
  * kernel/、core/chat/ 写拒；AGENT_ALLOW_CORE_EDIT=1 放行。
  */
 import type { Express } from 'express';
-import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
+import { statSync, readdirSync, existsSync, writeFileSync, mkdirSync, type Dirent } from 'node:fs';
 import { resolve, relative, join } from 'node:path';
 import { resolveInSandbox, readTextSmart, isProtectedWritePath, isDeniedReadPath } from '../../kernel/sandbox';
 import { openInExplorer, tenantIdOf, type RouteDeps } from './shared';
@@ -48,15 +48,17 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
       const sandbox = sandboxOf(req);
       const dir = resolveInSandbox(sandbox, String(req.query.path ?? '.'));
       if (!existsSync(dir)) return res.status(404).json({ error: '目录不存在' });
-      const entries = readdirSync(dir, { withFileTypes: true }).map((e) => {
-        const full = resolve(dir, e.name);
-        try {
-          const s = statSync(full);
-          return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
-        } catch {
-          return { name: e.name, type: e.isDirectory() ? 'dir' : 'file' };
-        }
-      }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+      const entries = readdirSync(dir, { withFileTypes: true })
+        .map((e) => {
+          const full = resolve(dir, e.name);
+          try {
+            const s = statSync(full);
+            return { name: e.name, type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
+          } catch {
+            return { name: e.name, type: e.isDirectory() ? 'dir' : 'file' };
+          }
+        })
+        .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
       res.json({ path: relative(sandbox, dir) || '.', entries });
     } catch (err) {
       res.status(400).json({ error: err instanceof Error ? err.message : String(err) });
@@ -90,7 +92,9 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
       // C-S4/H10：与 Agent 工具同一写边界（kernel/、core/chat/ 核心代码写拒；
       // AGENT_ALLOW_CORE_EDIT=1 放行——由 tools-fs 契约函数统一判定）
       if (isProtectedWritePath(file, sandbox)) {
-        return res.status(403).json({ error: '拒绝写入受保护路径（kernel/ 与 core/chat/ 核心代码；如确需修改请设置 AGENT_ALLOW_CORE_EDIT=1）' });
+        return res
+          .status(403)
+          .json({ error: '拒绝写入受保护路径（kernel/ 与 core/chat/ 核心代码；如确需修改请设置 AGENT_ALLOW_CORE_EDIT=1）' });
       }
       const tenantId = tenantIdOf(req);
       const contentText = String(content);
@@ -115,15 +119,21 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
   // 文件搜索：递归匹配文件名/相对路径（跳过 node_modules/.git/dist，上限 200 条）
   app.get('/api/files/search', (req, res) => {
     try {
-      const q = String(req.query.q ?? '').trim().toLowerCase();
+      const q = String(req.query.q ?? '')
+        .trim()
+        .toLowerCase();
       if (!q) return res.json({ query: '', results: [] });
       const sandbox = sandboxOf(req);
       const skip = new Set(['node_modules', '.git', 'dist', '.dsh', 'data']);
       const results: { path: string; size: number }[] = [];
       const walk = (dir: string, rel: string): void => {
         if (results.length >= 200) return;
-        let entries;
-        try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+        let entries: Dirent[];
+        try {
+          entries = readdirSync(dir, { withFileTypes: true });
+        } catch {
+          return;
+        }
         for (const e of entries) {
           if (results.length >= 200) return;
           if (skip.has(e.name)) continue;
@@ -132,7 +142,11 @@ export function registerFileRoutes(app: Express, deps: RouteDeps): void {
           if (e.isDirectory()) walk(child, childRel);
           else if (e.name.toLowerCase().includes(q)) {
             let size = 0;
-            try { size = statSync(child).size; } catch { /* 忽略 */ }
+            try {
+              size = statSync(child).size;
+            } catch {
+              /* 忽略 */
+            }
             results.push({ path: childRel, size });
           }
         }

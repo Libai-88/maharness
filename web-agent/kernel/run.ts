@@ -3,17 +3,44 @@ import type { AgentEvent, RunOptions } from './loop';
 
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
 export type PermissionProfile = 'standard' | 'developer';
-export interface RunAuthorization { workspace: string; profile: PermissionProfile; readOnly: boolean; revision: number; frameworkChangeId?: string; pluginDevelopment?: import('./task-plugins').PluginDevelopmentGrant; artifactWritePaths?: string[]; }
+export interface RunAuthorization {
+  workspace: string;
+  profile: PermissionProfile;
+  readOnly: boolean;
+  revision: number;
+  frameworkChangeId?: string;
+  pluginDevelopment?: import('./task-plugins').PluginDevelopmentGrant;
+  artifactWritePaths?: string[];
+}
 export interface RunRecord {
   reworkOfRunId?: string;
   materials?: import('./material').Material[];
-  id: string; sessionId: string; tenantId: string; parentId?: string; rootId: string; depth: number;
-  objective: string; providerId: string; model: string; status: RunStatus; authorization: RunAuthorization;
-  createdAt: number; updatedAt: number; cost: number; tokensIn: number; tokensOut: number;
-  tokensCached?: number; tokensCacheMiss?: number; cacheWriteTokens?: number;
+  id: string;
+  sessionId: string;
+  tenantId: string;
+  parentId?: string;
+  rootId: string;
+  depth: number;
+  objective: string;
+  providerId: string;
+  model: string;
+  status: RunStatus;
+  authorization: RunAuthorization;
+  createdAt: number;
+  updatedAt: number;
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  tokensCached?: number;
+  tokensCacheMiss?: number;
+  cacheWriteTokens?: number;
   /** Absolute model-token ceiling for this run, including descendants. */
   budgetTokens?: number;
-  answer?: string; error?: string; verification?: unknown; budgetUsd?: number; deadlineAt?: number;
+  answer?: string;
+  error?: string;
+  verification?: unknown;
+  budgetUsd?: number;
+  deadlineAt?: number;
   problem?: { code: string; stage: string; hint: string };
   parentStepId?: string;
   principalRole?: 'admin' | 'member' | 'readonly';
@@ -40,9 +67,28 @@ export interface RunRecord {
   cachePrefixHash?: string;
   fallbackReason?: string;
 }
-export interface RunEvent { runId: string; seq: number; type: string; data: Record<string, unknown>; createdAt: number; }
-export interface RunCheckpoint { history: LLMMessage[]; turn: number; costUsd: number; toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: import('./types').CapabilityConflict[]; pending?: boolean; pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string }; }
-export interface ManagedExecution { runChild(options: RunOptions, parentId: string): AsyncGenerator<AgentEvent>; }
+export interface RunEvent {
+  runId: string;
+  seq: number;
+  type: string;
+  data: Record<string, unknown>;
+  createdAt: number;
+}
+export interface RunCheckpoint {
+  history: LLMMessage[];
+  turn: number;
+  costUsd: number;
+  toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[];
+  enabledTools?: string[];
+  releasedTools?: string[];
+  selectedCapabilities?: string[];
+  capabilityConflicts?: import('./types').CapabilityConflict[];
+  pending?: boolean;
+  pendingTool?: { name: string; toolCallId: string; sideEffect?: string; effectKey?: string; resultId?: string };
+}
+export interface ManagedExecution {
+  runChild(options: RunOptions, parentId: string): AsyncGenerator<AgentEvent>;
+}
 export interface ChildRunRequest {
   parentStepId?: string;
   objective: string;
@@ -83,6 +129,15 @@ export interface ChildRunResult {
   cancelled: boolean;
   fallback?: ChildRunFallback;
 }
-export interface ToolFailure { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown'; }
-export interface PersistedToolCall { id: string; runId: string; name: string; result?: ToolResult; }
+export interface ToolFailure {
+  code: string;
+  retryable: boolean;
+  outcome: 'not_started' | 'applied' | 'unknown';
+}
+export interface PersistedToolCall {
+  id: string;
+  runId: string;
+  name: string;
+  result?: ToolResult;
+}
 export const RUN_TERMINAL = new Set<RunStatus>(['completed', 'failed', 'cancelled', 'interrupted']);

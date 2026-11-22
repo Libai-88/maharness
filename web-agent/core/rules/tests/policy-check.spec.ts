@@ -11,22 +11,30 @@ describe('check_policy', () => {
     try {
       const data = join(root, 'data');
       mkdirSync(data, { recursive: true });
-      writeFileSync(join(data, 'rules.json'), JSON.stringify([
-        { id: 'allow-docs', effect: 'allow', tool: 'read_file', pathPattern: 'docs/**' },
-        { id: 'deny-kill', effect: 'deny', tool: 'powershell_execute', argPattern: 'taskkill' },
-        { id: 'require-review', effect: 'require-approval', tool: 'write_file' },
-      ]), 'utf8');
+      writeFileSync(
+        join(data, 'rules.json'),
+        JSON.stringify([
+          { id: 'allow-docs', effect: 'allow', tool: 'read_file', pathPattern: 'docs/**' },
+          { id: 'deny-kill', effect: 'deny', tool: 'powershell_execute', argPattern: 'taskkill' },
+          { id: 'require-review', effect: 'require-approval', tool: 'write_file' },
+        ]),
+        'utf8',
+      );
       const tools = new Map<string, any>();
       let beforeTool: ((event: { data: any }) => void) | undefined;
       const ctx = {
         config: {
-          get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root
-            : key === 'rules.enabled' ? true
-              : key === 'rules.policyEnabled' ? true : fallback,
+          get: (key: string, fallback: unknown) =>
+            key === 'sandboxRoot' ? root : key === 'rules.enabled' ? true : key === 'rules.policyEnabled' ? true : fallback,
         },
         paths: { data, root },
-        register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); return () => undefined; },
-        watchConfig() { return () => undefined; },
+        register(value: any) {
+          if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
+          return () => undefined;
+        },
+        watchConfig() {
+          return () => undefined;
+        },
         on(event: string, listener: (event: { data: any }) => void) {
           if (event === 'agent.before_tool') beforeTool = listener;
           return () => undefined;
@@ -60,6 +68,8 @@ describe('check_policy', () => {
       beforeTool!({ data: forced });
       assert.equal((forced as any).forceApproval, true);
       assert.match((forced as any).forceApprovalReason, /require-review/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

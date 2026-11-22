@@ -55,20 +55,26 @@ export function validateEvalCase(value: unknown, source = '<case>'): EvalCase {
     for (const [ci, chunk] of request.chunks.entries()) {
       const at = `${source}: requests[${ri}].chunks[${ci}]`;
       if (!CHUNK_TYPES.has(chunk.type)) throw new Error(`${at}: 未知 chunk type ${chunk.type}`);
-      if (['delta', 'reasoning'].includes(chunk.type) && typeof chunk.text !== 'string') throw new Error(`${at}: ${chunk.type} 必须提供 text`);
+      if (['delta', 'reasoning'].includes(chunk.type) && typeof chunk.text !== 'string')
+        throw new Error(`${at}: ${chunk.type} 必须提供 text`);
       if (chunk.type === 'usage' && (!isNonNegativeNumber(chunk.input) || !isNonNegativeNumber(chunk.output))) {
         throw new Error(`${at}: usage 必须提供非负 input/output`);
       }
-      if (chunk.type === 'throw' && chunk.message !== undefined && typeof chunk.message !== 'string') throw new Error(`${at}: throw.message 必须是字符串`);
-      if (chunk.type === 'throw' && chunk.status !== undefined && !isNonNegativeNumber(chunk.status)) throw new Error(`${at}: throw.status 必须是非负数`);
-      if (chunk.type === 'throw' && chunk.name !== undefined && typeof chunk.name !== 'string') throw new Error(`${at}: throw.name 必须是字符串`);
+      if (chunk.type === 'throw' && chunk.message !== undefined && typeof chunk.message !== 'string')
+        throw new Error(`${at}: throw.message 必须是字符串`);
+      if (chunk.type === 'throw' && chunk.status !== undefined && !isNonNegativeNumber(chunk.status))
+        throw new Error(`${at}: throw.status 必须是非负数`);
+      if (chunk.type === 'throw' && chunk.name !== undefined && typeof chunk.name !== 'string')
+        throw new Error(`${at}: throw.name 必须是字符串`);
       if (chunk.type === 'tool_call' && !isToolCallChunk(chunk)) throw new Error(`${at}: tool_call 结构无效`);
       if (chunk.type === 'tool_call' && isToolCallChunk(chunk)) {
-        const args = ((chunk.toolCall as { function: { arguments: string } }).function.arguments);
+        const args = (chunk.toolCall as { function: { arguments: string } }).function.arguments;
         try {
           const parsed = JSON.parse(args) as unknown;
           if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error();
-        } catch { throw new Error(`${at}: tool_call arguments 必须是 JSON 对象`); }
+        } catch {
+          throw new Error(`${at}: tool_call arguments 必须是 JSON 对象`);
+        }
       }
     }
   }
@@ -76,16 +82,24 @@ export function validateEvalCase(value: unknown, source = '<case>'): EvalCase {
     throw new Error(`${source}: sandbox.files 的值必须是字符串`);
   }
   if (c.task && !isTaskContract(c.task)) throw new Error(`${source}: task contract 无效`);
-  if (c.recovery && (!c.task?.acceptance.some((item) => item.type === 'tool_succeeded' && item.name === c.recovery?.toolName))) {
+  if (c.recovery && !c.task?.acceptance.some((item) => item.type === 'tool_succeeded' && item.name === c.recovery?.toolName)) {
     throw new Error(`${source}: recovery 必须通过 task.tool_succeeded 验收恢复工具`);
   }
   if (c.recovery && c.expect.recoveryToolCalls === undefined) throw new Error(`${source}: recovery 必须断言 expect.recoveryToolCalls`);
-  if (c.securityAttack?.category === 'plugin_capability_escalation'
-    && (!c.securityAttack.allowedName.trim() || !c.securityAttack.attemptedName.trim() || c.securityAttack.allowedName === c.securityAttack.attemptedName)) {
+  if (
+    c.securityAttack?.category === 'plugin_capability_escalation' &&
+    (!c.securityAttack.allowedName.trim() ||
+      !c.securityAttack.attemptedName.trim() ||
+      c.securityAttack.allowedName === c.securityAttack.attemptedName)
+  ) {
     throw new Error(`${source}: securityAttack capability 配置无效`);
   }
-  if (c.securityAttack && c.securityAttack.category !== 'plugin_capability_escalation'
-    && (!c.securityAttack.payload.trim() || (c.securityAttack.category !== 'user_prompt_injection' && c.securityAttack.sourceTool === c.securityAttack.protectedTool))) {
+  if (
+    c.securityAttack &&
+    c.securityAttack.category !== 'plugin_capability_escalation' &&
+    (!c.securityAttack.payload.trim() ||
+      (c.securityAttack.category !== 'user_prompt_injection' && c.securityAttack.sourceTool === c.securityAttack.protectedTool))
+  ) {
     throw new Error(`${source}: securityAttack payload 或工具配置无效`);
   }
   if (c.securityAttack?.category === 'plugin_capability_escalation') {
@@ -112,11 +126,15 @@ function isToolCallChunk(chunk: Record<string, unknown>): boolean {
   const call = chunk.toolCall;
   if (!call || typeof call !== 'object' || Array.isArray(call)) return false;
   const fn = (call as Record<string, unknown>).function;
-  return typeof (call as Record<string, unknown>).id === 'string'
-    && (call as Record<string, unknown>).type === 'function'
-    && !!fn && typeof fn === 'object' && !Array.isArray(fn)
-    && typeof (fn as Record<string, unknown>).name === 'string'
-    && typeof (fn as Record<string, unknown>).arguments === 'string';
+  return (
+    typeof (call as Record<string, unknown>).id === 'string' &&
+    (call as Record<string, unknown>).type === 'function' &&
+    !!fn &&
+    typeof fn === 'object' &&
+    !Array.isArray(fn) &&
+    typeof (fn as Record<string, unknown>).name === 'string' &&
+    typeof (fn as Record<string, unknown>).arguments === 'string'
+  );
 }
 
 function isTaskContract(task: TaskContract): boolean {
@@ -126,14 +144,22 @@ function isTaskContract(task: TaskContract): boolean {
     if (criterion.type === 'output_contains') return typeof criterion.value === 'string' && criterion.value.length > 0;
     if (criterion.type === 'output_matches') {
       if (typeof criterion.pattern !== 'string' || (criterion.flags !== undefined && typeof criterion.flags !== 'string')) return false;
-      try { new RegExp(criterion.pattern, criterion.flags); return true; } catch { return false; }
+      try {
+        new RegExp(criterion.pattern, criterion.flags);
+        return true;
+      } catch {
+        return false;
+      }
     }
     if (criterion.type === 'tool_succeeded') return typeof criterion.name === 'string' && criterion.name.length > 0;
     if (criterion.type === 'tool_evidence') {
-      return typeof criterion.name === 'string' && criterion.name.length > 0
-        && (criterion.kind === undefined || ['file', 'url', 'command', 'state', 'content', 'custom'].includes(criterion.kind))
-        && (criterion.labelContains === undefined || typeof criterion.labelContains === 'string')
-        && (criterion.refContains === undefined || typeof criterion.refContains === 'string');
+      return (
+        typeof criterion.name === 'string' &&
+        criterion.name.length > 0 &&
+        (criterion.kind === undefined || ['file', 'url', 'command', 'state', 'content', 'custom'].includes(criterion.kind)) &&
+        (criterion.labelContains === undefined || typeof criterion.labelContains === 'string') &&
+        (criterion.refContains === undefined || typeof criterion.refContains === 'string')
+      );
     }
     if (criterion.type === 'file_exists') return typeof criterion.path === 'string' && criterion.path.length > 0;
     return typeof criterion.path === 'string' && criterion.path.length > 0 && typeof criterion.value === 'string';

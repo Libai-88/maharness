@@ -3,9 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  assertStorageQuota, measureStorage, TenantStorageQuotaError,
-} from '../tenant-workspace';
+import { assertStorageQuota, measureStorage, TenantStorageQuotaError } from '../tenant-workspace';
 
 describe('租户存储用量与配额', () => {
   test('统计目录字节与文件数，并支持排除子树', () => {
@@ -23,7 +21,9 @@ describe('租户存储用量与配额', () => {
       assert.equal(excluded.files, 2);
       assert.equal(excluded.bytes, 8);
       assert.equal(excluded.complete, true);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('0 表示不限额；超限抛出 413 语义错误', () => {
@@ -31,9 +31,7 @@ describe('租户存储用量与配额', () => {
     assert.doesNotThrow(() => assertStorageQuota({ usedBytes: 10, limitBytes: 20, additionalBytes: 10 }));
     assert.throws(
       () => assertStorageQuota({ usedBytes: 10, limitBytes: 20, additionalBytes: 11 }),
-      (error: unknown) => error instanceof TenantStorageQuotaError
-        && error.status === 413
-        && error.code === 'TENANT_STORAGE_QUOTA',
+      (error: unknown) => error instanceof TenantStorageQuotaError && error.status === 413 && error.code === 'TENANT_STORAGE_QUOTA',
     );
   });
 });

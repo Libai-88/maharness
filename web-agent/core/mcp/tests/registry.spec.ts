@@ -38,14 +38,20 @@ describe('MCP registry 发现与安装候选', () => {
     assert.equal(remote.transport, 'http');
     assert.equal(remote.cfg.url, 'https://mcp.example.com/mcp');
 
-    assert.equal(registryInstallCandidate({
-      name: 'bad-npm',
-      packages: [{ registryType: 'npm', identifier: '../../evil' }],
-    }), null);
-    assert.equal(registryInstallCandidate({
-      name: 'bad-remote',
-      remotes: [{ type: 'streamable-http', url: 'http://mcp.example.com/mcp' }],
-    }), null);
+    assert.equal(
+      registryInstallCandidate({
+        name: 'bad-npm',
+        packages: [{ registryType: 'npm', identifier: '../../evil' }],
+      }),
+      null,
+    );
+    assert.equal(
+      registryInstallCandidate({
+        name: 'bad-remote',
+        remotes: [{ type: 'streamable-http', url: 'http://mcp.example.com/mcp' }],
+      }),
+      null,
+    );
   });
 
   test('registry 搜索带 search/limit 并解析返回列表', async (t) => {

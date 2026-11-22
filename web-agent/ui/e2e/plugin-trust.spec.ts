@@ -17,17 +17,53 @@ const NAV_ITEM = {
 };
 
 async function mockShell(page: Page) {
-  await page.route('**/api/sessions', (route) => route.fulfill({ json: [{
-    id: 'e2e-session', title: '信任等级测试', model: 'e2e-model', provider: 'e2e-provider',
-    mode: 'normal', planPending: 0, archived: 0, pinned: 0, createdAt: 0, updatedAt: 0,
-  }] }));
-  await page.route('**/api/models', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider@e2e-model', provider: 'e2e-provider', label: 'E2E Model', model: 'e2e-model',
-  }] }));
-  await page.route('**/api/providers', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider', label: 'E2E Provider', baseUrl: 'http://e2e.local', model: 'e2e-model',
-    enabled: true, apiKeyMasked: 'sk-***', hasKey: true, createdAt: 0, updatedAt: 0,
-  }] }));
+  await page.route('**/api/sessions', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-session',
+          title: '信任等级测试',
+          model: 'e2e-model',
+          provider: 'e2e-provider',
+          mode: 'normal',
+          planPending: 0,
+          archived: 0,
+          pinned: 0,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/models', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider@e2e-model',
+          provider: 'e2e-provider',
+          label: 'E2E Model',
+          model: 'e2e-model',
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/providers', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider',
+          label: 'E2E Provider',
+          baseUrl: 'http://e2e.local',
+          model: 'e2e-model',
+          enabled: true,
+          apiKeyMasked: 'sk-***',
+          hasKey: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }),
+  );
   await page.route('**/api/nav', (route) => route.fulfill({ json: { items: [NAV_ITEM] } }));
 }
 
@@ -55,12 +91,28 @@ test('iframe 插件页头明示沙箱信任等级，iframe 带 sandbox 属性', 
 
 test('panel 插件页头明示净化片段信任等级', async ({ page }) => {
   await mockShell(page);
-  await page.route('**/api/nav', (route) => route.fulfill({
-    json: { items: [{ ...NAV_ITEM, key: 'plugin:demo-panel', pluginId: 'demo-panel', pluginName: 'Demo Panel', label: '面板', mode: 'panel', url: '/api/plugins/demo-panel/panel' }] },
-  }));
-  await page.route('**/api/plugins/demo-panel/panel', (route) => route.fulfill({
-    json: { title: '演示面板', html: '<p>面板内容</p>' },
-  }));
+  await page.route('**/api/nav', (route) =>
+    route.fulfill({
+      json: {
+        items: [
+          {
+            ...NAV_ITEM,
+            key: 'plugin:demo-panel',
+            pluginId: 'demo-panel',
+            pluginName: 'Demo Panel',
+            label: '面板',
+            mode: 'panel',
+            url: '/api/plugins/demo-panel/panel',
+          },
+        ],
+      },
+    }),
+  );
+  await page.route('**/api/plugins/demo-panel/panel', (route) =>
+    route.fulfill({
+      json: { title: '演示面板', html: '<p>面板内容</p>' },
+    }),
+  );
   await page.goto('/');
   await openPluginPage(page, 'Demo Panel · 面板');
   const trust = page.locator('[data-trust]');

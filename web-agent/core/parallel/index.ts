@@ -13,9 +13,20 @@ import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/plu
 
 /** 只读白名单：并行子代理默认只能侦查世界，不能改变世界（与 subagent 一致） */
 const READ_ONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
-  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
-  'plugin_status', 'mcp_status', 'todo_list',
+  'list_dir',
+  'read_file',
+  'glob',
+  'grep',
+  'web_search',
+  'web_fetch',
+  'list_skills',
+  'get_skill',
+  'get_skill_file',
+  'recall_facts',
+  'list_memory_blocks',
+  'plugin_status',
+  'mcp_status',
+  'todo_list',
 ]);
 /** 委派类工具永远不交给并行子代理，避免 tools:"all" 打开递归委派。 */
 const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review']);
@@ -88,7 +99,16 @@ export function normalizeParallelTasks(input: ParallelTaskSpec[]): { tasks?: Nor
     const dependsOn = Array.isArray(task.dependsOn)
       ? [...new Set(task.dependsOn.map((dependency) => String(dependency).trim()).filter(Boolean))]
       : [];
-    tasks.push({ id, objective, ...(task.contractId ? { contractId: task.contractId } : {}), plugins: task.plugins, tools: task.tools, dependsOn, publish: task.publish !== false, index });
+    tasks.push({
+      id,
+      objective,
+      ...(task.contractId ? { contractId: task.contractId } : {}),
+      plugins: task.plugins,
+      tools: task.tools,
+      dependsOn,
+      publish: task.publish !== false,
+      index,
+    });
   }
   for (const task of tasks) {
     for (const dependency of task.dependsOn) {
@@ -124,7 +144,9 @@ export function composeDependencyContext(
   for (const dependency of task.dependsOn) {
     const result = results.get(dependency);
     if (!result?.ok) continue;
-    const answer = String(result.answer ?? '').trim().slice(0, 3_000);
+    const answer = String(result.answer ?? '')
+      .trim()
+      .slice(0, 3_000);
     if (!answer) continue;
     sections.push(`### ${dependency}\n目标：${result.objective}\n结论：${answer}`);
   }
@@ -179,10 +201,16 @@ export default {
   onLoad(ctx) {
     // 反应性共效应（coeffect）：声明依赖 chat 服务——提供者激活/停用/换主时自动更新引用。
     // 依赖不可用 → 优雅降级（返回明确错误而非悬空引用）；提供者恢复 → 自动可用，无需重启。
-    let chatSvc: {
-      providers: ProviderDef[];
-      routeForTask?: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) => { provider: ProviderDef; model: string } | undefined;
-    } | undefined;
+    let chatSvc:
+      | {
+          providers: ProviderDef[];
+          routeForTask?: (
+            taskText: string,
+            routing: Record<string, string>,
+            providers: ProviderDef[],
+          ) => { provider: ProviderDef; model: string } | undefined;
+        }
+      | undefined;
     const chatDep = ctx.inject('service:chat', (v) => {
       chatSvc = v as { providers: ProviderDef[] } | undefined;
     });
@@ -190,14 +218,19 @@ export default {
     ctx.inject('service:rules', (v) => {
       rulesText = (v as { promptBlock?: () => string } | undefined)?.promptBlock?.() ?? '';
     });
-    const withUserRules = (base: string): string =>
-      rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base;
+    const withUserRules = (base: string): string => (rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base);
     chatSvc = chatDep.value as typeof chatSvc;
 
     // ---- 并行进度事件（前端实时观测：并行任务开始/结束） ----
     // 带上 sessionId 与总数：前端据此把进度挂到正确的会话/正确的那张"小队"气泡上，
     // 并显示 2/4 这样的分母（没有分母的进度条等于没有进度）。
-    const emit = (phase: 'start' | 'done' | 'fail', taskId: string, objective: string, detail?: unknown, extra?: { sessionId?: string; total?: number; index?: number }) => {
+    const emit = (
+      phase: 'start' | 'done' | 'fail',
+      taskId: string,
+      objective: string,
+      detail?: unknown,
+      extra?: { sessionId?: string; total?: number; index?: number },
+    ) => {
       ctx.bus.emit({ type: 'parallel.progress', data: { phase, taskId, objective, detail, ...(extra ?? {}) }, ts: Date.now() });
     };
 
@@ -205,24 +238,32 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network","delegate"],
+        permissions: ['network', 'delegate'],
         name: 'run_parallel',
         delegates: true,
         risk: 'low',
         costHint: 'high',
         sideEffect: 'external',
         limits: `一次最多 ${MAX_PARALLEL} 个并行子任务；成本 ≈ 多次 LLM 调用`,
-        output: '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?, cancelled?}], completed, failed, cancelled, status}',
+        output:
+          '{results: [{taskId, objective, ok, answer, toolCalls, tokensIn, tokensOut, cost, traceId, error?, cancelled?}], completed, failed, cancelled, status}',
         outputSchema: {
-          type: 'object', required: ['results', 'completed', 'failed', 'cancelled', 'status'],
+          type: 'object',
+          required: ['results', 'completed', 'failed', 'cancelled', 'status'],
           properties: {
-            results: { type: 'array' }, completed: { type: 'integer' }, failed: { type: 'integer' },
-            cancelled: { type: 'integer' }, status: { type: 'string' }, summary: { type: 'string' },
-            batchId: { type: 'string' }, blackboardPrefix: { type: 'string' },
+            results: { type: 'array' },
+            completed: { type: 'integer' },
+            failed: { type: 'integer' },
+            cancelled: { type: 'integer' },
+            status: { type: 'string' },
+            summary: { type: 'string' },
+            batchId: { type: 'string' },
+            blackboardPrefix: { type: 'string' },
           },
         },
         timeoutMs: 240_000, // 并行子代理内部多轮，独立超时 4 分钟
-        description: '将任务拆分为多个子任务，按依赖关系分批并发委派子代理执行（互不污染上下文，独立产出后统一汇总）。' +
+        description:
+          '将任务拆分为多个子任务，按依赖关系分批并发委派子代理执行（互不污染上下文，独立产出后统一汇总）。' +
           '无 dependsOn 的任务同批并行；有 dependsOn 的任务等待上游完成后启动，并只接收上游的结构化结论。' +
           '用于：多个独立子问题、分阶段研究/分析、多个视角并行产出再交叉审查。结果按委派顺序返回，失败项带 error 不阻塞无关分支。',
         parameters: {
@@ -262,29 +303,55 @@ export default {
             const byId = new Map<string, ParallelTaskResult>();
             const shares = splitBudget(tctx.remainingBudget, tasks.length);
             for (const wave of waves) {
-              const results = await Promise.all(wave.map(async id => {
-                const task = tasks.find(candidate => candidate.id === id)!;
-                if (task.dependsOn.some(dependency => !byId.get(dependency)?.ok)) return { taskId: id, objective: task.objective, ok: false, error: '依赖任务未成功', cost: 0 };
-                try {
-                  const result = await tctx.delegate!({
-                    objective: composeDependencyContext(task, byId),
-                    tools: task.tools === 'all' ? 'all' : 'read',
-                    instructions: PARALLEL_SYSTEM_PROMPT,
-                    maxTurns: 12,
-                    budgetUsd: shares[task.index],
-                    plugins: task.plugins,
-                    ...(task.contractId ? { assignmentContractId: task.contractId } : {}),
-                  }, tctx.signal);
-                  return { ...result, taskId: id, objective: task.objective, ok: !result.error };
-                } catch (error) { return { taskId: id, objective: task.objective, ok: false, error: error instanceof Error ? error.message : String(error), cost: 0 }; }
-              }));
-              results.forEach(result => byId.set(result.taskId, result));
+              const results = await Promise.all(
+                wave.map(async (id) => {
+                  const task = tasks.find((candidate) => candidate.id === id)!;
+                  if (task.dependsOn.some((dependency) => !byId.get(dependency)?.ok))
+                    return { taskId: id, objective: task.objective, ok: false, error: '依赖任务未成功', cost: 0 };
+                  try {
+                    const result = await tctx.delegate!(
+                      {
+                        objective: composeDependencyContext(task, byId),
+                        tools: task.tools === 'all' ? 'all' : 'read',
+                        instructions: PARALLEL_SYSTEM_PROMPT,
+                        maxTurns: 12,
+                        budgetUsd: shares[task.index],
+                        plugins: task.plugins,
+                        ...(task.contractId ? { assignmentContractId: task.contractId } : {}),
+                      },
+                      tctx.signal,
+                    );
+                    return { ...result, taskId: id, objective: task.objective, ok: !result.error };
+                  } catch (error) {
+                    return {
+                      taskId: id,
+                      objective: task.objective,
+                      ok: false,
+                      error: error instanceof Error ? error.message : String(error),
+                      cost: 0,
+                    };
+                  }
+                }),
+              );
+              results.forEach((result) => {
+                byId.set(result.taskId, result);
+              });
             }
-            const aggregate = aggregateParallelResults(tasks.map(task => byId.get(task.id)!));
+            const aggregate = aggregateParallelResults(tasks.map((task) => byId.get(task.id)!));
             const ok = parallelToolSucceeded(aggregate);
-            return { ok, data: aggregate, ...(!ok ? { failure: {
-              code: 'DELEGATION_INCOMPLETE', retryable: false, outcome: 'applied' as const,
-            } } : {}) };
+            return {
+              ok,
+              data: aggregate,
+              ...(!ok
+                ? {
+                    failure: {
+                      code: 'DELEGATION_INCOMPLETE',
+                      retryable: false,
+                      outcome: 'applied' as const,
+                    },
+                  }
+                : {}),
+            };
           }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
@@ -303,16 +370,18 @@ export default {
           if (!quota.allowed) {
             return { ok: false, error: `子代理配额不足（10 分钟窗口内限额，剩余 ${quota.remaining}）。请减少委派频率或稍后再试。` };
           }
-          const allTools = ctx.kernel.plugins.capabilities('tool')
+          const allTools = ctx.kernel.plugins
+            .capabilities('tool')
             .map((c) => c.tool)
             .filter((tool) => !DELEGATION_TOOLS.has(tool.name));
-          const toolsFor = (t: { tools?: string }): ToolDef[] => t.tools === 'all'
-            ? allTools
-            : allTools.filter((x) => READ_ONLY_TOOLS.has(x.name));
+          const toolsFor = (t: { tools?: string }): ToolDef[] =>
+            t.tools === 'all' ? allTools : allTools.filter((x) => READ_ONLY_TOOLS.has(x.name));
 
-          let blackboard: {
-            put(sessionId: string, key: string, value: unknown, tags?: string[], tenantId?: string): unknown;
-          } | undefined;
+          let blackboard:
+            | {
+                put(sessionId: string, key: string, value: unknown, tags?: string[], tenantId?: string): unknown;
+              }
+            | undefined;
           const blackboardDep = ctx.inject('service:blackboard', (value) => {
             blackboard = value as typeof blackboard;
           });
@@ -340,28 +409,46 @@ export default {
           const publishResult = (task: NormalizedParallelTask, result: ParallelTaskResult): void => {
             if (!task.publish || !result.ok || !blackboard) return;
             try {
-              blackboard.put(tctx.sessionId ?? '_default', `${batchKey}:${task.id}`, {
-                objective: task.objective,
-                answer: String(result.answer ?? '').slice(0, 12_000),
-                traceId: result.traceId,
-                dependsOn: task.dependsOn,
-              }, ['parallel', batchId, ...task.dependsOn], tctx.tenantId);
-            } catch { /* 黑板不可写不影响任务结果 */ }
+              blackboard.put(
+                tctx.sessionId ?? '_default',
+                `${batchKey}:${task.id}`,
+                {
+                  objective: task.objective,
+                  answer: String(result.answer ?? '').slice(0, 12_000),
+                  traceId: result.traceId,
+                  dependsOn: task.dependsOn,
+                },
+                ['parallel', batchId, ...task.dependsOn],
+                tctx.tenantId,
+              );
+            } catch {
+              /* 黑板不可写不影响任务结果 */
+            }
           };
 
           const runOne = async (task: NormalizedParallelTask): Promise<ParallelTaskResult> => {
-            const failedDependency = task.dependsOn
-              .map((dependency) => byId.get(dependency))
-              .find((dependency) => !dependency?.ok);
+            const failedDependency = task.dependsOn.map((dependency) => byId.get(dependency)).find((dependency) => !dependency?.ok);
             if (failedDependency) {
               const result: ParallelTaskResult = {
-                taskId: task.id, objective: task.objective, ok: false,
+                taskId: task.id,
+                objective: task.objective,
+                ok: false,
                 error: `依赖任务未成功: ${failedDependency.taskId}${failedDependency.error ? `（${failedDependency.error}）` : ''}`,
                 cancelled: failedDependency.cancelled === true,
-                dependsOn: task.dependsOn, toolCalls: 0, tokensIn: 0, tokensOut: 0, cost: 0,
+                dependsOn: task.dependsOn,
+                toolCalls: 0,
+                tokensIn: 0,
+                tokensOut: 0,
+                cost: 0,
                 traceId: '',
               };
-              emit('fail', task.id, task.objective, { error: result.error, cancelled: result.cancelled }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
+              emit(
+                'fail',
+                task.id,
+                task.objective,
+                { error: result.error, cancelled: result.cancelled },
+                { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+              );
               return result;
             }
 
@@ -369,14 +456,34 @@ export default {
             const route = chatSvc?.routeForTask?.(task.objective, routing, chatSvc.providers);
             const provider = route?.provider ?? fallbackProvider;
             const model = route?.model ?? provider.defaultModel;
-            emit('start', task.id, task.objective, { index: task.index, dependsOn: task.dependsOn }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
+            emit(
+              'start',
+              task.id,
+              task.objective,
+              { index: task.index, dependsOn: task.dependsOn },
+              { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+            );
             // 循环经服务解析取得（service:runner）：与顶层/子代理同一实现，替换循环即全局一致
             const runner = makeRunner(ctx.kernel, ctx.bus);
             if (!runner) {
-              emit('fail', task.id, task.objective, { error: 'service:runner 不可用' }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
+              emit(
+                'fail',
+                task.id,
+                task.objective,
+                { error: 'service:runner 不可用' },
+                { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+              );
               return {
-                taskId: task.id, objective: task.objective, ok: false, dependsOn: task.dependsOn,
-                error: '执行循环服务（service:runner）不可用——对话引擎插件未加载', toolCalls: 0, tokensIn: 0, tokensOut: 0, cost: 0, traceId,
+                taskId: task.id,
+                objective: task.objective,
+                ok: false,
+                dependsOn: task.dependsOn,
+                error: '执行循环服务（service:runner）不可用——对话引擎插件未加载',
+                toolCalls: 0,
+                tokensIn: 0,
+                tokensOut: 0,
+                cost: 0,
+                traceId,
               };
             }
             let answer = '';
@@ -404,8 +511,10 @@ export default {
               })) {
                 if (ev.type === 'delta') answer += ev.text;
                 else if (ev.type === 'tool_result') toolCalls++;
-                else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
-                else if (ev.type === 'approval_required') {
+                else if (ev.type === 'assistant_done') {
+                  usage = ev.usage;
+                  cost = ev.cost;
+                } else if (ev.type === 'approval_required') {
                   // 并行子任务审批可达性：审批注册在共享 ApprovalBoard（/api/approvals/:id
                   // 经主 runner 可达）；事件经全局事件总线广播给 UI——父执行器阻塞在
                   // 本 handler 内，事件无法经其 yield 流透传，必须走带外通道。
@@ -415,44 +524,89 @@ export default {
                     ts: Date.now(),
                     data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                   });
+                } else if (ev.type === 'error') {
+                  error = ev.error;
+                  cancelled = ev.kind === 'aborted';
                 }
-                else if (ev.type === 'error') { error = ev.error; cancelled = ev.kind === 'aborted'; }
               }
             } catch (err) {
               error = err instanceof Error ? err.message : String(err);
               cancelled = tctx.signal?.aborted === true;
             }
             if (error) {
-              emit('fail', task.id, task.objective, { error, cancelled, cost }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
+              emit(
+                'fail',
+                task.id,
+                task.objective,
+                { error, cancelled, cost },
+                { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+              );
               return {
-                taskId: task.id, objective: task.objective, ok: false, dependsOn: task.dependsOn,
-                error: `并行子任务失败: ${error}`, cancelled, toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
+                taskId: task.id,
+                objective: task.objective,
+                ok: false,
+                dependsOn: task.dependsOn,
+                error: `并行子任务失败: ${error}`,
+                cancelled,
+                toolCalls,
+                tokensIn: usage.input,
+                tokensOut: usage.output,
+                cost,
+                traceId,
               };
             }
-            emit('done', task.id, task.objective, { toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
+            emit(
+              'done',
+              task.id,
+              task.objective,
+              { toolCalls, tokensIn: usage.input, tokensOut: usage.output, cost },
+              { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+            );
             return {
-              taskId: task.id, objective: task.objective, ok: true, dependsOn: task.dependsOn,
-              answer: answer.trim(), toolCalls,
-              tokensIn: usage.input, tokensOut: usage.output, cost, traceId,
+              taskId: task.id,
+              objective: task.objective,
+              ok: true,
+              dependsOn: task.dependsOn,
+              answer: answer.trim(),
+              toolCalls,
+              tokensIn: usage.input,
+              tokensOut: usage.output,
+              cost,
+              traceId,
             };
           };
 
           try {
             for (const wave of waves) {
               const waveTasks = wave.map((id) => tasks.find((task) => task.id === id)!).filter(Boolean);
-              const settled = await Promise.all(waveTasks.map(async (task) => {
-                try {
-                  return { task, result: await runOne(task) };
-                } catch (err) {
-                  const result: ParallelTaskResult = {
-                    taskId: task.id, objective: task.objective, ok: false, dependsOn: task.dependsOn,
-                    error: `内部异常: ${err instanceof Error ? err.message : String(err)}`,
-                    toolCalls: 0, tokensIn: 0, tokensOut: 0, cost: 0, traceId: '',
-                  };
-                  emit('fail', task.id, task.objective, { error: result.error }, { sessionId: tctx.sessionId, total: tasks.length, index: task.index });
-                  return { task, result };
-                }
-              }));
+              const settled = await Promise.all(
+                waveTasks.map(async (task) => {
+                  try {
+                    return { task, result: await runOne(task) };
+                  } catch (err) {
+                    const result: ParallelTaskResult = {
+                      taskId: task.id,
+                      objective: task.objective,
+                      ok: false,
+                      dependsOn: task.dependsOn,
+                      error: `内部异常: ${err instanceof Error ? err.message : String(err)}`,
+                      toolCalls: 0,
+                      tokensIn: 0,
+                      tokensOut: 0,
+                      cost: 0,
+                      traceId: '',
+                    };
+                    emit(
+                      'fail',
+                      task.id,
+                      task.objective,
+                      { error: result.error },
+                      { sessionId: tctx.sessionId, total: tasks.length, index: task.index },
+                    );
+                    return { task, result };
+                  }
+                }),
+              );
               for (const { task, result } of settled) {
                 results[task.index] = result;
                 byId.set(task.id, result);
@@ -463,13 +617,20 @@ export default {
             releaseSlots();
           }
 
-          const completed = results.map((result, index) => result ?? {
-            taskId: tasks[index]!.id, objective: tasks[index]!.objective, ok: false, error: '任务未执行',
-            dependsOn: tasks[index]!.dependsOn,
-          });
-          if (reservation) completed.forEach((result, index) => {
-            reservation.settle(index, Number((result as { cost?: number }).cost ?? 0));
-          });
+          const completed = results.map(
+            (result, index) =>
+              result ?? {
+                taskId: tasks[index]!.id,
+                objective: tasks[index]!.objective,
+                ok: false,
+                error: '任务未执行',
+                dependsOn: tasks[index]!.dependsOn,
+              },
+          );
+          if (reservation)
+            completed.forEach((result, index) => {
+              reservation.settle(index, Number((result as { cost?: number }).cost ?? 0));
+            });
           // C5 成本回传：聚合全部子任务的开销，主循环执行器并入 totalCost/熔断核算
           const aggregate = aggregateParallelResults(completed as ParallelTaskResult[]);
           return {
@@ -478,10 +639,12 @@ export default {
               ...aggregate,
               batchId,
               blackboardPrefix: blackboard ? batchKey : undefined,
-              summary: aggregate.results.map((r, i) => {
-                const dependency = Array.isArray(r.dependsOn) && r.dependsOn.length ? ` [依赖 ${r.dependsOn.join(', ')}]` : '';
-                return `${i + 1}.${dependency} ${r.objective} → ${r.ok ? '完成' : r.cancelled ? '取消' : '失败'}`;
-              }).join('\n'),
+              summary: aggregate.results
+                .map((r, i) => {
+                  const dependency = Array.isArray(r.dependsOn) && r.dependsOn.length ? ` [依赖 ${r.dependsOn.join(', ')}]` : '';
+                  return `${i + 1}.${dependency} ${r.objective} → ${r.ok ? '完成' : r.cancelled ? '取消' : '失败'}`;
+                })
+                .join('\n'),
             },
           };
         },

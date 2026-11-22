@@ -21,7 +21,10 @@ function plan(objective: string): PlanState {
 describe('goal-plan 持久化', () => {
   it('原子保存并恢复计划', () => {
     const file = join(root, 'plans.json');
-    const plans = new Map([['session-a', plan('a')], ['session-b', plan('b')]]);
+    const plans = new Map([
+      ['session-a', plan('a')],
+      ['session-b', plan('b')],
+    ]);
     savePlans(file, plans);
     const loaded = loadPlans(file);
     assert.equal(loaded.size, 2);
@@ -38,11 +41,15 @@ describe('goal-plan 持久化', () => {
 
   it('拒绝非法计划形状，保留合法项', () => {
     const file = join(root, 'mixed.json');
-    writeFileSync(file, JSON.stringify({
-      good: plan('good'),
-      bad: { objective: 'bad', steps: [{ title: 'x', status: 'unknown' }] },
-      scalar: 1,
-    }), 'utf8');
+    writeFileSync(
+      file,
+      JSON.stringify({
+        good: plan('good'),
+        bad: { objective: 'bad', steps: [{ title: 'x', status: 'unknown' }] },
+        scalar: 1,
+      }),
+      'utf8',
+    );
     const loaded = loadPlans(file);
     assert.equal(loaded.size, 1);
     assert.equal(loaded.get('good')?.objective, 'good');

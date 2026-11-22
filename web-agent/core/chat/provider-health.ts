@@ -99,7 +99,9 @@ const health = sharedSingleton('chat.providerHealth', () => new Map<string, Prov
 export function isAuthError(error: unknown): boolean {
   if (error instanceof LLMHttpError) return error.status === 401 || error.status === 403;
   const msg = error instanceof Error ? error.message : String(error ?? '');
-  return /\b(?:HTTP|status|请求失败|:)\s*(401|403)\b/.test(msg) || /authentication|unauthorized|invalid api key|no access to model/i.test(msg);
+  return (
+    /\b(?:HTTP|status|请求失败|:)\s*(401|403)\b/.test(msg) || /authentication|unauthorized|invalid api key|no access to model/i.test(msg)
+  );
 }
 
 /** 记录一次失败（agent failover 链上每个耗尽重试的 provider 都回报）。
@@ -124,7 +126,6 @@ export function noteProviderFailure(providerId: string, error: unknown, config: 
   health.set(providerId, next);
   return next;
 }
-
 
 /** 记录一次成功：清除异常状态；返回是否清除了已有故障（供 agent 决定是否广播恢复） */
 export function noteProviderSuccess(providerId: string): boolean {

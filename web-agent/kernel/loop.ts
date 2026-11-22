@@ -10,7 +10,15 @@
  * 本文件只放【形状】（类型与常量），不放行为：行为归默认实现（core/chat/agent.ts）。
  */
 import type {
-  AgentRunSummary, KernelLike, LLMMessage, PluginBus, ProviderDef, ResponseFormat, ToolCall, ToolDef, ToolResult,
+  AgentRunSummary,
+  KernelLike,
+  LLMMessage,
+  PluginBus,
+  ProviderDef,
+  ResponseFormat,
+  ToolCall,
+  ToolDef,
+  ToolResult,
 } from './types';
 import type { TaskContract } from './task-verifier';
 export type { ClassifiedError, ErrorCategory } from './error-policy';
@@ -34,10 +42,10 @@ export interface AgentHookCtx {
   sandboxRoot?: string;
   runId?: string;
   history: LLMMessage[];
-  systemPrompt: string;                 // 信息展示；改 history[0].content 才真正生效
+  systemPrompt: string; // 信息展示；改 history[0].content 才真正生效
   tools: ToolDef[];
   scratchpad: Record<string, unknown>;
-  blocked?: boolean;                    // 置 true 拦截（agent.input.received / agent.before_tool）
+  blocked?: boolean; // 置 true 拦截（agent.input.received / agent.before_tool）
   blockReason?: string;
   /** agent.before_tool：用户策略规则显式放行本次调用（免审批），执行器据此跳过审批门并留痕 */
   policyApproved?: boolean;
@@ -45,12 +53,12 @@ export interface AgentHookCtx {
   forceApproval?: boolean;
   forceApprovalReason?: string;
   tool?: { name: string; args: unknown };
-  content?: string;                     // after_llm：模型输出（观测）
+  content?: string; // after_llm：模型输出（观测）
   reasoning?: string;
   toolCalls?: ToolCall[];
-  result?: ToolResult;                  // after_tool：结果（可改写）
-  error?: string;                       // on_error
-  reason?: string;                      // agent.stopped：停止原因（如 'max_turns'）
+  result?: ToolResult; // after_tool：结果（可改写）
+  error?: string; // on_error
+  reason?: string; // agent.stopped：停止原因（如 'max_turns'）
 }
 
 /** 执行循环的逐步事件流（决策→行动→观察 的播报）。可辨识联合：消费方按 type 收窄。 */
@@ -59,10 +67,23 @@ export type AgentEvent =
   | { type: 'reasoning'; text: string }
   /** id = tool_call_id：前端靠它把 start/result 精确配对成同一张卡（同名并发调用不会串卡） */
   | { type: 'tool_start'; id?: string; name: string; args: unknown }
-  | { type: 'tool_result'; id?: string; name: string; summary: string; ok: boolean; stored?: boolean; evidence?: { kind: string; label: string; ref?: string; value?: unknown }[] }
+  | {
+      type: 'tool_result';
+      id?: string;
+      name: string;
+      summary: string;
+      ok: boolean;
+      stored?: boolean;
+      evidence?: { kind: string; label: string; ref?: string; value?: unknown }[];
+    }
   | { type: 'approval_required'; approvalId: string; name: string; summary: string; args: unknown }
   | { type: 'assistant_done'; content: string; reasoning: string; usage: { input: number; output: number }; cost: number; cached?: boolean }
-  | { type: 'task_verified' | 'task_partial' | 'task_failed'; objective: string; checks: { ok: boolean; reason?: string }[]; evidence?: { source: string; detail: string; traceStepId?: string }[] }
+  | {
+      type: 'task_verified' | 'task_partial' | 'task_failed';
+      objective: string;
+      checks: { ok: boolean; reason?: string }[];
+      evidence?: { source: string; detail: string; traceStepId?: string }[];
+    }
   | { type: 'budget_hit'; cost: number; budget: number }
   | { type: 'handoff'; role: string; objective: string }
   /** provider 重试（内层瞬态重试 / 外层切换备用）：重试前执行器已清空上次失败流的
@@ -70,7 +91,13 @@ export type AgentEvent =
    *  reason 让人话提示能对上现实：同线路重试 / 换线路 / 叙述化纠偏，三者观感不同。 */
   | { type: 'retry'; reason: 'attempt' | 'failover' | 'narration'; detail?: string }
   /** kind 让前端能区分"用户自己按了停止"与"真出错了"——aborted 不该画成红色报错 */
-  | { type: 'error'; error: string; code?: string; stage?: string; kind?: 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'auth' | 'parameter' | 'business' | 'transient' };
+  | {
+      type: 'error';
+      error: string;
+      code?: string;
+      stage?: string;
+      kind?: 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'auth' | 'parameter' | 'business' | 'transient';
+    };
 
 /** 一次 run 的全部输入（循环实现的入参契约） */
 export interface RunOptions {
@@ -87,8 +114,22 @@ export interface RunOptions {
   delegate?: (request: import('./run').ChildRunRequest, signal?: AbortSignal) => Promise<import('./run').ChildRunResult>;
   acquireExecution?: (signal?: AbortSignal) => Promise<() => void>;
   availableBudget?: () => number | undefined;
-  historyArchive?: { save?(messages: LLMMessage[]): void; search(query: string, offset?: number, limit?: number): unknown[]; read(id: string, offset?: number, limit?: number): import('./tool-journal').ToolResultPage | undefined };
-  onModelInput?: (input: { callId?: string; purpose?: import('./model-call').ModelPurpose; diagnostics?: import('./input-diagnostics').InputDiagnostics; usage?: { inputTokens: number; window: number; outputReserve: number; outputLimitSource?: 'model' | 'default' }; turn: number; providerId: string; model: string; messages: LLMMessage[]; tools: { name: string; description: string; parameters: Record<string, unknown> }[] }) => void;
+  historyArchive?: {
+    save?(messages: LLMMessage[]): void;
+    search(query: string, offset?: number, limit?: number): unknown[];
+    read(id: string, offset?: number, limit?: number): import('./tool-journal').ToolResultPage | undefined;
+  };
+  onModelInput?: (input: {
+    callId?: string;
+    purpose?: import('./model-call').ModelPurpose;
+    diagnostics?: import('./input-diagnostics').InputDiagnostics;
+    usage?: { inputTokens: number; window: number; outputReserve: number; outputLimitSource?: 'model' | 'default' };
+    turn: number;
+    providerId: string;
+    model: string;
+    messages: LLMMessage[];
+    tools: { name: string; description: string; parameters: Record<string, unknown> }[];
+  }) => void;
   parentRunId?: string;
   authorization?: import('./run').RunAuthorization;
   /** Called only at model-call boundaries; returned messages are already durable. */
@@ -103,13 +144,13 @@ export interface RunOptions {
   restoredReleasedTools?: string[];
   provider: ProviderDef;
   model: string;
-  messages: LLMMessage[];    // 会话历史（含最新用户消息）
+  messages: LLMMessage[]; // 会话历史（含最新用户消息）
   /** 本轮临时上下文：发送给模型但不写回会话历史（如世界状态）。 */
   contextMessages?: LLMMessage[];
   /** 请求模型返回结构化 JSON；由支持该能力的 Provider 适配器落地。 */
   responseFormat?: ResponseFormat;
   systemPrompt?: string;
-  tools?: ToolDef[];         // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
+  tools?: ToolDef[]; // 覆盖可用工具（如 plan 模式出计划阶段传 []，强制只输出计划）
   traceId: string;
   /** L1 会话级缓存作用域（如 session.id）：跨多次 run 的同一会话共享"会话自产答案"；
    *  缺省用 traceId——子代理/独立循环天然隔离（每次 traceId 唯一）。 */
@@ -153,13 +194,25 @@ export interface RunOptions {
    *  超 context.maxTokens 时调用，返回压缩后的消息序列（由 server 注入 compactHistory
    *  等实现）；缺失时维持现状（不在 run 内压缩，由 server 组装侧兜底）。 */
   contextWindow?: number;
-  compactFn?: (history: LLMMessage[], maxTokens?: number, signal?: AbortSignal, onUsage?: (usage: { input: number; output: number; cost: number }) => void) => Promise<LLMMessage[]>;
+  compactFn?: (
+    history: LLMMessage[],
+    maxTokens?: number,
+    signal?: AbortSignal,
+    onUsage?: (usage: { input: number; output: number; cost: number }) => void,
+  ) => Promise<LLMMessage[]>;
   /** 断点回调（checkpoint）：每轮工具执行完（下轮 LLM 调用前）触发，携带完整历史
    *  （含工具回填，字节级可恢复）。server 层持久化；resume 用该历史继续——中断不白跑。 */
   onCheckpoint?: (
     turn: number,
     history: LLMMessage[],
-    evidence?: { toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[]; costUsd: number; enabledTools?: string[]; releasedTools?: string[]; selectedCapabilities?: string[]; capabilityConflicts?: import('./types').CapabilityConflict[] },
+    evidence?: {
+      toolResults: { name: string; ok: boolean; evidence?: import('./types').ToolEvidence[] }[];
+      costUsd: number;
+      enabledTools?: string[];
+      releasedTools?: string[];
+      selectedCapabilities?: string[];
+      capabilityConflicts?: import('./types').CapabilityConflict[];
+    },
     step?: {
       phase: 'turn_end' | 'tool_pending';
       pendingTool?: { name: string; toolCallId: string; sideEffect?: string; argsPreview?: string; effectKey?: string; resultId?: string };

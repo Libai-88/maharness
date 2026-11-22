@@ -29,18 +29,31 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   let closed = 0;
-  const tryExit = () => { if (closed >= procs.length) process.exit(0); };
+  const tryExit = () => {
+    if (closed >= procs.length) process.exit(0);
+  };
   for (const p of procs) {
     if (p.exitCode !== null || p.signalCode !== null) {
       // 已退出（触发本次 shutdown 的进程）：close 可能已发过，直接计入
       closed++;
       continue;
     }
-    p.once('close', () => { closed++; tryExit(); });
+    p.once('close', () => {
+      closed++;
+      tryExit();
+    });
     if (isWin) {
-      try { spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); } catch { /* 忽略 */ }
+      try {
+        spawn('taskkill', ['/PID', String(p.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+      } catch {
+        /* 忽略 */
+      }
     } else {
-      try { p.kill(signal); } catch { /* 忽略 */ }
+      try {
+        p.kill(signal);
+      } catch {
+        /* 忽略 */
+      }
     }
   }
   tryExit();
@@ -53,6 +66,12 @@ process.on('SIGTERM', () => shutdown('SIGTERM'));
 
 console.log('[dev-all] maharness 一键启动中…');
 // 后端：node node_modules/tsx/dist/cli.mjs watch server/index.ts
-run('后端', process.execPath, [join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', 'server/index.ts'], root, `http://localhost:${process.env.PORT ?? 3000}`);
+run(
+  '后端',
+  process.execPath,
+  [join(root, 'node_modules', 'tsx', 'dist', 'cli.mjs'), 'watch', 'server/index.ts'],
+  root,
+  `http://localhost:${process.env.PORT ?? 3000}`,
+);
 // 前端：node node_modules/vite/bin/vite.js（cwd = ui/）
 run('前端', process.execPath, [join(root, 'ui', 'node_modules', 'vite', 'bin', 'vite.js')], join(root, 'ui'), 'http://localhost:5173');

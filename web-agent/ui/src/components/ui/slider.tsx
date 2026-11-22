@@ -1,24 +1,13 @@
-import * as React from "react"
-import { cn } from "cn"
-import { Slider as SliderPrimitive } from "radix-ui"
+// biome-ignore-all lint/suspicious/noArrayIndexKey: 每个拇指对应一个值位，位置即身份（value 会移动，不能用值作 key）
+import * as React from 'react';
+import { cn } from 'cn';
+import { Slider as SliderPrimitive } from 'radix-ui';
 
-function Slider({
-  className,
-  defaultValue,
-  value,
-  min = 0,
-  max = 100,
-  ...props
-}: React.ComponentProps<typeof SliderPrimitive.Root>) {
+function Slider({ className, defaultValue, value, min = 0, max = 100, ...props }: React.ComponentProps<typeof SliderPrimitive.Root>) {
   const _values = React.useMemo(
-    () =>
-      Array.isArray(value)
-        ? value
-        : Array.isArray(defaultValue)
-          ? defaultValue
-          : [min, max],
-    [value, defaultValue, min, max]
-  )
+    () => (Array.isArray(value) ? value : Array.isArray(defaultValue) ? defaultValue : [min, max]),
+    [value, defaultValue, min, max],
+  );
 
   return (
     <SliderPrimitive.Root
@@ -28,8 +17,8 @@ function Slider({
       min={min}
       max={max}
       className={cn(
-        "relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col",
-        className
+        'relative flex w-full touch-none items-center select-none data-disabled:opacity-50 data-vertical:h-full data-vertical:min-h-40 data-vertical:w-auto data-vertical:flex-col',
+        className,
       )}
       {...props}
     >
@@ -43,16 +32,17 @@ function Slider({
         />
       </SliderPrimitive.Track>
       {Array.from({ length: _values.length }, (_, index) => (
+        // biome-ignore lint/suspicious/noArrayIndexKey: 每个滑块拇指对应一个值位，位置即身份
         <SliderPrimitive.Thumb
-          data-slot="slider-thumb"
           key={index}
-          aria-label={props["aria-label"]}
-          aria-labelledby={props["aria-labelledby"]}
+          data-slot="slider-thumb"
+          aria-label={props['aria-label']}
+          aria-labelledby={props['aria-labelledby']}
           className="relative block size-3 shrink-0 rounded-full border border-ring bg-white ring-ring/50 transition-[color,box-shadow] select-none after:absolute after:-inset-2 hover:ring-3 focus-visible:ring-3 focus-visible:outline-hidden active:ring-3 disabled:pointer-events-none disabled:opacity-50"
         />
       ))}
     </SliderPrimitive.Root>
-  )
+  );
 }
 
-export { Slider }
+export { Slider };

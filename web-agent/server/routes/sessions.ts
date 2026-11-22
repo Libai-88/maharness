@@ -42,7 +42,10 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
     if (mode !== undefined && !['normal', 'plan', 'goal'].includes(String(mode))) {
       return res.status(400).json({ error: 'mode 仅支持 normal / plan / goal' });
     }
-    for (const [k, v] of [['archived', archived], ['pinned', pinned]] as const) {
+    for (const [k, v] of [
+      ['archived', archived],
+      ['pinned', pinned],
+    ] as const) {
       if (v !== undefined && v !== 0 && v !== 1 && v !== false && v !== true) {
         return res.status(400).json({ error: `${k} 仅支持 0/1` });
       }
@@ -68,9 +71,7 @@ export function registerSessionRoutes(app: Express, deps: RouteDeps): void {
 
   // 批量删除会话（事务原子；前端批量管理用）
   app.post('/api/sessions/batch-delete', (req, res) => {
-    const ids = Array.isArray(req.body?.ids)
-      ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500)
-      : [];
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.filter((x: unknown): x is string => typeof x === 'string').slice(0, 500) : [];
     if (ids.length === 0) return res.status(400).json({ error: '缺少 ids' });
     const removed = store.deleteSessions(ids, tenantIdOf(req));
     res.json({ ok: true, removed });

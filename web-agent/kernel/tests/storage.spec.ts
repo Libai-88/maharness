@@ -28,8 +28,33 @@ function setup(manifestExtra: Record<string, unknown> = {}): Fixture {
   const dir = join(pluginsDir, 'tmp-store');
   mkdirSync(dir, { recursive: true });
   mkdirSync(coreDir, { recursive: true });
-  writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ apiVersion: 2, permissions: { capabilities: { tool: ['*'], service: ['*'], context: ['*'], provider: ['*'], persona: ['*'], listener: ['*'], command: ['*'], role: ['*'], api: ['*'] } }, id: 'tmp-store', name: '存储探针', version: '0.1.0', entry: 'index.ts', ...manifestExtra }));
-  writeFileSync(join(dir, 'index.ts'), `
+  writeFileSync(
+    join(dir, 'plugin.json'),
+    JSON.stringify({
+      apiVersion: 2,
+      permissions: {
+        capabilities: {
+          tool: ['*'],
+          service: ['*'],
+          context: ['*'],
+          provider: ['*'],
+          persona: ['*'],
+          listener: ['*'],
+          command: ['*'],
+          role: ['*'],
+          api: ['*'],
+        },
+      },
+      id: 'tmp-store',
+      name: '存储探针',
+      version: '0.1.0',
+      entry: 'index.ts',
+      ...manifestExtra,
+    }),
+  );
+  writeFileSync(
+    join(dir, 'index.ts'),
+    `
 export default {
   id: 'tmp-store', name: '存储探针', version: '0.1.0',
   onLoad(ctx) {
@@ -45,7 +70,8 @@ export default {
     };
   },
 };
-`);
+`,
+  );
   const kernel = new Kernel(rootDir, {}, { dataDir, userPluginsDir: pluginsDir, corePluginsDir: coreDir });
   return { kernel, rootDir, dataDir, cleanup: () => rmSync(rootDir, { recursive: true, force: true }) };
 }
@@ -73,15 +99,25 @@ describe('界外效应收敛', () => {
     const f = setup();
     const seen: { kind: string; detail: string }[] = [];
     const reverted: { effects: number; outbound?: number }[] = [];
-    f.kernel.bus.on('plugin.outbound', (e) => { seen.push(e.data as { kind: string; detail: string }); });
-    f.kernel.bus.on('plugin.reverted', (e) => { reverted.push(e.data as { effects: number; outbound?: number }); });
+    f.kernel.bus.on('plugin.outbound', (e) => {
+      seen.push(e.data as { kind: string; detail: string });
+    });
+    f.kernel.bus.on('plugin.reverted', (e) => {
+      reverted.push(e.data as { effects: number; outbound?: number });
+    });
 
     await f.kernel.plugins.loadAll();
     const ledger = join(f.dataDir, 'outbound', 'tmp-store.jsonl');
     assert.equal(existsSync(ledger), true, '台账文件应已生成');
-    const rows = readFileSync(ledger, 'utf-8').trim().split('\n').map((l) => JSON.parse(l) as { kind: string; detail: string });
+    const rows = readFileSync(ledger, 'utf-8')
+      .trim()
+      .split('\n')
+      .map((l) => JSON.parse(l) as { kind: string; detail: string });
     assert.equal(rows.length, 2);
-    assert.deepEqual(rows.map((r) => r.kind), ['http', 'file']);
+    assert.deepEqual(
+      rows.map((r) => r.kind),
+      ['http', 'file'],
+    );
     assert.equal(seen.length, 2, '每次登记都应广播事件');
 
     await f.kernel.plugins.disable('tmp-store');
@@ -95,7 +131,9 @@ describe('界外效应收敛', () => {
   test('cleanup: purge 在卸载时清除私有存储', async () => {
     const f = setup({ cleanup: 'purge' });
     const cleanupEvents: { id: string; strategy: string }[] = [];
-    f.kernel.bus.on('plugin.cleanup', (e) => { cleanupEvents.push(e.data as { id: string; strategy: string }); });
+    f.kernel.bus.on('plugin.cleanup', (e) => {
+      cleanupEvents.push(e.data as { id: string; strategy: string });
+    });
     await f.kernel.plugins.loadAll();
     const dir = join(f.dataDir, 'plugins', 'tmp-store');
     assert.equal(existsSync(dir), true);

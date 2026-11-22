@@ -11,18 +11,39 @@ describe('技能语义路由', () => {
     try {
       const dir = join(root, '.maharness', 'skills', 'quantum-target');
       mkdirSync(dir, { recursive: true });
-      writeFileSync(join(dir, 'SKILL.md'), [
-        '---', 'name: quantum-target', 'description: 量子计算与 qubit 方法论',
-        'triggers:', '  - 量子', 'applies-when:', '  - 量子任务',
-        'reject-when:', '  - 普通代码', 'input: task', 'output: result', '---', '正文',
-      ].join('\n'));
+      writeFileSync(
+        join(dir, 'SKILL.md'),
+        [
+          '---',
+          'name: quantum-target',
+          'description: 量子计算与 qubit 方法论',
+          'triggers:',
+          '  - 量子',
+          'applies-when:',
+          '  - 量子任务',
+          'reject-when:',
+          '  - 普通代码',
+          'input: task',
+          'output: result',
+          '---',
+          '正文',
+        ].join('\n'),
+      );
 
-      let context: { contentFn: (ctx: { history: unknown[]; systemPrompt: string; scratchpad: Record<string, unknown> }) => string | { content: string } | null } | undefined;
+      let context:
+        | {
+            contentFn: (ctx: {
+              history: unknown[];
+              systemPrompt: string;
+              scratchpad: Record<string, unknown>;
+            }) => string | { content: string } | null;
+          }
+        | undefined;
       let beforeLlm: ((event: { data: unknown }) => Promise<void>) | undefined;
       const ctx = {
         config: {
-          get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root
-            : key === 'skills.vendorDir' ? join(root, 'vendor') : fallback,
+          get: (key: string, fallback: unknown) =>
+            key === 'sandboxRoot' ? root : key === 'skills.vendorDir' ? join(root, 'vendor') : fallback,
         },
         paths: { data: join(root, 'data') },
         register(value: any) {

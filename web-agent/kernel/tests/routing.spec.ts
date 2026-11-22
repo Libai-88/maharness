@@ -9,12 +9,20 @@ import { routeForTask } from '../../core/chat/routing';
 import type { ProviderDef } from '../types';
 
 const cheap: ProviderDef = {
-  id: 'cheap', label: 'CHEAP', defaultModel: 'cheap-model',
-  async *chat() { yield { type: 'done' } as never; },
+  id: 'cheap',
+  label: 'CHEAP',
+  defaultModel: 'cheap-model',
+  async *chat() {
+    yield { type: 'done' } as never;
+  },
 };
 const strong: ProviderDef = {
-  id: 'strong', label: 'STRONG', defaultModel: 'strong-model',
-  async *chat() { yield { type: 'done' } as never; },
+  id: 'strong',
+  label: 'STRONG',
+  defaultModel: 'strong-model',
+  async *chat() {
+    yield { type: 'done' } as never;
+  },
 };
 const providers = [cheap, strong];
 

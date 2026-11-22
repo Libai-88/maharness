@@ -46,26 +46,43 @@ function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', chil
   let peakActive = 0;
   const childSignals: AbortSignal[] = [];
   const provider: ProviderDef = {
-    id: `cancel-${toolName}-provider`, label: 'Cancel Fixture', defaultModel: 'cancel-model',
-    priceSource: 'configured', prices: { in: 0, out: 0 }, outputLimitGuaranteed: true,
-    models: [{
-      modelId: 'cancel-model', contextWindow: 32_000, maxOutput: 4_096,
-      vision: false, tools: true, reasoning: false, priceIn: 0, priceOut: 0,
-      enabled: true, source: 'manual',
-    }],
+    id: `cancel-${toolName}-provider`,
+    label: 'Cancel Fixture',
+    defaultModel: 'cancel-model',
+    priceSource: 'configured',
+    prices: { in: 0, out: 0 },
+    outputLimitGuaranteed: true,
+    models: [
+      {
+        modelId: 'cancel-model',
+        contextWindow: 32_000,
+        maxOutput: 4_096,
+        vision: false,
+        tools: true,
+        reasoning: false,
+        priceIn: 0,
+        priceOut: 0,
+        enabled: true,
+        source: 'manual',
+      },
+    ],
     async *chat(_messages: LLMMessage[], opts: ChatOptions) {
       const call = ++calls;
       if (call === 1) {
-        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
-        yield { type: 'tool_call', toolCall: {
-          id: `enable-team-${call}`, type: 'function',
-          function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
-        } };
+        assert.ok(opts.tools?.some((tool) => tool.name === 'enable_tools'));
+        yield {
+          type: 'tool_call',
+          toolCall: {
+            id: `enable-team-${call}`,
+            type: 'function',
+            function: { name: 'enable_tools', arguments: JSON.stringify({ names: ['team_create'] }) },
+          },
+        };
         return;
       }
       if (call === 2) {
-        assert.ok(opts.tools?.some(tool => tool.name === 'team_create'));
-        assert.ok(!opts.tools?.some(tool => tool.name === toolName));
+        assert.ok(opts.tools?.some((tool) => tool.name === 'team_create'));
+        assert.ok(!opts.tools?.some((tool) => tool.name === toolName));
         const assignments = Array.from({ length: Math.max(2, childCount) }, (_, index) => ({
           roleName: `取消测试角色 ${index + 1}`,
           objective: `独立取消测试分支 ${index + 1}`,
@@ -76,37 +93,54 @@ function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', chil
         yield {
           type: 'tool_call',
           toolCall: {
-            id: `team-call-${call}`, type: 'function',
-            function: { name: 'team_create', arguments: JSON.stringify({
-              assignments, teamEstimateUsd: Math.max(2, childCount) * 0.1, reason: '取消传播测试',
-            }) },
+            id: `team-call-${call}`,
+            type: 'function',
+            function: {
+              name: 'team_create',
+              arguments: JSON.stringify({
+                assignments,
+                teamEstimateUsd: Math.max(2, childCount) * 0.1,
+                reason: '取消传播测试',
+              }),
+            },
           },
         };
         return;
       }
       if (call === 3) {
-        assert.ok(opts.tools?.some(tool => tool.name === 'enable_tools'));
-        yield { type: 'tool_call', toolCall: {
-          id: `enable-delegation-${call}`, type: 'function',
-          function: { name: 'enable_tools', arguments: JSON.stringify({ names: [toolName] }) },
-        } };
+        assert.ok(opts.tools?.some((tool) => tool.name === 'enable_tools'));
+        yield {
+          type: 'tool_call',
+          toolCall: {
+            id: `enable-delegation-${call}`,
+            type: 'function',
+            function: { name: 'enable_tools', arguments: JSON.stringify({ names: [toolName] }) },
+          },
+        };
         return;
       }
       if (call === 4) {
-        assert.ok(opts.tools?.some(tool => tool.name === toolName));
+        assert.ok(opts.tools?.some((tool) => tool.name === toolName));
         assert.ok(started);
-        const root = started.store.runs.active('default')
-          .find(run => !run.parentId && run.providerId === provider.id);
+        const root = started.store.runs.active('default').find((run) => !run.parentId && run.providerId === provider.id);
         assert.ok(root?.workOrderId);
-        const contracts = started.store.organization.contracts(root.workOrderId, 'default')
-          .filter(contract => contract.status === 'proposed');
+        const contracts = started.store.organization
+          .contracts(root.workOrderId, 'default')
+          .filter((contract) => contract.status === 'proposed');
         assert.ok(contracts.length >= Math.max(2, childCount));
-        const childArgs = toolName === 'run_subagent'
-          ? JSON.stringify({ objective: 'cancel-child-20261031', contractId: contracts[0]!.id })
-          : JSON.stringify({ tasks: Array.from({ length: childCount }, (_, i) => ({
-              objective: `cancel-child-${i}-20261031`, contractId: contracts[i]!.id,
-            })) });
-        yield { type: 'tool_call', toolCall: { id: `cancel-call-${call}`, type: 'function', function: { name: toolName, arguments: childArgs } } };
+        const childArgs =
+          toolName === 'run_subagent'
+            ? JSON.stringify({ objective: 'cancel-child-20261031', contractId: contracts[0]!.id })
+            : JSON.stringify({
+                tasks: Array.from({ length: childCount }, (_, i) => ({
+                  objective: `cancel-child-${i}-20261031`,
+                  contractId: contracts[i]!.id,
+                })),
+              });
+        yield {
+          type: 'tool_call',
+          toolCall: { id: `cancel-call-${call}`, type: 'function', function: { name: toolName, arguments: childArgs } },
+        };
         return;
       }
       active++;
@@ -131,7 +165,8 @@ function makeCancellableProvider(toolName: 'run_subagent' | 'run_parallel', chil
 
 async function startChat(sessionId: string, message: string): Promise<Response> {
   const response = await fetch(`${base}/api/sessions/${sessionId}/chat`, {
-    method: 'POST', headers: { 'content-type': 'application/json' },
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ message, budgetUsd: 0.4, budgetPolicy: 'enforce' }),
   });
   assert.equal(response.status, 200);
@@ -149,7 +184,11 @@ after(async () => {
   started?.closeEnvWatcher();
   await started?.runs.shutdown();
   started?.store.close();
-  try { await started?.kernel.stop(); } catch { /* 测试清理不影响断言结果 */ }
+  try {
+    await started?.kernel.stop();
+  } catch {
+    /* 测试清理不影响断言结果 */
+  }
   rmSync(tmp, { recursive: true, force: true });
 });
 
@@ -157,7 +196,16 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
   test('就绪端点暴露运行时句柄计数，取消后 activeRuns 归零', async () => {
     assert.ok(started);
     const ready = await fetch(`${base}/api/ready`);
-    const body = await ready.json() as { resources?: { activeRuns?: number; sseConnections?: number; pageConnections?: number; pendingApprovals?: number; activeWarmups?: number; activeSubagentSlots?: number } };
+    const body = (await ready.json()) as {
+      resources?: {
+        activeRuns?: number;
+        sseConnections?: number;
+        pageConnections?: number;
+        pendingApprovals?: number;
+        activeWarmups?: number;
+        activeSubagentSlots?: number;
+      };
+    };
     assert.equal(body.resources?.activeRuns, 0);
     assert.equal(typeof body.resources?.sseConnections, 'number');
     assert.equal(typeof body.resources?.pageConnections, 'number');
@@ -172,18 +220,23 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     (started.kernel.plugins.resolveService('service:chat') as { providers: ProviderDef[] }).providers = [fixture.provider];
     const progress: { phase?: string; detail?: { cancelled?: boolean } }[] = [];
     const bus = started.kernel.bus as unknown as { on(type: string, listener: (event: { data: unknown }) => void): () => void };
-    const off = bus.on('parallel.progress', (event) => progress.push(event.data as typeof progress[number]));
+    const off = bus.on('parallel.progress', (event) => progress.push(event.data as (typeof progress)[number]));
     const session = started.store.createSession('cancel-model', 'cancel-run_parallel-provider');
     const response = await startChat(session.id, '执行四项并行子任务');
     const reader = response.body!.getReader();
     // 等到 4 个子任务都已发起 LLM 调用再停止
     const enteredAt = Date.now();
-    while (fixture.childSignals.length < 4) { assert.ok(Date.now() - enteredAt < 5000, '并行子任务应在 5 秒内启动'); await new Promise((r) => setTimeout(r, 10)); }
+    while (fixture.childSignals.length < 4) {
+      assert.ok(Date.now() - enteredAt < 5000, '并行子任务应在 5 秒内启动');
+      await new Promise((r) => setTimeout(r, 10));
+    }
     const abortTs = Date.now();
-    const run = started.store.runs.active('default', session.id).find(run => !run.parentId)!;
+    const run = started.store.runs.active('default', session.id).find((run) => !run.parentId)!;
     const cancelled = await fetch(`${base}/api/v2/runs/${run.id}/cancel`, { method: 'POST' });
     assert.equal(cancelled.status, 200);
-    reader.cancel().catch(() => { /* 客户端断开本身即测试目标 */ });
+    reader.cancel().catch(() => {
+      /* 客户端断开本身即测试目标 */
+    });
     while (fixture.stats().active > 0 || !fixture.childSignals.every((s) => s.aborted)) {
       assert.ok(Date.now() - abortTs < 5000, '取消后 5 秒内子任务流必须全部回收');
       await new Promise((r) => setTimeout(r, 20));
@@ -202,12 +255,17 @@ describe('LR-05 父任务停止传播到子代理与并行子任务', () => {
     const response = await startChat(session.id, '请组织团队并行委派子代理侦查');
     const reader = response.body!.getReader();
     const enteredAt = Date.now();
-    while (fixture.childSignals.length < 1) { assert.ok(Date.now() - enteredAt < 5000, '子代理应在 5 秒内启动'); await new Promise((r) => setTimeout(r, 10)); }
+    while (fixture.childSignals.length < 1) {
+      assert.ok(Date.now() - enteredAt < 5000, '子代理应在 5 秒内启动');
+      await new Promise((r) => setTimeout(r, 10));
+    }
     const abortTs = Date.now();
-    const run = started.store.runs.active('default', session.id).find(run => !run.parentId)!;
+    const run = started.store.runs.active('default', session.id).find((run) => !run.parentId)!;
     const cancelled = await fetch(`${base}/api/v2/runs/${run.id}/cancel`, { method: 'POST' });
     assert.equal(cancelled.status, 200);
-    reader.cancel().catch(() => { /* 同上 */ });
+    reader.cancel().catch(() => {
+      /* 同上 */
+    });
     while (fixture.stats().active > 0 || !fixture.childSignals[0]?.aborted) {
       assert.ok(Date.now() - abortTs < 5000, '取消后 5 秒内子代理流必须回收');
       await new Promise((r) => setTimeout(r, 20));

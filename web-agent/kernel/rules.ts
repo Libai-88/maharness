@@ -34,9 +34,7 @@ export function personaRuleDescriptor(
   index: number,
 ): RuleDescriptor {
   const source = message.context?.source ?? '';
-  const kind = source.startsWith('user-persistent:') ? 'user'
-    : source.startsWith('skill-guidance:') ? 'skill'
-    : 'plugin';
+  const kind = source.startsWith('user-persistent:') ? 'user' : source.startsWith('skill-guidance:') ? 'skill' : 'plugin';
   return {
     id: `persona:${message.context?.id ?? index}`,
     label: source || `persona-${index + 1}`,
@@ -44,7 +42,9 @@ export function personaRuleDescriptor(
     scope: 'workspace',
     priority: kind === 'user' ? 75 : kind === 'skill' ? 60 : 55,
     trust: kind === 'user' ? 'user' : 'reference',
-    contentHash: createHash('sha256').update(message.content ?? '').digest('hex'),
+    contentHash: createHash('sha256')
+      .update(message.content ?? '')
+      .digest('hex'),
     active: true,
   };
 }
@@ -81,7 +81,10 @@ export function resolveRuleDescriptors(input: RuleDescriptor[]): RuleResolution 
   const ignored: RuleDescriptor[] = [];
   const conflicts: RuleResolution['conflicts'] = [];
   for (const item of ordered) {
-    if (!item.active) { ignored.push(item); continue; }
+    if (!item.active) {
+      ignored.push(item);
+      continue;
+    }
     const prior = hashes.get(item.contentHash);
     if (prior) {
       ignored.push(item);
@@ -116,17 +119,21 @@ function readIfExists(file: string): { text: string; mtimeMs: number } | null {
     const st = statSync(file);
     if (!st.isFile()) return null;
     return { text: readFileSync(file, 'utf-8'), mtimeMs: st.mtimeMs };
-  } catch { return null; }
+  } catch {
+    return null;
+  }
 }
 
 function mdFilesIn(dir: string): string[] {
   if (!existsSync(dir)) return [];
   try {
     return readdirSync(dir, { withFileTypes: true })
-      .filter(e => e.isFile() && /\.md$/i.test(e.name))
-      .map(e => join(dir, e.name))
+      .filter((e) => e.isFile() && /\.md$/i.test(e.name))
+      .map((e) => join(dir, e.name))
       .sort((a, b) => a.localeCompare(b));
-  } catch { return []; }
+  } catch {
+    return [];
+  }
 }
 
 /** 剥离 YAML frontmatter：规则文件常被当作技能/文档复用，头部元数据不该进提示词 */
@@ -136,7 +143,10 @@ function stripFrontMatter(md: string): string {
   const after = t.slice(t.indexOf('\n') + 1);
   const end = /^---[ \t]*$/m.exec(after);
   if (!end || end.index === undefined) return t.trim();
-  return after.slice(end.index + end[0].length).replace(/^\r?\n/, '').trim();
+  return after
+    .slice(end.index + end[0].length)
+    .replace(/^\r?\n/, '')
+    .trim();
 }
 
 const renderRuleSegment = (scope: 'global' | 'project', label: string, text: string) =>
@@ -146,11 +156,7 @@ const renderRuleSegment = (scope: 'global' | 'project', label: string, text: str
  * 加载提示规则。maxChars 为总预算（超出按「项目优先于全局」反向裁剪）。
  * now 用于测试注入。
  */
-export function loadPromptRules(opts: {
-  dataDir: string;
-  projectRoot: string;
-  maxChars?: number;
-}): PromptRulesResult {
+export function loadPromptRules(opts: { dataDir: string; projectRoot: string; maxChars?: number }): PromptRulesResult {
   const maxChars = opts.maxChars ?? 12_000;
   const collected: { scope: 'global' | 'project'; label: string; file: string; text: string; source: RuleSource }[] = [];
   const sources: RuleSource[] = [];
@@ -160,8 +166,14 @@ export function loadPromptRules(opts: {
     const abs = resolve(file);
     const text = r ? stripFrontMatter(r.text) : '';
     const source: RuleSource = {
-      scope, label, file: abs, exists: !!r, chars: r ? r.text.length : 0, mtimeMs: r?.mtimeMs ?? 0,
-      priority: scope === 'project' ? 80 : 70, trust: 'user',
+      scope,
+      label,
+      file: abs,
+      exists: !!r,
+      chars: r ? r.text.length : 0,
+      mtimeMs: r?.mtimeMs ?? 0,
+      priority: scope === 'project' ? 80 : 70,
+      trust: 'user',
       contentHash: createHash('sha256').update(text).digest('hex'),
     };
     sources.push(source);
@@ -178,7 +190,7 @@ export function loadPromptRules(opts: {
   let budget = maxChars;
   let truncated = false;
   // 项目规则更具体、更该保留：先项目后全局
-  const ordered = [...collected.filter(c => c.scope === 'project'), ...collected.filter(c => c.scope === 'global')];
+  const ordered = [...collected.filter((c) => c.scope === 'project'), ...collected.filter((c) => c.scope === 'global')];
   const kept: typeof ordered = [];
   const consideredFiles = new Set<string>();
   const selectedHashes = new Map<string, string>();
@@ -206,16 +218,13 @@ export function loadPromptRules(opts: {
       consideredFiles.add(c.source.file);
       truncated = true;
       budget -= separatorLength + renderRuleSegment(segment.scope, segment.label, segment.text).length;
-    }
-    else truncated = true;
+    } else truncated = true;
   }
-  const text = kept
-    .map(c => renderRuleSegment(c.scope, c.label, c.text))
-    .join('\n\n');
-  const descriptors = sources.map(source => ({
+  const text = kept.map((c) => renderRuleSegment(c.scope, c.label, c.text)).join('\n\n');
+  const descriptors = sources.map((source) => ({
     id: `rules:${source.scope}:${source.label}:${source.contentHash.slice(0, 8)}`,
     label: source.label,
-    source: source.scope === 'project' ? 'project' as const : 'user' as const,
+    source: source.scope === 'project' ? ('project' as const) : ('user' as const),
     scope: 'workspace' as const,
     priority: source.priority,
     trust: source.trust,
@@ -224,9 +233,11 @@ export function loadPromptRules(opts: {
   }));
   return {
     text,
-    segments: kept.map(segment => ({
+    segments: kept.map((segment) => ({
       text: renderRuleSegment(segment.scope, segment.label, segment.text),
-      descriptor: descriptors.find(descriptor => descriptor.id === `rules:${segment.scope}:${segment.label}:${segment.source.contentHash.slice(0, 8)}`)!,
+      descriptor: descriptors.find(
+        (descriptor) => descriptor.id === `rules:${segment.scope}:${segment.label}:${segment.source.contentHash.slice(0, 8)}`,
+      )!,
     })),
     sources,
     truncated,
@@ -234,14 +245,14 @@ export function loadPromptRules(opts: {
     editable: {
       scope: 'project',
       defaultFile: join(root, 'AGENTS.md'),
-      candidates: PROJECT_CANDIDATES.map(rel => join(root, rel)),
+      candidates: PROJECT_CANDIDATES.map((rel) => join(root, rel)),
     },
   };
 }
 
 /** 规则集指纹（文件路径+mtime），供插件做惰性重载 */
 export function rulesSignature(sources: RuleSource[]): string {
-  return sources.map(s => `${s.file}:${s.exists ? 1 : 0}:${s.mtimeMs}:${s.chars}`).join('|');
+  return sources.map((s) => `${s.file}:${s.exists ? 1 : 0}:${s.mtimeMs}:${s.chars}`).join('|');
 }
 
 /** 加载策略规则 JSON（多文件合并，后加载者优先；解析失败的文件回报错误而不中断） */
@@ -253,10 +264,16 @@ export function loadPolicyRules(files: string[]): { rules: PolicyRule[]; errors:
     if (!r) continue;
     try {
       const parsed = JSON.parse(r.text) as { rules?: PolicyRule[] } | PolicyRule[];
-      const list = Array.isArray(parsed) ? parsed : parsed.rules ?? [];
-      if (!Array.isArray(list)) { errors.push(`${f}: 期望数组或 {rules:[...]}`); continue; }
+      const list = Array.isArray(parsed) ? parsed : (parsed.rules ?? []);
+      if (!Array.isArray(list)) {
+        errors.push(`${f}: 期望数组或 {rules:[...]}`);
+        continue;
+      }
       list.forEach((item, i) => {
-        if (!item || typeof item !== 'object') { errors.push(`${f}[${i}]: 非对象`); return; }
+        if (!item || typeof item !== 'object') {
+          errors.push(`${f}[${i}]: 非对象`);
+          return;
+        }
         if (!item.tool || !['allow', 'deny', 'require-approval'].includes(item.effect)) {
           errors.push(`${f}[${i}]: 缺 tool 或 effect 非法`);
           return;
@@ -302,7 +319,11 @@ export function evaluatePolicy(rules: PolicyRule[], toolName: string, args: unkn
     if (!matchesGlob(toolName.toLowerCase(), r.tool.toLowerCase())) continue;
     if (r.argPattern) {
       let re: RegExp;
-      try { re = new RegExp(r.argPattern, 'i'); } catch { continue; }   // 坏正则的规则视为不匹配
+      try {
+        re = new RegExp(r.argPattern, 'i');
+      } catch {
+        continue;
+      } // 坏正则的规则视为不匹配
       if (!re.test(JSON.stringify(args ?? {}))) continue;
     }
     if (r.pathPattern) {
@@ -387,8 +408,11 @@ export function validatePolicyRules(rules: PolicyRule[]): PolicyValidationIssue[
       issues.push({ level: 'error', code: 'invalid-effect', ruleId: id, message: `effect 非法: ${String(rule.effect)}` });
     }
     if (rule.argPattern) {
-      try { new RegExp(rule.argPattern, 'i'); }
-      catch { issues.push({ level: 'error', code: 'invalid-regex', ruleId: id, message: `argPattern 不是合法正则: ${rule.argPattern}` }); }
+      try {
+        new RegExp(rule.argPattern, 'i');
+      } catch {
+        issues.push({ level: 'error', code: 'invalid-regex', ruleId: id, message: `argPattern 不是合法正则: ${rule.argPattern}` });
+      }
     }
     if (rule.id) {
       if (ids.has(rule.id)) issues.push({ level: 'warning', code: 'duplicate-id', ruleId: rule.id, message: `规则 id 重复: ${rule.id}` });
@@ -396,7 +420,9 @@ export function validatePolicyRules(rules: PolicyRule[]): PolicyValidationIssue[
     }
     if (isBlanketAllow(rule)) {
       issues.push({
-        level: 'warning', code: 'blanket-allow', ruleId: id,
+        level: 'warning',
+        code: 'blanket-allow',
+        ruleId: id,
         message: `通配 allow（tool=${rule.tool}）会整体放行审批门，需显式确认`,
       });
     }
@@ -419,18 +445,16 @@ export interface PolicyDryRunResult {
 }
 
 /** 只读演练：同一组探针分别跑当前策略与候选策略，不执行工具、不落盘。 */
-export function dryRunPolicy(
-  currentRules: PolicyRule[],
-  candidateRules: PolicyRule[],
-  probes: PolicyProbe[],
-): PolicyDryRunResult {
+export function dryRunPolicy(currentRules: PolicyRule[], candidateRules: PolicyRule[], probes: PolicyProbe[]): PolicyDryRunResult {
   const current = probes.map((probe) => evaluatePolicy(currentRules, probe.tool, probe.args ?? {}));
   const candidate = probes.map((probe) => evaluatePolicy(candidateRules, probe.tool, probe.args ?? {}));
   const diff = diffPolicyRules(currentRules, candidateRules);
   return {
     current,
     candidate,
-    changed: diff.length > 0 || current.some((item, index) => item.decision !== candidate[index].decision || item.ruleId !== candidate[index].ruleId),
+    changed:
+      diff.length > 0 ||
+      current.some((item, index) => item.decision !== candidate[index].decision || item.ruleId !== candidate[index].ruleId),
     probes: probes.map((probe, index) => ({
       tool: probe.tool,
       args: probe.args,

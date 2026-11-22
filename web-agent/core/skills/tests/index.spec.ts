@@ -7,23 +7,38 @@ import skillsPlugin from '../index';
 
 describe('技能契约索引', () => {
   let root = '';
-  afterEach(() => { if (root) rmSync(root, { recursive: true, force: true }); root = ''; });
+  afterEach(() => {
+    if (root) rmSync(root, { recursive: true, force: true });
+    root = '';
+  });
 
   it('读取并公开触发、适用、拒绝及输入输出契约', () => {
     root = mkdtempSync(join(tmpdir(), 'mh-skill-index-'));
     const dir = join(root, '.maharness', 'skills', 'contract-demo');
     mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, 'SKILL.md'), [
-      '---', 'name: contract-demo', 'description: 契约测试技能',
-      'triggers:', '  - 契约测试', '  - skill contract',
-      'applies_when:', '  - 需要验证技能元数据',
-      'reject-when:', '  - 仅修改普通代码',
-      'input: {task, constraints}', 'output: {ok, report}', '---', '正文',
-    ].join('\n'));
+    writeFileSync(
+      join(dir, 'SKILL.md'),
+      [
+        '---',
+        'name: contract-demo',
+        'description: 契约测试技能',
+        'triggers:',
+        '  - 契约测试',
+        '  - skill contract',
+        'applies_when:',
+        '  - 需要验证技能元数据',
+        'reject-when:',
+        '  - 仅修改普通代码',
+        'input: {task, constraints}',
+        'output: {ok, report}',
+        '---',
+        '正文',
+      ].join('\n'),
+    );
 
     let service: { list: () => Array<Record<string, unknown>> } | undefined;
     const ctx = {
-      config: { get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root : fallback },
+      config: { get: (key: string, fallback: unknown) => (key === 'sandboxRoot' ? root : fallback) },
       paths: { data: join(root, 'data') },
       register(value: { kind: string; service?: { id: string; instance: unknown } }) {
         if (value.kind === 'service' && value.service?.id === 'skills') service = value.service.instance as typeof service;
@@ -49,7 +64,7 @@ describe('技能契约索引', () => {
 
     let service: { list: () => Array<Record<string, unknown>> } | undefined;
     const ctx = {
-      config: { get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root : fallback },
+      config: { get: (key: string, fallback: unknown) => (key === 'sandboxRoot' ? root : fallback) },
       paths: { data: join(root, 'data') },
       register(value: { kind: string; service?: { id: string; instance: unknown } }) {
         if (value.kind === 'service' && value.service?.id === 'skills') service = value.service.instance as typeof service;
@@ -83,7 +98,10 @@ describe('技能契约索引', () => {
     skillsPlugin.onLoad(ctx as never);
     const builtin = service?.list().filter((s) => s.source === 'builtin') ?? [];
     assert.equal(builtin.length, 9);
-    assert.ok(builtin.every((s) => !s.contractWarnings), JSON.stringify(builtin));
+    assert.ok(
+      builtin.every((s) => !s.contractWarnings),
+      JSON.stringify(builtin),
+    );
     skillsPlugin.onStop?.();
   });
 
@@ -93,12 +111,13 @@ describe('技能契约索引', () => {
     const skillDir = join(vendor, 'demo-pack', 'skills', 'vendor-demo');
     mkdirSync(skillDir, { recursive: true });
     const file = join(skillDir, 'SKILL.md');
-    const v1 = '---\nname: vendor-demo\ndescription: vendor v1\ntriggers:\n  - v1\napplies-when:\n  - vendor\nreject-when:\n  - none\ninput: task\noutput: result\n---\nv1\n';
+    const v1 =
+      '---\nname: vendor-demo\ndescription: vendor v1\ntriggers:\n  - v1\napplies-when:\n  - vendor\nreject-when:\n  - none\ninput: task\noutput: result\n---\nv1\n';
     const v2 = v1.replace('vendor v1', 'vendor v2').replace('  - v1', '  - v2').replace('\nv1\n', '\nv2\n');
     writeFileSync(file, v1, 'utf-8');
     let service: { list: () => Array<Record<string, unknown>>; invalidateCache: () => void; packDir: string } | undefined;
     const ctx = {
-      config: { get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root : key === 'skills.vendorDir' ? vendor : fallback },
+      config: { get: (key: string, fallback: unknown) => (key === 'sandboxRoot' ? root : key === 'skills.vendorDir' ? vendor : fallback) },
       paths: { data: join(root, 'data') },
       register(value: { kind: string; service?: { id: string; instance: unknown } }) {
         if (value.kind === 'service' && value.service?.id === 'skills') service = value.service.instance as typeof service;

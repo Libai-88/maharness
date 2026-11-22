@@ -14,9 +14,15 @@ describe('atomicWriteFileSync', () => {
     const original = '{"agent":{"maxTurns":12}}\n';
     writeFileSync(target, original, 'utf8');
 
-    assert.throws(() => atomicWriteFileSync(target, '{"agent":{"maxTurns":20}}\n', {
-      beforeRename: () => { throw new Error('injected pre-commit failure'); },
-    }), /injected pre-commit failure/);
+    assert.throws(
+      () =>
+        atomicWriteFileSync(target, '{"agent":{"maxTurns":20}}\n', {
+          beforeRename: () => {
+            throw new Error('injected pre-commit failure');
+          },
+        }),
+      /injected pre-commit failure/,
+    );
 
     assert.equal(readFileSync(target, 'utf8'), original);
     assert.deepEqual(readdirSync(root), ['config.json']);
@@ -33,10 +39,14 @@ describe('atomicWriteFileSync', () => {
     const target = join(root, 'concurrent.json');
     writeFileSync(target, 'v1', 'utf8');
     const expected = fileRevisionSync(target);
-    assert.throws(() => atomicWriteFileSync(target, 'local-v2', {
-      expectedRevision: expected,
-      beforeRename: () => writeFileSync(target, 'external-v2', 'utf8'),
-    }), (error: unknown) => error instanceof ConcurrentWriteError && error.code === 'concurrent_write');
+    assert.throws(
+      () =>
+        atomicWriteFileSync(target, 'local-v2', {
+          expectedRevision: expected,
+          beforeRename: () => writeFileSync(target, 'external-v2', 'utf8'),
+        }),
+      (error: unknown) => error instanceof ConcurrentWriteError && error.code === 'concurrent_write',
+    );
     assert.equal(readFileSync(target, 'utf8'), 'external-v2');
     assert.ok(!readdirSync(root).some((name) => name.includes('concurrent.json.') && name.endsWith('.tmp')));
   });

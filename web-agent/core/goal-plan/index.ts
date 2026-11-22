@@ -30,9 +30,7 @@ export function currentPlanForSession(tenantId = 'default', sessionId = '_defaul
 
 function splitKey(key: string): { tenantId: string; sessionId: string } {
   const index = key.indexOf('\u0000');
-  return index < 0
-    ? { tenantId: 'default', sessionId: key }
-    : { tenantId: key.slice(0, index), sessionId: key.slice(index + 1) };
+  return index < 0 ? { tenantId: 'default', sessionId: key } : { tenantId: key.slice(0, index), sessionId: key.slice(index + 1) };
 }
 
 /** 读取并刷新 LRU 近期性 */
@@ -102,10 +100,7 @@ export default {
         name: '目标计划模式规则',
         description: '引导 LLM 对多步目标使用计划管理',
         priority: 5,
-        content: [
-          '目标计划模式规则：',
-          '多步目标可用 create_plan 跟踪步骤；单步任务直接执行；计划可随实际进展调整。',
-        ].join('\n'),
+        content: ['目标计划模式规则：', '多步目标可用 create_plan 跟踪步骤；单步任务直接执行；计划可随实际进展调整。'].join('\n'),
       },
     });
 
@@ -113,23 +108,33 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'create_plan',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['objective', 'total', 'steps'],
-          properties: { objective: { type: 'string' }, total: { type: 'integer' }, steps: { type: 'string' }, workItems: { type: 'array' }, hint: { type: 'string' } },
+          type: 'object',
+          required: ['objective', 'total', 'steps'],
+          properties: {
+            objective: { type: 'string' },
+            total: { type: 'integer' },
+            steps: { type: 'string' },
+            workItems: { type: 'array' },
+            hint: { type: 'string' },
+          },
         },
-        description: '为多步目标创建执行计划。可使用 steps 记录顺序，也可用 workItems 明确产物、验收、依赖、证据和 token 预估。结构化工作项不会自行授权团队。',
+        description:
+          '为多步目标创建执行计划。可使用 steps 记录顺序，也可用 workItems 明确产物、验收、依赖、证据和 token 预估。结构化工作项不会自行授权团队。',
         parameters: {
           type: 'object',
           properties: {
             objective: { type: 'string', description: '目标描述' },
             steps: { type: 'array', items: { type: 'string' }, description: '步骤标题列表（3-10 步）' },
             workItems: {
-              type: 'array', minItems: 1, maxItems: 10,
+              type: 'array',
+              minItems: 1,
+              maxItems: 10,
               items: {
                 type: 'object',
                 required: ['id', 'objective', 'expectedArtifacts', 'acceptance'],
@@ -150,29 +155,32 @@ export default {
         },
         async handler(args: { objective?: string; steps?: string[]; workItems?: PlanWorkItem[] }, tctx: ToolContext) {
           const objective = String(args.objective ?? '').trim();
-          const steps = Array.isArray(args.steps)
-            ? args.steps.map((s) => String(s).trim()).filter(Boolean)
+          const steps = Array.isArray(args.steps) ? args.steps.map((s) => String(s).trim()).filter(Boolean) : [];
+          const workItems = Array.isArray(args.workItems)
+            ? args.workItems.flatMap((item) => {
+                if (!item || typeof item !== 'object') return [];
+                const id = String(item.id ?? '').trim();
+                const title = String(item.objective ?? '').trim();
+                if (!/^[A-Za-z0-9_-]{1,32}$/.test(id) || !title) return [];
+                return [
+                  {
+                    id,
+                    objective: title,
+                    expectedArtifacts: Array.isArray(item.expectedArtifacts) ? item.expectedArtifacts.map(String).filter(Boolean) : [],
+                    acceptance: Array.isArray(item.acceptance) ? item.acceptance.map(String).filter(Boolean) : [],
+                    dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.map(String).filter(Boolean) : [],
+                    evidenceRefs: Array.isArray(item.evidenceRefs) ? item.evidenceRefs.map(String).filter(Boolean) : [],
+                    estimatedTokens: Math.max(0, Math.trunc(Number(item.estimatedTokens) || 0)),
+                  },
+                ];
+              })
             : [];
-          const workItems = Array.isArray(args.workItems) ? args.workItems.flatMap(item => {
-            if (!item || typeof item !== 'object') return [];
-            const id = String(item.id ?? '').trim();
-            const title = String(item.objective ?? '').trim();
-            if (!/^[A-Za-z0-9_-]{1,32}$/.test(id) || !title) return [];
-            return [{
-              id,
-              objective: title,
-              expectedArtifacts: Array.isArray(item.expectedArtifacts) ? item.expectedArtifacts.map(String).filter(Boolean) : [],
-              acceptance: Array.isArray(item.acceptance) ? item.acceptance.map(String).filter(Boolean) : [],
-              dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.map(String).filter(Boolean) : [],
-              evidenceRefs: Array.isArray(item.evidenceRefs) ? item.evidenceRefs.map(String).filter(Boolean) : [],
-              estimatedTokens: Math.max(0, Math.trunc(Number(item.estimatedTokens) || 0)),
-            }];
-          }) : [];
-          if (!objective || (!steps.length && !workItems.length)) return { ok: false, error: '需要 objective 与至少一个 steps 或 workItems' };
-          const titles = steps.length ? steps : workItems.map(item => item.objective);
+          if (!objective || (!steps.length && !workItems.length))
+            return { ok: false, error: '需要 objective 与至少一个 steps 或 workItems' };
+          const titles = steps.length ? steps : workItems.map((item) => item.objective);
           if (titles.length > 10) return { ok: false, error: '计划最多 10 项' };
-          const ids = new Set(workItems.map(item => item.id));
-          if (ids.size !== workItems.length || workItems.some(item => item.dependsOn.some(id => !ids.has(id))))
+          const ids = new Set(workItems.map((item) => item.id));
+          if (ids.size !== workItems.length || workItems.some((item) => item.dependsOn.some((id) => !ids.has(id))))
             return { ok: false, error: 'workItems 的 id 必须唯一，依赖必须引用已有工作项' };
           const key = sessionKey(tctx);
           putPlan(key, {
@@ -203,13 +211,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'update_plan_progress',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['step', 'title', 'status', 'current'],
+          type: 'object',
+          required: ['step', 'title', 'status', 'current'],
           properties: { step: { type: 'integer' }, title: { type: 'string' }, status: { type: 'string' }, current: { type: 'integer' } },
         },
         description: '更新计划的步骤状态：done（完成）/ in_progress（进行中）/ blocked（受阻）。可附说明。',
@@ -229,7 +238,9 @@ export default {
           const idx = Number(args.stepIndex);
           const st = p.steps[idx];
           if (!st) return { ok: false, error: `步骤不存在: ${idx}` };
-          const status = ['pending', 'in_progress', 'done', 'blocked'].includes(String(args.status)) ? String(args.status) as StepStatus : 'pending';
+          const status = ['pending', 'in_progress', 'done', 'blocked'].includes(String(args.status))
+            ? (String(args.status) as StepStatus)
+            : 'pending';
           if (!canTransition(st.status, status)) {
             return { ok: false, error: `非法步骤状态迁移: ${st.status} → ${status}（步骤 ${idx + 1}）` };
           }
@@ -256,13 +267,14 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'complete_goal',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         outputSchema: {
-          type: 'object', required: ['completed', 'objective'],
+          type: 'object',
+          required: ['completed', 'objective'],
           properties: { completed: { type: 'boolean' }, objective: { type: 'string' } },
         },
         description: '标记目标计划完成，附最终总结。',
@@ -280,7 +292,10 @@ export default {
           if (unfinished.length) {
             return {
               ok: false,
-              error: `还有 ${unfinished.length} 个步骤未完成：${unfinished.slice(0, 6).map(({ step, index }) => `${index + 1}. ${step.title} (${step.status})`).join('；')}${unfinished.length > 6 ? '；…' : ''}`,
+              error: `还有 ${unfinished.length} 个步骤未完成：${unfinished
+                .slice(0, 6)
+                .map(({ step, index }) => `${index + 1}. ${step.title} (${step.status})`)
+                .join('；')}${unfinished.length > 6 ? '；…' : ''}`,
             };
           }
           p.completed = true;
@@ -304,9 +319,13 @@ export default {
         responses: {
           'GET /plan': { type: 'object', required: ['plan'], properties: { plan: { type: ['object', 'null'] } } },
         },
-        router: (async (req: { method?: string; path?: string; query?: Record<string, unknown>; tenantId?: string }, res: {
-          json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void };
-        }) => {
+        router: (async (
+          req: { method?: string; path?: string; query?: Record<string, unknown>; tenantId?: string },
+          res: {
+            json: (v: unknown) => void;
+            status: (n: number) => { json: (v: unknown) => void };
+          },
+        ) => {
           const raw = (req.path ?? '/').replace(/\/+$/, '') || '/';
           if (req.method && req.method !== 'GET') return res.status(405).json({ error: '仅支持 GET' });
           if (raw !== '/' && raw !== '/plan') return res.status(404).json({ error: '未知路径' });

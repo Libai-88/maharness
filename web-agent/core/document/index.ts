@@ -29,41 +29,87 @@ export interface OcrConfig {
   maxChars?: number;
 }
 
-async function runCommand(command: string, argv: string[], cwd: string, timeoutMs: number, signal?: AbortSignal): Promise<{ stdout: string; stderr: string; code: number | null }> {
+async function runCommand(
+  command: string,
+  argv: string[],
+  cwd: string,
+  timeoutMs: number,
+  signal?: AbortSignal,
+): Promise<{ stdout: string; stderr: string; code: number | null }> {
   signal?.throwIfAborted();
   return new Promise((resolve, reject) => {
-    const child = spawn(command, argv, { cwd, env: buildProcessEnv(process.env), stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true, shell: false });
-    let stdout = '', stderr = ''; let failure: Error | undefined;
+    const child = spawn(command, argv, {
+      cwd,
+      env: buildProcessEnv(process.env),
+      stdio: ['ignore', 'pipe', 'pipe'],
+      windowsHide: true,
+      shell: false,
+    });
+    let stdout = '',
+      stderr = '';
+    let failure: Error | undefined;
     const kill = () => {
-      if (process.platform === 'win32' && child.pid) { const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }); killer.on('error', () => child.kill()); }
-      else child.kill('SIGKILL');
+      if (process.platform === 'win32' && child.pid) {
+        const killer = spawn('taskkill', ['/PID', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
+        killer.on('error', () => child.kill());
+      } else child.kill('SIGKILL');
     };
-    const abort = () => { failure = new Error('OCR 已取消'); kill(); };
-    const timer = setTimeout(() => { failure = new Error(`外部命令超时（${timeoutMs}ms）`); kill(); }, timeoutMs);
-    const cleanup = () => { clearTimeout(timer); signal?.removeEventListener('abort', abort); };
-    signal?.addEventListener('abort', abort, { once: true }); if (signal?.aborted) abort();
-    child.stdout.on('data', (chunk: Buffer) => { if (stdout.length < 1_000_000) stdout += chunk.toString(); });
-    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 4_000) stderr += chunk.toString(); });
-    child.on('error', error => { cleanup(); reject(error); });
-    child.on('close', code => { cleanup(); if (failure) reject(failure); else resolve({ stdout, stderr, code }); });
+    const abort = () => {
+      failure = new Error('OCR 已取消');
+      kill();
+    };
+    const timer = setTimeout(() => {
+      failure = new Error(`外部命令超时（${timeoutMs}ms）`);
+      kill();
+    }, timeoutMs);
+    const cleanup = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+    child.stdout.on('data', (chunk: Buffer) => {
+      if (stdout.length < 1_000_000) stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer) => {
+      if (stderr.length < 4_000) stderr += chunk.toString();
+    });
+    child.on('error', (error) => {
+      cleanup();
+      reject(error);
+    });
+    child.on('close', (code) => {
+      cleanup();
+      if (failure) reject(failure);
+      else resolve({ stdout, stderr, code });
+    });
   });
 }
 
 function normalizeText(text: string): string {
-  return text.replace(/\r\n/g, '\n').replace(/[ \t]+\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  return text
+    .replace(/\r\n/g, '\n')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function normalizeTableRows(rows: string[][]): string[][] {
   let cells = 0;
-  return rows.slice(0, MAX_TABLE_ROWS).map((row) => row.map((cell) => {
-    if (cells++ >= MAX_TABLE_CELLS) return '';
-    return String(cell ?? '').replace(/\s+/g, ' ').trim().slice(0, 2_000);
-  }));
+  return rows.slice(0, MAX_TABLE_ROWS).map((row) =>
+    row.map((cell) => {
+      if (cells++ >= MAX_TABLE_CELLS) return '';
+      return String(cell ?? '')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 2_000);
+    }),
+  );
 }
 
 export default {
   id: 'document',
-    name: '文件处理',
+  name: '文件处理',
   version: '0.1.0',
   onLoad(ctx) {
     registerDocumentTools(ctx);
@@ -90,7 +136,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'read_document',
         risk: 'low',
         costHint: 'medium',
@@ -100,14 +146,22 @@ export default {
         limits: `PDF/DOCX ≤ ${MAX_BYTES / 1024 / 1024}MB；正文 ≤ ${MAX_CHARS} 字符；表格 ≤ ${MAX_TABLES} 个 / ${MAX_TABLE_ROWS} 行 / ${MAX_TABLE_CELLS} 单元格`,
         output: '{path, format, pages?, totalChars, truncated, text, tables: [{page?, rows}], tableCount}',
         outputSchema: {
-          type: 'object', required: ['path', 'format', 'totalChars', 'truncated', 'text', 'tables', 'tableCount'],
+          type: 'object',
+          required: ['path', 'format', 'totalChars', 'truncated', 'text', 'tables', 'tableCount'],
           properties: {
-            path: { type: 'string' }, format: { type: 'string' }, pages: { type: 'array' },
-            totalChars: { type: 'integer' }, truncated: { type: 'boolean' }, text: { type: 'string' },
-            tables: { type: 'array' }, tableCount: { type: 'integer' }, tableWarning: { type: 'string' },
+            path: { type: 'string' },
+            format: { type: 'string' },
+            pages: { type: 'array' },
+            totalChars: { type: 'integer' },
+            truncated: { type: 'boolean' },
+            text: { type: 'string' },
+            tables: { type: 'array' },
+            tableCount: { type: 'integer' },
+            tableWarning: { type: 'string' },
           },
         },
-        description: '读取 PDF / DOCX 文档正文与表格（PDF 支持指定页范围）。用于论文、报告、合同等二进制文档；read_file 无法读取二进制文档。',
+        description:
+          '读取 PDF / DOCX 文档正文与表格（PDF 支持指定页范围）。用于论文、报告、合同等二进制文档；read_file 无法读取二进制文档。',
         parameters: {
           type: 'object',
           properties: {
@@ -144,10 +198,37 @@ export default {
           const includeTables = args.tables !== false;
           try {
             const content = await documentService.read(await readFile(file), format.slice(1), { pages, limit: 200 }, tctx.signal);
-            const text = normalizeText(content.blocks.filter(block => block.type !== 'table').map(block => block.text).join('\n\n'));
-            const tables = includeTables ? content.blocks.filter(block => block.rows?.length).slice(0, MAX_TABLES).map(block => ({ ...(block.anchor.page ? { page: block.anchor.page } : {}), rows: normalizeTableRows(block.rows!) })) : [];
-            return { ok: true, data: { path: raw, format: format.slice(1), pages: pages?.length ? pages : undefined, totalChars: text.length, truncated: text.length > maxChars || content.nextOffset !== undefined, text: text.slice(0, maxChars), tables, tableCount: tables.length, version: content.version, nextOffset: content.nextOffset, warnings: content.warnings } };
-          } catch (error) { return { ok: false, error: `文档解析失败: ${error instanceof Error ? error.message : String(error)}` }; }
+            const text = normalizeText(
+              content.blocks
+                .filter((block) => block.type !== 'table')
+                .map((block) => block.text)
+                .join('\n\n'),
+            );
+            const tables = includeTables
+              ? content.blocks
+                  .filter((block) => block.rows?.length)
+                  .slice(0, MAX_TABLES)
+                  .map((block) => ({ ...(block.anchor.page ? { page: block.anchor.page } : {}), rows: normalizeTableRows(block.rows!) }))
+              : [];
+            return {
+              ok: true,
+              data: {
+                path: raw,
+                format: format.slice(1),
+                pages: pages?.length ? pages : undefined,
+                totalChars: text.length,
+                truncated: text.length > maxChars || content.nextOffset !== undefined,
+                text: text.slice(0, maxChars),
+                tables,
+                tableCount: tables.length,
+                version: content.version,
+                nextOffset: content.nextOffset,
+                warnings: content.warnings,
+              },
+            };
+          } catch (error) {
+            return { ok: false, error: `文档解析失败: ${error instanceof Error ? error.message : String(error)}` };
+          }
         },
       },
     });
@@ -156,7 +237,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'ocr_image',
         risk: 'low',
         costHint: 'medium',
@@ -165,8 +246,15 @@ export default {
         contentTrust: 'untrusted',
         output: '{path, text, chars, truncated, command}',
         outputSchema: {
-          type: 'object', required: ['path', 'text', 'chars', 'truncated', 'command'],
-          properties: { path: { type: 'string' }, text: { type: 'string' }, chars: { type: 'integer' }, truncated: { type: 'boolean' }, command: { type: 'string' } },
+          type: 'object',
+          required: ['path', 'text', 'chars', 'truncated', 'command'],
+          properties: {
+            path: { type: 'string' },
+            text: { type: 'string' },
+            chars: { type: 'integer' },
+            truncated: { type: 'boolean' },
+            command: { type: 'string' },
+          },
         },
         description: '对沙箱内图片执行 OCR（需管理员配置 document.ocr.command）。适合截图、扫描图与图片中的文字。',
         parameters: {
@@ -181,7 +269,8 @@ export default {
           const cfg = ctx.config.get<OcrConfig>('document.ocr', {});
           if (!cfg.command) return { ok: false, error: 'OCR 未配置：请在 config.json 设置 document.ocr.command（如 tesseract）' };
           const file = resolveInSandbox(tctx.sandboxRoot, String(args.path ?? ''));
-          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths?.root ?? tctx.sandboxRoot)) return { ok: false, error: '拒绝读取受保护路径' };
+          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths?.root ?? tctx.sandboxRoot))
+            return { ok: false, error: '拒绝读取受保护路径' };
           const ext = extname(file).toLowerCase();
           if (!OCR_EXTS.has(ext)) return { ok: false, error: `不支持的图片格式: ${ext || '(无扩展名)'}` };
           const info = await stat(file).catch(() => null);
@@ -197,7 +286,11 @@ export default {
             const result = await runCommand(cfg.command, argv, tctx.sandboxRoot, timeoutMs, tctx.signal);
             const text = normalizeText(result.stdout);
             if (result.code !== 0) {
-              return { ok: false, error: `OCR 失败（exit ${result.code}）: ${result.stderr.slice(0, 500) || '外部引擎未成功完成'}`, data: { text: text.slice(0, maxChars), partial: true } };
+              return {
+                ok: false,
+                error: `OCR 失败（exit ${result.code}）: ${result.stderr.slice(0, 500) || '外部引擎未成功完成'}`,
+                data: { text: text.slice(0, maxChars), partial: true },
+              };
             }
             return {
               ok: true,
@@ -221,7 +314,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'ocr_pdf',
         risk: 'low',
         costHint: 'medium',
@@ -230,10 +323,18 @@ export default {
         contentTrust: 'untrusted',
         output: '{path, pages: [{page, text}], text, rendered, truncated}',
         outputSchema: {
-          type: 'object', required: ['path', 'pages', 'text', 'rendered', 'truncated'],
-          properties: { path: { type: 'string' }, pages: { type: 'array' }, text: { type: 'string' }, rendered: { type: 'integer' }, truncated: { type: 'boolean' } },
+          type: 'object',
+          required: ['path', 'pages', 'text', 'rendered', 'truncated'],
+          properties: {
+            path: { type: 'string' },
+            pages: { type: 'array' },
+            text: { type: 'string' },
+            rendered: { type: 'integer' },
+            truncated: { type: 'boolean' },
+          },
         },
-        description: '扫描版 PDF 的 OCR 流水线：先用 document.ocr.pdfCommand 渲染页面，再对每页执行 document.ocr.command。两者均需管理员配置。',
+        description:
+          '扫描版 PDF 的 OCR 流水线：先用 document.ocr.pdfCommand 渲染页面，再对每页执行 document.ocr.command。两者均需管理员配置。',
         parameters: {
           type: 'object',
           properties: {
@@ -248,7 +349,8 @@ export default {
           if (!cfg.pdfCommand) return { ok: false, error: '扫描版 PDF OCR 未配置：请设置 document.ocr.pdfCommand（PDF→图片渲染命令）' };
           if (!cfg.command) return { ok: false, error: 'OCR 未配置：请设置 document.ocr.command' };
           const file = resolveInSandbox(tctx.sandboxRoot, String(args.path ?? ''));
-          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths?.root ?? tctx.sandboxRoot)) return { ok: false, error: '拒绝读取受保护路径' };
+          if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths?.root ?? tctx.sandboxRoot))
+            return { ok: false, error: '拒绝读取受保护路径' };
           if (extname(file).toLowerCase() !== '.pdf') return { ok: false, error: 'ocr_pdf 只接受 .pdf 文件' };
           const info = await stat(file).catch(() => null);
           if (!info?.isFile()) return { ok: false, error: `PDF 不存在: ${args.path}` };
@@ -260,29 +362,39 @@ export default {
           let outDir = '';
           try {
             outDir = await mkdtemp(join(tmpdir(), 'mh-pdf-ocr-'));
-            const pdfArgs = (Array.isArray(cfg.pdfArgs) && cfg.pdfArgs.length
-              ? cfg.pdfArgs
-              : ['-png', '-r', '150', '{input}', '{outDir}/page'])
-              .map((arg) => arg.replaceAll('{input}', file).replaceAll('{outDir}', outDir));
+            const pdfArgs = (
+              Array.isArray(cfg.pdfArgs) && cfg.pdfArgs.length ? cfg.pdfArgs : ['-png', '-r', '150', '{input}', '{outDir}/page']
+            ).map((arg) => arg.replaceAll('{input}', file).replaceAll('{outDir}', outDir));
             const render = await runCommand(cfg.pdfCommand, pdfArgs, tctx.sandboxRoot, timeoutMs, tctx.signal);
-            const rendered = (await readdir(outDir)).filter((name) => OCR_EXTS.has(extname(name).toLowerCase())).sort().slice(0, maxPages);
+            const rendered = (await readdir(outDir))
+              .filter((name) => OCR_EXTS.has(extname(name).toLowerCase()))
+              .sort()
+              .slice(0, maxPages);
             if (!rendered.length) {
               return { ok: false, error: `PDF 页面渲染失败（exit ${render.code}）: ${render.stderr.slice(0, 500) || '没有生成图片'}` };
             }
             const pages: { page: number; text: string }[] = [];
             for (let i = 0; i < rendered.length; i++) {
               const pageFile = join(outDir, rendered[i]!);
-              const argv = (Array.isArray(cfg.args) && cfg.args.length ? cfg.args : ['{file}', 'stdout'])
-                .map((arg) => arg.replaceAll('{file}', pageFile));
+              const argv = (Array.isArray(cfg.args) && cfg.args.length ? cfg.args : ['{file}', 'stdout']).map((arg) =>
+                arg.replaceAll('{file}', pageFile),
+              );
               if (!argv.some((arg) => arg.includes(pageFile))) argv.push(pageFile);
               const ocr = await runCommand(cfg.command, argv, tctx.sandboxRoot, timeoutMs, tctx.signal);
               const text = normalizeText(ocr.stdout);
               pages.push({ page: i + 1, text: text.slice(0, maxChars) });
               if (ocr.code !== 0) {
-                return { ok: false, error: `第 ${i + 1} 页 OCR 失败（exit ${ocr.code}）: ${ocr.stderr.slice(0, 500) || '外部引擎未成功完成'}`, data: { pages, partial: true } };
+                return {
+                  ok: false,
+                  error: `第 ${i + 1} 页 OCR 失败（exit ${ocr.code}）: ${ocr.stderr.slice(0, 500) || '外部引擎未成功完成'}`,
+                  data: { pages, partial: true },
+                };
               }
             }
-            const text = pages.map((page) => `--- page ${page.page} ---\n${page.text}`).join('\n\n').slice(0, maxChars);
+            const text = pages
+              .map((page) => `--- page ${page.page} ---\n${page.text}`)
+              .join('\n\n')
+              .slice(0, maxChars);
             return {
               ok: true,
               data: { path: String(args.path ?? ''), rendered: rendered.length, pages, text, truncated: text.length >= maxChars },

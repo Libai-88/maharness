@@ -1,4 +1,7 @@
-export interface MemoryPrivacyResult { sensitive: boolean; reason?: string }
+export interface MemoryPrivacyResult {
+  sensitive: boolean;
+  reason?: string;
+}
 
 const SECRET_PATTERNS: Array<[RegExp, string]> = [
   [/-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/i, 'private-key'],

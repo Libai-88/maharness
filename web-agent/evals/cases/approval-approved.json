@@ -10,7 +10,10 @@
   "requests": [
     {
       "chunks": [
-        { "type": "tool_call", "toolCall": { "id": "approval-call-1", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } } },
+        {
+          "type": "tool_call",
+          "toolCall": { "id": "approval-call-1", "type": "function", "function": { "name": "eval_approval_action", "arguments": "{}" } }
+        },
         { "type": "usage", "input": 30, "output": 8 },
         { "type": "done" }
       ]

@@ -15,17 +15,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "powershell_execute",
-        "env_probe",
-        "command_start",
-        "command_output",
-        "command_wait",
-        "command_cancel"
-      ],
-      "persona": [
-        "powershell-rules"
-      ]
+      "tool": ["powershell_execute", "env_probe", "command_start", "command_output", "command_wait", "command_cancel"],
+      "persona": ["powershell-rules"]
     }
   },
   "apiVersion": 2

@@ -5,8 +5,19 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import type { RunInfo } from '../run-api';
 import RunControls from './RunControls';
 import { Suspense, lazy, useEffect, useRef, useState } from 'react';
-import type { ApprovalItem, ChatMessage, CheckpointInfo, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderInfo, Session, TodoCard, TraceStep } from '../types';
-import type { Theme, Brand } from '../App';
+import type {
+  ApprovalItem,
+  ChatMessage,
+  CheckpointInfo,
+  PluginDiagnostic,
+  PluginInfo,
+  PluginNavItem,
+  ProviderInfo,
+  Session,
+  TodoCard,
+  TraceStep,
+} from '../types';
+import type { Brand, Theme } from '../app-shell';
 import type { MainTab } from './Sidebar';
 import { AGENT_ID, AGENT_NAME, APP_VERSION, sys } from '../voice';
 import { Toaster } from '@/components/ui/sonner';
@@ -112,17 +123,71 @@ interface Props {
 
 export default function AppView(props: Props) {
   const {
-    sessions, activeId, messages, streaming, models, sel, plugins, pluginDiagnostics, providers,
-    activeTab, settingsOpen, traceSteps, traceStats, traceOpen, plan, todos, theme, brand,
-    checkpoint, resuming, budgetHit, sessionCost, streamStatus, liveState, squad, approvals,
-    providerAuthFailed, currentSession, groupMembers, activity, modeLabel, modelLabel,
-    modelTag, pluginRunning, pluginNav, modeItems, workbenchTabKey, activePluginNav, pendingInference,
+    sessions,
+    activeId,
+    messages,
+    streaming,
+    models,
+    sel,
+    plugins,
+    pluginDiagnostics,
+    providers,
+    activeTab,
+    settingsOpen,
+    traceSteps,
+    traceStats,
+    traceOpen,
+    plan,
+    todos,
+    theme,
+    brand,
+    checkpoint,
+    resuming,
+    budgetHit,
+    sessionCost,
+    streamStatus,
+    liveState,
+    squad,
+    approvals,
+    providerAuthFailed,
+    currentSession,
+    groupMembers,
+    activity,
+    modeLabel,
+    modelLabel,
+    modelTag,
+    pluginRunning,
+    pluginNav,
+    modeItems,
+    workbenchTabKey,
+    activePluginNav,
+    pendingInference,
   } = props;
 
   const [pendingFile, setPendingFile] = useState<{ material: Material; quote?: string }>();
   const [viewing, setViewing] = useState<{ material: Material; block?: string; page?: number }>();
-  const useMaterial = (material: Material, quote?: string) => { setPendingFile({ material, quote }); setViewing(undefined); props.onActiveTabChange('chat'); };
-  useEffect(() => { const openSource = () => { const query = new URLSearchParams(location.hash.slice(1)); const id = query.get('material'); if (!id) return; void materialApi.get(id).then(material => { if (query.get('version') !== material.version) throw new Error('来源版本不匹配，请重新选择文件'); setViewing({ material, block: query.get('block') ?? undefined, page: Number(query.get('page')) || undefined }); }).catch(error => toast.error(String(error))); }; window.addEventListener('hashchange', openSource); openSource(); return () => window.removeEventListener('hashchange', openSource); }, []);
+  const handleUseMaterial = (material: Material, quote?: string) => {
+    setPendingFile({ material, quote });
+    setViewing(undefined);
+    props.onActiveTabChange('chat');
+  };
+  useEffect(() => {
+    const openSource = () => {
+      const query = new URLSearchParams(location.hash.slice(1));
+      const id = query.get('material');
+      if (!id) return;
+      void materialApi
+        .get(id)
+        .then((material) => {
+          if (query.get('version') !== material.version) throw new Error('来源版本不匹配，请重新选择文件');
+          setViewing({ material, block: query.get('block') ?? undefined, page: Number(query.get('page')) || undefined });
+        })
+        .catch((error) => toast.error(String(error)));
+    };
+    window.addEventListener('hashchange', openSource);
+    openSource();
+    return () => window.removeEventListener('hashchange', openSource);
+  }, []);
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 1100px)').matches);
   const traceToggleRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -169,133 +234,139 @@ export default function AppView(props: Props) {
           version={APP_VERSION}
         />
 
-      <SidebarInset className="min-h-0 overflow-hidden min-w-0">
-        <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur-md">
-          {settingsOpen ? (
-            <div className="flex min-w-0 items-center gap-2 text-[13px]">
-              <SidebarTrigger className="size-8 shrink-0" />
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem className="font-mono text-[11px] text-muted-foreground">{AGENT_ID}</BreadcrumbItem>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>设置</BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            </div>
-          ) : activeTab === 'chat' ? (
-            <div className="flex min-w-0 items-center gap-3">
-              <SidebarTrigger className="size-8 shrink-0" />
-              <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#fff8ed] ring-1 ring-black/5">
-                <BrandMark size={26} />
-              </div>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="truncate text-[14px] font-semibold tracking-[-0.015em]">
-                    {currentSession?.title ?? '新会话'}
-                  </span>
-                </div>
-                <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
-                  <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
-                  <span className="truncate" data-testid="connection-status" data-state={liveState}>
-                    {liveState === 'down'
-                      ? sys.offline
-                      : streaming
-                        ? activity ?? streamStatus ?? sys.started
-                        : groupMembers.length
-                          ? `${groupMembers.length} 位帮手协作中`
-                          : `${AGENT_NAME} · 在线`}
-                  </span>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="flex min-w-0 items-center gap-2 text-[13px]">
-              <SidebarTrigger className="size-8 shrink-0" />
-              <Breadcrumb>
-                <BreadcrumbList>
-                  <BreadcrumbItem className="font-mono text-[11px] text-muted-foreground">{AGENT_ID}</BreadcrumbItem>
-                  <BreadcrumbSeparator />
-                  <BreadcrumbItem>
-                    <BreadcrumbPage>
-                      {activeTab === 'runs' ? '运行记录' : activeTab === 'files' ? '文件工作区' : activeTab === 'society' ? 'AI 社会' : activeTab === 'workbench' ? '工作台' : activeTab === 'automations' ? '自动化' : activePluginNav ? activePluginNav.pluginName : activeTab === 'plugins' ? '插件管理' : '缓存与成本'}
-                    </BreadcrumbPage>
-                  </BreadcrumbItem>
-                </BreadcrumbList>
-              </Breadcrumb>
-            </div>
-          )}
-          <div className="flex shrink-0 items-center gap-1.5">
+        <SidebarInset className="min-h-0 overflow-hidden min-w-0">
+          <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur-md">
             {settingsOpen ? (
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => props.onTab('chat')}
-                title="关闭设置"
-                aria-label="关闭设置"
-              >
-                <X />
-              </Button>
+              <div className="flex min-w-0 items-center gap-2 text-[13px]">
+                <SidebarTrigger className="size-8 shrink-0" />
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem className="font-mono text-[11px] text-muted-foreground">{AGENT_ID}</BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>设置</BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+              </div>
             ) : activeTab === 'chat' ? (
-              <>
-                <Select value={currentSession?.mode ?? 'normal'} onValueChange={(key) => void props.onSetSessionMode(key)}>
-                  <SelectTrigger size="sm" className="h-8 max-w-[220px]" aria-label="会话模式" title={modeLabel}>
-                    <MessageCircle className="md:hidden" />
-                    <SelectValue>{modeLabel}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectGroup>
-                      {modeItems.map((item) => (
-                        <SelectItem key={item.key} value={item.key}>
-                          {item.label}
-                          {item.sub && <span className="ml-auto font-mono text-[10px] text-muted-foreground">{item.sub}</span>}
-                        </SelectItem>
-                      ))}
-                    </SelectGroup>
-                  </SelectContent>
-                </Select>
-                <Button
-                  ref={traceToggleRef}
-                  variant={traceOpen ? 'secondary' : 'ghost'}
-                  size="icon-sm"
-                  onClick={() => props.onTraceOpenChange(!traceOpen)}
-                  title="运行轨迹面板"
-                  aria-label="运行轨迹面板"
-                  aria-expanded={traceOpen}
-                  aria-controls={traceOpen ? 'chat-trace-panel' : undefined}
-                >
-                  {traceOpen ? <X /> : <PanelRight />}
-                </Button>
-              </>
+              <div className="flex min-w-0 items-center gap-3">
+                <SidebarTrigger className="size-8 shrink-0" />
+                <div className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-[#fff8ed] ring-1 ring-black/5">
+                  <BrandMark size={26} />
+                </div>
+                <div className="min-w-0">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-[14px] font-semibold tracking-[-0.015em]">{currentSession?.title ?? '新会话'}</span>
+                  </div>
+                  <div className="mt-0.5 flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                    <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
+                    <span className="truncate" data-testid="connection-status" data-state={liveState}>
+                      {liveState === 'down'
+                        ? sys.offline
+                        : streaming
+                          ? (activity ?? streamStatus ?? sys.started)
+                          : groupMembers.length
+                            ? `${groupMembers.length} 位帮手协作中`
+                            : `${AGENT_NAME} · 在线`}
+                    </span>
+                  </div>
+                </div>
+              </div>
             ) : (
-              <>
-                <Badge variant="outline" title={liveState === 'down' ? sys.offline : '与后端的实时事件通道正常'}>
-                  <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
-                  {liveState === 'down' ? '重连中' : '实时'}
-                </Badge>
-                <Button
-                  variant="ghost"
-                  size="icon-sm"
-                  onClick={() => props.onTab('chat')}
-                  title="关闭页面，返回会话"
-                  aria-label="关闭页面，返回会话"
-                >
+              <div className="flex min-w-0 items-center gap-2 text-[13px]">
+                <SidebarTrigger className="size-8 shrink-0" />
+                <Breadcrumb>
+                  <BreadcrumbList>
+                    <BreadcrumbItem className="font-mono text-[11px] text-muted-foreground">{AGENT_ID}</BreadcrumbItem>
+                    <BreadcrumbSeparator />
+                    <BreadcrumbItem>
+                      <BreadcrumbPage>
+                        {activeTab === 'runs'
+                          ? '运行记录'
+                          : activeTab === 'files'
+                            ? '文件工作区'
+                            : activeTab === 'society'
+                              ? 'AI 社会'
+                              : activeTab === 'workbench'
+                                ? '工作台'
+                                : activeTab === 'automations'
+                                  ? '自动化'
+                                  : activePluginNav
+                                    ? activePluginNav.pluginName
+                                    : activeTab === 'plugins'
+                                      ? '插件管理'
+                                      : '缓存与成本'}
+                      </BreadcrumbPage>
+                    </BreadcrumbItem>
+                  </BreadcrumbList>
+                </Breadcrumb>
+              </div>
+            )}
+            <div className="flex shrink-0 items-center gap-1.5">
+              {settingsOpen ? (
+                <Button variant="ghost" size="icon-sm" onClick={() => props.onTab('chat')} title="关闭设置" aria-label="关闭设置">
                   <X />
                 </Button>
-              </>
-            )}
-          </div>
-        </header>
+              ) : activeTab === 'chat' ? (
+                <>
+                  <Select value={currentSession?.mode ?? 'normal'} onValueChange={(key) => void props.onSetSessionMode(key)}>
+                    <SelectTrigger size="sm" className="h-8 max-w-[220px]" aria-label="会话模式" title={modeLabel}>
+                      <MessageCircle className="md:hidden" />
+                      <SelectValue>{modeLabel}</SelectValue>
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectGroup>
+                        {modeItems.map((item) => (
+                          <SelectItem key={item.key} value={item.key}>
+                            {item.label}
+                            {item.sub && <span className="ml-auto font-mono text-[10px] text-muted-foreground">{item.sub}</span>}
+                          </SelectItem>
+                        ))}
+                      </SelectGroup>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    ref={traceToggleRef}
+                    variant={traceOpen ? 'secondary' : 'ghost'}
+                    size="icon-sm"
+                    onClick={() => props.onTraceOpenChange(!traceOpen)}
+                    title="运行轨迹面板"
+                    aria-label="运行轨迹面板"
+                    aria-expanded={traceOpen}
+                    aria-controls={traceOpen ? 'chat-trace-panel' : undefined}
+                  >
+                    {traceOpen ? <X /> : <PanelRight />}
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Badge variant="outline" title={liveState === 'down' ? sys.offline : '与后端的实时事件通道正常'}>
+                    <span className={cn('size-1.5 rounded-full', liveState === 'down' ? 'bg-destructive' : 'bg-primary')} />
+                    {liveState === 'down' ? '重连中' : '实时'}
+                  </Badge>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    onClick={() => props.onTab('chat')}
+                    title="关闭页面，返回会话"
+                    aria-label="关闭页面，返回会话"
+                  >
+                    <X />
+                  </Button>
+                </>
+              )}
+            </div>
+          </header>
 
-        <Suspense fallback={viewFallback}>
-            <div
-              className="flex min-h-0 min-w-0 flex-1 overflow-hidden"
-              key={settingsOpen ? 'settings' : activeTab}
-            >
+          <Suspense fallback={viewFallback}>
+            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden" key={settingsOpen ? 'settings' : activeTab}>
               {settingsOpen ? (
                 <SettingsView
-                  onStartTask={() => { props.onSettingsOpenChange(false); props.onActiveTabChange('chat'); }}
+                  onStartTask={() => {
+                    props.onSettingsOpenChange(false);
+                    props.onActiveTabChange('chat');
+                  }}
                   providers={providers}
                   onChanged={props.onRefreshProviders}
                   theme={theme}
@@ -314,7 +385,33 @@ export default function AppView(props: Props) {
                     <ChatView
                       initialMaterial={pendingFile}
                       onMaterialAttached={() => setPendingFile(undefined)}
-                      runControls={<>{props.currentRun && <RunControls key={props.currentRun.id} run={props.currentRun} onChanged={props.onRunChanged} onResume={props.onResume} onNew={props.onNewTask} />}<RunFiles sessionId={activeId ?? undefined} revision={props.currentRun?.updatedAt} onOpen={material => setViewing({ material })} />{props.currentRun?.materials?.length ? <div className="flex flex-wrap gap-2 px-4 py-2">{props.currentRun.materials.map(material => <Button key={material.id} variant="ghost" size="sm" onClick={() => setViewing({ material })}>{material.name}</Button>)}</div> : null}</>}
+                      runControls={
+                        <>
+                          {props.currentRun && (
+                            <RunControls
+                              key={props.currentRun.id}
+                              run={props.currentRun}
+                              onChanged={props.onRunChanged}
+                              onResume={props.onResume}
+                              onNew={props.onNewTask}
+                            />
+                          )}
+                          <RunFiles
+                            sessionId={activeId ?? undefined}
+                            revision={props.currentRun?.updatedAt}
+                            onOpen={(material) => setViewing({ material })}
+                          />
+                          {props.currentRun?.materials?.length ? (
+                            <div className="flex flex-wrap gap-2 px-4 py-2">
+                              {props.currentRun.materials.map((material) => (
+                                <Button key={material.id} variant="ghost" size="sm" onClick={() => setViewing({ material })}>
+                                  {material.name}
+                                </Button>
+                              ))}
+                            </div>
+                          ) : null}
+                        </>
+                      }
                       messages={messages}
                       streaming={streaming}
                       onSend={props.onSend}
@@ -351,18 +448,25 @@ export default function AppView(props: Props) {
                     />
                   </div>
                   {!narrow && traceOpen && (
-                    <aside id="chat-trace-panel" data-testid="trace-panel" aria-label="运行轨迹" className="flex w-80 shrink-0 flex-col border-l bg-card xl:w-[22rem]">
-                      <TracePanel
-                        run={props.currentRun}
-                        steps={traceSteps}
-                        stats={traceStats}
-                        onRefresh={props.onRefreshTrace}
-                      />
+                    <aside
+                      id="chat-trace-panel"
+                      data-testid="trace-panel"
+                      aria-label="运行轨迹"
+                      className="flex w-80 shrink-0 flex-col border-l bg-card xl:w-[22rem]"
+                    >
+                      <TracePanel run={props.currentRun} steps={traceSteps} stats={traceStats} onRefresh={props.onRefreshTrace} />
                     </aside>
                   )}
                   {narrow && (
                     <Sheet open={traceOpen} onOpenChange={props.onTraceOpenChange}>
-                      <SheetContent id="chat-trace-panel" className="w-[min(92vw,24rem)] gap-0" onCloseAutoFocus={(event) => { event.preventDefault(); traceToggleRef.current?.focus(); }}>
+                      <SheetContent
+                        id="chat-trace-panel"
+                        className="w-[min(92vw,24rem)] gap-0"
+                        onCloseAutoFocus={(event) => {
+                          event.preventDefault();
+                          traceToggleRef.current?.focus();
+                        }}
+                      >
                         <SheetHeader className="pr-12">
                           <SheetTitle>运行轨迹</SheetTitle>
                           <SheetDescription>模型调用、工具执行与缓存使用。</SheetDescription>
@@ -375,11 +479,15 @@ export default function AppView(props: Props) {
                   )}
                 </div>
               ) : activeTab === 'runs' ? (
-                <RunsView onSession={id => props.onSelectSession(id)} />
+                <RunsView onSession={(id) => props.onSelectSession(id)} />
               ) : activeTab === 'files' ? (
-                <FilesView onFrameworkTask={props.onFrameworkTask} onUseMaterial={useMaterial} />
+                <FilesView onFrameworkTask={props.onFrameworkTask} onUseMaterial={handleUseMaterial} />
               ) : activeTab === 'society' ? (
-                <SocietyView onSession={props.onSelectSession} onAutomations={() => props.onTab('automations')} onOpenWorkbench={() => props.onTab(workbenchTabKey ?? 'workbench')} />
+                <SocietyView
+                  onSession={props.onSelectSession}
+                  onAutomations={() => props.onTab('automations')}
+                  onOpenWorkbench={() => props.onTab(workbenchTabKey ?? 'workbench')}
+                />
               ) : activeTab === 'workbench' ? (
                 <WorkbenchView
                   onSession={props.onSelectSession}
@@ -396,16 +504,30 @@ export default function AppView(props: Props) {
                 <StatsView />
               )}
             </div>
-        </Suspense>
-      </SidebarInset>
+          </Suspense>
+        </SidebarInset>
 
-      <Dialog open={Boolean(viewing)} onOpenChange={open => { if (!open) { setViewing(undefined); history.replaceState(null, '', location.pathname + location.search); } }}><DialogContent className="flex h-[90dvh] max-w-5xl flex-col sm:max-w-5xl"><DialogHeader><DialogTitle>{viewing?.material.name ?? '文件预览'}</DialogTitle></DialogHeader>{viewing && <Suspense fallback={<Spinner />}><MaterialViewer material={viewing.material} focusBlock={viewing.block} page={viewing.page} onUse={useMaterial} /></Suspense>}</DialogContent></Dialog>
-      <Toaster
-        theme={theme}
-        position="bottom-right"
-        gap={8}
-        visibleToasts={4}
-      />
+        <Dialog
+          open={Boolean(viewing)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setViewing(undefined);
+              history.replaceState(null, '', location.pathname + location.search);
+            }
+          }}
+        >
+          <DialogContent className="flex h-[90dvh] max-w-5xl flex-col sm:max-w-5xl">
+            <DialogHeader>
+              <DialogTitle>{viewing?.material.name ?? '文件预览'}</DialogTitle>
+            </DialogHeader>
+            {viewing && (
+              <Suspense fallback={<Spinner />}>
+                <MaterialViewer material={viewing.material} focusBlock={viewing.block} page={viewing.page} onUse={handleUseMaterial} />
+              </Suspense>
+            )}
+          </DialogContent>
+        </Dialog>
+        <Toaster theme={theme} position="bottom-right" gap={8} visibleToasts={4} />
       </SidebarProvider>
     </TooltipProvider>
   );

@@ -3,7 +3,7 @@
   "plugins": {
     "reference-hello": {
       "version": "0.1.0",
-      "integrity": "d34657f667",
+      "integrity": "0919ccadc4",
       "compatibility": {
         "api": {
           "min": "3.0.0",
@@ -17,11 +17,11 @@
           ]
         }
       },
-      "updatedAt": 1795052927347
+      "updatedAt": 1795261923942
     },
     "workbench": {
       "version": "0.4.0",
-      "integrity": "8da203e10a",
+      "integrity": "1f9bd1fc3d",
       "compatibility": {
         "api": {
           "min": "3.0.0",
@@ -48,7 +48,7 @@
           ]
         }
       },
-      "updatedAt": 1795052927348
+      "updatedAt": 1795261923943
     }
   }
 }

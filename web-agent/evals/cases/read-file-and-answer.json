@@ -6,9 +6,7 @@
       "notes.txt": "hello maharness"
     }
   },
-  "messages": [
-    { "role": "user", "content": "请读取 notes.txt 文件，然后告诉我里面的内容是什么" }
-  ],
+  "messages": [{ "role": "user", "content": "请读取 notes.txt 文件，然后告诉我里面的内容是什么" }],
   "requests": [
     {
       "chunks": [

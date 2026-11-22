@@ -4,13 +4,29 @@ import { routeForCapability, capabilitySatisfied, capabilityRejectionReasons, ro
 import type { ModelCapability, ProviderDef } from '../../../kernel/types';
 
 const cap = (modelId: string, over: Partial<ModelCapability> = {}): ModelCapability => ({
-  modelId, contextWindow: 32_768, maxOutput: 4096, vision: false, tools: true, reasoning: false,
-  priceIn: 1, priceOut: 4, enabled: true, source: 'inferred', ...over,
+  modelId,
+  contextWindow: 32_768,
+  maxOutput: 4096,
+  vision: false,
+  tools: true,
+  reasoning: false,
+  priceIn: 1,
+  priceOut: 4,
+  enabled: true,
+  source: 'inferred',
+  ...over,
 });
 
 const provider = (id: string, defaultModel: string, models: ModelCapability[]): ProviderDef => ({
-  id, label: id.toUpperCase(), defaultModel, protocol: 'openai', models, prices: { in: 1, out: 4 },
-  chat: async function* () { /* 测试不实际请求 */ },
+  id,
+  label: id.toUpperCase(),
+  defaultModel,
+  protocol: 'openai',
+  models,
+  prices: { in: 1, out: 4 },
+  chat: async function* () {
+    /* 测试不实际请求 */
+  },
 });
 
 describe('能力路由 routeForCapability', () => {
@@ -65,15 +81,25 @@ describe('能力路由 routeForCapability', () => {
   });
 
   it('minContext 参与筛选', () => {
-    const r = routeForCapability({ minContext: 200_000 }, [deepseek, provider('claude', 'claude-sonnet-4-5', [cap('claude-sonnet-4-5', { contextWindow: 200_000 })])],
-      { providerId: 'deepseek', model: 'deepseek-chat' });
+    const r = routeForCapability(
+      { minContext: 200_000 },
+      [deepseek, provider('claude', 'claude-sonnet-4-5', [cap('claude-sonnet-4-5', { contextWindow: 200_000 })])],
+      { providerId: 'deepseek', model: 'deepseek-chat' },
+    );
     assert.equal(r?.model, 'claude-sonnet-4-5');
   });
 
   it('按延迟、隐私和风险约束筛选并保留可解释评分', () => {
-    const local = provider('local', 'local-fast', [cap('local-fast', { latencyMs: 80, privacyTier: 'local', riskLevel: 'low', vision: true })]);
-    const external = provider('external', 'external-slow', [cap('external-slow', { latencyMs: 900, privacyTier: 'external', riskLevel: 'high', vision: true })]);
-    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'medium' }, [external, local], { providerId: 'deepseek', model: 'deepseek-chat' });
+    const local = provider('local', 'local-fast', [
+      cap('local-fast', { latencyMs: 80, privacyTier: 'local', riskLevel: 'low', vision: true }),
+    ]);
+    const external = provider('external', 'external-slow', [
+      cap('external-slow', { latencyMs: 900, privacyTier: 'external', riskLevel: 'high', vision: true }),
+    ]);
+    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'medium' }, [external, local], {
+      providerId: 'deepseek',
+      model: 'deepseek-chat',
+    });
     assert.equal(r?.provider.id, 'local');
     assert.match(r?.candidates.find((c) => c.accepted)?.reasons.join(' ') ?? '', /延迟≈80ms/);
     assert.ok(r?.candidates.find((c) => c.model === 'external-slow')?.reasons.includes('不满足至少一项能力要求'));
@@ -81,7 +107,10 @@ describe('能力路由 routeForCapability', () => {
 
   it('显式延迟、隐私和风险约束缺少画像时 fail-closed 并说明缺口', () => {
     const unprofiled = provider('unprofiled', 'vision-model', [cap('vision-model', { vision: true })]);
-    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'low' }, [unprofiled], { providerId: 'text', model: 'text-model' });
+    const r = routeForCapability({ vision: true, maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'low' }, [unprofiled], {
+      providerId: 'text',
+      model: 'text-model',
+    });
     assert.equal(r, undefined, '没有画像证据时不能声称满足显式约束');
     assert.deepEqual(capabilityRejectionReasons({ maxLatencyMs: 200, privacyTier: 'local', maxRiskLevel: 'low' }, cap('vision-model')), [
       '不满足至少一项能力要求',

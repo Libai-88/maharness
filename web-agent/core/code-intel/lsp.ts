@@ -35,11 +35,28 @@ interface Pending {
 
 const MAX_HEADER = 64 * 1024;
 const ENV_ALLOWLIST = new Set([
-  'path', 'pathext', 'comspec', 'systemroot', 'windir', 'systemdrive',
-  'home', 'userprofile', 'homedrive', 'homepage', 'temp', 'tmp',
-  'appdata', 'localappdata', 'allusersprofile', 'programdata',
-  'programfiles', 'programfiles(x86)', 'programw6432',
-  'lang', 'lc_all', 'tz',
+  'path',
+  'pathext',
+  'comspec',
+  'systemroot',
+  'windir',
+  'systemdrive',
+  'home',
+  'userprofile',
+  'homedrive',
+  'homepage',
+  'temp',
+  'tmp',
+  'appdata',
+  'localappdata',
+  'allusersprofile',
+  'programdata',
+  'programfiles',
+  'programfiles(x86)',
+  'programw6432',
+  'lang',
+  'lc_all',
+  'tz',
 ]);
 
 function childEnv(): Record<string, string> {
@@ -88,7 +105,7 @@ export class LspClient {
     });
     this.proc.on('exit', (code) => this.failAll(new Error(`LSP server ${this.name} exited code=${code}`)));
     const rootUri = pathToFileURL(this.root).href;
-    const result = await this.request('initialize', {
+    const result = (await this.request('initialize', {
       processId: process.pid,
       rootUri,
       workspaceFolders: [{ uri: rootUri, name: basename(this.root) }],
@@ -102,7 +119,7 @@ export class LspClient {
         workspace: { workspaceFolders: true },
       },
       ...(this.cfg.initializationOptions ? { initializationOptions: this.cfg.initializationOptions } : {}),
-    }) as { capabilities?: unknown };
+    })) as { capabilities?: unknown };
     if (!result || typeof result !== 'object') throw new Error(`LSP server ${this.name} initialize 返回非法`);
     this.notify('initialized', {});
     this.initialized = true;
@@ -127,8 +144,9 @@ export class LspClient {
         reject(new Error(`LSP ${this.name} ${method} 超时`));
       }, timeoutMs);
       this.pending.set(id, { resolve, reject, timer });
-      try { this.send({ jsonrpc: '2.0', id, method, params }); }
-      catch (err) {
+      try {
+        this.send({ jsonrpc: '2.0', id, method, params });
+      } catch (err) {
         clearTimeout(timer);
         this.pending.delete(id);
         reject(err instanceof Error ? err : new Error(String(err)));
@@ -146,13 +164,20 @@ export class LspClient {
       }
       const header = this.buf.slice(0, headerEnd).toString('ascii');
       const match = /Content-Length:\s*(\d+)/i.exec(header);
-      if (!match) { this.buf = this.buf.slice(headerEnd + 4); continue; }
+      if (!match) {
+        this.buf = this.buf.slice(headerEnd + 4);
+        continue;
+      }
       const length = Number(match[1]);
       const start = headerEnd + 4;
       if (this.buf.length < start + length) return;
       const body = this.buf.slice(start, start + length).toString('utf8');
       this.buf = this.buf.slice(start + length);
-      try { this.onMessage(JSON.parse(body)); } catch { /* 忽略坏帧 */ }
+      try {
+        this.onMessage(JSON.parse(body));
+      } catch {
+        /* 忽略坏帧 */
+      }
     }
   }
 
@@ -211,22 +236,25 @@ export class LspClient {
   async definition(file: string, line: number, character: number): Promise<LspLocation[]> {
     await this.start();
     const uri = await this.open(file);
-    const result = await this.request('textDocument/definition', {
-      textDocument: { uri }, position: { line, character },
-    }) as LspLocation | LspLocation[] | null;
+    const result = (await this.request('textDocument/definition', {
+      textDocument: { uri },
+      position: { line, character },
+    })) as LspLocation | LspLocation[] | null;
     return result ? (Array.isArray(result) ? result : [result]) : [];
   }
 
   async hover(file: string, line: number, character: number): Promise<string> {
     await this.start();
     const uri = await this.open(file);
-    const result = await this.request('textDocument/hover', {
-      textDocument: { uri }, position: { line, character },
-    }) as { contents?: unknown } | null;
+    const result = (await this.request('textDocument/hover', {
+      textDocument: { uri },
+      position: { line, character },
+    })) as { contents?: unknown } | null;
     const contents = result?.contents;
     if (typeof contents === 'string') return contents;
     if (contents && typeof contents === 'object' && 'value' in contents) return String((contents as { value?: unknown }).value ?? '');
-    if (Array.isArray(contents)) return contents.map((part) => typeof part === 'string' ? part : String((part as { value?: unknown })?.value ?? '')).join('\n');
+    if (Array.isArray(contents))
+      return contents.map((part) => (typeof part === 'string' ? part : String((part as { value?: unknown })?.value ?? ''))).join('\n');
     return '';
   }
 
@@ -238,27 +266,42 @@ export class LspClient {
   }
 
   pathOf(uri: string): string {
-    try { return fileURLToPath(uri); } catch { return uri; }
+    try {
+      return fileURLToPath(uri);
+    } catch {
+      return uri;
+    }
   }
 
   async stop(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
-    try { await this.request('shutdown', {}, 2_000); } catch { /* 已退出 */ }
-    try { this.notify('exit', {}); } catch { /* 忽略 */ }
+    try {
+      await this.request('shutdown', {}, 2_000);
+    } catch {
+      /* 已退出 */
+    }
+    try {
+      this.notify('exit', {});
+    } catch {
+      /* 忽略 */
+    }
     const proc = this.proc;
     if (!proc) return;
     const exited = new Promise<void>((resolve) => proc.once('exit', () => resolve()));
-    setTimeout(() => { try { proc.kill(); } catch { /* 忽略 */ } }, 1_000);
+    setTimeout(() => {
+      try {
+        proc.kill();
+      } catch {
+        /* 忽略 */
+      }
+    }, 1_000);
     await exited;
     this.proc = undefined;
   }
 }
 
-export function pickLspServer(
-  configs: Record<string, LspServerConfig>,
-  file: string,
-): { name: string; cfg: LspServerConfig } | undefined {
+export function pickLspServer(configs: Record<string, LspServerConfig>, file: string): { name: string; cfg: LspServerConfig } | undefined {
   const ext = file.slice(file.lastIndexOf('.')).toLowerCase();
   for (const [name, cfg] of Object.entries(configs)) {
     if (Array.isArray(cfg.extensions) && cfg.extensions.map((item) => item.toLowerCase()).includes(ext)) return { name, cfg };

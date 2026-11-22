@@ -29,9 +29,7 @@
  * 密钥文件丢失 = 已存 key 不可解密（本机个人服务可接受的取舍，但要显式告知）。
  */
 import { createCipheriv, createDecipheriv, randomBytes, createHash } from 'node:crypto';
-import {
-  mkdirSync, readFileSync, existsSync, chmodSync, copyFileSync,
-} from 'node:fs';
+import { mkdirSync, readFileSync, existsSync, chmodSync, copyFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { basename, join } from 'node:path';
 import * as os from 'node:os';
@@ -76,7 +74,9 @@ export interface SecretKeyInfo {
 export function hardenSecretKeyPath(path: string): void {
   try {
     chmodSync(path, 0o600);
-  } catch { /* Windows 上语义有限；POSIX 上失败说明文件系统不支持权限位：交由 icacls 分支/忽略 */ }
+  } catch {
+    /* Windows 上语义有限；POSIX 上失败说明文件系统不支持权限位：交由 icacls 分支/忽略 */
+  }
   if (process.platform !== 'win32') return;
   if (process.env.MAHARNESS_SECRET_KEY_ACL === '0') return;
   try {
@@ -85,14 +85,19 @@ export function hardenSecretKeyPath(path: string): void {
     const domain = process.env.USERDOMAIN;
     const trustee = domain && !user.includes('\\') ? `${domain}\\${user}` : user;
     const r = spawnSync('icacls', [path, '/inheritance:r', '/grant:r', `${trustee}:F`], {
-      encoding: 'utf8', windowsHide: true, timeout: 10_000,
+      encoding: 'utf8',
+      windowsHide: true,
+      timeout: 10_000,
     });
     if (r.error) {
-      console.warn('[secret] icacls 不可用（Windows 权限未收紧；chmod 在该平台只切只读位）:',
-        r.error.message);
+      console.warn('[secret] icacls 不可用（Windows 权限未收紧；chmod 在该平台只切只读位）:', r.error.message);
     } else if (r.status !== 0) {
-      console.warn(`[secret] icacls 收紧 secret.key 权限失败（status=${r.status}，不阻断启动）:`,
-        String(r.stderr || r.stdout || '').trim().slice(0, 200));
+      console.warn(
+        `[secret] icacls 收紧 secret.key 权限失败（status=${r.status}，不阻断启动）:`,
+        String(r.stderr || r.stdout || '')
+          .trim()
+          .slice(0, 200),
+      );
     }
   } catch (err) {
     console.warn('[secret] icacls 调用异常（不阻断启动）:', err instanceof Error ? err.message : String(err));
@@ -122,8 +127,7 @@ function generateAndPersist(dataDir: string, path: string): { key?: Buffer; stat
     return { key, state: 'created', message: '已生成新的主密钥' };
   } catch (err) {
     // 落盘失败：进程内用随机密钥继续（新写入的密文重启后不可解，必须告警）
-    console.warn('[secret] 写入 secret.key 失败（本次生成的密钥不会持久，重启即失效）:',
-      err instanceof Error ? err.message : String(err));
+    console.warn('[secret] 写入 secret.key 失败（本次生成的密钥不会持久，重启即失效）:', err instanceof Error ? err.message : String(err));
     return { key, state: 'unavailable', message: `密钥文件写入失败：${err instanceof Error ? err.message : String(err)}` };
   }
 }
@@ -136,7 +140,13 @@ function generateAndPersist(dataDir: string, path: string): { key?: Buffer; stat
 export function resolveSecretKey(dataDir: string, opts: { hasExistingCiphertext?: () => boolean } = {}): SecretKeyInfo {
   const path = join(dataDir, KEY_FILE);
   const allowReset = process.env.MAHARNESS_ALLOW_SECRET_KEY_RESET === '1';
-  const hasCipher = () => { try { return !!opts.hasExistingCiphertext?.(); } catch { return false; } };
+  const hasCipher = () => {
+    try {
+      return !!opts.hasExistingCiphertext?.();
+    } catch {
+      return false;
+    }
+  };
 
   const read = readKeyFile(path);
   if (read.key) {
@@ -156,8 +166,9 @@ export function resolveSecretKey(dataDir: string, opts: { hasExistingCiphertext?
         // 状态必须如实标注：这条路径上旧密文全部作废，是「用户必须知道」的故障，
         // 不能伪装成普通首启 created（调用方按 state 决定 log 级别）
         state: r.state === 'unavailable' ? 'unavailable' : 'created-with-ciphertext',
-        message: 'secret.key 缺失但数据库中已有密文：已生成新密钥，旧密文全部不可解，'
-          + '请在设置页重新录入各供应商密钥（或从备份恢复原 secret.key 后重启）',
+        message:
+          'secret.key 缺失但数据库中已有密文：已生成新密钥，旧密文全部不可解，' +
+          '请在设置页重新录入各供应商密钥（或从备份恢复原 secret.key 后重启）',
       };
     }
     const r = generateAndPersist(dataDir, path);
@@ -178,7 +189,9 @@ export function resolveSecretKey(dataDir: string, opts: { hasExistingCiphertext?
     }
     const r = generateAndPersist(dataDir, path);
     return {
-      ...r, backupPath, path,
+      ...r,
+      backupPath,
+      path,
       state: r.state === 'unavailable' ? 'unavailable' : 'malformed-reset',
       message: `secret.key ${read.problem}；库内无密文，已重建${backupPath ? `（原文件另存为 ${basename(backupPath)}）` : ''}`,
     };
@@ -193,18 +206,21 @@ export function resolveSecretKey(dataDir: string, opts: { hasExistingCiphertext?
     }
     const r = generateAndPersist(dataDir, path);
     return {
-      ...r, backupPath, path,
+      ...r,
+      backupPath,
+      path,
       state: r.state === 'unavailable' ? 'unavailable' : 'malformed-reset',
-      message: `secret.key ${read.problem}；已按要求（MAHARNESS_ALLOW_SECRET_KEY_RESET=1）重建密钥，`
-        + '库内旧密文不可解，需重新录入供应商密钥',
+      message:
+        `secret.key ${read.problem}；已按要求（MAHARNESS_ALLOW_SECRET_KEY_RESET=1）重建密钥，` + '库内旧密文不可解，需重新录入供应商密钥',
     };
   }
   // 拒绝覆盖：不写文件、不返回密钥
   return {
     state: 'malformed-preserved',
     path,
-    message: `secret.key ${read.problem}，且数据库中已有密文：已拒绝重新生成（避免旧密文静默作废）。`
-      + '请人工修复/移除该文件后重启；确要重建请设 MAHARNESS_ALLOW_SECRET_KEY_RESET=1（会先备份原文件）',
+    message:
+      `secret.key ${read.problem}，且数据库中已有密文：已拒绝重新生成（避免旧密文静默作废）。` +
+      '请人工修复/移除该文件后重启；确要重建请设 MAHARNESS_ALLOW_SECRET_KEY_RESET=1（会先备份原文件）',
   };
 }
 

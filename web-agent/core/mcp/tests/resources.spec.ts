@@ -8,14 +8,17 @@ describe('MCP resources / prompts', () => {
   test('列表分页跟随 nextCursor 直到末页', async () => {
     const server = createServer((req, res) => {
       let body = '';
-      req.on('data', (chunk) => { body += chunk.toString('utf8'); });
+      req.on('data', (chunk) => {
+        body += chunk.toString('utf8');
+      });
       req.on('end', () => {
         const msg = JSON.parse(body) as { id: number; method: string; params?: { cursor?: string } };
-        const result = msg.method === 'resources/list'
-          ? msg.params?.cursor === 'page-2'
-            ? { resources: [{ uri: 'docs://b', name: 'B' }] }
-            : { resources: [{ uri: 'docs://a', name: 'A' }], nextCursor: 'page-2' }
-          : {};
+        const result =
+          msg.method === 'resources/list'
+            ? msg.params?.cursor === 'page-2'
+              ? { resources: [{ uri: 'docs://b', name: 'B' }] }
+              : { resources: [{ uri: 'docs://a', name: 'A' }], nextCursor: 'page-2' }
+            : {};
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
       });
@@ -24,29 +27,38 @@ describe('MCP resources / prompts', () => {
     const port = (server.address() as AddressInfo).port;
     const conn = new HttpConnection('paging', { type: 'http', url: `http://127.0.0.1:${port}/mcp`, allowPrivate: true });
     try {
-      assert.deepEqual((await conn.resourcesList()).map((r) => r.uri), ['docs://a', 'docs://b']);
+      assert.deepEqual(
+        (await conn.resourcesList()).map((r) => r.uri),
+        ['docs://a', 'docs://b'],
+      );
     } finally {
       conn.close();
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
   test('HTTP 连接可发现并读取资源和 prompt 模板', async () => {
     const server = createServer((req, res) => {
       let body = '';
-      req.on('data', (chunk) => { body += chunk.toString('utf8'); });
+      req.on('data', (chunk) => {
+        body += chunk.toString('utf8');
+      });
       req.on('end', () => {
         const msg = JSON.parse(body) as { id: number; method: string; params?: { uri?: string; name?: string } };
-        const result = msg.method === 'resources/list'
-          ? { resources: [{ uri: 'docs://readme', name: 'README', mimeType: 'text/markdown' }] }
-          : msg.method === 'resources/read'
-            ? { contents: [{ uri: msg.params?.uri, mimeType: 'text/plain', text: 'resource body' }] }
-            : msg.method === 'prompts/list'
-              ? { prompts: [{ name: 'review', description: 'Review helper' }] }
-              : msg.method === 'prompts/get'
-                ? { description: 'Review helper', messages: [{ role: 'user', content: { type: 'text', text: `review ${msg.params?.name}` } }] }
-                : {};
+        const result =
+          msg.method === 'resources/list'
+            ? { resources: [{ uri: 'docs://readme', name: 'README', mimeType: 'text/markdown' }] }
+            : msg.method === 'resources/read'
+              ? { contents: [{ uri: msg.params?.uri, mimeType: 'text/plain', text: 'resource body' }] }
+              : msg.method === 'prompts/list'
+                ? { prompts: [{ name: 'review', description: 'Review helper' }] }
+                : msg.method === 'prompts/get'
+                  ? {
+                      description: 'Review helper',
+                      messages: [{ role: 'user', content: { type: 'text', text: `review ${msg.params?.name}` } }],
+                    }
+                  : {};
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ jsonrpc: '2.0', id: msg.id, result }));
       });
@@ -55,15 +67,21 @@ describe('MCP resources / prompts', () => {
     const port = (server.address() as AddressInfo).port;
     const conn = new HttpConnection('fixture', { type: 'http', url: `http://127.0.0.1:${port}/mcp`, allowPrivate: true });
     try {
-      assert.deepEqual((await conn.resourcesList()).map((r) => r.uri), ['docs://readme']);
+      assert.deepEqual(
+        (await conn.resourcesList()).map((r) => r.uri),
+        ['docs://readme'],
+      );
       assert.equal((await conn.resourcesRead('docs://readme'))[0]?.text, 'resource body');
-      assert.deepEqual((await conn.promptsList()).map((p) => p.name), ['review']);
+      assert.deepEqual(
+        (await conn.promptsList()).map((p) => p.name),
+        ['review'],
+      );
       const prompt = await conn.promptsGet('review', {});
       assert.match(String(prompt.messages?.[0]?.content?.text), /review/);
     } finally {
       conn.close();
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
@@ -72,7 +90,9 @@ describe('MCP resources / prompts', () => {
     let mcpCalls = 0;
     const server = createServer((req, res) => {
       let body = '';
-      req.on('data', (chunk) => { body += chunk.toString('utf8'); });
+      req.on('data', (chunk) => {
+        body += chunk.toString('utf8');
+      });
       req.on('end', () => {
         if (req.url === '/token') {
           tokenCalls++;
@@ -95,9 +115,12 @@ describe('MCP resources / prompts', () => {
     const port = (server.address() as AddressInfo).port;
     process.env.MCP_TEST_REFRESH = 'refresh-secret';
     const conn = new HttpConnection('auth', {
-      type: 'http', url: `http://127.0.0.1:${port}/mcp`, allowPrivate: true,
+      type: 'http',
+      url: `http://127.0.0.1:${port}/mcp`,
+      allowPrivate: true,
       auth: {
-        type: 'bearer', token: 'stale',
+        type: 'bearer',
+        token: 'stale',
         refresh: { tokenUrl: `http://127.0.0.1:${port}/token`, refreshTokenEnv: 'MCP_TEST_REFRESH' },
       },
     });
@@ -108,7 +131,7 @@ describe('MCP resources / prompts', () => {
     } finally {
       delete process.env.MCP_TEST_REFRESH;
       server.closeAllConnections();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 });

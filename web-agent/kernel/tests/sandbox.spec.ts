@@ -13,14 +13,18 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync, existsSync } from 'node:
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  isDeniedReadPath, isProtectedWritePath, isApprovalRequiredWritePath,
-  sensitiveTarget, resolveInSandbox, resetCoreEditGuard,
+  isDeniedReadPath,
+  isProtectedWritePath,
+  isApprovalRequiredWritePath,
+  sensitiveTarget,
+  resolveInSandbox,
+  resetCoreEditGuard,
 } from '../sandbox';
 
 /** 造一个「沙箱根 ≠ 项目根」的真实部署形态 */
 function makeRoots() {
   const base = mkdtempSync(join(tmpdir(), 'mh-sandbox-'));
-  const sandboxRoot = join(base, 'workspace');          // Agent 的边界（宽）
+  const sandboxRoot = join(base, 'workspace'); // Agent 的边界（宽）
   const projectRoot = join(sandboxRoot, 'maharness', 'web-agent'); // 内核与数据实际所在（在边界内）
   mkdirSync(join(projectRoot, 'kernel'), { recursive: true });
   mkdirSync(join(projectRoot, 'core', 'chat'), { recursive: true });
@@ -34,7 +38,10 @@ function makeRoots() {
 }
 
 let r: ReturnType<typeof makeRoots>;
-beforeEach(() => { r = makeRoots(); resetCoreEditGuard(); });
+beforeEach(() => {
+  r = makeRoots();
+  resetCoreEditGuard();
+});
 afterEach(() => {
   resetCoreEditGuard();
   delete process.env.AGENT_ALLOW_CORE_EDIT;
@@ -45,10 +52,12 @@ const abs = (p: string) => resolveInSandbox(r.sandboxRoot, p);
 
 describe('A2：读保护按双基座判定', () => {
   test('项目根下的 data/ 与 .env 仍然读拒（旧实现只在沙箱根 == 项目根时有效）', () => {
-    assert.equal(isDeniedReadPath(abs('maharness/web-agent/data/secret.key'), r.sandboxRoot), false,
-      '单基座（仅沙箱根）下的旧行为——这正是要修的洞');
-    assert.equal(isDeniedReadPath(abs('maharness/web-agent/data/secret.key'), r.sandboxRoot, r.projectRoot), true,
-      '补上项目基座后必须拦');
+    assert.equal(
+      isDeniedReadPath(abs('maharness/web-agent/data/secret.key'), r.sandboxRoot),
+      false,
+      '单基座（仅沙箱根）下的旧行为——这正是要修的洞',
+    );
+    assert.equal(isDeniedReadPath(abs('maharness/web-agent/data/secret.key'), r.sandboxRoot, r.projectRoot), true, '补上项目基座后必须拦');
     assert.equal(isDeniedReadPath(abs('maharness/web-agent/.env'), r.sandboxRoot, r.projectRoot), true);
     assert.equal(isDeniedReadPath(abs('notes.md'), r.sandboxRoot, r.projectRoot), false, '普通工作区文件不受影响');
   });
@@ -67,11 +76,20 @@ describe('A2：写侧敏感门（此前完全没有写侧名单）', () => {
   });
 
   test('.env 与 data/ 属「需批准」而非硬拒（用户仍可显式授权）', () => {
-    assert.equal(isApprovalRequiredWritePath(abs('maharness/web-agent/.env'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }), true);
-    assert.equal(isApprovalRequiredWritePath(abs('maharness/web-agent/data/rules.json'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }), true);
+    assert.equal(
+      isApprovalRequiredWritePath(abs('maharness/web-agent/.env'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }),
+      true,
+    );
+    assert.equal(
+      isApprovalRequiredWritePath(abs('maharness/web-agent/data/rules.json'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }),
+      true,
+    );
     assert.equal(isApprovalRequiredWritePath(abs('notes.md'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }), false);
     // 保护区不算「可批准的敏感写」——它是硬拒
-    assert.equal(isApprovalRequiredWritePath(abs('maharness/web-agent/kernel/index.ts'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }), false);
+    assert.equal(
+      isApprovalRequiredWritePath(abs('maharness/web-agent/kernel/index.ts'), { sandboxRoot: r.sandboxRoot, projectRoot: r.projectRoot }),
+      false,
+    );
   });
 
   test('sensitiveTarget 给出可读原因（审批卡要说明为什么拦）', () => {

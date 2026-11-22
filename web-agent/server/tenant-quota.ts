@@ -1,8 +1,6 @@
 /** 租户存储配额：按租户根统计用量并缓存 3 秒；写入前预检，避免每次写都全量递归。 */
 import { join } from 'node:path';
-import {
-  assertStorageQuota, measureStorage, tenantSandboxPath, TenantStorageQuotaError,
-} from './tenant-workspace';
+import { assertStorageQuota, measureStorage, tenantSandboxPath, TenantStorageQuotaError } from './tenant-workspace';
 
 const CACHE_TTL_MS = 3_000;
 const cache = new Map<string, { bytes: number; at: number; root: string }>();
@@ -27,12 +25,7 @@ export function invalidateTenantStorage(tenantId: string): void {
   }
 }
 
-export function assertTenantStorage(input: {
-  base: string;
-  tenantId: string;
-  limitBytes: number;
-  additionalBytes: number;
-}): void {
+export function assertTenantStorage(input: { base: string; tenantId: string; limitBytes: number; additionalBytes: number }): void {
   if (!input.limitBytes || input.limitBytes <= 0 || input.additionalBytes <= 0) return;
   const used = tenantStorageBytes(input.base, input.tenantId);
   assertStorageQuota({ usedBytes: used, limitBytes: input.limitBytes, additionalBytes: input.additionalBytes });

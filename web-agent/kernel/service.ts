@@ -14,7 +14,10 @@ import type { PluginContext } from './types';
 export abstract class Service {
   public readonly id: string;
 
-  constructor(protected ctx: PluginContext, id: string) {
+  constructor(
+    protected ctx: PluginContext,
+    id: string,
+  ) {
     this.id = id;
     // 服务能力注册：逆元由 EffectScope 自动回收（卸载即撤销，不重复、不泄漏）
     ctx.register({ kind: 'service', service: { id, instance: this } });

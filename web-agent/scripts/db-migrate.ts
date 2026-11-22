@@ -18,22 +18,23 @@ import { MIGRATION_MANIFEST, applyMigrations, fileChecksum } from '../server/mig
 const args = process.argv.slice(2);
 const command = args[0] ?? 'verify';
 const root = resolve(import.meta.dirname, '..');
-const dbPath = resolve(root, valueOf('--db') ?? join('data', 'agent.db'));
+const dbPath = resolve(root, flagValue('--db') ?? join('data', 'agent.db'));
 
-function valueOf(flag: string): string | undefined {
+function flagValue(flag: string): string | undefined {
   const index = args.indexOf(flag);
   return index >= 0 ? args[index + 1] : undefined;
 }
 
 function exportDump(): void {
   if (!existsSync(dbPath)) throw new Error(`数据库不存在: ${dbPath}`);
-  const outDir = resolve(root, valueOf('--out') ?? join('data', 'export', new Date().toISOString().replace(/[:.]/g, '-')));
+  const outDir = resolve(root, flagValue('--out') ?? join('data', 'export', new Date().toISOString().replace(/[:.]/g, '-')));
   mkdirSync(outDir, { recursive: true });
   const db = new Database(dbPath, { readonly: true });
   try {
     const version = Number(db.pragma('user_version', { simple: true }));
-    const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[])
-      .map(row => row.name);
+    const tables = (
+      db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name").all() as { name: string }[]
+    ).map((row) => row.name);
     const dump: Record<string, unknown[]> = {};
     for (const table of tables) dump[table] = db.prepare(`SELECT * FROM "${table.replace(/"/g, '""')}"`).all();
     writeFileSync(join(outDir, 'dump.json'), JSON.stringify({ schemaVersion: version, exportedAt: Date.now(), tables: dump }, null, 2));
@@ -56,14 +57,20 @@ function upgrade(): void {
 }
 
 function verify(): void {
-  const rows = MIGRATION_MANIFEST.migrations.map(entry => ({
+  const rows = MIGRATION_MANIFEST.migrations.map((entry) => ({
     version: entry.version,
     file: entry.file,
     expected: entry.sha256,
     actual: fileChecksum(entry),
   }));
-  const mismatched = rows.filter(row => row.expected !== row.actual);
-  console.log(JSON.stringify({ schemaVersion: MIGRATION_MANIFEST.schemaVersion, minSupportedVersion: MIGRATION_MANIFEST.minSupportedVersion, mismatched, rows }, null, 2));
+  const mismatched = rows.filter((row) => row.expected !== row.actual);
+  console.log(
+    JSON.stringify(
+      { schemaVersion: MIGRATION_MANIFEST.schemaVersion, minSupportedVersion: MIGRATION_MANIFEST.minSupportedVersion, mismatched, rows },
+      null,
+      2,
+    ),
+  );
   if (mismatched.length) process.exit(1);
 }
 

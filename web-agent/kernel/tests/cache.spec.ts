@@ -4,7 +4,9 @@ import { Cache, contentWords, actionGroups, bigramSet, dice } from '../cache';
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -69,9 +71,13 @@ describe('L2 并发单航班', () => {
     assert.equal(b.hit, false);
     assert.equal(loaderSignal?.aborted, false);
 
-    const cached = await cache.l2GetOrLoad('read_file:shared', async () => {
-      throw new Error('loader must not run on a cache hit');
-    }, { tenantId: 'tenant-a' });
+    const cached = await cache.l2GetOrLoad(
+      'read_file:shared',
+      async () => {
+        throw new Error('loader must not run on a cache hit');
+      },
+      { tenantId: 'tenant-a' },
+    );
     assert.equal(cached.hit, true);
     assert.equal(cached.value, 'parsed');
     assert.equal(loads, 1);
@@ -84,15 +90,23 @@ describe('L2 并发单航班', () => {
     const controller = new AbortController();
     let loaderSignal: AbortSignal | undefined;
 
-    const first = cache.l2GetOrLoad('document:shared', signal => {
-      loaderSignal = signal;
-      started.resolve();
-      return gate.promise;
-    }, { tenantId: 'tenant-a', signal: controller.signal });
-    const second = cache.l2GetOrLoad('document:shared', signal => {
-      loaderSignal = signal;
-      return gate.promise;
-    }, { tenantId: 'tenant-a' });
+    const first = cache.l2GetOrLoad(
+      'document:shared',
+      (signal) => {
+        loaderSignal = signal;
+        started.resolve();
+        return gate.promise;
+      },
+      { tenantId: 'tenant-a', signal: controller.signal },
+    );
+    const second = cache.l2GetOrLoad(
+      'document:shared',
+      (signal) => {
+        loaderSignal = signal;
+        return gate.promise;
+      },
+      { tenantId: 'tenant-a' },
+    );
     await started.promise;
 
     controller.abort();
@@ -134,15 +148,26 @@ describe('L2 并发单航班', () => {
   it('loader 失败不缓存，后续调用可重试', async () => {
     const cache = new Cache();
     let attempts = 0;
-    await assert.rejects(cache.l2GetOrLoad('document:retry', async () => {
-      attempts++;
-      throw new Error('parse failed');
-    }, { tenantId: 'tenant-a' }), /parse failed/);
+    await assert.rejects(
+      cache.l2GetOrLoad(
+        'document:retry',
+        async () => {
+          attempts++;
+          throw new Error('parse failed');
+        },
+        { tenantId: 'tenant-a' },
+      ),
+      /parse failed/,
+    );
 
-    const retried = await cache.l2GetOrLoad('document:retry', async () => {
-      attempts++;
-      return 'ok';
-    }, { tenantId: 'tenant-a' });
+    const retried = await cache.l2GetOrLoad(
+      'document:retry',
+      async () => {
+        attempts++;
+        return 'ok';
+      },
+      { tenantId: 'tenant-a' },
+    );
     assert.equal(retried.hit, false);
     assert.equal(retried.value, 'ok');
     assert.equal(attempts, 2);
@@ -165,7 +190,7 @@ describe('L2 并发单航班', () => {
       return new Promise<string>((resolve, reject) => {
         const onAbort = () => reject(signal.reason ?? new DOMException('Aborted', 'AbortError'));
         signal.addEventListener('abort', onAbort, { once: true });
-        gates[tenant].promise.then(value => {
+        gates[tenant].promise.then((value) => {
           signal.removeEventListener('abort', onAbort);
           resolve(value);
         }, reject);
@@ -188,10 +213,14 @@ describe('L2 并发单航班', () => {
 
     await cache.l2GetOrLoad('document:cached-only', async () => 'tenant-a-value', { tenantId: 'tenant-a' });
     let loads = 0;
-    const otherTenant = await cache.l2GetOrLoad('document:cached-only', async () => {
-      loads++;
-      return 'tenant-b-value';
-    }, { tenantId: 'tenant-b' });
+    const otherTenant = await cache.l2GetOrLoad(
+      'document:cached-only',
+      async () => {
+        loads++;
+        return 'tenant-b-value';
+      },
+      { tenantId: 'tenant-b' },
+    );
     assert.equal(otherTenant.hit, false);
     assert.equal(otherTenant.value, 'tenant-b-value');
     assert.equal(loads, 1);
@@ -252,7 +281,13 @@ describe('Cache 持久化', () => {
     const dir = mkdtempSync(join(tmpdir(), 'cache-schema-'));
     const file = join(dir, 'cache.json');
     try {
-      writeFileSync(file, JSON.stringify({ v: 1, l1: [{ k: 'pk|问题', answer: '旧答案', hits: 0, promptKey: 'pk', expiresAt: Date.now() + 60_000, bigrams: ['问题'] }] }));
+      writeFileSync(
+        file,
+        JSON.stringify({
+          v: 1,
+          l1: [{ k: 'pk|问题', answer: '旧答案', hits: 0, promptKey: 'pk', expiresAt: Date.now() + 60_000, bigrams: ['问题'] }],
+        }),
+      );
       const cache = new Cache(undefined, {}, file);
       assert.equal((await cache.l1Get('问题内容足够长', 'pk')).hit, false);
     } finally {

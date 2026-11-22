@@ -13,22 +13,49 @@ describe('技能版本与依赖', () => {
       const dependent = join(root, '.maharness', 'skills', 'dependent');
       mkdirSync(base, { recursive: true });
       mkdirSync(dependent, { recursive: true });
-      writeFileSync(join(base, 'SKILL.md'), '---\nname: base\ndescription: base\ntriggers:\n  - base\napplies-when:\n  - base\nreject-when:\n  - none\ninput: task\noutput: result\n---\n');
-      writeFileSync(join(dependent, 'SKILL.md'), [
-        '---', 'name: dependent', 'description: dependent', 'version: 1.2.0',
-        'requires:', '  - base', '  - missing',
-        'triggers:', '  - dep', 'applies-when:', '  - dep',
-        'reject-when:', '  - none', 'input: task', 'output: result', '---',
-      ].join('\n'));
+      writeFileSync(
+        join(base, 'SKILL.md'),
+        '---\nname: base\ndescription: base\ntriggers:\n  - base\napplies-when:\n  - base\nreject-when:\n  - none\ninput: task\noutput: result\n---\n',
+      );
+      writeFileSync(
+        join(dependent, 'SKILL.md'),
+        [
+          '---',
+          'name: dependent',
+          'description: dependent',
+          'version: 1.2.0',
+          'requires:',
+          '  - base',
+          '  - missing',
+          'triggers:',
+          '  - dep',
+          'applies-when:',
+          '  - dep',
+          'reject-when:',
+          '  - none',
+          'input: task',
+          'output: result',
+          '---',
+        ].join('\n'),
+      );
 
       let service: { list: () => Array<Record<string, any>> } | undefined;
       const ctx = {
-        config: { get: (key: string, fallback: unknown) => key === 'sandboxRoot' ? root
-          : key === 'skills.vendorDir' ? join(root, 'vendor') : fallback },
+        config: {
+          get: (key: string, fallback: unknown) =>
+            key === 'sandboxRoot' ? root : key === 'skills.vendorDir' ? join(root, 'vendor') : fallback,
+        },
         paths: { data: join(root, 'data') },
-        register(value: any) { if (value.kind === 'service' && value.service?.id === 'skills') service = value.service.instance; return () => undefined; },
-        inject(_key: string, apply: (value: unknown) => void) { apply(undefined); },
-        on() { return () => undefined; },
+        register(value: any) {
+          if (value.kind === 'service' && value.service?.id === 'skills') service = value.service.instance;
+          return () => undefined;
+        },
+        inject(_key: string, apply: (value: unknown) => void) {
+          apply(undefined);
+        },
+        on() {
+          return () => undefined;
+        },
         logger: { info() {} },
       };
       skillsPlugin.onLoad(ctx as never);

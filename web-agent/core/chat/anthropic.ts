@@ -49,7 +49,11 @@ export function mapMessages(messages: LLMMessage[]): { system?: string; messages
     }
     for (const tc of m.tool_calls ?? []) {
       let input: unknown = {};
-      try { input = JSON.parse(tc.function?.arguments || '{}'); } catch { input = { _raw: tc.function?.arguments }; }
+      try {
+        input = JSON.parse(tc.function?.arguments || '{}');
+      } catch {
+        input = { _raw: tc.function?.arguments };
+      }
       blocks.push({ type: 'tool_use', id: tc.id, name: tc.function?.name ?? '', input });
     }
     return blocks;
@@ -68,7 +72,7 @@ export function mapMessages(messages: LLMMessage[]): { system?: string; messages
       };
       const last = out[out.length - 1];
       // tool_result 必须挂在 user 消息里；连续多个工具结果合并进同一条，避免 user/assistant 交替被破坏
-      if (last && last.role === 'user' && last.content.some(b => b.type === 'tool_result')) last.content.push(block);
+      if (last && last.role === 'user' && last.content.some((b) => b.type === 'tool_result')) last.content.push(block);
       else out.push({ role: 'user', content: [block] });
       continue;
     }
@@ -88,7 +92,7 @@ export function mapMessages(messages: LLMMessage[]): { system?: string; messages
 
 /** 工具声明：OpenAI function schema → Anthropic input_schema */
 export function mapTools(tools: ToolDef[]): { name: string; description?: string; input_schema: Record<string, unknown> }[] {
-  return tools.map(t => ({ name: t.name, description: t.description, input_schema: t.parameters ?? { type: 'object', properties: {} } }));
+  return tools.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters ?? { type: 'object', properties: {} } }));
 }
 
 export interface AnthropicRequestBody {
@@ -101,7 +105,11 @@ export interface AnthropicRequestBody {
   tools?: ReturnType<typeof mapTools>;
 }
 
-export function buildBody(model: string, messages: LLMMessage[], opts: { maxTokens?: number; temperature?: number; tools?: ToolDef[] }): AnthropicRequestBody {
+export function buildBody(
+  model: string,
+  messages: LLMMessage[],
+  opts: { maxTokens?: number; temperature?: number; tools?: ToolDef[] },
+): AnthropicRequestBody {
   const mapped = mapMessages(messages);
   const body: AnthropicRequestBody = {
     model,
@@ -120,7 +128,8 @@ export interface AnthropicStreamState {
   stopReason?: string;
   tools: Map<number, { id: string; name: string; json: string }>;
   usage: { input: number; output: number; cachedInput: number; creation: number };
-  inputReported?: boolean; outputReported?: boolean;
+  inputReported?: boolean;
+  outputReported?: boolean;
   finished: boolean;
   errored: string | null;
 }
@@ -176,10 +185,16 @@ export function reduceEvent(json: Record<string, unknown>, st: AnthropicStreamSt
     const delta = json.delta as { stop_reason?: string } | undefined;
     if (typeof delta?.stop_reason === 'string') st.stopReason = delta.stop_reason;
     const u = (json.usage ?? {}) as Record<string, unknown>;
-    if (typeof u.output_tokens === 'number') { st.usage.output = u.output_tokens; st.outputReported = true; }
+    if (typeof u.output_tokens === 'number') {
+      st.usage.output = u.output_tokens;
+      st.outputReported = true;
+    }
     return out;
   }
-  if (type === 'message_stop') { st.finished = true; return out; }
+  if (type === 'message_stop') {
+    st.finished = true;
+    return out;
+  }
   if (type === 'error') {
     const e = (json.error ?? {}) as Record<string, unknown>;
     st.errored = `${String(e.type ?? 'error')}: ${String(e.message ?? '')}`;

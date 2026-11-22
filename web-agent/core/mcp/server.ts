@@ -49,9 +49,10 @@ export async function handleMcpRpc(body: unknown, opts: McpServerOptions): Promi
     return ok(id, { tools });
   }
   if (method === 'tools/call') {
-    const params = request.params && typeof request.params === 'object' && !Array.isArray(request.params)
-      ? request.params as { name?: unknown; arguments?: unknown }
-      : {};
+    const params =
+      request.params && typeof request.params === 'object' && !Array.isArray(request.params)
+        ? (request.params as { name?: unknown; arguments?: unknown })
+        : {};
     const name = typeof params.name === 'string' ? params.name : '';
     if (!name || !opts.allowlist.has(name)) return error(id, -32602, `Tool 不允许调用: ${name || '(empty)'}`);
     try {

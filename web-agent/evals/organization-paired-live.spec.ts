@@ -32,7 +32,7 @@ function config(reportDir: string): PairedLiveConfig {
 }
 
 function lastMessage(messages: LLMMessage[]): string {
-  return messages.map(message => String(message.content)).join('\n');
+  return messages.map((message) => String(message.content)).join('\n');
 }
 
 function mockProvider(completeUsage = true): { provider: ProviderDef; calls: () => number } {
@@ -48,34 +48,68 @@ function mockProvider(completeUsage = true): { provider: ProviderDef; calls: () 
       async *chat(messages, options) {
         calls++;
         const text = lastMessage(messages);
-        const names = options.tools?.map(tool => tool.name) ?? [];
+        const names = options.tools?.map((tool) => tool.name) ?? [];
         if (text.includes('run_paired_team')) assert.deepEqual(names, ['recall_tool_result', 'run_paired_team', 'write_paired_artifact']);
-        else if (text.includes('Use write_paired_artifact exactly once')) assert.deepEqual(names, ['recall_tool_result', 'write_paired_artifact']);
+        else if (text.includes('Use write_paired_artifact exactly once'))
+          assert.deepEqual(names, ['recall_tool_result', 'write_paired_artifact']);
         else if (text.includes('分别调用 write_paired_artifact')) assert.deepEqual(names, ['recall_tool_result', 'write_paired_artifact']);
         const key = text.includes('Use write_paired_artifact exactly once')
-          ? text.includes('ALPHA 与 BETA') ? 'a' : 'b'
-          : text.includes('run_paired_team') ? 'team-root'
+          ? text.includes('ALPHA 与 BETA')
+            ? 'a'
+            : 'b'
+          : text.includes('run_paired_team')
+            ? 'team-root'
             : 'root';
         const turn = (responses.get(key) ?? 0) + 1;
         responses.set(key, turn);
         assert.equal(options.model, 'mock-model');
         if (key === 'a' && turn === 1) {
-          yield { type: 'tool_call', toolCall: { id: `write-a-${calls}`, type: 'function', function: { name: 'write_paired_artifact', arguments: JSON.stringify({ path: 'analysis-a.md', content: 'ALPHA=17\nBETA=29\n' }) } } };
-        } else if (key === 'b' && turn === 1) {
-          yield { type: 'tool_call', toolCall: { id: `write-b-${calls}`, type: 'function', function: { name: 'write_paired_artifact', arguments: JSON.stringify({ path: 'review-b.md', content: 'GAMMA=41\n' }) } } };
-        } else if (key === 'team-root' && turn === 1) {
-          yield { type: 'tool_call', toolCall: { id: `team-${calls}`, type: 'function', function: { name: 'run_paired_team', arguments: '{}' } } };
-        } else if (key === 'root' && turn === 1) {
-          yield { type: 'tool_call', toolCall: {
-            id: `solo-${calls}`,
-            type: 'function',
-            function: {
-              name: 'write_paired_artifact',
-              arguments: JSON.stringify({ path: 'analysis-a.md', content: 'ALPHA=17\nBETA=29\n' }),
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: `write-a-${calls}`,
+              type: 'function',
+              function: {
+                name: 'write_paired_artifact',
+                arguments: JSON.stringify({ path: 'analysis-a.md', content: 'ALPHA=17\nBETA=29\n' }),
+              },
             },
-          } };
+          };
+        } else if (key === 'b' && turn === 1) {
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: `write-b-${calls}`,
+              type: 'function',
+              function: { name: 'write_paired_artifact', arguments: JSON.stringify({ path: 'review-b.md', content: 'GAMMA=41\n' }) },
+            },
+          };
+        } else if (key === 'team-root' && turn === 1) {
+          yield {
+            type: 'tool_call',
+            toolCall: { id: `team-${calls}`, type: 'function', function: { name: 'run_paired_team', arguments: '{}' } },
+          };
+        } else if (key === 'root' && turn === 1) {
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: `solo-${calls}`,
+              type: 'function',
+              function: {
+                name: 'write_paired_artifact',
+                arguments: JSON.stringify({ path: 'analysis-a.md', content: 'ALPHA=17\nBETA=29\n' }),
+              },
+            },
+          };
         } else if (key === 'root' && turn === 2) {
-          yield { type: 'tool_call', toolCall: { id: `solo-b-${calls}`, type: 'function', function: { name: 'write_paired_artifact', arguments: JSON.stringify({ path: 'review-b.md', content: 'GAMMA=41\n' }) } } };
+          yield {
+            type: 'tool_call',
+            toolCall: {
+              id: `solo-b-${calls}`,
+              type: 'function',
+              function: { name: 'write_paired_artifact', arguments: JSON.stringify({ path: 'review-b.md', content: 'GAMMA=41\n' }) },
+            },
+          };
         } else {
           yield { type: 'delta', text: key.endsWith('root') ? 'paired arm complete' : `${key} branch complete` };
         }
@@ -126,11 +160,7 @@ test('runtime fingerprint covers execution dependencies and provenance follows t
 
   const dir = mkdtempSync(join(tmpdir(), 'mh-paired-provenance-'));
   try {
-    const report = unexecutedPairedReport(
-      config(join(dir, 'planned')),
-      'provider was not executed',
-      'configured-provider',
-    );
+    const report = unexecutedPairedReport(config(join(dir, 'planned')), 'provider was not executed', 'configured-provider');
     assert.equal(report.evidenceMode, 'configured-provider');
   } finally {
     rmSync(dir, { recursive: true, force: true });
@@ -161,8 +191,8 @@ test('mock provider drives solo and two real team child runs', async () => {
     assert.deepEqual(report.arms.solo?.artifacts.sort(), ['analysis-a.md', 'review-b.md']);
     assert.deepEqual(report.arms.team?.artifacts.sort(), ['analysis-a.md', 'review-b.md']);
     assert.deepEqual(Object.keys(report.arms.team?.artifactHashes ?? {}).sort(), ['analysis-a.md', 'review-b.md']);
-    assert.ok(report.arms.solo?.checks.every(check => check.passed));
-    assert.ok(report.arms.team?.checks.every(check => check.passed));
+    assert.ok(report.arms.solo?.checks.every((check) => check.passed));
+    assert.ok(report.arms.team?.checks.every((check) => check.passed));
     assert.equal(report.comparison?.tokens.marginal, 330);
     assert.equal(report.comparison?.coordination.tokens, report.comparison?.tokens.marginal);
     assert.equal(report.comparison?.risk.solo, 0);

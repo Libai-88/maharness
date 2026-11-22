@@ -9,7 +9,10 @@ describe('搜索结果去重与本地重排', () => {
       { title: 'B', url: 'https://example.com/docs#intro', snippet: '' },
       { title: 'C', url: 'https://example.com/other', snippet: '' },
     ]);
-    assert.deepEqual(results.map((item) => item.title), ['A', 'C']);
+    assert.deepEqual(
+      results.map((item) => item.title),
+      ['A', 'C'],
+    );
   });
 
   test('标题命中优先于摘要命中，稳定保留同分原顺序', () => {
@@ -18,7 +21,10 @@ describe('搜索结果去重与本地重排', () => {
       { title: 'Agent Memory 指南', url: 'https://example.com/b', snippet: '正文' },
       { title: '另一篇', url: 'https://example.com/c', snippet: '正文' },
     ]);
-    assert.deepEqual(results.map((item) => item.title), ['Agent Memory 指南', '无关文章', '另一篇']);
+    assert.deepEqual(
+      results.map((item) => item.title),
+      ['Agent Memory 指南', '无关文章', '另一篇'],
+    );
   });
 
   test('中文查询按连续片段计分', () => {

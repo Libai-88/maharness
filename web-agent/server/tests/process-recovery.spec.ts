@@ -16,11 +16,18 @@ function waitForLine(child: ChildProcess): Promise<Record<string, unknown>> {
       output += chunk.toString();
       for (const line of output.split(/\r?\n/)) {
         if (!line.startsWith('{')) continue;
-        try { resolve(JSON.parse(line) as Record<string, unknown>); return; } catch { /* 等待完整 JSON */ }
+        try {
+          resolve(JSON.parse(line) as Record<string, unknown>);
+          return;
+        } catch {
+          /* 等待完整 JSON */
+        }
       }
     };
     child.stdout?.on('data', onData);
-    child.stderr?.on('data', (chunk) => { output += chunk.toString(); });
+    child.stderr?.on('data', (chunk) => {
+      output += chunk.toString();
+    });
     child.once('error', reject);
     child.once('exit', (code, signal) => reject(new Error(`fixture exited before ready: code=${code} signal=${signal}\n${output}`)));
   });
@@ -82,7 +89,9 @@ describe('真实服务进程强杀恢复', () => {
       assert.equal(result.status, 202);
       assert.equal(result.completed, true);
       assert.deepEqual(result.effectBefore, { state: 'done', result: { ok: true, data: { written: true } } });
-      await new Promise<void>((resolve, reject) => verify?.once('exit', (code) => code === 0 ? resolve() : reject(new Error(`verify exited ${code}`))));
+      await new Promise<void>((resolve, reject) =>
+        verify?.once('exit', (code) => (code === 0 ? resolve() : reject(new Error(`verify exited ${code}`)))),
+      );
       verify = undefined;
     } finally {
       if (seed) await stopHard(seed);

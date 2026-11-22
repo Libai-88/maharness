@@ -20,19 +20,50 @@ export interface FactLedger {
   runIds: string[];
   generatedAt: number;
   runs: Array<{
-    id: string; status: string; goal: string; verified: boolean | null; durationMs: number;
-    modelCalls: number; modelInputTokens?: number; modelOutputTokens?: number; modelCostUsd?: number;
-    modelFailures?: number; modelPurposes?: string[]; toolCalls: number; failedTools: number;
-    duplicateTools: number; toolVersions?: string[]; recoveries: number; approvalWaits: number;
-    artifacts: number; invalidArtifacts: number; capabilities: string[]; conflicts: number;
+    id: string;
+    status: string;
+    goal: string;
+    verified: boolean | null;
+    durationMs: number;
+    modelCalls: number;
+    modelInputTokens?: number;
+    modelOutputTokens?: number;
+    modelCostUsd?: number;
+    modelFailures?: number;
+    modelPurposes?: string[];
+    toolCalls: number;
+    failedTools: number;
+    duplicateTools: number;
+    toolVersions?: string[];
+    recoveries: number;
+    approvalWaits: number;
+    artifacts: number;
+    invalidArtifacts: number;
+    capabilities: string[];
+    conflicts: number;
   }>;
   totals: {
-    durationMs: number; modelCalls: number; modelInputTokens?: number; modelOutputTokens?: number;
-    modelCostUsd?: number; modelFailures?: number; toolCalls: number; failedTools: number;
-    duplicateTools: number; recoveries: number; approvalWaits: number; artifacts: number;
+    durationMs: number;
+    modelCalls: number;
+    modelInputTokens?: number;
+    modelOutputTokens?: number;
+    modelCostUsd?: number;
+    modelFailures?: number;
+    toolCalls: number;
+    failedTools: number;
+    duplicateTools: number;
+    recoveries: number;
+    approvalWaits: number;
+    artifacts: number;
     invalidArtifacts: number;
   };
-  gates: { allTerminal: boolean; noFalseSuccess: boolean; noUnknownSideEffects: boolean; noUnauthorizedSideEffects: boolean; artifactsParsable: boolean };
+  gates: {
+    allTerminal: boolean;
+    noFalseSuccess: boolean;
+    noUnknownSideEffects: boolean;
+    noUnauthorizedSideEffects: boolean;
+    artifactsParsable: boolean;
+  };
   anomalies: FactAnomaly[];
   omittedRuns?: number;
   truncated?: boolean;
@@ -96,7 +127,15 @@ export interface AIUserReview {
   facts: FactLedger;
   evidenceIndex: ReviewEvidenceRef[];
   evidence: Array<{ ref: string; label: string; text: string; hash: string; tokens: number }>;
-  budget: { inputTokenLimit: number; outputTokenLimit: number; totalTokenLimit: number; inputTokens: number; outputTokens: number; costUsd: number; costSource: string };
+  budget: {
+    inputTokenLimit: number;
+    outputTokenLimit: number;
+    totalTokenLimit: number;
+    inputTokens: number;
+    outputTokens: number;
+    costUsd: number;
+    costSource: string;
+  };
   calls: number;
   error?: string;
   createdAt: number;
@@ -177,45 +216,65 @@ export interface AIUserReviewEstimate {
 }
 
 export const experienceApi = {
-  estimate: (runIds: string[], alternative?: { providerId: string; model: string }) => api<AIUserReviewEstimate>('/api/experience/reviews/estimate', {
-    method: 'POST',
-    body: JSON.stringify({ runIds, ...alternative }),
-  }),
-  create: (runIds: string[], alternative?: { providerId: string; model: string }) => api<{ review: AIUserReview }>('/api/experience/reviews', {
-    method: 'POST',
-    headers: { 'Idempotency-Key': crypto.randomUUID() },
-    body: JSON.stringify({ runIds, ...alternative }),
-  }),
-  list: (runId?: string) => api<{ reviews: AIUserReview[] }>(`/api/experience/reviews?limit=100${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`),
-  detail: (id: string) => api<{ review: AIUserReview; audits: ExperienceAudit[]; findings: ExperienceFinding[] }>(`/api/experience/reviews/${encodeURIComponent(id)}`),
+  estimate: (runIds: string[], alternative?: { providerId: string; model: string }) =>
+    api<AIUserReviewEstimate>('/api/experience/reviews/estimate', {
+      method: 'POST',
+      body: JSON.stringify({ runIds, ...alternative }),
+    }),
+  create: (runIds: string[], alternative?: { providerId: string; model: string }) =>
+    api<{ review: AIUserReview }>('/api/experience/reviews', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ runIds, ...alternative }),
+    }),
+  list: (runId?: string) =>
+    api<{ reviews: AIUserReview[] }>(`/api/experience/reviews?limit=100${runId ? `&runId=${encodeURIComponent(runId)}` : ''}`),
+  detail: (id: string) =>
+    api<{ review: AIUserReview; audits: ExperienceAudit[]; findings: ExperienceFinding[] }>(
+      `/api/experience/reviews/${encodeURIComponent(id)}`,
+    ),
   cancel: (id: string) => api<{ review: AIUserReview }>(`/api/experience/reviews/${encodeURIComponent(id)}/cancel`, { method: 'POST' }),
   deepen: (id: string) => api<{ review: AIUserReview }>(`/api/experience/reviews/${encodeURIComponent(id)}/deepen`, { method: 'POST' }),
-  audit: (id: string, alternative?: { providerId: string; model: string }) => api<{ audit: ExperienceAudit }>(`/api/experience/reviews/${encodeURIComponent(id)}/audit`, {
-    method: 'POST',
-    body: JSON.stringify(alternative ?? {}),
-  }),
-  calibrate: (id: string, body: { verdict: string; summary: string; dimensions?: ReviewDimensionScore[] }) => api<{ audit: ExperienceAudit }>(`/api/experience/reviews/${encodeURIComponent(id)}/calibrate`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }),
-  adopt: (reviewId: string, suggestionId: string) => api<{ finding: ExperienceFinding }>(`/api/experience/reviews/${encodeURIComponent(reviewId)}/suggestions/${encodeURIComponent(suggestionId)}/adopt`, { method: 'POST' }),
+  audit: (id: string, alternative?: { providerId: string; model: string }) =>
+    api<{ audit: ExperienceAudit }>(`/api/experience/reviews/${encodeURIComponent(id)}/audit`, {
+      method: 'POST',
+      body: JSON.stringify(alternative ?? {}),
+    }),
+  calibrate: (id: string, body: { verdict: string; summary: string; dimensions?: ReviewDimensionScore[] }) =>
+    api<{ audit: ExperienceAudit }>(`/api/experience/reviews/${encodeURIComponent(id)}/calibrate`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  adopt: (reviewId: string, suggestionId: string) =>
+    api<{ finding: ExperienceFinding }>(
+      `/api/experience/reviews/${encodeURIComponent(reviewId)}/suggestions/${encodeURIComponent(suggestionId)}/adopt`,
+      { method: 'POST' },
+    ),
   models: () => api<Array<{ provider: string; model: string }>>('/api/models'),
-  findings: (status?: FindingStatus) => api<{ findings: ExperienceFinding[] }>(`/api/experience/findings?limit=100${status ? `&status=${status}` : ''}`),
-  updateFinding: (id: string, status: FindingStatus, statusNote?: string) => api<{ finding: ExperienceFinding }>(`/api/experience/findings/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    body: JSON.stringify({ status, statusNote }),
-  }),
-  reproduceFinding: (id: string, expected?: string) => api<{ finding: ExperienceFinding; regression: ExperienceRegressionCase }>(`/api/experience/findings/${encodeURIComponent(id)}/reproduce`, {
-    method: 'POST',
-    body: JSON.stringify({ expected }),
-  }),
-  verifyFinding: (id: string, body: { outcome: 'passed' | 'failed'; runId: string; summary: string }) => api<{ finding: ExperienceFinding; regression: ExperienceRegressionCase }>(`/api/experience/findings/${encodeURIComponent(id)}/verify`, {
-    method: 'POST',
-    body: JSON.stringify(body),
-  }),
-  evolveFinding: (id: string) => api<{ finding: ExperienceFinding }>(`/api/experience/findings/${encodeURIComponent(id)}/evolve`, {
-    method: 'POST',
-  }),
+  findings: (status?: FindingStatus) =>
+    api<{ findings: ExperienceFinding[] }>(`/api/experience/findings?limit=100${status ? `&status=${status}` : ''}`),
+  updateFinding: (id: string, status: FindingStatus, statusNote?: string) =>
+    api<{ finding: ExperienceFinding }>(`/api/experience/findings/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ status, statusNote }),
+    }),
+  reproduceFinding: (id: string, expected?: string) =>
+    api<{ finding: ExperienceFinding; regression: ExperienceRegressionCase }>(
+      `/api/experience/findings/${encodeURIComponent(id)}/reproduce`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ expected }),
+      },
+    ),
+  verifyFinding: (id: string, body: { outcome: 'passed' | 'failed'; runId: string; summary: string }) =>
+    api<{ finding: ExperienceFinding; regression: ExperienceRegressionCase }>(`/api/experience/findings/${encodeURIComponent(id)}/verify`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+  evolveFinding: (id: string) =>
+    api<{ finding: ExperienceFinding }>(`/api/experience/findings/${encodeURIComponent(id)}/evolve`, {
+      method: 'POST',
+    }),
 };
 
 export type ExperienceSourceRun = RunInfo;

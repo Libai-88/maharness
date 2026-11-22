@@ -40,16 +40,22 @@ export function experimentDecision(
   if (!task) throw new OrganizationError(404, 'SOCIETY_TASK_NOT_FOUND', '社会任务不存在');
   const institution = deps.ensureInstitution(tenantId);
   const estimate = deps.estimate(task);
-  const team = task.branches.length >= 2
-    && deps.teamCostEligible(task.objective, estimate)
-    && estimate.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd
-    && estimate.team.netBenefitUsd > 0;
+  const team =
+    task.branches.length >= 2 &&
+    deps.teamCostEligible(task.objective, estimate) &&
+    estimate.marginalNetBenefitUsd >= institution.policies.minNetBenefitUsd &&
+    estimate.team.netBenefitUsd > 0;
   const selected = team ? 'team' : estimate.single.netBenefitUsd > institution.policies.minNetBenefitUsd ? 'solo' : 'queue';
   return {
-    task, estimate, selected,
-    reason: selected === 'team' ? '团队净收益超过单角色并满足独立分支门槛'
-      : selected === 'solo' ? '团队净收益不足，保持单角色执行'
-        : '两种方案净收益均不足，排队或等待人类重新估价',
+    task,
+    estimate,
+    selected,
+    reason:
+      selected === 'team'
+        ? '团队净收益超过单角色并满足独立分支门槛'
+        : selected === 'solo'
+          ? '团队净收益不足，保持单角色执行'
+          : '两种方案净收益均不足，排队或等待人类重新估价',
   };
 }
 
@@ -61,24 +67,22 @@ export function createPairedExperiment(
     throw new OrganizationError(400, 'SOCIETY_EXPERIMENT_INVALID', '配对实验至少需要两个独立团队分支');
   const institution = deps.ensureInstitution(input.tenantId);
   const objective = bounded(input.objective, 2000, '任务目标');
-  const departmentId = input.departmentId
-    ?? deps.selection.departmentForText(objective, institution.policies.departments).id;
-  const plannedArtifacts = [...new Set(input.branches.flatMap(branch => branch.expectedArtifacts ?? []))];
-  const acceptance = [...new Set([
-    ...(input.acceptance ?? []),
-    ...input.branches.flatMap(branch => branch.acceptance ?? []),
-  ])];
+  const departmentId = input.departmentId ?? deps.selection.departmentForText(objective, institution.policies.departments).id;
+  const plannedArtifacts = [...new Set(input.branches.flatMap((branch) => branch.expectedArtifacts ?? []))];
+  const acceptance = [...new Set([...(input.acceptance ?? []), ...input.branches.flatMap((branch) => branch.acceptance ?? [])])];
   let solo: SocietyTask | undefined;
   try {
     solo = deps.createTask({
       ...input,
       departmentId,
-      branches: [{
-        objective,
-        acceptance,
-        expectedArtifacts: plannedArtifacts,
-        departmentId,
-      }],
+      branches: [
+        {
+          objective,
+          acceptance,
+          expectedArtifacts: plannedArtifacts,
+          departmentId,
+        },
+      ],
       economics: undefined,
       evidenceExperimentId: undefined,
     });
@@ -101,20 +105,26 @@ export function createPairedExperiment(
     deps.repository().transaction(() => {
       deps.repository().updateSocietyTask(solo!, {
         experiment: {
-          id: experiment.id, variant: 'solo', peerTaskId: team.id,
+          id: experiment.id,
+          variant: 'solo',
+          peerTaskId: team.id,
           snapshot: structuredClone(experiment),
         },
       });
       deps.repository().updateSocietyTask(team, {
         experiment: {
-          id: experiment.id, variant: 'team', peerTaskId: solo!.id,
+          id: experiment.id,
+          variant: 'team',
+          peerTaskId: solo!.id,
           snapshot: structuredClone(experiment),
         },
       });
     });
     deps.emit('organization.society.experiment.updated', {
-      experimentId: experiment.id, status: experiment.status,
-      soloTaskId: solo.id, teamTaskId: team.id,
+      experimentId: experiment.id,
+      status: experiment.status,
+      soloTaskId: solo.id,
+      teamTaskId: team.id,
     });
     return {
       solo: deps.repository().getSocietyTask(solo.id, input.tenantId)!,
@@ -122,45 +132,44 @@ export function createPairedExperiment(
       experiment,
     };
   } catch (error) {
-    if (solo) deps.repository().updateSocietyTask(solo, {
-      status: 'cancelled', lastSchedulingReason: '配对实验创建失败',
-    });
+    if (solo)
+      deps.repository().updateSocietyTask(solo, {
+        status: 'cancelled',
+        lastSchedulingReason: '配对实验创建失败',
+      });
     throw error;
   }
 }
 
-export function pairedExperiment(
-  deps: ExperimentDeps,
-  experimentId: string,
-  tenantId: string,
-): SocietyPairedExperiment {
-  const matching = deps.repository().societyTasks(tenantId, undefined, 1000)
-    .filter(task => task.experiment?.id === experimentId);
-  if (matching.length !== 2)
-    throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
+export function pairedExperiment(deps: ExperimentDeps, experimentId: string, tenantId: string): SocietyPairedExperiment {
+  const matching = deps
+    .repository()
+    .societyTasks(tenantId, undefined, 1000)
+    .filter((task) => task.experiment?.id === experimentId);
+  if (matching.length !== 2) throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
   return structuredClone(matching[0]!.experiment!.snapshot);
 }
 
-export function measurePairedExperiment(
-  deps: ExperimentDeps,
-  experimentId: string,
-  tenantId: string,
-): SocietyPairedExperiment {
-  const matching = deps.repository().societyTasks(tenantId, undefined, 1000)
-    .filter(task => task.experiment?.id === experimentId);
-  const solo = matching.find(task => task.experiment?.variant === 'solo');
-  const team = matching.find(task => task.experiment?.variant === 'team');
-  if (!solo || !team)
-    throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
+export function measurePairedExperiment(deps: ExperimentDeps, experimentId: string, tenantId: string): SocietyPairedExperiment {
+  const matching = deps
+    .repository()
+    .societyTasks(tenantId, undefined, 1000)
+    .filter((task) => task.experiment?.id === experimentId);
+  const solo = matching.find((task) => task.experiment?.variant === 'solo');
+  const team = matching.find((task) => task.experiment?.variant === 'team');
+  if (!solo || !team) throw new OrganizationError(404, 'SOCIETY_EXPERIMENT_NOT_FOUND', '配对净收益实验不存在');
   const soloMeasurement = experimentMeasurement(deps, solo);
   const teamMeasurement = experimentMeasurement(deps, team);
-  const terminal = [soloMeasurement, teamMeasurement]
-    .every(item => ['awaiting_acceptance', 'completed', 'failed', 'cancelled'].includes(item.status));
+  const terminal = [soloMeasurement, teamMeasurement].every((item) =>
+    ['awaiting_acceptance', 'completed', 'failed', 'cancelled'].includes(item.status),
+  );
   if (!terminal) {
     const reason = '单角色或团队 Run 尚未结束';
     const running: SocietyPairedExperiment = {
       ...solo.experiment!.snapshot,
-      status: 'running', reason, updatedAt: deps.now(),
+      status: 'running',
+      reason,
+      updatedAt: deps.now(),
     };
     persistExperiment(deps, solo, team, running);
     return structuredClone(running);
@@ -204,48 +213,64 @@ export function experimentMeasurement(deps: ExperimentDeps, task: SocietyTask): 
   const repo = deps.repository();
   const schedule = task.scheduleId
     ? repo.getSocietySchedule(task.scheduleId, task.tenantId)
-    : repo.societySchedules(task.tenantId, 1000).find(item => item.taskId === task.id);
+    : repo.societySchedules(task.tenantId, 1000).find((item) => item.taskId === task.id);
   if (!schedule) {
     return {
-      taskId: task.id, runIds: [], status: task.status, completed: false,
-      quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
-      costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
+      taskId: task.id,
+      runIds: [],
+      status: task.status,
+      completed: false,
+      quality: 0,
+      artifactCoverage: 0,
+      latencyMs: 0,
+      risk: 1,
+      costUsd: 0,
+      tokens: 0,
+      coordinationCostUsd: 0,
+      coordinationTokens: 0,
       usageKnown: false,
     };
   }
   const contracts = (schedule.contractIds ?? [])
-    .map(id => repo.getContract(id, task.tenantId))
+    .map((id) => repo.getContract(id, task.tenantId))
     .filter((contract): contract is AssignmentContract => !!contract);
-  const runIds = [...new Set([
-    ...(schedule.runIds ?? []),
-    ...contracts.flatMap(contract => contract.runId ? [contract.runId] : []),
-  ])];
-  const runs = runIds
-    .map(runId => deps.store.runs.get(runId, task.tenantId))
-    .filter((run): run is RunRecord => !!run);
-  const terminal = runs.length > 0 && runs.every(run => RUN_TERMINAL.has(run.status));
+  const runIds = [...new Set([...(schedule.runIds ?? []), ...contracts.flatMap((contract) => (contract.runId ? [contract.runId] : []))])];
+  const runs = runIds.map((runId) => deps.store.runs.get(runId, task.tenantId)).filter((run): run is RunRecord => !!run);
+  const terminal = runs.length > 0 && runs.every((run) => RUN_TERMINAL.has(run.status));
   if (!terminal || ['queued', 'waiting_approval', 'scheduled'].includes(task.status)) {
     return {
-      taskId: task.id, scheduleId: schedule.id, runIds, status: task.status, completed: false,
-      quality: 0, artifactCoverage: 0, latencyMs: 0, risk: 1,
-      costUsd: 0, tokens: 0, coordinationCostUsd: 0, coordinationTokens: 0,
+      taskId: task.id,
+      scheduleId: schedule.id,
+      runIds,
+      status: task.status,
+      completed: false,
+      quality: 0,
+      artifactCoverage: 0,
+      latencyMs: 0,
+      risk: 1,
+      costUsd: 0,
+      tokens: 0,
+      coordinationCostUsd: 0,
+      coordinationTokens: 0,
       usageKnown: false,
     };
   }
   const completed = ['awaiting_acceptance', 'completed'].includes(task.status);
   const completion = contracts.length
-    ? contracts.filter(contract => contract.status === 'delivered').length / contracts.length
-    : completed ? 1 : 0;
-  const expected = [...new Set(task.branches.flatMap(branch => branch.expectedArtifacts))];
-  const artifacts = runs.flatMap(run => deps.store.runs.artifacts(run.id).map(item => item.ref.replace(/\\/g, '/').toLowerCase()));
+    ? contracts.filter((contract) => contract.status === 'delivered').length / contracts.length
+    : completed
+      ? 1
+      : 0;
+  const expected = [...new Set(task.branches.flatMap((branch) => branch.expectedArtifacts))];
+  const artifacts = runs.flatMap((run) => deps.store.runs.artifacts(run.id).map((item) => item.ref.replace(/\\/g, '/').toLowerCase()));
   const artifactCoverage = expected.length
-    ? expected.filter(ref => {
-      const normalized = ref.replace(/\\/g, '/').toLowerCase();
-      return artifacts.some(artifact => artifact.includes(normalized));
-    }).length / expected.length
+    ? expected.filter((ref) => {
+        const normalized = ref.replace(/\\/g, '/').toLowerCase();
+        return artifacts.some((artifact) => artifact.includes(normalized));
+      }).length / expected.length
     : completion;
-  const startedAt = Math.min(task.createdAt, ...runs.map(run => run.createdAt));
-  const finishedAt = Math.max(task.updatedAt, ...runs.map(run => run.updatedAt));
+  const startedAt = Math.min(task.createdAt, ...runs.map((run) => run.createdAt));
+  const finishedAt = Math.max(task.updatedAt, ...runs.map((run) => run.updatedAt));
   return {
     taskId: task.id,
     scheduleId: schedule.id,
@@ -260,16 +285,11 @@ export function experimentMeasurement(deps: ExperimentDeps, task: SocietyTask): 
     tokens: runs.reduce((sum, run) => sum + run.tokensIn + run.tokensOut, 0),
     coordinationCostUsd: 0,
     coordinationTokens: 0,
-    usageKnown: runs.length > 0 && runs.every(run => run.usageStatus === 'reported'),
+    usageKnown: runs.length > 0 && runs.every((run) => run.usageStatus === 'reported'),
   };
 }
 
-function persistExperiment(
-  deps: ExperimentDeps,
-  solo: SocietyTask,
-  team: SocietyTask,
-  experiment: SocietyPairedExperiment,
-): void {
+function persistExperiment(deps: ExperimentDeps, solo: SocietyTask, team: SocietyTask, experiment: SocietyPairedExperiment): void {
   deps.repository().transaction(() => {
     deps.repository().updateSocietyTask(solo, {
       experiment: { ...solo.experiment!, snapshot: structuredClone(experiment) },

@@ -21,12 +21,21 @@ function newStore(): { store: Store; cleanup: () => void } {
   const root = mkdtempSync(join(tmpdir(), 'mh-db-'));
   roots.push(root);
   const store = new Store(join(root, 'test.db'));
-  return { store, cleanup: () => { store.close(); } };
+  return {
+    store,
+    cleanup: () => {
+      store.close();
+    },
+  };
 }
 
 after(() => {
   for (const root of roots) {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* 句柄迟释放 */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* 句柄迟释放 */
+    }
   }
 });
 
@@ -35,7 +44,10 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
     const { migrations, schemaVersion, minSupportedVersion } = MIGRATION_MANIFEST;
     assert.equal(schemaVersion, Store.DB_SCHEMA_VERSION);
     assert.equal(minSupportedVersion, 15);
-    assert.deepEqual(migrations.map(entry => entry.version), [15, 16]);
+    assert.deepEqual(
+      migrations.map((entry) => entry.version),
+      [15, 16],
+    );
     for (const entry of migrations) {
       assert.equal(fileChecksum(entry), entry.sha256, `migration ${entry.file} checksum drifted; published migrations are immutable`);
     }
@@ -45,7 +57,9 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-v15-upgrade-'));
     const path = join(root, 'agent.db');
     try {
-      const initial = new Store(path); const session = initial.createSession('preserved'); initial.close();
+      const initial = new Store(path);
+      const session = initial.createSession('preserved');
+      initial.close();
       const raw = new Database(path);
       raw.pragma('user_version = 15');
       raw.exec(`DROP TABLE schema_migrations;
@@ -58,61 +72,91 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       try {
         assert.equal(upgraded.schemaVersion, 16);
         assert.equal(upgraded.listSessions()[0]?.id, session.id);
-      } finally { upgraded.close(); }
+      } finally {
+        upgraded.close();
+      }
       const verified = new Database(path, { readonly: true });
       try {
-        const rows = verified.prepare('SELECT version,name,sha256 FROM schema_migrations ORDER BY version').all() as { version: number; name: string }[];
-        assert.deepEqual(rows.map(row => row.version), [15, 16]);
+        const rows = verified.prepare('SELECT version,name,sha256 FROM schema_migrations ORDER BY version').all() as {
+          version: number;
+          name: string;
+        }[];
+        assert.deepEqual(
+          rows.map((row) => row.version),
+          [15, 16],
+        );
         assert.equal(rows[1]!.name, '002_v16.sql');
-        const columns = verified.prepare("PRAGMA table_info(organization_society_tasks_v1)").all() as { name: string }[];
-        assert.ok(columns.some(column => column.name === 'capability_source'));
-        assert.ok(columns.some(column => column.name === 'team_mode'));
-      } finally { verified.close(); }
+        const columns = verified.prepare('PRAGMA table_info(organization_society_tasks_v1)').all() as { name: string }[];
+        assert.ok(columns.some((column) => column.name === 'capability_source'));
+        assert.ok(columns.some((column) => column.name === 'team_mode'));
+      } finally {
+        verified.close();
+      }
       const reopened = new Store(path);
-      try { assert.equal(reopened.schemaVersion, 16); } finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      try {
+        assert.equal(reopened.schemaVersion, 16);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('迁移失败回滚且保留旧版本；备份可恢复原会话与未知配置', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-failed-migration-'));
     const path = join(root, 'agent.db');
     try {
-      const initial = new Store(path); const session = initial.createSession('preserved'); initial.close();
+      const initial = new Store(path);
+      const session = initial.createSession('preserved');
+      initial.close();
       const raw = new Database(path);
       raw.pragma('user_version = 15');
       raw.exec('DROP TABLE schema_migrations; DROP TABLE organization_society_tasks_v1');
       raw.close();
-      const configFile = join(root, 'config.json'); writeFileSync(configFile, '{"custom":{"unknown":42}}');
+      const configFile = join(root, 'config.json');
+      writeFileSync(configFile, '{"custom":{"unknown":42}}');
       assert.throws(() => new Store(path, { migrationSources: { configFile, pluginDirs: [] } }), /迁移.*失败|no such table/);
-      const failed = new Database(path); assert.equal(failed.pragma('user_version', { simple: true }), 15); failed.close();
-      const snapshot = readdirSync(root).find(name => name.includes('.pre-v2-') && name.endsWith('.sqlite'))!;
+      const failed = new Database(path);
+      assert.equal(failed.pragma('user_version', { simple: true }), 15);
+      failed.close();
+      const snapshot = readdirSync(root).find((name) => name.includes('.pre-v2-') && name.endsWith('.sqlite'))!;
       const backup = new Database(join(root, snapshot), { readonly: true });
       assert.equal((backup.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
-      assert.equal(backup.pragma('integrity_check', { simple: true }), 'ok'); backup.close();
+      assert.equal(backup.pragma('integrity_check', { simple: true }), 'ok');
+      backup.close();
       assert.equal(JSON.parse(readFileSync(join(root, `${snapshot}.config.json`), 'utf8')).custom.unknown, 42);
       copyFileSync(join(root, snapshot), path);
-      const restored = new Database(path); assert.equal(restored.pragma('user_version', { simple: true }), 15); restored.close();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      const restored = new Database(path);
+      assert.equal(restored.pragma('user_version', { simple: true }), 15);
+      restored.close();
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   test('低于最低支持版本的旧库 fail-closed 并提示导出或恢复备份', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-v2-backup-'));
     const dbFile = join(root, 'agent.db');
     try {
-      const initial = new Store(dbFile); const session = initial.createSession('model'); initial.close();
+      const initial = new Store(dbFile);
+      const session = initial.createSession('model');
+      initial.close();
       const raw = new Database(dbFile);
       raw.pragma('user_version = 1');
       raw.close();
-      const configFile = join(root, 'config.json'); writeFileSync(configFile, JSON.stringify({ customRule: 'preserve' }));
-      assert.throws(
-        () => new Store(dbFile, { migrationSources: { configFile, pluginDirs: [] } }),
-        /低于最低支持的 15.*db:export/,
-      );
+      const configFile = join(root, 'config.json');
+      writeFileSync(configFile, JSON.stringify({ customRule: 'preserve' }));
+      assert.throws(() => new Store(dbFile, { migrationSources: { configFile, pluginDirs: [] } }), /低于最低支持的 15.*db:export/);
       const untouched = new Database(dbFile, { readonly: true });
       try {
         assert.equal(untouched.pragma('user_version', { simple: true }), 1, '拒绝升级时不改动旧库版本');
         assert.equal((untouched.prepare('SELECT id FROM sessions').get() as { id: string }).id, session.id);
-      } finally { untouched.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        untouched.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   test('新库与历史库都推进到当前 schema 版本，数据在重开后保留', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-db-mig-'));
@@ -134,8 +178,12 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       try {
         assert.equal(reopened.schemaVersion, Store.DB_SCHEMA_VERSION, '历史库自动推进到当前版本');
         assert.equal(reopened.listSessions()[0]?.id, session.id, '数据保留');
-      } finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('更高版本的库 fail-closed 拒绝打开', () => {
@@ -148,12 +196,16 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       raw.pragma(`user_version = ${Store.DB_SCHEMA_VERSION + 1}`);
       raw.close();
       let rejected = false;
-      try { new Store(dbPath); } catch (err) {
+      try {
+        new Store(dbPath);
+      } catch (err) {
         rejected = true;
         assert.match(err instanceof Error ? err.message : String(err), /高于本程序支持的/);
       }
       assert.equal(rejected, true, '更高版本的库应被拒绝打开');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('损坏自动恢复：主库损坏后 autoMaintain 从备份恢复数据', () => {
@@ -172,8 +224,12 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       const reopened = new Store(dbPath);
       try {
         assert.equal(reopened.listSessions()[0]?.id, session.id, '数据从备份恢复');
-      } finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('启动备份轮转：只保留最近 BACKUP_KEEP 份', () => {
@@ -190,7 +246,9 @@ describe('Store 版本化迁移与数据库自动维护（API-04）', () => {
       Store.autoMaintain(dbPath);
       const remaining = readdirSync(join(root, 'backups')).filter((f) => f.startsWith('agent-'));
       assert.equal(remaining.length, Store.BACKUP_KEEP, `轮转后应剩 ${Store.BACKUP_KEEP} 份`);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -200,21 +258,36 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     const dbPath = join(root, 'audit.db');
     const store = new Store(dbPath);
     store.appendAuthorizationAudit({
-      outcome: 'denied', subject: 'anonymous', capability: 'http:post',
-      object: '/api/workspaces', reason: 'api-token-required', occurredAt: 1234,
+      outcome: 'denied',
+      subject: 'anonymous',
+      capability: 'http:post',
+      object: '/api/workspaces',
+      reason: 'api-token-required',
+      occurredAt: 1234,
     });
     store.close();
     try {
       const reopened = new Store(dbPath);
       try {
-        assert.deepEqual(reopened.listAuthorizationAudit(1), [{
-          id: 1, occurredAt: 1234, outcome: 'denied', subject: 'anonymous',
-          capability: 'http:post', object: '/api/workspaces', reason: 'api-token-required',
-        }]);
+        assert.deepEqual(reopened.listAuthorizationAudit(1), [
+          {
+            id: 1,
+            occurredAt: 1234,
+            outcome: 'denied',
+            subject: 'anonymous',
+            capability: 'http:post',
+            object: '/api/workspaces',
+            reason: 'api-token-required',
+          },
+        ]);
         assert.equal(reopened.listAuthorizationAudit(0).length, 1, 'limit 下限为 1');
         assert.equal(reopened.listAuthorizationAudit(9999).length, 1, '读取上限安全裁剪');
-      } finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('任务验收与 Trace 引用在 Store 重开后保留', () => {
@@ -224,8 +297,12 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     const session = store.createSession('m');
     const message = store.addMessage({ sessionId: session.id, role: 'assistant', content: '部分完成' });
     store.updateMessageTaskVerification(message.id, {
-      status: 'partial', objective: '完成两项',
-      checks: [{ ok: true, reason: '文件存在' }, { ok: false, reason: '工具未成功' }],
+      status: 'partial',
+      objective: '完成两项',
+      checks: [
+        { ok: true, reason: '文件存在' },
+        { ok: false, reason: '工具未成功' },
+      ],
       evidence: [{ source: 'filesystem', detail: 'out.txt 存在', traceStepId: 'trace-step-1' }],
     });
     store.close();
@@ -233,12 +310,20 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       const reopened = new Store(dbPath);
       try {
         assert.deepEqual(reopened.listMessages(session.id)[0]?.taskVerification, {
-          status: 'partial', objective: '完成两项',
-          checks: [{ ok: true, reason: '文件存在' }, { ok: false, reason: '工具未成功' }],
+          status: 'partial',
+          objective: '完成两项',
+          checks: [
+            { ok: true, reason: '文件存在' },
+            { ok: false, reason: '工具未成功' },
+          ],
           evidence: [{ source: 'filesystem', detail: 'out.txt 存在', traceStepId: 'trace-step-1' }],
         });
-      } finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('checkpoint 保存 runId，工具账本完成后可安全回放，pending 不可冒充完成', () => {
@@ -267,7 +352,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       assert.equal(store.claimToolEffect('run-1', '2:1:send_http:def').state, 'new');
       assert.equal(store.claimToolEffect('run-1', '2:1:send_http:def').state, 'pending');
       assert.equal(store.hasPendingToolEffects('run-1'), true);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('deleteSession 删除会话同时清理 checkpoint（无孤儿）', () => {
@@ -280,7 +367,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       store.deleteSession(s.id);
       assert.equal(store.getSession(s.id), undefined);
       assert.equal(store.loadCheckpoint(s.id), undefined, '删除会话应级联清理断点');
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('审批审计持久化：注册、决策与按租户/会话查询', () => {
@@ -288,8 +377,14 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     try {
       const s = store.createSession('m', '', 'tenant-a');
       store.saveApprovalRequest({
-        id: 'ap-1', sessionId: s.id, tenantId: 'tenant-a', name: 'write_file',
-        summary: '写入文件', args: { path: 'a.txt' }, createdAt: 100, expiresAt: 200,
+        id: 'ap-1',
+        sessionId: s.id,
+        tenantId: 'tenant-a',
+        name: 'write_file',
+        summary: '写入文件',
+        args: { path: 'a.txt' },
+        createdAt: 100,
+        expiresAt: 200,
       });
       const pending = store.listApprovalRequests('tenant-a', s.id);
       assert.equal(pending.length, 1);
@@ -299,7 +394,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       assert.equal(decided[0]?.decision, 'approved');
       assert.equal(decided[0]?.reason, 'user');
       assert.equal(store.listApprovalRequests('tenant-b').length, 0);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('重启清理：未决审批标记 expired:restart 并返回会话归属', () => {
@@ -307,8 +404,13 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     try {
       const s = store.createSession('m', '', 'tenant-a');
       store.saveApprovalRequest({
-        id: 'ap-orphan', sessionId: s.id, tenantId: 'tenant-a', name: 'delete_file',
-        summary: '删除文件', createdAt: 100, expiresAt: 100_000,
+        id: 'ap-orphan',
+        sessionId: s.id,
+        tenantId: 'tenant-a',
+        name: 'delete_file',
+        summary: '删除文件',
+        createdAt: 100,
+        expiresAt: 100_000,
       });
       const rows = store.expireOrphanedApprovalRequests(500);
       assert.deepEqual(rows, [{ id: 'ap-orphan', sessionId: s.id, tenantId: 'tenant-a' }]);
@@ -316,7 +418,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       assert.equal(decided[0]?.decision, 'expired');
       assert.equal(decided[0]?.reason, 'restart');
       assert.deepEqual(store.expireOrphanedApprovalRequests(600), []);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('deleteSessions 批量删除同步清理全部断点', () => {
@@ -330,7 +434,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       store.deleteSessions([a.id, b.id]);
       assert.equal(store.loadCheckpoint(a.id), undefined);
       assert.equal(store.loadCheckpoint(b.id), undefined);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('clearSessionMessages（/clear）清消息同时清理断点：清空后 resume 不再复活旧任务', () => {
@@ -342,7 +448,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       store.clearSessionMessages(s.id);
       assert.equal(store.getSession(s.id) !== undefined, true, '会话本身保留');
       assert.equal(store.loadCheckpoint(s.id), undefined, '/clear 应清理断点');
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('checkpoint 同时受消息数和 JSON 字节上限约束，并保留截断标记', () => {
@@ -350,7 +458,8 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     try {
       const s = store.createSession('m');
       const history = Array.from({ length: Store.MAX_CHECKPOINT_HISTORY + 40 }, (_, i) => ({
-        role: 'user', content: `${i}:${'x'.repeat(4000)}`,
+        role: 'user',
+        content: `${i}:${'x'.repeat(4000)}`,
       }));
       store.saveCheckpoint(s.id, 9, history, 'bounded-run');
       const cp = store.loadCheckpoint(s.id)!;
@@ -359,7 +468,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       assert.ok(cp.history.length <= Store.MAX_CHECKPOINT_HISTORY);
       assert.ok(JSON.stringify({ messages: cp.history }).length <= Store.MAX_CHECKPOINT_BYTES);
       assert.equal(cp.history.at(-1)?.content, history.at(-1)?.content);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('checkpoint 兼容旧版直接消息数组格式', () => {
@@ -371,7 +482,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
         .run(s.id, 1, JSON.stringify([{ role: 'user', content: 'legacy' }]), Date.now());
       assert.deepEqual(store.loadCheckpoint(s.id)?.history, [{ role: 'user', content: 'legacy' }]);
       assert.equal(store.loadCheckpoint(s.id)?.schemaVersion, 0);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('未知 checkpoint schema 版本 fail-closed 并清理断点', () => {
@@ -383,7 +496,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
         .run(s.id, 1, JSON.stringify({ schemaVersion: 99, messages: [{ role: 'user', content: 'unknown' }] }), Date.now());
       assert.equal(store.loadCheckpoint(s.id), undefined);
       assert.equal(store.loadCheckpoint(s.id), undefined);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('超过默认保留期的 checkpoint 不可恢复并会清理副作用账本', () => {
@@ -397,7 +512,9 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
         .run(Date.now() - Store.CHECKPOINT_RETENTION_MS - 1, s.id);
       assert.equal(store.loadCheckpoint(s.id), undefined);
       assert.equal(store.hasPendingToolEffects('expired-run'), false);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('checkpoint 保留期可配置并在 Store 重开后按新策略恢复', () => {
@@ -411,30 +528,49 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
       .run(Date.now() - 24 * 60 * 60 * 1000, s.id);
     first.close();
     const reopened = new Store(dbPath, { checkpointRetentionMs: 2 * 24 * 60 * 60 * 1000 });
-    try { assert.equal(reopened.loadCheckpoint(s.id)?.history[0]?.content, 'kept'); }
-    finally { reopened.close(); rmSync(root, { recursive: true, force: true }); }
+    try {
+      assert.equal(reopened.loadCheckpoint(s.id)?.history[0]?.content, 'kept');
+    } finally {
+      reopened.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('模型路由画像写入模型表并在 Store 重开后保留', () => {
     const { store, cleanup } = newStore();
     try {
-      store.upsertModel({ providerId: 'p', modelId: 'm', vision: 1, tools: 1, reasoning: 0, latencyMs: 120, privacyTier: 'local', riskLevel: 'low' });
+      store.upsertModel({
+        providerId: 'p',
+        modelId: 'm',
+        vision: 1,
+        tools: 1,
+        reasoning: 0,
+        latencyMs: 120,
+        privacyTier: 'local',
+        riskLevel: 'low',
+      });
       const row = store.listModels('p')[0];
       assert.equal(row?.latencyMs, 120);
       assert.equal(row?.privacyTier, 'local');
       assert.equal(row?.riskLevel, 'low');
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('模型目录批量写入事务失败时整体回滚', () => {
     const { store, cleanup } = newStore();
     try {
-      assert.throws(() => store.upsertModels([
-        { providerId: 'p', modelId: 'good', vision: 1 },
-        { providerId: 'p', modelId: null as unknown as string, vision: 1 },
-      ]));
+      assert.throws(() =>
+        store.upsertModels([
+          { providerId: 'p', modelId: 'good', vision: 1 },
+          { providerId: 'p', modelId: null as unknown as string, vision: 1 },
+        ]),
+      );
       assert.deepEqual(store.listModels(), [], '第二行失败时第一行也必须回滚');
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('Provider 乐观版本校验拒绝陈旧写入并保留最新值', () => {
@@ -445,11 +581,32 @@ describe('Store 级联清理（会话 ↔ 断点）', () => {
     try {
       first.upsertProvider({ id: 'p', label: 'P', baseUrl: 'https://x.example', apiKey: 'k', model: 'm' });
       const snapshot = second.getProvider('p')!;
-      first.upsertProvider({ id: 'p', label: 'P1', baseUrl: 'https://x.example', apiKey: 'k', model: 'm', expectedUpdatedAt: snapshot.updatedAt });
-      assert.throws(() => second.upsertProvider({ id: 'p', label: 'stale', baseUrl: 'https://x.example', apiKey: 'k', model: 'm', expectedUpdatedAt: snapshot.updatedAt }),
-        (error: unknown) => error instanceof ConcurrentStoreWriteError && error.code === 'concurrent_write');
+      first.upsertProvider({
+        id: 'p',
+        label: 'P1',
+        baseUrl: 'https://x.example',
+        apiKey: 'k',
+        model: 'm',
+        expectedUpdatedAt: snapshot.updatedAt,
+      });
+      assert.throws(
+        () =>
+          second.upsertProvider({
+            id: 'p',
+            label: 'stale',
+            baseUrl: 'https://x.example',
+            apiKey: 'k',
+            model: 'm',
+            expectedUpdatedAt: snapshot.updatedAt,
+          }),
+        (error: unknown) => error instanceof ConcurrentStoreWriteError && error.code === 'concurrent_write',
+      );
       assert.equal(first.getProvider('p')?.label, 'P1');
-    } finally { first.close(); second.close(); rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      first.close();
+      second.close();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -469,9 +626,13 @@ describe('Store api_key 加密存储（R1）', () => {
       try {
         assert.equal(isEncrypted(raw.getProvider('p1')?.apiKey ?? ''), true, 'DB 中应为密文');
         assert.notEqual(raw.getProvider('p1')?.apiKey, 'sk-secret-123');
-      } finally { raw.close(); }
+      } finally {
+        raw.close();
+      }
       store.close();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('自动迁移：已有明文 api_key 在带主密钥启动时加密（幂等）', () => {
@@ -486,14 +647,20 @@ describe('Store api_key 加密存储（R1）', () => {
       const readBack = new Store(join(root, 'mig.db'));
       try {
         assert.equal(isEncrypted(readBack.getProvider('p1')?.apiKey ?? ''), true, '落库已为密文');
-      } finally { readBack.close(); }
+      } finally {
+        readBack.close();
+      }
       migrated.close();
 
       const again = new Store(join(root, 'mig.db'), { secretKey: KEY });
       try {
         assert.equal(again.getProvider('p1')?.apiKey, 'sk-legacy', '重复迁移幂等');
-      } finally { again.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        again.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('密钥不符：解密失败返回空 key（Provider 不可用但不崩服务）', () => {
@@ -506,7 +673,9 @@ describe('Store api_key 加密存储（R1）', () => {
       const other = new Store(join(root, 'k.db'), { secretKey: OTHER_KEY });
       assert.equal(other.getProvider('p1')?.apiKey, '', '密钥不符解密失败置空');
       other.close();
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('用途隔离：v2 密文按 provider id 派生，不能跨用途解密', () => {
@@ -523,8 +692,12 @@ describe('Store api_key 加密存储（R1）', () => {
         assert.equal(secretPurpose(blob), 'provider:p1');
         assert.equal(decryptPurposeSecret(blob, KEY, 'provider:p1'), providerKey);
         assert.throws(() => decryptPurposeSecret(blob, KEY, 'provider:p2'), /用途不匹配/);
-      } finally { raw.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      } finally {
+        raw.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('encryptSecret/decryptSecret 密码学往返（GCM：每次 IV 随机）', () => {
@@ -544,16 +717,27 @@ describe('OPS-01 会话租户作用域', () => {
       const a = store.createSession('m', '', 'tenant-a');
       const b = store.createSession('m', '', 'tenant-b');
       const d = store.createSession('m');
-      assert.deepEqual(store.listSessions('tenant-a').map((s) => s.id), [a.id]);
-      assert.deepEqual(store.listSessions('tenant-b').map((s) => s.id), [b.id]);
-      assert.deepEqual(store.listSessions('default').map((s) => s.id), [d.id]);
+      assert.deepEqual(
+        store.listSessions('tenant-a').map((s) => s.id),
+        [a.id],
+      );
+      assert.deepEqual(
+        store.listSessions('tenant-b').map((s) => s.id),
+        [b.id],
+      );
+      assert.deepEqual(
+        store.listSessions('default').map((s) => s.id),
+        [d.id],
+      );
       assert.equal(store.getSession(a.id, 'tenant-b'), undefined);
       assert.equal(store.getSession(a.id, 'tenant-a')?.id, a.id);
       assert.equal(store.deleteSessions([a.id], 'tenant-b'), 0, '跨租户删除必须无效');
       assert.equal(store.getSession(a.id, 'tenant-a')?.id, a.id, '跨租户删除后原会话仍在');
       assert.equal(store.deleteSessions([a.id], 'tenant-a'), 1);
       assert.equal(store.getSession(a.id, 'tenant-a'), undefined);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 
   test('统计聚合按租户过滤', () => {
@@ -567,6 +751,8 @@ describe('OPS-01 会话租户作用域', () => {
       assert.equal(store.statsOverview('tenant-b').messages, 0);
       assert.equal(store.aggregateSessions('tenant-a')[0]?.sessionId, a.id);
       assert.equal(store.aggregateSessions('tenant-b').length, 0);
-    } finally { cleanup(); }
+    } finally {
+      cleanup();
+    }
   });
 });

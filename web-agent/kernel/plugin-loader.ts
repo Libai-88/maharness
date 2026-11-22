@@ -37,13 +37,34 @@ import { reviewPluginRuntimeSource } from './plugin-review';
 import { pluginLockEntryOf, readPluginLock, verifyPluginLock } from './plugin-lock';
 import { ProcessPluginHost } from './plugin-process';
 import { capabilityName } from './capability-identity';
+import { assertCapabilityPermission, capabilityDiscoveryOf, validatePluginManifest } from './plugin-manifest';
+
+// 清单校验已迁到 kernel/plugin-manifest.ts（纯规则，无运行时状态）；此处保留原导出面。
+export {
+  PLUGIN_API_VERSION,
+  LEGACY_PLUGIN_API_VERSION,
+  validatePluginManifest,
+  capabilityDiscoveryOf,
+  validateRuntimePermissions,
+} from './plugin-manifest';
 import type {
-  Capability, CapabilityDescriptor, EventListener, NavDef, OutboundRecord, Plugin, PluginBus, PluginContext, PluginDiagnostic, PluginManifest, PluginStorage, TraceLike, CacheLike, ToolDef,
+  Capability,
+  EventListener,
+  NavDef,
+  OutboundRecord,
+  Plugin,
+  PluginBus,
+  PluginContext,
+  PluginDiagnostic,
+  PluginManifest,
+  PluginStorage,
+  TraceLike,
+  CacheLike,
+  ToolDef,
 } from './types';
 
 type PluginState = 'registered' | 'loaded' | 'started' | 'stopped' | 'loading' | 'unloading' | 'error';
 
-const CAPABILITY_KINDS = new Set<Capability['kind']>(['tool', 'listener', 'command', 'provider', 'service', 'persona', 'context', 'role', 'api']);
 export interface ToolCatalogEntry {
   pluginId: string;
   tool: ToolDef;
@@ -75,189 +96,6 @@ export function resolveToolConflicts(entries: ToolCatalogEntry[]): ToolCatalogEn
 }
 let serviceTraceSeq = 0;
 const serviceTracePrefix = `service-${process.pid}-${Math.random().toString(16).slice(2, 8)}`;
-/** 插件清单兼容的宿主 API 版本；v2 清单通过适配层继续运行。 */
-export const PLUGIN_API_VERSION = '3.0.0';
-export const LEGACY_PLUGIN_API_VERSION = '2.0.0';
-
-function semver(value: unknown): [number, number, number] | undefined {
-  if (typeof value !== 'string') return undefined;
-  const match = /^(\d+)\.(\d+)\.(\d+)$/.exec(value.trim());
-  if (!match) return undefined;
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareVersion(a: [number, number, number], b: [number, number, number]): number {
-  return a[0] - b[0] || a[1] - b[1] || a[2] - b[2];
-}
-
-function validateManifestCompatibility(manifest: PluginManifest): void {
-  if (manifest.apiVersion !== 2 && manifest.apiVersion !== 3) {
-    throw new Error(`插件 ${manifest.id} 必须使用 apiVersion: 2 或 3`);
-  }
-  const range = manifest.compatibility?.api;
-  if (range === undefined) return;
-  if (!range || typeof range !== 'object' || Array.isArray(range)) {
-    throw new Error(`插件 ${manifest.id} compatibility.api 必须是对象`);
-  }
-  const min = range.min === undefined ? undefined : semver(range.min);
-  const max = range.max === undefined ? undefined : semver(range.max);
-  if ((range.min !== undefined && !min) || (range.max !== undefined && !max)) {
-    throw new Error(`插件 ${manifest.id} compatibility.api.min/max 必须是完整 semver（例如 1.0.0）`);
-  }
-  if (min && max && compareVersion(min, max) > 0) {
-    throw new Error(`插件 ${manifest.id} compatibility.api.min 不能高于 max`);
-  }
-  const host = semver(manifest.apiVersion === 2 ? LEGACY_PLUGIN_API_VERSION : PLUGIN_API_VERSION)!;
-  if ((min && compareVersion(host, min) < 0) || (max && compareVersion(host, max) > 0)) {
-    throw new Error(`插件 ${manifest.id} 不兼容宿主插件 API ${PLUGIN_API_VERSION}`);
-  }
-}
-
-function validateCapabilityIndex(manifest: PluginManifest): void {
-  if (manifest.apiVersion === 2) {
-    if (manifest.capabilityIndex !== undefined) throw new Error(`插件 ${manifest.id} 的 capabilityIndex 需要 apiVersion: 3`);
-    return;
-  }
-  if (manifest.capabilityIndex === undefined) return;
-  if (!Array.isArray(manifest.capabilityIndex)) throw new Error(`插件 ${manifest.id} capabilityIndex 必须是数组`);
-  const ids = new Set<string>();
-  const tools = new Set(manifest.permissions.capabilities.tool ?? []);
-  for (const item of manifest.capabilityIndex as CapabilityDescriptor[]) {
-    if (!item || typeof item !== 'object' || typeof item.id !== 'string' || !item.id.trim()
-      || typeof item.name !== 'string' || !item.name.trim()
-      || typeof item.description !== 'string' || !item.description.trim()
-      || !Array.isArray(item.tools) || !item.tools.length
-      || item.tools.some(tool => typeof tool !== 'string' || !tool.trim())) {
-      throw new Error(`插件 ${manifest.id} 的 capabilityIndex 项必须包含 id、name、description 和 tools`);
-    }
-    if (ids.has(item.id)) throw new Error(`插件 ${manifest.id} capabilityIndex.id 重复: ${item.id}`);
-    ids.add(item.id);
-    for (const tool of item.tools) {
-      if (!tools.has(tool) && !tools.has('*')) {
-        throw new Error(`插件 ${manifest.id} capabilityIndex ${item.id} 引用了未授权工具 ${tool}`);
-      }
-    }
-  }
-}
-
-
-function validatePermissions(manifest: PluginManifest): void {
-  if (manifest.permissions === undefined) throw new Error(`插件 ${manifest.id} 必须声明 permissions.capabilities`);
-  const caps = manifest.permissions?.capabilities;
-  if (!caps || typeof caps !== 'object' || Array.isArray(caps)) throw new Error(`插件 ${manifest.id} permissions.capabilities 必须是对象`);
-  for (const [kind, names] of Object.entries(caps)) {
-    if (!CAPABILITY_KINDS.has(kind as Capability['kind'])) throw new Error(`插件 ${manifest.id} 声明了未知 capability 类型: ${kind}`);
-    if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim())) {
-      throw new Error(`插件 ${manifest.id} permissions.capabilities.${kind} 必须是字符串数组`);
-    }
-  }
-}
-
-function validateManifestLimits(manifest: PluginManifest): void {
-  const limits = manifest.limits;
-  if (!limits) return;
-  for (const [key, value] of Object.entries(limits)) {
-    if (value === undefined) continue;
-    if (!Number.isInteger(value) || value < 0) {
-      throw new Error(`插件 ${manifest.id} limits.${key} 必须是非负整数`);
-    }
-  }
-}
-
-function validateManifestExecution(manifest: PluginManifest): void {
-  const execution = manifest.execution;
-  if (execution === undefined) return;
-  if (!execution || typeof execution !== 'object' || Array.isArray(execution)) {
-    throw new Error(`插件 ${manifest.id} execution 必须是对象`);
-  }
-  if (execution.mode !== 'process') {
-    throw new Error(`插件 ${manifest.id} execution.mode 仅支持 process`);
-  }
-  if (execution.memoryMb !== undefined
-    && (!Number.isInteger(execution.memoryMb) || execution.memoryMb < 32 || execution.memoryMb > 2048)) {
-    throw new Error(`插件 ${manifest.id} execution.memoryMb 必须是 32..2048 的整数`);
-  }
-  if (execution.timeoutMs !== undefined
-    && (!Number.isInteger(execution.timeoutMs) || execution.timeoutMs < 1_000 || execution.timeoutMs > 300_000)) {
-    throw new Error(`插件 ${manifest.id} execution.timeoutMs 必须是 1000..300000 的整数`);
-  }
-  const caps = manifest.permissions?.capabilities;
-  if (!caps?.tool?.length) {
-    throw new Error(`插件 ${manifest.id} 使用 process 执行时必须声明 permissions.capabilities.tool`);
-  }
-  for (const kind of Object.keys(caps)) {
-    if (kind !== 'tool' && Array.isArray((caps as Record<string, unknown>)[kind])) {
-      throw new Error(`插件 ${manifest.id} 的 process 执行仅支持 tool 能力，不能声明 ${kind}`);
-    }
-  }
-  if (manifest.nav || manifest.api || manifest.provides?.length) {
-    throw new Error(`插件 ${manifest.id} 的 process 执行不支持 nav/api/provides`);
-  }
-}
-
-export function validatePluginManifest(manifest: PluginManifest): void {
-  validateManifestCompatibility(manifest);
-  validatePermissions(manifest);
-  validateCapabilityIndex(manifest);
-  validateManifestLimits(manifest);
-  validateManifestExecution(manifest);
-  validateRuntimePermissions(manifest);
-}
-
-/** Compatibility metadata added to v3 tool discovery without changing execution permissions. */
-export function capabilityDiscoveryOf(manifest: PluginManifest, toolName: string): CapabilityDescriptor[] {
-  return (manifest.capabilityIndex ?? []).filter(item => item.tools.includes(toolName));
-}
-
-export function validateRuntimePermissions(manifest: PluginManifest): void {
-  const runtime = manifest.permissions?.runtime;
-  if (runtime === undefined) return;
-  if (!runtime || typeof runtime !== 'object' || Array.isArray(runtime)) {
-    throw new Error(`插件 ${manifest.id} permissions.runtime 必须是对象`);
-  }
-  if (runtime.filesystem !== undefined && !['none', 'storage', 'sandbox', 'full'].includes(runtime.filesystem)) {
-    throw new Error(`插件 ${manifest.id} permissions.runtime.filesystem 不受支持`);
-  }
-  if (runtime.filesystem !== undefined && runtime.filesystem !== 'full' && manifest.execution?.mode !== 'process') {
-    throw new Error(`插件 ${manifest.id} 的 filesystem=${runtime.filesystem} 需要 execution.mode=process 才能执行路径策略`);
-  }
-  if (runtime.network !== undefined && !['none', 'allowlist', 'full'].includes(runtime.network)) {
-    throw new Error(`插件 ${manifest.id} permissions.runtime.network 不受支持`);
-  }
-  if (runtime.networkAllowlist !== undefined) {
-    if (!Array.isArray(runtime.networkAllowlist)
-      || runtime.networkAllowlist.some((host) => typeof host !== 'string' || !host.trim())) {
-      throw new Error(`插件 ${manifest.id} permissions.runtime.networkAllowlist 必须是非空字符串数组`);
-    }
-    if (runtime.network !== 'allowlist') {
-      throw new Error(`插件 ${manifest.id} networkAllowlist 仅在 runtime.network=allowlist 时有效`);
-    }
-  }
-  if (runtime.network === 'allowlist') {
-    if (manifest.execution?.mode !== 'process') {
-      throw new Error(`插件 ${manifest.id} 的 network=allowlist 需要 execution.mode=process 才能执行出口策略`);
-    }
-    if (!runtime.networkAllowlist?.length) {
-      throw new Error(`插件 ${manifest.id} 的 network=allowlist 必须提供 networkAllowlist`);
-    }
-  }
-  if (runtime.process !== undefined && typeof runtime.process !== 'boolean') {
-    throw new Error(`插件 ${manifest.id} permissions.runtime.process 必须是布尔值`);
-  }
-}
-
-function assertCapabilityPermission(manifest: PluginManifest, cap: Capability): void {
-  if (cap.kind === 'tool') {
-    const tool = cap.tool;
-    if (!semver(tool.version) || !tool.description || !tool.parameters || !tool.outputSchema || !['none', 'read', 'write', 'external', 'irreversible'].includes(tool.sideEffect ?? '') || !Array.isArray(tool.permissions) || tool.permissions.some(p => !['workspace.read', 'workspace.write', 'network', 'process', 'delegate', 'admin'].includes(p))) throw new Error(`工具 ${tool.name} 缺少有效的 v2 版本、schema、副作用或权限声明`);
-  }
-  if (manifest.permissions === undefined) return;
-  const name = capabilityName(cap);
-  const allowed = manifest.permissions.capabilities[cap.kind];
-  if (!allowed?.includes(name) && !allowed?.includes('*')) {
-    throw new Error(`插件 ${manifest.id} 未获准注册 capability ${cap.kind}:${name}`);
-  }
-}
 
 /** B6：config.changed → reloadChanged 的防抖窗口（ms）——连续配置写入合并为一次重载 */
 const CONFIG_RELOAD_DEBOUNCE_MS = 400;
@@ -306,7 +144,7 @@ export function suggestFix(errorMsg: string): string | undefined {
     return `请先安装并启用依赖插件「${dep}」，然后重试。可在插件市场搜索或手动创建 plugins/${dep}/ 目录。`;
   }
   // 配置校验失败
-  if (lower.includes('配置校验失败') || lower.includes('config') && lower.includes('validation')) {
+  if (lower.includes('配置校验失败') || (lower.includes('config') && lower.includes('validation'))) {
     return '请检查 config.json 中该插件的配置项是否符合 schema 要求（类型/必填/范围），修正后重载插件。';
   }
   // 超时
@@ -314,15 +152,15 @@ export function suggestFix(errorMsg: string): string | undefined {
     return '插件启动/加载超时，可能在 onLoad/onStart 中执行了耗时操作或死循环。请检查插件代码中的异步操作是否有 await 遗漏或无限循环。';
   }
   // 入口文件解析失败
-  if (lower.includes('plugin.json 解析失败') || lower.includes('syntax') && lower.includes('json')) {
+  if (lower.includes('plugin.json 解析失败') || (lower.includes('syntax') && lower.includes('json'))) {
     return 'plugin.json 格式错误（JSON 语法），请用 JSON 校验器检查格式后修复。';
   }
   // 入口文件找不到
-  if (lower.includes('cannot find') || lower.includes('does not exist') || lower.includes('模块') && lower.includes('找不到')) {
+  if (lower.includes('cannot find') || lower.includes('does not exist') || (lower.includes('模块') && lower.includes('找不到'))) {
     return '入口文件不存在或路径错误，请检查 plugin.json 中 "entry" 字段指向的文件是否存在于插件目录中。';
   }
   // id 冲突
-  if (lower.includes('id 冲突') || lower.includes('id') && lower.includes('不一致')) {
+  if (lower.includes('id 冲突') || (lower.includes('id') && lower.includes('不一致'))) {
     return '插件 id 与已注册的插件冲突。请修改 plugin.json 中的 "id" 为唯一值（仅小写字母/数字/连字符）。';
   }
   // 熔断态
@@ -447,7 +285,23 @@ export class PluginLoader {
 
   constructor(
     private bus: EventBus,
-    private ctxBase: Omit<PluginContext, 'pluginId' | 'register' | 'logger' | 'bus' | 'on' | 'provide' | 'inject' | 'onCapabilities' | 'watchConfig' | 'watchEnv' | 'configWith' | 'effect' | 'storage' | 'outbound'> & { budget: unknown },
+    private ctxBase: Omit<
+      PluginContext,
+      | 'pluginId'
+      | 'register'
+      | 'logger'
+      | 'bus'
+      | 'on'
+      | 'provide'
+      | 'inject'
+      | 'onCapabilities'
+      | 'watchConfig'
+      | 'watchEnv'
+      | 'configWith'
+      | 'effect'
+      | 'storage'
+      | 'outbound'
+    > & { budget: unknown },
     private coreDir: string,
     private userDir: string,
     private policy?: {
@@ -518,7 +372,10 @@ export class PluginLoader {
     const entries = await readdir(root, { withFileTypes: true });
     for (const e of entries) {
       if (!e.isDirectory()) continue;
-      if (SNAPSHOT_SUFFIX.test(e.name)) { this.pruneOrphanSnapshot(root, e.name); continue; }
+      if (SNAPSHOT_SUFFIX.test(e.name)) {
+        this.pruneOrphanSnapshot(root, e.name);
+        continue;
+      }
       const dir = join(root, e.name);
       const manifestPath = join(dir, 'plugin.json');
       if (!existsSync(manifestPath)) continue;
@@ -590,8 +447,12 @@ export class PluginLoader {
           throw new Error(`插件 ${manifest.id} 运行时能力审查失败: ${review.issues.map((issue) => issue.message).join('；')}`);
         }
       }
-      if (this.ctxBase.config.get<boolean>('plugins.enforceLock', false)
-        && resolve(dir).toLowerCase().startsWith(`${resolve(this.userDir).toLowerCase()}${sep}`)) {
+      if (
+        this.ctxBase.config.get<boolean>('plugins.enforceLock', false) &&
+        resolve(dir)
+          .toLowerCase()
+          .startsWith(`${resolve(this.userDir).toLowerCase()}${sep}`)
+      ) {
         const lock = readPluginLock(this.ctxBase.paths.root);
         if (lock.error) throw new Error(`plugins-lock.json 无效: ${lock.error}`);
         if (!lock.data) throw new Error('plugins.enforceLock=true 但未找到 plugins-lock.json');
@@ -603,7 +464,12 @@ export class PluginLoader {
         if (existing.dir !== dir) {
           const message = `插件 id 冲突："${manifest.id}" 已由 ${existing.dir} 注册，忽略 ${dir}（core 与 plugins/ 不允许同 id）`;
           console.warn(`[plugin] ${message}`);
-          this.diagnosticLog.push({ id: manifest.id, kind: 'conflict', message, suggestion: '请修改冲突插件 plugin.json 的 id 为唯一值后重载。' });
+          this.diagnosticLog.push({
+            id: manifest.id,
+            kind: 'conflict',
+            message,
+            suggestion: '请修改冲突插件 plugin.json 的 id 为唯一值后重载。',
+          });
         }
         return existing;
       }
@@ -613,9 +479,29 @@ export class PluginLoader {
       // 旧实现只在 reload 提交/回滚与卸载时剪枝，进程被中断/回滚失败/换分支留下的
       // 「内容已过期但目录还在」的脏副本会长期驻盘，并被工具链（测试 glob、人工阅读）误当源码。
       pruneSnapshots(dir, [snap.dir]);
-      inst = { manifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: '', configOverrides: [], circuitBreaker: { failures: 0, openedAt: 0 } };
+      inst = {
+        manifest,
+        dir,
+        loadDir: snap.dir,
+        loadHash: snap.hash,
+        state: 'registered',
+        caps: [],
+        scope: new EffectScope(),
+        provides: [],
+        depHooks: [],
+        depSignature: '',
+        configOverrides: [],
+        circuitBreaker: { failures: 0, openedAt: 0 },
+      };
       this.registry.set(id, inst);
-      this.bus.emit(EventBus.event('plugin.registered', { id: manifest.id, name: manifest.name, version: manifest.version, provides: manifest.provides }));
+      this.bus.emit(
+        EventBus.event('plugin.registered', {
+          id: manifest.id,
+          name: manifest.name,
+          version: manifest.version,
+          provides: manifest.provides,
+        }),
+      );
 
       // 依赖检查全部后置（v3.4）：注册阶段只解析清单与加载入口——同批次扫描顺序
       // 无保证（readdir 平台相关），requires 指向稍后扫描的插件在本阶段必然未注册，
@@ -632,19 +518,23 @@ export class PluginLoader {
           config: this.ctxBase.config.section(manifest.id),
           timeoutMs: manifest.execution.timeoutMs ?? 30_000,
           memoryMb: manifest.execution.memoryMb ?? 256,
-          runtime: manifest.permissions?.runtime ? {
-            network: manifest.permissions.runtime.network,
-            networkAllowlist: manifest.permissions.runtime.networkAllowlist,
-            filesystem: manifest.permissions.runtime.filesystem,
-            sandboxRoot: this.ctxBase.config.get<string>('sandboxRoot', this.ctxBase.kernel.paths.root),
-          } : undefined,
+          runtime: manifest.permissions?.runtime
+            ? {
+                network: manifest.permissions.runtime.network,
+                networkAllowlist: manifest.permissions.runtime.networkAllowlist,
+                filesystem: manifest.permissions.runtime.filesystem,
+                sandboxRoot: this.ctxBase.config.get<string>('sandboxRoot', this.ctxBase.kernel.paths.root),
+              }
+            : undefined,
           bus: this.bus,
           eventBus: this.bus,
           logger: {
             info: (msg, meta) => console.log(`[${manifest.id}] ${msg}`, meta ?? ''),
             warn: (msg, meta) => console.warn(`[${manifest.id}] ${msg}`, meta ?? ''),
             error: (msg, meta) => console.error(`[${manifest.id}] ${msg}`, meta ?? ''),
-            debug: (msg, meta) => { if (process.env.DEBUG) console.debug(`[${manifest.id}] ${msg}`, meta ?? ''); },
+            debug: (msg, meta) => {
+              if (process.env.DEBUG) console.debug(`[${manifest.id}] ${msg}`, meta ?? '');
+            },
           },
         });
         inst.processHost = processHost;
@@ -661,12 +551,25 @@ export class PluginLoader {
       // 副作用回收：onLoad 已执行的 ctx.on/register/provide 等逆元全部清除——
       // 否则加载失败的插件会残留事件订阅、能力与服务绑定（旧实现只删 registry）
       if (inst) {
-        try { await inst.processHost?.dispose(); } catch { /* 忽略子进程终止失败 */ }
-        try { await inst.scope.dispose(); } catch { /* 忽略 */ }
+        try {
+          await inst.processHost?.dispose();
+        } catch {
+          /* 忽略子进程终止失败 */
+        }
+        try {
+          await inst.scope.dispose();
+        } catch {
+          /* 忽略 */
+        }
       }
       const msg = err instanceof Error ? err.message : String(err);
       console.error(`[plugin] 加载失败 ${basename(dir)}: ${msg}`);
-      this.diagnosticLog.push({ id: id || basename(dir), kind: 'load', message: msg, suggestion: '更新插件 v2 清单与工具契约后重新加载。' });
+      this.diagnosticLog.push({
+        id: id || basename(dir),
+        kind: 'load',
+        message: msg,
+        suggestion: '更新插件 v2 清单与工具契约后重新加载。',
+      });
       this.bus.emit(EventBus.event('plugin.error', { dir: basename(dir), error: msg }));
       return undefined;
     }
@@ -712,13 +615,11 @@ export class PluginLoader {
     }
     const ctx = this.buildContext(inst);
     const lifecycleTimeout = inst.manifest.limits?.lifecycleTimeoutMs ?? DEFAULT_LIFECYCLE_TIMEOUT_MS;
-    await withTimeout(
-      Promise.resolve(inst.plugin?.onLoad?.(ctx)),
-      lifecycleTimeout,
-      `${inst.manifest.id}.onLoad`,
-    );
+    await withTimeout(Promise.resolve(inst.plugin?.onLoad?.(ctx)), lifecycleTimeout, `${inst.manifest.id}.onLoad`);
     inst.state = 'loaded';
-    this.bus.emit(EventBus.event('plugin.loaded', { id: inst.manifest.id, caps: inst.caps.map((c) => c.kind), provides: [...inst.provides] }));
+    this.bus.emit(
+      EventBus.event('plugin.loaded', { id: inst.manifest.id, caps: inst.caps.map((c) => c.kind), provides: [...inst.provides] }),
+    );
   }
 
   /** 插件私有存储目录：<data>/plugins/<id> */
@@ -739,13 +640,23 @@ export class PluginLoader {
       for (const entry of readdirSync(dir, { withFileTypes: true })) {
         if (!entry.isFile()) continue;
         files++;
-        try { bytes += statSync(join(dir, entry.name)).size; } catch { /* 忽略瞬时消失 */ }
+        try {
+          bytes += statSync(join(dir, entry.name)).size;
+        } catch {
+          /* 忽略瞬时消失 */
+        }
       }
       return { bytes, files };
     };
     return {
       dir,
-      read: (name) => { try { return readFileSync(at(name), 'utf-8'); } catch { return null; } },
+      read: (name) => {
+        try {
+          return readFileSync(at(name), 'utf-8');
+        } catch {
+          return null;
+        }
+      },
       write: (name, content) => {
         const target = at(name);
         const current = usage();
@@ -761,8 +672,20 @@ export class PluginLoader {
         mkdirSync(dir, { recursive: true });
         writeFileSync(target, content, 'utf-8');
       },
-      list: () => { try { return readdirSync(dir); } catch { return []; } },
-      remove: (name) => { try { rmSync(at(name), { force: true }); } catch { /* 已不存在 */ } },
+      list: () => {
+        try {
+          return readdirSync(dir);
+        } catch {
+          return [];
+        }
+      },
+      remove: (name) => {
+        try {
+          rmSync(at(name), { force: true });
+        } catch {
+          /* 已不存在 */
+        }
+      },
     };
   }
 
@@ -779,7 +702,9 @@ export class PluginLoader {
         try {
           mkdirSync(dirname(file), { recursive: true });
           appendFileSync(file, `${JSON.stringify({ ts: Date.now(), ...rec })}\n`, 'utf-8');
-        } catch { /* 台账写失败不影响插件运行 */ }
+        } catch {
+          /* 台账写失败不影响插件运行 */
+        }
         this.bus.emit(EventBus.event('plugin.outbound', { id: inst.manifest.id, kind: rec.kind, detail: rec.detail }));
       },
     };
@@ -848,8 +773,12 @@ export class PluginLoader {
       // 旧写法直接把内核内置实例交给插件，于是插件以 priority>0 接管 service:cache 之后
       // 「kernel.cache 已是插件实现、插件自己的 ctx.cache 仍旧」——同一子系统在进程内
       // 存在两种身份，接管语义只在文档承诺的那一半成立。
-      get trace() { return loader.resolveView<TraceLike>('service:trace', loader.ctxBase.trace); },
-      get cache() { return loader.resolveView<CacheLike>('service:cache', loader.ctxBase.cache); },
+      get trace() {
+        return loader.resolveView<TraceLike>('service:trace', loader.ctxBase.trace);
+      },
+      get cache() {
+        return loader.resolveView<CacheLike>('service:cache', loader.ctxBase.cache);
+      },
       register: (cap: Capability) => {
         this.policy?.capability?.(cap, inst.manifest);
         try {
@@ -873,9 +802,15 @@ export class PluginLoader {
               if (maxPerMinute) {
                 const window = (this.toolCallWindows.get(rateKey) ?? []).filter((ts) => now - ts < 60_000);
                 if (window.length >= maxPerMinute) {
-                  this.bus.emit(EventBus.event('plugin.quota.denied', {
-                    pluginId, tenantId, tool: cap.tool.name, quota: 'maxToolCallsPerMinute', limit: maxPerMinute,
-                  }));
+                  this.bus.emit(
+                    EventBus.event('plugin.quota.denied', {
+                      pluginId,
+                      tenantId,
+                      tool: cap.tool.name,
+                      quota: 'maxToolCallsPerMinute',
+                      limit: maxPerMinute,
+                    }),
+                  );
                   return { ok: false, error: `插件 ${pluginId} 在租户 ${tenantId} 的工具调用频率超出配额（${maxPerMinute}/分钟）` };
                 }
                 window.push(now);
@@ -883,9 +818,15 @@ export class PluginLoader {
               }
               const active = this.activeToolCalls.get(pluginId) ?? 0;
               if (maxConcurrent && active >= maxConcurrent) {
-                this.bus.emit(EventBus.event('plugin.quota.denied', {
-                    pluginId, tenantId, tool: cap.tool.name, quota: 'maxConcurrentToolCalls', limit: maxConcurrent,
-                }));
+                this.bus.emit(
+                  EventBus.event('plugin.quota.denied', {
+                    pluginId,
+                    tenantId,
+                    tool: cap.tool.name,
+                    quota: 'maxConcurrentToolCalls',
+                    limit: maxConcurrent,
+                  }),
+                );
                 return { ok: false, error: `插件 ${pluginId} 的并发工具调用超出配额（${maxConcurrent}）` };
               }
               this.activeToolCalls.set(pluginId, active + 1);
@@ -909,10 +850,20 @@ export class PluginLoader {
         // 它由 startInternal 的 registerServiceCap 通道统一生效（两条通道各司其职，
         // 不在 provides 里留悬空键——publishPendingFor 只负责 ctx.provide 的候选）。
         this.notifyCapSet(cap.kind);
-        this.bus.emit(EventBus.event('plugin.capability', {
-          pluginId: inst.manifest.id, kind: cap.kind,
-          name: cap.kind === 'tool' ? cap.tool.name : cap.kind === 'command' ? cap.command.name : cap.kind === 'provider' ? cap.provider.id : undefined,
-        }));
+        this.bus.emit(
+          EventBus.event('plugin.capability', {
+            pluginId: inst.manifest.id,
+            kind: cap.kind,
+            name:
+              cap.kind === 'tool'
+                ? cap.tool.name
+                : cap.kind === 'command'
+                  ? cap.command.name
+                  : cap.kind === 'provider'
+                    ? cap.provider.id
+                    : undefined,
+          }),
+        );
         const inverse = () => {
           const i = inst.caps.indexOf(cap);
           if (i >= 0) {
@@ -925,13 +876,19 @@ export class PluginLoader {
         // 再执行撤销——dispose 不会二次执行（旧实现直接返回 inverse，手动撤销后
         // dispose 会对已撤销的效果再执行一次撤销）
         const remove = scope.add(inverse);
-        return () => { remove(); inverse(); };
+        return () => {
+          remove();
+          inverse();
+        };
       },
       on: (event: string, listener: EventListener, priority?: number) => {
         // 自动退订的事件订阅：卸载时随作用域回收，杜绝监听器泄漏
         const off = this.bus.on(event, listener, priority);
         const remove = scope.add(off);
-        return () => { remove(); off(); }; // 手动退订：先摘除逆元再退订（dispose 不再二次执行）
+        return () => {
+          remove();
+          off();
+        }; // 手动退订：先摘除逆元再退订（dispose 不再二次执行）
       },
       provide: (key: string, value: unknown, priority = 0) => {
         this.policy?.service?.(key, inst.manifest);
@@ -949,7 +906,10 @@ export class PluginLoader {
         // 逆元：撤回本绑定（幂等——重复调用安全）。已发布的绑定被手动撤销时同样正确回退。
         const inverse = () => this.withdraw(key, inst);
         const remove = scope.add(inverse);
-        return () => { remove(); inverse(); };
+        return () => {
+          remove();
+          inverse();
+        };
       },
       inject: (key: string, onChange?: (v: unknown | undefined) => void) => {
         if (onChange && this.policy?.subscribe) scope.add(this.policy.subscribe(key, onChange));
@@ -958,11 +918,17 @@ export class PluginLoader {
         let off: () => void = () => {};
         if (onChange) {
           let set = loader.dependents.get(key);
-          if (!set) { set = new Set(); loader.dependents.set(key, set); }
+          if (!set) {
+            set = new Set();
+            loader.dependents.set(key, set);
+          }
           set.add(onChange);
           off = () => {
             const s = loader.dependents.get(key);
-            if (s) { s.delete(onChange); if (s.size === 0) loader.dependents.delete(key); }
+            if (s) {
+              s.delete(onChange);
+              if (s.size === 0) loader.dependents.delete(key);
+            }
           };
           scope.add(off);
         }
@@ -972,53 +938,69 @@ export class PluginLoader {
         };
       },
       onCapabilities: (kind: Capability['kind'], cb: () => void) => {
-          if (loader.policy?.subscribeCapabilities) { const off = loader.policy.subscribeCapabilities(kind, cb); scope.add(off); return off; }
-          // v3 智能重载：登记依赖声明（per-kind 版本）
-          inst.depHooks.push(() => `caps:${kind}@${loader.capVersions.get(kind) ?? 0}`);
-          let set = loader.capSubs.get(kind);
-          if (!set) { set = new Set(); loader.capSubs.set(kind, set); }
-          set.add(cb);
-          const off = () => {
-            const s = loader.capSubs.get(kind);
-            if (s) { s.delete(cb); if (s.size === 0) loader.capSubs.delete(kind); }
-          };
+        if (loader.policy?.subscribeCapabilities) {
+          const off = loader.policy.subscribeCapabilities(kind, cb);
           scope.add(off);
           return off;
-        },
-        watchConfig: (key: string, cb: (value: unknown) => void) => {
-          // v3 智能重载：登记配置依赖（读当前值，配置变化即 bumpFact）。
-          // B4 修复：签名分量此前是 `String(全局 config.get(key))`，有三处静默失效——
-          //  ① 对象/数组值恒为 "[object Object]"，改它下面的字段永不触发重载；
-          //  ② 通配键（如 'rules.*'）走点路径查找会命中字面 "*" → 恒 undefined → 声明形同无效；
-          //  ③ 读的是全局 config，而插件实际读的是 configWith override 链后的值（两套口径）。
-          // 现在统一按「该插件眼中的有效值 + 稳定序列化」取分量，通配键按子树整体参与签名。
-          inst.depHooks.push(() => `cfg:${key}@${loader.configSignature(inst, key)}`);
-          // 声明式配置对账：按「变了哪个键」分派（最小干预），并递增依赖事实版本
-          const off = loader.ctxBase.config.watch(key, (_k, v) => {
-            loader.bumpFact();
-            cb(v);
-          });
-          scope.add(off);
-          return off;
-        },
-        watchEnv: (name: string, cb?: (value: string | undefined) => void) => {
-          // v3.1 智能重载：登记 env 依赖（per-name 版本——.env 变更即重载该插件）。
-          // 先初始化 envVersions 的 key：bumpEnv() 无参时以此收集「全部已知 env 依赖」
-          if (!loader.envVersions.has(name)) loader.envVersions.set(name, 0);
-          inst.depHooks.push(() => `env:${name}@${loader.envVersions.get(name) ?? 0}`);
-          let off: () => void = () => {};
-          if (cb) {
-            let set = loader.envSubs.get(name);
-            if (!set) { set = new Set(); loader.envSubs.set(name, set); }
-            set.add(cb);
-            off = () => {
-              const s = loader.envSubs.get(name);
-              if (s) { s.delete(cb); if (s.size === 0) loader.envSubs.delete(name); }
-            };
+        }
+        // v3 智能重载：登记依赖声明（per-kind 版本）
+        inst.depHooks.push(() => `caps:${kind}@${loader.capVersions.get(kind) ?? 0}`);
+        let set = loader.capSubs.get(kind);
+        if (!set) {
+          set = new Set();
+          loader.capSubs.set(kind, set);
+        }
+        set.add(cb);
+        const off = () => {
+          const s = loader.capSubs.get(kind);
+          if (s) {
+            s.delete(cb);
+            if (s.size === 0) loader.capSubs.delete(kind);
           }
-          scope.add(off);
-          return off;
-        },
+        };
+        scope.add(off);
+        return off;
+      },
+      watchConfig: (key: string, cb: (value: unknown) => void) => {
+        // v3 智能重载：登记配置依赖（读当前值，配置变化即 bumpFact）。
+        // B4 修复：签名分量此前是 `String(全局 config.get(key))`，有三处静默失效——
+        //  ① 对象/数组值恒为 "[object Object]"，改它下面的字段永不触发重载；
+        //  ② 通配键（如 'rules.*'）走点路径查找会命中字面 "*" → 恒 undefined → 声明形同无效；
+        //  ③ 读的是全局 config，而插件实际读的是 configWith override 链后的值（两套口径）。
+        // 现在统一按「该插件眼中的有效值 + 稳定序列化」取分量，通配键按子树整体参与签名。
+        inst.depHooks.push(() => `cfg:${key}@${loader.configSignature(inst, key)}`);
+        // 声明式配置对账：按「变了哪个键」分派（最小干预），并递增依赖事实版本
+        const off = loader.ctxBase.config.watch(key, (_k, v) => {
+          loader.bumpFact();
+          cb(v);
+        });
+        scope.add(off);
+        return off;
+      },
+      watchEnv: (name: string, cb?: (value: string | undefined) => void) => {
+        // v3.1 智能重载：登记 env 依赖（per-name 版本——.env 变更即重载该插件）。
+        // 先初始化 envVersions 的 key：bumpEnv() 无参时以此收集「全部已知 env 依赖」
+        if (!loader.envVersions.has(name)) loader.envVersions.set(name, 0);
+        inst.depHooks.push(() => `env:${name}@${loader.envVersions.get(name) ?? 0}`);
+        let off: () => void = () => {};
+        if (cb) {
+          let set = loader.envSubs.get(name);
+          if (!set) {
+            set = new Set();
+            loader.envSubs.set(name, set);
+          }
+          set.add(cb);
+          off = () => {
+            const s = loader.envSubs.get(name);
+            if (s) {
+              s.delete(cb);
+              if (s.size === 0) loader.envSubs.delete(name);
+            }
+          };
+        }
+        scope.add(off);
+        return off;
+      },
       configWith: (overrides: Record<string, unknown>) => {
         const layer = { ...overrides };
         inst.configOverrides.push(layer);
@@ -1036,24 +1018,65 @@ export class PluginLoader {
         return scope.effect(fn, makeInverse);
       },
       resources: {
-        defer: dispose => { let done = false; const once = () => { if (done) return; done = true; return dispose(); }; const detach = scope.add(once); return () => { detach(); void Promise.resolve().then(once).catch(error => console.warn(`[plugin] ${inst.manifest.id} resource cleanup failed`, error)); }; },
-        timeout: (callback, milliseconds) => { const timer = setTimeout(() => { detach(); if (scope.isArmed) void Promise.resolve().then(callback).catch(error => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error)); }, milliseconds); const detach = scope.add(() => clearTimeout(timer)); return () => { detach(); clearTimeout(timer); }; },
-        interval: (callback, milliseconds) => { const timer = setInterval(() => { if (scope.isArmed) void Promise.resolve().then(callback).catch(error => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error)); }, milliseconds); const detach = scope.add(() => clearInterval(timer)); return () => { detach(); clearInterval(timer); }; },
+        defer: (dispose) => {
+          let done = false;
+          const once = () => {
+            if (done) return;
+            done = true;
+            return dispose();
+          };
+          const detach = scope.add(once);
+          return () => {
+            detach();
+            void Promise.resolve()
+              .then(once)
+              .catch((error) => console.warn(`[plugin] ${inst.manifest.id} resource cleanup failed`, error));
+          };
+        },
+        timeout: (callback, milliseconds) => {
+          const timer = setTimeout(() => {
+            detach();
+            if (scope.isArmed)
+              void Promise.resolve()
+                .then(callback)
+                .catch((error) => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error));
+          }, milliseconds);
+          const detach = scope.add(() => clearTimeout(timer));
+          return () => {
+            detach();
+            clearTimeout(timer);
+          };
+        },
+        interval: (callback, milliseconds) => {
+          const timer = setInterval(() => {
+            if (scope.isArmed)
+              void Promise.resolve()
+                .then(callback)
+                .catch((error) => console.warn(`[plugin] ${inst.manifest.id} timer failed`, error));
+          }, milliseconds);
+          const detach = scope.add(() => clearInterval(timer));
+          return () => {
+            detach();
+            clearInterval(timer);
+          };
+        },
       },
       logger: {
         info: (msg, meta) => console.log(`[${inst.manifest.id}] ${msg}`, meta ?? ''),
         warn: (msg, meta) => console.warn(`[${inst.manifest.id}] ${msg}`, meta ?? ''),
         error: (msg, meta) => console.error(`[${inst.manifest.id}] ${msg}`, meta ?? ''),
-        debug: (msg, meta) => { if (process.env.DEBUG) console.debug(`[${inst.manifest.id}] ${msg}`, meta ?? ''); },
+        debug: (msg, meta) => {
+          if (process.env.DEBUG) console.debug(`[${inst.manifest.id}] ${msg}`, meta ?? '');
+        },
       },
     };
   }
 
   private readOverride(layer: Record<string, unknown>, key: string): unknown {
-    if (Object.prototype.hasOwnProperty.call(layer, key)) return layer[key];
+    if (Object.hasOwn(layer, key)) return layer[key];
     let value: unknown = layer;
     for (const part of key.split('.')) {
-      if (!value || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, part)) return undefined;
+      if (!value || typeof value !== 'object' || !Object.hasOwn(value, part)) return undefined;
       value = (value as Record<string, unknown>)[part];
     }
     return value;
@@ -1075,7 +1098,10 @@ export class PluginLoader {
     if (Array.isArray(value)) return `[${value.map((v) => this.stableStringify(v)).join(',')}]`;
     if (typeof value === 'object') {
       const o = value as Record<string, unknown>;
-      return `{${Object.keys(o).sort().map((k) => `${k}:${this.stableStringify(o[k])}`).join(',')}}`;
+      return `{${Object.keys(o)
+        .sort()
+        .map((k) => `${k}:${this.stableStringify(o[k])}`)
+        .join(',')}}`;
     }
     return String(value);
   }
@@ -1109,7 +1135,9 @@ export class PluginLoader {
         }
         return hits;
       };
-      const global = pick(this.flattenConfig((this.ctxBase.config as unknown as { snapshot?: () => Record<string, unknown> }).snapshot?.() ?? {}));
+      const global = pick(
+        this.flattenConfig((this.ctxBase.config as unknown as { snapshot?: () => Record<string, unknown> }).snapshot?.() ?? {}),
+      );
       // override 链里也可能有同前缀的覆盖，一并计入
       const layers: Record<string, unknown>[] = [];
       for (const layer of inst.configOverrides) layers.push(pick(this.flattenConfig(layer)));
@@ -1143,7 +1171,8 @@ export class PluginLoader {
     const next = this.arbitrate(key);
     if (!prev && !next) return false;
     if (prev && next && prev === next) return false; // 同一绑定对象仍在生效：无变化
-    if (next) this.providers.set(key, next); else this.providers.delete(key);
+    if (next) this.providers.set(key, next);
+    else this.providers.delete(key);
     return true;
   }
 
@@ -1166,11 +1195,13 @@ export class PluginLoader {
     //  - 此前无人生效 → provided（首次激活）
     //  - 此前有别人生效 → overridden（接管，含从「休眠候选」上线接管活动绑定的情形）
     const type = prev && prev !== winner ? 'service.overridden' : 'service.provided';
-    this.bus.emit(EventBus.event(type, {
-      key,
-      pluginId: winner?.pluginId ?? binding.pluginId,
-      priority: winner?.priority ?? binding.priority,
-    }));
+    this.bus.emit(
+      EventBus.event(type, {
+        key,
+        pluginId: winner?.pluginId ?? binding.pluginId,
+        priority: winner?.priority ?? binding.priority,
+      }),
+    );
     this.notifyDependents(key, winner?.value);
   }
 
@@ -1199,7 +1230,10 @@ export class PluginLoader {
   /** 登记候选绑定（不生效）。绑定按（键, 插件）唯一：同插件重复 provide 覆盖前者。 */
   private declareBinding(key: string, binding: ProviderBinding): void {
     let byPlugin = this.bindings.get(key);
-    if (!byPlugin) { byPlugin = new Map(); this.bindings.set(key, byPlugin); }
+    if (!byPlugin) {
+      byPlugin = new Map();
+      this.bindings.set(key, byPlugin);
+    }
     byPlugin.set(binding.pluginId, binding);
   }
 
@@ -1214,10 +1248,9 @@ export class PluginLoader {
     if (!changed) return;
     this.bumpFact();
     const winner = this.providers.get(key);
-    this.bus.emit(EventBus.event(
-      winner ? 'service.provided' : 'service.withdrawn',
-      { key, pluginId: winner?.pluginId ?? inst.manifest.id },
-    ));
+    this.bus.emit(
+      EventBus.event(winner ? 'service.provided' : 'service.withdrawn', { key, pluginId: winner?.pluginId ?? inst.manifest.id }),
+    );
     this.notifyDependents(key, winner?.value);
   }
 
@@ -1237,7 +1270,9 @@ export class PluginLoader {
     const subs = this.dependents.get(key);
     if (!subs) return;
     for (const cb of [...subs]) {
-      try { cb(value); } catch (err) {
+      try {
+        cb(value);
+      } catch (err) {
         console.warn(`[loader] 依赖方通知失败 (${key}):`, err instanceof Error ? err.message : String(err));
       }
     }
@@ -1251,7 +1286,9 @@ export class PluginLoader {
     const subs = this.capSubs.get(kind);
     if (!subs) return;
     for (const cb of [...subs]) {
-      try { cb(); } catch (err) {
+      try {
+        cb();
+      } catch (err) {
         console.warn(`[loader] 能力集通知失败 (${kind}):`, err instanceof Error ? err.message : String(err));
       }
     }
@@ -1267,7 +1304,7 @@ export class PluginLoader {
    *  埋点交给 resolveService（显式解析点），避免热路径把簿记写进 Trace（C1 的同一教训）。 */
   private resolveView<T>(key: string, fallback: T): T {
     const binding = this.providers.get(key);
-    return (binding ? (binding.value as T) : fallback);
+    return binding ? (binding.value as T) : fallback;
   }
 
   /** 服务解析的可观测形式：保留提供者身份，供调试/管理面使用。 */
@@ -1289,7 +1326,11 @@ export class PluginLoader {
    *  - always：逐次记录（调试服务抖动时用）；
    *  - off：一律不记。
    */
-  traceServiceGet(key: string, consumer: string, trace?: TraceLike): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
+  traceServiceGet(
+    key: string,
+    consumer: string,
+    trace?: TraceLike,
+  ): { pluginId: string; value: unknown; seq: number; ts: number } | undefined {
     const binding = this.providers.get(key);
     if (!binding) return undefined;
     const mode = this.ctxBase.config.get<string>('trace.serviceCall', 'takeover');
@@ -1343,7 +1384,9 @@ export class PluginLoader {
       const subs = this.envSubs.get(name);
       if (!subs) continue;
       for (const cb of [...subs]) {
-        try { cb(process.env[name]); } catch (err) {
+        try {
+          cb(process.env[name]);
+        } catch (err) {
           console.warn(`[loader] env 订阅通知失败 (${name}):`, err instanceof Error ? err.message : String(err));
         }
       }
@@ -1370,7 +1413,9 @@ export class PluginLoader {
     try {
       const parsed = JSON.parse(readFileSync(join(inst.dir, 'plugin.json'), 'utf-8')) as PluginManifest;
       if (parsed && parsed.id === manifest.id) manifest = parsed;
-    } catch { /* 用内存中的 manifest 兜底 */ }
+    } catch {
+      /* 用内存中的 manifest 兜底 */
+    }
     return !(manifest.enabled === false || manifest.lazy);
   }
 
@@ -1386,7 +1431,10 @@ export class PluginLoader {
   private enqueue(id: string, body: () => Promise<void>): Promise<void> {
     const tail = this.chains.get(id) ?? Promise.resolve();
     const run = tail.then(body);
-    this.chains.set(id, run.catch(() => {}));
+    this.chains.set(
+      id,
+      run.catch(() => {}),
+    );
     return run;
   }
 
@@ -1439,11 +1487,7 @@ export class PluginLoader {
         throw new Error(`缺少依赖插件: ${missingDep}（依赖未加载，无法启动）`);
       }
       // 超时保护：onStart 挂起超过阈值则强制失败（不取消原 Promise，但标记错误）
-      await withTimeout(
-        Promise.resolve(inst.plugin?.onStart?.(this.buildContext(inst))),
-        lifecycleTimeout,
-        `${inst.manifest.id}.onStart`,
-      );
+      await withTimeout(Promise.resolve(inst.plugin?.onStart?.(this.buildContext(inst))), lifecycleTimeout, `${inst.manifest.id}.onStart`);
       inst.state = 'started';
       // 启动成功：重置熔断器
       cb.failures = 0;
@@ -1491,8 +1535,16 @@ export class PluginLoader {
       this.bus.emit(EventBus.event('plugin.reverted', { id: inst.manifest.id, effects: tracked, outbound }));
     }
     // 旧式钩子保留：有手工清理的插件仍可在此补位（自动回收已覆盖大部分场景）
-    try { await inst.plugin?.onStop?.(this.buildContext(inst)); } catch { /* 忽略 */ }
-    try { await inst.plugin?.onUnload?.(this.buildContext(inst)); } catch { /* 忽略 */ }
+    try {
+      await inst.plugin?.onStop?.(this.buildContext(inst));
+    } catch {
+      /* 忽略 */
+    }
+    try {
+      await inst.plugin?.onUnload?.(this.buildContext(inst));
+    } catch {
+      /* 忽略 */
+    }
     // 依赖声明清空（B3）：enable 重部署时 onLoad 会重新登记 depHooks——
     // 不清空则新旧两代依赖声明叠加，残留分量（如已撤回服务的 @none）造成签名漂移
     inst.depHooks = [];
@@ -1524,18 +1576,31 @@ export class PluginLoader {
   private async reloadInternal(inst: PluginInstance, start: boolean): Promise<void> {
     const { dir } = inst;
     const registryId = inst.manifest.id;
-    const oldModule = inst.plugin;        // 备份旧模块（事务回滚用；其依赖引用同样是旧版本）
+    const oldModule = inst.plugin; // 备份旧模块（事务回滚用；其依赖引用同样是旧版本）
     const oldManifest = inst.manifest;
-    const oldLoadDir = inst.loadDir;      // 旧快照目录：回滚期间保留，失败版本回收
+    const oldLoadDir = inst.loadDir; // 旧快照目录：回滚期间保留，失败版本回收
     const forceFresh = !!inst.forceFresh; // 依赖签名变化触发的 reload：强制刷新模块记录
-    inst.forceFresh = false;              // 消费即复位（只刷一次）
+    inst.forceFresh = false; // 消费即复位（只刷一次）
     // 事务阶段 1：回收旧实例的全部效果（可逆恢复）——旧模块引用保留
     await this.stopInternal(inst);
     this.bus.emit(EventBus.event('plugin.unloaded', { id: registryId }));
 
     // 事务阶段 2：加载新版本（内容快照 + 独立作用域，暂不进入注册表）
     const snap = this.snapshotOf(dir);
-    const fresh: PluginInstance = { manifest: oldManifest, dir, loadDir: snap.dir, loadHash: snap.hash, state: 'registered', caps: [], scope: new EffectScope(), provides: [], depHooks: [], depSignature: inst.depSignature, configOverrides: [], circuitBreaker: { ...inst.circuitBreaker } };
+    const fresh: PluginInstance = {
+      manifest: oldManifest,
+      dir,
+      loadDir: snap.dir,
+      loadHash: snap.hash,
+      state: 'registered',
+      caps: [],
+      scope: new EffectScope(),
+      provides: [],
+      depHooks: [],
+      depSignature: inst.depSignature,
+      configOverrides: [],
+      circuitBreaker: { ...inst.circuitBreaker },
+    };
     try {
       // 重读 plugin.json：清单本身可能已变更（入口/依赖/启停声明）；解析失败走回滚
       try {
@@ -1550,9 +1615,14 @@ export class PluginLoader {
       const oldPermissions = oldManifest.permissions!;
       for (const [kind, names] of Object.entries(fresh.manifest.permissions!.capabilities)) {
         const allowed = oldPermissions.capabilities[kind as Capability['kind']] ?? [];
-        if (!allowed.includes('*') && names?.some(name => !allowed.includes(name))) throw new Error('热加载不能扩大插件权限，请由用户重新安装并授权');
+        if (!allowed.includes('*') && names?.some((name) => !allowed.includes(name)))
+          throw new Error('热加载不能扩大插件权限，请由用户重新安装并授权');
       }
-      if (JSON.stringify(fresh.manifest.permissions!.runtime ?? {}) !== JSON.stringify(oldPermissions.runtime ?? {}) || JSON.stringify(fresh.manifest.permissions!.dependencies ?? []) !== JSON.stringify(oldPermissions.dependencies ?? [])) throw new Error('热加载不能更改插件运行时权限或依赖，请由用户重新安装并授权');
+      if (
+        JSON.stringify(fresh.manifest.permissions!.runtime ?? {}) !== JSON.stringify(oldPermissions.runtime ?? {}) ||
+        JSON.stringify(fresh.manifest.permissions!.dependencies ?? []) !== JSON.stringify(oldPermissions.dependencies ?? [])
+      )
+        throw new Error('热加载不能更改插件运行时权限或依赖，请由用户重新安装并授权');
       const mod = await import(this.entryUrl(fresh.loadDir, fresh.manifest.entry, fresh.loadHash, forceFresh));
       fresh.plugin = (mod.default ?? mod) as Plugin;
       await this.runLoad(fresh);
@@ -1571,9 +1641,18 @@ export class PluginLoader {
       try {
         await fresh.scope.dispose(); // 回收半成品副作用
         const rollback: PluginInstance = {
-          manifest: oldManifest, dir, loadDir: oldLoadDir, loadHash: inst.loadHash, state: 'registered',
-          caps: [], scope: new EffectScope(), provides: [], configOverrides: [], plugin: oldModule,
-          depHooks: [], depSignature: inst.depSignature,
+          manifest: oldManifest,
+          dir,
+          loadDir: oldLoadDir,
+          loadHash: inst.loadHash,
+          state: 'registered',
+          caps: [],
+          scope: new EffectScope(),
+          provides: [],
+          configOverrides: [],
+          plugin: oldModule,
+          depHooks: [],
+          depSignature: inst.depSignature,
           circuitBreaker: { ...inst.circuitBreaker },
         };
         await this.runLoad(rollback);
@@ -1630,7 +1709,11 @@ export class PluginLoader {
   private recomputeSignature(inst: PluginInstance): string {
     // 收集 depHooks 当前分量；除依赖分量外，requires 插件的版本也算入（依赖升级 = 重载）
     const parts = inst.depHooks.map((hook) => {
-      try { return hook(); } catch { return ''; }
+      try {
+        return hook();
+      } catch {
+        return '';
+      }
     });
     for (const dep of inst.manifest.requires ?? []) {
       const depInst = this.registry.get(dep);
@@ -1694,7 +1777,13 @@ export class PluginLoader {
   // ---------- 对外管理 API ----------
 
   /** 插件清单投影（不暴露 scope/plugin/chain 等内部结构——内核实现细节不是公共 API） */
-  list(): { manifest: PluginManifest; state: string; error?: string; circuitBreaker?: { failures: number; openedAt: number }; watched: boolean }[] {
+  list(): {
+    manifest: PluginManifest;
+    state: string;
+    error?: string;
+    circuitBreaker?: { failures: number; openedAt: number };
+    watched: boolean;
+  }[] {
     return [...this.registry.values()].map((i) => ({
       manifest: i.manifest,
       state: i.state,
@@ -1758,7 +1847,9 @@ export class PluginLoader {
 
   /** 实际暴露给 Agent 的工具集：同名只保留一个，避免模型看到重复定义。 */
   tools(): ToolDef[] {
-    return this.toolCatalog().filter((entry) => !entry.shadowedBy).map((entry) => entry.tool);
+    return this.toolCatalog()
+      .filter((entry) => !entry.shadowedBy)
+      .map((entry) => entry.tool);
   }
 
   /** 插件 API 清单（含所属插件 id）：server 层按 /api/plugins/<id>/<mount> 动态分发 */
@@ -1882,7 +1973,7 @@ export class PluginLoader {
       // 从注册表移除
       this.registry.delete(id);
       pruneSnapshots(cur.dir); // 连同内容快照一起清理
-      this.applyCleanup(cur);  // 私有存储按 manifest.cleanup 处理（数据归属可预期）
+      this.applyCleanup(cur); // 私有存储按 manifest.cleanup 处理（数据归属可预期）
       this.bus.emit(EventBus.event('plugin.unloaded', { id }));
     });
   }
@@ -1922,7 +2013,10 @@ export class PluginLoader {
    *  快照目录删除事件到达），只看最后一个会把整个窗口当快照噪声丢弃——
    *  插件删除事件被吞，实例永久滞留注册表（Linux CI 稳定复现）。 */
   private async onFileChange(changedPaths: string[]): Promise<void> {
-    if (this.rescanning) { this.pendingRescan = true; return; }
+    if (this.rescanning) {
+      this.pendingRescan = true;
+      return;
+    }
     // 纯快照目录事件窗口：快照增删是 reload 自产的回声，忽略
     const source = changedPaths.filter((p) => p && !SNAPSHOT_SUFFIX.test(p.split('/')[0]));
     if (changedPaths.length > 0 && source.length === 0) return;
@@ -1969,7 +2063,11 @@ export class PluginLoader {
   private snapshotMtime(dir: string): number {
     let m = 0;
     for (const p of [dir, join(dir, 'plugin.json')]) {
-      try { m = Math.max(m, statSync(p).mtimeMs); } catch { /* 忽略：目录可能已被删除 */ }
+      try {
+        m = Math.max(m, statSync(p).mtimeMs);
+      } catch {
+        /* 忽略：目录可能已被删除 */
+      }
     }
     return m;
   }
@@ -2007,7 +2105,7 @@ export class PluginLoader {
         this.registry.delete(inst.manifest.id);
         this.dirMtimes.delete(inst.dir);
         pruneSnapshots(inst.dir); // 插件目录已删除：连它的内容快照一并清理（不留孤儿）
-        this.applyCleanup(inst);  // 私有存储按 manifest.cleanup 处理
+        this.applyCleanup(inst); // 私有存储按 manifest.cleanup 处理
         this.bus.emit(EventBus.event('plugin.unloaded', { id: inst.manifest.id }));
       }
     }

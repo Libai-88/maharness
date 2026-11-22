@@ -18,51 +18,491 @@ import { ToggleGroup, ToggleGroupItem } from '@/components/ui/toggle-group';
 
 export function Review() {
   const { data, L, english } = useWorkbench();
-  const [range, setRange] = useState('week'), [offset, setOffset] = useState(0);
+  const [range, setRange] = useState('week'),
+    [offset, setOffset] = useState(0);
   const now = new Date();
   let start: string, end: string;
-  if (range === 'month') { start = day(new Date(now.getFullYear(), now.getMonth() + offset, 1)); end = day(new Date(now.getFullYear(), now.getMonth() + offset + 1, 0)); }
-  else { start = shift(day(), -((now.getDay() + 6) % 7) + offset * 7); end = shift(start, 6); }
+  if (range === 'month') {
+    start = day(new Date(now.getFullYear(), now.getMonth() + offset, 1));
+    end = day(new Date(now.getFullYear(), now.getMonth() + offset + 1, 0));
+  } else {
+    start = shift(day(), -((now.getDay() + 6) % 7) + offset * 7);
+    end = shift(start, 6);
+  }
   const inside = (stamp: number) => day(new Date(stamp)) >= start && day(new Date(stamp)) <= end;
-  const done = data.tasks.filter(task => task.done && !!task.doneAt && inside(task.doneAt));
-  const created = data.tasks.filter(task => inside(task.createdAt));
-  const pomo = Object.entries(data.meta.pomoLog).filter(([date]) => date >= start && date <= end).reduce((sum, [, count]) => sum + Number(count), 0);
+  const done = data.tasks.filter((task) => task.done && !!task.doneAt && inside(task.doneAt));
+  const created = data.tasks.filter((task) => inside(task.createdAt));
+  const pomo = Object.entries(data.meta.pomoLog)
+    .filter(([date]) => date >= start && date <= end)
+    .reduce((sum, [, count]) => sum + Number(count), 0);
   const points: { date: string; done: number; pomo: number }[] = [];
-  for (let date = start; date <= end; date = shift(date, 1)) points.push({ date: date.slice(5), done: done.filter(task => day(new Date(task.doneAt!)) === date).length, pomo: Number(data.meta.pomoLog[date]) || 0 });
+  for (let date = start; date <= end; date = shift(date, 1))
+    points.push({
+      date: date.slice(5),
+      done: done.filter((task) => day(new Date(task.doneAt!)) === date).length,
+      pomo: Number(data.meta.pomoLog[date]) || 0,
+    });
   const report = markdown(data, english, { start, end });
-  const copy = async () => { try { await navigator.clipboard.writeText(report); toast.success(L('报告已复制', 'Report copied')); } catch (error) { toast.error(String(error)); } };
-  const history = Array.from({ length: 119 }, (_, index) => { const date = shift(day(), index - 118); return { date, done: data.tasks.filter(task => task.done && !!task.doneAt && day(new Date(task.doneAt)) === date).length }; });
-  return <div className="flex min-w-0 flex-col gap-6">
-    <div className="flex flex-wrap items-center justify-between gap-3"><ToggleGroup type="single" variant="outline" value={range} onValueChange={value => { if (value) { setRange(value); setOffset(0); } }}><ToggleGroupItem value="week">{L('周复盘', 'Weekly')}</ToggleGroupItem><ToggleGroupItem value="month">{L('月复盘', 'Monthly')}</ToggleGroupItem></ToggleGroup><div className="flex items-center gap-2"><Button variant="outline" size="icon-sm" aria-label={L('上一周期', 'Previous period')} onClick={() => setOffset(offset - 1)}><ChevronLeft /></Button><span className="text-sm tabular-nums">{start} – {end}</span><Button variant="outline" size="icon-sm" aria-label={L('下一周期', 'Next period')} onClick={() => setOffset(offset + 1)}><ChevronRight /></Button><Button variant="ghost" size="sm" onClick={() => setOffset(0)}>{L('本期', 'Current')}</Button></div></div>
-    <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">{[[L('完成任务', 'Completed'), done.length], [L('新建任务', 'Created'), created.length], [L('受阻项目', 'Blocked projects'), data.projects.filter(project => project.status === 'blocked').length], [L('专注番茄', 'Pomodoros'), pomo]].map(([label, count]) => <Card key={label} size="sm"><CardHeader><CardDescription>{label}</CardDescription><CardTitle className="text-2xl tabular-nums">{count}</CardTitle></CardHeader></Card>)}</div>
-    <Card><CardHeader><CardTitle>{L('完成与投入', 'Completion and focus')}</CardTitle><CardDescription>{start} – {end}</CardDescription></CardHeader><CardContent><ChartContainer className="h-64 w-full" config={{ done: { label: L('完成任务', 'Completed tasks'), color: 'var(--chart-1)' }, pomo: { label: L('番茄', 'Pomodoros'), color: 'var(--chart-2)' } }}><BarChart accessibilityLayer data={points}><CartesianGrid vertical={false} /><XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={24} /><YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} domain={[0, 'auto']} /><ChartTooltip content={<ChartTooltipContent />} /><Bar dataKey="done" fill="var(--color-done)" radius={3} /><Bar dataKey="pomo" fill="var(--color-pomo)" radius={3} /></BarChart></ChartContainer></CardContent><CardFooter className="flex-wrap gap-3 text-sm text-muted-foreground"><span>{L('完成任务', 'Completed tasks')}: {done.length}</span><span>{L('番茄', 'Pomodoros')}: {pomo}</span></CardFooter></Card>
-    <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2"><Card className="min-w-0"><CardHeader><CardTitle>{L('项目投入', 'Project focus')}</CardTitle><CardDescription>{L('本周期完成任务与已记录番茄', 'Completed tasks and recorded pomodoros this period')}</CardDescription></CardHeader><CardContent><Table><TableHeader><TableRow><TableHead>{L('项目', 'Project')}</TableHead><TableHead className="text-right">{L('完成', 'Done')}</TableHead><TableHead className="text-right">{L('番茄', 'Pomo')}</TableHead></TableRow></TableHeader><TableBody>{[...data.projects, { id: '', name: L('未关联', 'Unlinked') }].map(project => <TableRow key={project.id}><TableCell>{project.name}</TableCell><TableCell className="text-right tabular-nums">{done.filter(task => task.pid === project.id).length}</TableCell><TableCell className="text-right tabular-nums">{done.filter(task => task.pid === project.id).reduce((sum, task) => sum + task.pomo, 0)}</TableCell></TableRow>)}</TableBody></Table></CardContent></Card>
-      <Card><CardHeader><CardTitle>{L('每日一记', 'Daily lines')}</CardTitle><CardDescription>{start} – {end}</CardDescription></CardHeader><CardContent className="flex flex-col gap-4">{Object.entries(data.diary).filter(([date, content]) => content && date >= start && date <= end).sort().map(([date, content]) => <div key={date} className="flex flex-col gap-1"><span className="text-xs text-muted-foreground">{date}</span><p className="whitespace-pre-wrap text-sm">{content}</p></div>)}</CardContent><CardFooter className="gap-2"><Button variant="outline" size="sm" onClick={() => void copy()}><Copy data-icon="inline-start" />{L('复制报告', 'Copy report')}</Button><Button variant="outline" size="sm" onClick={() => download(report, `workbench-review-${start}.md`)}><Download data-icon="inline-start" />{L('下载报告', 'Download report')}</Button></CardFooter></Card></div>
-    <Card><CardHeader><CardTitle>{L('长期完成趋势', 'Completion history')}</CardTitle><CardDescription>{history[0].date} – {day()}</CardDescription></CardHeader><CardContent><ChartContainer config={{ done: { label: L('完成任务', 'Completed tasks'), color: 'var(--chart-1)' } }} className="h-48 w-full"><BarChart accessibilityLayer data={history}><XAxis dataKey="date" tickFormatter={value => value.slice(5)} tickLine={false} axisLine={false} minTickGap={32} /><YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} domain={[0, 'auto']} /><ChartTooltip content={<ChartTooltipContent />} /><Bar dataKey="done" fill="var(--color-done)" radius={2} /></BarChart></ChartContainer></CardContent></Card>
-  </div>;
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(report);
+      toast.success(L('报告已复制', 'Report copied'));
+    } catch (error) {
+      toast.error(String(error));
+    }
+  };
+  const history = Array.from({ length: 119 }, (_, index) => {
+    const date = shift(day(), index - 118);
+    return { date, done: data.tasks.filter((task) => task.done && !!task.doneAt && day(new Date(task.doneAt)) === date).length };
+  });
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <ToggleGroup
+          type="single"
+          variant="outline"
+          value={range}
+          onValueChange={(value) => {
+            if (value) {
+              setRange(value);
+              setOffset(0);
+            }
+          }}
+        >
+          <ToggleGroupItem value="week">{L('周复盘', 'Weekly')}</ToggleGroupItem>
+          <ToggleGroupItem value="month">{L('月复盘', 'Monthly')}</ToggleGroupItem>
+        </ToggleGroup>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" size="icon-sm" aria-label={L('上一周期', 'Previous period')} onClick={() => setOffset(offset - 1)}>
+            <ChevronLeft />
+          </Button>
+          <span className="text-sm tabular-nums">
+            {start} – {end}
+          </span>
+          <Button variant="outline" size="icon-sm" aria-label={L('下一周期', 'Next period')} onClick={() => setOffset(offset + 1)}>
+            <ChevronRight />
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => setOffset(0)}>
+            {L('本期', 'Current')}
+          </Button>
+        </div>
+      </div>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        {[
+          [L('完成任务', 'Completed'), done.length],
+          [L('新建任务', 'Created'), created.length],
+          [L('受阻项目', 'Blocked projects'), data.projects.filter((project) => project.status === 'blocked').length],
+          [L('专注番茄', 'Pomodoros'), pomo],
+        ].map(([label, count]) => (
+          <Card key={label} size="sm">
+            <CardHeader>
+              <CardDescription>{label}</CardDescription>
+              <CardTitle className="text-2xl tabular-nums">{count}</CardTitle>
+            </CardHeader>
+          </Card>
+        ))}
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('完成与投入', 'Completion and focus')}</CardTitle>
+          <CardDescription>
+            {start} – {end}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer
+            className="h-64 w-full"
+            config={{
+              done: { label: L('完成任务', 'Completed tasks'), color: 'var(--chart-1)' },
+              pomo: { label: L('番茄', 'Pomodoros'), color: 'var(--chart-2)' },
+            }}
+          >
+            <BarChart accessibilityLayer data={points}>
+              <CartesianGrid vertical={false} />
+              <XAxis dataKey="date" tickLine={false} axisLine={false} minTickGap={24} />
+              <YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} domain={[0, 'auto']} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="done" fill="var(--color-done)" radius={3} />
+              <Bar dataKey="pomo" fill="var(--color-pomo)" radius={3} />
+            </BarChart>
+          </ChartContainer>
+        </CardContent>
+        <CardFooter className="flex-wrap gap-3 text-sm text-muted-foreground">
+          <span>
+            {L('完成任务', 'Completed tasks')}: {done.length}
+          </span>
+          <span>
+            {L('番茄', 'Pomodoros')}: {pomo}
+          </span>
+        </CardFooter>
+      </Card>
+      <div className="grid min-w-0 items-start gap-6 xl:grid-cols-2">
+        <Card className="min-w-0">
+          <CardHeader>
+            <CardTitle>{L('项目投入', 'Project focus')}</CardTitle>
+            <CardDescription>{L('本周期完成任务与已记录番茄', 'Completed tasks and recorded pomodoros this period')}</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{L('项目', 'Project')}</TableHead>
+                  <TableHead className="text-right">{L('完成', 'Done')}</TableHead>
+                  <TableHead className="text-right">{L('番茄', 'Pomo')}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {[...data.projects, { id: '', name: L('未关联', 'Unlinked') }].map((project) => (
+                  <TableRow key={project.id}>
+                    <TableCell>{project.name}</TableCell>
+                    <TableCell className="text-right tabular-nums">{done.filter((task) => task.pid === project.id).length}</TableCell>
+                    <TableCell className="text-right tabular-nums">
+                      {done.filter((task) => task.pid === project.id).reduce((sum, task) => sum + task.pomo, 0)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle>{L('每日一记', 'Daily lines')}</CardTitle>
+            <CardDescription>
+              {start} – {end}
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="flex flex-col gap-4">
+            {Object.entries(data.diary)
+              .filter(([date, content]) => content && date >= start && date <= end)
+              .sort()
+              .map(([date, content]) => (
+                <div key={date} className="flex flex-col gap-1">
+                  <span className="text-xs text-muted-foreground">{date}</span>
+                  <p className="whitespace-pre-wrap text-sm">{content}</p>
+                </div>
+              ))}
+          </CardContent>
+          <CardFooter className="gap-2">
+            <Button variant="outline" size="sm" onClick={() => void copy()}>
+              <Copy data-icon="inline-start" />
+              {L('复制报告', 'Copy report')}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => download(report, `workbench-review-${start}.md`)}>
+              <Download data-icon="inline-start" />
+              {L('下载报告', 'Download report')}
+            </Button>
+          </CardFooter>
+        </Card>
+      </div>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('长期完成趋势', 'Completion history')}</CardTitle>
+          <CardDescription>
+            {history[0].date} – {day()}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <ChartContainer config={{ done: { label: L('完成任务', 'Completed tasks'), color: 'var(--chart-1)' } }} className="h-48 w-full">
+            <BarChart accessibilityLayer data={history}>
+              <XAxis dataKey="date" tickFormatter={(value) => value.slice(5)} tickLine={false} axisLine={false} minTickGap={32} />
+              <YAxis allowDecimals={false} width={28} tickLine={false} axisLine={false} domain={[0, 'auto']} />
+              <ChartTooltip content={<ChartTooltipContent />} />
+              <Bar dataKey="done" fill="var(--color-done)" radius={2} />
+            </BarChart>
+          </ChartContainer>
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 export function Backups() {
-  const { data, store, L, english, confirm } = useWorkbench(), { connection } = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const [mode, setMode] = useState('merge'), [health, setHealth] = useState<string | null>(null), [busy, setBusy] = useState(false);
+  const { data, store, L, english, confirm } = useWorkbench(),
+    { connection } = useSyncExternalStore(store.subscribe, store.getSnapshot);
+  const [mode, setMode] = useState('merge'),
+    [health, setHealth] = useState<string | null>(null),
+    [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
-  const run = async (action: () => Promise<unknown>) => { setBusy(true); try { await action(); } catch (error) { toast.error(String(error)); } finally { setBusy(false); } };
+  const run = async (action: () => Promise<unknown>) => {
+    setBusy(true);
+    try {
+      await action();
+    } catch (error) {
+      toast.error(String(error));
+    } finally {
+      setBusy(false);
+    }
+  };
   const total = data.tasks.length + data.notes.length + data.projects.length;
   const exportData = (json: boolean) => {
-    store.commit(draft => { draft.meta.lastExport = Date.now(); draft.meta.itemsAtExport = total; }, false);
+    store.commit((draft) => {
+      draft.meta.lastExport = Date.now();
+      draft.meta.itemsAtExport = total;
+    }, false);
     const current = store.getSnapshot().data;
-    download(json ? JSON.stringify({ ...current, app: 'workbench', savedAt: new Date().toISOString() }, null, 2) : markdown(current, english), `workbench-${day()}.${json ? 'json' : 'md'}`, json ? 'application/json' : undefined);
+    download(
+      json ? JSON.stringify({ ...current, app: 'workbench', savedAt: new Date().toISOString() }, null, 2) : markdown(current, english),
+      `workbench-${day()}.${json ? 'json' : 'md'}`,
+      json ? 'application/json' : undefined,
+    );
   };
-  const importData = (incoming: WorkbenchState) => void run(async () => { await store.importData(incoming, mode === 'replace'); toast.success(L('导入完成', 'Import complete')); });
-  const clear = (sample: boolean) => confirm(sample ? L('清空示例数据？', 'Clear sample records?') : L('清空全部数据？', 'Clear all data?'), () => store.commit(draft => {
-    for (const [kind, key] of [['task', 'tasks'], ['note', 'notes'], ['proj', 'projects']] as const) removeRecords(draft, kind, draft[key].filter(record => !sample || record._s).map(record => record.id));
-    draft.meta.sample = false;
-    if (!sample) { for (const date of Object.keys(draft.diary)) { draft.diary[date] = ''; draft.diaryTs[date] = Date.now(); } draft.meta.pomoLog = {}; }
-  }), L('任务、项目和灵感可从回收站恢复。', 'Tasks, projects and notes can be restored from the recycle bin.'));
-  return <div className="flex min-w-0 flex-col gap-6">
-    <Card><CardHeader><CardTitle>{L('数据与备份', 'Data and backups')}</CardTitle><CardDescription>{total} {L('条记录', 'records')}{data.meta.lastExport ? ` · ${L('最近导出', 'Last exported')} ${new Date(data.meta.lastExport).toLocaleString()}` : ''}</CardDescription></CardHeader><CardContent className="flex flex-wrap gap-3"><Button variant="outline" onClick={() => exportData(true)}><Download data-icon="inline-start" />{L('导出 JSON', 'Export JSON')}</Button><Button variant="outline" onClick={() => exportData(false)}><Download data-icon="inline-start" />{L('导出 Markdown', 'Export Markdown')}</Button></CardContent><CardFooter><p className="text-sm text-muted-foreground">{L('数据保存于应用存储，可导出 JSON 备份。', 'Data saves to application storage. Export JSON for backup.')}</p></CardFooter></Card>
-    <Card><CardHeader><CardTitle>{L('导入数据', 'Import data')}</CardTitle><CardDescription>{L('合并保留本地已有记录，覆盖使用备份中的完整内容。', 'Merge keeps existing local records. Replace uses the complete backup.')}</CardDescription></CardHeader><CardContent><FieldGroup className="max-w-lg"><Field><FieldLabel>{L('导入方式', 'Import mode')}</FieldLabel><Choice label={L('导入方式', 'Import mode')} value={mode} onChange={setMode} options={[["merge", L('合并导入', 'Merge')], ["replace", L('覆盖导入', 'Replace')]]} /></Field><Field><FieldLabel htmlFor="workbench-import">{L('JSON 备份文件', 'JSON backup file')}</FieldLabel><Input ref={input} id="workbench-import" type="file" accept=".json,application/json" disabled={busy} onChange={event => { const file = event.target.files?.[0]; if (!file) return; void run(async () => { const incoming = readImport(await file.text()); if (mode === 'replace') confirm(L('覆盖当前工作台？', 'Replace current workbench?'), () => importData(incoming), L('请先导出当前数据作为备份。', 'Export your current data before replacing it.')); else importData(incoming); }); event.target.value = ''; }} /></Field></FieldGroup></CardContent><CardFooter><Button variant="outline" disabled={busy} onClick={() => input.current?.click()}><Upload data-icon="inline-start" />{L('选择备份', 'Choose backup')}</Button></CardFooter></Card>
-    <Card><CardHeader><CardTitle>{L('应用存储', 'Application storage')}</CardTitle><CardDescription>{connection.name}</CardDescription></CardHeader><CardContent>{connection.error && <Alert variant="destructive"><AlertTitle>保存需要处理</AlertTitle><AlertDescription>{connection.error}。未提交内容仍保留在当前页面，请先导出备份。</AlertDescription></Alert>}</CardContent><CardFooter className="gap-2"><Button variant="outline" disabled={connection.busy} onClick={() => void store.sync()}><RefreshCw />保存并刷新</Button><Button variant="outline" onClick={() => confirm('重新载入应用数据？', () => void store.refresh(true), '当前未保存内容将被替换，请先导出。')}>重新载入</Button><Button variant="outline" onClick={() => { try { const legacy = store.legacyData(); if (!legacy) { toast.info('没有浏览器历史数据'); return; } confirm('导入浏览器历史数据？', () => void run(() => store.importLegacy()), `${legacy.tasks.filter(t => !t._s).length} 个事项，${legacy.notes.filter(n => !n._s).length} 条笔记，${legacy.projects.filter(p => !p._s).length} 个项目；按更新时间合并，同 ID 冲突保留较新记录。`); } catch (error) { toast.error(String(error)); } }}>导入浏览器历史</Button></CardFooter></Card>
-    <Card><CardHeader><CardTitle>{L('回收站', 'Recycle bin')}</CardTitle><CardDescription>{L('保留 30 天，最多 200 条。', 'Up to 200 records, kept for 30 days.')}</CardDescription><CardAction><Badge variant="secondary">{data.bin.length}</Badge></CardAction></CardHeader><CardContent><ItemGroup className="gap-2">{data.bin.map(entry => <Item key={entry.id} variant="outline"><ItemContent><ItemTitle>{String(entry.rec.title || entry.rec.name || entry.rec.text || entry.id).slice(0, 160)}</ItemTitle><ItemDescription>{new Date(entry.at).toLocaleString()} · {entry.kind === 'task' ? L('任务', 'Task') : entry.kind === 'note' ? L('灵感', 'Note') : L('项目', 'Project')}</ItemDescription></ItemContent><ItemActions><Button variant="outline" size="sm" onClick={() => store.commit(draft => restoreRecord(draft, entry.id))}><Undo2 data-icon="inline-start" />{L('恢复', 'Restore')}</Button></ItemActions></Item>)}</ItemGroup>{!data.bin.length && <NoItems />}</CardContent><CardFooter><Button variant="outline" disabled={!data.bin.length} onClick={() => confirm(L('清空回收站？', 'Empty recycle bin?'), () => store.commit(draft => { draft.bin = []; }, false), L('回收站中的记录将永久移除。', 'Records in the recycle bin will be permanently removed.'))}><Trash2 data-icon="inline-start" />{L('清空回收站', 'Empty recycle bin')}</Button></CardFooter></Card>
-    <Card><CardHeader><CardTitle>{L('数据维护', 'Data maintenance')}</CardTitle><CardDescription>{L('检查完整性，或整理工作台记录。', 'Check integrity or manage workbench records.')}</CardDescription></CardHeader><CardContent className="flex flex-col gap-3">{health && <Alert><AlertTitle>{L('健康检查', 'Health check')}</AlertTitle><AlertDescription>{health}</AlertDescription></Alert>}<p className="text-sm text-muted-foreground">{L('未完成', 'Open')}: {data.tasks.filter(live).length} · {L('任务', 'Tasks')}: {data.tasks.length} · {L('项目', 'Projects')}: {data.projects.length} · {L('灵感', 'Notes')}: {data.notes.length}</p></CardContent><CardFooter className="flex-wrap gap-2"><Button variant="outline" onClick={() => { const all = [...data.tasks, ...data.notes, ...data.projects], ids = new Set(all.map(item => item.id)); const orphan = data.tasks.filter(task => task.pid && !data.projects.some(project => project.id === task.pid)).length; setHealth(ids.size === all.length && !orphan ? L('记录完整，未发现重复 ID 或失效的项目关联。', 'Records are consistent. No duplicate IDs or orphaned project links.') : L('存在重复 ID 或失效关联，请导出备份后检查。', 'Duplicate IDs or orphaned links found. Export a backup and inspect it.')); }}>{L('健康检查', 'Health check')}</Button><Button variant="outline" disabled={![...data.tasks, ...data.notes, ...data.projects].some(item => item._s)} onClick={() => clear(true)}>{L('清空示例', 'Clear samples')}</Button><Button variant="destructive" onClick={() => clear(false)}>{L('清空全部数据', 'Clear all data')}</Button></CardFooter></Card>
-  </div>;
+  const importData = (incoming: WorkbenchState) =>
+    void run(async () => {
+      await store.importData(incoming, mode === 'replace');
+      toast.success(L('导入完成', 'Import complete'));
+    });
+  const clear = (sample: boolean) =>
+    confirm(
+      sample ? L('清空示例数据？', 'Clear sample records?') : L('清空全部数据？', 'Clear all data?'),
+      () =>
+        store.commit((draft) => {
+          for (const [kind, key] of [
+            ['task', 'tasks'],
+            ['note', 'notes'],
+            ['proj', 'projects'],
+          ] as const)
+            removeRecords(
+              draft,
+              kind,
+              draft[key].filter((record) => !sample || record._s).map((record) => record.id),
+            );
+          draft.meta.sample = false;
+          if (!sample) {
+            for (const date of Object.keys(draft.diary)) {
+              draft.diary[date] = '';
+              draft.diaryTs[date] = Date.now();
+            }
+            draft.meta.pomoLog = {};
+          }
+        }),
+      L('任务、项目和灵感可从回收站恢复。', 'Tasks, projects and notes can be restored from the recycle bin.'),
+    );
+  return (
+    <div className="flex min-w-0 flex-col gap-6">
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('数据与备份', 'Data and backups')}</CardTitle>
+          <CardDescription>
+            {total} {L('条记录', 'records')}
+            {data.meta.lastExport ? ` · ${L('最近导出', 'Last exported')} ${new Date(data.meta.lastExport).toLocaleString()}` : ''}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-wrap gap-3">
+          <Button variant="outline" onClick={() => exportData(true)}>
+            <Download data-icon="inline-start" />
+            {L('导出 JSON', 'Export JSON')}
+          </Button>
+          <Button variant="outline" onClick={() => exportData(false)}>
+            <Download data-icon="inline-start" />
+            {L('导出 Markdown', 'Export Markdown')}
+          </Button>
+        </CardContent>
+        <CardFooter>
+          <p className="text-sm text-muted-foreground">
+            {L('数据保存于应用存储，可导出 JSON 备份。', 'Data saves to application storage. Export JSON for backup.')}
+          </p>
+        </CardFooter>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('导入数据', 'Import data')}</CardTitle>
+          <CardDescription>
+            {L('合并保留本地已有记录，覆盖使用备份中的完整内容。', 'Merge keeps existing local records. Replace uses the complete backup.')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldGroup className="max-w-lg">
+            <Field>
+              <FieldLabel>{L('导入方式', 'Import mode')}</FieldLabel>
+              <Choice
+                label={L('导入方式', 'Import mode')}
+                value={mode}
+                onChange={setMode}
+                options={[
+                  ['merge', L('合并导入', 'Merge')],
+                  ['replace', L('覆盖导入', 'Replace')],
+                ]}
+              />
+            </Field>
+            <Field>
+              <FieldLabel htmlFor="workbench-import">{L('JSON 备份文件', 'JSON backup file')}</FieldLabel>
+              <Input
+                ref={input}
+                id="workbench-import"
+                type="file"
+                accept=".json,application/json"
+                disabled={busy}
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (!file) return;
+                  void run(async () => {
+                    const incoming = readImport(await file.text());
+                    if (mode === 'replace')
+                      confirm(
+                        L('覆盖当前工作台？', 'Replace current workbench?'),
+                        () => importData(incoming),
+                        L('请先导出当前数据作为备份。', 'Export your current data before replacing it.'),
+                      );
+                    else importData(incoming);
+                  });
+                  event.target.value = '';
+                }}
+              />
+            </Field>
+          </FieldGroup>
+        </CardContent>
+        <CardFooter>
+          <Button variant="outline" disabled={busy} onClick={() => input.current?.click()}>
+            <Upload data-icon="inline-start" />
+            {L('选择备份', 'Choose backup')}
+          </Button>
+        </CardFooter>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('应用存储', 'Application storage')}</CardTitle>
+          <CardDescription>{connection.name}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {connection.error && (
+            <Alert variant="destructive">
+              <AlertTitle>保存需要处理</AlertTitle>
+              <AlertDescription>{connection.error}。未提交内容仍保留在当前页面，请先导出备份。</AlertDescription>
+            </Alert>
+          )}
+        </CardContent>
+        <CardFooter className="gap-2">
+          <Button variant="outline" disabled={connection.busy} onClick={() => void store.sync()}>
+            <RefreshCw />
+            保存并刷新
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => confirm('重新载入应用数据？', () => void store.refresh(true), '当前未保存内容将被替换，请先导出。')}
+          >
+            重新载入
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              try {
+                const legacy = store.legacyData();
+                if (!legacy) {
+                  toast.info('没有浏览器历史数据');
+                  return;
+                }
+                confirm(
+                  '导入浏览器历史数据？',
+                  () => void run(() => store.importLegacy()),
+                  `${legacy.tasks.filter((t) => !t._s).length} 个事项，${legacy.notes.filter((n) => !n._s).length} 条笔记，${legacy.projects.filter((p) => !p._s).length} 个项目；按更新时间合并，同 ID 冲突保留较新记录。`,
+                );
+              } catch (error) {
+                toast.error(String(error));
+              }
+            }}
+          >
+            导入浏览器历史
+          </Button>
+        </CardFooter>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('回收站', 'Recycle bin')}</CardTitle>
+          <CardDescription>{L('保留 30 天，最多 200 条。', 'Up to 200 records, kept for 30 days.')}</CardDescription>
+          <CardAction>
+            <Badge variant="secondary">{data.bin.length}</Badge>
+          </CardAction>
+        </CardHeader>
+        <CardContent>
+          <ItemGroup className="gap-2">
+            {data.bin.map((entry) => (
+              <Item key={entry.id} variant="outline">
+                <ItemContent>
+                  <ItemTitle>{String(entry.rec.title || entry.rec.name || entry.rec.text || entry.id).slice(0, 160)}</ItemTitle>
+                  <ItemDescription>
+                    {new Date(entry.at).toLocaleString()} ·{' '}
+                    {entry.kind === 'task' ? L('任务', 'Task') : entry.kind === 'note' ? L('灵感', 'Note') : L('项目', 'Project')}
+                  </ItemDescription>
+                </ItemContent>
+                <ItemActions>
+                  <Button variant="outline" size="sm" onClick={() => store.commit((draft) => restoreRecord(draft, entry.id))}>
+                    <Undo2 data-icon="inline-start" />
+                    {L('恢复', 'Restore')}
+                  </Button>
+                </ItemActions>
+              </Item>
+            ))}
+          </ItemGroup>
+          {!data.bin.length && <NoItems />}
+        </CardContent>
+        <CardFooter>
+          <Button
+            variant="outline"
+            disabled={!data.bin.length}
+            onClick={() =>
+              confirm(
+                L('清空回收站？', 'Empty recycle bin?'),
+                () =>
+                  store.commit((draft) => {
+                    draft.bin = [];
+                  }, false),
+                L('回收站中的记录将永久移除。', 'Records in the recycle bin will be permanently removed.'),
+              )
+            }
+          >
+            <Trash2 data-icon="inline-start" />
+            {L('清空回收站', 'Empty recycle bin')}
+          </Button>
+        </CardFooter>
+      </Card>
+      <Card>
+        <CardHeader>
+          <CardTitle>{L('数据维护', 'Data maintenance')}</CardTitle>
+          <CardDescription>{L('检查完整性，或整理工作台记录。', 'Check integrity or manage workbench records.')}</CardDescription>
+        </CardHeader>
+        <CardContent className="flex flex-col gap-3">
+          {health && (
+            <Alert>
+              <AlertTitle>{L('健康检查', 'Health check')}</AlertTitle>
+              <AlertDescription>{health}</AlertDescription>
+            </Alert>
+          )}
+          <p className="text-sm text-muted-foreground">
+            {L('未完成', 'Open')}: {data.tasks.filter(live).length} · {L('任务', 'Tasks')}: {data.tasks.length} · {L('项目', 'Projects')}:{' '}
+            {data.projects.length} · {L('灵感', 'Notes')}: {data.notes.length}
+          </p>
+        </CardContent>
+        <CardFooter className="flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={() => {
+              const all = [...data.tasks, ...data.notes, ...data.projects],
+                ids = new Set(all.map((item) => item.id));
+              const orphan = data.tasks.filter((task) => task.pid && !data.projects.some((project) => project.id === task.pid)).length;
+              setHealth(
+                ids.size === all.length && !orphan
+                  ? L('记录完整，未发现重复 ID 或失效的项目关联。', 'Records are consistent. No duplicate IDs or orphaned project links.')
+                  : L(
+                      '存在重复 ID 或失效关联，请导出备份后检查。',
+                      'Duplicate IDs or orphaned links found. Export a backup and inspect it.',
+                    ),
+              );
+            }}
+          >
+            {L('健康检查', 'Health check')}
+          </Button>
+          <Button
+            variant="outline"
+            disabled={![...data.tasks, ...data.notes, ...data.projects].some((item) => item._s)}
+            onClick={() => clear(true)}
+          >
+            {L('清空示例', 'Clear samples')}
+          </Button>
+          <Button variant="destructive" onClick={() => clear(false)}>
+            {L('清空全部数据', 'Clear all data')}
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
+  );
 }

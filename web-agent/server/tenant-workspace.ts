@@ -27,25 +27,42 @@ export interface StorageUsage {
 export function measureStorage(root: string, opts: { maxFiles?: number; deadlineMs?: number; exclude?: string[] } = {}): StorageUsage {
   const maxFiles = opts.maxFiles ?? 200_000;
   const deadline = Date.now() + (opts.deadlineMs ?? 2_000);
-  const exclude = new Set((opts.exclude ?? []).map((path) => process.platform === 'win32' ? path.toLowerCase() : path));
+  const exclude = new Set((opts.exclude ?? []).map((path) => (process.platform === 'win32' ? path.toLowerCase() : path)));
   let bytes = 0;
   let files = 0;
   let complete = true;
   const walk = (dir: string): void => {
     if (!complete) return;
-    if (Date.now() > deadline || files > maxFiles) { complete = false; return; }
+    if (Date.now() > deadline || files > maxFiles) {
+      complete = false;
+      return;
+    }
     let entries: Dirent[];
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
     for (const entry of entries) {
       if (!complete) return;
-      if (files > maxFiles || Date.now() > deadline) { complete = false; return; }
+      if (files > maxFiles || Date.now() > deadline) {
+        complete = false;
+        return;
+      }
       const full = join(dir, entry.name);
       if (exclude.has(process.platform === 'win32' ? full.toLowerCase() : full)) continue;
       if (entry.isSymbolicLink()) continue;
-      if (entry.isDirectory()) { walk(full); continue; }
+      if (entry.isDirectory()) {
+        walk(full);
+        continue;
+      }
       if (!entry.isFile()) continue;
       files++;
-      try { bytes += statSync(full).size; } catch { /* 文件在遍历中消失：跳过 */ }
+      try {
+        bytes += statSync(full).size;
+      } catch {
+        /* 文件在遍历中消失：跳过 */
+      }
     }
   };
   if (existsSync(root)) walk(root);
@@ -55,15 +72,17 @@ export function measureStorage(root: string, opts: { maxFiles?: number; deadline
 export class TenantStorageQuotaError extends Error {
   readonly code = 'TENANT_STORAGE_QUOTA' as const;
   readonly status = 413;
-  constructor(readonly used: number, readonly limit: number, readonly additional: number) {
+  constructor(
+    readonly used: number,
+    readonly limit: number,
+    readonly additional: number,
+  ) {
     super(`租户存储配额超限：已用 ${used} 字节，本次需要 ${additional} 字节，上限 ${limit} 字节`);
     this.name = 'TenantStorageQuotaError';
   }
 }
 
-export function assertStorageQuota(input: {
-  usedBytes: number; limitBytes: number; additionalBytes: number;
-}): void {
+export function assertStorageQuota(input: { usedBytes: number; limitBytes: number; additionalBytes: number }): void {
   if (!input.limitBytes || input.limitBytes <= 0) return;
   if (input.additionalBytes <= 0) return;
   if (input.usedBytes + input.additionalBytes > input.limitBytes) {

@@ -19,8 +19,12 @@ function memoryStore(): OAuthTokenStore & { data: OAuthTokenData | null } {
   const store = {
     data: null as OAuthTokenData | null,
     load: () => store.data,
-    save: (data: OAuthTokenData) => { store.data = data; },
-    clear: () => { store.data = null; },
+    save: (data: OAuthTokenData) => {
+      store.data = data;
+    },
+    clear: () => {
+      store.data = null;
+    },
   };
   return store;
 }
@@ -39,7 +43,11 @@ describe('MCP OAuth 2.1 PKCE', () => {
           if (form.get('grant_type') === 'authorization_code') {
             assert.equal(form.get('code'), 'auth-code');
             assert.equal(form.get('client_id'), 'client-1');
-            const challenge = base64url(createHash('sha256').update(String(form.get('code_verifier'))).digest());
+            const challenge = base64url(
+              createHash('sha256')
+                .update(String(form.get('code_verifier')))
+                .digest(),
+            );
             assert.equal(challenge, expectedChallenge, 'code_verifier 必须匹配授权 URL 的 challenge');
             res.setHeader('Content-Type', 'application/json');
             res.end(JSON.stringify({ access_token: 'access-token-1', refresh_token: 'refresh-token-1', expires_in: 60 }));
@@ -51,7 +59,9 @@ describe('MCP OAuth 2.1 PKCE', () => {
             res.end(JSON.stringify({ access_token: 'access-token-2', expires_in: 3600 }));
             return;
           }
-          res.statusCode = 400; res.end('bad grant'); return;
+          res.statusCode = 400;
+          res.end('bad grant');
+          return;
         }
         if (url.pathname === '/mcp') {
           mcpCalls++;
@@ -59,14 +69,24 @@ describe('MCP OAuth 2.1 PKCE', () => {
           const rpc = JSON.parse(await body(req)) as { id?: number; method?: string };
           res.setHeader('Content-Type', 'application/json');
           if (rpc.method === 'tools/list') {
-            res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: { tools: [{ name: 'echo', inputSchema: { type: 'object', properties: {} } }] } }));
+            res.end(
+              JSON.stringify({
+                jsonrpc: '2.0',
+                id: rpc.id,
+                result: { tools: [{ name: 'echo', inputSchema: { type: 'object', properties: {} } }] },
+              }),
+            );
           } else {
             res.end(JSON.stringify({ jsonrpc: '2.0', id: rpc.id, result: {} }));
           }
           return;
         }
-        res.statusCode = 404; res.end();
-      })().catch((err) => { res.statusCode = 500; res.end(String(err)); });
+        res.statusCode = 404;
+        res.end();
+      })().catch((err) => {
+        res.statusCode = 500;
+        res.end(String(err));
+      });
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
@@ -107,14 +127,21 @@ describe('MCP OAuth 2.1 PKCE', () => {
     assert.equal(client.status().state, 'authorized');
     assert.equal(tokenCalls, 1);
 
-    const conn = new HttpConnection('demo', {
-      type: 'http',
-      url: `http://127.0.0.1:${port}/mcp`,
-      allowPrivate: true,
-    }, client);
+    const conn = new HttpConnection(
+      'demo',
+      {
+        type: 'http',
+        url: `http://127.0.0.1:${port}/mcp`,
+        allowPrivate: true,
+      },
+      client,
+    );
     await conn.initialize();
     const tools = await conn.toolsList();
-    assert.deepEqual(tools.map((tool) => tool.name), ['echo']);
+    assert.deepEqual(
+      tools.map((tool) => tool.name),
+      ['echo'],
+    );
     assert.equal(mcpCalls, 2);
     conn.close();
 
@@ -126,21 +153,44 @@ describe('MCP OAuth 2.1 PKCE', () => {
   test('缺少 refresh token 时明确要求重新登录', async () => {
     const store = memoryStore();
     store.save({ accessToken: 'expired', expiresAt: 1, tokenUrl: 'http://127.0.0.1:1/token', clientId: 'c' });
-    const client = new McpOAuthClient('demo', {
-      type: 'oauth', authorizationUrl: 'http://127.0.0.1:1/authorize', tokenUrl: 'http://127.0.0.1:1/token', clientId: 'c',
-    }, store, {}, async () => undefined, () => 1_000_000);
+    const client = new McpOAuthClient(
+      'demo',
+      {
+        type: 'oauth',
+        authorizationUrl: 'http://127.0.0.1:1/authorize',
+        tokenUrl: 'http://127.0.0.1:1/token',
+        clientId: 'c',
+      },
+      store,
+      {},
+      async () => undefined,
+      () => 1_000_000,
+    );
     await assert.rejects(() => client.getAccessToken(), OAuthLoginRequiredError);
   });
 
   test('logout 清除 token 并回到需要登录状态', async () => {
     const store = memoryStore();
     store.save({
-      accessToken: 'still-valid', refreshToken: 'r', expiresAt: 9_000_000,
-      tokenUrl: 'http://127.0.0.1:1/token', clientId: 'c',
+      accessToken: 'still-valid',
+      refreshToken: 'r',
+      expiresAt: 9_000_000,
+      tokenUrl: 'http://127.0.0.1:1/token',
+      clientId: 'c',
     });
-    const client = new McpOAuthClient('demo', {
-      type: 'oauth', authorizationUrl: 'http://127.0.0.1:1/authorize', tokenUrl: 'http://127.0.0.1:1/token', clientId: 'c',
-    }, store, {}, async () => undefined, () => 1_000_000);
+    const client = new McpOAuthClient(
+      'demo',
+      {
+        type: 'oauth',
+        authorizationUrl: 'http://127.0.0.1:1/authorize',
+        tokenUrl: 'http://127.0.0.1:1/token',
+        clientId: 'c',
+      },
+      store,
+      {},
+      async () => undefined,
+      () => 1_000_000,
+    );
     assert.equal(await client.getAccessToken(), 'still-valid');
     client.logout();
     assert.equal(store.data, null);
@@ -148,10 +198,7 @@ describe('MCP OAuth 2.1 PKCE', () => {
   });
 
   test('OAuth 认证不写静态 Authorization 头，Bearer 行为保持不变', () => {
-    assert.deepEqual(
-      buildHttpHeaders({ auth: { type: 'oauth', authorizationUrl: 'https://a', tokenUrl: 'https://t' } }, {}),
-      {},
-    );
+    assert.deepEqual(buildHttpHeaders({ auth: { type: 'oauth', authorizationUrl: 'https://a', tokenUrl: 'https://t' } }, {}), {});
     assert.equal(buildHttpHeaders({ auth: { type: 'bearer', token: 'x' } }, {}).Authorization, 'Bearer x');
   });
 });

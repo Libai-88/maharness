@@ -1,5 +1,18 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Archive, BriefcaseBusiness, CalendarClock, Folder, ListChecks, MessageCircle, MoreHorizontal, Pin, Plus, Settings, Trash2, X } from 'lucide-react';
+import {
+  Archive,
+  BriefcaseBusiness,
+  CalendarClock,
+  Folder,
+  ListChecks,
+  MessageCircle,
+  MoreHorizontal,
+  Pin,
+  Plus,
+  Settings,
+  Trash2,
+  X,
+} from 'lucide-react';
 import BrandMark from '@/brand/BrandMark';
 import type { Session } from '../types';
 import { AGENT_NAME, APP_VERSION, chatTime, displayTitle, previewOf } from '../voice';
@@ -32,7 +45,16 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 
 export type MainTab = string;
 
@@ -180,12 +202,13 @@ export default memo(function Sidebar({
     });
   };
 
-  const askDelete = (s: Session) => setConfirm({
-    text: `删掉「${displayTitle(s.title)}」这段对话？删了就找不回来了。`,
-    okText: '删除',
-    danger: true,
-    onOk: () => onDelete(s.id),
-  });
+  const askDelete = (s: Session) =>
+    setConfirm({
+      text: `删掉「${displayTitle(s.title)}」这段对话？删了就找不回来了。`,
+      okText: '删除',
+      danger: true,
+      onOk: () => onDelete(s.id),
+    });
 
   const renderItem = (s: Session) => {
     const modeText = s.mode === 'plan' ? '计划模式' : s.mode === 'goal' ? '目标模式' : '';
@@ -198,7 +221,10 @@ export default memo(function Sidebar({
       return (
         <SidebarMenuItem key={s.id}>
           <div className="flex min-h-14 items-center gap-2.5 rounded-md px-2 py-2">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
+            <span
+              className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground"
+              aria-hidden
+            >
               <BrandMark size={18} />
             </span>
             <Input
@@ -206,11 +232,18 @@ export default memo(function Sidebar({
               aria-label="重命名会话"
               value={draft}
               autoFocus
-              onFocus={() => { renameCommitted.current = false; }}
+              onFocus={() => {
+                renameCommitted.current = false;
+              }}
               onChange={(event) => setDraft(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === 'Enter') { event.preventDefault(); commitRename(); }
-                else if (event.key === 'Escape') { renameCommitted.current = true; setEditingId(null); }
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  commitRename();
+                } else if (event.key === 'Escape') {
+                  renameCommitted.current = true;
+                  setEditingId(null);
+                }
                 event.stopPropagation();
               }}
               onBlur={commitRename}
@@ -222,7 +255,14 @@ export default memo(function Sidebar({
 
     return (
       <SidebarMenuItem key={s.id}>
-        {managing && <Checkbox checked={selected.has(s.id)} onCheckedChange={() => toggleSelect(s.id)} aria-label={`选择会话 ${displayTitle(s.title)}`} className="absolute top-4 left-2" />}
+        {managing && (
+          <Checkbox
+            checked={selected.has(s.id)}
+            onCheckedChange={() => toggleSelect(s.id)}
+            aria-label={`选择会话 ${displayTitle(s.title)}`}
+            className="absolute top-4 left-2"
+          />
+        )}
         <SidebarMenuButton
           isActive={managing ? selected.has(s.id) : active}
           size="lg"
@@ -252,7 +292,10 @@ export default memo(function Sidebar({
           aria-current={active ? 'page' : undefined}
         >
           {!managing && (
-            <span className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground" aria-hidden>
+            <span
+              className="relative flex size-8 shrink-0 items-center justify-center rounded-lg bg-sidebar-accent text-sidebar-accent-foreground"
+              aria-hidden
+            >
               <BrandMark size={18} />
               {unread && <span className="absolute -right-0.5 -top-0.5 size-2 rounded-full border-2 border-sidebar bg-primary" />}
             </span>
@@ -326,7 +369,14 @@ export default memo(function Sidebar({
           <SidebarMenu>
             {BUILTIN_TABS.map((tab) => (
               <SidebarMenuItem key={tab.key}>
-                <SidebarMenuButton isActive={activeTab === tab.key && !settingsOpen} tooltip={tab.label} onClick={() => { onTab(tab.key); setOpenMobile(false); }}>
+                <SidebarMenuButton
+                  isActive={activeTab === tab.key && !settingsOpen}
+                  tooltip={tab.label}
+                  onClick={() => {
+                    onTab(tab.key);
+                    setOpenMobile(false);
+                  }}
+                >
                   {tab.icon}
                   <span>{tab.label}</span>
                 </SidebarMenuButton>
@@ -338,13 +388,24 @@ export default memo(function Sidebar({
         <SidebarGroup>
           <SidebarGroupLabel>对话</SidebarGroupLabel>
           <div className="flex gap-2 px-2 pb-2">
-            <Button className="flex-1 justify-start" disabled={managing} onClick={() => { onCreate(); setOpenMobile(false); }}>
-              <Plus data-icon="inline-start" />新会话
+            <Button
+              className="flex-1 justify-start"
+              disabled={managing}
+              onClick={() => {
+                onCreate();
+                setOpenMobile(false);
+              }}
+            >
+              <Plus data-icon="inline-start" />
+              新会话
             </Button>
             <Button
               variant="outline"
               size="icon"
-              onClick={() => { if (managing) exitManage(); else setManaging(true); }}
+              onClick={() => {
+                if (managing) exitManage();
+                else setManaging(true);
+              }}
               title={managing ? '退出批量管理' : '批量管理会话'}
               aria-label={managing ? '退出批量管理' : '批量管理会话'}
             >
@@ -354,13 +415,25 @@ export default memo(function Sidebar({
 
           {managing && (
             <div className="mx-2 mb-1.5 flex items-center justify-between rounded-lg bg-sidebar-accent px-2.5 py-1.5 text-[11px]">
-              <label className="flex cursor-pointer items-center gap-2"><Checkbox checked={allSelected ? true : selected.size ? 'indeterminate' : false} onCheckedChange={toggleAll} />全选</label>
+              <span className="flex cursor-pointer items-center gap-2">
+                <Checkbox
+                  aria-label="全选会话"
+                  checked={allSelected ? true : selected.size ? 'indeterminate' : false}
+                  onCheckedChange={toggleAll}
+                />
+                全选
+              </span>
               <span className="text-muted-foreground">{selected.size} 已选</span>
             </div>
           )}
 
           {sessions.length === 0 && (
-            <Empty className="px-3 py-8"><EmptyHeader><EmptyTitle>还没有对话</EmptyTitle><EmptyDescription>点击「新会话」开始。</EmptyDescription></EmptyHeader></Empty>
+            <Empty className="px-3 py-8">
+              <EmptyHeader>
+                <EmptyTitle>还没有对话</EmptyTitle>
+                <EmptyDescription>点击「新会话」开始。</EmptyDescription>
+              </EmptyHeader>
+            </Empty>
           )}
         </SidebarGroup>
 
@@ -395,27 +468,49 @@ export default memo(function Sidebar({
       <SidebarFooter className="border-t border-sidebar-border p-2">
         {managing ? (
           <div className="flex gap-2">
-            <Button variant="outline" size="sm" className="flex-1" onClick={doBatchArchive} disabled={!selected.size}><Archive data-icon="inline-start" />归档</Button>
-            <Button variant="destructive" size="sm" className="flex-1" onClick={doBatchDelete} disabled={!selected.size}><Trash2 data-icon="inline-start" />删除</Button>
-            <Button size="sm" onClick={exitManage}>完成</Button>
+            <Button variant="outline" size="sm" className="flex-1" onClick={doBatchArchive} disabled={!selected.size}>
+              <Archive data-icon="inline-start" />
+              归档
+            </Button>
+            <Button variant="destructive" size="sm" className="flex-1" onClick={doBatchDelete} disabled={!selected.size}>
+              <Trash2 data-icon="inline-start" />
+              删除
+            </Button>
+            <Button size="sm" onClick={exitManage}>
+              完成
+            </Button>
           </div>
         ) : (
           <>
             <div className="mb-2 flex items-center justify-between px-0.5">
-              <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px] font-medium text-muted-foreground">{pluginRunning} 个插件运行中</Badge>
+              <Badge variant="secondary" className="h-5 rounded-md px-1.5 text-[10px] font-medium text-muted-foreground">
+                {pluginRunning} 个插件运行中
+              </Badge>
               <span className="font-mono text-[10px] text-muted-foreground">v{version ?? APP_VERSION}</span>
             </div>
             <SidebarMenu>
               <SidebarMenuItem>
-                <SidebarMenuButton isActive={settingsOpen} onClick={() => { onToggleSettings(); setOpenMobile(false); }}>
-                  <Settings />设置
+                <SidebarMenuButton
+                  isActive={settingsOpen}
+                  onClick={() => {
+                    onToggleSettings();
+                    setOpenMobile(false);
+                  }}
+                >
+                  <Settings />
+                  设置
                 </SidebarMenuButton>
               </SidebarMenuItem>
             </SidebarMenu>
           </>
         )}
       </SidebarFooter>
-      <AlertDialog open={!!confirm} onOpenChange={(open) => { if (!open) setConfirm(null); }}>
+      <AlertDialog
+        open={!!confirm}
+        onOpenChange={(open) => {
+          if (!open) setConfirm(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>请确认</AlertDialogTitle>
@@ -423,7 +518,15 @@ export default memo(function Sidebar({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>再想想</AlertDialogCancel>
-            <AlertDialogAction variant={confirm?.danger ? 'destructive' : 'default'} onClick={() => { confirm?.onOk(); setConfirm(null); }}>{confirm?.okText ?? '好'}</AlertDialogAction>
+            <AlertDialogAction
+              variant={confirm?.danger ? 'destructive' : 'default'}
+              onClick={() => {
+                confirm?.onOk();
+                setConfirm(null);
+              }}
+            >
+              {confirm?.okText ?? '好'}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

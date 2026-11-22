@@ -15,12 +15,8 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "run_parallel"
-      ],
-      "persona": [
-        "parallel-rules"
-      ]
+      "tool": ["run_parallel"],
+      "persona": ["parallel-rules"]
     }
   },
   "apiVersion": 2

@@ -18,7 +18,8 @@ function suggestFix(errorMsg: string): string | undefined {
   }
   if (lower.includes('配置校验失败')) return '请检查 config.json 中该插件的配置是否符合 schema 要求。';
   if (lower.includes('超时')) return '插件启动超时，可能在 onLoad/onStart 中有耗时操作或死循环。';
-  if (lower.includes('解析失败') || (lower.includes('syntax') && lower.includes('json'))) return 'plugin.json 格式错误，请用 JSON 校验器检查后修复。';
+  if (lower.includes('解析失败') || (lower.includes('syntax') && lower.includes('json')))
+    return 'plugin.json 格式错误，请用 JSON 校验器检查后修复。';
   if (lower.includes('找不到') || lower.includes('does not exist')) return '入口文件不存在，请检查 plugin.json 的 "entry" 字段。';
   if (lower.includes('id 冲突') || lower.includes('不一致')) return '插件 id 与已注册插件冲突，请修改为唯一值。';
   if (lower.includes('熔断')) return '插件连续失败已进入熔断保护，系统会在冷却后自动重试。';
@@ -45,7 +46,9 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
       description: c.context.description,
     }));
     const personas = kernel.plugins.capabilities('persona').map((c) => ({
-      id: c.persona.id, name: c.persona.name, priority: c.persona.priority ?? 0,
+      id: c.persona.id,
+      name: c.persona.name,
+      priority: c.persona.priority ?? 0,
     }));
     res.json({
       tools: tools.sort((a, b) => a.name.localeCompare(b.name)),
@@ -59,19 +62,21 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
   });
 
   app.get('/api/tools', (_req, res) => {
-    res.json(kernel.plugins.toolCatalog().map((entry) => ({
-      name: entry.tool.name,
-      domain: toolDomain(entry.tool.name),
-      pluginId: entry.pluginId,
-      shadowedBy: entry.shadowedBy ?? null,
-      risk: entry.tool.risk ?? 'low',
-      costHint: entry.tool.costHint ?? 'low',
-      sideEffect: entry.tool.sideEffect ?? 'external',
-      idempotent: entry.tool.idempotent ?? false,
-      contentTrust: entry.tool.contentTrust ?? 'trusted',
-      approval: entry.tool.approval ?? false,
-      description: entry.tool.description,
-    })));
+    res.json(
+      kernel.plugins.toolCatalog().map((entry) => ({
+        name: entry.tool.name,
+        domain: toolDomain(entry.tool.name),
+        pluginId: entry.pluginId,
+        shadowedBy: entry.shadowedBy ?? null,
+        risk: entry.tool.risk ?? 'low',
+        costHint: entry.tool.costHint ?? 'low',
+        sideEffect: entry.tool.sideEffect ?? 'external',
+        idempotent: entry.tool.idempotent ?? false,
+        contentTrust: entry.tool.contentTrust ?? 'trusted',
+        approval: entry.tool.approval ?? false,
+        description: entry.tool.description,
+      })),
+    );
   });
 
   // ---------- 前端页面贡献（声明式导航） ----------
@@ -92,9 +97,8 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
         order: c.nav.order ?? 0,
         mode: c.nav.mode,
         // 前端直接用这两个字段：iframe → src；panel → 取 JSON；module → 动态 import moduleUrl
-        url: c.nav.mode === 'iframe' ? `${base}${c.nav.page ?? '/page'}`
-          : c.nav.mode === 'panel' ? `${base}${c.nav.panel ?? '/panel'}`
-            : '',
+        url:
+          c.nav.mode === 'iframe' ? `${base}${c.nav.page ?? '/page'}` : c.nav.mode === 'panel' ? `${base}${c.nav.panel ?? '/panel'}` : '',
         moduleUrl: c.moduleUrl,
         statusUrl: c.nav.status ? `${base}${c.nav.status}` : null,
         statusIntervalMs: c.nav.statusIntervalMs ?? 6000,
@@ -111,10 +115,16 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
   app.get(/^\/api\/plugins\/([^/]+)\/ui\/(.+)$/, (req, res) => {
     const inst = kernel.plugins.get(req.params[0]);
     const rel = String(req.params[1]).replace(/\\/g, '/');
-    if (!inst || !rel || rel.includes('..')) { res.status(404).end(); return; }
+    if (!inst || !rel || rel.includes('..')) {
+      res.status(404).end();
+      return;
+    }
     const root = join(inst.dir, 'ui');
     const file = join(root, rel);
-    if (!file.startsWith(root + sep) || !/\.(js|mjs|css|map|json)$/.test(file)) { res.status(404).end(); return; }
+    if (!file.startsWith(root + sep) || !/\.(js|mjs|css|map|json)$/.test(file)) {
+      res.status(404).end();
+      return;
+    }
     try {
       res.setHeader('Cache-Control', 'no-store');
       res.type(basename(file));
@@ -127,18 +137,22 @@ export function registerPluginRoutes(app: Express, deps: RouteDeps): void {
   // ---------- 插件管理 ----------
   app.get('/api/plugins', (_req, res) => {
     // kernel 侧 list() 是不暴露内部结构的投影（无 caps 字段）；caps 从实例补齐
-    res.json(kernel.plugins.list().map((p) => ({
-      id: p.manifest.id, name: p.manifest.name, version: p.manifest.version,
-      state: p.state,
-      caps: (kernel.plugins.get(p.manifest.id)?.caps ?? []).map((c) => c.kind),
-      error: p.error,
-      fixSuggestion: p.error ? suggestFix(p.error) : undefined,
-      essential: p.manifest.essential,
-      execution: p.manifest.execution,
-      circuitBreaker: p.circuitBreaker,
-      // F5：是否受目录监听（true = 保存即热重载；false = core/ 内置插件，改动需重载/重启）
-      watched: p.watched === true,
-    })));
+    res.json(
+      kernel.plugins.list().map((p) => ({
+        id: p.manifest.id,
+        name: p.manifest.name,
+        version: p.manifest.version,
+        state: p.state,
+        caps: (kernel.plugins.get(p.manifest.id)?.caps ?? []).map((c) => c.kind),
+        error: p.error,
+        fixSuggestion: p.error ? suggestFix(p.error) : undefined,
+        essential: p.manifest.essential,
+        execution: p.manifest.execution,
+        circuitBreaker: p.circuitBreaker,
+        // F5：是否受目录监听（true = 保存即热重载；false = core/ 内置插件，改动需重载/重启）
+        watched: p.watched === true,
+      })),
+    );
   });
 
   app.get('/api/plugins/diagnostics', (_req, res) => {

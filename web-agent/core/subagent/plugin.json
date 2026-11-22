@@ -15,16 +15,9 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "run_subagent",
-        "run_review"
-      ],
-      "persona": [
-        "subagent-rules"
-      ],
-      "role": [
-        "reviewer"
-      ]
+      "tool": ["run_subagent", "run_review"],
+      "persona": ["subagent-rules"],
+      "role": ["reviewer"]
     }
   },
   "apiVersion": 2

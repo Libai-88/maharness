@@ -12,9 +12,7 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "reference_hello"
-      ]
+      "tool": ["reference_hello"]
     }
   },
   "cleanup": "keep",

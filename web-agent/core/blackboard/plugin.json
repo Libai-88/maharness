@@ -15,18 +15,9 @@
   },
   "permissions": {
     "capabilities": {
-      "tool": [
-        "blackboard_put",
-        "blackboard_get",
-        "blackboard_list",
-        "blackboard_delete"
-      ],
-      "persona": [
-        "blackboard-rules"
-      ],
-      "service": [
-        "blackboard"
-      ]
+      "tool": ["blackboard_put", "blackboard_get", "blackboard_list", "blackboard_delete"],
+      "persona": ["blackboard-rules"],
+      "service": ["blackboard"]
     }
   },
   "apiVersion": 2

@@ -3,40 +3,76 @@ import { expect, test, type Page, type Route } from '@playwright/test';
 import type { Message, Session } from '../src/types';
 
 const sessions: Session[] = ['设计核对', '历史对话'].map((title, index) => ({
-  id: `chat-layout-${index}`, title, model: 'demo', provider: 'demo', mode: 'normal',
-  planPending: 0, archived: 0, pinned: 0, createdAt: 1, updatedAt: 1,
+  id: `chat-layout-${index}`,
+  title,
+  model: 'demo',
+  provider: 'demo',
+  mode: 'normal',
+  planPending: 0,
+  archived: 0,
+  pinned: 0,
+  createdAt: 1,
+  updatedAt: 1,
 }));
 
 function history(count = 1): Message[] {
   return Array.from({ length: count }, (_, index) => [
-    { id: `user-${index}`, sessionId: sessions[0].id, role: 'user' as const, content: `检查第 ${index + 1} 项布局`, createdAt: index * 2 + 1 },
-    { id: `assistant-${index}`, sessionId: sessions[0].id, role: 'assistant' as const, content: `第 ${index + 1} 项：消息采用 **统一的阅读宽度**。\n\n- 保留已有功能\n- 检查中文与长内容\n- 支持键盘和触屏\n\n\`\`\`ts\nconst layout = { responsive: true };\n\`\`\``, createdAt: index * 2 + 2 },
+    {
+      id: `user-${index}`,
+      sessionId: sessions[0].id,
+      role: 'user' as const,
+      content: `检查第 ${index + 1} 项布局`,
+      createdAt: index * 2 + 1,
+    },
+    {
+      id: `assistant-${index}`,
+      sessionId: sessions[0].id,
+      role: 'assistant' as const,
+      content: `第 ${index + 1} 项：消息采用 **统一的阅读宽度**。\n\n- 保留已有功能\n- 检查中文与长内容\n- 支持键盘和触屏\n\n\`\`\`ts\nconst layout = { responsive: true };\n\`\`\``,
+      createdAt: index * 2 + 2,
+    },
   ]).flat();
 }
 
 async function setup(page: Page, messages = history(), events?: (route: Route) => Promise<void>) {
   await installRunMocks(page);
   await page.route('**/api/sessions', (route) => route.fulfill({ json: sessions }));
-  await page.route('**/api/sessions/*/messages', (route) => route.fulfill({ json: route.request().url().includes(sessions[0].id) ? messages : history(1) }));
+  await page.route('**/api/sessions/*/messages', (route) =>
+    route.fulfill({ json: route.request().url().includes(sessions[0].id) ? messages : history(1) }),
+  );
   await page.route('**/api/sessions/*/checkpoint', (route) => route.fulfill({ json: { exists: false } }));
   await page.route('**/api/sessions/*/plan', (route) => route.fulfill({ json: { plan: null } }));
   await page.route('**/api/plugins/goal-plan/plan*', (route) => route.fulfill({ json: { plan: null } }));
-  await page.route('**/api/approvals**', (route) => route.fulfill({ json: route.request().method() === 'POST' ? { ok: true } : { pending: [] } }));
-  await page.route('**/api/providers', (route) => route.fulfill({ json: [{ id: 'demo', label: '演示模型', model: 'demo', enabled: true, hasKey: true }] }));
-  await page.route('**/api/models', (route) => route.fulfill({ json: [
-    { id: 'demo@demo', provider: 'demo', model: 'demo', label: '演示模型' },
-    { id: 'demo@other', provider: 'demo', model: 'other', label: '备用模型' },
-  ] }));
+  await page.route('**/api/approvals**', (route) =>
+    route.fulfill({ json: route.request().method() === 'POST' ? { ok: true } : { pending: [] } }),
+  );
+  await page.route('**/api/providers', (route) =>
+    route.fulfill({ json: [{ id: 'demo', label: '演示模型', model: 'demo', enabled: true, hasKey: true }] }),
+  );
+  await page.route('**/api/models', (route) =>
+    route.fulfill({
+      json: [
+        { id: 'demo@demo', provider: 'demo', model: 'demo', label: '演示模型' },
+        { id: 'demo@other', provider: 'demo', model: 'other', label: '备用模型' },
+      ],
+    }),
+  );
   await page.route('**/api/sessions/chat-layout-*', (route) => {
     if (route.request().method() === 'PATCH') return route.fulfill({ json: { ...sessions[0], ...route.request().postDataJSON() } });
     return route.fallback();
   });
   await page.route('**/api/events', events ?? ((route) => route.fulfill({ contentType: 'text/event-stream', body: '' })));
   await page.route('**/api/trace/stats', (route) => route.fulfill({ json: { trace: {}, cache: {}, l1Enabled: false } }));
-  await page.route('**/api/commands/list', (route) => route.fulfill({ json: { commands: [
-    { name: 'help', description: '查看全部命令', source: 'builtin' },
-    { name: 'model', usage: '<模型名称>', description: '切换模型', source: 'builtin' },
-  ] } }));
+  await page.route('**/api/commands/list', (route) =>
+    route.fulfill({
+      json: {
+        commands: [
+          { name: 'help', description: '查看全部命令', source: 'builtin' },
+          { name: 'model', usage: '<模型名称>', description: '切换模型', source: 'builtin' },
+        ],
+      },
+    }),
+  );
   await page.goto('/');
   await expect(page.getByRole('textbox', { name: '消息', exact: true })).toBeVisible();
   if (messages.length) await expect(page.getByTestId('msg-bubble-assistant').last()).toBeVisible();
@@ -47,7 +83,10 @@ async function mockReply(page: Page) {
   const requests: unknown[] = [];
   await mockTaskEvents(page, (route) => {
     requests.push(route.request().postDataJSON());
-    return route.fulfill({ contentType: 'text/event-stream', body: 'event: start\ndata: {"traceId":"layout"}\n\nevent: done\ndata: {"content":"已完成。","usage":{"input":1,"output":1},"cost":0}\n\nevent: end\ndata: {}\n\n' });
+    return route.fulfill({
+      contentType: 'text/event-stream',
+      body: 'event: start\ndata: {"traceId":"layout"}\n\nevent: done\ndata: {"content":"已完成。","usage":{"input":1,"output":1},"cost":0}\n\nevent: end\ndata: {}\n\n',
+    });
   });
   return requests;
 }
@@ -57,7 +96,11 @@ test('中文输入法确认不会发送，Enter 和 Shift+Enter 各自生效', a
   const requests = await mockReply(page);
   const input = page.getByRole('textbox', { name: '消息', exact: true });
   await input.fill('中文输入');
-  await input.evaluate((element) => element.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true, bubbles: true, cancelable: true })));
+  await input.evaluate((element) =>
+    element.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', isComposing: true, bubbles: true, cancelable: true }),
+    ),
+  );
   expect(requests).toHaveLength(0);
   await expect(input).toHaveValue('中文输入');
   await input.press('Shift+Enter');
@@ -123,12 +166,22 @@ test('流式活动共用 Trace，滚动阅读历史后可回到最新', async ({
     window.fetch = (...args) => {
       if (/\/api\/v2\/runs\/[^/]+\/events/.test(String(args[0]))) {
         let seq = 0;
-        return Promise.resolve(new Response(new ReadableStream({ start(controller) {
-          state.emitChat = (event, data) => { if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true; controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); };
-          state.endChat = () => controller.close();
-          state.emitChat('start', { traceId: 'live-layout' });
-          state.emitChat('reasoning', { text: '检查消息布局与工具输出。' });
-        } }), { headers: { 'Content-Type': 'text/event-stream' } }));
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                state.emitChat = (event, data) => {
+                  if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true;
+                  controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+                };
+                state.endChat = () => controller.close();
+                state.emitChat('start', { traceId: 'live-layout' });
+                state.emitChat('reasoning', { text: '检查消息布局与工具输出。' });
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          ),
+        );
       }
       return originalFetch(...args);
     };
@@ -158,7 +211,9 @@ test('流式活动共用 Trace，滚动阅读历史后可回到最新', async ({
   await page.mouse.wheel(0, -1000);
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(liveTop - 300);
   const top = await viewport.evaluate((element) => element.scrollTop);
-  await page.evaluate(() => (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('delta', { text: '额外内容。\n\n'.repeat(10) }));
+  await page.evaluate(() =>
+    (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('delta', { text: '额外内容。\n\n'.repeat(10) }),
+  );
   await expect.poll(() => viewport.evaluate((element) => element.scrollTop)).toBeLessThan(top + 50);
   const latest = page.getByRole('button', { name: '回到底部' });
   await expect(latest).toHaveAttribute('data-active', 'true');
@@ -209,10 +264,13 @@ for (const width of [390, 900]) {
 for (const theme of ['light', 'dark']) {
   for (const brand of ['doodle', 'ink', 'moss']) {
     test(`${theme} ${brand} 主题与首页贴纸布局`, async ({ page }, testInfo) => {
-      await page.addInitScript(({ theme, brand }) => {
-        localStorage.setItem('maharness-theme', theme);
-        localStorage.setItem('maharness-brand', brand);
-      }, { theme, brand });
+      await page.addInitScript(
+        ({ theme, brand }) => {
+          localStorage.setItem('maharness-theme', theme);
+          localStorage.setItem('maharness-brand', brand);
+        },
+        { theme, brand },
+      );
       await setup(page, []);
       const photo = page.getByRole('button', { name: '更换首页贴纸照片' });
       await expect(photo).toBeInViewport();
@@ -235,7 +293,16 @@ test('首页贴纸换图持久化并可恢复默认照片', async ({ page }) => 
   await setup(page, []);
   const sticker = page.getByTestId('hero-sticker').locator('img');
   const original = await sticker.getAttribute('src');
-  await page.getByTestId('hero-sticker').locator('input[type="file"]').setInputFiles({ name: 'photo.svg', mimeType: 'image/svg+xml', buffer: Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>') });
+  await page
+    .getByTestId('hero-sticker')
+    .locator('input[type="file"]')
+    .setInputFiles({
+      name: 'photo.svg',
+      mimeType: 'image/svg+xml',
+      buffer: Buffer.from(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="40" height="40"><rect width="40" height="40" fill="teal"/></svg>',
+      ),
+    });
   await expect(sticker).toHaveAttribute('src', /^data:image\/jpeg/);
   const custom = await sticker.getAttribute('src');
   await page.reload();
@@ -245,23 +312,50 @@ test('首页贴纸换图持久化并可恢复默认照片', async ({ page }) => 
   expect(await page.evaluate(() => localStorage.getItem('maharness-sticker'))).toBeNull();
 });
 
-for (const viewport of [{ width: 390, height: 640 }, { width: 900, height: 720 }, { width: 1440, height: 900 }]) {
+for (const viewport of [
+  { width: 390, height: 640 },
+  { width: 900, height: 720 },
+  { width: 1440, height: 900 },
+]) {
   test(`${viewport.width}px 多项审批、目标与任务状态并存时保留阅读和输入空间`, async ({ page }, testInfo) => {
     await page.setViewportSize(viewport);
     let releaseEvents!: () => void;
-    const gate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      releaseEvents = resolve;
+    });
     await setup(page, history(), async (route) => {
       await gate;
-      await route.fulfill({ contentType: 'text/event-stream', body: `event: event\ndata: ${JSON.stringify({ type: 'plan.updated', data: {
-        objective: '整理季度报告', current: 1, completed: false, createdAt: 1,
-        steps: Array.from({ length: 30 }, (_, index) => ({ title: `报告步骤 ${index + 1}`, status: index === 0 ? 'done' : index === 1 ? 'in_progress' : 'pending' })),
-      } })}\n\n` });
+      await route.fulfill({
+        contentType: 'text/event-stream',
+        body: `event: event\ndata: ${JSON.stringify({
+          type: 'plan.updated',
+          data: {
+            objective: '整理季度报告',
+            current: 1,
+            completed: false,
+            createdAt: 1,
+            steps: Array.from({ length: 30 }, (_, index) => ({
+              title: `报告步骤 ${index + 1}`,
+              status: index === 0 ? 'done' : index === 1 ? 'in_progress' : 'pending',
+            })),
+          },
+        })}\n\n`,
+      });
     });
-    await mockTaskEvents(page, (route) => route.fulfill({ contentType: 'text/event-stream', body: [
-      `event: start\ndata: ${JSON.stringify({ traceId: 'context-layout' })}\n\n`,
-      ...Array.from({ length: 8 }, (_, index) => `event: approval_required\ndata: ${JSON.stringify({ approvalId: `context-${index}`, name: 'write_file', summary: `写入 reports/quarter-${index}.md` })}\n\n`),
-      'event: end\ndata: {}\n\n',
-    ].join('') }));
+    await mockTaskEvents(page, (route) =>
+      route.fulfill({
+        contentType: 'text/event-stream',
+        body: [
+          `event: start\ndata: ${JSON.stringify({ traceId: 'context-layout' })}\n\n`,
+          ...Array.from(
+            { length: 8 },
+            (_, index) =>
+              `event: approval_required\ndata: ${JSON.stringify({ approvalId: `context-${index}`, name: 'write_file', summary: `写入 reports/quarter-${index}.md` })}\n\n`,
+          ),
+          'event: end\ndata: {}\n\n',
+        ].join(''),
+      }),
+    );
     const input = page.getByRole('textbox', { name: '消息', exact: true });
     await input.fill('整理季度报告');
     await input.press('Enter');
@@ -301,7 +395,9 @@ for (const viewport of [{ width: 390, height: 640 }, { width: 900, height: 720 }
     expect(measurements.columnOffset).toBeLessThanOrEqual(8);
     expect(measurements.overflow).toBe(false);
     await expect(input).toHaveValue('报告内容\n'.repeat(60));
-    await context.evaluate((element) => { element.scrollTop = 0; });
+    await context.evaluate((element) => {
+      element.scrollTop = 0;
+    });
     await page.screenshot({ path: testInfo.outputPath('context-layout.png') });
   });
 }
@@ -316,14 +412,20 @@ for (const width of [390, 1440]) {
       window.EventSource = class extends NativeEventSource {
         constructor(url: string | URL, options?: EventSourceInit) {
           super(url, options);
-          this.addEventListener('event', () => { state.busEvents++; });
+          this.addEventListener('event', () => {
+            state.busEvents++;
+          });
         }
       };
     });
     let releaseEvents!: () => void;
-    const gate = new Promise<void>((resolve) => { releaseEvents = resolve; });
+    const gate = new Promise<void>((resolve) => {
+      releaseEvents = resolve;
+    });
     let statsRequests = 0;
-    page.on('request', (request) => { if (request.url().endsWith('/api/trace/stats')) statsRequests++; });
+    page.on('request', (request) => {
+      if (request.url().endsWith('/api/trace/stats')) statsRequests++;
+    });
     const steps = [
       { id: 'cached-step', traceId: 'layout', status: 'running', outputSummary: '正在读取' },
       { id: 'cached-step', traceId: 'layout', status: 'done', outputSummary: '收起期间已完成读取' },
@@ -331,7 +433,15 @@ for (const width of [390, 1440]) {
     ];
     await setup(page, history(), async (route) => {
       await gate;
-      await route.fulfill({ contentType: 'text/event-stream', body: steps.map((step) => `event: event\ndata: ${JSON.stringify({ type: 'trace.step', data: { turn: 1, type: 'tool_call', name: 'read_file', ts: 1, ...step } })}\n\n`).join('') });
+      await route.fulfill({
+        contentType: 'text/event-stream',
+        body: steps
+          .map(
+            (step) =>
+              `event: event\ndata: ${JSON.stringify({ type: 'trace.step', data: { turn: 1, type: 'tool_call', name: 'read_file', ts: 1, ...step } })}\n\n`,
+          )
+          .join(''),
+      });
     });
     await mockReply(page);
     const toggle = page.getByRole('button', { name: '运行轨迹面板' });
@@ -341,7 +451,9 @@ for (const width of [390, 1440]) {
     await page.getByTestId('send-btn').click();
     await expect(page.getByTestId('msg-bubble-assistant').last()).toContainText('已完成。');
     releaseEvents();
-    await expect.poll(() => page.evaluate(() => (window as unknown as { busEvents: number }).busEvents)).toBeGreaterThanOrEqual(steps.length);
+    await expect
+      .poll(() => page.evaluate(() => (window as unknown as { busEvents: number }).busEvents))
+      .toBeGreaterThanOrEqual(steps.length);
     expect(statsRequests).toBe(0);
     await toggle.click();
     const panel = page.getByTestId('trace-panel');
@@ -383,12 +495,22 @@ test('长思考限制详情高度，运行中与完成后都尊重手动展开�
     window.fetch = (...args) => {
       if (/\/api\/v2\/runs\/[^/]+\/events/.test(String(args[0]))) {
         let seq = 0;
-        return Promise.resolve(new Response(new ReadableStream({ start(controller) {
-          state.emitChat = (event, data) => { if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true; controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`)); };
-          state.endChat = () => controller.close();
-          state.emitChat('start', { traceId: 'long-reasoning' });
-          state.emitChat('reasoning', { text: '核对任务的输入与输出。\n'.repeat(100) });
-        } }), { headers: { 'Content-Type': 'text/event-stream' } }));
+        return Promise.resolve(
+          new Response(
+            new ReadableStream({
+              start(controller) {
+                state.emitChat = (event, data) => {
+                  if (event === 'done') (window as unknown as { liveTaskDone: boolean }).liveTaskDone = true;
+                  controller.enqueue(encoder.encode(`id: ${++seq}\nevent: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+                };
+                state.endChat = () => controller.close();
+                state.emitChat('start', { traceId: 'long-reasoning' });
+                state.emitChat('reasoning', { text: '核对任务的输入与输出。\n'.repeat(100) });
+              },
+            }),
+            { headers: { 'Content-Type': 'text/event-stream' } },
+          ),
+        );
       }
       return originalFetch(...args);
     };
@@ -396,7 +518,9 @@ test('长思考限制详情高度，运行中与完成后都尊重手动展开�
   await page.getByRole('textbox', { name: '消息', exact: true }).fill('核对报告');
   await page.getByTestId('send-btn').click();
   const message = page.locator('[data-slot="message"][data-align="start"]').last();
-  const thinking = message.locator('[data-slot="trace-collapsible"]').filter({ has: page.locator('[data-slot="trace-title"]', { hasText: /正在思考|思考过程/ }) });
+  const thinking = message
+    .locator('[data-slot="trace-collapsible"]')
+    .filter({ has: page.locator('[data-slot="trace-title"]', { hasText: /正在思考|思考过程/ }) });
   const trigger = thinking.getByRole('button').first();
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   const scroll = thinking.getByRole('region', { name: '思考详情' }).locator('[data-slot="scroll-area-viewport"]');
@@ -406,11 +530,19 @@ test('长思考限制详情高度，运行中与完成后都尊重手动展开�
   await expect.poll(() => scroll.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true);
   expect(await scroll.evaluate((element) => element.getBoundingClientRect().height)).toBeLessThanOrEqual(192);
   await trigger.click();
-  await page.evaluate(() => (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('reasoning', { text: '继续核对。' }));
+  await page.evaluate(() =>
+    (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('reasoning', { text: '继续核对。' }),
+  );
   await expect(trigger).toHaveAttribute('aria-expanded', 'false');
   await trigger.click();
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
-  await page.evaluate(() => (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('tool_start', { id: 'sub-live', name: 'run_subagent', args: { objective: '核对报告' } }));
+  await page.evaluate(() =>
+    (window as unknown as { emitChat: (event: string, data: unknown) => void }).emitChat('tool_start', {
+      id: 'sub-live',
+      name: 'run_subagent',
+      args: { objective: '核对报告' },
+    }),
+  );
   await expect(trigger).toHaveAttribute('aria-expanded', 'true');
   const member = message.getByTestId('subagent-step');
   await expect(member.getByRole('button').first()).toHaveAttribute('aria-expanded', 'true');

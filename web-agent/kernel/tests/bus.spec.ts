@@ -11,7 +11,9 @@ describe('EventBus 基础', () => {
   test('on/off：退订后不再收到事件', () => {
     const bus = new EventBus();
     let count = 0;
-    const off = bus.on('x', () => { count++; });
+    const off = bus.on('x', () => {
+      count++;
+    });
     bus.emit(EventBus.event('x'));
     assert.equal(count, 1);
     off();
@@ -42,7 +44,9 @@ describe('EventBus 基础', () => {
   test('emit 中单个监听器抛错不影响其他监听器', () => {
     const bus = new EventBus();
     const order: string[] = [];
-    bus.on('x', () => { throw new Error('boom'); });
+    bus.on('x', () => {
+      throw new Error('boom');
+    });
     bus.on('x', () => order.push('ok'));
     assert.doesNotThrow(() => bus.emit(EventBus.event('x')));
     assert.deepEqual(order, ['ok']);
@@ -59,9 +63,18 @@ describe('EventBus serial / bail（短路）', () => {
   test('serial：首个非 null/undefined/false 的返回短路，后续监听器不执行', async () => {
     const bus = new EventBus();
     const order: string[] = [];
-    bus.on('x', () => { order.push('a'); return null; });
-    bus.on('x', () => { order.push('b'); return 42; });
-    bus.on('x', () => { order.push('c'); return 7; });
+    bus.on('x', () => {
+      order.push('a');
+      return null;
+    });
+    bus.on('x', () => {
+      order.push('b');
+      return 42;
+    });
+    bus.on('x', () => {
+      order.push('c');
+      return 7;
+    });
     const r = await bus.serial(EventBus.event('x'));
     assert.equal(r, 42);
     assert.deepEqual(order, ['a', 'b'], 'c 不应执行（已短路）');
@@ -86,7 +99,10 @@ describe('EventBus serial / bail（短路）', () => {
 
   test('serial 等待异步监听器', async () => {
     const bus = new EventBus();
-    bus.on('x', async () => { await new Promise((r) => setTimeout(r, 5)); return 'async-value'; });
+    bus.on('x', async () => {
+      await new Promise((r) => setTimeout(r, 5));
+      return 'async-value';
+    });
     const r = await bus.serial(EventBus.event('x'));
     assert.equal(r, 'async-value');
   });
@@ -96,14 +112,23 @@ describe('EventBus parallel（并发）', () => {
   test('parallel：全部完成后返回，错误聚合成 AggregateError', async () => {
     const bus = new EventBus();
     const order: string[] = [];
-    bus.on('x', async () => { await new Promise((r) => setTimeout(r, 20)); order.push('slow'); });
-    bus.on('x', async () => { order.push('fast'); throw new Error('boom1'); });
-    bus.on('x', async () => { throw new Error('boom2'); });
+    bus.on('x', async () => {
+      await new Promise((r) => setTimeout(r, 20));
+      order.push('slow');
+    });
+    bus.on('x', async () => {
+      order.push('fast');
+      throw new Error('boom1');
+    });
+    bus.on('x', async () => {
+      throw new Error('boom2');
+    });
     await assert.rejects(
       bus.parallel(EventBus.event('x')),
-      (err: unknown) => err instanceof AggregateError
-        && err.errors.length === 2
-        && err.errors.every((e) => e instanceof Error && e.message.startsWith('boom')),
+      (err: unknown) =>
+        err instanceof AggregateError &&
+        err.errors.length === 2 &&
+        err.errors.every((e) => e instanceof Error && e.message.startsWith('boom')),
     );
     assert.deepEqual(order, ['fast', 'slow'], '并发执行，全部 await');
   });
@@ -119,13 +144,21 @@ describe('EventBus waterfall（洋葱中间件）', () => {
   test('按 priority 顺序串联，监听器改写 e.data 传播到下游与 final', async () => {
     const bus = new EventBus();
     const out: string[] = [];
-    bus.on('wf', (e) => {
-      out.push('m1');
-      (e.data as { count: number }).count += 1; // 改写
-    }, 10);
-    bus.on('wf', (e) => {
-      out.push(`m2:${(e.data as { count: number }).count}`);
-    }, 0);
+    bus.on(
+      'wf',
+      (e) => {
+        out.push('m1');
+        (e.data as { count: number }).count += 1; // 改写
+      },
+      10,
+    );
+    bus.on(
+      'wf',
+      (e) => {
+        out.push(`m2:${(e.data as { count: number }).count}`);
+      },
+      0,
+    );
     const r = await bus.waterfall('wf', { count: 1 }, (data: unknown) => {
       out.push(`final:${JSON.stringify(data)}`);
       return 'done';
@@ -137,9 +170,17 @@ describe('EventBus waterfall（洋葱中间件）', () => {
   test('监听器 return 非 undefined 短路接管（链停，final 不执行）', async () => {
     const bus = new EventBus();
     const out: string[] = [];
-    bus.on('wf', () => { out.push('short'); return '接管结果'; });
-    bus.on('wf', () => { out.push('m2'); });
-    const r = await bus.waterfall('wf', { count: 1 }, () => { out.push('final'); return 'done'; });
+    bus.on('wf', () => {
+      out.push('short');
+      return '接管结果';
+    });
+    bus.on('wf', () => {
+      out.push('m2');
+    });
+    const r = await bus.waterfall('wf', { count: 1 }, () => {
+      out.push('final');
+      return 'done';
+    });
     assert.equal(r, '接管结果');
     assert.deepEqual(out, ['short'], '短路后链停止');
   });
@@ -180,10 +221,16 @@ describe('EventBus onPhase（声明式三阶段钩子）', () => {
     const phases: string[] = [];
     bus.onPhase('ph', {
       before: (v) => phases.push(`before:${v}`),
-      rewrite: (v) => { phases.push('rewrite'); return `${v}!`; },
+      rewrite: (v) => {
+        phases.push('rewrite');
+        return `${v}!`;
+      },
       after: (result, value) => phases.push(`after:${result}:${value}`),
     });
-    const r = await bus.waterfall('ph', 'data', (d: unknown) => { phases.push(`final:${d}`); return 'RESULT'; });
+    const r = await bus.waterfall('ph', 'data', (d: unknown) => {
+      phases.push(`final:${d}`);
+      return 'RESULT';
+    });
     assert.equal(r, 'RESULT');
     assert.deepEqual(phases, ['before:data', 'rewrite', 'final:data!', 'after:RESULT:data!']);
   });
@@ -192,8 +239,13 @@ describe('EventBus onPhase（声明式三阶段钩子）', () => {
     const bus = new EventBus();
     const out: string[] = [];
     bus.onPhase('ph', { before: () => out.push('hook') });
-    bus.on('ph', () => { out.push('listener'); }); // 块体：返回 undefined，不误触短路
-    const r = await bus.waterfall('ph', 1, (d: unknown) => { out.push(`final:${d}`); return d; });
+    bus.on('ph', () => {
+      out.push('listener');
+    }); // 块体：返回 undefined，不误触短路
+    const r = await bus.waterfall('ph', 1, (d: unknown) => {
+      out.push(`final:${d}`);
+      return d;
+    });
     assert.equal(r, 1);
     assert.deepEqual(out, ['hook', 'listener', 'final:1']);
   });
@@ -209,9 +261,16 @@ describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）'
     t.mock.method(console, 'error', () => {});
     const bus = new EventBus();
     const out: string[] = [];
-    bus.on('wf', () => { throw new Error('插件钩子炸了'); });
-    bus.on('wf', () => { out.push('second'); });
-    const r = await bus.waterfall('wf', { v: 1 }, (d: unknown) => { out.push('final'); return d; });
+    bus.on('wf', () => {
+      throw new Error('插件钩子炸了');
+    });
+    bus.on('wf', () => {
+      out.push('second');
+    });
+    const r = await bus.waterfall('wf', { v: 1 }, (d: unknown) => {
+      out.push('final');
+      return d;
+    });
     assert.deepEqual(out, ['second', 'final'], '抛错不应吞掉后续监听器，也不应吞掉 final');
     assert.deepEqual(r, { v: 1 });
   });
@@ -221,7 +280,7 @@ describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）'
     const bus = new EventBus();
     bus.on('wf', async (e) => {
       const next = (e as unknown as { next: (v?: unknown) => Promise<unknown> }).next;
-      await next('MOD');           // 先推进下游
+      await next('MOD'); // 先推进下游
       throw new Error('推进后才炸');
     });
     const r = await bus.waterfall<string>('wf', 'seed', (d: unknown) => `final:${d}`);
@@ -231,7 +290,9 @@ describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）'
   test('serial：抛错监听器被跳过，后面的提供者结果照常返回', async (t) => {
     t.mock.method(console, 'error', () => {});
     const bus = new EventBus();
-    bus.on('se', () => { throw new Error('boom'); });
+    bus.on('se', () => {
+      throw new Error('boom');
+    });
     bus.on('se', () => 'ANSWER');
     assert.equal(await bus.serial(EventBus.event('se')), 'ANSWER');
   });
@@ -239,7 +300,9 @@ describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）'
   test('bail：抛错监听器被跳过，后面的同步结果照常短路', async (t) => {
     t.mock.method(console, 'error', () => {});
     const bus = new EventBus();
-    bus.on('ba', () => { throw new Error('boom'); });
+    bus.on('ba', () => {
+      throw new Error('boom');
+    });
     bus.on('ba', () => 'HIT');
     assert.equal(bus.bail(EventBus.event('ba')), 'HIT');
   });
@@ -248,8 +311,14 @@ describe('EventBus 监听器错误隔离（B7）与 async 短路语义（B11）'
     t.mock.method(console, 'warn', () => {});
     const bus = new EventBus();
     const seen: string[] = [];
-    bus.on('ba2', async () => { seen.push('async'); return 'ASYNC_RESULT'; });
-    bus.on('ba2', () => { seen.push('sync'); return 'SYNC_RESULT'; });
+    bus.on('ba2', async () => {
+      seen.push('async');
+      return 'ASYNC_RESULT';
+    });
+    bus.on('ba2', () => {
+      seen.push('sync');
+      return 'SYNC_RESULT';
+    });
     const r = bus.bail<string>(EventBus.event('ba2'));
     assert.equal(r, 'SYNC_RESULT', '旧实现会返回未 await 的 Promise 并截断后续监听器');
     assert.equal(typeof r, 'string');

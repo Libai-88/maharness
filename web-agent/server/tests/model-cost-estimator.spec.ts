@@ -4,22 +4,32 @@ import { randomUUID } from 'node:crypto';
 import type { ModelCallRecord } from '../../kernel/model-call';
 import type { RunRecord } from '../../kernel/run';
 import { Store } from '../db';
-import {
-  estimateModelWorkloadCost,
-  modelUsageProfile,
-  resolvePricedModel,
-} from '../model-cost-estimator';
+import { estimateModelWorkloadCost, modelUsageProfile, resolvePricedModel } from '../model-cost-estimator';
 
 function addRun(store: Store, tenantId: string): RunRecord {
   const session = store.createSession('fixture-model', 'fixture', tenantId);
   const now = Date.now();
   const run: RunRecord = {
-    id: randomUUID(), rootId: randomUUID(), sessionId: session.id, tenantId,
-    depth: 0, objective: '成本样本', providerId: 'fixture', model: 'fixture-model',
-    status: 'completed', authorization: {
-      workspace: process.cwd(), profile: 'standard', readOnly: false, revision: 0,
+    id: randomUUID(),
+    rootId: randomUUID(),
+    sessionId: session.id,
+    tenantId,
+    depth: 0,
+    objective: '成本样本',
+    providerId: 'fixture',
+    model: 'fixture-model',
+    status: 'completed',
+    authorization: {
+      workspace: process.cwd(),
+      profile: 'standard',
+      readOnly: false,
+      revision: 0,
     },
-    cost: 0, tokensIn: 0, tokensOut: 0, createdAt: now, updatedAt: now,
+    cost: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    createdAt: now,
+    updatedAt: now,
   };
   run.rootId = run.id;
   store.runs.create(run);
@@ -28,14 +38,28 @@ function addRun(store: Store, tenantId: string): RunRecord {
 
 function addUsage(store: Store, run: RunRecord, input: number, output: number): void {
   const call: ModelCallRecord = {
-    id: randomUUID(), runId: run.id, scope: 'run', purpose: 'agent',
-    providerId: 'fixture', model: 'fixture-model', startedAt: Date.now(),
-    status: 'running', inputEstimate: input, outputLimit: output, usageStatus: 'unknown',
-    priceSource: 'configured', priceIn: 1, priceOut: 2,
+    id: randomUUID(),
+    runId: run.id,
+    scope: 'run',
+    purpose: 'agent',
+    providerId: 'fixture',
+    model: 'fixture-model',
+    startedAt: Date.now(),
+    status: 'running',
+    inputEstimate: input,
+    outputLimit: output,
+    usageStatus: 'unknown',
+    priceSource: 'configured',
+    priceIn: 1,
+    priceOut: 2,
   };
   store.runs.startModelCall(call);
   store.runs.finishModelCall({
-    ...call, status: 'completed', input, output, usageStatus: 'reported',
+    ...call,
+    status: 'completed',
+    input,
+    output,
+    usageStatus: 'reported',
   });
 }
 
@@ -44,8 +68,13 @@ describe('authoritative model cost estimation', () => {
     const store = new Store(':memory:');
     try {
       store.upsertProvider({
-        id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
-        apiKey: '', model: 'fixture-model', priceIn: 1, priceOut: 2,
+        id: 'fixture',
+        label: 'Fixture',
+        baseUrl: 'https://fixture.invalid/v1',
+        apiKey: '',
+        model: 'fixture-model',
+        priceIn: 1,
+        priceOut: 2,
       });
       const tenantRun = addRun(store, 'tenant-a');
       addUsage(store, tenantRun, 10_000, 200);
@@ -59,8 +88,11 @@ describe('authoritative model cost estimation', () => {
       assert.equal(profile.outputTokens, 200);
 
       const estimate = estimateModelWorkloadCost(store, {
-        tenantId: 'tenant-a', pricedModel: priced,
-        promptTokens: 100, outputTokens: 100, fallbackCalls: 3,
+        tenantId: 'tenant-a',
+        pricedModel: priced,
+        promptTokens: 100,
+        outputTokens: 100,
+        fallbackCalls: 3,
       });
       assert.equal(estimate.source, 'historical');
       assert.equal(estimate.historySamples, 1);
@@ -76,8 +108,11 @@ describe('authoritative model cost estimation', () => {
     const store = new Store(':memory:');
     try {
       store.upsertProvider({
-        id: 'fixture', label: 'Fixture', baseUrl: 'https://fixture.invalid/v1',
-        apiKey: '', model: 'fixture-model',
+        id: 'fixture',
+        label: 'Fixture',
+        baseUrl: 'https://fixture.invalid/v1',
+        apiKey: '',
+        model: 'fixture-model',
       });
       assert.equal(resolvePricedModel(store, 'fixture', 'fixture-model'), undefined);
     } finally {

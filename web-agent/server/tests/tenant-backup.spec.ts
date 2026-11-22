@@ -3,9 +3,7 @@ import assert from 'node:assert/strict';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import {
-  backupTenantWorkspace, listTenantBackups, restoreTenantWorkspace,
-} from '../tenant-backup';
+import { backupTenantWorkspace, listTenantBackups, restoreTenantWorkspace } from '../tenant-backup';
 import { tenantSandboxPath } from '../tenant-workspace';
 
 describe('租户工作区备份 / 恢复', () => {
@@ -26,20 +24,34 @@ describe('租户工作区备份 / 恢复', () => {
 
       writeFileSync(join(target, 'src', 'a.txt'), 'changed');
       const restored = restoreTenantWorkspace({
-        base, dataDir, backupDir: backup.dir, tenantId, now: 1_700_000_001_000,
+        base,
+        dataDir,
+        backupDir: backup.dir,
+        tenantId,
+        now: 1_700_000_001_000,
       });
       assert.equal(readFileSync(join(restored.target, 'src', 'a.txt'), 'utf8'), 'original');
       assert.ok(restored.previous && existsSync(restored.previous));
       assert.equal(readFileSync(join(restored.previous, 'src', 'a.txt'), 'utf8'), 'changed');
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('不存在的租户工作区拒绝备份', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-tenant-backup-'));
     try {
-      assert.throws(() => backupTenantWorkspace({
-        base: join(root, 'workspace'), dataDir: join(root, 'data'), tenantId: 'missing',
-      }), /不存在/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      assert.throws(
+        () =>
+          backupTenantWorkspace({
+            base: join(root, 'workspace'),
+            dataDir: join(root, 'data'),
+            tenantId: 'missing',
+          }),
+        /不存在/,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

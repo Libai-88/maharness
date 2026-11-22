@@ -17,19 +17,40 @@ function setup() {
     rootDir: 'root',
     config: {
       get: <T>(key: string, fallback?: T): T => (values.has(key) ? values.get(key) : fallback) as T,
-      setPersistent: (key: string, value: unknown) => { values.set(key, value); writes.push([key, value]); },
+      setPersistent: (key: string, value: unknown) => {
+        values.set(key, value);
+        writes.push([key, value]);
+      },
     },
-    setCheckpointRetentionMs: (value: number) => { retentionMs = value; },
+    setCheckpointRetentionMs: (value: number) => {
+      retentionMs = value;
+    },
     plugins: { resolveService: () => undefined },
   } as unknown as Kernel;
   let getHandler: ((req: unknown, res: unknown) => void) | undefined;
   let patchHandler: ((req: unknown, res: unknown) => void) | undefined;
   const app = {
-    get: (path: string, handler: typeof getHandler) => { if (path === '/api/config') getHandler = handler; return app; },
-    patch: (_path: string, handler: typeof patchHandler) => { patchHandler = handler; return app; },
+    get: (path: string, handler: typeof getHandler) => {
+      if (path === '/api/config') getHandler = handler;
+      return app;
+    },
+    patch: (_path: string, handler: typeof patchHandler) => {
+      patchHandler = handler;
+      return app;
+    },
     post: () => app,
   };
-  registerConfigRoutes(app as never, { kernel, store: { setCheckpointRetentionMs: (value: number) => { retentionMs = value; } } } as never);
+  registerConfigRoutes(
+    app as never,
+    {
+      kernel,
+      store: {
+        setCheckpointRetentionMs: (value: number) => {
+          retentionMs = value;
+        },
+      },
+    } as never,
+  );
   return { values, writes, get: getHandler!, patch: patchHandler!, retention: () => retentionMs };
 }
 
@@ -37,8 +58,14 @@ function invoke(handler: (req: unknown, res: unknown) => void, body?: unknown) {
   let status = 200;
   let result: unknown;
   const res = {
-    status: (code: number) => { status = code; return res; },
-    json: (value: unknown) => { result = value; return res; },
+    status: (code: number) => {
+      status = code;
+      return res;
+    },
+    json: (value: unknown) => {
+      result = value;
+      return res;
+    },
   };
   handler({ body }, res);
   return { status, result };
@@ -54,7 +81,8 @@ describe('provider circuit breaker config', () => {
       circuitBreakerResetMs: 60_000,
     });
     assert.deepEqual(invoke(routes.patch, { provider: { circuitBreakerThreshold: 0, circuitBreakerResetMs: 4_000_000 } }), {
-      status: 200, result: { ok: true, revision: 'unversioned' },
+      status: 200,
+      result: { ok: true, revision: 'unversioned' },
     });
     assert.deepEqual(routes.writes, [
       ['provider.circuitBreakerThreshold', 1],
@@ -77,7 +105,10 @@ describe('provider circuit breaker config', () => {
 
   test('checkpoint retention is bounded, persisted, and applied at runtime', () => {
     const routes = setup();
-    assert.deepEqual(invoke(routes.patch, { checkpoint: { retentionDays: 90 } }), { status: 200, result: { ok: true, revision: 'unversioned' } });
+    assert.deepEqual(invoke(routes.patch, { checkpoint: { retentionDays: 90 } }), {
+      status: 200,
+      result: { ok: true, revision: 'unversioned' },
+    });
     assert.equal(routes.values.get('checkpoint.retentionDays'), 90);
     assert.equal(routes.retention(), 90 * 24 * 60 * 60 * 1000);
     const invalid = invoke(routes.patch, { checkpoint: { retentionDays: 0.5 } });
@@ -94,7 +125,10 @@ describe('provider circuit breaker config', () => {
       let patchHandler: ((req: unknown, res: unknown) => void) | undefined;
       const app = {
         get: () => app,
-        patch: (_path: string, handler: typeof patchHandler) => { patchHandler = handler; return app; },
+        patch: (_path: string, handler: typeof patchHandler) => {
+          patchHandler = handler;
+          return app;
+        },
         post: () => app,
       };
       const kernel = {
@@ -106,12 +140,15 @@ describe('provider circuit breaker config', () => {
       registerConfigRoutes(app as never, { kernel, store: { setCheckpointRetentionMs: () => undefined } } as never);
       const response = invoke(patchHandler!, {
         revision: config.getPersistedRevision(),
-        provider: { circuitBreakerThreshold: 12 }, agent: { reasoningBudget: 1200 },
+        provider: { circuitBreakerThreshold: 12 },
+        agent: { reasoningBudget: 1200 },
       });
       assert.equal(response.status, 503);
       assert.equal(config.get('provider.circuitBreakerThreshold'), 3);
       assert.equal(config.get('agent.reasoningBudget'), undefined);
       assert.equal(readFileSync(path, 'utf8'), original);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

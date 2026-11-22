@@ -10,7 +10,11 @@ initializePluginTheme();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {new URLSearchParams(location.search).has('history') ? <TodoBoard /> : <PersonalItemsView overview={new URLSearchParams(location.search).get('view') === 'overview'} />}
+    {new URLSearchParams(location.search).has('history') ? (
+      <TodoBoard />
+    ) : (
+      <PersonalItemsView overview={new URLSearchParams(location.search).get('view') === 'overview'} />
+    )}
     <Toaster theme={document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'} />
   </StrictMode>,
 );

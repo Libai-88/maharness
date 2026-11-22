@@ -12,22 +12,38 @@ console.error = (...args) => process.stderr.write(`${args.join(' ')}\n`);
 
 const root = process.argv[2];
 if (!root) throw new Error('missing trial root');
-const kernel = new Kernel(root, { sandboxRoot: root }, {
-  dataDir: join(root, 'data'),
-  userPluginsDir: join(root, 'plugins'),
-  corePluginsDir: join(root, 'core'),
-});
+const kernel = new Kernel(
+  root,
+  { sandboxRoot: root },
+  {
+    dataDir: join(root, 'data'),
+    userPluginsDir: join(root, 'plugins'),
+    corePluginsDir: join(root, 'core'),
+  },
+);
 try {
   await kernel.plugins.loadAll();
   const id = process.env.MH_TRIAL_ID;
   const inst = id ? kernel.plugins.get(id) : undefined;
   const caps = inst ? kernel.plugins.capabilities('tool').map(() => 'tool') : [];
-  const registered = inst ? Object.keys(CAPABILITY_IDENTIFIERS).flatMap(kind => kernel.plugins.capabilities(kind).filter(cap => inst.caps.includes(cap)).map(cap => ({ kind, name: capabilityName(cap) }))) : [];
+  const registered = inst
+    ? Object.keys(CAPABILITY_IDENTIFIERS).flatMap((kind) =>
+        kernel.plugins
+          .capabilities(kind)
+          .filter((cap) => inst.caps.includes(cap))
+          .map((cap) => ({ kind, name: capabilityName(cap) })),
+      )
+    : [];
   const diagnostic = id ? kernel.plugins.diagnostics().find((d) => d.id === id) : undefined;
-  process.stdout.write(JSON.stringify({
-    ok: inst?.state === 'started', state: inst?.state ?? 'error',
-    caps, registered, error: inst?.state === 'started' ? undefined : inst?.error ?? diagnostic?.message ?? '插件试运行加载失败',
-  }));
+  process.stdout.write(
+    JSON.stringify({
+      ok: inst?.state === 'started',
+      state: inst?.state ?? 'error',
+      caps,
+      registered,
+      error: inst?.state === 'started' ? undefined : (inst?.error ?? diagnostic?.message ?? '插件试运行加载失败'),
+    }),
+  );
 } finally {
   await kernel.stop();
 }

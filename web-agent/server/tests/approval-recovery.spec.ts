@@ -12,7 +12,7 @@ describe('重启后的审批闭环', () => {
     const scheduled: { sessionId: string; tenantId: string; dueAt: number }[] = [];
     const store = {
       expireOrphanedApprovalRequests: () => rows.splice(0),
-      loadCheckpoint: (sessionId: string) => sessionId === 's-1' ? { messages: [] } : undefined,
+      loadCheckpoint: (sessionId: string) => (sessionId === 's-1' ? { messages: [] } : undefined),
     };
     const scheduler = {
       list: () => [],
@@ -31,7 +31,12 @@ describe('重启后的审批闭环', () => {
       expireOrphanedApprovalRequests: () => [{ id: 'ap', sessionId: 's', tenantId: 'default' }],
       loadCheckpoint: () => ({ messages: [] }),
     };
-    const queued = { list: () => [{ sessionId: 's', state: 'pending' }], schedule: () => { throw new Error('should not schedule'); } };
+    const queued = {
+      list: () => [{ sessionId: 's', state: 'pending' }],
+      schedule: () => {
+        throw new Error('should not schedule');
+      },
+    };
     assert.deepEqual(recoverOrphanedApprovals(store, queued, 1), { orphaned: 1, resumed: 0 });
     assert.deepEqual(recoverOrphanedApprovals(store, undefined, 1), { orphaned: 1, resumed: 0 });
   });

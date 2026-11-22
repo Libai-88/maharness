@@ -22,9 +22,14 @@ export function registerGitRoutes(app: Express, deps: RouteDeps): void {
       const staged: { path: string; status: string }[] = [];
       const changes: { path: string; status: string }[] = [];
       for (const line of lines) {
-        const x = line[0] ?? ' ', y = line[1] ?? ' ', p = line.slice(3);
+        const x = line[0] ?? ' ',
+          y = line[1] ?? ' ',
+          p = line.slice(3);
         if (!p) continue;
-        if (x === '?' && y === '?') { changes.push({ path: p, status: '??' }); continue; }
+        if (x === '?' && y === '?') {
+          changes.push({ path: p, status: '??' });
+          continue;
+        }
         if (x !== ' ' && x !== '?') staged.push({ path: p, status: x });
         if (y !== ' ' && y !== '?') changes.push({ path: p, status: y });
       }

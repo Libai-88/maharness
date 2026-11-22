@@ -23,18 +23,33 @@ describe('并行任务依赖 DAG', () => {
   });
 
   test('重复 id、未知依赖与环均被拒绝', () => {
-    assert.match(String(normalizeParallelTasks([
-      { id: 'same', objective: 'A' },
-      { id: 'same', objective: 'B' },
-    ]).error), /重复/);
-    assert.match(String(normalizeParallelTasks([
-      { id: 'a', objective: 'A', dependsOn: ['missing'] },
-      { id: 'b', objective: 'B' },
-    ]).error), /不存在/);
-    assert.match(String(normalizeParallelTasks([
-      { id: 'a', objective: 'A', dependsOn: ['b'] },
-      { id: 'b', objective: 'B', dependsOn: ['a'] },
-    ]).error), /环/);
+    assert.match(
+      String(
+        normalizeParallelTasks([
+          { id: 'same', objective: 'A' },
+          { id: 'same', objective: 'B' },
+        ]).error,
+      ),
+      /重复/,
+    );
+    assert.match(
+      String(
+        normalizeParallelTasks([
+          { id: 'a', objective: 'A', dependsOn: ['missing'] },
+          { id: 'b', objective: 'B' },
+        ]).error,
+      ),
+      /不存在/,
+    );
+    assert.match(
+      String(
+        normalizeParallelTasks([
+          { id: 'a', objective: 'A', dependsOn: ['b'] },
+          { id: 'b', objective: 'B', dependsOn: ['a'] },
+        ]).error,
+      ),
+      /环/,
+    );
   });
 
   test('依赖结论只注入成功上游并限制长度', () => {

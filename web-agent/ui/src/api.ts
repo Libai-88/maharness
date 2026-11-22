@@ -1,10 +1,37 @@
 // ui/src/api.ts —— 后端通信（REST + SSE 流式解析，自研）
-import type { BridgeInfo, BusEvent, CheckpointInfo, CommandInfo, LockSkill, LockValidation, Message, ModelInfo, PersonaInfo, PlanState, PluginDiagnostic, PluginInfo, PluginNavItem, ProviderDiagnostic, ProviderForm, ProviderInfo, PulledModel, Session, SkillProposal, SkillUsageRow, StatsInfo, ToolEvidence, ToolWarning, TraceStep, TreeEntry, WorkspaceInfo } from './types';
+import type {
+  BridgeInfo,
+  BusEvent,
+  CheckpointInfo,
+  CommandInfo,
+  LockSkill,
+  LockValidation,
+  Message,
+  ModelInfo,
+  PersonaInfo,
+  PlanState,
+  PluginDiagnostic,
+  PluginInfo,
+  PluginNavItem,
+  ProviderDiagnostic,
+  ProviderForm,
+  ProviderInfo,
+  PulledModel,
+  Session,
+  SkillInfo,
+  SkillProposal,
+  SkillUsageRow,
+  StatsInfo,
+  ToolEvidence,
+  ToolWarning,
+  TraceStep,
+  TreeEntry,
+  WorkspaceInfo,
+} from './types';
 
 // ---- 变更类端点的显式授权凭据（A6-b 的前端侧）----
 const TOKEN_KEY = 'maharness-api-token';
 const TENANT_KEY = 'maharness-tenant';
-
 
 /**
  * 为什么 token 存在浏览器 localStorage、而**不是**由服务端下发：
@@ -19,25 +46,37 @@ const TENANT_KEY = 'maharness-tenant';
  * 恶意代码（它本就能直接改 data/ 下的文件）。真正的隔离边界是 OS 用户与文件权限。
  */
 export function getMutationToken(): string {
-  try { return localStorage.getItem(TOKEN_KEY) ?? ''; } catch { return ''; }
+  try {
+    return localStorage.getItem(TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export function setMutationToken(token: string): void {
   try {
     if (token.trim()) localStorage.setItem(TOKEN_KEY, token.trim());
     else localStorage.removeItem(TOKEN_KEY);
-  } catch { /* 存不上（隐私模式等）就算了：门会退回未授权态，比假装安全诚实 */ }
+  } catch {
+    /* 存不上（隐私模式等）就算了：门会退回未授权态，比假装安全诚实 */
+  }
 }
 
 export function getTenantId(): string {
-  try { return localStorage.getItem(TENANT_KEY) ?? ''; } catch { return ''; }
+  try {
+    return localStorage.getItem(TENANT_KEY) ?? '';
+  } catch {
+    return '';
+  }
 }
 
 export function setTenantId(tenantId: string): void {
   try {
     if (tenantId.trim()) localStorage.setItem(TENANT_KEY, tenantId.trim());
     else localStorage.removeItem(TENANT_KEY);
-  } catch { /* 存不上则使用服务端默认租户 */ }
+  } catch {
+    /* 存不上则使用服务端默认租户 */
+  }
 }
 
 /** 变更类方法始终带凭据头。trusted/remote 部署模式下服务端对 GET/SSE 也强制校验，
@@ -70,7 +109,11 @@ export async function api<T>(url: string, opts?: RequestInit): Promise<T> {
   }
   if (!res.ok) {
     let msg = `HTTP ${res.status}`;
-    try { msg = (await res.json()).error ?? msg; } catch { /* 忽略 */ }
+    try {
+      msg = (await res.json()).error ?? msg;
+    } catch {
+      /* 忽略 */
+    }
     // 401 要说清下一步做什么：不是"再试一次"，而是"把服务端设的那个值录进来"
     if (res.status === 401 && !/设置/.test(msg)) {
       throw new Error(`${msg}（若服务端已启用 MAHARNESS_API_TOKEN，请在 设置 → 高级 里录入同一个 token）`);
@@ -89,7 +132,15 @@ export interface ChatHandlers {
   onReasoning(text: string): void;
   /** id = tool_call_id：同名并发调用靠它配对，不会把两次 read_file 结算成一张卡 */
   onToolStart(id: string | undefined, name: string, args: unknown): void;
-  onToolResult(id: string | undefined, name: string, summary: string, ok: boolean, stored?: boolean, evidence?: ToolEvidence[], warnings?: ToolWarning[]): void;
+  onToolResult(
+    id: string | undefined,
+    name: string,
+    summary: string,
+    ok: boolean,
+    stored?: boolean,
+    evidence?: ToolEvidence[],
+    warnings?: ToolWarning[],
+  ): void;
   /** 审批挂起：approvalToken 是该次挂起的一次性回答凭据（A6-c），存下并在回答时回带 */
   onApprovalRequired(approvalId: string, name: string, summary: string, approvalToken?: string): void;
   onDone(d: { content: string; reasoning?: string; usage: { input: number; output: number }; cost: number; cached?: boolean }): void;
@@ -98,11 +149,26 @@ export interface ChatHandlers {
   /** 成本熔断（budget_hit）：harness 硬边界触发 */
   onBudgetHit?(cost: number, budget: number): void;
   /** 任务契约验收结果：可选，旧调用方无需实现 */
-  onTaskVerified?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
-  onTaskPartial?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
-  onTaskFailed?(objective: string, checks: { ok: boolean; reason?: string }[], evidence?: { source: string; detail: string; traceStepId?: string }[]): void;
+  onTaskVerified?(
+    objective: string,
+    checks: { ok: boolean; reason?: string }[],
+    evidence?: { source: string; detail: string; traceStepId?: string }[],
+  ): void;
+  onTaskPartial?(
+    objective: string,
+    checks: { ok: boolean; reason?: string }[],
+    evidence?: { source: string; detail: string; traceStepId?: string }[],
+  ): void;
+  onTaskFailed?(
+    objective: string,
+    checks: { ok: boolean; reason?: string }[],
+    evidence?: { source: string; detail: string; traceStepId?: string }[],
+  ): void;
   /** 开放式目标缺少可验证标准：展示可解释推断并等待用户在对话中补充条件。 */
-  onTaskInference?(objective: string, inference: { confidence: number; basis: string; needsConfirmation: boolean; rationale: string }): void;
+  onTaskInference?(
+    objective: string,
+    inference: { confidence: number; basis: string; needsConfirmation: boolean; rationale: string },
+  ): void;
   /** provider 重试（retry）：当前流式作废重新开始——调用方应清空流式内容重新累积。
    *  reason 让"作废"不再无声：换线路 / 刚才没接上 / 重新用真方式调用。 */
   onRetry?(reason: 'attempt' | 'failover' | 'narration', detail?: string): void;
@@ -113,7 +179,19 @@ export interface ChatHandlers {
   onEnd?(): void;
 }
 
-export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy' | 'auth' | 'parameter' | 'business' | 'transient';
+export type ErrorKind =
+  | 'aborted'
+  | 'budget'
+  | 'deadline'
+  | 'max-turns'
+  | 'policy'
+  | 'upstream'
+  | 'network'
+  | 'busy'
+  | 'auth'
+  | 'parameter'
+  | 'business'
+  | 'transient';
 
 /** retry 事件由 App 侧 onRetry handler 处理：App 持有 rAF 合帧缓冲，
  *  能在 retry 时刻算出含未冲刷增量的精确截断边界（retryMarks 状态传给展示层） */
@@ -159,7 +237,11 @@ export function subscribeEvents(onEvent: (e: BusEvent) => void, onState?: (s: 'o
     });
     next.addEventListener('event', (ev) => {
       if (stopped || es !== next) return;
-      try { onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent); } catch { /* 忽略 */ }
+      try {
+        onEvent(JSON.parse((ev as MessageEvent).data) as BusEvent);
+      } catch {
+        /* 忽略 */
+      }
     });
   };
   const reconnectOnline = (): void => {
@@ -195,10 +277,21 @@ export const sessionApi = {
   list: () => api<Session[]>('/api/sessions'),
   create: (model: string) => api<Session>('/api/sessions', { method: 'POST', body: JSON.stringify({ model }) }),
   rename: (id: string, title: string) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
-  update: (id: string, patch: Partial<{ title: string; model: string; provider: string; mode: string; role: string; archived: boolean | number; pinned: boolean | number }>) =>
-    api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
+  update: (
+    id: string,
+    patch: Partial<{
+      title: string;
+      model: string;
+      provider: string;
+      mode: string;
+      role: string;
+      archived: boolean | number;
+      pinned: boolean | number;
+    }>,
+  ) => api<Session>(`/api/sessions/${id}`, { method: 'PATCH', body: JSON.stringify(patch) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/sessions/${id}`, { method: 'DELETE' }),
-  batchRemove: (ids: string[]) => api<{ ok: boolean; removed: number }>('/api/sessions/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
+  batchRemove: (ids: string[]) =>
+    api<{ ok: boolean; removed: number }>('/api/sessions/batch-delete', { method: 'POST', body: JSON.stringify({ ids }) }),
   messages: (id: string) => api<Message[]>(`/api/sessions/${id}/messages`),
   /** 断点状态（checkpoint：任务中断后「继续任务」入口的数据源） */
   checkpoint: (id: string) => api<CheckpointInfo>(`/api/sessions/${id}/checkpoint`),
@@ -222,37 +315,40 @@ export const statsApi = {
   get: () => api<StatsInfo>('/api/stats'),
 };
 
-export interface SkillInfo {
-  name: string;
-  description: string;
-  source: 'builtin' | 'user';
-}
-
 export const skillsApi = {
   list: () => api<{ installed: SkillInfo[]; market: { name: string; description: string }[] }>('/api/skills'),
   install: (name: string) => api<{ ok: boolean }>('/api/skills/install', { method: 'POST', body: JSON.stringify({ name }) }),
   uninstall: (name: string) => api<{ ok: boolean }>(`/api/skills/${name}/uninstall`, { method: 'POST' }),
-  read: (name: string, source: string) =>
-    api<{ name: string; content: string }>(`/api/skills/${source}/${name}/read`),
+  read: (name: string, source: string) => api<{ name: string; content: string }>(`/api/skills/${source}/${name}/read`),
   /** skills-lock.json（GitHub 源 + 哈希锁）的可同步清单 */
-  lock: () => api<{ file: string | null; error?: string; count: number; skills: LockSkill[]; validation?: LockValidation }>('/api/skills/lock'),
+  lock: () =>
+    api<{ file: string | null; error?: string; count: number; skills: LockSkill[]; validation?: LockValidation }>('/api/skills/lock'),
   /** 按锁文件安装（默认只装缺失项；force 覆盖并放行哈希不符） */
   sync: (body?: { names?: string[]; force?: boolean }) =>
-    api<{ ok: boolean; results: { name: string; ok: boolean; installed?: boolean; skipped?: string; mismatch?: boolean; error?: string }[] }>(
-      '/api/skills/sync', { method: 'POST', body: JSON.stringify(body ?? {}) }),
+    api<{
+      ok: boolean;
+      results: { name: string; ok: boolean; installed?: boolean; skipped?: string; mismatch?: boolean; error?: string }[];
+    }>('/api/skills/sync', { method: 'POST', body: JSON.stringify(body ?? {}) }),
   usage: () => api<{ usage: Record<string, SkillUsageRow> }>('/api/skills/usage'),
 };
 
 /** 自进化：技能提案的确认回路 */
 export const evolveApi = {
-  list: () => api<{ proposals: SkillProposal[]; pending: number; toolStats: Record<string, { calls: number; fails: number; lastFailTs: number }> }>('/api/evolve/proposals'),
+  list: () =>
+    api<{ proposals: SkillProposal[]; pending: number; toolStats: Record<string, { calls: number; fails: number; lastFailTs: number }> }>(
+      '/api/evolve/proposals',
+    ),
   accept: (id: string) => api<{ ok: boolean; name?: string; error?: string }>(`/api/evolve/${id}/accept`, { method: 'POST' }),
   reject: (id: string) => api<{ ok: boolean; error?: string }>(`/api/evolve/${id}/reject`, { method: 'POST' }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/evolve/${id}/delete`, { method: 'POST' }),
 };
 
 /** 用户规则：全局/项目提示规则文件 + 策略规则 */
-export interface RuleFileInfo { name: string; content: string; revision?: string }
+export interface RuleFileInfo {
+  name: string;
+  content: string;
+  revision?: string;
+}
 export interface RulesView {
   paths: { globalDir: string; globalPolicy: string; projectRoot: string };
   policy: { id: string; effect: string; tool: string; argPattern?: string; pathPattern?: string; reason?: string; enabled?: boolean }[];
@@ -275,7 +371,12 @@ export interface PolicyDryRunView {
   ok: boolean;
   changed: boolean;
   diff: PolicyDiffEntry[];
-  probes: { tool: string; changed: boolean; current: { decision: string; ruleId?: string }; candidate: { decision: string; ruleId?: string } }[];
+  probes: {
+    tool: string;
+    changed: boolean;
+    current: { decision: string; ruleId?: string };
+    candidate: { decision: string; ruleId?: string };
+  }[];
   issues: { level: 'error' | 'warning'; code: string; ruleId?: string; message: string }[];
   blanketAllow?: { id?: string; tool: string }[];
 }
@@ -294,21 +395,25 @@ export const rulesApi = {
   putProject: (path: string, content: string, revision: string) =>
     api<{ ok: boolean }>('/api/rules/project', { method: 'PUT', body: JSON.stringify({ path, content, revision }) }),
   putPolicy: (scope: 'global' | 'project', rules: RulesView['policy'], revision: string) =>
-    api<{ ok: boolean; revision: string; error?: string }>('/api/rules/policy', { method: 'PUT', body: JSON.stringify({ scope, rules, revision }) }),
+    api<{ ok: boolean; revision: string; error?: string }>('/api/rules/policy', {
+      method: 'PUT',
+      body: JSON.stringify({ scope, rules, revision }),
+    }),
   dryRun: (scope: 'global' | 'project', rules: RulesView['policy'], probes: { tool: string; args?: unknown }[] = []) =>
     api<PolicyDryRunView>('/api/rules/policy/dry-run', { method: 'POST', body: JSON.stringify({ scope, rules, probes }) }),
-  history: (scope?: 'global' | 'project') =>
-    api<PolicySnapshot[]>(`/api/rules/policy/history${scope ? `?scope=${scope}` : ''}`),
+  history: (scope?: 'global' | 'project') => api<PolicySnapshot[]>(`/api/rules/policy/history${scope ? `?scope=${scope}` : ''}`),
   rollback: (scope: 'global' | 'project', snapshot: string, revision: string) =>
     api<{ ok: boolean; revision: string; snapshot?: string; error?: string }>('/api/rules/policy/rollback', {
-      method: 'POST', body: JSON.stringify({ scope, snapshot, revision }),
+      method: 'POST',
+      body: JSON.stringify({ scope, snapshot, revision }),
     }),
 };
 
 export const cacheApi = {
   clear: (scope: 'all' | 'l1' | 'l2' = 'all') =>
     api<{ ok: boolean; tenantId: string; scope: string; removed: { l1: number; l2: number } }>('/api/cache/clear', {
-      method: 'POST', body: JSON.stringify({ scope }),
+      method: 'POST',
+      body: JSON.stringify({ scope }),
     }),
 };
 
@@ -316,13 +421,15 @@ export const workspacesApi = {
   list: () => api<WorkspaceInfo[]>('/api/workspaces'),
   add: (path: string) => api<{ id: string; path: string }>('/api/workspaces', { method: 'POST', body: JSON.stringify({ path }) }),
   remove: (id: string) => api<{ ok: boolean }>(`/api/workspaces/${id}`, { method: 'DELETE' }),
-  switchTo: (path: string) => api<{ ok: boolean; current: string }>('/api/workspaces/switch', { method: 'POST', body: JSON.stringify({ path }) }),
+  switchTo: (path: string) =>
+    api<{ ok: boolean; current: string }>('/api/workspaces/switch', { method: 'POST', body: JSON.stringify({ path }) }),
 };
 
 export const fileApi = {
   tree: (path: string) => api<{ path: string; entries: TreeEntry[] }>(`/api/files/tree?path=${encodeURIComponent(path)}`),
   read: (path: string) => api<{ path: string; text: string; encoding: string }>(`/api/files/read?path=${encodeURIComponent(path)}`),
-  write: (path: string, content: string) => api<{ ok: boolean; path: string }>('/api/files/write', { method: 'POST', body: JSON.stringify({ path, content }) }),
+  write: (path: string, content: string) =>
+    api<{ ok: boolean; path: string }>('/api/files/write', { method: 'POST', body: JSON.stringify({ path, content }) }),
   search: (q: string) => api<{ query: string; results: { path: string; size: number }[] }>(`/api/files/search?q=${encodeURIComponent(q)}`),
   open: (path: string) => api<{ ok: boolean; path: string }>('/api/files/open', { method: 'POST', body: JSON.stringify({ path }) }),
 };
@@ -357,7 +464,13 @@ export interface RuntimeConfig {
   revision?: string;
   context: { maxTokens: number; truncateInject: boolean };
   cache: { l1Enabled?: boolean; l1Threshold: number; l2TtlMin: number; l3Enabled: boolean };
-  agent: { reasoningBudget: number; reasoningTotalBudget: number; thinkInEnglish: boolean; fallbackProviders?: string[]; modelRouting: Record<string, string> };
+  agent: {
+    reasoningBudget: number;
+    reasoningTotalBudget: number;
+    thinkInEnglish: boolean;
+    fallbackProviders?: string[];
+    modelRouting: Record<string, string>;
+  };
   provider: { circuitBreakerThreshold: number; circuitBreakerResetMs: number };
   routingTargets?: RoutingTarget[];
   taskTypes?: string[];
@@ -371,9 +484,16 @@ export const configApi = {
     latestConfigRevision = result.revision;
     return result;
   },
-  patch: async (patch: { context?: Partial<RuntimeConfig['context']>; cache?: Partial<RuntimeConfig['cache']>; agent?: Partial<RuntimeConfig['agent']>; provider?: Partial<RuntimeConfig['provider']>; checkpoint?: { retentionDays?: number } }) => {
+  patch: async (patch: {
+    context?: Partial<RuntimeConfig['context']>;
+    cache?: Partial<RuntimeConfig['cache']>;
+    agent?: Partial<RuntimeConfig['agent']>;
+    provider?: Partial<RuntimeConfig['provider']>;
+    checkpoint?: { retentionDays?: number };
+  }) => {
     const result = await api<{ ok: boolean; revision?: string }>('/api/config', {
-      method: 'PATCH', body: JSON.stringify({ ...patch, ...(latestConfigRevision ? { revision: latestConfigRevision } : {}) }),
+      method: 'PATCH',
+      body: JSON.stringify({ ...patch, ...(latestConfigRevision ? { revision: latestConfigRevision } : {}) }),
     });
     latestConfigRevision = result.revision ?? latestConfigRevision;
     return result;
@@ -399,7 +519,8 @@ export const securityApi = {
 
 export const metaApi = {
   paths: () => api<{ sandboxRoot: string; dbFile: string; tracesDir: string; configFile: string }>('/api/meta/paths'),
-  open: (kind: string) => api<{ ok: boolean; kind: string; path: string }>('/api/meta/open', { method: 'POST', body: JSON.stringify({ kind }) }),
+  open: (kind: string) =>
+    api<{ ok: boolean; kind: string; path: string }>('/api/meta/open', { method: 'POST', body: JSON.stringify({ kind }) }),
 };
 
 export const approvalsApi = {
@@ -413,29 +534,53 @@ export const approvalsApi = {
     }),
   /** 挂起清单：刷新页面后审批卡原位复原（可按会话过滤）——服务端在等，用户必须看得见 */
   list: (sessionId?: string) =>
-    api<{ pending: { id: string; name: string; summary: string; sessionId?: string; createdAt: number; expiresAt: number; waitedMs: number; expiresInMs: number; approvalToken?: string }[] }>(
-      sessionId ? `/api/approvals?sessionId=${encodeURIComponent(sessionId)}` : '/api/approvals'),
+    api<{
+      pending: {
+        id: string;
+        name: string;
+        summary: string;
+        sessionId?: string;
+        createdAt: number;
+        expiresAt: number;
+        waitedMs: number;
+        expiresInMs: number;
+        approvalToken?: string;
+      }[];
+    }>(sessionId ? `/api/approvals?sessionId=${encodeURIComponent(sessionId)}` : '/api/approvals'),
 };
 
-export const modelsApi = {  list: () => api<ModelInfo[]>('/api/models'),
-};
+export const modelsApi = { list: () => api<ModelInfo[]>('/api/models') };
 
 export const providersApi = {
   list: () => api<ProviderInfo[]>('/api/providers'),
-  checkTools: (id: string, model?: string) => api<{ status: 'confirmed' | 'not_confirmed' | 'unknown'; checkedAt?: number; reason?: string }>(`/api/providers/${encodeURIComponent(id)}/tool-check`, { method: 'POST', body: JSON.stringify({ model }) }),
+  checkTools: (id: string, model?: string) =>
+    api<{ status: 'confirmed' | 'not_confirmed' | 'unknown'; checkedAt?: number; reason?: string }>(
+      `/api/providers/${encodeURIComponent(id)}/tool-check`,
+      { method: 'POST', body: JSON.stringify({ model }) },
+    ),
   diagnose: (id: string) => api<ProviderDiagnostic>(`/api/providers/${encodeURIComponent(id)}/diagnose`),
   create: (form: ProviderForm) => api<ProviderInfo>('/api/providers', { method: 'POST', body: JSON.stringify(form) }),
   update: (id: string, form: Partial<ProviderForm> & { enabled?: boolean; expectedUpdatedAt?: number }) =>
     api<ProviderInfo>(`/api/providers/${id}`, { method: 'PATCH', body: JSON.stringify(form) }),
-  remove: (id: string, expectedUpdatedAt: number) => api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt }) }),
+  remove: (id: string, expectedUpdatedAt: number) =>
+    api<{ ok: boolean }>(`/api/providers/${id}`, { method: 'DELETE', body: JSON.stringify({ expectedUpdatedAt }) }),
   test: (body: { baseUrl: string; apiKey: string; model: string; protocol?: string; providerId?: string }) =>
-    api<{ ok: boolean; latencyMs?: number; message?: string; error?: string; authFailed?: boolean }>('/api/providers/test', { method: 'POST', body: JSON.stringify(body) }),
+    api<{ ok: boolean; latencyMs?: number; message?: string; error?: string; authFailed?: boolean }>('/api/providers/test', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   /** 拉取供应商模型与能力（openai / anthropic / ollama 三协议）；编辑已保存供应商时 Key 可留空 */
   fetchModels: (body: { baseUrl: string; apiKey: string; protocol?: string; providerId?: string; persist?: boolean }) =>
-    api<{ ok: boolean; protocol?: string; count?: number; models: PulledModel[] }>('/api/providers/models', { method: 'POST', body: JSON.stringify(body) }),
+    api<{ ok: boolean; protocol?: string; count?: number; models: PulledModel[] }>('/api/providers/models', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
   /** 手改单个模型的能力位/价格（模型名走 query，可含 / 与 : ） */
   patchModel: (id: string, modelId: string, body: Record<string, unknown>) =>
-    api<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}/models?model=${encodeURIComponent(modelId)}`, { method: 'PATCH', body: JSON.stringify(body) }),
+    api<{ ok: boolean }>(`/api/providers/${encodeURIComponent(id)}/models?model=${encodeURIComponent(modelId)}`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
 };
 
 export const personasApi = {

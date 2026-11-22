@@ -50,23 +50,36 @@ export default {
     const stateFile = join(ctx.paths.data, 'evolve-state.json');
     mkdirSync(dir, { recursive: true });
 
-    interface State { toolStats: Record<string, { calls: number; fails: number; lastFailTs: number }>; questions: { text: string; ts: number }[] }
+    interface State {
+      toolStats: Record<string, { calls: number; fails: number; lastFailTs: number }>;
+      questions: { text: string; ts: number }[];
+    }
     let state: State = { toolStats: {}, questions: [] };
     try {
       const parsed = JSON.parse(readFileSync(stateFile, 'utf-8')) as State;
       if (parsed && typeof parsed === 'object') state = { toolStats: parsed.toolStats ?? {}, questions: parsed.questions ?? [] };
-    } catch { /* 首次运行无状态文件 */ }
+    } catch {
+      /* 首次运行无状态文件 */
+    }
     let dirty = false;
     const save = () => {
       if (!dirty) return;
       dirty = false;
-      try { writeFileSync(stateFile, JSON.stringify(state), 'utf-8'); } catch { /* 状态写盘失败不影响主流程 */ }
+      try {
+        writeFileSync(stateFile, JSON.stringify(state), 'utf-8');
+      } catch {
+        /* 状态写盘失败不影响主流程 */
+      }
     };
     const timer = setInterval(save, 20_000);
     (timer as { unref?: () => void }).unref?.();
 
-    const slug = (s: string): string => s.toLowerCase()
-      .replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, '').slice(0, 40) || 'skill';
+    const slug = (s: string): string =>
+      s
+        .toLowerCase()
+        .replace(/[^\p{L}\p{N}]+/gu, '-')
+        .replace(/^-+|-+$/g, '')
+        .slice(0, 40) || 'skill';
     const newId = (): string => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
     /** 提案 id 同时是文件名：只允许字母数字，杜绝 ../ 目录穿越。 */
     const proposalFile = (id: string): string | null => {
@@ -99,7 +112,9 @@ export default {
             question: fmString(fm.data, 'question') || undefined,
             evidence: fmString(fm.data, 'evidence') || undefined,
           });
-        } catch { /* 坏文件跳过 */ }
+        } catch {
+          /* 坏文件跳过 */
+        }
       }
       return out.sort((a, b) => b.updatedAt - a.updatedAt);
     }
@@ -107,7 +122,8 @@ export default {
     function writeProposal(p: ProposalMeta, body: string): void {
       const file = join(dir, `${p.id}.md`);
       const scalar = (value: string): string => `"${value.replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
-      const md = ['---',
+      const md = [
+        '---',
         `name: ${scalar(p.name)}`,
         `tenant-id: ${scalar(p.tenantId ?? 'default')}`,
         `description: ${scalar(p.description)}`,
@@ -118,7 +134,10 @@ export default {
         `updated-at: ${p.updatedAt}`,
         `seen: ${p.seen}`,
         `question: ${scalar((p.question ?? '').slice(0, 200))}`,
-        '---', '', body].join('\n');
+        '---',
+        '',
+        body,
+      ].join('\n');
       writeFileSync(file, md, 'utf-8');
     }
 
@@ -130,84 +149,156 @@ export default {
       const file = proposalFile(id);
       if (!file) return null;
       if (!existsSync(file)) return null;
-      try { return parseFrontMatter(readFileSync(file, 'utf-8')).body; } catch { return null; }
+      try {
+        return parseFrontMatter(readFileSync(file, 'utf-8')).body;
+      } catch {
+        return null;
+      }
     }
 
     /** 命中同名待确认提案则累加次数，否则新建 */
-    function upsert(signals: string[], name: string, description: string, reason: string, body: string, question: string, evidence?: string, tenantId = 'default'): ProposalMeta | null {
-      const pending = loadProposals(tenantId).filter(p => p.status === 'pending');
-      if (pending.length >= 12) return null;                 // 待确认积压过多时不再打扰
-      const dup = pending.find(p => p.name === name || (p.signals.length > 0 && p.signals.join() === signals.join()));
+    function upsert(
+      signals: string[],
+      name: string,
+      description: string,
+      reason: string,
+      body: string,
+      question: string,
+      evidence?: string,
+      tenantId = 'default',
+    ): ProposalMeta | null {
+      const pending = loadProposals(tenantId).filter((p) => p.status === 'pending');
+      if (pending.length >= 12) return null; // 待确认积压过多时不再打扰
+      const dup = pending.find((p) => p.name === name || (p.signals.length > 0 && p.signals.join() === signals.join()));
       if (dup) {
         dup.seen++;
         dup.updatedAt = Date.now();
         writeProposal(dup, proposalBody(dup.id) ?? body);
-        ctx.bus.emit({ type: 'evolve.proposal', data: { id: dup.id, name: dup.name, seen: dup.seen, updated: true, tenantId }, ts: Date.now() });
+        ctx.bus.emit({
+          type: 'evolve.proposal',
+          data: { id: dup.id, name: dup.name, seen: dup.seen, updated: true, tenantId },
+          ts: Date.now(),
+        });
         return dup;
       }
       const p: ProposalMeta = {
-        id: newId(), tenantId, name, description, reason, signals,
-        status: 'pending', createdAt: Date.now(), updatedAt: Date.now(), seen: 1, question: question.slice(0, 300), evidence,
+        id: newId(),
+        tenantId,
+        name,
+        description,
+        reason,
+        signals,
+        status: 'pending',
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+        seen: 1,
+        question: question.slice(0, 300),
+        evidence,
       };
       writeProposal(p, body);
       ctx.bus.emit({ type: 'evolve.proposal', data: { id: p.id, name: p.name, seen: 1, updated: false, tenantId }, ts: Date.now() });
       return p;
     }
 
-    const draftBody = (p: { name: string; description: string; reason: string }, question: string): string => [
-      `# ${p.name}`, '',
-      `> 由 maharness 在任务后自动起草（${p.reason}）。采纳前请核对内容。`, '',
-      '## 何时使用', '',
-      p.description || `用户提出与下列表述同类的需求时使用：「${question.slice(0, 120)}」`, '',
-      '## 步骤', '',
-      '1. 先复述目标与约束，确认与用户一致；',
-      '2. 按下列固定做法执行（把失败点写成显式步骤，而不是靠临场回忆）：',
-      '   - （把本次任务里被验证有效的操作序列写在这里，含具体命令/路径/参数）',
-      '3. 完成后自检：逐条核对用户强调的要求是否全部满足。', '',
-      '## 禁止事项', '',
-      '- （把本次任务里踩过的坑、被用户纠正过的点写在这里）', '',
-      '## 来源', '',
-      `- 触发问题：${question.slice(0, 300)}`,
-      `- 起草时间：${new Date().toLocaleString('zh-CN')}`,
-      '',
-    ].join('\n');
+    const draftBody = (p: { name: string; description: string; reason: string }, question: string): string =>
+      [
+        `# ${p.name}`,
+        '',
+        `> 由 maharness 在任务后自动起草（${p.reason}）。采纳前请核对内容。`,
+        '',
+        '## 何时使用',
+        '',
+        p.description || `用户提出与下列表述同类的需求时使用：「${question.slice(0, 120)}」`,
+        '',
+        '## 步骤',
+        '',
+        '1. 先复述目标与约束，确认与用户一致；',
+        '2. 按下列固定做法执行（把失败点写成显式步骤，而不是靠临场回忆）：',
+        '   - （把本次任务里被验证有效的操作序列写在这里，含具体命令/路径/参数）',
+        '3. 完成后自检：逐条核对用户强调的要求是否全部满足。',
+        '',
+        '## 禁止事项',
+        '',
+        '- （把本次任务里踩过的坑、被用户纠正过的点写在这里）',
+        '',
+        '## 来源',
+        '',
+        `- 触发问题：${question.slice(0, 300)}`,
+        `- 起草时间：${new Date().toLocaleString('zh-CN')}`,
+        '',
+      ].join('\n');
 
-    function proposeFromFinding(input: {
-      name: string; description: string; reason: string; findingId: string; severity: string;
-      evidenceRefs: string[]; sourceRunIds: string[]; regressionId?: string;
-    }, tenantId = 'default'): ProposalMeta | undefined {
+    function proposeFromFinding(
+      input: {
+        name: string;
+        description: string;
+        reason: string;
+        findingId: string;
+        severity: string;
+        evidenceRefs: string[];
+        sourceRunIds: string[];
+        regressionId?: string;
+      },
+      tenantId = 'default',
+    ): ProposalMeta | undefined {
       const name = input.name.replace(/[^\w.\u4e00-\u9fa5-]/g, '').slice(0, 60);
       if (!name) return undefined;
       const description = input.description.trim().slice(0, 300);
       const reason = input.reason.trim().slice(0, 300);
       const body = [
-        `# ${name}`, '',
-        '## 何时使用', '',
-        `当任务再次出现以下体验摩擦时使用：${description}`, '',
-        '## 执行要求', '',
+        `# ${name}`,
+        '',
+        '## 何时使用',
+        '',
+        `当任务再次出现以下体验摩擦时使用：${description}`,
+        '',
+        '## 执行要求',
+        '',
         '1. 先确认当前用户目标、授权工作区和工具能力，不沿用旧运行中的过时状态。',
         `2. 按本技能处理该 ${input.severity} 体验问题；采纳前由人类补全可执行步骤，模型不得自行将提案视为已修复。`,
-        '3. 完成前核对运行事实、产物可用性、来源定位和实际副作用。', '',
-        '## 回归要求', '',
+        '3. 完成前核对运行事实、产物可用性、来源定位和实际副作用。',
+        '',
+        '## 回归要求',
+        '',
         `- 体验问题：${input.findingId}`,
         ...(input.regressionId ? [`- 回归案例：${input.regressionId}`] : []),
         `- 来源运行：${input.sourceRunIds.join(', ') || '未记录'}`,
-        `- 证据：${input.evidenceRefs.join(', ') || '未记录'}`, '',
-        '## 禁止事项', '',
+        `- 证据：${input.evidenceRefs.join(', ') || '未记录'}`,
+        '',
+        '## 禁止事项',
+        '',
         '- 不自动批准副作用、不篡改事实、不把本提案当作已采纳规则。',
         '- 未经过回归或人工验证，不宣称问题已经修复。',
         '',
       ].join('\n');
-      return upsert(['AI用户体验', input.severity], name, description, reason, body, description,
-        JSON.stringify({ findingId: input.findingId, sourceRunIds: input.sourceRunIds, evidenceRefs: input.evidenceRefs, regressionId: input.regressionId }),
-        tenantId) ?? undefined;
+      return (
+        upsert(
+          ['AI用户体验', input.severity],
+          name,
+          description,
+          reason,
+          body,
+          description,
+          JSON.stringify({
+            findingId: input.findingId,
+            sourceRunIds: input.sourceRunIds,
+            evidenceRefs: input.evidenceRefs,
+            regressionId: input.regressionId,
+          }),
+          tenantId,
+        ) ?? undefined
+      );
     }
 
     function onRunFinished(summary: AgentRunSummary): void {
       if (!enabled || !auto) return;
       const tenantId = summary.tenantId ?? 'default';
       for (const [tool, n] of Object.entries(summary.failedTools)) {
-        const row = state.toolStats[tool] ??= { calls: 0, fails: 0, lastFailTs: 0 };
+        let row = state.toolStats[tool];
+        if (!row) {
+          row = { calls: 0, fails: 0, lastFailTs: 0 };
+          state.toolStats[tool] = row;
+        }
         row.fails += n;
         row.lastFailTs = Date.now();
         dirty = true;
@@ -216,7 +307,7 @@ export default {
       const q = String(summary.question ?? '').trim();
       if (!q || STOPWORDS_SKILL.test(q)) return;
 
-      const emphasis = EMPHASIS_PATTERNS.find(e => e.re.test(q));
+      const emphasis = EMPHASIS_PATTERNS.find((e) => e.re.test(q));
       const signals: string[] = [];
       let name = '';
       let description = '';
@@ -233,22 +324,42 @@ export default {
         description = `把「${worst?.[0] ?? '工具'}」反复失败后摸索出的正确路径固化为技能`;
         reason = `本次任务工具失败 ${summary.toolFailures} 次`;
       } else {
-        const hist = state.questions.find(x => Date.now() - x.ts < 30 * 864e5 && dice(bigramSet(contentWords(x.text)), bigramSet(contentWords(q))) >= 0.55);
-        if (!hist) { state.questions.push({ text: q.slice(0, 200), ts: Date.now() }); if (state.questions.length > 200) state.questions.shift(); dirty = true; return; }
+        const hist = state.questions.find(
+          (x) => Date.now() - x.ts < 30 * 864e5 && dice(bigramSet(contentWords(x.text)), bigramSet(contentWords(q))) >= 0.55,
+        );
+        if (!hist) {
+          state.questions.push({ text: q.slice(0, 200), ts: Date.now() });
+          if (state.questions.length > 200) state.questions.shift();
+          dirty = true;
+          return;
+        }
         signals.push('重复任务');
         name = `flow-${slug(q.slice(0, 24))}`;
         description = `重复出现的任务流程，沉淀后可直接套用：${q.slice(0, 100)}`;
         reason = '近 30 天内出现相似问题';
       }
-      for (const t of Object.keys(summary.failedTools)) if (calls[t]?.fails >= minFailures * 2 && !signals.includes('历史高失败')) signals.push('历史高失败');
+      for (const t of Object.keys(summary.failedTools))
+        if (calls[t]?.fails >= minFailures * 2 && !signals.includes('历史高失败')) signals.push('历史高失败');
       const body = draftBody({ name, description, reason }, q);
-      upsert(signals, name, description, reason, body, q,
-        Object.keys(summary.failedTools).length ? `失败统计: ${JSON.stringify(summary.failedTools)}` : undefined, tenantId);
+      upsert(
+        signals,
+        name,
+        description,
+        reason,
+        body,
+        q,
+        Object.keys(summary.failedTools).length ? `失败统计: ${JSON.stringify(summary.failedTools)}` : undefined,
+        tenantId,
+      );
     }
 
     // 自动退订：卸载/停用时随 EffectScope 回收（无需手工持有 off 句柄）
     ctx.on('agent.run.finished', (e) => {
-      try { onRunFinished((e as { data: AgentRunSummary }).data); } catch { /* 进化失败绝不影响对话 */ }
+      try {
+        onRunFinished((e as { data: AgentRunSummary }).data);
+      } catch {
+        /* 进化失败绝不影响对话 */
+      }
     });
 
     ctx.register({
@@ -272,7 +383,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'propose_skill',
         risk: 'low',
         costHint: 'low',
@@ -280,10 +391,12 @@ export default {
         limits: '只写 data/skill-proposals/，采纳由用户在界面确认',
         output: '{id, name, status}',
         outputSchema: {
-          type: 'object', required: ['id', 'name', 'status'],
+          type: 'object',
+          required: ['id', 'name', 'status'],
           properties: { id: { type: 'string' }, name: { type: 'string' }, status: { type: 'string' } },
         },
-        description: '产出一份「可复用技能」提案草稿（等用户采纳）。当用户表示"以后都这样做/把这个流程固化"时使用；正文按「何时使用 / 步骤 / 禁止事项」组织。',
+        description:
+          '产出一份「可复用技能」提案草稿（等用户采纳）。当用户表示"以后都这样做/把这个流程固化"时使用；正文按「何时使用 / 步骤 / 禁止事项」组织。',
         parameters: {
           type: 'object',
           properties: {
@@ -295,12 +408,23 @@ export default {
           required: ['name', 'description', 'body'],
         },
         async handler(args: { name?: string; description?: string; body?: string; reason?: string }, tctx: { tenantId?: string }) {
-          const name = String(args.name ?? '').trim().replace(/[^\w.\u4e00-\u9fa5-]/g, '').slice(0, 60);
+          const name = String(args.name ?? '')
+            .trim()
+            .replace(/[^\w.\u4e00-\u9fa5-]/g, '')
+            .slice(0, 60);
           if (!name) return { ok: false, error: 'name 不合法（用小写短横线或中文）' };
-          const p = upsert(['模型主动提议'], name, String(args.description ?? '').slice(0, 300),
-            String(args.reason ?? '模型判断值得复用').slice(0, 300), String(args.body ?? ''), String(args.reason ?? ''),
-            undefined, tctx?.tenantId ?? 'default');
-          return p ? { ok: true, data: { id: p.id, name: p.name, status: p.status } }
+          const p = upsert(
+            ['模型主动提议'],
+            name,
+            String(args.description ?? '').slice(0, 300),
+            String(args.reason ?? '模型判断值得复用').slice(0, 300),
+            String(args.body ?? ''),
+            String(args.reason ?? ''),
+            undefined,
+            tctx?.tenantId ?? 'default',
+          );
+          return p
+            ? { ok: true, data: { id: p.id, name: p.name, status: p.status } }
             : { ok: false, error: '待确认提案已达上限（12 条），请先到技能页处理' };
         },
       },
@@ -327,11 +451,14 @@ export default {
             const userDir = join(ctx.paths.data, 'skills', name);
             if (existsSync(join(userDir, 'SKILL.md'))) return { ok: false, error: `同名技能已存在: ${name}` };
             mkdirSync(userDir, { recursive: true });
-            const description = fmString(fm.data, 'description')
-              .replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+            const description = fmString(fm.data, 'description').replace(/\r?\n/g, ' ').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
             writeFileSync(join(userDir, 'SKILL.md'), `---\nname: "${name}"\ndescription: "${description}"\n---\n\n${fm.body}`, 'utf-8');
-            const meta = loadProposals(tenantId).find(p => p.id === id);
-            if (meta) { meta.status = 'accepted'; meta.updatedAt = Date.now(); writeProposal(meta, fm.body); }
+            const meta = loadProposals(tenantId).find((p) => p.id === id);
+            if (meta) {
+              meta.status = 'accepted';
+              meta.updatedAt = Date.now();
+              writeProposal(meta, fm.body);
+            }
             skillsSvc()?.invalidateCache?.();
             ctx.bus.emit({ type: 'evolve.accepted', data: { id, name, tenantId }, ts: Date.now() });
             return { ok: true, name };
@@ -340,15 +467,19 @@ export default {
             const file = proposalFile(id);
             if (!file) return { ok: false, error: '提案 id 非法' };
             if (!existsSync(file)) return { ok: false, error: '提案不存在' };
-            const meta = loadProposals(tenantId).find(p => p.id === id);
+            const meta = loadProposals(tenantId).find((p) => p.id === id);
             if (!meta) return { ok: false, error: '提案不属于当前租户' };
-            if (meta) { meta.status = 'rejected'; meta.updatedAt = Date.now(); writeProposal(meta, parseFrontMatter(readFileSync(file, 'utf-8')).body); }
+            if (meta) {
+              meta.status = 'rejected';
+              meta.updatedAt = Date.now();
+              writeProposal(meta, parseFrontMatter(readFileSync(file, 'utf-8')).body);
+            }
             return { ok: true };
           },
           remove(id: string, tenantId = 'default'): { ok: boolean } {
             const file = proposalFile(id);
             if (!file) return { ok: false };
-            if (!loadProposals(tenantId).some(p => p.id === id)) return { ok: false };
+            if (!loadProposals(tenantId).some((p) => p.id === id)) return { ok: false };
             rmSync(file, { force: true });
             return { ok: true };
           },
@@ -356,7 +487,7 @@ export default {
       },
     });
 
-    const pending = loadProposals().filter(p => p.status === 'pending').length;
+    const pending = loadProposals().filter((p) => p.status === 'pending').length;
     ctx.logger.info(`自进化就绪：${auto ? 'run 结束自动提案' : '自动提案已关闭'}，待确认提案 ${pending} 条（${dir}）`);
   },
 } satisfies Plugin;

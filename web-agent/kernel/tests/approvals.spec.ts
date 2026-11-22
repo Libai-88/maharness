@@ -13,9 +13,7 @@ import assert from 'node:assert/strict';
 import { ApprovalBoard } from '../../core/chat/approvals';
 import { AgentRunner } from '../../core/chat/agent';
 import { splitBudget } from '../../core/parallel';
-import type {
-  EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, ToolDef, ToolResult, TraceStepInit,
-} from '../types';
+import type { EventBusLike, KernelLike, LLMChunk, ProviderDef, StepHandle, ToolDef, ToolResult, TraceStepInit } from '../types';
 
 // ---------- 轻量 stub（AgentRunner 只消费 kernel 的最小面） ----------
 
@@ -35,7 +33,7 @@ function kernelStub(rootDir: string, toolTimeoutMs: number): KernelLike {
     rootDir,
     paths: { root: rootDir, data: rootDir, traces: rootDir, configFile: '', dbFile: '', cacheFile: '' },
     config: {
-      get: <T>(key: string, def?: T): T => (cfg.has(key) ? cfg.get(key) as unknown as T : def as unknown as T),
+      get: <T>(key: string, def?: T): T => (cfg.has(key) ? (cfg.get(key) as unknown as T) : (def as unknown as T)),
     } as unknown as KernelLike['config'],
     trace: trace as unknown as KernelLike['trace'],
     cache: {
@@ -63,7 +61,9 @@ const bus: EventBusLike = {
 /** 按调用序号响应的 mock provider：第 1 次调用产出工具调用，此后产出完成 */
 function scriptedProvider(script: ((i: number) => AsyncIterable<LLMChunk>)[], calls: { n: number }): ProviderDef {
   return {
-    id: 'mock', label: 'MOCK', defaultModel: 'm',
+    id: 'mock',
+    label: 'MOCK',
+    defaultModel: 'm',
     async *chat(): AsyncIterable<LLMChunk> {
       const i = calls.n++;
       const gen = script[Math.min(i, script.length - 1)](i);
@@ -86,9 +86,15 @@ describe('ApprovalBoard 共享注册表', () => {
     const registered: string[] = [];
     const resolved: string[] = [];
     const withdrawn: string[] = [];
-    board.onRegister = (approval) => { registered.push(`${approval.id}:${approval.name}`); };
-    board.onResolve = (id, approved, reason) => { resolved.push(`${id}:${approved}:${reason}`); };
-    board.onWithdraw = (id) => { withdrawn.push(id); };
+    board.onRegister = (approval) => {
+      registered.push(`${approval.id}:${approval.name}`);
+    };
+    board.onResolve = (id, approved, reason) => {
+      resolved.push(`${id}:${approved}:${reason}`);
+    };
+    board.onWithdraw = (id) => {
+      withdrawn.push(id);
+    };
     board.register('audit-1', { name: 'write_file', summary: 's' }, () => {});
     assert.deepEqual(registered, ['audit-1:write_file']);
     assert.equal(board.approve('audit-1', true), true);
@@ -101,7 +107,9 @@ describe('ApprovalBoard 共享注册表', () => {
   test('register → approve 可达并解除挂起；未知 ID 返回 false', () => {
     const board = new ApprovalBoard(1000);
     let resolved: boolean | null = null;
-    board.register('a1', { name: 't', summary: 's' }, (v) => { resolved = v; });
+    board.register('a1', { name: 't', summary: 's' }, (v) => {
+      resolved = v;
+    });
     assert.equal(board.size, 1);
     assert.equal(board.has('a1'), true);
     assert.equal(board.approve('missing', true), false);
@@ -113,7 +121,9 @@ describe('ApprovalBoard 共享注册表', () => {
   test('超时自动拒绝（resolve(false)）并清理条目', async () => {
     const board = new ApprovalBoard(30);
     let resolved: boolean | null = null;
-    board.register('a2', { name: 't', summary: 's' }, (v) => { resolved = v; });
+    board.register('a2', { name: 't', summary: 's' }, (v) => {
+      resolved = v;
+    });
     await new Promise((r) => setTimeout(r, 60));
     assert.equal(resolved, false);
     assert.equal(board.size, 0);
@@ -135,7 +145,11 @@ describe('ApprovalBoard 共享注册表', () => {
 describe('AgentRunner 审批（共享 board）', () => {
   test('risk=high 但漏写 approval 的工具仍被审批门拦截', async () => {
     let handledWithApproval: boolean | null = null;
-    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
+    const tool: ToolDef = {
+      version: '2.0.0',
+      permissions: [],
+      sideEffect: 'external',
+      outputSchema: {},
       name: 'high_risk_no_approval',
       description: '高风险但漏写 approval 的工具',
       parameters: { type: 'object', properties: {} },
@@ -146,12 +160,18 @@ describe('AgentRunner 审批（共享 board）', () => {
       },
     };
     const calls = { n: 0 };
-    const provider = scriptedProvider([
-      async function* (): AsyncIterable<LLMChunk> {
-        yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'high_risk_no_approval', arguments: '{}' } } };
-      },
-      doneStream,
-    ], calls);
+    const provider = scriptedProvider(
+      [
+        async function* (): AsyncIterable<LLMChunk> {
+          yield {
+            type: 'tool_call',
+            toolCall: { id: 'c1', type: 'function', function: { name: 'high_risk_no_approval', arguments: '{}' } },
+          };
+        },
+        doneStream,
+      ],
+      calls,
+    );
 
     const kernel = kernelStub(process.cwd(), 5000);
     const child = new AgentRunner(kernel, bus, new ApprovalBoard(60));
@@ -160,9 +180,13 @@ describe('AgentRunner 审批（共享 board）', () => {
     const keepAlive = setInterval(() => {}, 1000);
     try {
       for await (const ev of child.run({
-        provider, model: 'm',
+        provider,
+        model: 'm',
         messages: [{ role: 'user', content: '帮我做件事' }],
-        tools: [tool], traceId: 't-risk', sessionId: 's-risk', maxTurns: 3,
+        tools: [tool],
+        traceId: 't-risk',
+        sessionId: 's-risk',
+        maxTurns: 3,
       })) {
         events.push(ev.type);
       }
@@ -176,7 +200,11 @@ describe('AgentRunner 审批（共享 board）', () => {
 
   test('未批准前 handler 被执行器拦截；审批超时自动拒绝后任务继续', async () => {
     let handledWithApproval: boolean | null = null;
-    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
+    const tool: ToolDef = {
+      version: '2.0.0',
+      permissions: [],
+      sideEffect: 'external',
+      outputSchema: {},
       name: 'need_ok',
       description: '需审批工具',
       parameters: { type: 'object', properties: {} },
@@ -187,12 +215,15 @@ describe('AgentRunner 审批（共享 board）', () => {
       },
     };
     const calls = { n: 0 };
-    const provider = scriptedProvider([
-      async function* (): AsyncIterable<LLMChunk> {
-        yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'need_ok', arguments: '{}' } } };
-      },
-      doneStream,
-    ], calls);
+    const provider = scriptedProvider(
+      [
+        async function* (): AsyncIterable<LLMChunk> {
+          yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'need_ok', arguments: '{}' } } };
+        },
+        doneStream,
+      ],
+      calls,
+    );
 
     const kernel = kernelStub(process.cwd(), 5000);
     // 独立短超时 board：无人批准时自动拒绝（默认 10 分钟会挂死测试）
@@ -203,9 +234,13 @@ describe('AgentRunner 审批（共享 board）', () => {
     const keepAlive = setInterval(() => {}, 1000);
     try {
       for await (const ev of child.run({
-        provider, model: 'm',
+        provider,
+        model: 'm',
         messages: [{ role: 'user', content: '帮我做件事' }],
-        tools: [tool], traceId: 't1', sessionId: 's1', maxTurns: 3,
+        tools: [tool],
+        traceId: 't1',
+        sessionId: 's1',
+        maxTurns: 3,
       })) {
         events.push(ev.type);
       }
@@ -222,7 +257,11 @@ describe('AgentRunner 审批（共享 board）', () => {
   test('子 runner 审批经主 runner 入口批准后继续执行（修复前：主入口 404、子 runner 只能等超时）', async () => {
     let handledWithApproval: boolean | null = null;
     let approvalId: string | null = null;
-    const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
+    const tool: ToolDef = {
+      version: '2.0.0',
+      permissions: [],
+      sideEffect: 'external',
+      outputSchema: {},
       name: 'need_ok2',
       description: '需审批工具',
       parameters: { type: 'object', properties: {} },
@@ -233,12 +272,15 @@ describe('AgentRunner 审批（共享 board）', () => {
       },
     };
     const calls = { n: 0 };
-    const provider = scriptedProvider([
-      async function* (): AsyncIterable<LLMChunk> {
-        yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'need_ok2', arguments: '{}' } } };
-      },
-      doneStream,
-    ], calls);
+    const provider = scriptedProvider(
+      [
+        async function* (): AsyncIterable<LLMChunk> {
+          yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'need_ok2', arguments: '{}' } } };
+        },
+        doneStream,
+      ],
+      calls,
+    );
 
     const kernel = kernelStub(process.cwd(), 5000);
     // 子/主 runner 共享同一独立 board（模拟进程级共享注册表）
@@ -250,9 +292,13 @@ describe('AgentRunner 审批（共享 board）', () => {
     const keepAlive = setInterval(() => {}, 1000);
     const consume = async () => {
       for await (const ev of child.run({
-        provider, model: 'm',
+        provider,
+        model: 'm',
         messages: [{ role: 'user', content: '帮我做件事' }],
-        tools: [tool], traceId: 't2', sessionId: 's2', maxTurns: 3,
+        tools: [tool],
+        traceId: 't2',
+        sessionId: 's2',
+        maxTurns: 3,
       })) {
         if (ev.type === 'approval_required') approvalId = ev.approvalId;
       }
@@ -277,9 +323,17 @@ describe('AgentRunner 审批（共享 board）', () => {
   test('审批通过后，幂等工具的瞬时失败按工具契约重试', async () => {
     let handlerCalls = 0;
     let approvalId: string | null = null;
-    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
-      name: 'retry_after_approval', description: '需审批且幂等', parameters: { type: 'object', properties: {} }, sideEffect: 'read',
-      approval: true, idempotent: true, retry: { maxAttempts: 2, backoffMs: 1 },
+    const tool: ToolDef = {
+      version: '2.0.0',
+      permissions: [],
+      outputSchema: {},
+      name: 'retry_after_approval',
+      description: '需审批且幂等',
+      parameters: { type: 'object', properties: {} },
+      sideEffect: 'read',
+      approval: true,
+      idempotent: true,
+      retry: { maxAttempts: 2, backoffMs: 1 },
       async handler(_args, tctx) {
         assert.equal(tctx.approved, true);
         handlerCalls++;
@@ -287,19 +341,33 @@ describe('AgentRunner 审批（共享 board）', () => {
         return { ok: true, data: { accepted: true } };
       },
     };
-    const provider = scriptedProvider([
-      async function* (): AsyncIterable<LLMChunk> {
-        yield { type: 'tool_call', toolCall: { id: 'approval-retry', type: 'function', function: { name: 'retry_after_approval', arguments: '{}' } } };
-      },
-      doneStream,
-    ], { n: 0 });
+    const provider = scriptedProvider(
+      [
+        async function* (): AsyncIterable<LLMChunk> {
+          yield {
+            type: 'tool_call',
+            toolCall: { id: 'approval-retry', type: 'function', function: { name: 'retry_after_approval', arguments: '{}' } },
+          };
+        },
+        doneStream,
+      ],
+      { n: 0 },
+    );
     const board = new ApprovalBoard(5000);
     const runner = new AgentRunner(kernelStub(process.cwd(), 5000), bus, board);
     const keepAlive = setInterval(() => {}, 1000);
     try {
       const events: string[] = [];
       const running = (async () => {
-        for await (const ev of runner.run({ provider, model: 'm', messages: [{ role: 'user', content: '执行' }], tools: [tool], traceId: 'approval-retry', sessionId: 's3', maxTurns: 3 })) {
+        for await (const ev of runner.run({
+          provider,
+          model: 'm',
+          messages: [{ role: 'user', content: '执行' }],
+          tools: [tool],
+          traceId: 'approval-retry',
+          sessionId: 's3',
+          maxTurns: 3,
+        })) {
           events.push(ev.type);
           if (ev.type === 'approval_required') approvalId = ev.approvalId;
         }
@@ -323,7 +391,10 @@ describe('AgentRunner 审批（共享 board）', () => {
 describe('AgentRunner 工具超时取消', () => {
   test('超时触发 AbortController：等待 signal 的 handler 真正中断', async () => {
     let sawAbort = false;
-    const tool: ToolDef = {version: '2.0.0', permissions: [], outputSchema: {},
+    const tool: ToolDef = {
+      version: '2.0.0',
+      permissions: [],
+      outputSchema: {},
       name: 'slow_tool',
       sideEffect: 'read',
       description: '挂起工具',
@@ -331,28 +402,41 @@ describe('AgentRunner 工具超时取消', () => {
       timeoutMs: 80,
       async handler(_args, tctx): Promise<ToolResult> {
         await new Promise<never>((_res, rej) => {
-          tctx.signal?.addEventListener('abort', () => { sawAbort = true; rej(new Error('handler-cancelled')); });
-          if (tctx.signal?.aborted) { sawAbort = true; rej(new Error('handler-cancelled')); }
+          tctx.signal?.addEventListener('abort', () => {
+            sawAbort = true;
+            rej(new Error('handler-cancelled'));
+          });
+          if (tctx.signal?.aborted) {
+            sawAbort = true;
+            rej(new Error('handler-cancelled'));
+          }
         });
         throw new Error('unreachable'); // Promise<never> 永不 resolve
       },
     };
     const calls = { n: 0 };
-    const provider = scriptedProvider([
-      async function* (): AsyncIterable<LLMChunk> {
-        yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'slow_tool', arguments: '{}' } } };
-      },
-      doneStream,
-    ], calls);
+    const provider = scriptedProvider(
+      [
+        async function* (): AsyncIterable<LLMChunk> {
+          yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'slow_tool', arguments: '{}' } } };
+        },
+        doneStream,
+      ],
+      calls,
+    );
 
     const kernel = kernelStub(process.cwd(), 300); // 工具自身 80ms，覆盖超时
     const runner = new AgentRunner(kernel, bus);
     const evs: string[] = [];
     for await (const ev of runner.run({
-      provider, model: 'm',
+      provider,
+      model: 'm',
       messages: [{ role: 'user', content: 'x' }],
-      tools: [tool], traceId: 't3', maxTurns: 3,
-    })) evs.push(ev.type);
+      tools: [tool],
+      traceId: 't3',
+      maxTurns: 3,
+    }))
+      evs.push(ev.type);
 
     assert.equal(sawAbort, true, '超时应向 handler 传导取消信号');
     assert.ok(evs.includes('tool_result'), '超时结果应回填为工具失败');
@@ -361,11 +445,17 @@ describe('AgentRunner 工具超时取消', () => {
 
   test('慢速 handler 超时后迟到 rejection 不产生 unhandledRejection', async () => {
     // 场景：withToolTimeout 已抛超时，handler 迟到 reject——应被预标记 catch 消费
-    let unhandled: unknown[] = [];
-    const onUnhandled = (reason: unknown) => { unhandled.push(reason); };
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown) => {
+      unhandled.push(reason);
+    };
     process.on('unhandledRejection', onUnhandled);
     try {
-      const tool: ToolDef = {version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},
+      const tool: ToolDef = {
+        version: '2.0.0',
+        permissions: [],
+        sideEffect: 'external',
+        outputSchema: {},
         name: 'late_reject',
         description: '超时后迟到拒绝',
         parameters: { type: 'object', properties: {} },
@@ -376,19 +466,27 @@ describe('AgentRunner 工具超时取消', () => {
         },
       };
       const calls = { n: 0 };
-      const provider = scriptedProvider([
-        async function* (): AsyncIterable<LLMChunk> {
-          yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'late_reject', arguments: '{}' } } };
-        },
-        doneStream,
-      ], calls);
+      const provider = scriptedProvider(
+        [
+          async function* (): AsyncIterable<LLMChunk> {
+            yield { type: 'tool_call', toolCall: { id: 'c1', type: 'function', function: { name: 'late_reject', arguments: '{}' } } };
+          },
+          doneStream,
+        ],
+        calls,
+      );
       const kernel = kernelStub(process.cwd(), 300);
       const runner = new AgentRunner(kernel, bus);
       for await (const _ev of runner.run({
-        provider, model: 'm',
+        provider,
+        model: 'm',
         messages: [{ role: 'user', content: 'x' }],
-        tools: [tool], traceId: 't4', maxTurns: 3,
-      })) { /* 消费完 */ }
+        tools: [tool],
+        traceId: 't4',
+        maxTurns: 3,
+      })) {
+        /* 消费完 */
+      }
       await new Promise((r) => setTimeout(r, 80)); // 让迟到的 rejection 有机会触发
       assert.equal(unhandled.length, 0, '迟到 rejection 不应成为 unhandledRejection');
     } finally {
@@ -403,7 +501,10 @@ describe('parallel splitBudget 均分', () => {
   test('floor 分配、余数归最后一项，总和 = 剩余预算', () => {
     const shares = splitBudget(10, 3);
     assert.deepEqual(shares, [3, 3, 4]);
-    assert.equal(shares.reduce((s: number, x) => s + (x ?? 0), 0), 10);
+    assert.equal(
+      shares.reduce((s: number, x) => s + (x ?? 0), 0),
+      10,
+    );
   });
 
   test('每份都不超过剩余预算（不再每任务拷贝同一份）', () => {
@@ -411,7 +512,10 @@ describe('parallel splitBudget 均分', () => {
     for (const s of shares) {
       assert.ok((s ?? 0) <= 0.05);
     }
-    assert.equal(shares.reduce((sum: number, s) => sum + (s ?? 0), 0), 0.05);
+    assert.equal(
+      shares.reduce((sum: number, s) => sum + (s ?? 0), 0),
+      0.05,
+    );
   });
 
   test('无预算（undefined）时全部无上限（维持现状语义）', () => {

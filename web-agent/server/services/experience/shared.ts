@@ -14,7 +14,10 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 
 export function uniqueStrings(value: unknown, limit = 10): string[] {
   if (!Array.isArray(value)) return [];
-  return [...new Set(value.filter((item): item is string => typeof item === 'string' && !!item.trim()).map(item => item.trim()))].slice(0, limit);
+  return [...new Set(value.filter((item): item is string => typeof item === 'string' && !!item.trim()).map((item) => item.trim()))].slice(
+    0,
+    limit,
+  );
 }
 
 export function stableHash(value: unknown): string {
@@ -34,11 +37,13 @@ export function jsonText(value: unknown): string {
     // JSON.stringify(undefined) returns undefined (not a string); callers use
     // .length on the result, so normalise it instead of throwing.
     return JSON.stringify(redactTraceValue(value), null, 2) ?? 'null';
-  } catch { return String(value); }
+  } catch {
+    return String(value);
+  }
 }
 
 export function trimToTokens(text: string, limit: number, tokenizer?: ProviderDef['tokenizer']): string {
-  const count = (value: string) => tokenizer?.countText ? tokenizer.countText(value) : estimateTokens(value);
+  const count = (value: string) => (tokenizer?.countText ? tokenizer.countText(value) : estimateTokens(value));
   if (count(text) <= limit) return text;
   let low = 0;
   let high = text.length;
@@ -73,4 +78,3 @@ export function parseJsonObject(text: string): Record<string, unknown> {
 export function severityRank(value: FindingSeverity): number {
   return ({ P0: 0, P1: 1, P2: 2, P3: 3 } as const)[value];
 }
-

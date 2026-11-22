@@ -3,7 +3,20 @@
  * append-only 结构：TraceSession(traceId) → Turn → Step。
  * 三态输出：① SSE 实时推送（trace.step 事件）② JSONL 审计落盘（异步批量）③ 内存环形缓冲。
  */
-import { appendFileSync, closeSync, fstatSync, mkdirSync, openSync, readFileSync, readdirSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  fstatSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readdirSync,
+  readSync,
+  renameSync,
+  rmSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { EventBus } from './bus';
 import type { StepHandle, TraceStats, TraceStep, TraceStepInit } from './types';
@@ -33,7 +46,17 @@ export function validateTraceSteps(steps: readonly TraceStep[], options: TraceVa
     if (typeof step.id !== 'string' || !step.id || ids.has(step.id)) errors.push(`重复或缺失步骤 id: ${label}`);
     if (typeof step.id === 'string') ids.add(step.id);
     if (typeof step.traceId !== 'string' || !step.traceId.trim()) errors.push(`步骤 ${label} 缺少 traceId`);
-    for (const [key, value] of Object.entries({ sessionId: step.sessionId, pluginId: step.pluginId, name: step.name, inputSummary: step.inputSummary, cacheKey: step.cacheKey, parentId: step.parentId, outputSummary: step.outputSummary, error: step.error, errorCode: step.errorCode })) {
+    for (const [key, value] of Object.entries({
+      sessionId: step.sessionId,
+      pluginId: step.pluginId,
+      name: step.name,
+      inputSummary: step.inputSummary,
+      cacheKey: step.cacheKey,
+      parentId: step.parentId,
+      outputSummary: step.outputSummary,
+      error: step.error,
+      errorCode: step.errorCode,
+    })) {
       if (value !== undefined && typeof value !== 'string') errors.push(`步骤 ${label} 的 ${key} 类型非法`);
     }
     if (!Number.isInteger(step.turn) || step.turn < 0) errors.push(`步骤 ${step.id || '(empty)'} 的 turn 非法`);
@@ -42,15 +65,18 @@ export function validateTraceSteps(steps: readonly TraceStep[], options: TraceVa
     if (!validStatuses.has(step.status)) errors.push(`步骤 ${label} 的 status 非法`);
     if (!Number.isFinite(step.ts) || step.ts < 0) errors.push(`步骤 ${label} 的 ts 非法`);
     if (step.endTs !== undefined && (!Number.isFinite(step.endTs) || step.endTs < step.ts)) errors.push(`步骤 ${label} 的 endTs 非法`);
-    if (step.durationMs !== undefined && (!Number.isFinite(step.durationMs) || step.durationMs < 0)) errors.push(`步骤 ${label} 的 durationMs 非法`);
+    if (step.durationMs !== undefined && (!Number.isFinite(step.durationMs) || step.durationMs < 0))
+      errors.push(`步骤 ${label} 的 durationMs 非法`);
     for (const [key, value] of Object.entries({ tokensIn: step.tokensIn, tokensOut: step.tokensOut, tokensCached: step.tokensCached })) {
       if (value !== undefined && (!Number.isInteger(value) || value < 0)) errors.push(`步骤 ${label} 的 ${key} 非法`);
     }
     if (step.cost !== undefined && (!Number.isFinite(step.cost) || step.cost < 0)) errors.push(`步骤 ${label} 的 cost 非法`);
     if (step.cacheLayer !== undefined && !validCacheLayers.has(step.cacheLayer)) errors.push(`步骤 ${label} 的 cacheLayer 非法`);
-    if (step.errorCategory !== undefined && !validErrorCategories.has(step.errorCategory)) errors.push(`步骤 ${label} 的 errorCategory 非法`);
+    if (step.errorCategory !== undefined && !validErrorCategories.has(step.errorCategory))
+      errors.push(`步骤 ${label} 的 errorCategory 非法`);
     if (step.retryable !== undefined && typeof step.retryable !== 'boolean') errors.push(`步骤 ${label} 的 retryable 类型非法`);
-    if (step.retryDelayMs !== undefined && (!Number.isFinite(step.retryDelayMs) || step.retryDelayMs < 0)) errors.push(`步骤 ${label} 的 retryDelayMs 非法`);
+    if (step.retryDelayMs !== undefined && (!Number.isFinite(step.retryDelayMs) || step.retryDelayMs < 0))
+      errors.push(`步骤 ${label} 的 retryDelayMs 非法`);
     if (step.parentId === step.id) errors.push(`步骤 ${step.id} 不能引用自身为 parentId`);
   }
   const byId = new Map(steps.map((step) => [step.id, step]));
@@ -117,7 +143,13 @@ function readTailLines(path: string, maxLines: number): string[] {
   } catch {
     return [];
   } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* 忽略 */ } }
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* 忽略 */
+      }
+    }
   }
 }
 
@@ -131,7 +163,13 @@ function readAt(path: string, offset: number, length: number): string | undefine
   } catch {
     return undefined;
   } finally {
-    if (fd !== undefined) { try { closeSync(fd); } catch { /* 忽略 */ } }
+    if (fd !== undefined) {
+      try {
+        closeSync(fd);
+      } catch {
+        /* 忽略 */
+      }
+    }
   }
 }
 
@@ -152,8 +190,13 @@ export class Trace {
   /** 进程随机前缀：区分多进程写同一 traces 目录时的 id 空间 */
   private readonly pidPrefix = `p${Math.random().toString(16).slice(2, 6)}`;
   private counter: TraceStats = {
-    steps: 0, llmCalls: 0, toolCalls: 0, cacheHits: 0,
-    totalTokensIn: 0, totalTokensOut: 0, totalCost: 0,
+    steps: 0,
+    llmCalls: 0,
+    toolCalls: 0,
+    cacheHits: 0,
+    totalTokensIn: 0,
+    totalTokensOut: 0,
+    totalCost: 0,
     writeFailures: 0,
   };
   /** 归档 .idx 解析缓存：按 mtime + size 失效，避免每次分页重复解析整份索引。 */
@@ -161,10 +204,18 @@ export class Trace {
   /** 进程退出前兜底 flush（同步 appendFileSync 在 exit 钩子内可执行） */
   private readonly exitFlush = () => this.flush();
 
-  constructor(private bus: EventBus, tracesDir: string, retainDays?: number) {
+  constructor(
+    private bus: EventBus,
+    tracesDir: string,
+    retainDays?: number,
+  ) {
     this.tracesDir = tracesDir;
     if (typeof retainDays === 'number') this.retainDaysCfg = retainDays;
-    try { mkdirSync(tracesDir, { recursive: true }); } catch { /* 忽略 */ }
+    try {
+      mkdirSync(tracesDir, { recursive: true });
+    } catch {
+      /* 忽略 */
+    }
     process.on('exit', this.exitFlush);
   }
 
@@ -179,9 +230,7 @@ export class Trace {
     // 插件/工具扩展可能在缺少运行上下文时直接写 Trace；不要让空 traceId
     // 污染归档或绕过 schema。为这类事件分配可查询的 unscoped run，真实主/子
     // 代理路径仍使用调用方传入的 traceId 与 parentId。
-    const traceId = typeof init.traceId === 'string' && init.traceId.trim()
-      ? init.traceId
-      : `${this.pidPrefix}-unscoped-${seq}`;
+    const traceId = typeof init.traceId === 'string' && init.traceId.trim() ? init.traceId : `${this.pidPrefix}-unscoped-${seq}`;
     const step: TraceStep = {
       ...init,
       traceId,
@@ -255,9 +304,9 @@ export class Trace {
     // 惰性日期滚动：以写入时刻为准（旧实现构造时定死文件名，跨天进程会一直写昨天的文件）
     const today = new Date().toISOString().slice(0, 10);
     this.jsonlPath = this.jsonlPath || join(this.tracesDir, `${today}.jsonl`);
-    const path = this.jsonlPath.endsWith(`${today}.jsonl`)
-      ? this.jsonlPath
-      : (this.jsonlPath = join(this.tracesDir, `${today}.jsonl`));
+    const todayPath = join(this.tracesDir, `${today}.jsonl`);
+    if (!this.jsonlPath.endsWith(`${today}.jsonl`)) this.jsonlPath = todayPath;
+    const path = this.jsonlPath;
     try {
       const baseOffset = statSync(path, { throwIfNoEntry: false })?.size ?? 0;
       appendFileSync(path, chunk);
@@ -266,11 +315,20 @@ export class Trace {
       for (const line of this.writeQueueSnapshot(chunk)) {
         try {
           const step = JSON.parse(line) as TraceStep;
-          if (step.traceId) indexLines.push(JSON.stringify({
-            traceId: step.traceId, sessionId: step.sessionId, pluginId: step.pluginId,
-            ts: step.ts, offset, length: Buffer.byteLength(line),
-          }));
-        } catch { /* 坏行仍由 JSONL 保留，索引跳过 */ }
+          if (step.traceId)
+            indexLines.push(
+              JSON.stringify({
+                traceId: step.traceId,
+                sessionId: step.sessionId,
+                pluginId: step.pluginId,
+                ts: step.ts,
+                offset,
+                length: Buffer.byteLength(line),
+              }),
+            );
+        } catch {
+          /* 坏行仍由 JSONL 保留，索引跳过 */
+        }
         offset += Buffer.byteLength(line) + 1;
       }
       if (indexLines.length) appendFileSync(join(this.tracesDir, `${today}.idx`), `${indexLines.join('\n')}\n`);
@@ -279,7 +337,10 @@ export class Trace {
       this.counter.writeFailures = this.writeFailures;
       if (!this.warnedWriteFailure) {
         this.warnedWriteFailure = true;
-        console.warn('[trace] JSONL 落盘失败（后续失败仅计数，见 stats().writeFailures）:', err instanceof Error ? err.message : String(err));
+        console.warn(
+          '[trace] JSONL 落盘失败（后续失败仅计数，见 stats().writeFailures）:',
+          err instanceof Error ? err.message : String(err),
+        );
       }
     }
     // 跨天才尝试清理（每天至多一次 readdir/rmSync，不在热路径上）
@@ -303,7 +364,9 @@ export class Trace {
     let files: string[];
     try {
       files = readdirSync(this.tracesDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f));
-    } catch { return; }
+    } catch {
+      return;
+    }
     // 不按「文件数 ≤ 保留天数」提前返回：文件少不代表都新（只有两个百年前的归档时
     // 同样必须清理）。判定只看日期，代价是一次 readdir，且每天至多跑一次。
     const cutoff = new Date(Date.now() - retainDays * 86_400_000).toISOString().slice(0, 10);
@@ -326,10 +389,22 @@ export class Trace {
 
   /** 查询轨迹：按 traceId / 步骤类型 / 名称 / 父步骤 过滤环形缓冲（最近 1000 条；可观察性的检索面）
    *  parentId：span 树下钻——查某步骤的全部子步骤（如 run_subagent 工具步骤下的子代理内部步骤） */
-  query(traceId?: string, filter?: {
-    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
-    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
-  }): TraceStep[] {
+  query(
+    traceId?: string,
+    filter?: {
+      type?: string;
+      name?: string;
+      parentId?: string;
+      sessionId?: string;
+      pluginId?: string;
+      fromTs?: number;
+      toTs?: number;
+      beforeTs?: number;
+      status?: string;
+      errorCategory?: string;
+      limit?: number;
+    },
+  ): TraceStep[] {
     let out = traceId ? this.ring.filter((s) => s.traceId === traceId) : [...this.ring];
     if (filter?.type) out = out.filter((s) => s.type === filter.type);
     if (filter?.name) out = out.filter((s) => s.name === filter.name);
@@ -363,13 +438,15 @@ export class Trace {
       if (seen.has(parentId)) continue;
       seen.add(parentId);
       const parent = byId.get(parentId);
-      if (!parent) { unresolved.add(parentId); continue; }
+      if (!parent) {
+        unresolved.add(parentId);
+        continue;
+      }
       if (!expanded.some((step) => step.id === parent.id)) expanded.push(parent);
       if (parent.parentId) pending.push(parent.parentId);
     }
     for (const parentId of pending) unresolved.add(parentId);
-    const result = [...new Map(expanded.map((step) => [step.id, step])).values()]
-      .sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
+    const result = [...new Map(expanded.map((step) => [step.id, step])).values()].sort((a, b) => a.ts - b.ts || a.id.localeCompare(b.id));
     return { steps: result, unresolvedParentIds: [...unresolved].sort() };
   }
 
@@ -379,10 +456,20 @@ export class Trace {
     let files = 0;
     let entries = 0;
     let names: string[] = [];
-    try { names = readdirSync(this.tracesDir).filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f)).sort(); } catch { return { files, entries }; }
+    try {
+      names = readdirSync(this.tracesDir)
+        .filter((f) => /^\d{4}-\d{2}-\d{2}\.jsonl$/.test(f))
+        .sort();
+    } catch {
+      return { files, entries };
+    }
     for (const file of names) {
       let text: string;
-      try { text = readFileSync(join(this.tracesDir, file), 'utf8'); } catch { continue; }
+      try {
+        text = readFileSync(join(this.tracesDir, file), 'utf8');
+      } catch {
+        continue;
+      }
       const indexLines: string[] = [];
       let offset = 0;
       for (const line of text.split('\n')) {
@@ -391,10 +478,14 @@ export class Trace {
           try {
             const step = JSON.parse(line) as TraceStep;
             if (step && step.id && step.traceId && Number.isFinite(step.ts)) {
-              indexLines.push(JSON.stringify({ traceId: step.traceId, sessionId: step.sessionId, pluginId: step.pluginId, ts: step.ts, offset, length }));
+              indexLines.push(
+                JSON.stringify({ traceId: step.traceId, sessionId: step.sessionId, pluginId: step.pluginId, ts: step.ts, offset, length }),
+              );
               entries++;
             }
-          } catch { /* 保留坏行，不让索引重建阻断服务 */ }
+          } catch {
+            /* 保留坏行，不让索引重建阻断服务 */
+          }
         }
         offset += length + 1;
       }
@@ -404,7 +495,13 @@ export class Trace {
         writeFileSync(tempPath, indexLines.length ? `${indexLines.join('\n')}\n` : '', 'utf8');
         renameSync(tempPath, indexPath);
         files++;
-      } catch { try { rmSync(tempPath, { force: true }); } catch { /* ignore */ } }
+      } catch {
+        try {
+          rmSync(tempPath, { force: true });
+        } catch {
+          /* ignore */
+        }
+      }
     }
     this.archiveIndexCache.clear();
     return { files, entries };
@@ -412,17 +509,34 @@ export class Trace {
 
   /** 归档查询：ring 未命中时回退 JSONL 审计文件（跨重启/跨日期的历史可检索）。
    *  只扫最近 maxFiles 个日志文件、每文件最近 maxLines 行（本机工具量级足够）。 */
-  queryArchive(traceId?: string, filter: {
-    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
-    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
-  } = {},
-    opts: { maxFiles?: number; maxLinesPerFile?: number } = {}): TraceStep[] {
+  queryArchive(
+    traceId?: string,
+    filter: {
+      type?: string;
+      name?: string;
+      parentId?: string;
+      sessionId?: string;
+      pluginId?: string;
+      fromTs?: number;
+      toTs?: number;
+      beforeTs?: number;
+      status?: string;
+      errorCategory?: string;
+      limit?: number;
+    } = {},
+    opts: { maxFiles?: number; maxLinesPerFile?: number } = {},
+  ): TraceStep[] {
     const maxFiles = opts.maxFiles ?? 14;
     const maxLines = opts.maxLinesPerFile ?? 20_000;
     let files: string[] = [];
     try {
-      files = readdirSync(this.tracesDir).filter((f) => f.endsWith('.jsonl')).sort().slice(-maxFiles);
-    } catch { return []; }
+      files = readdirSync(this.tracesDir)
+        .filter((f) => f.endsWith('.jsonl'))
+        .sort()
+        .slice(-maxFiles);
+    } catch {
+      return [];
+    }
     const out: TraceStep[] = [];
     if (traceId) {
       const indexed = this.queryArchiveIndex(traceId, filter, maxFiles);
@@ -434,8 +548,10 @@ export class Trace {
         for (const line of lines) {
           let step: TraceStep;
           try {
-          step = withCompatibleTraceDefaults(JSON.parse(line) as TraceStep);
-          } catch { continue; }
+            step = withCompatibleTraceDefaults(JSON.parse(line) as TraceStep);
+          } catch {
+            continue;
+          }
           if (!step || typeof step !== 'object' || !step.id || typeof step.ts !== 'number') continue;
           if (traceId && step.traceId !== traceId) continue;
           if (filter.type && step.type !== filter.type) continue;
@@ -450,22 +566,42 @@ export class Trace {
           if (filter.errorCategory && step.errorCategory !== filter.errorCategory) continue;
           out.push(step);
         }
-      } catch { /* 单文件读取失败跳过 */ }
+      } catch {
+        /* 单文件读取失败跳过 */
+      }
     }
     if (filter.limit && filter.limit > 0) return out.slice(-filter.limit);
     return out;
   }
 
-  private queryArchiveIndex(traceId: string, filter: {
-    type?: string; name?: string; parentId?: string; sessionId?: string; pluginId?: string;
-    fromTs?: number; toTs?: number; beforeTs?: number; status?: string; errorCategory?: string; limit?: number;
-  }, maxFiles: number): TraceStep[] {
+  private queryArchiveIndex(
+    traceId: string,
+    filter: {
+      type?: string;
+      name?: string;
+      parentId?: string;
+      sessionId?: string;
+      pluginId?: string;
+      fromTs?: number;
+      toTs?: number;
+      beforeTs?: number;
+      status?: string;
+      errorCategory?: string;
+      limit?: number;
+    },
+    maxFiles: number,
+  ): TraceStep[] {
     const out: TraceStep[] = [];
     const candidates: { offset: number; length: number; day: string }[] = [];
     let indexFiles: string[] = [];
     try {
-      indexFiles = readdirSync(this.tracesDir).filter((f) => f.endsWith('.idx')).sort().slice(-maxFiles);
-    } catch { return out; }
+      indexFiles = readdirSync(this.tracesDir)
+        .filter((f) => f.endsWith('.idx'))
+        .sort()
+        .slice(-maxFiles);
+    } catch {
+      return out;
+    }
     const active = new Set(indexFiles);
     for (const key of this.archiveIndexCache.keys()) {
       if (!active.has(key)) this.archiveIndexCache.delete(key);
@@ -483,10 +619,19 @@ export class Trace {
           entries = [];
           for (const line of readTailLines(indexPath, Number.MAX_SAFE_INTEGER)) {
             let entry: { traceId?: string; ts?: number; offset?: number; length?: number };
-            try { entry = JSON.parse(line) as typeof entry; } catch { continue; }
-            if (typeof entry.traceId !== 'string' || typeof entry.offset !== 'number'
-              || typeof entry.length !== 'number' || !Number.isSafeInteger(entry.offset)
-              || !Number.isSafeInteger(entry.length)) continue;
+            try {
+              entry = JSON.parse(line) as typeof entry;
+            } catch {
+              continue;
+            }
+            if (
+              typeof entry.traceId !== 'string' ||
+              typeof entry.offset !== 'number' ||
+              typeof entry.length !== 'number' ||
+              !Number.isSafeInteger(entry.offset) ||
+              !Number.isSafeInteger(entry.length)
+            )
+              continue;
             entries.push({
               traceId: entry.traceId,
               ...(typeof entry.ts === 'number' ? { ts: entry.ts } : {}),
@@ -509,22 +654,26 @@ export class Trace {
     }
     const selected = filter.limit && filter.limit > 0 ? candidates.slice(-filter.limit) : candidates;
     for (const candidate of selected) {
-        const raw = readAt(join(this.tracesDir, `${candidate.day}.jsonl`), candidate.offset, candidate.length);
-        if (!raw) continue;
-        let step: TraceStep;
-        try { step = withCompatibleTraceDefaults(JSON.parse(raw) as TraceStep); } catch { continue; }
-        if (filter.type && step.type !== filter.type) continue;
-        if (filter.name && step.name !== filter.name) continue;
-        if (filter.parentId && step.parentId !== filter.parentId) continue;
-        if (filter.sessionId && step.sessionId !== filter.sessionId) continue;
-        if (filter.pluginId && step.pluginId !== filter.pluginId) continue;
-        if (filter.fromTs !== undefined && step.ts < filter.fromTs) continue;
-        if (filter.toTs !== undefined && step.ts > filter.toTs) continue;
-        if (filter.beforeTs !== undefined && step.ts >= filter.beforeTs) continue;
-        if (filter.status && step.status !== filter.status) continue;
-        if (filter.errorCategory && step.errorCategory !== filter.errorCategory) continue;
-        out.push(step);
+      const raw = readAt(join(this.tracesDir, `${candidate.day}.jsonl`), candidate.offset, candidate.length);
+      if (!raw) continue;
+      let step: TraceStep;
+      try {
+        step = withCompatibleTraceDefaults(JSON.parse(raw) as TraceStep);
+      } catch {
+        continue;
       }
+      if (filter.type && step.type !== filter.type) continue;
+      if (filter.name && step.name !== filter.name) continue;
+      if (filter.parentId && step.parentId !== filter.parentId) continue;
+      if (filter.sessionId && step.sessionId !== filter.sessionId) continue;
+      if (filter.pluginId && step.pluginId !== filter.pluginId) continue;
+      if (filter.fromTs !== undefined && step.ts < filter.fromTs) continue;
+      if (filter.toTs !== undefined && step.ts > filter.toTs) continue;
+      if (filter.beforeTs !== undefined && step.ts >= filter.beforeTs) continue;
+      if (filter.status && step.status !== filter.status) continue;
+      if (filter.errorCategory && step.errorCategory !== filter.errorCategory) continue;
+      out.push(step);
+    }
     return out;
   }
 

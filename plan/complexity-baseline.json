@@ -1,0 +1,1118 @@
+{
+ "kernel/cache.ts": {
+  "lines": 1019,
+  "functionLines": 121,
+  "complexity": 40,
+  "exports": 9
+ },
+ "kernel/error-policy.ts": {
+  "lines": 126,
+  "functionLines": 41,
+  "complexity": 21,
+  "exports": 7
+ },
+ "kernel/frontmatter.ts": {
+  "lines": 134,
+  "functionLines": 71,
+  "complexity": 31,
+  "exports": 6
+ },
+ "kernel/fssearch.ts": {
+  "lines": 460,
+  "functionLines": 46,
+  "complexity": 21,
+  "exports": 23
+ },
+ "kernel/index.ts": {
+  "lines": 164,
+  "functionLines": 59,
+  "complexity": 5,
+  "exports": 15
+ },
+ "kernel/model-call.ts": {
+  "lines": 302,
+  "functionLines": 143,
+  "complexity": 77,
+  "exports": 13
+ },
+ "kernel/modelCatalog.ts": {
+  "lines": 248,
+  "functionLines": 42,
+  "complexity": 33,
+  "exports": 5
+ },
+ "kernel/plugin-loader.ts": {
+  "lines": 2121,
+  "functionLines": 342,
+  "complexity": 28,
+  "exports": 6
+ },
+ "kernel/plugin-lock.ts": {
+  "lines": 123,
+  "functionLines": 23,
+  "complexity": 17,
+  "exports": 9
+ },
+ "kernel/plugin-manifest.ts": {
+  "lines": 222,
+  "functionLines": 35,
+  "complexity": 22,
+  "exports": 6
+ },
+ "kernel/plugin-process-host.ts": {
+  "lines": 531,
+  "functionLines": 104,
+  "complexity": 15,
+  "exports": 0
+ },
+ "kernel/plugin-process.ts": {
+  "lines": 558,
+  "functionLines": 95,
+  "complexity": 21,
+  "exports": 3
+ },
+ "kernel/plugin-review.ts": {
+  "lines": 206,
+  "functionLines": 37,
+  "complexity": 20,
+  "exports": 7
+ },
+ "kernel/plugin-sdk.ts": {
+  "lines": 54,
+  "functionLines": 0,
+  "complexity": 0,
+  "exports": 43
+ },
+ "kernel/rules.ts": {
+  "lines": 468,
+  "functionLines": 93,
+  "complexity": 11,
+  "exports": 23
+ },
+ "kernel/run.ts": {
+  "lines": 143,
+  "functionLines": 0,
+  "complexity": 0,
+  "exports": 13
+ },
+ "kernel/skillsSync.ts": {
+  "lines": 817,
+  "functionLines": 105,
+  "complexity": 33,
+  "exports": 20
+ },
+ "kernel/task-contract.ts": {
+  "lines": 188,
+  "functionLines": 145,
+  "complexity": 63,
+  "exports": 1
+ },
+ "kernel/task-verifier.ts": {
+  "lines": 202,
+  "functionLines": 95,
+  "complexity": 30,
+  "exports": 7
+ },
+ "kernel/tool-discovery.ts": {
+  "lines": 340,
+  "functionLines": 275,
+  "complexity": 15,
+  "exports": 7
+ },
+ "kernel/tool-domain.ts": {
+  "lines": 94,
+  "functionLines": 29,
+  "complexity": 43,
+  "exports": 2
+ },
+ "kernel/trace.ts": {
+  "lines": 693,
+  "functionLines": 102,
+  "complexity": 54,
+  "exports": 3
+ },
+ "kernel/types.ts": {
+  "lines": 1039,
+  "functionLines": 0,
+  "complexity": 0,
+  "exports": 60
+ },
+ "kernel/validate.ts": {
+  "lines": 219,
+  "functionLines": 136,
+  "complexity": 89,
+  "exports": 3
+ },
+ "core/academic/references.ts": {
+  "lines": 212,
+  "functionLines": 73,
+  "complexity": 8,
+  "exports": 9
+ },
+ "core/blackboard/index.ts": {
+  "lines": 287,
+  "functionLines": 188,
+  "complexity": 18,
+  "exports": 3
+ },
+ "core/browser/index.ts": {
+  "lines": 697,
+  "functionLines": 468,
+  "complexity": 13,
+  "exports": 6
+ },
+ "core/chat/agent.ts": {
+  "lines": 1904,
+  "functionLines": 1609,
+  "complexity": 334,
+  "exports": 11
+ },
+ "core/chat/anthropic.ts": {
+  "lines": 218,
+  "functionLines": 63,
+  "complexity": 40,
+  "exports": 11
+ },
+ "core/chat/compact.ts": {
+  "lines": 353,
+  "functionLines": 97,
+  "complexity": 25,
+  "exports": 7
+ },
+ "core/chat/index.ts": {
+  "lines": 247,
+  "functionLines": 209,
+  "complexity": 7,
+  "exports": 1
+ },
+ "core/chat/provider-health.ts": {
+  "lines": 149,
+  "functionLines": 20,
+  "complexity": 15,
+  "exports": 14
+ },
+ "core/chat/provider.ts": {
+  "lines": 547,
+  "functionLines": 208,
+  "complexity": 50,
+  "exports": 12
+ },
+ "core/chat/routing.ts": {
+  "lines": 188,
+  "functionLines": 70,
+  "complexity": 23,
+  "exports": 8
+ },
+ "core/chat/tool-broker.ts": {
+  "lines": 156,
+  "functionLines": 101,
+  "complexity": 28,
+  "exports": 2
+ },
+ "core/chat/tool-executor.ts": {
+  "lines": 227,
+  "functionLines": 160,
+  "complexity": 77,
+  "exports": 2
+ },
+ "core/code-intel/index.ts": {
+  "lines": 606,
+  "functionLines": 365,
+  "complexity": 16,
+  "exports": 6
+ },
+ "core/document/drafts.ts": {
+  "lines": 417,
+  "functionLines": 235,
+  "complexity": 25,
+  "exports": 2
+ },
+ "core/document/formats.ts": {
+  "lines": 575,
+  "functionLines": 190,
+  "complexity": 48,
+  "exports": 7
+ },
+ "core/document/index.ts": {
+  "lines": 414,
+  "functionLines": 300,
+  "complexity": 26,
+  "exports": 2
+ },
+ "core/document/tools.ts": {
+  "lines": 295,
+  "functionLines": 234,
+  "complexity": 10,
+  "exports": 1
+ },
+ "core/evolve/index.ts": {
+  "lines": 493,
+  "functionLines": 448,
+  "complexity": 19,
+  "exports": 2
+ },
+ "core/goal-plan/index.ts": {
+  "lines": 342,
+  "functionLines": 282,
+  "complexity": 13,
+  "exports": 3
+ },
+ "core/mcp/index.ts": {
+  "lines": 2105,
+  "functionLines": 933,
+  "complexity": 27,
+  "exports": 23
+ },
+ "core/mcp/registry.ts": {
+  "lines": 150,
+  "functionLines": 41,
+  "complexity": 18,
+  "exports": 8
+ },
+ "core/mcp/server.ts": {
+  "lines": 72,
+  "functionLines": 50,
+  "complexity": 22,
+  "exports": 3
+ },
+ "core/memory/index.ts": {
+  "lines": 590,
+  "functionLines": 463,
+  "complexity": 18,
+  "exports": 3
+ },
+ "core/parallel/index.ts": {
+  "lines": 672,
+  "functionLines": 471,
+  "complexity": 18,
+  "exports": 11
+ },
+ "core/powershell/index.ts": {
+  "lines": 883,
+  "functionLines": 310,
+  "complexity": 20,
+  "exports": 9
+ },
+ "core/powershell/processes.ts": {
+  "lines": 166,
+  "functionLines": 84,
+  "complexity": 9,
+  "exports": 2
+ },
+ "core/rules/index.ts": {
+  "lines": 253,
+  "functionLines": 217,
+  "complexity": 11,
+  "exports": 1
+ },
+ "core/search/index.ts": {
+  "lines": 917,
+  "functionLines": 287,
+  "complexity": 19,
+  "exports": 14
+ },
+ "core/self-extend/index.ts": {
+  "lines": 507,
+  "functionLines": 424,
+  "complexity": 33,
+  "exports": 1
+ },
+ "core/self-extend/runtime.ts": {
+  "lines": 829,
+  "functionLines": 394,
+  "complexity": 28,
+  "exports": 1
+ },
+ "core/skills/index.ts": {
+  "lines": 731,
+  "functionLines": 549,
+  "complexity": 21,
+  "exports": 3
+ },
+ "core/skills/router.ts": {
+  "lines": 61,
+  "functionLines": 37,
+  "complexity": 21,
+  "exports": 4
+ },
+ "core/subagent/index.ts": {
+  "lines": 548,
+  "functionLines": 443,
+  "complexity": 36,
+  "exports": 2
+ },
+ "core/todo/index.ts": {
+  "lines": 406,
+  "functionLines": 354,
+  "complexity": 45,
+  "exports": 4
+ },
+ "core/todo/item-tools.ts": {
+  "lines": 215,
+  "functionLines": 171,
+  "complexity": 15,
+  "exports": 1
+ },
+ "core/todo/items.ts": {
+  "lines": 575,
+  "functionLines": 60,
+  "complexity": 27,
+  "exports": 6
+ },
+ "core/tools-fs/index.ts": {
+  "lines": 925,
+  "functionLines": 644,
+  "complexity": 25,
+  "exports": 4
+ },
+ "core/vision/index.ts": {
+  "lines": 368,
+  "functionLines": 287,
+  "complexity": 28,
+  "exports": 3
+ },
+ "server/automations.ts": {
+  "lines": 1484,
+  "functionLines": 193,
+  "complexity": 34,
+  "exports": 15
+ },
+ "server/db.ts": {
+  "lines": 1447,
+  "functionLines": 124,
+  "complexity": 26,
+  "exports": 3
+ },
+ "server/deploy-mode.ts": {
+  "lines": 103,
+  "functionLines": 39,
+  "complexity": 17,
+  "exports": 6
+ },
+ "server/experience-store.ts": {
+  "lines": 503,
+  "functionLines": 22,
+  "complexity": 3,
+  "exports": 25
+ },
+ "server/experience.ts": {
+  "lines": 1278,
+  "functionLines": 74,
+  "complexity": 32,
+  "exports": 5
+ },
+ "server/framework-changes.ts": {
+  "lines": 302,
+  "functionLines": 52,
+  "complexity": 20,
+  "exports": 2
+ },
+ "server/http/security.ts": {
+  "lines": 314,
+  "functionLines": 72,
+  "complexity": 18,
+  "exports": 13
+ },
+ "server/index.ts": {
+  "lines": 863,
+  "functionLines": 499,
+  "complexity": 51,
+  "exports": 11
+ },
+ "server/migrations/runner.ts": {
+  "lines": 151,
+  "functionLines": 76,
+  "complexity": 14,
+  "exports": 8
+ },
+ "server/model-tool-check.ts": {
+  "lines": 75,
+  "functionLines": 65,
+  "complexity": 8,
+  "exports": 2
+ },
+ "server/organization-store.ts": {
+  "lines": 1889,
+  "functionLines": 62,
+  "complexity": 16,
+  "exports": 50
+ },
+ "server/organization-tools.ts": {
+  "lines": 278,
+  "functionLines": 258,
+  "complexity": 5,
+  "exports": 1
+ },
+ "server/routes/approvals.ts": {
+  "lines": 219,
+  "functionLines": 109,
+  "complexity": 12,
+  "exports": 5
+ },
+ "server/routes/automations.ts": {
+  "lines": 121,
+  "functionLines": 103,
+  "complexity": 4,
+  "exports": 1
+ },
+ "server/routes/chat.ts": {
+  "lines": 70,
+  "functionLines": 63,
+  "complexity": 20,
+  "exports": 1
+ },
+ "server/routes/commands.ts": {
+  "lines": 90,
+  "functionLines": 71,
+  "complexity": 24,
+  "exports": 1
+ },
+ "server/routes/config.ts": {
+  "lines": 240,
+  "functionLines": 231,
+  "complexity": 42,
+  "exports": 1
+ },
+ "server/routes/events.ts": {
+  "lines": 177,
+  "functionLines": 119,
+  "complexity": 12,
+  "exports": 2
+ },
+ "server/routes/experience.ts": {
+  "lines": 214,
+  "functionLines": 177,
+  "complexity": 11,
+  "exports": 1
+ },
+ "server/routes/files.ts": {
+  "lines": 174,
+  "functionLines": 160,
+  "complexity": 10,
+  "exports": 1
+ },
+ "server/routes/git.ts": {
+  "lines": 71,
+  "functionLines": 64,
+  "complexity": 17,
+  "exports": 1
+ },
+ "server/routes/index.ts": {
+  "lines": 241,
+  "functionLines": 181,
+  "complexity": 15,
+  "exports": 5
+ },
+ "server/routes/items.ts": {
+  "lines": 183,
+  "functionLines": 166,
+  "complexity": 24,
+  "exports": 1
+ },
+ "server/routes/materials.ts": {
+  "lines": 193,
+  "functionLines": 181,
+  "complexity": 17,
+  "exports": 1
+ },
+ "server/routes/organization.ts": {
+  "lines": 202,
+  "functionLines": 193,
+  "complexity": 7,
+  "exports": 1
+ },
+ "server/routes/plugins.ts": {
+  "lines": 195,
+  "functionLines": 167,
+  "complexity": 15,
+  "exports": 1
+ },
+ "server/routes/providers.ts": {
+  "lines": 113,
+  "functionLines": 80,
+  "complexity": 7,
+  "exports": 3
+ },
+ "server/routes/rules.ts": {
+  "lines": 190,
+  "functionLines": 139,
+  "complexity": 15,
+  "exports": 3
+ },
+ "server/routes/runs.ts": {
+  "lines": 210,
+  "functionLines": 187,
+  "complexity": 19,
+  "exports": 2
+ },
+ "server/routes/sessions.ts": {
+  "lines": 79,
+  "functionLines": 72,
+  "complexity": 21,
+  "exports": 1
+ },
+ "server/routes/skills.ts": {
+  "lines": 172,
+  "functionLines": 138,
+  "complexity": 10,
+  "exports": 1
+ },
+ "server/routes/stats.ts": {
+  "lines": 164,
+  "functionLines": 157,
+  "complexity": 8,
+  "exports": 1
+ },
+ "server/routes/tenants.ts": {
+  "lines": 90,
+  "functionLines": 84,
+  "complexity": 27,
+  "exports": 1
+ },
+ "server/routes/trace.ts": {
+  "lines": 68,
+  "functionLines": 62,
+  "complexity": 27,
+  "exports": 1
+ },
+ "server/routes/warmup.ts": {
+  "lines": 165,
+  "functionLines": 77,
+  "complexity": 21,
+  "exports": 4
+ },
+ "server/routes/workbench.ts": {
+  "lines": 213,
+  "functionLines": 70,
+  "complexity": 19,
+  "exports": 2
+ },
+ "server/routes/workspaces.ts": {
+  "lines": 186,
+  "functionLines": 65,
+  "complexity": 12,
+  "exports": 4
+ },
+ "server/run/recovery.ts": {
+  "lines": 147,
+  "functionLines": 73,
+  "complexity": 23,
+  "exports": 3
+ },
+ "server/run/usage.ts": {
+  "lines": 266,
+  "functionLines": 136,
+  "complexity": 29,
+  "exports": 2
+ },
+ "server/run-service.ts": {
+  "lines": 289,
+  "functionLines": 54,
+  "complexity": 21,
+  "exports": 2
+ },
+ "server/run-store.ts": {
+  "lines": 600,
+  "functionLines": 38,
+  "complexity": 16,
+  "exports": 5
+ },
+ "server/secrets.ts": {
+  "lines": 265,
+  "functionLines": 86,
+  "complexity": 15,
+  "exports": 10
+ },
+ "server/services/experience/facts.ts": {
+  "lines": 613,
+  "functionLines": 229,
+  "complexity": 60,
+  "exports": 18
+ },
+ "server/services/organization/contract.ts": {
+  "lines": 246,
+  "functionLines": 79,
+  "complexity": 16,
+  "exports": 15
+ },
+ "server/services/organization/projections.ts": {
+  "lines": 147,
+  "functionLines": 63,
+  "complexity": 15,
+  "exports": 3
+ },
+ "server/services/organization/service.ts": {
+  "lines": 1907,
+  "functionLines": 128,
+  "complexity": 51,
+  "exports": 8
+ },
+ "server/services/society/experiments.ts": {
+  "lines": 301,
+  "functionLines": 81,
+  "complexity": 12,
+  "exports": 6
+ },
+ "server/services/society/index.ts": {
+  "lines": 1867,
+  "functionLines": 354,
+  "complexity": 78,
+  "exports": 2
+ },
+ "server/services/society/selection.ts": {
+  "lines": 198,
+  "functionLines": 84,
+  "complexity": 15,
+  "exports": 1
+ },
+ "server/services/society/snapshot.ts": {
+  "lines": 295,
+  "functionLines": 233,
+  "complexity": 35,
+  "exports": 4
+ },
+ "server/usecases/provider-models.ts": {
+  "lines": 119,
+  "functionLines": 53,
+  "complexity": 28,
+  "exports": 3
+ },
+ "server/usecases/provider-support.ts": {
+  "lines": 226,
+  "functionLines": 47,
+  "complexity": 14,
+  "exports": 13
+ },
+ "server/usecases/providers.ts": {
+  "lines": 334,
+  "functionLines": 59,
+  "complexity": 27,
+  "exports": 10
+ },
+ "scripts/agent-eval.ts": {
+  "lines": 641,
+  "functionLines": 395,
+  "complexity": 76,
+  "exports": 0
+ },
+ "scripts/ai-society-acceptance.ts": {
+  "lines": 1375,
+  "functionLines": 148,
+  "complexity": 59,
+  "exports": 0
+ },
+ "scripts/composition-live.ts": {
+  "lines": 455,
+  "functionLines": 213,
+  "complexity": 29,
+  "exports": 0
+ },
+ "scripts/long-content-browser.ts": {
+  "lines": 113,
+  "functionLines": 101,
+  "complexity": 4,
+  "exports": 1
+ },
+ "scripts/optimization-live.ts": {
+  "lines": 424,
+  "functionLines": 11,
+  "complexity": 6,
+  "exports": 0
+ },
+ "scripts/organization-live.ts": {
+  "lines": 579,
+  "functionLines": 215,
+  "complexity": 33,
+  "exports": 0
+ },
+ "scripts/organization-paired-live.ts": {
+  "lines": 741,
+  "functionLines": 180,
+  "complexity": 25,
+  "exports": 9
+ },
+ "scripts/regress-reasoning.ts": {
+  "lines": 204,
+  "functionLines": 98,
+  "complexity": 27,
+  "exports": 0
+ },
+ "scripts/release-live.ts": {
+  "lines": 563,
+  "functionLines": 291,
+  "complexity": 22,
+  "exports": 0
+ },
+ "scripts/selftest.ts": {
+  "lines": 1865,
+  "functionLines": 23,
+  "complexity": 4,
+  "exports": 0
+ },
+ "scripts/strengthening-live.ts": {
+  "lines": 763,
+  "functionLines": 383,
+  "complexity": 29,
+  "exports": 0
+ },
+ "scripts/v3-live.ts": {
+  "lines": 728,
+  "functionLines": 382,
+  "complexity": 71,
+  "exports": 0
+ },
+ "scripts/workbench-live.ts": {
+  "lines": 756,
+  "functionLines": 392,
+  "complexity": 52,
+  "exports": 0
+ },
+ "ui/src/api.ts": {
+  "lines": 623,
+  "functionLines": 68,
+  "complexity": 8,
+  "exports": 41
+ },
+ "ui/src/App.tsx": {
+  "lines": 1187,
+  "functionLines": 1139,
+  "complexity": 25,
+  "exports": 2
+ },
+ "ui/src/chat/model.ts": {
+  "lines": 185,
+  "functionLines": 76,
+  "complexity": 20,
+  "exports": 6
+ },
+ "ui/src/components/AppView.tsx": {
+  "lines": 534,
+  "functionLines": 411,
+  "complexity": 48,
+  "exports": 1
+ },
+ "ui/src/components/AutomationsView.tsx": {
+  "lines": 556,
+  "functionLines": 318,
+  "complexity": 18,
+  "exports": 1
+ },
+ "ui/src/components/chat/AttachmentControls.tsx": {
+  "lines": 144,
+  "functionLines": 133,
+  "complexity": 9,
+  "exports": 1
+ },
+ "ui/src/components/chat/ChatComposer.tsx": {
+  "lines": 366,
+  "functionLines": 321,
+  "complexity": 17,
+  "exports": 1
+ },
+ "ui/src/components/chat/ChatThread.tsx": {
+  "lines": 192,
+  "functionLines": 151,
+  "complexity": 9,
+  "exports": 1
+ },
+ "ui/src/components/chat/message.tsx": {
+  "lines": 662,
+  "functionLines": 115,
+  "complexity": 27,
+  "exports": 3
+ },
+ "ui/src/components/ChatView.tsx": {
+  "lines": 404,
+  "functionLines": 331,
+  "complexity": 27,
+  "exports": 1
+ },
+ "ui/src/components/DocumentSettings.tsx": {
+  "lines": 118,
+  "functionLines": 110,
+  "complexity": 8,
+  "exports": 1
+ },
+ "ui/src/components/ExperienceReviewPanel.tsx": {
+  "lines": 610,
+  "functionLines": 526,
+  "complexity": 38,
+  "exports": 1
+ },
+ "ui/src/components/ExperienceSettings.tsx": {
+  "lines": 89,
+  "functionLines": 73,
+  "complexity": 5,
+  "exports": 1
+ },
+ "ui/src/components/FilesView.tsx": {
+  "lines": 689,
+  "functionLines": 445,
+  "complexity": 33,
+  "exports": 1
+ },
+ "ui/src/components/FrameworkChangesPanel.tsx": {
+  "lines": 162,
+  "functionLines": 134,
+  "complexity": 7,
+  "exports": 1
+ },
+ "ui/src/components/GettingStarted.tsx": {
+  "lines": 209,
+  "functionLines": 197,
+  "complexity": 23,
+  "exports": 1
+ },
+ "ui/src/components/HeroSticker.tsx": {
+  "lines": 127,
+  "functionLines": 70,
+  "complexity": 8,
+  "exports": 1
+ },
+ "ui/src/components/LegacyCheckpoint.tsx": {
+  "lines": 92,
+  "functionLines": 76,
+  "complexity": 6,
+  "exports": 1
+ },
+ "ui/src/components/MaterialViewer.tsx": {
+  "lines": 145,
+  "functionLines": 136,
+  "complexity": 15,
+  "exports": 1
+ },
+ "ui/src/components/OrganizationDialog.tsx": {
+  "lines": 533,
+  "functionLines": 510,
+  "complexity": 18,
+  "exports": 1
+ },
+ "ui/src/components/PdfPreview.tsx": {
+  "lines": 81,
+  "functionLines": 74,
+  "complexity": 7,
+  "exports": 1
+ },
+ "ui/src/components/PersonaPanel.tsx": {
+  "lines": 237,
+  "functionLines": 213,
+  "complexity": 8,
+  "exports": 1
+ },
+ "ui/src/components/PluginsView.tsx": {
+  "lines": 367,
+  "functionLines": 275,
+  "complexity": 26,
+  "exports": 1
+ },
+ "ui/src/components/PluginTabView.tsx": {
+  "lines": 223,
+  "functionLines": 141,
+  "complexity": 14,
+  "exports": 1
+ },
+ "ui/src/components/RunControls.tsx": {
+  "lines": 151,
+  "functionLines": 142,
+  "complexity": 32,
+  "exports": 1
+ },
+ "ui/src/components/RunDiagnostics.tsx": {
+  "lines": 466,
+  "functionLines": 422,
+  "complexity": 32,
+  "exports": 1
+ },
+ "ui/src/components/RunFiles.tsx": {
+  "lines": 102,
+  "functionLines": 94,
+  "complexity": 5,
+  "exports": 1
+ },
+ "ui/src/components/RunsView.tsx": {
+  "lines": 199,
+  "functionLines": 182,
+  "complexity": 9,
+  "exports": 1
+ },
+ "ui/src/components/SettingsProviders.tsx": {
+  "lines": 571,
+  "functionLines": 542,
+  "complexity": 35,
+  "exports": 1
+ },
+ "ui/src/components/SettingsView.tsx": {
+  "lines": 1060,
+  "functionLines": 333,
+  "complexity": 21,
+  "exports": 1
+ },
+ "ui/src/components/Sidebar.tsx": {
+  "lines": 536,
+  "functionLines": 432,
+  "complexity": 23,
+  "exports": 4
+ },
+ "ui/src/components/SkillsView.tsx": {
+  "lines": 417,
+  "functionLines": 381,
+  "complexity": 19,
+  "exports": 1
+ },
+ "ui/src/components/SocietyView.tsx": {
+  "lines": 365,
+  "functionLines": 334,
+  "complexity": 19,
+  "exports": 1
+ },
+ "ui/src/components/StatsView.tsx": {
+  "lines": 313,
+  "functionLines": 296,
+  "complexity": 23,
+  "exports": 1
+ },
+ "ui/src/components/TracePanel.tsx": {
+  "lines": 358,
+  "functionLines": 201,
+  "complexity": 30,
+  "exports": 1
+ },
+ "ui/src/components/ui/calendar.tsx": {
+  "lines": 160,
+  "functionLines": 116,
+  "complexity": 4,
+  "exports": 1
+ },
+ "ui/src/components/ui/chart.tsx": {
+  "lines": 290,
+  "functionLines": 119,
+  "complexity": 21,
+  "exports": 2
+ },
+ "ui/src/components/ui/sidebar.tsx": {
+  "lines": 601,
+  "functionLines": 98,
+  "complexity": 8,
+  "exports": 1
+ },
+ "ui/src/components/WorkbenchView.tsx": {
+  "lines": 1489,
+  "functionLines": 1326,
+  "complexity": 51,
+  "exports": 1
+ },
+ "ui/src/components/WorkspacePermissions.tsx": {
+  "lines": 180,
+  "functionLines": 163,
+  "complexity": 10,
+  "exports": 1
+ },
+ "ui/src/experience-api.ts": {
+  "lines": 280,
+  "functionLines": 8,
+  "complexity": 1,
+  "exports": 17
+ },
+ "ui/src/hooks/useApprovals.ts": {
+  "lines": 179,
+  "functionLines": 151,
+  "complexity": 15,
+  "exports": 1
+ },
+ "ui/src/hooks/useChatComposer.ts": {
+  "lines": 229,
+  "functionLines": 212,
+  "complexity": 22,
+  "exports": 2
+ },
+ "ui/src/plugins/todo/PersonalItemsView.tsx": {
+  "lines": 629,
+  "functionLines": 596,
+  "complexity": 24,
+  "exports": 2
+ },
+ "ui/src/plugins/todo/TodoBoard.tsx": {
+  "lines": 510,
+  "functionLines": 310,
+  "complexity": 9,
+  "exports": 1
+ },
+ "ui/src/plugins/workbench/RecordEditor.tsx": {
+  "lines": 344,
+  "functionLines": 333,
+  "complexity": 18,
+  "exports": 1
+ },
+ "ui/src/plugins/workbench/Reports.tsx": {
+  "lines": 508,
+  "functionLines": 290,
+  "complexity": 6,
+  "exports": 2
+ },
+ "ui/src/plugins/workbench/Tasks.tsx": {
+  "lines": 772,
+  "functionLines": 461,
+  "complexity": 30,
+  "exports": 3
+ },
+ "ui/src/plugins/workbench/Views.tsx": {
+  "lines": 367,
+  "functionLines": 148,
+  "complexity": 9,
+  "exports": 3
+ },
+ "ui/src/plugins/workbench/Workbench.tsx": {
+  "lines": 524,
+  "functionLines": 366,
+  "complexity": 19,
+  "exports": 1
+ },
+ "ui/src/replay.ts": {
+  "lines": 180,
+  "functionLines": 77,
+  "complexity": 25,
+  "exports": 6
+ },
+ "ui/src/run-api.ts": {
+  "lines": 394,
+  "functionLines": 85,
+  "complexity": 27,
+  "exports": 17
+ },
+ "ui/src/types.ts": {
+  "lines": 517,
+  "functionLines": 50,
+  "complexity": 27,
+  "exports": 38
+ },
+ "ui/src/voice.ts": {
+  "lines": 266,
+  "functionLines": 41,
+  "complexity": 22,
+  "exports": 17
+ },
+ "ui/src/workbench-api.ts": {
+  "lines": 717,
+  "functionLines": 17,
+  "complexity": 1,
+  "exports": 26
+ },
+ "ui/e2e/run-fixture.ts": {
+  "lines": 176,
+  "functionLines": 113,
+  "complexity": 25,
+  "exports": 7
+ },
+ "plugins/workbench/index.ts": {
+  "lines": 258,
+  "functionLines": 248,
+  "complexity": 21,
+  "exports": 1
+ },
+ "plugins/workbench/model.ts": {
+  "lines": 591,
+  "functionLines": 98,
+  "complexity": 15,
+  "exports": 28
+ }
+}

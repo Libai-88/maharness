@@ -24,7 +24,9 @@ describe('Config 分层读取', () => {
       writeFileSync(path, JSON.stringify({ agent: { maxTurns: 30 } }), 'utf-8');
       const c2 = new Config(new EventBus(), { agent: { maxTurns: 12 } }, path);
       assert.equal(c2.get('agent.maxTurns'), 30, 'config.json 优先于 defaults');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('点路径平铺键也可用（defaults 与 config.json 两种写法都归一化）', () => {
@@ -39,7 +41,9 @@ describe('Config 分层读取', () => {
       writeFileSync(path, JSON.stringify({ 'context.maxTokens': 100 }), 'utf-8');
       const c2 = new Config(new EventBus(), { context: { maxTokens: 60000 } }, path);
       assert.equal(c2.get('context.maxTokens'), 100, '平铺 config 键应覆盖嵌套 default');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('config.json 顶层非法（数组/标量）时忽略用户配置且不抛', () => {
@@ -49,7 +53,9 @@ describe('Config 分层读取', () => {
       writeFileSync(path, '[1,2,3]', 'utf-8');
       const c = new Config(new EventBus(), { agent: { maxTurns: 12 } }, path);
       assert.equal(c.get('agent.maxTurns'), 12);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('显式 null 视同未设置（回退默认值）', () => {
@@ -68,7 +74,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       c.set('context.maxTokens', 999);
       assert.equal(existsSync(path), false, '未调用 setPersistent 不应创建文件');
       assert.equal(c.persistNow(), false, '无待落盘键时 persistNow 返回 false');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('setPersistent 落盘，且新实例（模拟重启）读到同值', () => {
@@ -84,7 +92,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       const after = new Config(new EventBus(), { context: { maxTokens: 60000 } }, path);
       assert.equal(after.get('context.maxTokens'), 999);
       assert.deepEqual(after.get('agent.modelRouting'), { 代码: 'deepseek@deepseek-reasoner' });
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('落盘合并保留用户手写的其它键（不清空 config.json）', () => {
@@ -98,7 +108,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       const raw = JSON.parse(readFileSync(path, 'utf-8'));
       assert.equal(raw.cache.l2TtlMin, 5, '新键写入');
       assert.deepEqual(raw.mcp.servers.fs, { type: 'stdio' }, '既有手写键不被销毁');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('批量写入先提交文件再广播配置变更', () => {
@@ -109,19 +121,26 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       const bus = new EventBus();
       const c = new Config(bus, { context: { maxTokens: 60000 }, cache: { warmup: 'auto' } }, path);
       let persistedAtPublish: Record<string, unknown> | undefined;
-      bus.on('config.changed', () => { persistedAtPublish = JSON.parse(readFileSync(path, 'utf-8')); });
+      bus.on('config.changed', () => {
+        persistedAtPublish = JSON.parse(readFileSync(path, 'utf-8'));
+      });
 
-      assert.equal(c.setPersistentBatch([
-        ['context.maxTokens', 12000],
-        ['cache.warmup', 'off'],
-      ]), true);
+      assert.equal(
+        c.setPersistentBatch([
+          ['context.maxTokens', 12000],
+          ['cache.warmup', 'off'],
+        ]),
+        true,
+      );
 
       assert.equal(c.get('context.maxTokens'), 12000);
       assert.equal(c.get('cache.warmup'), 'off');
       assert.deepEqual(persistedAtPublish?.context, { maxTokens: 12000 });
       assert.deepEqual(persistedAtPublish?.cache, { warmup: 'off' });
       assert.deepEqual(persistedAtPublish?.handWritten, { keep: true });
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('批量写入提交失败时保留原文件和运行配置', () => {
@@ -135,7 +154,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       assert.equal(c.setPersistentBatch([['context.maxTokens', 12000]]), false);
       assert.equal(c.get('context.maxTokens'), 60000);
       assert.equal(readFileSync(path, 'utf-8'), original);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('批量写入检测外部版本变化并拒绝覆盖更新后的文件', () => {
@@ -151,7 +172,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       assert.equal(c.getPersistentFailureCode(), 'concurrent_write');
       assert.equal(JSON.parse(readFileSync(path, 'utf8')).context.maxTokens, 70000);
       assert.equal(c.get('context.maxTokens'), 60000, '冲突时运行态也保持原值');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('对象值整子树覆盖：被删除的路由条目不残留', () => {
@@ -165,7 +188,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       c.persistNow();
       const raw = JSON.parse(readFileSync(path, 'utf-8'));
       assert.deepEqual(raw.agent.modelRouting, { 代码: 'a' }, '逐个叶键合并会让 写作 残留（旧实现的坑）');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('config.json 已损坏时拒绝落盘（不销毁用户文件）', () => {
@@ -177,7 +202,9 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       c.setPersistent('context.maxTokens', 1234);
       assert.equal(c.persistNow(), false, '解析失败 → 拒绝覆写');
       assert.equal(readFileSync(path, 'utf-8'), '{这不是合法 JSON', '原文件内容未被破坏');
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   test('未绑定 config 路径时 setPersistent 仍可用（只改内存，不抛）', () => {
@@ -198,6 +225,8 @@ describe('Config 持久化（B12：用户改动必须下次还在）', () => {
       c.setPersistent('agent.maxTurns', 7);
       c.persistNow();
       assert.deepEqual(got, [['agent.maxTurns', 7]]);
-    } finally { rmSync(dir, { recursive: true, force: true }); }
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

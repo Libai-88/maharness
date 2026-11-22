@@ -13,12 +13,14 @@ function Toaster(props: ToasterProps) {
         error: <OctagonXIcon className="size-4" />,
         loading: <Spinner />,
       }}
-      style={{
-        '--normal-bg': 'var(--popover)',
-        '--normal-text': 'var(--popover-foreground)',
-        '--normal-border': 'var(--border)',
-        '--border-radius': 'var(--radius)',
-      } as React.CSSProperties}
+      style={
+        {
+          '--normal-bg': 'var(--popover)',
+          '--normal-text': 'var(--popover-foreground)',
+          '--normal-border': 'var(--border)',
+          '--border-radius': 'var(--radius)',
+        } as React.CSSProperties
+      }
       toastOptions={{ classNames: { toast: 'cn-toast' } }}
       {...props}
     />

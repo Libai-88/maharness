@@ -72,8 +72,11 @@ export function validatePlugin(pluginDir) {
   const manifestPath = join(root, 'plugin.json');
   if (!existsSync(manifestPath)) return ['缺少 plugin.json'];
   let manifest;
-  try { manifest = JSON.parse(readFileSync(manifestPath, 'utf8')); }
-  catch { return ['plugin.json 不是有效 JSON']; }
+  try {
+    manifest = JSON.parse(readFileSync(manifestPath, 'utf8'));
+  } catch {
+    return ['plugin.json 不是有效 JSON'];
+  }
   if (!manifest || typeof manifest !== 'object' || Array.isArray(manifest)) return ['manifest 必须是对象'];
   if (typeof manifest.id !== 'string' || !ID_RE.test(manifest.id)) errors.push('id 必须匹配 /^[a-z][a-z0-9-]{1,63}$/');
   if (typeof manifest.name !== 'string' || !manifest.name.trim()) errors.push('name 必须是非空字符串');
@@ -87,19 +90,24 @@ export function validatePlugin(pluginDir) {
   if (api !== undefined) {
     if (!api || typeof api !== 'object' || Array.isArray(api)) errors.push('compatibility.api 必须是对象');
     else {
-      if (api.min !== undefined && (typeof api.min !== 'string' || !SEMVER_RE.test(api.min))) errors.push('compatibility.api.min 必须是完整 semver');
-      if (api.max !== undefined && (typeof api.max !== 'string' || !SEMVER_RE.test(api.max))) errors.push('compatibility.api.max 必须是完整 semver');
-      if (typeof api.min === 'string' && typeof api.max === 'string' && compareVersion(api.min, api.max) > 0) errors.push('compatibility.api.min 不能高于 max');
+      if (api.min !== undefined && (typeof api.min !== 'string' || !SEMVER_RE.test(api.min)))
+        errors.push('compatibility.api.min 必须是完整 semver');
+      if (api.max !== undefined && (typeof api.max !== 'string' || !SEMVER_RE.test(api.max)))
+        errors.push('compatibility.api.max 必须是完整 semver');
+      if (typeof api.min === 'string' && typeof api.max === 'string' && compareVersion(api.min, api.max) > 0)
+        errors.push('compatibility.api.min 不能高于 max');
       if (typeof api.min === 'string' && compareVersion(HOST_PLUGIN_API, api.min) < 0) errors.push(`不兼容宿主插件 API ${HOST_PLUGIN_API}`);
       if (typeof api.max === 'string' && compareVersion(HOST_PLUGIN_API, api.max) > 0) errors.push(`不兼容宿主插件 API ${HOST_PLUGIN_API}`);
     }
   }
   if (manifest.apiVersion !== 3) errors.push('新插件需要 apiVersion: 3');
   const caps = manifest.permissions?.capabilities;
-  if (manifest.permissions !== undefined && (!caps || typeof caps !== 'object' || Array.isArray(caps))) errors.push('permissions.capabilities 必须是对象');
+  if (manifest.permissions !== undefined && (!caps || typeof caps !== 'object' || Array.isArray(caps)))
+    errors.push('permissions.capabilities 必须是对象');
   if (caps && typeof caps === 'object' && !Array.isArray(caps)) {
     for (const [kind, names] of Object.entries(caps)) {
-      if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim())) errors.push(`permissions.capabilities.${kind} 必须是字符串数组`);
+      if (!Array.isArray(names) || names.some((name) => typeof name !== 'string' || !name.trim()))
+        errors.push(`permissions.capabilities.${kind} 必须是字符串数组`);
     }
   }
   return errors;
@@ -146,12 +154,17 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
         let failed = false;
         for (const dir of dirs) {
           const errors = validatePlugin(dir);
-          if (errors.length) { failed = true; console.error(errors.map((error) => `✗ ${dir}: ${error}`).join('\n')); }
-          else console.log(`✓ 插件 manifest 有效: ${resolve(dir)}`);
+          if (errors.length) {
+            failed = true;
+            console.error(errors.map((error) => `✗ ${dir}: ${error}`).join('\n'));
+          } else console.log(`✓ 插件 manifest 有效: ${resolve(dir)}`);
         }
         if (failed) process.exitCode = 1;
       }
-    } else { usage(); process.exitCode = 1; }
+    } else {
+      usage();
+      process.exitCode = 1;
+    }
   } catch (error) {
     console.error(`✗ ${error instanceof Error ? error.message : String(error)}`);
     process.exitCode = 1;

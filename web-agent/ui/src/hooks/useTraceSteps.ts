@@ -18,9 +18,9 @@ export function useTraceSteps() {
   const record = useCallback((step: TraceStep) => {
     const previous = buffer.current;
     const index = previous.findIndex((item) => item.id === step.id);
-    let next = index < 0 ? [...previous, step] : previous.map((item, itemIndex) => itemIndex === index ? step : item);
+    let next = index < 0 ? [...previous, step] : previous.map((item, itemIndex) => (itemIndex === index ? step : item));
     if (next.length > TRACE_MAX) {
-      const parents = new Set(next.flatMap((item) => item.parentId ? [item.parentId] : []));
+      const parents = new Set(next.flatMap((item) => (item.parentId ? [item.parentId] : [])));
       let remaining = next.length - TRACE_MAX;
       next = next.filter((item) => {
         if (remaining > 0 && !parents.has(item.id)) {

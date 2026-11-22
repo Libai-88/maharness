@@ -14,21 +14,31 @@ import type { ProviderDef } from '../../kernel/types';
 import { estimateTokens } from '../../kernel/tokens';
 
 const DIMENSIONS = [
-  'capability_discovery', 'tool_contract_clarity', 'result_actionability', 'state_credibility',
-  'error_recovery', 'execution_efficiency', 'context_continuity', 'authorization_control',
-  'result_usability', 'reuse_intention',
+  'capability_discovery',
+  'tool_contract_clarity',
+  'result_actionability',
+  'state_credibility',
+  'error_recovery',
+  'execution_efficiency',
+  'context_continuity',
+  'authorization_control',
+  'result_usability',
+  'reuse_intention',
 ];
 
-function addRun(store: Store, input: {
-  objective?: string;
-  providerId?: string;
-  model?: string;
-  tenantId?: string;
-  status?: RunRecord['status'];
-  verification?: unknown;
-  answer?: string;
-  workspace?: string;
-} = {}): RunRecord {
+function addRun(
+  store: Store,
+  input: {
+    objective?: string;
+    providerId?: string;
+    model?: string;
+    tenantId?: string;
+    status?: RunRecord['status'];
+    verification?: unknown;
+    answer?: string;
+    workspace?: string;
+  } = {},
+): RunRecord {
   const tenantId = input.tenantId ?? 'default';
   const providerId = input.providerId ?? 'fixture';
   const model = input.model ?? 'fixture-model';
@@ -36,66 +46,102 @@ function addRun(store: Store, input: {
   const now = Date.now();
   const id = randomUUID();
   const run: RunRecord = {
-    id, rootId: id, sessionId: session.id, tenantId, depth: 0,
+    id,
+    rootId: id,
+    sessionId: session.id,
+    tenantId,
+    depth: 0,
     objective: input.objective ?? '整理一份可检查的结果',
-    providerId, model, status: 'running', authorization: { workspace: input.workspace ?? process.cwd(), profile: 'standard', revision: 0, readOnly: false },
-    cost: 0, tokensIn: 0, tokensOut: 0, createdAt: now - 100, updatedAt: now,
+    providerId,
+    model,
+    status: 'running',
+    authorization: { workspace: input.workspace ?? process.cwd(), profile: 'standard', revision: 0, readOnly: false },
+    cost: 0,
+    tokensIn: 0,
+    tokensOut: 0,
+    createdAt: now - 100,
+    updatedAt: now,
   };
   store.runs.create(run);
-  store.runs.update(run, {
-    status: input.status ?? 'completed',
-    answer: input.answer ?? '已经生成结果。',
-    ...(input.verification === undefined ? {} : { verification: input.verification }),
-  }, 'done', { status: input.status ?? 'completed' });
+  store.runs.update(
+    run,
+    {
+      status: input.status ?? 'completed',
+      answer: input.answer ?? '已经生成结果。',
+      ...(input.verification === undefined ? {} : { verification: input.verification }),
+    },
+    'done',
+    { status: input.status ?? 'completed' },
+  );
   return store.runs.get(id, tenantId)!;
 }
 
 function finalOutput(refs: string[], score = 5, dimensions: string[] = DIMENSIONS): string {
   return JSON.stringify({
-    scores: dimensions.map(id => ({ id, score, reason: '事实与证据支持该判断。', evidenceRefs: refs.slice(0, 1) })),
+    scores: dimensions.map((id) => ({ id, score, reason: '事实与证据支持该判断。', evidenceRefs: refs.slice(0, 1) })),
     observations: [{ kind: 'positive', summary: '任务结果可直接检查。', evidenceRefs: refs.slice(0, 1) }],
-    suggestions: [{
-      title: '保留当前结果反馈', detail: '继续在结果旁展示可核对来源。', category: 'result-feedback',
-      impact: 'medium', confidence: 0.9, evidenceRefs: refs.slice(0, 1),
-    }],
+    suggestions: [
+      {
+        title: '保留当前结果反馈',
+        detail: '继续在结果旁展示可核对来源。',
+        category: 'result-feedback',
+        impact: 'medium',
+        confidence: 0.9,
+        evidenceRefs: refs.slice(0, 1),
+      },
+    ],
     reuseIntent: score,
     confidence: 0.9,
     evidenceGaps: [],
   });
 }
 
-function reviewProvider(options: {
-  malformed?: boolean;
-  hold?: boolean;
-  score?: number;
-  seen?: string[][];
-  maxTokens?: number[];
-  usage?: { input: number; output: number };
-  duplicatePlanRefs?: boolean;
-  modelMaxOutput?: number;
-  reasoning?: boolean;
-  planGap?: boolean;
-  truncateOnce?: boolean;
-} = {}): ProviderDef & { calls: () => number } {
+function reviewProvider(
+  options: {
+    malformed?: boolean;
+    hold?: boolean;
+    score?: number;
+    seen?: string[][];
+    maxTokens?: number[];
+    usage?: { input: number; output: number };
+    duplicatePlanRefs?: boolean;
+    modelMaxOutput?: number;
+    reasoning?: boolean;
+    planGap?: boolean;
+    truncateOnce?: boolean;
+  } = {},
+): ProviderDef & { calls: () => number } {
   let calls = 0;
   return {
-    id: 'fixture', label: 'Fixture', defaultModel: 'fixture-model', priceSource: 'configured',
-    models: [{
-      modelId: 'fixture-model', contextWindow: 32_000, maxOutput: options.modelMaxOutput ?? 4_096,
-      vision: false, tools: false, reasoning: options.reasoning ?? false, priceIn: 1, priceOut: 2,
-      enabled: true, source: 'manual',
-    }],
+    id: 'fixture',
+    label: 'Fixture',
+    defaultModel: 'fixture-model',
+    priceSource: 'configured',
+    models: [
+      {
+        modelId: 'fixture-model',
+        contextWindow: 32_000,
+        maxOutput: options.modelMaxOutput ?? 4_096,
+        vision: false,
+        tools: false,
+        reasoning: options.reasoning ?? false,
+        priceIn: 1,
+        priceOut: 2,
+        enabled: true,
+        source: 'manual',
+      },
+    ],
     calls: () => calls,
     async *chat(messages, chatOptions) {
       calls++;
-      options.seen?.push(messages.map(message => message.content ?? ''));
+      options.seen?.push(messages.map((message) => message.content ?? ''));
       options.maxTokens?.push(chatOptions.maxTokens ?? -1);
       if (options.truncateOnce && calls === 1) {
         yield { type: 'done', reason: 'length' };
         return;
       }
       if (options.hold) {
-        await new Promise<void>(resolve => {
+        await new Promise<void>((resolve) => {
           if (chatOptions.signal?.aborted) resolve();
           else chatOptions.signal?.addEventListener('abort', () => resolve(), { once: true });
         });
@@ -107,23 +153,22 @@ function reviewProvider(options: {
         rubric?: string[];
       };
       if (payload.mode === 'evidence_plan') {
-        const refs = (payload.evidenceIndex ?? []).slice(0, 6).map(item => item.id);
-        yield { type: 'delta', text: JSON.stringify({
-          evidenceRefs: options.planGap ? [] : options.duplicatePlanRefs && refs[0] ? [refs[0], refs[0], ...refs.slice(1)] : refs,
-          evidenceGaps: options.planGap ? ['缺少可核验的验收证据'] : [],
-          hypotheses: options.planGap ? [] : ['检查产物和验收事实'],
-        }) };
+        const refs = (payload.evidenceIndex ?? []).slice(0, 6).map((item) => item.id);
+        yield {
+          type: 'delta',
+          text: JSON.stringify({
+            evidenceRefs: options.planGap ? [] : options.duplicatePlanRefs && refs[0] ? [refs[0], refs[0], ...refs.slice(1)] : refs,
+            evidenceGaps: options.planGap ? ['缺少可核验的验收证据'] : [],
+            hypotheses: options.planGap ? [] : ['检查产物和验收事实'],
+          }),
+        };
       } else if (options.malformed) {
         yield { type: 'delta', text: 'not json' };
       } else {
-        const refs = (payload.evidence ?? []).map(item => item.ref);
+        const refs = (payload.evidence ?? []).map((item) => item.ref);
         yield {
           type: 'delta',
-          text: finalOutput(
-            refs.length ? refs : (payload.evidenceIndex ?? []).map(item => item.id),
-            options.score ?? 5,
-            payload.rubric,
-          ),
+          text: finalOutput(refs.length ? refs : (payload.evidenceIndex ?? []).map((item) => item.id), options.score ?? 5, payload.rubric),
         };
       }
       yield { type: 'usage', input: options.usage?.input ?? 100, output: options.usage?.output ?? 50 };
@@ -135,7 +180,8 @@ function reviewProvider(options: {
 function services(store: Store, provider: ProviderDef) {
   const events: Array<{ type: string; data: Record<string, unknown> }> = [];
   const experience = new ExperienceService({
-    store, providers: () => [provider],
+    store,
+    providers: () => [provider],
     emit: (type, data) => events.push({ type, data }),
   });
   return { experience, events };
@@ -153,8 +199,14 @@ describe('AI 用户复盘', () => {
       raw.close();
       assert.throws(() => new Store(file), /低于最低支持的 15/);
       const untouched = new Database(file, { readonly: true });
-      try { assert.equal(untouched.pragma('user_version', { simple: true }), 9); } finally { untouched.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      try {
+        assert.equal(untouched.pragma('user_version', { simple: true }), 9);
+      } finally {
+        untouched.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('review freezes the active evaluation version and uses its token budgets', async () => {
@@ -174,12 +226,16 @@ describe('AI 用户复盘', () => {
       assert.equal(review.evaluationHash, initial.hash);
       assert.equal(review.evaluationPolicy?.review.fast.total, 8_000);
 
-      const updated = organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          fast: { input: 2_500, output: 700, total: 3_200 },
+      const updated = organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            fast: { input: 2_500, output: 700, total: 3_200 },
+          },
         },
-      }, '收紧快速复盘预算');
+        '收紧快速复盘预算',
+      );
       assert.equal(updated.version, initial.version + 1);
       assert.equal(store.experience.review(review.id, 'default')?.evaluationHash, initial.hash);
       assert.equal(experience.estimate({ runIds: [run.id] }, 'default').totalTokenLimit, 3_200);
@@ -199,14 +255,18 @@ describe('AI 用户复盘', () => {
     try {
       const organization = new OrganizationService({ store });
       const initial = organization.ensureEvaluation('default');
-      organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          rubricVersion: 'custom-review-v2',
-          dimensions: ['speed', 'trust'],
-          systemPrompt: 'CUSTOM RUBRIC PROMPT',
+      organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            rubricVersion: 'custom-review-v2',
+            dimensions: ['speed', 'trust'],
+            systemPrompt: 'CUSTOM RUBRIC PROMPT',
+          },
         },
-      }, '替换复盘 Rubric');
+        '替换复盘 Rubric',
+      );
       const run = addRun(store, {
         verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
       });
@@ -217,7 +277,10 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.status, 'completed');
       assert.equal(finished.rubricVersion, 'custom-review-v2');
       assert.match(finished.rubricHash ?? '', /^[0-9a-f]{64}$/);
-      assert.deepEqual(finished.dimensions.map(item => item.id), ['speed', 'trust']);
+      assert.deepEqual(
+        finished.dimensions.map((item) => item.id),
+        ['speed', 'trust'],
+      );
       assert.match(seen[0]?.[0] ?? '', /CUSTOM RUBRIC PROMPT/);
       const input = JSON.parse(seen[0]?.at(-1) ?? '{}') as { rubric?: string[] };
       assert.deepEqual(input.rubric, ['speed', 'trust']);
@@ -234,12 +297,16 @@ describe('AI 用户复盘', () => {
     try {
       const organization = new OrganizationService({ store });
       const initial = organization.ensureEvaluation('default');
-      organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          fast: { input: 3_000, output: 500, total: 3_500 },
+      organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            fast: { input: 3_000, output: 500, total: 3_500 },
+          },
         },
-      }, '设置快速复盘输出预算');
+        '设置快速复盘输出预算',
+      );
       const run = addRun(store, {
         verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
       });
@@ -254,7 +321,9 @@ describe('AI 用户复盘', () => {
       assert.equal(maxTokens.length, 1);
       assert.ok(maxTokens[0]! >= 500, `expected at least the nominal cap, got ${maxTokens[0]}`);
       assert.ok(maxTokens[0]! <= finished.budget.totalTokenLimit, 'must stay inside the total budget');
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('focused review uses the remaining frozen output on plan and final calls', async () => {
@@ -265,12 +334,16 @@ describe('AI 用户复盘', () => {
     try {
       const organization = new OrganizationService({ store });
       const initial = organization.ensureEvaluation('default');
-      organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          focused: { input: 8_000, output: 1_400, total: 9_400 },
+      organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            focused: { input: 8_000, output: 1_400, total: 9_400 },
+          },
         },
-      }, '设置聚焦复盘输出预算');
+        '设置聚焦复盘输出预算',
+      );
       const run = addRun(store, {
         verification: { status: 'failed', objective: '失败', checks: [{ ok: false, reason: '未产出' }], evidence: [] },
       });
@@ -284,7 +357,9 @@ describe('AI 用户复盘', () => {
       assert.ok(maxTokens[0]! >= 1_400);
       assert.ok(maxTokens[1]! <= maxTokens[0]!);
       assert.ok(maxTokens[1]! >= 1_000);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('provider output ceiling lowers but never inflates the frozen review cap', async () => {
@@ -295,12 +370,16 @@ describe('AI 用户复盘', () => {
     try {
       const organization = new OrganizationService({ store });
       const initial = organization.ensureEvaluation('default');
-      organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          fast: { input: 3_000, output: 500, total: 3_500 },
+      organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            fast: { input: 3_000, output: 500, total: 3_500 },
+          },
         },
-      }, '设置快速复盘输出预算');
+        '设置快速复盘输出预算',
+      );
       const run = addRun(store, {
         verification: { status: 'passed', objective: '完成', checks: [{ ok: true, reason: '证据存在' }], evidence: [] },
       });
@@ -309,7 +388,9 @@ describe('AI 用户复盘', () => {
 
       assert.equal(experience.review(review.id, 'default').status, 'completed');
       assert.deepEqual(maxTokens, [400]);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('deepen adds the frozen custom focused budgets', async () => {
@@ -319,12 +400,16 @@ describe('AI 用户复盘', () => {
     try {
       const organization = new OrganizationService({ store });
       const initial = organization.ensureEvaluation('default');
-      organization.updateEvaluation('default', {
-        review: {
-          ...initial.record.review,
-          focused: { input: 7_000, output: 900, total: 7_900 },
+      organization.updateEvaluation(
+        'default',
+        {
+          review: {
+            ...initial.record.review,
+            focused: { input: 7_000, output: 900, total: 7_900 },
+          },
         },
-      }, '设置聚焦复盘预算');
+        '设置聚焦复盘预算',
+      );
       const run = addRun(store, {
         verification: { status: 'failed', objective: '失败', checks: [{ ok: false, reason: '未产出' }], evidence: [] },
       });
@@ -338,7 +423,9 @@ describe('AI 用户复盘', () => {
       assert.equal(deepened.budget.totalTokenLimit, 15_800);
       experience.cancel(review.id, 'default');
       await experience.settled(review.id);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('事实账本压缩长结果、聚合同类异常并拦截虚假成功与未知副作用', () => {
@@ -353,18 +440,34 @@ describe('AI 用户复盘', () => {
       store.runs.finishTool(run.id, 'b', { ok: true, data: { text: 'x'.repeat(20_000) } });
       store.runs.startTool(run.id, 'c', 'write_file', 'out.txt', { sideEffect: 'write' });
       store.runs.finishTool(run.id, 'c', {
-        ok: false, error: 'unknown',
+        ok: false,
+        error: 'unknown',
         failure: { code: 'WRITE_INTERRUPTED', retryable: false, outcome: 'unknown' },
       });
       const modelCall: ModelCallRecord = {
-        id: 'model-failed', runId: run.id, scope: 'run', purpose: 'agent',
-        providerId: 'fixture', model: 'fixture-model', startedAt: Date.now(),
-        status: 'running', inputEstimate: 400, outputLimit: 800, usageStatus: 'unknown', priceSource: 'configured',
+        id: 'model-failed',
+        runId: run.id,
+        scope: 'run',
+        purpose: 'agent',
+        providerId: 'fixture',
+        model: 'fixture-model',
+        startedAt: Date.now(),
+        status: 'running',
+        inputEstimate: 400,
+        outputLimit: 800,
+        usageStatus: 'unknown',
+        priceSource: 'configured',
       };
       store.runs.startModelCall(modelCall);
       store.runs.finishModelCall({
-        ...modelCall, status: 'failed', finishedAt: Date.now(), input: 321, output: 45,
-        cost: 0.000411, usageStatus: 'reported', errorCode: 'UPSTREAM_FAILED',
+        ...modelCall,
+        status: 'failed',
+        finishedAt: Date.now(),
+        input: 321,
+        output: 45,
+        cost: 0.000411,
+        usageStatus: 'reported',
+        errorCode: 'UPSTREAM_FAILED',
       });
       const facts = buildFactLedger(store, 'default', [run]);
       assert.equal(facts.gates.noFalseSuccess, false);
@@ -380,16 +483,24 @@ describe('AI 用户复盘', () => {
       assert.equal(facts.totals.modelOutputTokens, 45);
       assert.equal(facts.totals.modelCostUsd, 0.000411);
       assert.equal(facts.totals.modelFailures, 1);
-      assert.equal(facts.anomalies.some(item => item.code === 'FALSE_SUCCESS' && item.severity === 'P0'), true);
-      assert.equal(facts.anomalies.some(item => item.code === 'UNKNOWN_SIDE_EFFECT' && item.severity === 'P0'), true);
-      const longResult = buildEvidenceIndex([run], store).find(item => item.id === `run:${run.id}:tool:b`);
+      assert.equal(
+        facts.anomalies.some((item) => item.code === 'FALSE_SUCCESS' && item.severity === 'P0'),
+        true,
+      );
+      assert.equal(
+        facts.anomalies.some((item) => item.code === 'UNKNOWN_SIDE_EFFECT' && item.severity === 'P0'),
+        true,
+      );
+      const longResult = buildEvidenceIndex([run], store).find((item) => item.id === `run:${run.id}:tool:b`);
       assert.equal(longResult?.reason, 'long_result');
       assert.equal(longResult?.resultRef, 'b');
       assert.equal(longResult?.truncated, true);
       assert.ok((longResult?.size ?? 0) > 20_000);
       assert.ok(estimateTokens(JSON.stringify(facts)) <= 1_200);
       assert.doesNotMatch(JSON.stringify(facts), /x{1000}/);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('事实账本按租户、工作区、规则版本和源内容哈希复用，源事实变化后失效', () => {
@@ -407,9 +518,18 @@ describe('AI 用户复盘', () => {
       const otherTenant = buildCachedFactLedger(store, 'tenant-b', [run], 250, cache);
       assert.equal(cache.size, 2);
       assert.equal(otherTenant.tenantId, 'tenant-b');
-      const otherWorkspace = buildCachedFactLedger(store, 'default', [{
-        ...run, authorization: { ...run.authorization, workspace: `${run.authorization.workspace}-other` },
-      }], 275, cache);
+      const otherWorkspace = buildCachedFactLedger(
+        store,
+        'default',
+        [
+          {
+            ...run,
+            authorization: { ...run.authorization, workspace: `${run.authorization.workspace}-other` },
+          },
+        ],
+        275,
+        cache,
+      );
       assert.equal(cache.size, 3);
       assert.equal(otherWorkspace.generatedAt, 275);
 
@@ -420,22 +540,49 @@ describe('AI 用户复盘', () => {
       assert.equal(changed.totals.recoveries, 1);
 
       const providerChanged = buildCachedFactLedger(store, 'default', [{ ...run, providerId: 'other-provider' }], 325, cache);
-      const ruleChanged = buildCachedFactLedger(store, 'default', [{
-        ...run,
-        ruleResolution: { schemaVersion: 1, applied: [], ignored: [], conflicts: [] },
-      }], 350, cache);
-      const materialChanged = buildCachedFactLedger(store, 'default', [{
-        ...run,
-        materials: [{
-          id: 'material-a', version: 'v2', tenantId: 'default', workspace: run.authorization.workspace,
-          path: 'material-a.txt', name: 'material-a.txt', format: 'txt', size: 1, createdAt: 1,
-        }],
-      }], 375, cache);
+      const ruleChanged = buildCachedFactLedger(
+        store,
+        'default',
+        [
+          {
+            ...run,
+            ruleResolution: { schemaVersion: 1, applied: [], ignored: [], conflicts: [] },
+          },
+        ],
+        350,
+        cache,
+      );
+      const materialChanged = buildCachedFactLedger(
+        store,
+        'default',
+        [
+          {
+            ...run,
+            materials: [
+              {
+                id: 'material-a',
+                version: 'v2',
+                tenantId: 'default',
+                workspace: run.authorization.workspace,
+                path: 'material-a.txt',
+                name: 'material-a.txt',
+                format: 'txt',
+                size: 1,
+                createdAt: 1,
+              },
+            ],
+          },
+        ],
+        375,
+        cache,
+      );
       assert.equal(providerChanged.generatedAt, 325);
       assert.equal(ruleChanged.generatedAt, 350);
       assert.equal(materialChanged.generatedAt, 375);
       assert.equal(cache.size, 7);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('事实账本保留团队契约、回退原因、证据引用和缓存前缀', () => {
@@ -449,34 +596,52 @@ describe('AI 用户复盘', () => {
         teamEstimateUsd: 0.08,
         assignments: [
           {
-            objective: '分析资料 A', expectedArtifacts: ['analysis-a.md'], acceptance: ['结论可核验'],
-            evidenceInputs: [{ id: 'material:a:v1', kind: 'material', ref: 'a', version: 'v1' }], budgetUsd: 0.04,
+            objective: '分析资料 A',
+            expectedArtifacts: ['analysis-a.md'],
+            acceptance: ['结论可核验'],
+            evidenceInputs: [{ id: 'material:a:v1', kind: 'material', ref: 'a', version: 'v1' }],
+            budgetUsd: 0.04,
           },
           {
-            objective: '分析资料 B', expectedArtifacts: ['analysis-b.md'], acceptance: ['结论可核验'],
-            evidenceInputs: [{ id: 'material:b:v1', kind: 'material', ref: 'b', version: 'v1' }], budgetUsd: 0.04,
+            objective: '分析资料 B',
+            expectedArtifacts: ['analysis-b.md'],
+            acceptance: ['结论可核验'],
+            evidenceInputs: [{ id: 'material:b:v1', kind: 'material', ref: 'b', version: 'v1' }],
+            budgetUsd: 0.04,
           },
         ],
       });
       const contract = team.contracts[0]!;
       const now = Date.now();
       const child: RunRecord = {
-        ...root, id: randomUUID(), parentId: root.id, rootId: root.id, depth: 1,
-        objective: contract.branchObjective, status: 'queued', cost: 0, tokensIn: 0, tokensOut: 0,
-        createdAt: now, updatedAt: now, assignmentContractId: contract.id,
-        teamCycleId: team.teamCycle.id, organizationRoleId: contract.roleId,
+        ...root,
+        id: randomUUID(),
+        parentId: root.id,
+        rootId: root.id,
+        depth: 1,
+        objective: contract.branchObjective,
+        status: 'queued',
+        cost: 0,
+        tokensIn: 0,
+        tokensOut: 0,
+        createdAt: now,
+        updatedAt: now,
+        assignmentContractId: contract.id,
+        teamCycleId: team.teamCycle.id,
+        organizationRoleId: contract.roleId,
         cachePrefixHash: '0123456789abcdef0123456789abcdef',
       };
       store.runs.create(child);
       organization.prepareDelegation(root, child, {
-        objective: child.objective, assignmentContractId: contract.id,
+        objective: child.objective,
+        assignmentContractId: contract.id,
       });
       store.runs.update(child, { status: 'completed', answer: '分支完成' });
       store.runs.update(root, { fallbackReason: 'ROLLBACK_TO_SOLO' });
 
       const facts = buildFactLedger(store, 'default', [root, store.runs.get(child.id, 'default')!]);
-      const childFacts = facts.runs.find(item => item.id === child.id)?.team;
-      const rootFacts = facts.runs.find(item => item.id === root.id)?.team;
+      const childFacts = facts.runs.find((item) => item.id === child.id)?.team;
+      const rootFacts = facts.runs.find((item) => item.id === root.id)?.team;
       assert.equal(childFacts?.contractId, contract.id);
       assert.equal(childFacts?.teamCycleId, team.teamCycle.id);
       assert.deepEqual(childFacts?.expectedArtifacts, ['analysis-a.md']);
@@ -484,7 +649,9 @@ describe('AI 用户复盘', () => {
       assert.equal(childFacts?.cachePrefixHash, '0123456789abcdef01234567');
       assert.equal(rootFacts?.fallbackReason, 'ROLLBACK_TO_SOLO');
       assert.ok(estimateTokens(JSON.stringify(facts)) <= 1_200);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('正常任务走快速路径、只发送选定证据并落在总 token 上限内', async () => {
@@ -501,7 +668,16 @@ describe('AI 用户复盘', () => {
       const review = experience.create({ runIds: [run.id], requestKey: 'normal' }, 'default');
       await experience.settled(review.id)!;
       const finished = experience.review(review.id, 'default');
-      assert.equal(finished.status, 'completed', JSON.stringify({ error: finished.error, evidenceGaps: finished.evidenceGaps, evidence: finished.evidence.length, tokenUse: finished.budget.inputTokens + finished.budget.outputTokens }));
+      assert.equal(
+        finished.status,
+        'completed',
+        JSON.stringify({
+          error: finished.error,
+          evidenceGaps: finished.evidenceGaps,
+          evidence: finished.evidence.length,
+          tokenUse: finished.budget.inputTokens + finished.budget.outputTokens,
+        }),
+      );
       assert.equal(finished.path, 'fast');
       assert.equal(finished.verdict, 'positive');
       assert.equal(finished.calls, 1);
@@ -509,8 +685,13 @@ describe('AI 用户复盘', () => {
       assert.ok(finished.evidence.length <= 4);
       assert.equal(provider.calls(), 1);
       assert.doesNotMatch(JSON.stringify(seen), /FULL_TRACE_MARKER{20}/);
-      assert.equal(finished.dimensions.every(item => item.evidenceRefs.length === 1), true);
-    } finally { store.close(); }
+      assert.equal(
+        finished.dimensions.every((item) => item.evidenceRefs.length === 1),
+        true,
+      );
+    } finally {
+      store.close();
+    }
   });
 
   test('异常与多运行复盘使用预设聚焦预算并限制同类模型选择', () => {
@@ -542,7 +723,9 @@ describe('AI 用户复盘', () => {
         () => experience.estimate({ runIds: [first.id, addRun(store, { workspace: `${process.cwd()}-other` }).id] }, 'default'),
         (error: unknown) => error instanceof ExperienceError && error.code === 'MIXED_WORKSPACES',
       );
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('多运行事实按代表性摩擦聚类且始终不超过事实账本上限', async () => {
@@ -560,16 +743,27 @@ describe('AI 用户复盘', () => {
         });
         return run;
       });
-      const review = experience.create({ runIds: runs.map(run => run.id) }, 'default');
+      const review = experience.create({ runIds: runs.map((run) => run.id) }, 'default');
       await experience.settled(review.id)!;
       const finished = experience.review(review.id, 'default');
-      assert.equal(finished.status, 'completed', JSON.stringify({ error: finished.error, evidenceGaps: finished.evidenceGaps, evidence: finished.evidence.length, tokenUse: finished.budget.inputTokens + finished.budget.outputTokens }));
+      assert.equal(
+        finished.status,
+        'completed',
+        JSON.stringify({
+          error: finished.error,
+          evidenceGaps: finished.evidenceGaps,
+          evidence: finished.evidence.length,
+          tokenUse: finished.budget.inputTokens + finished.budget.outputTokens,
+        }),
+      );
       assert.equal(finished.path, 'focused');
       assert.equal(finished.facts.truncated, true);
       assert.ok(finished.facts.anomalies.length <= 5);
       assert.ok(estimateTokens(JSON.stringify(finished.facts)) <= 1_200);
       assert.ok(finished.budget.inputTokens + finished.budget.outputTokens <= 16_000);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('上下文中断、无谓审批等待、失败恢复与跨运行重复摩擦进入事实轨道', () => {
@@ -578,7 +772,8 @@ describe('AI 用户复盘', () => {
       const first = addRun(store, { objective: '读取配置文件' });
       store.runs.startTool(first.id, 'bad-1', 'read_file', 'missing.txt', { sideEffect: 'read' });
       store.runs.finishTool(first.id, 'bad-1', {
-        ok: false, error: '参数不完整',
+        ok: false,
+        error: '参数不完整',
         failure: { code: 'INVALID_ARGS', retryable: true, outcome: 'not_started' },
       });
       store.runs.append(first.id, 'checkpoint_incomplete', { error: '恢复时缺少上下文边界' });
@@ -587,7 +782,8 @@ describe('AI 用户复盘', () => {
       store.runs.append(second.id, 'approval_required', { name: 'read_file', summary: '只读调用也进入审批' });
       store.runs.startTool(second.id, 'bad-2', 'read_file', 'missing.txt', { sideEffect: 'read' });
       store.runs.finishTool(second.id, 'bad-2', {
-        ok: false, error: '参数不完整',
+        ok: false,
+        error: '参数不完整',
         failure: { code: 'INVALID_ARGS', retryable: true, outcome: 'not_started' },
       });
       store.runs.append(second.id, 'tool_recovered', { name: 'read_file', outcome: 'not_started' });
@@ -595,11 +791,16 @@ describe('AI 用户复盘', () => {
       const facts = buildFactLedger(store, 'default', [first, second]);
       assert.equal(facts.totals.approvalWaits, 1);
       assert.equal(facts.totals.recoveries, 1);
-      assert.equal(facts.anomalies.some(item => item.code === 'CONTEXT_LOSS' && item.severity === 'P1'), true);
-      const repeated = facts.anomalies.find(item => item.code === 'INVALID_TOOL_CONTRACT');
+      assert.equal(
+        facts.anomalies.some((item) => item.code === 'CONTEXT_LOSS' && item.severity === 'P1'),
+        true,
+      );
+      const repeated = facts.anomalies.find((item) => item.code === 'INVALID_TOOL_CONTRACT');
       assert.equal(repeated?.occurrences, 2);
       assert.equal(repeated?.evidenceRefs.length, 2);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('聚焦路径实际执行证据规划和结论两步模型调用', async () => {
@@ -623,10 +824,15 @@ describe('AI 用户复盘', () => {
       assert.match(seen[0]!.join('\n'), /evidence_plan/);
       assert.match(seen[1]!.join('\n'), /review_input/);
       const finalInput = JSON.parse(seen[1]!.at(-1)!) as { evidence: Array<{ ref: string }> };
-      const refs = finalInput.evidence.map(item => item.ref);
+      const refs = finalInput.evidence.map((item) => item.ref);
       assert.equal(new Set(refs).size, refs.length);
-      assert.equal(finished.dimensions.every(item => item.evidenceRefs.length > 0), true);
-    } finally { store.close(); }
+      assert.equal(
+        finished.dimensions.every((item) => item.evidenceRefs.length > 0),
+        true,
+      );
+    } finally {
+      store.close();
+    }
   });
 
   test('P0 事实不能被模型的满分评价抵消', async () => {
@@ -641,12 +847,20 @@ describe('AI 用户复盘', () => {
       await experience.settled(review.id)!;
       const finished = experience.review(review.id, 'default');
       assert.equal(finished.status, 'completed');
-      assert.equal(finished.dimensions.every(item => item.score === 5), true);
+      assert.equal(
+        finished.dimensions.every((item) => item.score === 5),
+        true,
+      );
       assert.equal(finished.verdict, 'negative');
       assert.equal(finished.selfEvaluationBias?.detected, true);
       assert.match(finished.selfEvaluationBias?.reason ?? '', /事实门槛未通过.*5\/5/);
-      assert.equal(finished.facts.anomalies.some(item => item.severity === 'P0'), true);
-    } finally { store.close(); }
+      assert.equal(
+        finished.facts.anomalies.some((item) => item.severity === 'P0'),
+        true,
+      );
+    } finally {
+      store.close();
+    }
   });
 
   test('幂等、租户隔离和原模型不可用均按显式边界处理', async () => {
@@ -674,8 +888,12 @@ describe('AI 用户复盘', () => {
           () => offline.create({ runIds: [unavailableRun.id] }, 'default'),
           (error: unknown) => error instanceof ExperienceError && error.code === 'ORIGINAL_MODEL_UNAVAILABLE',
         );
-      } finally { unavailableStore.close(); }
-    } finally { store.close(); }
+      } finally {
+        unavailableStore.close();
+      }
+    } finally {
+      store.close();
+    }
   });
 
   test('取消会中断模型调用且不留成功状态', async () => {
@@ -686,14 +904,16 @@ describe('AI 用户复盘', () => {
       const run = addRun(store);
       const review = experience.create({ runIds: [run.id] }, 'default');
       while (experience.review(review.id, 'default').status !== 'running') {
-        await new Promise(resolve => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 5));
       }
       experience.cancel(review.id, 'default');
       await experience.settled(review.id)!;
       const finished = experience.review(review.id, 'default');
       assert.equal(finished.status, 'cancelled');
       assert.equal(finished.completedAt, undefined);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('模型输出不合格时直接失败，不自动重试消耗 token', async () => {
@@ -709,7 +929,9 @@ describe('AI 用户复盘', () => {
       assert.match(finished.error ?? '', /JSON/);
       assert.equal(provider.calls(), 1);
       assert.equal(finished.calls, 1);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('reasoning models can use total-budget headroom for thinking before emitting review JSON', async () => {
@@ -724,8 +946,13 @@ describe('AI 用户复盘', () => {
       const finished = experience.review(review.id, 'default');
       assert.equal(finished.status, 'completed');
       assert.equal(provider.calls(), 1);
-      assert.ok((maxTokens[0] ?? 0) > 800, `reasoning review should receive more than the nominal 800-token output cap, got ${maxTokens[0]}`);
-    } finally { store.close(); }
+      assert.ok(
+        (maxTokens[0] ?? 0) > 800,
+        `reasoning review should receive more than the nominal 800-token output cap, got ${maxTokens[0]}`,
+      );
+    } finally {
+      store.close();
+    }
   });
 
   test('实测 token 超过总预算时终止并保留结构化失败状态', async () => {
@@ -744,7 +971,9 @@ describe('AI 用户复盘', () => {
       assert.equal(finished.budget.outputTokens, 3_500);
       assert.equal(finished.completedAt, undefined);
       assert.match(finished.error ?? '', /8500 token.*8000 token.*输入 5000，输出 3500/);
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('复盘调用进入 maintenance 模型账本并保留 usage 与 purpose', async () => {
@@ -757,7 +986,9 @@ describe('AI 用户复盘', () => {
       signal: controller.signal,
       acquire: async () => () => undefined,
       start: (record: ModelCallRecord) => store.runs.startModelCall(record),
-      finish: (record: ModelCallRecord) => { store.runs.finishModelCall(record); },
+      finish: (record: ModelCallRecord) => {
+        store.runs.finishModelCall(record);
+      },
     });
     try {
       const run = addRun(store);
@@ -798,25 +1029,37 @@ describe('AI 用户复盘', () => {
       assert.equal(experience.findings('default').length, 1);
 
       let submitted: { name: string; findingId: string } | undefined;
-      const evolved = experience.evolveFinding(finding.id, 'default', input => {
+      const evolved = experience.evolveFinding(finding.id, 'default', (input) => {
         submitted = input;
         return { id: 'proposal123' };
       });
       assert.equal(submitted?.findingId, finding.id);
       assert.match(submitted?.name ?? '', /^experience-/);
       assert.equal(evolved.evolutionProposalId, 'proposal123');
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('历史体验问题缺少复盘列表时仍可提交已验证模式', () => {
     const store = new Store(':memory:');
     try {
       const finding = {
-        id: 'legacy-finding', tenantId: 'default', reviewId: 'legacy-review',
-        suggestionId: 'legacy-suggestion', fingerprint: 'legacy-fingerprint',
-        title: '历史问题', detail: '旧记录只保存原始复盘引用', category: 'result-feedback',
-        severity: 'P2', status: 'closed', evidenceRefs: [], sourceRunIds: [],
-        occurrences: 2, createdAt: 1, updatedAt: 1,
+        id: 'legacy-finding',
+        tenantId: 'default',
+        reviewId: 'legacy-review',
+        suggestionId: 'legacy-suggestion',
+        fingerprint: 'legacy-fingerprint',
+        title: '历史问题',
+        detail: '旧记录只保存原始复盘引用',
+        category: 'result-feedback',
+        severity: 'P2',
+        status: 'closed',
+        evidenceRefs: [],
+        sourceRunIds: [],
+        occurrences: 2,
+        createdAt: 1,
+        updatedAt: 1,
       } as Parameters<typeof store.experience.putFinding>[0];
       store.experience.putFinding(finding);
       const { experience } = services(store, reviewProvider());
@@ -827,7 +1070,9 @@ describe('AI 用户复盘', () => {
       });
       assert.equal(submitted, true);
       assert.equal(evolved.evolutionProposalId, 'legacy-proposal');
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('回归通过必须绑定真实验证运行，失败会重开问题', async () => {
@@ -849,9 +1094,12 @@ describe('AI 用户复盘', () => {
         verification: { status: 'failed', objective: '验证', checks: [{ ok: false, reason: '问题仍存在' }], evidence: [] },
       });
       assert.throws(
-        () => experience.recordRegressionResult(finding.id, 'default', {
-          outcome: 'passed', runId: failedRun.id, summary: '人工判断通过',
-        }),
+        () =>
+          experience.recordRegressionResult(finding.id, 'default', {
+            outcome: 'passed',
+            runId: failedRun.id,
+            summary: '人工判断通过',
+          }),
         (error: unknown) => error instanceof ExperienceError && error.code === 'REGRESSION_PASS_CONFLICTS_WITH_VERIFICATION',
       );
 
@@ -859,13 +1107,18 @@ describe('AI 用户复盘', () => {
         verification: { status: 'passed', objective: '验证', checks: [{ ok: true, reason: '问题消失' }], evidence: [] },
       });
       const result = experience.recordRegressionResult(finding.id, 'default', {
-        outcome: 'passed', runId: verificationRun.id, summary: '隔离重放通过，问题未再出现',
+        outcome: 'passed',
+        runId: verificationRun.id,
+        summary: '隔离重放通过，问题未再出现',
       });
       assert.equal(result.regression.status, 'passed');
       assert.equal(result.regression.verificationRunId, verificationRun.id);
       assert.equal(result.finding.status, 'closed');
       assert.equal(result.finding.sourceRunIds.includes(verificationRun.id), true);
-      assert.equal(result.regression.evidenceRefs.some(ref => ref.startsWith(`run:${verificationRun.id}:`)), true);
+      assert.equal(
+        result.regression.evidenceRefs.some((ref) => ref.startsWith(`run:${verificationRun.id}:`)),
+        true,
+      );
 
       experience.updateFinding(finding.id, 'default', 'reopened');
       experience.updateFinding(finding.id, 'default', 'triaged');
@@ -873,11 +1126,15 @@ describe('AI 用户复盘', () => {
       experience.updateFinding(finding.id, 'default', 'fixing');
       experience.updateFinding(finding.id, 'default', 'verifying');
       const failed = experience.recordRegressionResult(finding.id, 'default', {
-        outcome: 'failed', runId: failedRun.id, summary: '隔离重放仍复现原问题',
+        outcome: 'failed',
+        runId: failedRun.id,
+        summary: '隔离重放仍复现原问题',
       });
       assert.equal(failed.regression.status, 'failed');
       assert.equal(failed.finding.status, 'reopened');
-    } finally { store.close(); }
+    } finally {
+      store.close();
+    }
   });
 
   test('建议采纳去重、回归案例和人工校准保留原始 AI 评分', async () => {
@@ -906,21 +1163,20 @@ describe('AI 用户复盘', () => {
         () => experience.updateFinding(finding.id, 'default', 'closed'),
         (error: unknown) => error instanceof ExperienceError && error.code === 'FINDING_CLOSURE_EVIDENCE_REQUIRED',
       );
-      const closed = experience.updateFinding(
-        finding.id,
-        'default',
-        'closed',
-        '人工例外：当前问题已由人工确认关闭。',
-      );
+      const closed = experience.updateFinding(finding.id, 'default', 'closed', '人工例外：当前问题已由人工确认关闭。');
       assert.equal(closed.status, 'closed');
       const calibration = experience.calibrate(review.id, 'default', {
-        verdict: 'disagree', summary: '人工验收发现输出内容需进一步确认', dimensions: finished.dimensions,
+        verdict: 'disagree',
+        summary: '人工验收发现输出内容需进一步确认',
+        dimensions: finished.dimensions,
       });
       assert.equal(calibration.source, 'human');
       assert.equal(JSON.stringify(experience.review(review.id, 'default').dimensions), before);
       assert.equal(JSON.stringify(experience.review(review.id, 'default').facts), factsBefore);
-      assert.equal(experience.audits(review.id, 'default').filter(item => item.source === 'human').length, 1);
-    } finally { store.close(); }
+      assert.equal(experience.audits(review.id, 'default').filter((item) => item.source === 'human').length, 1);
+    } finally {
+      store.close();
+    }
   });
 });
 
@@ -936,8 +1192,10 @@ test('evidence index tolerates undefined values instead of throwing on .length',
     await experience.settled(review.id)!;
     const finished = experience.review(review.id, 'default');
     assert.ok(['completed', 'insufficient_evidence', 'failed'].includes(finished.status));
-    assert.ok(finished.evidenceIndex.every(item => (item.size ?? 0) >= 0));
-  } finally { store.close(); }
+    assert.ok(finished.evidenceIndex.every((item) => (item.size ?? 0) >= 0));
+  } finally {
+    store.close();
+  }
 });
 
 test('review retries once with a doubled output cap when the model truncates', async () => {
@@ -952,5 +1210,7 @@ test('review retries once with a doubled output cap when the model truncates', a
     assert.equal(finished.status, 'completed', 'the retry should complete the review');
     assert.equal(provider.calls(), 2);
     assert.ok(finished.dimensions.length > 0);
-  } finally { store.close(); }
+  } finally {
+    store.close();
+  }
 });

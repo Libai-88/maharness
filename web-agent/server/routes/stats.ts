@@ -39,7 +39,9 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
       const a = agg.get(s.id);
       const estimatedTokens = Math.ceil((a?.chars ?? 0) / 2);
       return {
-        id: s.id, title: s.title, mode: s.mode,
+        id: s.id,
+        title: s.title,
+        mode: s.mode,
         messages: a?.messages ?? 0,
         tokensIn: a?.tokensIn ?? 0,
         tokensOut: a?.tokensOut ?? 0,
@@ -76,9 +78,7 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
       tenant: {
         id: tenantId,
         sessions: store.countSessions(tenantId),
-        storageBytes: storageLimit > 0
-          ? tenantStorageBytes(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantId)
-          : 0,
+        storageBytes: storageLimit > 0 ? tenantStorageBytes(kernel.config.get<string>('sandboxRoot', kernel.rootDir), tenantId) : 0,
         maxStorageBytes: storageLimit,
       },
       plugins: {
@@ -93,8 +93,12 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
     res.json({
       overview: { ...overview, cacheHitSteps: trace.cacheHits },
       process: {
-        steps: trace.steps, llmCalls: trace.llmCalls, toolCalls: trace.toolCalls,
-        tokensIn: trace.totalTokensIn, tokensOut: trace.totalTokensOut, cost: trace.totalCost,
+        steps: trace.steps,
+        llmCalls: trace.llmCalls,
+        toolCalls: trace.toolCalls,
+        tokensIn: trace.totalTokensIn,
+        tokensOut: trace.totalTokensOut,
+        cost: trace.totalCost,
       },
       context: { maxTokens: maxCtx, perSession, quality },
       taskProfile: kernel.budget.taskProfile(),
@@ -111,8 +115,11 @@ export function registerStatsRoutes(app: Express, deps: RouteDeps): void {
         // + 真实（provider usage 确认的缓存命中 token，唯一权威）。
         // 真实命中率 = realTokens / (realTokens + realMissTokens)
         l3: {
-          hits: cache.l3Hits, tokens: cache.l3Tokens,
-          realHits: cache.l3RealHits, realTokens: cache.l3RealTokens, realMissTokens: cache.l3RealMissTokens,
+          hits: cache.l3Hits,
+          tokens: cache.l3Tokens,
+          realHits: cache.l3RealHits,
+          realTokens: cache.l3RealTokens,
+          realMissTokens: cache.l3RealMissTokens,
           realRate: (() => {
             const total = cache.l3RealTokens + cache.l3RealMissTokens;
             return total > 0 ? Math.round((cache.l3RealTokens / total) * 1000) / 10 : 0;

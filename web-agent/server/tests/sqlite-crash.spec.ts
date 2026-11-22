@@ -16,12 +16,18 @@ describe('SQLite 事务崩溃恢复', () => {
     try {
       const child = spawnSync(process.execPath, ['--import', 'tsx', fixture, dbPath], {
         cwd: join(fileURLToPath(new URL('../..', import.meta.url))),
-        encoding: 'utf8', windowsHide: true,
+        encoding: 'utf8',
+        windowsHide: true,
       });
       assert.notEqual(child.status, 0, `fixture should terminate inside transaction\n${child.stdout}\n${child.stderr}`);
       const reopened = new Store(dbPath);
-      try { assert.equal(reopened.getSession('crash-only-session'), undefined); }
-      finally { reopened.close(); }
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      try {
+        assert.equal(reopened.getSession('crash-only-session'), undefined);
+      } finally {
+        reopened.close();
+      }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });

@@ -22,9 +22,7 @@
   },
   "permissions": {
     "capabilities": {
-      "persona": [
-        "workbench-rules"
-      ],
+      "persona": ["workbench-rules"],
       "tool": [
         "workbench_today",
         "workbench_add_task",
@@ -35,9 +33,7 @@
         "workbench_update_project",
         "workbench_diary"
       ],
-      "api": [
-        "wb"
-      ]
+      "api": ["wb"]
     }
   },
   "capabilityIndex": [
@@ -45,7 +41,16 @@
       "id": "workbench.records",
       "name": "工作台记录",
       "description": "读取和更新今日任务、项目、笔记与日记，并通过统一 API 显示在聚合工作台。",
-      "tools": ["workbench_today", "workbench_add_task", "workbench_update_task", "workbench_add_note", "workbench_update_note", "workbench_add_project", "workbench_update_project", "workbench_diary"],
+      "tools": [
+        "workbench_today",
+        "workbench_add_task",
+        "workbench_update_task",
+        "workbench_add_note",
+        "workbench_update_note",
+        "workbench_add_project",
+        "workbench_update_project",
+        "workbench_diary"
+      ],
       "aliases": ["工作台", "今日安排", "项目", "笔记", "日记"],
       "outputs": ["workbench-record"],
       "risk": "low",

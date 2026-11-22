@@ -34,28 +34,38 @@ function normalizePlan(value: unknown): PlanState | null {
     if (!step || typeof step !== 'object' || Array.isArray(step)) return [];
     const item = step as Record<string, unknown>;
     if (typeof item.title !== 'string' || !STATUSES.has(item.status as StepStatus)) return [];
-    return [{
-      title: item.title,
-      status: item.status as StepStatus,
-      ...(typeof item.note === 'string' ? { note: item.note } : {}),
-      ...(typeof item.blockedReason === 'string' ? { blockedReason: item.blockedReason } : {}),
-      ...(Number.isFinite(item.updatedAt) ? { updatedAt: Number(item.updatedAt) } : {}),
-    }];
+    return [
+      {
+        title: item.title,
+        status: item.status as StepStatus,
+        ...(typeof item.note === 'string' ? { note: item.note } : {}),
+        ...(typeof item.blockedReason === 'string' ? { blockedReason: item.blockedReason } : {}),
+        ...(Number.isFinite(item.updatedAt) ? { updatedAt: Number(item.updatedAt) } : {}),
+      },
+    ];
   });
-  const workItems = Array.isArray(raw.workItems) ? raw.workItems.flatMap((value) => {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
-    const item = value as Record<string, unknown>;
-    if (typeof item.id !== 'string' || typeof item.objective !== 'string') return [];
-    return [{
-      id: item.id,
-      objective: item.objective,
-      expectedArtifacts: Array.isArray(item.expectedArtifacts) ? item.expectedArtifacts.filter((entry): entry is string => typeof entry === 'string') : [],
-      acceptance: Array.isArray(item.acceptance) ? item.acceptance.filter((entry): entry is string => typeof entry === 'string') : [],
-      dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.filter((entry): entry is string => typeof entry === 'string') : [],
-      evidenceRefs: Array.isArray(item.evidenceRefs) ? item.evidenceRefs.filter((entry): entry is string => typeof entry === 'string') : [],
-      estimatedTokens: Number.isFinite(item.estimatedTokens) ? Math.max(0, Math.trunc(Number(item.estimatedTokens))) : 0,
-    }];
-  }) : [];
+  const workItems = Array.isArray(raw.workItems)
+    ? raw.workItems.flatMap((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) return [];
+        const item = value as Record<string, unknown>;
+        if (typeof item.id !== 'string' || typeof item.objective !== 'string') return [];
+        return [
+          {
+            id: item.id,
+            objective: item.objective,
+            expectedArtifacts: Array.isArray(item.expectedArtifacts)
+              ? item.expectedArtifacts.filter((entry): entry is string => typeof entry === 'string')
+              : [],
+            acceptance: Array.isArray(item.acceptance) ? item.acceptance.filter((entry): entry is string => typeof entry === 'string') : [],
+            dependsOn: Array.isArray(item.dependsOn) ? item.dependsOn.filter((entry): entry is string => typeof entry === 'string') : [],
+            evidenceRefs: Array.isArray(item.evidenceRefs)
+              ? item.evidenceRefs.filter((entry): entry is string => typeof entry === 'string')
+              : [],
+            estimatedTokens: Number.isFinite(item.estimatedTokens) ? Math.max(0, Math.trunc(Number(item.estimatedTokens))) : 0,
+          },
+        ];
+      })
+    : [];
   if (steps.length === 0 && raw.steps.length > 0) return null;
   return {
     objective: raw.objective,
@@ -72,11 +82,16 @@ function normalizePlan(value: unknown): PlanState | null {
 export function canTransition(from: StepStatus, to: StepStatus): boolean {
   if (from === to) return true;
   switch (from) {
-    case 'pending': return to === 'in_progress' || to === 'done' || to === 'blocked';
-    case 'in_progress': return to === 'pending' || to === 'done' || to === 'blocked';
-    case 'blocked': return to === 'pending' || to === 'in_progress';
-    case 'done': return to === 'pending' || to === 'in_progress';
-    default: return false;
+    case 'pending':
+      return to === 'in_progress' || to === 'done' || to === 'blocked';
+    case 'in_progress':
+      return to === 'pending' || to === 'done' || to === 'blocked';
+    case 'blocked':
+      return to === 'pending' || to === 'in_progress';
+    case 'done':
+      return to === 'pending' || to === 'in_progress';
+    default:
+      return false;
   }
 }
 
@@ -85,9 +100,7 @@ export function loadPlans(file: string): Map<string, PlanState> {
   try {
     if (!existsSync(file)) return plans;
     const raw = JSON.parse(readFileSync(file, 'utf-8')) as unknown;
-    const entries = raw && typeof raw === 'object' && !Array.isArray(raw)
-      ? Object.entries(raw as Record<string, unknown>)
-      : [];
+    const entries = raw && typeof raw === 'object' && !Array.isArray(raw) ? Object.entries(raw as Record<string, unknown>) : [];
     for (const [key, value] of entries) {
       const plan = normalizePlan(value);
       if (plan) plans.set(key, plan);

@@ -34,27 +34,38 @@ export function resolveInSandbox(sandboxRoot: string, relPath: string): string {
     // 归因错误且**所有**文件操作都失败（连"在根下新建文件"这种合法动作也被拒）。
     const parent = resolve(current, '..');
     const parentLower = parent.toLowerCase();
-    if (parent === current || parentLower !== rootLower && !parentLower.startsWith(rootLower + sep)) {
+    if (parent === current || (parentLower !== rootLower && !parentLower.startsWith(rootLower + sep))) {
       // 走到沙箱根之外还没找到存在的祖先 → 说明沙箱根自己就不存在
       throw new Error(`沙箱根目录不存在: ${root}（请先创建该目录或在设置里切换到已存在的工作区）`);
     }
     current = parent;
   }
-  return target;
 }
 
 function resolveSync(p: string): string {
-  try { return realpathSync.native(p); } catch { return resolve(p); }
+  try {
+    return realpathSync.native(p);
+  } catch {
+    return resolve(p);
+  }
 }
 
 export function contractArtifactPath(root: string, path: string): string | undefined {
   const parts = path.replace(/\\/g, '/').split('/');
-  if (parts.some(part => !part || /[<>:"|?*\x00-\x1f]|[. ]$/.test(part)
-    || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part))) return;
+  if (
+    parts.some(
+      (part) =>
+        // biome-ignore lint/suspicious/noControlCharactersInRegex: 这里就是要拒绝 Windows 文件名里的控制字符（U+0000–U+001F）
+        !part || /[<>:"|?*\x00-\x1f]|[. ]$/.test(part) || /^(?:con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/i.test(part),
+    )
+  )
+    return;
   const target = resolve(root, ...parts);
   try {
     if (resolveInSandbox(root, path) !== target) return;
-  } catch { return; }
+  } catch {
+    return;
+  }
   return parts.join('/');
 }
 
@@ -107,8 +118,7 @@ export function isProtectedWritePath(absPath: string, sandboxRoot: string, proje
   for (const base of projectRoot ? [sandboxRoot, projectRoot] : [sandboxRoot]) {
     const norm = relUnder(absPath, base)?.toLowerCase();
     if (!norm) continue;
-    if (norm === 'kernel' || norm.startsWith('kernel/')
-      || norm === 'core/chat' || norm.startsWith('core/chat/')) return true;
+    if (norm === 'kernel' || norm.startsWith('kernel/') || norm === 'core/chat' || norm.startsWith('core/chat/')) return true;
   }
   return false;
 }

@@ -6,14 +6,43 @@
  *      写类工具审批由执行器侧 assessApproval 动态判定（默认沙箱内免审批，tools.writeRequiresApproval=true 可恢复强制审批）。
  * 缓存：读类工具按「路径 + mtime + size + 参数」做 L2；写/编辑/删除成功后清空文件类读缓存并失效会话 L1。
  */
-import { statSync, readdirSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync, openSync, readSync, closeSync, renameSync } from 'node:fs';
+import {
+  statSync,
+  readdirSync,
+  mkdirSync,
+  writeFileSync,
+  readFileSync,
+  existsSync,
+  rmSync,
+  openSync,
+  readSync,
+  closeSync,
+  renameSync,
+} from 'node:fs';
 import { createHash, randomUUID } from 'node:crypto';
 import { resolve, relative } from 'node:path';
 import { spawn } from 'node:child_process';
 import type { CacheLike, Plugin, ToolContext, ToolResult, TraceLike } from '../../kernel/plugin-sdk';
-import { contractArtifactPath, resolveInSandbox, isProtectedWritePath, isDeniedReadPath, readTextSmart, isApprovalRequiredWritePath } from '../../kernel/plugin-sdk';
+import {
+  contractArtifactPath,
+  resolveInSandbox,
+  isProtectedWritePath,
+  isDeniedReadPath,
+  readTextSmart,
+  isApprovalRequiredWritePath,
+} from '../../kernel/plugin-sdk';
 import type { ReadResult } from '../../kernel/plugin-sdk';
-import { matchesGlob, grepFiles, sliceLines, applyEdits, detectEol, convertEol, directoryFingerprint, fileFingerprint, treeFingerprint } from '../../kernel/plugin-sdk';
+import {
+  matchesGlob,
+  grepFiles,
+  sliceLines,
+  applyEdits,
+  detectEol,
+  convertEol,
+  directoryFingerprint,
+  fileFingerprint,
+  treeFingerprint,
+} from '../../kernel/plugin-sdk';
 import type { EditOp } from '../../kernel/plugin-sdk';
 import { reviewPluginWrite } from '../../kernel/plugin-sdk';
 
@@ -22,11 +51,19 @@ export type { ReadResult };
 
 const TOOLS_FS_CACHE_VER = 'v5';
 
-function fileVersion(file: string): string | null { return existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : null; }
+function fileVersion(file: string): string | null {
+  return existsSync(file) ? createHash('sha256').update(readFileSync(file)).digest('hex') : null;
+}
 function versionConflict(file: string, expected: string | null | undefined): ToolResult | undefined {
   if (expected === undefined) return;
   const actual = fileVersion(file);
-  if (actual !== expected) return { ok: false, error: '文件版本已变化，请重新读取后编辑', failure: { code: 'FILE_VERSION_CONFLICT', retryable: false, outcome: 'not_started' }, data: { expectedVersion: expected, actualVersion: actual } };
+  if (actual !== expected)
+    return {
+      ok: false,
+      error: '文件版本已变化，请重新读取后编辑',
+      failure: { code: 'FILE_VERSION_CONFLICT', retryable: false, outcome: 'not_started' },
+      data: { expectedVersion: expected, actualVersion: actual },
+    };
 }
 const MAX_READ_CHARS = 100_000;
 const DEFAULT_READ_LINES = 2000;
@@ -40,12 +77,23 @@ function invalidateFileCaches(tctx: ToolContext): void {
   (tctx.cache as { l1InvalidateSession?: (s?: string) => void }).l1InvalidateSession?.(tctx.sessionId);
 }
 
-function cachedRead(cache: CacheLike, trace: TraceLike, traceId: string, turn: number, key: string, load: () => unknown, tenantId?: string): unknown {
+function cachedRead(
+  cache: CacheLike,
+  trace: TraceLike,
+  traceId: string,
+  turn: number,
+  key: string,
+  load: () => unknown,
+  tenantId?: string,
+): unknown {
   const hit = cache.l2Get(key);
   if (hit.hit) {
     const meta = hit.meta;
-    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-      .finish({ outputSummary: meta ? `L2 ${meta.namespace} 缓存命中（剩余 ${Math.ceil(meta.ttlRemainingMs / 60_000)} 分钟，第 ${meta.hits} 次）` : '工具结果缓存命中' });
+    trace.startStep({ traceId, turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key }).finish({
+      outputSummary: meta
+        ? `L2 ${meta.namespace} 缓存命中（剩余 ${Math.ceil(meta.ttlRemainingMs / 60_000)} 分钟，第 ${meta.hits} 次）`
+        : '工具结果缓存命中',
+    });
     return hit.value;
   }
   const value = load();
@@ -60,7 +108,16 @@ function startsWithBom(file: string): boolean {
     const buf = Buffer.alloc(3);
     const n = readSync(fd, buf, 0, 3, 0);
     return n === 3 && buf[0] === 0xef && buf[1] === 0xbb && buf[2] === 0xbf;
-  } catch { return false; } finally { if (fd !== undefined) try { closeSync(fd); } catch { /* 忽略 */ } }
+  } catch {
+    return false;
+  } finally {
+    if (fd !== undefined)
+      try {
+        closeSync(fd);
+      } catch {
+        /* 忽略 */
+      }
+  }
 }
 
 /** 原子写：tmp + rename（Windows 上 rename 目标已存在会 EEXIST，先移除） */
@@ -70,7 +127,11 @@ function atomicWrite(file: string, content: string): void {
   try {
     renameSync(tmp, file);
   } catch (err) {
-    try { rmSync(tmp, { force: true }); } catch { /* Preserve the original write error. */ }
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      /* Preserve the original write error. */
+    }
     throw err;
   }
 }
@@ -86,15 +147,33 @@ function hasRipgrep(): Promise<boolean> {
         p.on('error', () => res(false));
         p.on('close', (code) => res(code === 0));
         p.stdout.resume();
-      } catch { res(false); }
+      } catch {
+        res(false);
+      }
     });
   }
   return rgAvailability;
 }
 
-interface RgOut { matches: { file: string; line: number; text: string }[]; files: string[]; truncated: boolean }
+interface RgOut {
+  matches: { file: string; line: number; text: string }[];
+  files: string[];
+  truncated: boolean;
+}
 
-export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: boolean; ignoreCase?: boolean; glob?: string; path?: string; limit: number; accept?: (relativePath: string) => boolean }, signal?: AbortSignal): Promise<RgOut | null> {
+export function runRipgrep(
+  rootAbs: string,
+  opts: {
+    pattern: string;
+    literal?: boolean;
+    ignoreCase?: boolean;
+    glob?: string;
+    path?: string;
+    limit: number;
+    accept?: (relativePath: string) => boolean;
+  },
+  signal?: AbortSignal,
+): Promise<RgOut | null> {
   return new Promise((resolveP, rejectP) => {
     if (signal?.aborted) {
       rejectP(signal.reason instanceof Error ? signal.reason : new Error('搜索已取消'));
@@ -105,23 +184,37 @@ export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: b
     if (opts.literal) argv.push('-F');
     if (opts.glob) argv.push('--glob', opts.glob);
     argv.push('-e', opts.pattern, opts.path ?? '.');
-    let child;
+    let child: ReturnType<typeof spawn>;
     try {
       child = spawn('rg', argv, { cwd: rootAbs, windowsHide: true, signal });
-    } catch { resolveP(null); return; }
+    } catch {
+      resolveP(null);
+      return;
+    }
+    const stdout = child.stdout;
+    if (!stdout) {
+      // 没有标准输出管道说明子进程未能建立通道，退化为一无所得
+      resolveP(null);
+      return;
+    }
     let buf = '';
     let spawnError: Error | undefined;
     const out: RgOut = { matches: [], files: [], truncated: false };
     const timer = setTimeout(() => {
       out.truncated = true;
-      try { child.kill(); } catch { /* 忽略 */ }
+      try {
+        child.kill();
+      } catch {
+        /* 忽略 */
+      }
     }, 20_000);
-    child.stdout.on('data', (d: Buffer) => {
+    stdout.on('data', (d: Buffer) => {
       buf += d.toString('utf8');
-      let nl;
-      while ((nl = buf.indexOf('\n')) >= 0) {
+      let nl = buf.indexOf('\n');
+      while (nl >= 0) {
         const line = buf.slice(0, nl).trim();
         buf = buf.slice(nl + 1);
+        nl = buf.indexOf('\n');
         if (!line) continue;
         try {
           const j = JSON.parse(line);
@@ -129,23 +222,52 @@ export function runRipgrep(rootAbs: string, opts: { pattern: string; literal?: b
           const rel = String(j.data.path.text).split(/[\\/]/g).join('/');
           if (opts.accept && !opts.accept(rel)) continue;
           if (!out.files.includes(rel)) out.files.push(rel);
-          out.matches.push({ file: rel, line: Number(j.data.line_number) || 0, text: String(j.data.lines?.text ?? '').replace(/\r?\n$/, '').slice(0, 500) });
-          if (out.matches.length >= opts.limit) { out.truncated = true; try { child.kill(); } catch { /* 忽略 */ } }
-        } catch { /* 非 JSON 行忽略 */ }
+          out.matches.push({
+            file: rel,
+            line: Number(j.data.line_number) || 0,
+            text: String(j.data.lines?.text ?? '')
+              .replace(/\r?\n$/, '')
+              .slice(0, 500),
+          });
+          if (out.matches.length >= opts.limit) {
+            out.truncated = true;
+            try {
+              child.kill();
+            } catch {
+              /* 忽略 */
+            }
+          }
+        } catch {
+          /* 非 JSON 行忽略 */
+        }
       }
     });
-    child.on('error', (err) => { spawnError = err; });
+    child.on('error', (err) => {
+      spawnError = err;
+    });
     child.on('close', (code) => {
       clearTimeout(timer);
       if (signal?.aborted) {
         rejectP(signal.reason instanceof Error ? signal.reason : new Error('搜索已取消'));
         return;
       }
-      if (spawnError) { resolveP(null); return; }
-      if (out.truncated && code !== 0 && code !== 1) { resolveP(out); return; }
-      if (code === 1 && out.matches.length === 0) { resolveP(out); return; }   // 正常「无匹配」
-      if (code === 0 || out.truncated || out.matches.length) { resolveP(out); return; }
-      resolveP(null);                                                          // 异常/参数不支持 → 回落 JS
+      if (spawnError) {
+        resolveP(null);
+        return;
+      }
+      if (out.truncated && code !== 0 && code !== 1) {
+        resolveP(out);
+        return;
+      }
+      if (code === 1 && out.matches.length === 0) {
+        resolveP(out);
+        return;
+      } // 正常「无匹配」
+      if (code === 0 || out.truncated || out.matches.length) {
+        resolveP(out);
+        return;
+      }
+      resolveP(null); // 异常/参数不支持 → 回落 JS
     });
   });
 }
@@ -209,14 +331,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'list_dir',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{path, entries: [{name, type, size?, mtime?}]}',
         outputSchema: {
-          type: 'object', required: ['path', 'entries'],
+          type: 'object',
+          required: ['path', 'entries'],
           properties: { path: { type: 'string' }, entries: { type: 'array' } },
         },
         description: '列出单层目录内容（名称、类型、大小、修改时间）。递归找文件请用 glob。路径相对沙箱根目录。',
@@ -227,24 +350,38 @@ export default {
         },
         async handler(args: { path?: string }, tctx: ToolContext) {
           const dir = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
-          if (isDeniedReadPath(dir, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
+          if (isDeniedReadPath(dir, tctx.sandboxRoot, ctx.paths.root))
+            return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
           if (!existsSync(dir)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, dir) || '.'}` };
           const st = statSync(dir);
           if (!st.isDirectory()) return { ok: false, error: '目标不是目录' };
-          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)], { tenantId: tctx.tenantId });
-          const result = cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
-            return readdirSync(dir, { withFileTypes: true }).filter(e => !isDeniedReadPath(resolve(dir, e.name), tctx.sandboxRoot, ctx.paths.root)).map((e) => {
-              const full = resolve(dir, e.name);
-              let info: { type: string; size?: number; mtime?: number };
-              try {
-                const s = statSync(full);
-                info = { type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
-              } catch {
-                info = { type: e.isDirectory() ? 'dir' : 'file' };
-              }
-              return { name: e.name, ...info };
-            }).sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
-          }, tctx.tenantId);
+          const key = tctx.cache.makeKey(['list_dir', TOOLS_FS_CACHE_VER, dir.toLowerCase(), directoryFingerprint(dir)], {
+            tenantId: tctx.tenantId,
+          });
+          const result = cachedRead(
+            tctx.cache,
+            tctx.trace,
+            tctx.traceId ?? '',
+            tctx.turn,
+            key,
+            () => {
+              return readdirSync(dir, { withFileTypes: true })
+                .filter((e) => !isDeniedReadPath(resolve(dir, e.name), tctx.sandboxRoot, ctx.paths.root))
+                .map((e) => {
+                  const full = resolve(dir, e.name);
+                  let info: { type: string; size?: number; mtime?: number };
+                  try {
+                    const s = statSync(full);
+                    info = { type: e.isDirectory() ? 'dir' : 'file', size: s.size, mtime: s.mtimeMs };
+                  } catch {
+                    info = { type: e.isDirectory() ? 'dir' : 'file' };
+                  }
+                  return { name: e.name, ...info };
+                })
+                .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
+            },
+            tctx.tenantId,
+          );
           return { ok: true, data: { path: relative(tctx.sandboxRoot, dir) || '.', entries: result } };
         },
       },
@@ -254,7 +391,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'read_file',
         risk: 'low',
         costHint: 'low',
@@ -262,15 +399,23 @@ export default {
         limits: '仅文本文件；默认 2000 行，最多 20000 行 / 100k 字符，超出用 offset 续读',
         output: '{text, encoding, size, path, totalLines, startLine, endLine, nextOffset?}；nextOffset 表示还有后续行',
         outputSchema: {
-          type: 'object', required: ['text', 'path', 'size', 'totalLines', 'startLine', 'endLine'],
+          type: 'object',
+          required: ['text', 'path', 'size', 'totalLines', 'startLine', 'endLine'],
           properties: {
-            text: { type: 'string' }, path: { type: 'string' }, size: { type: 'integer' },
-            encoding: { type: 'string' }, isBinary: { type: 'boolean' },
-            totalLines: { type: 'integer' }, startLine: { type: 'integer' }, endLine: { type: 'integer' },
-            nextOffset: { type: 'integer' }, truncated: { type: 'boolean' },
+            text: { type: 'string' },
+            path: { type: 'string' },
+            size: { type: 'integer' },
+            encoding: { type: 'string' },
+            isBinary: { type: 'boolean' },
+            totalLines: { type: 'integer' },
+            startLine: { type: 'integer' },
+            endLine: { type: 'integer' },
+            nextOffset: { type: 'integer' },
+            truncated: { type: 'boolean' },
           },
         },
-        description: '读取文本文件（自动识别 UTF-8/UTF-16/GBK）。支持 offset（1 起始行号）/limit（行数）分段读，lineNumbers=true 可给每行加行号前缀。路径相对沙箱根目录。',
+        description:
+          '读取文本文件（自动识别 UTF-8/UTF-16/GBK）。支持 offset（1 起始行号）/limit（行数）分段读，lineNumbers=true 可给每行加行号前缀。路径相对沙箱根目录。',
         parameters: {
           type: 'object',
           properties: {
@@ -281,7 +426,10 @@ export default {
           },
           required: ['path'],
         },
-        async handler(args: { path?: string; offset?: number; limit?: number; lineNumbers?: boolean }, tctx: ToolContext): Promise<ToolResult> {
+        async handler(
+          args: { path?: string; offset?: number; limit?: number; lineNumbers?: boolean },
+          tctx: ToolContext,
+        ): Promise<ToolResult> {
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
           if (isDeniedReadPath(file, tctx.sandboxRoot, ctx.paths.root)) {
             return { ok: false, error: `拒绝读取: ${relative(tctx.sandboxRoot, file)}（密钥与环境配置 .env、内部数据 data/ 不可读）` };
@@ -293,11 +441,17 @@ export default {
           const limit = Math.min(20_000, Math.max(1, Math.floor(Number(args.limit) || DEFAULT_READ_LINES)));
           const lineNumbers = args.lineNumbers === true;
           const fingerprint = fileFingerprint(file, 2_000_000);
-          const key = fingerprint === undefined ? ''
-            : tctx.cache.makeKey(['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), fingerprint, String(offset), String(limit), lineNumbers ? 'n' : ''], { tenantId: tctx.tenantId });
+          const key =
+            fingerprint === undefined
+              ? ''
+              : tctx.cache.makeKey(
+                  ['read_file', TOOLS_FS_CACHE_VER, file.toLowerCase(), fingerprint, String(offset), String(limit), lineNumbers ? 'n' : ''],
+                  { tenantId: tctx.tenantId },
+                );
           const hit = key ? tctx.cache.l2Get(key) : { hit: false };
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
               .finish({ outputSummary: '文件读取缓存命中' });
             const cached = hit.value as ReadResult;
             return { ok: true, data: cached, evidence: [{ kind: 'file', label: `已读取 ${cached.path}`, ref: cached.path }] };
@@ -307,11 +461,21 @@ export default {
           const s = sliceLines(r.text, offset, limit, MAX_READ_CHARS);
           const result: ReadResult = {
             version: fileVersion(file)!,
-            text: lineNumbers ? s.text.split('\n').map((ln, i) => `${s.startLine + i}: ${ln}`).join('\n') : s.text,
-            encoding: r.encoding, isBinary: false,
-            size: st.size, path: relative(tctx.sandboxRoot, file),
+            text: lineNumbers
+              ? s.text
+                  .split('\n')
+                  .map((ln, i) => `${s.startLine + i}: ${ln}`)
+                  .join('\n')
+              : s.text,
+            encoding: r.encoding,
+            isBinary: false,
+            size: st.size,
+            path: relative(tctx.sandboxRoot, file),
             truncated: s.nextOffset ? true : undefined,
-            totalLines: s.totalLines, startLine: s.startLine, endLine: s.endLine, nextOffset: s.nextOffset,
+            totalLines: s.totalLines,
+            startLine: s.startLine,
+            endLine: s.endLine,
+            nextOffset: s.nextOffset,
           };
           if (key) tctx.cache.l2Set(key, result, undefined, tctx.tenantId);
           return { ok: true, data: result, evidence: [{ kind: 'file', label: `已读取 ${result.path}`, ref: result.path }] };
@@ -323,7 +487,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'glob',
         risk: 'low',
         costHint: 'low',
@@ -331,7 +495,8 @@ export default {
         limits: '不跟随符号链接；默认忽略 node_modules/.git/dist/build 等；上限 500 条',
         output: '{matches: [{path,size,mtime}], total, truncated, root}',
         outputSchema: {
-          type: 'object', required: ['matches', 'total', 'truncated'],
+          type: 'object',
+          required: ['matches', 'total', 'truncated'],
           properties: { matches: { type: 'array' }, total: { type: 'integer' }, truncated: { type: 'boolean' }, root: { type: 'string' } },
         },
         description: '按 glob 模式递归查找文件（如 **/*.ts、src/**/*.spec.ts、*.md）。不含 / 的模式按文件名匹配。路径参数相对沙箱根目录。',
@@ -348,30 +513,47 @@ export default {
           const pattern = String(args.pattern ?? '').trim();
           if (!pattern) return { ok: false, error: 'pattern 不能为空' };
           const rootAbs = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
-          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
+          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root))
+            return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.limit) || 200)));
-          const snapshot = treeFingerprint(rootAbs, { accept: rel => !isDeniedReadPath(resolve(rootAbs, rel), tctx.sandboxRoot, ctx.paths.root) && matchesGlob(rel, pattern), maxFiles: 20_000, maxMs: 8_000 });
+          const snapshot = treeFingerprint(rootAbs, {
+            accept: (rel) => !isDeniedReadPath(resolve(rootAbs, rel), tctx.sandboxRoot, ctx.paths.root) && matchesGlob(rel, pattern),
+            maxFiles: 20_000,
+            maxMs: 8_000,
+          });
           const key = snapshot.complete
-            ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint], { tenantId: tctx.tenantId })
+            ? tctx.cache.makeKey(['glob', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, String(limit), snapshot.fingerprint], {
+                tenantId: tctx.tenantId,
+              })
             : '';
-          const data = key ? cachedRead(tctx.cache, tctx.trace, tctx.traceId ?? '', tctx.turn, key, () => {
-            const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
-            return {
-              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
-              total: sorted.length,
-              truncated: sorted.length >= 20_000 || sorted.length > limit,
-              root: relative(tctx.sandboxRoot, rootAbs) || '.',
-            };
-          }, tctx.tenantId) : (() => {
-            const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
-            return {
-              matches: sorted.slice(0, limit).map(h => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
-              total: sorted.length,
-              truncated: !snapshot.complete || sorted.length > limit,
-              root: relative(tctx.sandboxRoot, rootAbs) || '.',
-            };
-          })();
+          const data = key
+            ? cachedRead(
+                tctx.cache,
+                tctx.trace,
+                tctx.traceId ?? '',
+                tctx.turn,
+                key,
+                () => {
+                  const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
+                  return {
+                    matches: sorted.slice(0, limit).map((h) => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
+                    total: sorted.length,
+                    truncated: sorted.length >= 20_000 || sorted.length > limit,
+                    root: relative(tctx.sandboxRoot, rootAbs) || '.',
+                  };
+                },
+                tctx.tenantId,
+              )
+            : (() => {
+                const sorted = [...snapshot.hits].sort((a, b) => a.rel.localeCompare(b.rel));
+                return {
+                  matches: sorted.slice(0, limit).map((h) => ({ path: h.rel, size: h.size, mtime: Math.round(h.mtimeMs) })),
+                  total: sorted.length,
+                  truncated: !snapshot.complete || sorted.length > limit,
+                  root: relative(tctx.sandboxRoot, rootAbs) || '.',
+                };
+              })();
           return { ok: true, data };
         },
       },
@@ -381,7 +563,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'grep',
         risk: 'low',
         costHint: 'medium',
@@ -389,10 +571,17 @@ export default {
         limits: '单文件默认跳过 >2MB；ripgrep 可用时走 rg，回落纯 JS；上限 200 条',
         output: '{matches: [{file,line,text,before?,after?}], files, scannedFiles, truncated}',
         outputSchema: {
-          type: 'object', required: ['matches'],
-          properties: { matches: { type: 'array' }, files: { type: 'array' }, scannedFiles: { type: 'integer' }, truncated: { type: 'boolean' } },
+          type: 'object',
+          required: ['matches'],
+          properties: {
+            matches: { type: 'array' },
+            files: { type: 'array' },
+            scannedFiles: { type: 'integer' },
+            truncated: { type: 'boolean' },
+          },
         },
-        description: '在工作区内按正则（或 literal=true 原文）搜索文件内容，返回 文件:行号:内容。可用 glob 限定文件类型、path 限定目录、contextLines 带上下文行。',
+        description:
+          '在工作区内按正则（或 literal=true 原文）搜索文件内容，返回 文件:行号:内容。可用 glob 限定文件类型、path 限定目录、contextLines 带上下文行。',
         parameters: {
           type: 'object',
           properties: {
@@ -406,41 +595,76 @@ export default {
           },
           required: ['pattern'],
         },
-        async handler(args: { pattern?: string; path?: string; glob?: string; ignoreCase?: boolean; literal?: boolean; contextLines?: number; maxResults?: number }, tctx: ToolContext) {
+        async handler(
+          args: {
+            pattern?: string;
+            path?: string;
+            glob?: string;
+            ignoreCase?: boolean;
+            literal?: boolean;
+            contextLines?: number;
+            maxResults?: number;
+          },
+          tctx: ToolContext,
+        ) {
           const pattern = String(args.pattern ?? '');
           if (!pattern) return { ok: false, error: 'pattern 不能为空' };
           const rootAbs = resolveInSandbox(tctx.sandboxRoot, args.path ?? '.');
-          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root)) return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
+          if (isDeniedReadPath(rootAbs, tctx.sandboxRoot, ctx.paths.root))
+            return { ok: false, error: '该目录不可读取', failure: { code: 'TOOL_PERMISSION', retryable: false, outcome: 'not_started' } };
           const accept = (rel: string) => !isDeniedReadPath(resolve(rootAbs, rel), tctx.sandboxRoot, ctx.paths.root);
           if (!existsSync(rootAbs)) return { ok: false, error: `目录不存在: ${relative(tctx.sandboxRoot, rootAbs) || '.'}` };
           const limit = Math.min(500, Math.max(1, Math.floor(Number(args.maxResults) || 200)));
           const ctxLines = Math.max(0, Math.min(5, Math.floor(Number(args.contextLines) || 0)));
           const snapshot = treeFingerprint(rootAbs, {
-            accept: rel => accept(rel) && (!args.glob || matchesGlob(rel, args.glob)),
+            accept: (rel) => accept(rel) && (!args.glob || matchesGlob(rel, args.glob)),
             maxFiles: 30_000,
             maxMs: 15_000,
             includeContent: true,
             maxContentBytes: 2_000_000,
             maxTotalContentBytes: 8_000_000,
           });
-          const key = snapshot.complete && snapshot.contentComplete
-            ? tctx.cache.makeKey(['grep', TOOLS_FS_CACHE_VER, rootAbs.toLowerCase(), pattern, args.glob ?? '', args.ignoreCase ? 'i' : '', args.literal ? 'F' : '', String(ctxLines), String(limit), snapshot.fingerprint], { tenantId: tctx.tenantId })
-            : '';
+          const key =
+            snapshot.complete && snapshot.contentComplete
+              ? tctx.cache.makeKey(
+                  [
+                    'grep',
+                    TOOLS_FS_CACHE_VER,
+                    rootAbs.toLowerCase(),
+                    pattern,
+                    args.glob ?? '',
+                    args.ignoreCase ? 'i' : '',
+                    args.literal ? 'F' : '',
+                    String(ctxLines),
+                    String(limit),
+                    snapshot.fingerprint,
+                  ],
+                  { tenantId: tctx.tenantId },
+                )
+              : '';
           const cached = key ? tctx.cache.l2Get(key) : { hit: false };
           if (cached.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key }).finish({ outputSummary: '搜索结果缓存命中' });
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+              .finish({ outputSummary: '搜索结果缓存命中' });
             return { ok: true, data: cached.value };
           }
           const opts = { pattern, glob: args.glob, ignoreCase: args.ignoreCase, literal: args.literal };
           let data: unknown = null;
-          if (ctxLines === 0 && await hasRipgrep()) {
+          if (ctxLines === 0 && (await hasRipgrep())) {
             const rg = await runRipgrep(rootAbs, { ...opts, limit, accept }, tctx.signal);
             if (rg) data = { ...rg, scannedFiles: rg.files.length, engine: 'ripgrep' };
           }
           if (!data) {
             const r = grepFiles(rootAbs, {
-              pattern, literal: args.literal, ignoreCase: args.ignoreCase, path: '.', glob: args.glob,
-              contextLines: ctxLines, limit, accept,
+              pattern,
+              literal: args.literal,
+              ignoreCase: args.ignoreCase,
+              path: '.',
+              glob: args.glob,
+              contextLines: ctxLines,
+              limit,
+              accept,
             });
             if (r.error) return { ok: false, error: r.error };
             data = { ...r, engine: 'js' };
@@ -455,7 +679,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'write_file',
         risk: 'medium',
         costHint: 'low',
@@ -464,10 +688,12 @@ export default {
         limits: '整文件覆写；kernel/、core/chat/ 硬拒，.env 与 data/ 需用户批准',
         output: '{path, bytes}',
         outputSchema: {
-          type: 'object', required: ['path', 'bytes'],
+          type: 'object',
+          required: ['path', 'bytes'],
           properties: { path: { type: 'string' }, bytes: { type: 'integer' } },
         },
-        description: '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。普通工作区文件写默认免审批（可经 tools.writeRequiresApproval 恢复审批）；但 .env 与 data/ 下的任何写入都必须用户批准，不受该开关影响。',
+        description:
+          '写入文本文件（UTF-8，自动创建父目录；已存在则整份覆盖）。局部改动优先用 edit_file。普通工作区文件写默认免审批（可经 tools.writeRequiresApproval 恢复审批）；但 .env 与 data/ 下的任何写入都必须用户批准，不受该开关影响。',
         parameters: {
           type: 'object',
           properties: {
@@ -483,11 +709,15 @@ export default {
           if (paths && (tctx.authorization?.readOnly || !paths.includes(contractArtifactPath(tctx.sandboxRoot, args.path ?? '') ?? '')))
             return { ok: false, error: '分工只能写入契约声明的产物路径' };
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
-            return { ok: false, error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。` };
+          if (!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId)) {
+            return {
+              ok: false,
+              error: `拒绝写入内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。`,
+            };
           }
           if (args.content === undefined) return { ok: false, error: '缺少 content' };
-          const conflict = versionConflict(file, args.expectedVersion); if (conflict) return conflict;
+          const conflict = versionConflict(file, args.expectedVersion);
+          if (conflict) return conflict;
           const gate = sensitiveBypass(file, tctx);
           if (gate) return gate;
           const review = reviewPluginWrite(tctx.sandboxRoot, file, args.content, pluginReviewOptions());
@@ -500,8 +730,11 @@ export default {
           }
           const nextBytes = Buffer.byteLength(args.content, 'utf8');
           const previousBytes = existsSync(file) ? statSync(file).size : 0;
-          try { tctx.quota?.assertWritable(Math.max(0, nextBytes - previousBytes)); }
-          catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+          try {
+            tctx.quota?.assertWritable(Math.max(0, nextBytes - previousBytes));
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) };
+          }
           mkdirSync(resolve(file, '..'), { recursive: true });
           atomicWrite(file, args.content);
           tctx.quota?.invalidate?.();
@@ -520,7 +753,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'edit_file',
         risk: 'medium',
         costHint: 'low',
@@ -529,10 +762,17 @@ export default {
         limits: '目标须为已存在的文本文件且 <2MB；oldText 必须与文件内容逐字符一致（含缩进），不唯一时报错',
         output: '{path, edits: [{index, replaced}], bytesBefore, bytesAfter}',
         outputSchema: {
-          type: 'object', required: ['path', 'edits', 'bytesBefore', 'bytesAfter'],
-          properties: { path: { type: 'string' }, edits: { type: 'array' }, bytesBefore: { type: 'integer' }, bytesAfter: { type: 'integer' } },
+          type: 'object',
+          required: ['path', 'edits', 'bytesBefore', 'bytesAfter'],
+          properties: {
+            path: { type: 'string' },
+            edits: { type: 'array' },
+            bytesBefore: { type: 'integer' },
+            bytesAfter: { type: 'integer' },
+          },
         },
-        description: '对已存在文件做精确字符串替换（一次可传多处 edits，全部命中才写盘；任一处未命中或匹配不唯一则整体放弃并逐条报错）。保留原换行风格（CRLF/LF）与 BOM。局部改动的首选工具。',
+        description:
+          '对已存在文件做精确字符串替换（一次可传多处 edits，全部命中才写盘；任一处未命中或匹配不唯一则整体放弃并逐条报错）。保留原换行风格（CRLF/LF）与 BOM。局部改动的首选工具。',
         parameters: {
           type: 'object',
           properties: {
@@ -560,11 +800,12 @@ export default {
           if (paths && (tctx.authorization?.readOnly || !paths.includes(contractArtifactPath(tctx.sandboxRoot, args.path ?? '') ?? '')))
             return { ok: false, error: '分工只能编辑契约声明的产物路径' };
           const file = resolveInSandbox(tctx.sandboxRoot, args.path ?? '');
-          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
+          if (!tctx.authorization?.frameworkChangeId && isProtectedWritePath(file, tctx.sandboxRoot, ctx.paths.root, !tctx.runId)) {
             return { ok: false, error: `拒绝编辑内核保护区（kernel/、core/chat/）: ${relative(tctx.sandboxRoot, file)}` };
           }
           if (!existsSync(file)) return { ok: false, error: `文件不存在: ${relative(tctx.sandboxRoot, file)}——新建请用 write_file` };
-          const conflict = versionConflict(file, args.expectedVersion); if (conflict) return conflict;
+          const conflict = versionConflict(file, args.expectedVersion);
+          if (conflict) return conflict;
           const gate = sensitiveBypass(file, tctx);
           if (gate) return gate;
           const st = statSync(file);
@@ -577,13 +818,18 @@ export default {
           const r = readTextSmart(file);
           if (r.isBinary) return { ok: false, error: '二进制文件不可编辑' };
           const eol = detectEol(r.text);
-          const normalized = edits.map(e => ({
+          const normalized = edits.map((e) => ({
             oldText: convertEol(String(e.oldText ?? ''), eol),
             newText: convertEol(String(e.newText ?? ''), eol),
             replaceAll: !!e.replaceAll,
           }));
           const outcome = applyEdits(r.text, normalized);
-          if (!outcome.ok) return { ok: false, error: `${outcome.error}（文件未改动）`, failure: { code: 'EDIT_NO_MATCH', retryable: false, outcome: 'not_started' } };
+          if (!outcome.ok)
+            return {
+              ok: false,
+              error: `${outcome.error}（文件未改动）`,
+              failure: { code: 'EDIT_NO_MATCH', retryable: false, outcome: 'not_started' },
+            };
           const review = reviewPluginWrite(tctx.sandboxRoot, file, outcome.text, pluginReviewOptions());
           if (review && !review.ok) {
             return {
@@ -593,8 +839,11 @@ export default {
             };
           }
           const bytesAfter = Buffer.byteLength((bom ? '\ufeff' : '') + outcome.text, 'utf8');
-          try { tctx.quota?.assertWritable(Math.max(0, bytesAfter - st.size)); }
-          catch (error) { return { ok: false, error: error instanceof Error ? error.message : String(error) }; }
+          try {
+            tctx.quota?.assertWritable(Math.max(0, bytesAfter - st.size));
+          } catch (error) {
+            return { ok: false, error: error instanceof Error ? error.message : String(error) };
+          }
           atomicWrite(file, (bom ? '\ufeff' : '') + outcome.text);
           tctx.quota?.invalidate?.();
           invalidateFileCaches(tctx);
@@ -607,7 +856,9 @@ export default {
               bytesBefore: st.size,
               bytesAfter,
             },
-            evidence: [{ kind: 'file', artifact: true, label: `已编辑 ${relative(tctx.sandboxRoot, file)}`, ref: relative(tctx.sandboxRoot, file) }],
+            evidence: [
+              { kind: 'file', artifact: true, label: `已编辑 ${relative(tctx.sandboxRoot, file)}`, ref: relative(tctx.sandboxRoot, file) },
+            ],
           };
         },
       },
@@ -617,7 +868,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'delete_file',
         risk: 'high',
         costHint: 'low',
@@ -625,7 +876,8 @@ export default {
         sideEffect: 'irreversible',
         output: '{removed, type}',
         outputSchema: {
-          type: 'object', required: ['removed', 'type'],
+          type: 'object',
+          required: ['removed', 'type'],
           properties: { removed: { type: 'string' }, type: { type: 'string', enum: ['file', 'dir'] } },
         },
         description: '删除沙箱内的文件或空目录。破坏性操作：始终需要用户审批；非空目录会失败（不能递归删除）。',
@@ -639,8 +891,11 @@ export default {
           if (!existsSync(target)) return { ok: false, error: `目标不存在: ${relative(tctx.sandboxRoot, target) || '.'}` };
           const rel = relative(tctx.sandboxRoot, target) || '.';
           if (rel === '.') return { ok: false, error: '不能删除沙箱根目录' };
-          if ((!tctx.authorization?.frameworkChangeId && isProtectedWritePath(target, tctx.sandboxRoot, ctx.paths.root, !tctx.runId))) {
-            return { ok: false, error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。` };
+          if (!tctx.authorization?.frameworkChangeId && isProtectedWritePath(target, tctx.sandboxRoot, ctx.paths.root, !tctx.runId)) {
+            return {
+              ok: false,
+              error: `拒绝删除内核保护区（kernel/、core/chat/）: ${rel}。如确需修改 agent 运行时核心，请在开发者权限下创建隔离框架副本。`,
+            };
           }
           // A8：删除的 handler 侧二次校验保留，但必须承认用户策略规则的放行
           //（policyApproved 此前未透传，规则 allow 会被这里误拦）
@@ -663,6 +918,8 @@ export default {
       },
     });
 
-    ctx.logger.info('工具就绪: list_dir / read_file / glob / grep / write_file / edit_file / delete_file（沙箱内；普通写默认免审批，.env 与 data/ 写入需批准，kernel/ 与 core/chat/ 硬拒）');
+    ctx.logger.info(
+      '工具就绪: list_dir / read_file / glob / grep / write_file / edit_file / delete_file（沙箱内；普通写默认免审批，.env 与 data/ 写入需批准，kernel/ 与 core/chat/ 硬拒）',
+    );
   },
 } satisfies Plugin;

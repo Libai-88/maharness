@@ -18,8 +18,15 @@ import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import {
-  isPrivateAddress, ipv4ToNumber, ipv6ToGroups, embeddedIpv4, isReservedIpv4,
-  assertPublicUrl, fetchDoc, validateSearchProxy, getSearchDispatcher,
+  isPrivateAddress,
+  ipv4ToNumber,
+  ipv6ToGroups,
+  embeddedIpv4,
+  isReservedIpv4,
+  assertPublicUrl,
+  fetchDoc,
+  validateSearchProxy,
+  getSearchDispatcher,
 } from '../index';
 
 const ENV_KEY = 'AGENT_ALLOW_PRIVATE_URLS';
@@ -27,9 +34,11 @@ let savedEnv: string | undefined;
 const MODE_KEY = 'MAHARNESS_MODE';
 let savedMode: string | undefined;
 before(() => {
-  savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY];
+  savedEnv = process.env[ENV_KEY];
+  delete process.env[ENV_KEY];
   // 本文件的拒绝用例锁定「remote 模式下 web_fetch 拦截私网」的默认语义
-  savedMode = process.env[MODE_KEY]; process.env[MODE_KEY] = 'remote';
+  savedMode = process.env[MODE_KEY];
+  process.env[MODE_KEY] = 'remote';
 });
 after(() => {
   if (savedEnv === undefined) delete process.env[ENV_KEY];
@@ -39,26 +48,25 @@ after(() => {
 });
 
 /** 主机名 → 测试 URL（v6 字面量要加方括号） */
-const urlOf = (ip: string): string =>
-  (ip.includes(':') ? `http://[${ip}]:3000/api/health` : `http://${ip}:3000/api/health`);
+const urlOf = (ip: string): string => (ip.includes(':') ? `http://[${ip}]:3000/api/health` : `http://${ip}:3000/api/health`);
 
 // ---------------------------------------------------------------- ① 内嵌 IPv4 还原
 
 describe('A3① 内嵌 IPv4 的还原（十六进制压缩形式不再是公网）', () => {
   const EQUIV: readonly [string, string][] = [
-    ['::ffff:7f00:1', '127.0.0.1'],        // ← 清单里那条可直接免审批绕过 web_fetch 的 payload
+    ['::ffff:7f00:1', '127.0.0.1'], // ← 清单里那条可直接免审批绕过 web_fetch 的 payload
     ['::ffff:a00:1', '10.0.0.1'],
     ['::ffff:c0a8:1', '192.168.0.1'],
     ['::ffff:a9fe:a9fe', '169.254.169.254'], // 云 metadata
     ['::ffff:6440:1', '100.64.0.1'],
     ['::ffff:c612:0', '198.18.0.0'],
-    ['::7f00:1', '127.0.0.1'],               // IPv4-compatible（::/96，已废弃但协议栈仍在解）
-    ['2002:7f00:1::', '127.0.0.1'],          // 6to4：第 2、3 组就是 v4
-    ['64:ff9b::7f00:1', '127.0.0.1'],        // NAT64 Well-Known Prefix：低 32 位是 v4
-    ['::ffff:8.8.8.8', '8.8.8.8'],           // 公网：点分写法
-    ['::ffff:808:808', '8.8.8.8'],           // 公网：同一地址的十六进制压缩写法（修复不能过拟合到"mapped 一律拒"）
-    ['2002:0808:0808::', '8.8.8.8'],         // 公网 6to4
-    ['64:ff9b::808:808', '8.8.8.8'],         // 公网 NAT64
+    ['::7f00:1', '127.0.0.1'], // IPv4-compatible（::/96，已废弃但协议栈仍在解）
+    ['2002:7f00:1::', '127.0.0.1'], // 6to4：第 2、3 组就是 v4
+    ['64:ff9b::7f00:1', '127.0.0.1'], // NAT64 Well-Known Prefix：低 32 位是 v4
+    ['::ffff:8.8.8.8', '8.8.8.8'], // 公网：点分写法
+    ['::ffff:808:808', '8.8.8.8'], // 公网：同一地址的十六进制压缩写法（修复不能过拟合到"mapped 一律拒"）
+    ['2002:0808:0808::', '8.8.8.8'], // 公网 6to4
+    ['64:ff9b::808:808', '8.8.8.8'], // 公网 NAT64
   ];
   for (const [v6, v4] of EQUIV) {
     it(`${v6} → ${v4}`, () => {
@@ -96,36 +104,71 @@ describe('A3① 内嵌 IPv4 的还原（十六进制压缩形式不再是公网�
 /** 判为私网/保留（全部必须拒绝） */
 const PRIVATE: readonly string[] = [
   // IPv4：旧实现已覆盖的段（回归保护）
-  '127.0.0.1', '127.255.255.255', '10.0.0.1', '10.255.255.255', '172.16.0.1', '172.31.255.255',
-  '192.168.0.1', '169.254.1.1', '169.254.169.254', '0.0.0.0', '0.255.255.255',
+  '127.0.0.1',
+  '127.255.255.255',
+  '10.0.0.1',
+  '10.255.255.255',
+  '172.16.0.1',
+  '172.31.255.255',
+  '192.168.0.1',
+  '169.254.1.1',
+  '169.254.169.254',
+  '0.0.0.0',
+  '0.255.255.255',
   // IPv4：A3 补齐的段
-  '100.64.0.1', '100.127.255.255',        // 100.64.0.0/10 CGNAT（Tailscale 等）
-  '198.18.0.1', '198.19.255.255',         // 198.18.0.0/15 设备基准测试
-  '192.0.0.1',                              // 192.0.0.0/24 IETF 协议分配
-  '192.88.99.1',                            // 192.88.99.0/24 6to4 中继任播
-  '224.0.0.1', '239.255.255.255',           // 224.0.0.0/4 组播
-  '240.0.0.1', '255.255.255.255',           // 240.0.0.0/4 保留（含有限广播）
+  '100.64.0.1',
+  '100.127.255.255', // 100.64.0.0/10 CGNAT（Tailscale 等）
+  '198.18.0.1',
+  '198.19.255.255', // 198.18.0.0/15 设备基准测试
+  '192.0.0.1', // 192.0.0.0/24 IETF 协议分配
+  '192.88.99.1', // 192.88.99.0/24 6to4 中继任播
+  '224.0.0.1',
+  '239.255.255.255', // 224.0.0.0/4 组播
+  '240.0.0.1',
+  '255.255.255.255', // 240.0.0.0/4 保留（含有限广播）
   // IPv6：环回 / ULA / 链路本地
-  '::1', '::', '[::1]',
-  'fc00::1', 'fd12:3456::1',                // fc00::/7
-  'fe80::1', 'fe90::1', 'febf::1',          // fe80::/10 —— 旧实现 startsWith('fe80') 只覆盖 fe80–fe8f
-  'ff02::1',                                // ff00::/8 组播
-  '100::1',                                 // 100::/64 discard-only（不在 2000::/3 → fail-closed）
-  'fec0::1',                                // 旧 site-local（同上）
+  '::1',
+  '::',
+  '[::1]',
+  'fc00::1',
+  'fd12:3456::1', // fc00::/7
+  'fe80::1',
+  'fe90::1',
+  'febf::1', // fe80::/10 —— 旧实现 startsWith('fe80') 只覆盖 fe80–fe8f
+  'ff02::1', // ff00::/8 组播
+  '100::1', // 100::/64 discard-only（不在 2000::/3 → fail-closed）
+  'fec0::1', // 旧 site-local（同上）
   // IPv4-mapped / 6to4 / NAT64 的内网形式（①里的等价表已验数值，这里验最终判定）
-  '[::ffff:7f00:1]', '::ffff:7f00:1', '::ffff:a00:1', '::ffff:c0a8:1', '::ffff:a9fe:a9fe',
-  '::7f00:1', '2002:7f00:1::', '64:ff9b::7f00:1',
+  '[::ffff:7f00:1]',
+  '::ffff:7f00:1',
+  '::ffff:a00:1',
+  '::ffff:c0a8:1',
+  '::ffff:a9fe:a9fe',
+  '::7f00:1',
+  '2002:7f00:1::',
+  '64:ff9b::7f00:1',
 ];
 
 /** 判为公网（必须放行——修复不能把正常地址一起拦掉） */
 const PUBLIC: readonly string[] = [
-  '8.8.8.8', '1.1.1.1', '100.63.255.255', '100.128.0.1',   // CGNAT 段两侧边界
-  '172.15.255.255', '172.32.0.1',                          // 172.16/12 两侧边界
-  '198.17.255.255', '198.20.0.1',                          // 198.18/15 两侧边界
-  '192.0.1.1', '192.88.98.1', '192.88.100.1',              // 192.0.0/24 与 192.88.99/24 邻接
-  '223.255.255.255', '1.0.0.1',                            // 224/4 与 0/8 的下边界之外
-  '::ffff:808:808', '2002:0808:0808::', '64:ff9b::808:808',
-  '2001:4860:4860::8888', '2606:4700:4700::1111',          // 真实公网 v6（Google DNS / Cloudflare DNS）
+  '8.8.8.8',
+  '1.1.1.1',
+  '100.63.255.255',
+  '100.128.0.1', // CGNAT 段两侧边界
+  '172.15.255.255',
+  '172.32.0.1', // 172.16/12 两侧边界
+  '198.17.255.255',
+  '198.20.0.1', // 198.18/15 两侧边界
+  '192.0.1.1',
+  '192.88.98.1',
+  '192.88.100.1', // 192.0.0/24 与 192.88.99/24 邻接
+  '223.255.255.255',
+  '1.0.0.1', // 224/4 与 0/8 的下边界之外
+  '::ffff:808:808',
+  '2002:0808:0808::',
+  '64:ff9b::808:808',
+  '2001:4860:4860::8888',
+  '2606:4700:4700::1111', // 真实公网 v6（Google DNS / Cloudflare DNS）
 ];
 
 describe('A3② 私网/保留段判定', () => {
@@ -233,18 +276,22 @@ describe('A3④ web_fetch DNS 钉扎', () => {
 
   it('DNS 答案混有公网和私网时 fail-closed 且不连接', async () => {
     let hits = 0;
-    const server = createServer((_req, res) => { hits++; res.end('must not connect'); });
+    const server = createServer((_req, res) => {
+      hits++;
+      res.end('must not connect');
+    });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     server.unref();
     const port = (server.address() as AddressInfo).port;
     try {
       await assert.rejects(
-        () => fetchDoc(`http://mixed.example.test:${port}/`, undefined, undefined, {
-          resolveAddresses: async () => [
-            { address: '8.8.8.8', family: 4 },
-            { address: '127.0.0.1', family: 4 },
-          ],
-        }),
+        () =>
+          fetchDoc(`http://mixed.example.test:${port}/`, undefined, undefined, {
+            resolveAddresses: async () => [
+              { address: '8.8.8.8', family: 4 },
+              { address: '127.0.0.1', family: 4 },
+            ],
+          }),
         /解析到内网/,
       );
       assert.equal(hits, 0);
@@ -265,7 +312,13 @@ describe('SEC-02 SEARCH_PROXY 可信配置边界', () => {
   it('只接受无凭据的 http/https 代理 URL', () => {
     assert.equal(validateSearchProxy('http://127.0.0.1:7897').protocol, 'http:');
     assert.equal(validateSearchProxy('https://proxy.example.test').hostname, 'proxy.example.test');
-    for (const value of ['file:///tmp/proxy', 'socks5://127.0.0.1:1080', 'http://user:pass@proxy.test', 'http://proxy.test/?token=x', 'not-a-url']) {
+    for (const value of [
+      'file:///tmp/proxy',
+      'socks5://127.0.0.1:1080',
+      'http://user:pass@proxy.test',
+      'http://proxy.test/?token=x',
+      'not-a-url',
+    ]) {
       assert.throws(() => validateSearchProxy(value), /SEARCH_PROXY/);
     }
   });
@@ -287,15 +340,18 @@ describe('SEC-02 SEARCH_PROXY 可信配置边界', () => {
 
 describe('A3③ 体积上限：流式累积 + 越界即断连', () => {
   const CHUNK = 1024;
-  const MAX_CHUNKS = 2000;     // 服务端最多吐 ~2MB
-  const LIMIT = 20_000;        // 客户端上限 20KB
+  const MAX_CHUNKS = 2000; // 服务端最多吐 ~2MB
+  const LIMIT = 20_000; // 客户端上限 20KB
 
   let server: Server | null = null;
   /** 服务端实际写出的块数（每次请求重置）——用来证明"越界就断连"而不是"先全读进内存" */
   let written = 0;
   let finished = false;
 
-  after(() => { server?.close(); server = null; });
+  after(() => {
+    server?.close();
+    server = null;
+  });
 
   async function start(): Promise<string> {
     if (server) return `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
@@ -316,10 +372,17 @@ describe('A3③ 体积上限：流式累积 + 越界即断连', () => {
       finished = false;
       res.writeHead(200, { 'Content-Type': 'application/octet-stream' });
       const timer = setInterval(() => {
-        if (res.destroyed || res.writableEnded) { clearInterval(timer); return; }
+        if (res.destroyed || res.writableEnded) {
+          clearInterval(timer);
+          return;
+        }
         written++;
         res.write(Buffer.alloc(CHUNK, 0x41));
-        if (written >= MAX_CHUNKS) { clearInterval(timer); finished = true; res.end(); }
+        if (written >= MAX_CHUNKS) {
+          clearInterval(timer);
+          finished = true;
+          res.end();
+        }
       }, 2);
       res.on('close', () => clearInterval(timer));
     });
@@ -331,7 +394,11 @@ describe('A3③ 体积上限：流式累积 + 越界即断连', () => {
   async function withLocalAllowed<T>(fn: () => Promise<T>): Promise<T> {
     // 本机 mock 端点当然在私网：这一节验的是体积上限，判定逻辑由上面两节独立覆盖
     process.env[ENV_KEY] = '1';
-    try { return await fn(); } finally { delete process.env[ENV_KEY]; }
+    try {
+      return await fn();
+    } finally {
+      delete process.env[ENV_KEY];
+    }
   }
 
   it('无 content-length 的长流：越界即拒，且服务端远未写完（证明未整包驻内存）', async () => {

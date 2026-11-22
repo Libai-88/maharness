@@ -21,12 +21,9 @@
  *
  * 实现：git sparse-checkout 拉单目录（零新依赖，复用本机 git）→ 临时目录校验 → 原子换入。
  */
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import {
-  existsSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync, readFileSync,
-  statSync, renameSync,
-} from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, rmSync, copyFileSync, readdirSync, readFileSync, statSync, renameSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve, sep } from 'node:path';
 import { verifyLockFile, type LockSignature } from './lock-signature';
@@ -75,7 +72,9 @@ function compareSemver(a: Semver, b: Semver): number {
 }
 
 function parseComparator(raw: string): { op: '=' | '^' | '~' | '>=' | '<=' | '>' | '<'; version: Semver } | null {
-  const text = String(raw ?? '').trim().replace(/^v/, '');
+  const text = String(raw ?? '')
+    .trim()
+    .replace(/^v/, '');
   const match = /^(>=|<=|>|<|\^|~|=)?\s*(\d+\.\d+\.\d+)$/.exec(text);
   if (!match) return null;
   const version = parseSemver(match[2]!);
@@ -86,11 +85,16 @@ function parseComparator(raw: string): { op: '=' | '^' | '~' | '>=' | '<=' | '>'
 function comparatorMatches(version: Semver, comparator: { op: string; version: Semver }): boolean {
   const cmp = compareSemver(version, comparator.version);
   switch (comparator.op) {
-    case '=': return cmp === 0;
-    case '>': return cmp > 0;
-    case '>=': return cmp >= 0;
-    case '<': return cmp < 0;
-    case '<=': return cmp <= 0;
+    case '=':
+      return cmp === 0;
+    case '>':
+      return cmp > 0;
+    case '>=':
+      return cmp >= 0;
+    case '<':
+      return cmp < 0;
+    case '<=':
+      return cmp <= 0;
     case '^': {
       const [major, minor, patch] = comparator.version;
       const upper: Semver = major > 0 ? [major + 1, 0, 0] : minor > 0 ? [0, minor + 1, 0] : [0, 0, patch + 1];
@@ -100,14 +104,17 @@ function comparatorMatches(version: Semver, comparator: { op: string; version: S
       const [major, minor] = comparator.version;
       return cmp >= 0 && compareSemver(version, [major, minor + 1, 0]) < 0;
     }
-    default: return false;
+    default:
+      return false;
   }
 }
 
 export function isValidVersionRange(range: string): boolean {
   const raw = String(range ?? '').trim();
   if (['*', 'latest', 'any'].includes(raw.toLowerCase())) return true;
-  const alternatives = String(range ?? '').trim().split('||');
+  const alternatives = String(range ?? '')
+    .trim()
+    .split('||');
   if (alternatives.length === 0 || alternatives.some((part) => !part.trim())) return false;
   return alternatives.every((part) => {
     const comparators = part.trim().split(/\s+/).filter(Boolean);
@@ -202,7 +209,10 @@ export function validateLockFile(lock: LockFile, opts: { publicKey?: string } = 
 }
 
 /** 一个文件的相对路径 + 实际 sha256 */
-export interface SkillFileHash { path: string; sha256: string }
+export interface SkillFileHash {
+  path: string;
+  sha256: string;
+}
 
 export interface SyncResult {
   name: string;
@@ -229,7 +239,7 @@ export interface SyncResult {
 
 function run(cmd: string, args: string[], cwd?: string, timeoutMs = 120_000): Promise<{ code: number; stdout: string; stderr: string }> {
   return new Promise((resolveP, rejectP) => {
-    let child;
+    let child: ChildProcess;
     try {
       child = spawn(cmd, args, { cwd, windowsHide: true });
     } catch (err) {
@@ -239,13 +249,27 @@ function run(cmd: string, args: string[], cwd?: string, timeoutMs = 120_000): Pr
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
-      try { child.kill('SIGKILL'); } catch { /* 忽略 */ }
+      try {
+        child.kill('SIGKILL');
+      } catch {
+        /* 忽略 */
+      }
       rejectP(new Error(`${cmd} 超时（${timeoutMs / 1000}s）`));
     }, timeoutMs);
-    child.stdout?.on('data', (d: Buffer) => { stdout += d.toString('utf8'); });
-    child.stderr?.on('data', (d: Buffer) => { stderr += d.toString('utf8'); });
-    child.on('error', (err) => { clearTimeout(timer); rejectP(err); });
-    child.on('close', (code) => { clearTimeout(timer); resolveP({ code: code ?? -1, stdout, stderr }); });
+    child.stdout?.on('data', (d: Buffer) => {
+      stdout += d.toString('utf8');
+    });
+    child.stderr?.on('data', (d: Buffer) => {
+      stderr += d.toString('utf8');
+    });
+    child.on('error', (err) => {
+      clearTimeout(timer);
+      rejectP(err);
+    });
+    child.on('close', (code) => {
+      clearTimeout(timer);
+      resolveP({ code: code ?? -1, stdout, stderr });
+    });
   });
 }
 
@@ -286,7 +310,13 @@ function listTreeFiles(dir: string, base = dir): string[] {
   for (const e of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, e.name);
     if (e.isDirectory()) out.push(...listTreeFiles(full, base));
-    else if (e.isFile()) out.push(full.slice(base.length + 1).split(sep).join('/'));
+    else if (e.isFile())
+      out.push(
+        full
+          .slice(base.length + 1)
+          .split(sep)
+          .join('/'),
+      );
   }
   return out.sort((a, b) => a.localeCompare(b));
 }
@@ -298,7 +328,13 @@ export function listTreeWithHashes(dir: string, base = dir): SkillFileHash[] {
     const full = join(dir, e.name);
     if (e.isDirectory()) out.push(...listTreeWithHashes(full, base));
     else if (e.isFile()) {
-      out.push({ path: full.slice(base.length + 1).split(sep).join('/'), sha256: sha256File(full) });
+      out.push({
+        path: full
+          .slice(base.length + 1)
+          .split(sep)
+          .join('/'),
+        sha256: sha256File(full),
+      });
     }
   }
   return out.sort((a, b) => a.path.localeCompare(b.path));
@@ -341,7 +377,11 @@ function backupExistingSkill(name: string, destDir: string, destSkillsDir: strin
   copyTree(destDir, target);
   const backups = listSkillBackups(name, destSkillsDir);
   for (const stale of backups.slice(MAX_SKILL_BACKUPS)) {
-    try { rmSync(stale, { recursive: true, force: true }); } catch { /* 旧备份清理失败无害 */ }
+    try {
+      rmSync(stale, { recursive: true, force: true });
+    } catch {
+      /* 旧备份清理失败无害 */
+    }
   }
   return target;
 }
@@ -372,7 +412,11 @@ export function rollbackSkill(name: string, destSkillsDir: string, backup?: stri
   } catch (err) {
     return { name: safeName, ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
-    try { rmSync(stagingParent, { recursive: true, force: true }); } catch { /* 清理失败无害 */ }
+    try {
+      rmSync(stagingParent, { recursive: true, force: true });
+    } catch {
+      /* 清理失败无害 */
+    }
   }
 }
 
@@ -392,7 +436,10 @@ export function copyListedFiles(srcRoot: string, destRoot: string, paths: string
 
 /** 相对路径安全拼接（拒绝越界与绝对路径）；非法返回 null */
 function safeJoin(root: string, rel: string): string | null {
-  const clean = String(rel ?? '').replace(/\\/g, '/').replace(/^\.\/+/, '').replace(/^\/+/, '');
+  const clean = String(rel ?? '')
+    .replace(/\\/g, '/')
+    .replace(/^\.\/+/, '')
+    .replace(/^\/+/, '');
   if (!clean || clean.includes('..')) return null;
   const abs = resolve(root, clean);
   const r = resolve(root);
@@ -412,9 +459,16 @@ export function normalizeManifest(entry: LockSkillEntry): { map: Map<string, str
   if (raw === undefined || raw === null) return { map: null };
   const map = new Map<string, string>();
   const add = (p: unknown, h: unknown) => {
-    const rel = String(p ?? '').replace(/\\/g, '/').replace(/^\.\/+/, '');
-    const hash = String(h ?? '').trim().toLowerCase();
-    if (!rel || !/^[0-9a-f]{64}$/.test(hash)) { map.set(rel || String(p ?? ''), hash || '__invalid__'); return; }
+    const rel = String(p ?? '')
+      .replace(/\\/g, '/')
+      .replace(/^\.\/+/, '');
+    const hash = String(h ?? '')
+      .trim()
+      .toLowerCase();
+    if (!rel || !/^[0-9a-f]{64}$/.test(hash)) {
+      map.set(rel || String(p ?? ''), hash || '__invalid__');
+      return;
+    }
     map.set(rel, hash);
   };
   if (Array.isArray(raw)) {
@@ -455,8 +509,14 @@ export interface VerifyReport {
  */
 export function verifyStagedSkill(stagedSkillDir: string, entry: LockSkillEntry): VerifyReport {
   const base: VerifyReport = {
-    ok: false, verifiedFiles: 0, manifest: false, mismatch: false,
-    errors: [], warnings: [], unverified: [], skippedUnlisted: [],
+    ok: false,
+    verifiedFiles: 0,
+    manifest: false,
+    mismatch: false,
+    errors: [],
+    warnings: [],
+    unverified: [],
+    skippedUnlisted: [],
   };
   const mdPath = join(stagedSkillDir, 'SKILL.md');
   if (!existsSync(mdPath)) return { ...base, errors: ['技能目录缺少 SKILL.md'] };
@@ -465,19 +525,28 @@ export function verifyStagedSkill(stagedSkillDir: string, entry: LockSkillEntry)
   const actual = listTreeWithHashes(stagedSkillDir);
 
   const { map, error } = normalizeManifest(entry);
-  if (error) { report.errors.push(error); return report; }
+  if (error) {
+    report.errors.push(error);
+    return report;
+  }
 
   if (map) {
     report.manifest = true;
     // 1) 清单里每条都必须存在且哈希一致
     for (const [rel, want] of map) {
-      if (!safeJoin(stagedSkillDir, rel)) { report.errors.push(`清单路径非法: ${rel}`); continue; }
+      if (!safeJoin(stagedSkillDir, rel)) {
+        report.errors.push(`清单路径非法: ${rel}`);
+        continue;
+      }
       if (want === '__invalid__' || !/^[0-9a-f]{64}$/.test(want)) {
         report.errors.push(`清单哈希非法（须 64 位 sha256hex）: ${rel}`);
         continue;
       }
       const abs = safeJoin(stagedSkillDir, rel);
-      if (!abs || !existsSync(abs)) { report.errors.push(`清单要求的文件不存在: ${rel}`); continue; }
+      if (!abs || !existsSync(abs)) {
+        report.errors.push(`清单要求的文件不存在: ${rel}`);
+        continue;
+      }
       const got = sha256File(abs);
       if (got !== want) {
         report.mismatch = true;
@@ -523,9 +592,11 @@ export function verifyStagedSkill(stagedSkillDir: string, entry: LockSkillEntry)
     const risky = report.unverified.filter((f) => /^scripts\//i.test(f.path) || EXEC_EXT.test(f.path));
     const hint = report.unverified.map((f) => `"${f.path}": "${f.sha256}"`).join(', ');
     report.warnings.push(
-      `锁文件没有 files 清单：${report.unverified.length} 个文件随 SKILL.md 一起落盘但**没有哈希锚点**`
-      + (risky.length ? `，其中 ${risky.length} 个属脚本/可执行文件（${risky.map((f) => f.path).join(', ')}）——技能执行脚本即构成执行面` : '')
-      + `。建议把它们钉进锁文件：{ ${hint} }`,
+      `锁文件没有 files 清单：${report.unverified.length} 个文件随 SKILL.md 一起落盘但**没有哈希锚点**` +
+        (risky.length
+          ? `，其中 ${risky.length} 个属脚本/可执行文件（${risky.map((f) => f.path).join(', ')}）——技能执行脚本即构成执行面`
+          : '') +
+        `。建议把它们钉进锁文件：{ ${hint} }`,
     );
   }
   report.ok = report.errors.length === 0;
@@ -560,11 +631,18 @@ function atomicSwap(stagingDir: string, destDir: string, destSkillsDir: string):
   try {
     renameSync(stagingDir, destDir);
   } catch (err) {
-    try { renameSync(backup, destDir); } catch { /* 放回也失败：下面重抛原始错误，现场保持可查 */ }
+    try {
+      renameSync(backup, destDir);
+    } catch {
+      /* 放回也失败：下面重抛原始错误，现场保持可查 */
+    }
     throw err;
   }
-  try { rmSync(backup, { recursive: true, force: true }); }
-  catch (err) { console.warn('[skills] 旧技能目录清理失败（无害，残留可手删）:', err instanceof Error ? err.message : String(err)); }
+  try {
+    rmSync(backup, { recursive: true, force: true });
+  } catch (err) {
+    console.warn('[skills] 旧技能目录清理失败（无害，残留可手删）:', err instanceof Error ? err.message : String(err));
+  }
 }
 
 /**
@@ -612,9 +690,11 @@ export function installFromSourceTree(
       if (!present.includes('SKILL.md')) {
         const missing = wanted.filter((p) => !present.includes(p));
         return {
-          name: safeName, ok: false,
-          error: `锁清单里定位不到 SKILL.md（清单缺项: ${missing.join(', ') || '无'}；`
-            + '注意 files 的路径是相对技能目录的，例如 "SKILL.md"、"scripts/run.py"）',
+          name: safeName,
+          ok: false,
+          error:
+            `锁清单里定位不到 SKILL.md（清单缺项: ${missing.join(', ') || '无'}；` +
+            '注意 files 的路径是相对技能目录的，例如 "SKILL.md"、"scripts/run.py"）',
         };
       }
     } else {
@@ -632,13 +712,14 @@ export function installFromSourceTree(
       const allowMismatch = opts.acceptMismatch === true || process.env.MAHARNESS_ALLOW_SKILL_HASH_MISMATCH === '1';
       if (!(report.mismatch && allowMismatch)) {
         return {
-          name: safeName, ok: false,
+          name: safeName,
+          ok: false,
           mismatch: report.mismatch || undefined,
-          hash: report.hash, manifest: report.manifest,
-          error: report.errors.join('; ')
-            + (report.mismatch
-              ? '——请更新 skills-lock.json 的 computedHash/files 后重装（force 只覆盖已安装，不豁免校验）'
-              : ''),
+          hash: report.hash,
+          manifest: report.manifest,
+          error:
+            report.errors.join('; ') +
+            (report.mismatch ? '——请更新 skills-lock.json 的 computedHash/files 后重装（force 只覆盖已安装，不豁免校验）' : ''),
           warnings,
         };
       }
@@ -651,11 +732,15 @@ export function installFromSourceTree(
     atomicSwap(stagingDir, destDir, destSkillsDir);
     const files = countFiles(destDir);
     return {
-      name: safeName, ok: true, installed: true,
-      hash: report.hash, files,
-      manifest: report.manifest, verifiedFiles: report.verifiedFiles,
+      name: safeName,
+      ok: true,
+      installed: true,
+      hash: report.hash,
+      files,
+      manifest: report.manifest,
+      verifiedFiles: report.verifiedFiles,
       unverified: report.unverified.length ? report.unverified : undefined,
-      skippedUnlisted: unlisted.length ? unlisted : (report.skippedUnlisted.length ? report.skippedUnlisted : undefined),
+      skippedUnlisted: unlisted.length ? unlisted : report.skippedUnlisted.length ? report.skippedUnlisted : undefined,
       warnings: warnings.length ? warnings : undefined,
       backup,
     };
@@ -663,7 +748,11 @@ export function installFromSourceTree(
     return { name: safeName, ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
     // 临时父目录无论成败都清掉：校验失败绝不留半成品（destDir 也未被动过）
-    try { rmSync(stagingParent, { recursive: true, force: true }); } catch { /* 临时目录清理失败无害 */ }
+    try {
+      rmSync(stagingParent, { recursive: true, force: true });
+    } catch {
+      /* 临时目录清理失败无害 */
+    }
   }
 }
 
@@ -693,8 +782,12 @@ export async function installSkill(
   let tmp = '';
   try {
     tmp = mkdtempSync(join(tmpdir(), 'mh-skill-'));
-    const clone = await run(git, ['clone', '--depth', '1', '--filter=blob:none', '--sparse',
-      `https://github.com/${entry.source}.git`, tmp], undefined, 180_000);
+    const clone = await run(
+      git,
+      ['clone', '--depth', '1', '--filter=blob:none', '--sparse', `https://github.com/${entry.source}.git`, tmp],
+      undefined,
+      180_000,
+    );
     if (clone.code !== 0) return { name: safeName, ok: false, error: `git clone 失败: ${(clone.stderr || clone.stdout).slice(0, 300)}` };
     const sparse = await run(git, ['-C', tmp, 'sparse-checkout', 'set', dirname(rel)], tmp, 60_000);
     if (sparse.code !== 0) return { name: safeName, ok: false, error: `sparse-checkout 失败: ${sparse.stderr.slice(0, 300)}` };
@@ -704,11 +797,21 @@ export async function installSkill(
   } catch (err) {
     return { name: safeName, ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
-    if (tmp) { try { rmSync(tmp, { recursive: true, force: true }); } catch { /* 临时目录清理失败无害 */ } }
+    if (tmp) {
+      try {
+        rmSync(tmp, { recursive: true, force: true });
+      } catch {
+        /* 临时目录清理失败无害 */
+      }
+    }
   }
 }
 
 /** 目录是否存在且可读为目录（供路由层做参数校验） */
 export function isDirectory(p: string): boolean {
-  try { return statSync(p).isDirectory(); } catch { return false; }
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }

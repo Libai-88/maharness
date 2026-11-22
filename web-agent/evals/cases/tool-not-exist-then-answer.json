@@ -1,9 +1,7 @@
 {
   "name": "tool-not-exist-then-answer",
   "description": "容错：LLM 调用不存在的工具 → 不崩溃、回填失败信息 → 下一轮给出最终回答",
-  "messages": [
-    { "role": "user", "content": "请检查一下当前目录结构然后告诉我结果" }
-  ],
+  "messages": [{ "role": "user", "content": "请检查一下当前目录结构然后告诉我结果" }],
   "requests": [
     {
       "chunks": [

@@ -97,7 +97,7 @@ export function describeToolOutcome(name: string, summary: string, ok: boolean):
       if (answer) return answer;
       if (name === 'run_parallel') {
         const rec = (data && typeof data === 'object' ? data : {}) as Record<string, unknown>;
-        const results = Array.isArray(rec.results) ? rec.results as { ok?: boolean }[] : [];
+        const results = Array.isArray(rec.results) ? (rec.results as { ok?: boolean }[]) : [];
         const done = results.filter((r) => r?.ok !== false).length;
         return results.length ? `${results.length} 路里有 ${done} 路交回了结果` : '小队回来了，但没带话';
       }
@@ -127,7 +127,7 @@ function tryJson(s: string): Record<string, unknown> | null {
   if (!s.startsWith('{') && !s.startsWith('[')) return null;
   try {
     const v = JSON.parse(s);
-    return v && typeof v === 'object' ? v as Record<string, unknown> : null;
+    return v && typeof v === 'object' ? (v as Record<string, unknown>) : null;
   } catch {
     // 工具结果是被 summarize() 截断过的 → JSON 不完整。退一步：用正则把关键字段抠出来。
     const m = s.match(/"(?:answer|summary|error|message|reason)"\s*:\s*"((?:[^"\\]|\\.)*)/);
@@ -144,7 +144,19 @@ export function tidySentence(s: string, max = 160): string {
   return one.length > max ? `${one.slice(0, max)}…` : one;
 }
 
-export type ErrorKind = 'aborted' | 'budget' | 'deadline' | 'max-turns' | 'policy' | 'upstream' | 'network' | 'busy' | 'auth' | 'parameter' | 'business' | 'transient';
+export type ErrorKind =
+  | 'aborted'
+  | 'budget'
+  | 'deadline'
+  | 'max-turns'
+  | 'policy'
+  | 'upstream'
+  | 'network'
+  | 'busy'
+  | 'auth'
+  | 'parameter'
+  | 'business'
+  | 'transient';
 
 export interface HumanError {
   /** 摆在气泡里的人话 */
@@ -159,13 +171,17 @@ export interface HumanError {
 export function humanizeError(raw: string, kind?: ErrorKind): HumanError {
   const msg = (raw ?? '').trim();
   if (kind === 'aborted' || msg === '已停止' || msg === '已中断') {
-    return { text: '', hint: undefined, severe: false };      // 停止走"系统条"，不走错误
+    return { text: '', hint: undefined, severe: false }; // 停止走"系统条"，不走错误
   }
   if (kind === 'busy' || /该会话有任务进行中/.test(msg)) {
     return { text: sys.busy, severe: false };
   }
   if (kind === 'budget' || /成本预算已耗尽/.test(msg)) {
-    return { text: '这次说到这儿就停了——预算用完了。已完成的部分都在，接着聊或新建一个都行。', hint: '可在「设置」里调整预算', severe: false };
+    return {
+      text: '这次说到这儿就停了——预算用完了。已完成的部分都在，接着聊或新建一个都行。',
+      hint: '可在「设置」里调整预算',
+      severe: false,
+    };
   }
   if (kind === 'deadline') return { text: '任务超过了设定时限，已停止后续执行。', hint: tidySentence(msg, 100), severe: false };
   if (kind === 'max-turns' || /轮数上限/.test(msg)) {
@@ -218,7 +234,11 @@ export function displayTitle(title: string | undefined): string {
 export function chatTime(ts: number, now = Date.now()): string {
   const d = new Date(ts);
   const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
-  const startOfDay = (t: number) => { const x = new Date(t); x.setHours(0, 0, 0, 0); return x.getTime(); };
+  const startOfDay = (t: number) => {
+    const x = new Date(t);
+    x.setHours(0, 0, 0, 0);
+    return x.getTime();
+  };
   const dayDiff = Math.round((startOfDay(now) - startOfDay(ts)) / 86_400_000);
   const diff = now - ts;
   if (dayDiff <= 0) {

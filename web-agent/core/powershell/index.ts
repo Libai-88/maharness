@@ -18,21 +18,82 @@ import { adminToolDenied } from '../../kernel/plugin-sdk';
  * 「段内出现的每一个 `Verb-Noun` 都必须在白名单里」——列表太窄会把 `Get-ChildItem | Group-Object`
  * 这类正常只读命令误拦（A10 的同族问题）。新增项全部是无副作用的筛选/输出/路径/转换 cmdlet。 */
 const READONLY_EXE = new Set([
-  'get-childitem', 'get-item', 'get-itemproperty', 'get-content', 'get-process', 'get-service',
-  'get-date', 'get-location', 'select-string', 'measure-object', 'where-object', 'sort-object',
-  'select-object', 'format-list', 'format-table', 'get-command', 'get-member', 'test-path',
-  'resolve-path', 'ls', 'dir', 'cat', 'type', 'whoami', 'hostname', 'pwd', 'tree', 'echo', 'findstr', 'rg',
+  'get-childitem',
+  'get-item',
+  'get-itemproperty',
+  'get-content',
+  'get-process',
+  'get-service',
+  'get-date',
+  'get-location',
+  'select-string',
+  'measure-object',
+  'where-object',
+  'sort-object',
+  'select-object',
+  'format-list',
+  'format-table',
+  'get-command',
+  'get-member',
+  'test-path',
+  'resolve-path',
+  'ls',
+  'dir',
+  'cat',
+  'type',
+  'whoami',
+  'hostname',
+  'pwd',
+  'tree',
+  'echo',
+  'findstr',
+  'rg',
   // —— 无副作用的筛选/输出/路径/反序列化（A1 配套扩充）
-  'group-object', 'compare-object', 'get-unique', 'split-path', 'join-path', 'get-childitem2',
-  'out-string', 'out-null', 'out-host', 'write-host', 'write-output', 'write-information',
-  'write-verbose', 'write-debug', 'convertfrom-json', 'convertfrom-csv', 'convertto-json', 'convertto-csv',
-  'get-contentinfo', 'stat', 'which', 'where', 'get-acl', 'test-connection',
+  'group-object',
+  'compare-object',
+  'get-unique',
+  'split-path',
+  'join-path',
+  'get-childitem2',
+  'out-string',
+  'out-null',
+  'out-host',
+  'write-host',
+  'write-output',
+  'write-information',
+  'write-verbose',
+  'write-debug',
+  'convertfrom-json',
+  'convertfrom-csv',
+  'convertto-json',
+  'convertto-csv',
+  'get-contentinfo',
+  'stat',
+  'which',
+  'where',
+  'get-acl',
+  'test-connection',
 ]);
 
 /** git 只读子命令（无位置参数副作用） */
 const GIT_READONLY_SUBS = new Set([
-  'status', 'diff', 'log', 'show', 'ls-files', 'ls-tree', 'rev-parse', 'describe', 'blame',
-  'cat-file', 'shortlog', 'count-objects', 'reflog', 'rev-list', 'diff-tree', 'grep', 'whatchanged',
+  'status',
+  'diff',
+  'log',
+  'show',
+  'ls-files',
+  'ls-tree',
+  'rev-parse',
+  'describe',
+  'blame',
+  'cat-file',
+  'shortlog',
+  'count-objects',
+  'reflog',
+  'rev-list',
+  'diff-tree',
+  'grep',
+  'whatchanged',
 ]);
 /** git 需要按参数细分的子命令及其允许旗标 */
 const GIT_SUB_FLAGS: Record<string, string[]> = {
@@ -70,7 +131,11 @@ const DANGEROUS_PATTERNS: { pattern: RegExp; reason: string }[] = [
   { pattern: /\b(Enable-PSRemoting|New-SelfSignedCertificate|Clear-EventLog)\b/i, reason: '高危系统操作' },
   { pattern: /\b(npx|npm\s+(install|i|add|uninstall|link|publish)|pip\s+install|pnpm\s+(add|install))\b/i, reason: '安装/执行外部代码' },
   // A1 新增：代码执行 / 对象创建 / 类型加载 / 进程启动 / 反射入口
-  { pattern: /\b(New-Object|Add-Type|Invoke-Command|Invoke-Item|Start-Process|Start-Job|Start-ThreadJob|Register-ObjectEvent|Register-EngineEvent|ConvertTo-SecureString|Set-Variable|New-Item|Install-Module|Import-Module)\b/i, reason: '创建对象/加载类型或模块/启动进程/执行命令' },
+  {
+    pattern:
+      /\b(New-Object|Add-Type|Invoke-Command|Invoke-Item|Start-Process|Start-Job|Start-ThreadJob|Register-ObjectEvent|Register-EngineEvent|ConvertTo-SecureString|Set-Variable|New-Item|Install-Module|Import-Module)\b/i,
+    reason: '创建对象/加载类型或模块/启动进程/执行命令',
+  },
 ];
 
 /** 去掉引号内内容后的扫描串（单引号原样串 / 双引号插值串 / 反引号转义）。
@@ -83,11 +148,22 @@ function stripQuoted(command: string): string {
   for (let i = 0; i < command.length; i++) {
     const c = command[i];
     if (quote) {
-      if (c === '`') { i++; continue; }          // 反引号转义：跳过下一个字符
-      if (c === quote) { quote = null; out += ' '; continue; }
-      continue;                                   // 引号内内容一律丢弃
+      if (c === '`') {
+        i++;
+        continue;
+      } // 反引号转义：跳过下一个字符
+      if (c === quote) {
+        quote = null;
+        out += ' ';
+        continue;
+      }
+      continue; // 引号内内容一律丢弃
     }
-    if (c === '"' || c === "'") { quote = c; out += ' '; continue; }
+    if (c === '"' || c === "'") {
+      quote = c;
+      out += ' ';
+      continue;
+    }
     out += c;
   }
   return out;
@@ -102,13 +178,20 @@ export function stripSingleQuoted(command: string): string {
     const c = command[i];
     if (inSingle) {
       if (c === "'") {
-        if (command[i + 1] === "'") { i++; continue; } // 单引号内的 '' 是转义
+        if (command[i + 1] === "'") {
+          i++;
+          continue;
+        } // 单引号内的 '' 是转义
         inSingle = false;
         out += ' ';
       }
       continue;
     }
-    if (c === "'") { inSingle = true; out += ' '; continue; }
+    if (c === "'") {
+      inSingle = true;
+      out += ' ';
+      continue;
+    }
     out += c;
   }
   return out;
@@ -136,16 +219,29 @@ export function scriptBodies(seg: string): string[] | null {
   for (let i = 0; i < seg.length; i++) {
     const c = seg[i];
     if (quote) {
-      if (c === '`') { i++; continue; }
+      if (c === '`') {
+        i++;
+        continue;
+      }
       if (c === quote) quote = null;
       continue;
     }
-    if (c === '"' || c === "'") { quote = c; continue; }
-    if (c === '{') { if (depth === 0) start = i + 1; depth++; continue; }
+    if (c === '"' || c === "'") {
+      quote = c;
+      continue;
+    }
+    if (c === '{') {
+      if (depth === 0) start = i + 1;
+      depth++;
+      continue;
+    }
     if (c === '}') {
       depth--;
       if (depth < 0) return null;
-      if (depth === 0 && start >= 0) { bodies.push(seg.slice(start, i)); start = -1; }
+      if (depth === 0 && start >= 0) {
+        bodies.push(seg.slice(start, i));
+        start = -1;
+      }
     }
   }
   return depth === 0 ? bodies : null;
@@ -157,21 +253,21 @@ export function scriptBodies(seg: string): string[] | null {
 export function scriptBlockIsSafe(body: string): boolean {
   const raw = body.trim();
   if (!raw) return true;
-  if (/::|\$\(|@\(|\[[A-Za-z_]/.test(raw)) return false;      // 成员/子表达式/类型
-  if (/[;]|\}/.test(raw)) return false;                        // 多语句或嵌套块（已由外层保证无 }）
+  if (/::|\$\(|@\(|\[[A-Za-z_]/.test(raw)) return false; // 成员/子表达式/类型
+  if (/[;]|\}/.test(raw)) return false; // 多语句或嵌套块（已由外层保证无 }）
   // 紧跟标识符/右括号的 `(` 是方法调用或命令调用（`$_.Kill()`、`(& x)`）：
   // 比较型筛选不需要这种括号，`($_.Length -gt 1000) -and (...)` 这类分组括号仍被放行
   if (/[\w)\]]\s*\(/.test(raw)) return false;
   if (/(^|[^=!<>])=(?!=)/.test(raw.replace(/-eq\b|-ne\b/gi, ' '))) return false; // 赋值
-  if (/[&]|\.\s*["'$@]/.test(raw)) return false;               // 调用/dot-source
+  if (/[&]|\.\s*["'$@]/.test(raw)) return false; // 调用/dot-source
   let s = raw
-    .replace(/\$(?:_|PSItem)(?:\?\.)?(?:\.[A-Za-z_]\w*)*/gi, ' ')  // $_ 与它的属性链
+    .replace(/\$(?:_|PSItem)(?:\?\.)?(?:\.[A-Za-z_]\w*)*/gi, ' ') // $_ 与它的属性链
     .replace(/\$(?:true|false|null)/gi, ' ')
     .replace(/'(?:[^']|'')*'/g, ' ')
     .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
     .replace(/-(?:eq|ne|gt|lt|ge|le|like|notlike|match|notmatch|replace|contains|notcontains|in|notin|is|isnot|and|or|not)\b/gi, ' ')
     .replace(/\d+(?:\.\d+)?/g, ' ');
-  s = s.replace(/[\s(){}\-_,.|?:+*/%<>=\[\]"'`]/g, '');
+  s = s.replace(/[\s(){}\-_,.|?:+*/%<>=[\]"'`]/g, '');
   // 剩下的若是纯属性名链（.Name 形式，出现在不带 $_ 的上下文）仍视为可疑 → 只有全空才安全
   return s.length === 0;
 }
@@ -219,20 +315,46 @@ function splitSegments(command: string): string[] {
     const c = command[i];
     if (quote) {
       cur += c;
-      if (c === '`') { cur += command[++i] ?? ''; continue; }   // 反引号转义
+      if (c === '`') {
+        cur += command[++i] ?? '';
+        continue;
+      } // 反引号转义
       if (c === quote) quote = null;
       continue;
     }
-    if (c === '"' || c === "'") { quote = c; cur += c; continue; }
-    if (c === '{') { depth++; cur += c; continue; }
-    if (c === '}') { if (depth > 0) depth--; cur += c; continue; }
+    if (c === '"' || c === "'") {
+      quote = c;
+      cur += c;
+      continue;
+    }
+    if (c === '{') {
+      depth++;
+      cur += c;
+      continue;
+    }
+    if (c === '}') {
+      if (depth > 0) depth--;
+      cur += c;
+      continue;
+    }
     if (depth === 0) {
-      if (c === ';' || c === '\n') { out.push(cur); cur = ''; continue; }
-      if (c === '|') {
-        if (command[i + 1] === '|') i++;                          // || 整体作为分隔
-        out.push(cur); cur = ''; continue;
+      if (c === ';' || c === '\n') {
+        out.push(cur);
+        cur = '';
+        continue;
       }
-      if (c === '&' && command[i + 1] === '&') { i++; out.push(cur); cur = ''; continue; }
+      if (c === '|') {
+        if (command[i + 1] === '|') i++; // || 整体作为分隔
+        out.push(cur);
+        cur = '';
+        continue;
+      }
+      if (c === '&' && command[i + 1] === '&') {
+        i++;
+        out.push(cur);
+        cur = '';
+        continue;
+      }
     }
     cur += c;
   }
@@ -242,7 +364,7 @@ function splitSegments(command: string): string[] {
 
 function segmentTokens(seg: string): { exe: string; args: string[] } {
   const parts = seg.trim().split(/\s+/);
-  const args = parts.slice(1).map(a => a.replace(/^["']|["']$/g, ''));
+  const args = parts.slice(1).map((a) => a.replace(/^["']|["']$/g, ''));
   return { exe: firstTokenOf(seg), args };
 }
 
@@ -251,15 +373,15 @@ function gitIsReadOnly(args: string[]): boolean {
   const sub = args[0];
   if (!sub) return false;
   const rest = args.slice(1);
-  if (rest.some(a => a === '-C' || a === '--git-dir' || a === '--work-tree' || a.startsWith('--output'))) return false;
+  if (rest.some((a) => a === '-C' || a === '--git-dir' || a === '--work-tree' || a.startsWith('--output'))) return false;
   if (sub === 'config') return GIT_SUB_FLAGS.config.includes(args[1] ?? '');
   if (GIT_READONLY_SUBS.has(sub)) return true;
   const allow = GIT_SUB_FLAGS[sub];
   if (!allow) return false;
-  const flags = rest.filter(a => a.startsWith('-'));
-  const positionals = rest.filter(a => !a.startsWith('-'));
-  if (positionals.length) return false;          // 带位置参数（分支名/标签名）→ 交给审批
-  return flags.every(f => allow.includes(f));
+  const flags = rest.filter((a) => a.startsWith('-'));
+  const positionals = rest.filter((a) => !a.startsWith('-'));
+  if (positionals.length) return false; // 带位置参数（分支名/标签名）→ 交给审批
+  return flags.every((f) => allow.includes(f));
 }
 
 function npmIsReadOnly(args: string[]): boolean {
@@ -280,7 +402,8 @@ function segmentIsReadOnly(seg: string): boolean {
   if (READONLY_EXE.has(exe)) known = true;
   else if (exe === 'git') known = gitIsReadOnly(args);
   else if (exe === 'npm' || exe === 'pnpm' || exe === 'yarn') known = npmIsReadOnly(args);
-  else if (exe === 'node' || exe === 'python' || exe === 'python3' || exe === 'py') known = args.length === 1 && /^(-v|--version)$/.test(args[0]);
+  else if (exe === 'node' || exe === 'python' || exe === 'python3' || exe === 'py')
+    known = args.length === 1 && /^(-v|--version)$/.test(args[0]);
   else if (exe === 'pip' || exe === 'pip3') known = ['list', 'show', 'check'].includes(args[0] ?? '');
   if (!known) return false;
   // 命中白名单后仍要过构造检查：参数位夹带代码就不是「只读调用」
@@ -325,12 +448,40 @@ const STREAM_CAP = 128_000;
 
 /** env_probe 内置探测清单：覆盖编程与办公文档链路常用工具 */
 const PROBE_DEFAULTS = [
-  'git', 'node', 'npm', 'npx', 'pnpm', 'bun', 'python', 'python3', 'pip', 'rg', 'jq', 'tar', 'zip', '7z',
-  'pandoc', 'soffice', 'libreoffice', 'pdftotext', 'pdfinfo', 'docker', 'sqlite3', 'code', 'go', 'cargo', 'dotnet',
+  'git',
+  'node',
+  'npm',
+  'npx',
+  'pnpm',
+  'bun',
+  'python',
+  'python3',
+  'pip',
+  'rg',
+  'jq',
+  'tar',
+  'zip',
+  '7z',
+  'pandoc',
+  'soffice',
+  'libreoffice',
+  'pdftotext',
+  'pdfinfo',
+  'docker',
+  'sqlite3',
+  'code',
+  'go',
+  'cargo',
+  'dotnet',
 ];
 const PROBE_VER = 'v1';
 
-interface PsResult { code: number; stdout: string; stderr: string; truncated?: boolean }
+interface PsResult {
+  code: number;
+  stdout: string;
+  stderr: string;
+  truncated?: boolean;
+}
 
 /** 执行 PowerShell（UTF-8 输出、可超时、可杀进程树、cwd 锚定沙箱根） */
 export function runPowershell(command: string, timeoutMs: number, cwd: string, signal?: AbortSignal, isolated = false): Promise<PsResult> {
@@ -359,10 +510,26 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
       if (process.platform === 'win32' && ps.pid) {
         try {
           const killer = spawn('taskkill', ['/PID', String(ps.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });
-          killer.on('error', () => { try { ps.kill(); } catch { /* 忽略 */ } });
-        } catch { try { ps.kill(); } catch { /* 忽略 */ } }
+          killer.on('error', () => {
+            try {
+              ps.kill();
+            } catch {
+              /* 忽略 */
+            }
+          });
+        } catch {
+          try {
+            ps.kill();
+          } catch {
+            /* 忽略 */
+          }
+        }
       } else {
-        try { ps.kill('SIGKILL'); } catch { /* 忽略 */ }
+        try {
+          ps.kill('SIGKILL');
+        } catch {
+          /* 忽略 */
+        }
       }
     };
     const onAbort = () => {
@@ -375,8 +542,16 @@ export function runPowershell(command: string, timeoutMs: number, cwd: string, s
       killTree();
     }, timeoutMs);
     signal?.addEventListener('abort', onAbort, { once: true });
-    ps.stdout.on('data', (d: Buffer) => { const text = d.toString('utf8'); truncated ||= text.length > STREAM_CAP - stdout.length; stdout += text.slice(0, Math.max(0, STREAM_CAP - stdout.length)); });
-    ps.stderr.on('data', (d: Buffer) => { const text = d.toString('utf8'); truncated ||= text.length > STREAM_CAP - stderr.length; stderr += text.slice(0, Math.max(0, STREAM_CAP - stderr.length)); });
+    ps.stdout.on('data', (d: Buffer) => {
+      const text = d.toString('utf8');
+      truncated ||= text.length > STREAM_CAP - stdout.length;
+      stdout += text.slice(0, Math.max(0, STREAM_CAP - stdout.length));
+    });
+    ps.stderr.on('data', (d: Buffer) => {
+      const text = d.toString('utf8');
+      truncated ||= text.length > STREAM_CAP - stderr.length;
+      stderr += text.slice(0, Math.max(0, STREAM_CAP - stderr.length));
+    });
     ps.on('error', (err) => {
       terminalError ??= err;
     });
@@ -416,7 +591,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["process"],
+        permissions: ['process'],
         name: 'powershell_execute',
         risk: 'high',
         costHint: 'medium',
@@ -425,14 +600,16 @@ export default {
         limits: '命令超时 60s；只读命令免审批，写入/安装/删除类需用户审批',
         output: '{exitCode, output, truncated}；output 合并 stdout/stderr，exitCode=0 表示成功；非零退出可能已产生副作用',
         outputSchema: {
-          type: 'object', required: ['exitCode', 'output', 'truncated'],
+          type: 'object',
+          required: ['exitCode', 'output', 'truncated'],
           properties: { exitCode: { type: 'integer' }, output: { type: 'string' }, truncated: { type: 'boolean' } },
         },
-        description: '在 Windows 上执行 PowerShell 命令并返回输出（工作目录锚定沙箱根）。审批语义（按参数动态判定，默认需审批）：'
-          + '只读调用免审批直接执行——包括 cmdlet 白名单（Get-ChildItem/Get-Content/Select-String/Get-Command 等，管道每段都只读）、'
-          + '`git status|diff|log|show|ls-files|rev-parse|blame|grep` 等只读子命令、`npm run test|typecheck|lint`、`rg`、`node --version`；'
-          + '按 | ; && || 拆段后任一段非只读，或命令含危险模式（删除/覆盖/重定向写/杀进程/下载执行/注册表/npx/npm install 等）'
-          + '→ 拦截并请求用户审批，批准后自动执行。',
+        description:
+          '在 Windows 上执行 PowerShell 命令并返回输出（工作目录锚定沙箱根）。审批语义（按参数动态判定，默认需审批）：' +
+          '只读调用免审批直接执行——包括 cmdlet 白名单（Get-ChildItem/Get-Content/Select-String/Get-Command 等，管道每段都只读）、' +
+          '`git status|diff|log|show|ls-files|rev-parse|blame|grep` 等只读子命令、`npm run test|typecheck|lint`、`rg`、`node --version`；' +
+          '按 | ; && || 拆段后任一段非只读，或命令含危险模式（删除/覆盖/重定向写/杀进程/下载执行/注册表/npx/npm install 等）' +
+          '→ 拦截并请求用户审批，批准后自动执行。',
         parameters: {
           type: 'object',
           properties: {
@@ -471,21 +648,41 @@ export default {
           }
           if (needsApproval && tctx.approved) {
             // 已获用户批准：审计留痕
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: '危险命令已获用户批准' })
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'system', name: '危险命令已获用户批准' })
               .finish({ outputSummary: `[${reason}] ${command.slice(0, 300)}` });
           }
 
           try {
-            const r = await runPowershell(command, timeoutSec * 1000, tctx.sandboxRoot, tctx.signal, !!tctx.authorization?.frameworkChangeId);
+            const r = await runPowershell(
+              command,
+              timeoutSec * 1000,
+              tctx.sandboxRoot,
+              tctx.signal,
+              !!tctx.authorization?.frameworkChangeId,
+            );
             const fullOutput = r.stdout + (r.stderr.trim() ? `\n[stderr] ${r.stderr.trim()}` : '');
             const combined = fullOutput.slice(0, MAX_OUTPUT);
             const truncated = !!r.truncated || fullOutput.length > MAX_OUTPUT;
             if (r.code === 0) {
               return { ok: true, data: { exitCode: r.code, output: combined, truncated } };
             }
-            return { ok: false, error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}`, data: { exitCode: r.code, output: combined, truncated }, failure: { code: 'COMMAND_EXIT_NONZERO', retryable: false, outcome: readOnly ? 'not_started' : 'unknown' } };
+            return {
+              ok: false,
+              error: `命令退出码 ${r.code}${combined ? `：\n${combined}` : ''}`,
+              data: { exitCode: r.code, output: combined, truncated },
+              failure: { code: 'COMMAND_EXIT_NONZERO', retryable: false, outcome: readOnly ? 'not_started' : 'unknown' },
+            };
           } catch (err) {
-            return { ok: false, error: err instanceof Error ? err.message : String(err), failure: { code: tctx.signal?.aborted ? 'COMMAND_CANCELLED' : 'COMMAND_EXECUTION', retryable: false, outcome: readOnly ? 'not_started' : 'unknown' } };
+            return {
+              ok: false,
+              error: err instanceof Error ? err.message : String(err),
+              failure: {
+                code: tctx.signal?.aborted ? 'COMMAND_CANCELLED' : 'COMMAND_EXECUTION',
+                retryable: false,
+                outcome: readOnly ? 'not_started' : 'unknown',
+              },
+            };
           }
         },
       },
@@ -495,7 +692,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["process"],
+        permissions: ['process'],
         name: 'env_probe',
         risk: 'low',
         costHint: 'low',
@@ -503,14 +700,20 @@ export default {
         limits: '默认只做 Get-Command 探测（不执行程序）；withVersion=true 会执行 --version，需用户审批',
         output: '{platform, node, tools: [{name, found, path?, version?}]}',
         outputSchema: {
-          type: 'object', required: ['platform', 'node', 'tools'],
+          type: 'object',
+          required: ['platform', 'node', 'tools'],
           properties: { platform: { type: 'string' }, node: { type: 'string' }, tools: { type: 'array' } },
         },
-        description: '探测本机可用工具链（git/node/npm/python/pandoc/libreoffice/rg 等）。用于判断能否用本机程序完成 docx/xlsx/pdf 转换、是否装了 ripgrep/git 等；结果按 L2 缓存。',
+        description:
+          '探测本机可用工具链（git/node/npm/python/pandoc/libreoffice/rg 等）。用于判断能否用本机程序完成 docx/xlsx/pdf 转换、是否装了 ripgrep/git 等；结果按 L2 缓存。',
         parameters: {
           type: 'object',
           properties: {
-            commands: { type: 'array', items: { type: 'string' }, description: `要探测的命令名，缺省探测内置清单（${PROBE_DEFAULTS.length} 项）` },
+            commands: {
+              type: 'array',
+              items: { type: 'string' },
+              description: `要探测的命令名，缺省探测内置清单（${PROBE_DEFAULTS.length} 项）`,
+            },
             withVersion: { type: 'boolean', description: '是否顺带执行 --version 读取版本号（默认 false）' },
           },
         },
@@ -520,29 +723,51 @@ export default {
             : { needsApproval: false, reason: '' };
         },
         async handler(args: { commands?: string[]; withVersion?: boolean }, tctx: ToolContext) {
-          const wanted = (args.commands ?? []).map(c => String(c).trim()).filter(c => /^[A-Za-z0-9_.+-]{1,32}$/.test(c));
+          const wanted = (args.commands ?? []).map((c) => String(c).trim()).filter((c) => /^[A-Za-z0-9_.+-]{1,32}$/.test(c));
           const cmds = wanted.length ? wanted : PROBE_DEFAULTS;
           const withVersion = !!args.withVersion;
           if (withVersion && !tctx.approved && !tctx.policyApproved) {
             return { ok: false, needsApproval: true, approvalSummary: 'env_probe 将执行本机程序的 --version 命令' };
           }
-          const key = tctx.cache.makeKey(['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : ''], { tenantId: tctx.tenantId });
+          const key = tctx.cache.makeKey(
+            ['env_probe', PROBE_VER, process.platform, process.version, cmds.join(','), withVersion ? 'v' : ''],
+            { tenantId: tctx.tenantId },
+          );
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: hit.meta ? `env_probe 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '环境探测缓存命中' });
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+              .finish({
+                outputSummary: hit.meta
+                  ? `env_probe 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）`
+                  : '环境探测缓存命中',
+              });
             return { ok: true, data: hit.value };
           }
-          const list = cmds.map(c => `'${c}'`).join(',');
+          const list = cmds.map((c) => `'${c}'`).join(',');
           const script = withVersion
             ? `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { $v = ''; try { $v = ((& $c --version) 2>&1 | Select-Object -First 1) } catch {}; "$($i.Name)|$($i.Source)|$v" } else { "$c||" } }; $out -join "\`n"`
             : `$out = foreach ($c in ${list}) { $i = Get-Command $c -ErrorAction SilentlyContinue; if ($i) { "$($i.Name)|$($i.Source)|" } else { "$c||" } }; $out -join "\`n"`;
           try {
-            const r = await runPowershell(script, (withVersion ? 45 : 20) * 1000, tctx.sandboxRoot, tctx.signal, !!tctx.authorization?.frameworkChangeId);
-            const tools = r.stdout.split(/\r?\n/).filter(l => l.includes('|')).map(l => {
-              const [name, path, version] = l.split('|');
-              return { name: (name || '').trim(), found: !!(path || '').trim(), path: (path || '').trim() || undefined, version: (version || '').trim() || undefined };
-            });
+            const r = await runPowershell(
+              script,
+              (withVersion ? 45 : 20) * 1000,
+              tctx.sandboxRoot,
+              tctx.signal,
+              !!tctx.authorization?.frameworkChangeId,
+            );
+            const tools = r.stdout
+              .split(/\r?\n/)
+              .filter((l) => l.includes('|'))
+              .map((l) => {
+                const [name, path, version] = l.split('|');
+                return {
+                  name: (name || '').trim(),
+                  found: !!(path || '').trim(),
+                  path: (path || '').trim() || undefined,
+                  version: (version || '').trim() || undefined,
+                };
+              });
             const data = { platform: process.platform, node: process.version, tools };
             tctx.cache.l2Set(key, data, undefined, tctx.tenantId);
             return { ok: true, data };
@@ -553,32 +778,106 @@ export default {
       },
     });
 
-    const processes = new CommandProcesses((id, state) => ctx.storage.write(`commands/${id}.json`, JSON.stringify(state)), id => {
-      const raw = ctx.storage.read(`commands/${id}.json`); return raw ? JSON.parse(String(raw)) : undefined;
-    });
-    ctx.effect(() => undefined, () => () => processes.stopAll());
-    for (const action of ['start', 'output', 'wait', 'cancel'] as const) ctx.register({ kind: 'tool', tool: {
-      name: `command_${action}`, version: '2.0.0', permissions: action === 'start' || action === 'cancel' ? ['process'] : [],
-      sideEffect: action === 'start' || action === 'cancel' ? 'external' : 'read',
-      description: { start: '启动后台 PowerShell 命令，返回稳定命令 ID；启动成功不代表命令执行成功。任务取消时请求终止进程树。', output: '按字符范围读取后台命令输出与实际进程状态。nextOffset < length 时继续分页；outputLimited=true 表示输出达到存储上限。', wait: '等待命令最多 10 秒（默认 1 秒）；等待超时返回当前状态，不终止进程。', cancel: '请求取消当前任务的后台命令及进程树；stopping 表示尚未确认退出，继续查询状态。' }[action],
-      parameters: { type: 'object', properties: action === 'start' ? { command: { type: 'string', minLength: 1, description: '在任务工作区运行的 PowerShell 命令' } } : action === 'output' ? { id: { type: 'string' }, offset: { type: 'integer', minimum: 0, description: '字符偏移；默认 0，下一页使用 nextOffset' }, limit: { type: 'integer', minimum: 1, maximum: 16000, description: '读取字符数；默认 8000' } } : action === 'wait' ? { id: { type: 'string' }, timeoutMs: { type: 'integer', minimum: 0, maximum: 10000, description: '本次等待毫秒数；默认 1000' } } : { id: { type: 'string' } }, required: action === 'start' ? ['command'] : ['id'] },
-      outputSchema: { type: 'object', required: action === 'start' ? ['id', 'status'] : ['id', 'status', 'exitCode', 'output', 'offset', 'nextOffset', 'length', 'truncated', 'outputLimited'], properties: { id: { type: 'string' }, status: { type: 'string', enum: ['running', 'stopping', 'exited', 'cancelled', 'failed', 'interrupted'] }, ...(action === 'start' ? {} : { exitCode: { type: ['integer', 'null'] }, error: { type: 'string' }, output: { type: 'string' }, offset: { type: 'integer' }, nextOffset: { type: 'integer' }, length: { type: 'integer' }, truncated: { type: 'boolean' }, outputLimited: { type: 'boolean' } }) } },
-      ...(action === 'start' ? { assessApproval: (args: unknown) => assessCommand(String((args as { command?: string }).command ?? '')) } : {}),
-      async handler(args: { command?: string; id?: string; offset?: number; limit?: number; timeoutMs?: number }, tctx: ToolContext) {
-        try {
-          if (action === 'start') {
-            const command = String(args.command ?? '').trim();
-            if (!command) return { ok: false, error: '命令不能为空', failure: { code: 'INVALID_COMMAND', retryable: false, outcome: 'not_started' } };
-            if (assessCommand(command).needsApproval && !tctx.approved && !tctx.policyApproved) return { ok: false, needsApproval: true, approvalSummary: command };
-            return { ok: true, data: processes.start(command, tctx) };
-          }
-          if (action === 'cancel') return { ok: true, data: processes.cancel(String(args.id), tctx) };
-          if (action === 'wait') return { ok: true, data: await processes.wait(String(args.id), tctx, args.timeoutMs ?? 1000) };
-          return { ok: true, data: processes.read(String(args.id), tctx, args.offset, args.limit) };
-        } catch (error) { return { ok: false, error: String(error), failure: { code: 'COMMAND_EXECUTION', retryable: false, outcome: action === 'start' ? 'unknown' : 'not_started' } }; }
+    const processes = new CommandProcesses(
+      (id, state) => ctx.storage.write(`commands/${id}.json`, JSON.stringify(state)),
+      (id) => {
+        const raw = ctx.storage.read(`commands/${id}.json`);
+        return raw ? JSON.parse(String(raw)) : undefined;
       },
-    } });
+    );
+    ctx.effect(
+      () => undefined,
+      () => () => processes.stopAll(),
+    );
+    for (const action of ['start', 'output', 'wait', 'cancel'] as const)
+      ctx.register({
+        kind: 'tool',
+        tool: {
+          name: `command_${action}`,
+          version: '2.0.0',
+          permissions: action === 'start' || action === 'cancel' ? ['process'] : [],
+          sideEffect: action === 'start' || action === 'cancel' ? 'external' : 'read',
+          description: {
+            start: '启动后台 PowerShell 命令，返回稳定命令 ID；启动成功不代表命令执行成功。任务取消时请求终止进程树。',
+            output: '按字符范围读取后台命令输出与实际进程状态。nextOffset < length 时继续分页；outputLimited=true 表示输出达到存储上限。',
+            wait: '等待命令最多 10 秒（默认 1 秒）；等待超时返回当前状态，不终止进程。',
+            cancel: '请求取消当前任务的后台命令及进程树；stopping 表示尚未确认退出，继续查询状态。',
+          }[action],
+          parameters: {
+            type: 'object',
+            properties:
+              action === 'start'
+                ? { command: { type: 'string', minLength: 1, description: '在任务工作区运行的 PowerShell 命令' } }
+                : action === 'output'
+                  ? {
+                      id: { type: 'string' },
+                      offset: { type: 'integer', minimum: 0, description: '字符偏移；默认 0，下一页使用 nextOffset' },
+                      limit: { type: 'integer', minimum: 1, maximum: 16000, description: '读取字符数；默认 8000' },
+                    }
+                  : action === 'wait'
+                    ? {
+                        id: { type: 'string' },
+                        timeoutMs: { type: 'integer', minimum: 0, maximum: 10000, description: '本次等待毫秒数；默认 1000' },
+                      }
+                    : { id: { type: 'string' } },
+            required: action === 'start' ? ['command'] : ['id'],
+          },
+          outputSchema: {
+            type: 'object',
+            required:
+              action === 'start'
+                ? ['id', 'status']
+                : ['id', 'status', 'exitCode', 'output', 'offset', 'nextOffset', 'length', 'truncated', 'outputLimited'],
+            properties: {
+              id: { type: 'string' },
+              status: { type: 'string', enum: ['running', 'stopping', 'exited', 'cancelled', 'failed', 'interrupted'] },
+              ...(action === 'start'
+                ? {}
+                : {
+                    exitCode: { type: ['integer', 'null'] },
+                    error: { type: 'string' },
+                    output: { type: 'string' },
+                    offset: { type: 'integer' },
+                    nextOffset: { type: 'integer' },
+                    length: { type: 'integer' },
+                    truncated: { type: 'boolean' },
+                    outputLimited: { type: 'boolean' },
+                  }),
+            },
+          },
+          ...(action === 'start'
+            ? { assessApproval: (args: unknown) => assessCommand(String((args as { command?: string }).command ?? '')) }
+            : {}),
+          async handler(args: { command?: string; id?: string; offset?: number; limit?: number; timeoutMs?: number }, tctx: ToolContext) {
+            try {
+              if (action === 'start') {
+                const command = String(args.command ?? '').trim();
+                if (!command)
+                  return {
+                    ok: false,
+                    error: '命令不能为空',
+                    failure: { code: 'INVALID_COMMAND', retryable: false, outcome: 'not_started' },
+                  };
+                if (assessCommand(command).needsApproval && !tctx.approved && !tctx.policyApproved)
+                  return { ok: false, needsApproval: true, approvalSummary: command };
+                return { ok: true, data: processes.start(command, tctx) };
+              }
+              if (action === 'cancel') return { ok: true, data: processes.cancel(String(args.id), tctx) };
+              if (action === 'wait') return { ok: true, data: await processes.wait(String(args.id), tctx, args.timeoutMs ?? 1000) };
+              return { ok: true, data: processes.read(String(args.id), tctx, args.offset, args.limit) };
+            } catch (error) {
+              return {
+                ok: false,
+                error: String(error),
+                failure: { code: 'COMMAND_EXECUTION', retryable: false, outcome: action === 'start' ? 'unknown' : 'not_started' },
+              };
+            }
+          },
+        },
+      });
 
-    ctx.logger.info(`工具就绪: powershell_execute（只读 ${READONLY_EXE.size} 个 cmdlet + git/npm 子命令级细分，黑名单 ${DANGEROUS_PATTERNS.length} 类兜底）+ env_probe`);
+    ctx.logger.info(
+      `工具就绪: powershell_execute（只读 ${READONLY_EXE.size} 个 cmdlet + git/npm 子命令级细分，黑名单 ${DANGEROUS_PATTERNS.length} 类兜底）+ env_probe`,
+    );
   },
 } satisfies Plugin;

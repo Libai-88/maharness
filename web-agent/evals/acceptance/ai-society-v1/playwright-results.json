@@ -1,11 +1,7 @@
 {
   "kind": "playwright-sanitized-evidence",
   "sourceSha256": "2e3631d1c77cdb63ceedf374ce0362ac11c0f2781a70446665065195be421c2a",
-  "targetFiles": [
-    "organization.spec.ts",
-    "society-real-backend.spec.ts",
-    "society.spec.ts"
-  ],
+  "targetFiles": ["organization.spec.ts", "society-real-backend.spec.ts", "society.spec.ts"],
   "specs": [
     {
       "file": "organization.spec.ts",

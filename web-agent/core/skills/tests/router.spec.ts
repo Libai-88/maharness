@@ -39,11 +39,16 @@ describe('技能路由打分', () => {
 
     const negative = scoreSkillEntries(entries, '不要插件，只要技能，怎么沉淀方法论');
     assert.notEqual(negative[0]?.name, 'plugin-authoring');
-    assert.equal(negative.find((item) => item.name === 'plugin-authoring')?.score! < 0, true);
+    const negativeHit = negative.find((item) => item.name === 'plugin-authoring');
+    assert.ok(negativeHit, '负例命中 plugin-authoring');
+    assert.equal((negativeHit.score ?? 0) < 0, true);
   });
 
   test('topSkills 过滤零分并保留排序', () => {
     const ranked = topSkills(scoreSkillEntries(entries, '第一性原理拆解问题'), 2);
-    assert.deepEqual(ranked.map((item) => item.name), ['thinking-chain']);
+    assert.deepEqual(
+      ranked.map((item) => item.name),
+      ['thinking-chain'],
+    );
   });
 });

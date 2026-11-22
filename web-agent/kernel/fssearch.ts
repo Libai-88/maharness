@@ -4,15 +4,33 @@
  * 设计约束：不跟随符号链接、忽略目录内置、有文件数与时间双预算（防大仓库扫穿）。
  */
 import { createHash } from 'node:crypto';
-import { closeSync, openSync, readSync, readdirSync, statSync } from 'node:fs';
+import { closeSync, openSync, readSync, readdirSync, statSync, type Dirent, type Stats } from 'node:fs';
 import { resolve, relative, sep, join } from 'node:path';
 import { readTextSmart } from './sandbox';
 
 /** 默认忽略目录：依赖产物与构建输出，检索几乎从不需要 */
 export const DEFAULT_IGNORES = [
-  'node_modules', '.git', '.hg', '.svn', 'dist', 'build', 'out', 'bin', 'obj',
-  '.next', '.nuxt', '.turbo', '.cache', 'coverage', '__pycache__', '.venv', 'venv',
-  '.idea', '.gradle', 'target', '.terraform',
+  'node_modules',
+  '.git',
+  '.hg',
+  '.svn',
+  'dist',
+  'build',
+  'out',
+  'bin',
+  'obj',
+  '.next',
+  '.nuxt',
+  '.turbo',
+  '.cache',
+  'coverage',
+  '__pycache__',
+  '.venv',
+  'venv',
+  '.idea',
+  '.gradle',
+  'target',
+  '.terraform',
 ];
 
 /** 归一化为沙箱相对路径（小写不敏感比较用 lower，展示用原样正斜杠） */
@@ -27,14 +45,25 @@ export function globToRegex(pattern: string): RegExp {
     const c = pattern[i];
     if (c === '*') {
       if (pattern[i + 1] === '*') {
-        if (pattern[i + 2] === '/') { i += 2; re += '(?:.*/)?'; }
-        else { i += 1; re += '.*'; }
+        if (pattern[i + 2] === '/') {
+          i += 2;
+          re += '(?:.*/)?';
+        } else {
+          i += 1;
+          re += '.*';
+        }
       } else re += '[^/]*';
     } else if (c === '?') re += '[^/]';
     else if (c === '{') {
       const end = pattern.indexOf('}', i);
-      if (end > i) { re += `(?:${pattern.slice(i + 1, end).split(',').map(escapeRe).join('|')})`; i = end; }
-      else re += '\\{';
+      if (end > i) {
+        re += `(?:${pattern
+          .slice(i + 1, end)
+          .split(',')
+          .map(escapeRe)
+          .join('|')})`;
+        i = end;
+      } else re += '\\{';
     } else if (c === '.') re += '\\.';
     else if (c === '/') re += '/';
     else re += escapeRe(c);
@@ -66,11 +95,17 @@ export interface WalkOptions {
   accept?: (rel: string) => boolean;
 }
 
-export interface WalkHit { abs: string; rel: string; size: number; mtimeMs: number; ctimeMs: number }
+export interface WalkHit {
+  abs: string;
+  rel: string;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
 
 /** 深度优先遍历目录（不跟随符号链接），超预算即停并标记 truncated */
 export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit[]; truncated: boolean } {
-  const ignore = new Set((opts.ignore ?? DEFAULT_IGNORES).map(s => s.toLowerCase()));
+  const ignore = new Set((opts.ignore ?? DEFAULT_IGNORES).map((s) => s.toLowerCase()));
   const maxFiles = opts.maxFiles ?? 20_000;
   const deadline = Date.now() + (opts.maxMs ?? 10_000);
   const base = resolve(root);
@@ -79,8 +114,12 @@ export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit
   const stack: string[] = [base];
   while (stack.length) {
     const dir = stack.pop()!;
-    let entries;
-    try { entries = readdirSync(dir, { withFileTypes: true }); } catch { continue; }
+    let entries: Dirent[];
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
     for (const e of entries) {
       if (e.isSymbolicLink()) continue;
       if (e.isDirectory()) {
@@ -92,12 +131,22 @@ export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit
       const abs = join(dir, e.name);
       const rel = toRel(base, abs);
       if (opts.accept && !opts.accept(rel)) continue;
-      let st;
-      try { st = statSync(abs); } catch { continue; }
+      let st: Stats;
+      try {
+        st = statSync(abs);
+      } catch {
+        continue;
+      }
       hits.push({ abs, rel, size: st.size, mtimeMs: st.mtimeMs, ctimeMs: st.ctimeMs });
-      if (hits.length >= maxFiles) { truncated = true; return { hits, truncated }; }
+      if (hits.length >= maxFiles) {
+        truncated = true;
+        return { hits, truncated };
+      }
     }
-    if (Date.now() > deadline) { truncated = true; break; }
+    if (Date.now() > deadline) {
+      truncated = true;
+      break;
+    }
   }
   return { hits, truncated };
 }
@@ -107,8 +156,12 @@ export function walkFiles(root: string, opts: WalkOptions = {}): { hits: WalkHit
  * maxContentBytes 设为 0 时只使用元数据；超出非零上限时返回 undefined，由调用方跳过缓存。
  */
 export function fileFingerprint(file: string, maxContentBytes = Number.POSITIVE_INFINITY): string | undefined {
-  let st;
-  try { st = statSync(file); } catch { return 'missing'; }
+  let st: Stats;
+  try {
+    st = statSync(file);
+  } catch {
+    return 'missing';
+  }
   if (maxContentBytes > 0 && st.isFile() && st.size > maxContentBytes) return undefined;
   const h = createHash('sha256');
   h.update(`${st.size}\0${st.mtimeMs}\0${st.ctimeMs}\0`);
@@ -118,12 +171,20 @@ export function fileFingerprint(file: string, maxContentBytes = Number.POSITIVE_
     try {
       fd = openSync(file, 'r');
       const buf = Buffer.allocUnsafe(64 * 1024);
-      let n = 0;
-      while ((n = readSync(fd, buf, 0, buf.length, null)) > 0) h.update(buf.subarray(0, n));
+      let n = readSync(fd, buf, 0, buf.length, null);
+      while (n > 0) {
+        h.update(buf.subarray(0, n));
+        n = readSync(fd, buf, 0, buf.length, null);
+      }
     } catch {
       h.update('unreadable');
     } finally {
-      if (fd !== undefined) try { closeSync(fd); } catch { /* 文件可能已被外部删除 */ }
+      if (fd !== undefined)
+        try {
+          closeSync(fd);
+        } catch {
+          /* 文件可能已被外部删除 */
+        }
     }
   }
   return h.digest('hex').slice(0, 32);
@@ -135,9 +196,12 @@ export function fileFingerprint(file: string, maxContentBytes = Number.POSITIVE_
  */
 export function directoryFingerprint(dir: string): string {
   const h = createHash('sha256');
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); }
-  catch { return 'missing'; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return 'missing';
+  }
   for (const e of entries.sort((a, b) => a.name.localeCompare(b.name))) {
     const abs = join(dir, e.name);
     try {
@@ -161,14 +225,17 @@ export interface TreeFingerprint {
   hits: WalkHit[];
 }
 
-export function treeFingerprint(root: string, opts: {
-  accept?: (rel: string) => boolean;
-  maxFiles?: number;
-  maxMs?: number;
-  includeContent?: boolean;
-  maxContentBytes?: number;
-  maxTotalContentBytes?: number;
-} = {}): TreeFingerprint {
+export function treeFingerprint(
+  root: string,
+  opts: {
+    accept?: (rel: string) => boolean;
+    maxFiles?: number;
+    maxMs?: number;
+    includeContent?: boolean;
+    maxContentBytes?: number;
+    maxTotalContentBytes?: number;
+  } = {},
+): TreeFingerprint {
   const { hits, truncated } = walkFiles(root, {
     accept: opts.accept,
     maxFiles: opts.maxFiles ?? 30_000,
@@ -249,15 +316,19 @@ export function grepFiles(root: string, opts: GrepOptions & { limit?: number }):
   const maxFileBytes = opts.maxFileBytes ?? 2_000_000;
   const ctxN = Math.max(0, Math.min(5, opts.contextLines ?? 0));
   const { hits, truncated: walkTruncated } = walkFiles(rootAbs, {
-    maxFiles: 30_000, maxMs: 15_000,
-    accept: rel => (!opts.accept || opts.accept(rel)) && (opts.glob ? matchesGlob(rel, opts.glob) : true),
+    maxFiles: 30_000,
+    maxMs: 15_000,
+    accept: (rel) => (!opts.accept || opts.accept(rel)) && (opts.glob ? matchesGlob(rel, opts.glob) : true),
   });
   const matches: GrepMatch[] = [];
   const files: string[] = [];
   let scanned = 0;
   let truncated = walkTruncated;
   for (const hit of hits) {
-    if (matches.length >= limit) { truncated = true; break; }
+    if (matches.length >= limit) {
+      truncated = true;
+      break;
+    }
     if (hit.size > maxFileBytes) continue;
     const r = readTextSmart(hit.abs);
     scanned++;
@@ -268,10 +339,13 @@ export function grepFiles(root: string, opts: GrepOptions & { limit?: number }):
       if (!matcher.test(lines[i])) continue;
       fileHits++;
       const m: GrepMatch = { file: hit.rel, line: i + 1, text: lines[i].slice(0, 500) };
-      if (ctxN && i - ctxN >= 0) m.before = lines.slice(Math.max(0, i - ctxN), i).map(s => s.slice(0, 500));
-      if (ctxN && i + ctxN < lines.length) m.after = lines.slice(i + 1, i + 1 + ctxN).map(s => s.slice(0, 500));
+      if (ctxN && i - ctxN >= 0) m.before = lines.slice(Math.max(0, i - ctxN), i).map((s) => s.slice(0, 500));
+      if (ctxN && i + ctxN < lines.length) m.after = lines.slice(i + 1, i + 1 + ctxN).map((s) => s.slice(0, 500));
       matches.push(m);
-      if (matches.length >= limit) { truncated = true; break; }
+      if (matches.length >= limit) {
+        truncated = true;
+        break;
+      }
     }
     if (fileHits && !files.includes(hit.rel)) files.push(hit.rel);
   }
@@ -279,17 +353,30 @@ export function grepFiles(root: string, opts: GrepOptions & { limit?: number }):
 }
 
 export function isValidRegex(src: string): boolean {
-  try { new RegExp(src); return true; } catch { return false; }
+  try {
+    new RegExp(src);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export function countOccurrences(hay: string, needle: string): number {
   if (!needle) return 0;
-  let n = 0, i = 0;
-  while ((i = hay.indexOf(needle, i)) !== -1) { n++; i += needle.length; }
+  let n = 0;
+  let i = hay.indexOf(needle);
+  while (i !== -1) {
+    n++;
+    i = hay.indexOf(needle, i + needle.length);
+  }
   return n;
 }
 
-export interface EditOp { oldText: string; newText: string; replaceAll?: boolean }
+export interface EditOp {
+  oldText: string;
+  newText: string;
+  replaceAll?: boolean;
+}
 
 export type EditOutcome =
   | { ok: true; text: string; applied: { index: number; replaced: number }[] }
@@ -308,7 +395,11 @@ export function applyEdits(text: string, edits: EditOp[]): EditOutcome {
     const n = countOccurrences(cur, oldText);
     if (n === 0) return { ok: false, error: `第 ${i + 1} 处编辑未找到匹配文本`, failedIndex: i };
     if (n > 1 && !e.replaceAll) {
-      return { ok: false, error: `第 ${i + 1} 处编辑匹配到 ${n} 处，无法唯一定位：请扩大 oldText 的上下文，或设 replaceAll=true`, failedIndex: i };
+      return {
+        ok: false,
+        error: `第 ${i + 1} 处编辑匹配到 ${n} 处，无法唯一定位：请扩大 oldText 的上下文，或设 replaceAll=true`,
+        failedIndex: i,
+      };
     }
     cur = e.replaceAll ? cur.split(oldText).join(newText) : cur.replace(oldText, () => newText);
     applied.push({ index: i, replaced: e.replaceAll ? n : 1 });
@@ -328,8 +419,18 @@ export function convertEol(s: string, eol: '\n' | '\r\n'): string {
 }
 
 /** 按行切片读取：返回行号区间与续读游标 */
-export function sliceLines(text: string, offset: number, limit: number, maxChars: number): {
-  text: string; startLine: number; endLine: number; totalLines: number; nextOffset?: number; truncatedByChars: boolean;
+export function sliceLines(
+  text: string,
+  offset: number,
+  limit: number,
+  maxChars: number,
+): {
+  text: string;
+  startLine: number;
+  endLine: number;
+  totalLines: number;
+  nextOffset?: number;
+  truncatedByChars: boolean;
 } {
   const lines = text.split('\n');
   const totalLines = lines.length;
@@ -339,7 +440,10 @@ export function sliceLines(text: string, offset: number, limit: number, maxChars
   let truncatedByChars = false;
   for (let i = start - 1; i < Math.min(totalLines, start + limit - 1); i++) {
     const line = lines[i];
-    if (chars + line.length + 1 > maxChars) { truncatedByChars = true; break; }
+    if (chars + line.length + 1 > maxChars) {
+      truncatedByChars = true;
+      break;
+    }
     chars += line.length + 1;
     out.push(line);
   }

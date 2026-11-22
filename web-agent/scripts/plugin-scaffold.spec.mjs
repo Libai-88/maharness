@@ -14,23 +14,36 @@ describe('plugin scaffold manifest validator', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-plugin-scaffold-'));
     try {
       mkdirSync(join(root, 'demo'), { recursive: true });
-      writeFileSync(join(root, 'demo', 'plugin.json'), JSON.stringify({
-        id: 'demo', name: 'demo', version: '0.1.0', entry: 'index.ts',
-        compatibility: { api: { min: '1.0.0', max: '1.0.0' } },
-        permissions: { capabilities: { tool: ['demo_hello'] } },
-      }));
+      writeFileSync(
+        join(root, 'demo', 'plugin.json'),
+        JSON.stringify({
+          id: 'demo',
+          name: 'demo',
+          version: '0.1.0',
+          entry: 'index.ts',
+          compatibility: { api: { min: '1.0.0', max: '1.0.0' } },
+          permissions: { capabilities: { tool: ['demo_hello'] } },
+        }),
+      );
       writeFileSync(join(root, 'demo', 'index.ts'), 'export default {};');
       assert.deepEqual(validatePlugin(join(root, 'demo')), []);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('rejects incompatible API and path traversal entry', () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-plugin-scaffold-'));
     try {
       mkdirSync(root, { recursive: true });
-      writeFileSync(join(root, 'plugin.json'), JSON.stringify({ id: 'demo', name: 'demo', version: '0.1.0', entry: '../index.ts', compatibility: { api: { min: '2.0.0' } } }));
+      writeFileSync(
+        join(root, 'plugin.json'),
+        JSON.stringify({ id: 'demo', name: 'demo', version: '0.1.0', entry: '../index.ts', compatibility: { api: { min: '2.0.0' } } }),
+      );
       assert.deepEqual(validatePlugin(root), ['entry 必须是插件目录内的相对路径', '不兼容宿主插件 API 1.0.0']);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   test('generated plugin loads through the real Kernel plugin loader', async () => {

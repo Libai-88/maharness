@@ -40,23 +40,49 @@ export async function runPluginTrial(input: PluginTrialInput): Promise<PluginTri
     symlinkSync(join(projectRoot, 'kernel'), join(root, 'kernel'), 'junction');
     writeFileSync(join(pluginDir, 'plugin.json'), JSON.stringify({ ...input.manifest, enabled: true }, null, 2), 'utf8');
     writeFileSync(join(pluginDir, 'index.ts'), input.source, 'utf8');
-    const allowedDependencies = [...new Set([input.manifest, ...(input.dependencies ?? []).map(item => item.manifest)].flatMap(manifest => (manifest.permissions as { dependencies?: string[] } | undefined)?.dependencies ?? []))];
+    const allowedDependencies = [
+      ...new Set(
+        [input.manifest, ...(input.dependencies ?? []).map((item) => item.manifest)].flatMap(
+          (manifest) => (manifest.permissions as { dependencies?: string[] } | undefined)?.dependencies ?? [],
+        ),
+      ),
+    ];
     writeFileSync(join(root, 'config.json'), JSON.stringify({ plugins: { allowedDependencies } }));
-    for (const [name, content] of Object.entries(input.files ?? {})) { const file = pluginFilePath(pluginDir, name); mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, content); }
+    for (const [name, content] of Object.entries(input.files ?? {})) {
+      const file = pluginFilePath(pluginDir, name);
+      mkdirSync(join(file, '..'), { recursive: true });
+      writeFileSync(file, content);
+    }
     for (const dependency of input.dependencies ?? []) {
       assertPluginId(dependency.manifest.id);
-      const dir = join(plugins, dependency.manifest.id); mkdirSync(dir, { recursive: true });
+      const dir = join(plugins, dependency.manifest.id);
+      mkdirSync(dir, { recursive: true });
       writeFileSync(join(dir, 'plugin.json'), JSON.stringify({ ...dependency.manifest, enabled: true, lazy: false }));
-      for (const [name, content] of Object.entries(dependency.files)) { const file = pluginFilePath(dir, name); mkdirSync(join(file, '..'), { recursive: true }); writeFileSync(file, content); }
+      for (const [name, content] of Object.entries(dependency.files)) {
+        const file = pluginFilePath(dir, name);
+        mkdirSync(join(file, '..'), { recursive: true });
+        writeFileSync(file, content);
+      }
     }
-    const { stdout } = await execFileAsync(process.execPath, [
-      '--import', 'tsx', join(projectRoot, 'scripts', 'plugin-trial-runner.mjs'), root,
-    ], { cwd: projectRoot, timeout: input.timeoutMs ?? 5_000, windowsHide: true, maxBuffer: 256 * 1024,
-      env: buildProcessEnv(process.env, { MH_TRIAL_ID: input.id }) });
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      ['--import', 'tsx', join(projectRoot, 'scripts', 'plugin-trial-runner.mjs'), root],
+      {
+        cwd: projectRoot,
+        timeout: input.timeoutMs ?? 5_000,
+        windowsHide: true,
+        maxBuffer: 256 * 1024,
+        env: buildProcessEnv(process.env, { MH_TRIAL_ID: input.id }),
+      },
+    );
     return JSON.parse(stdout.trim()) as PluginTrialResult;
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) };
   } finally {
-    try { rmSync(root, { recursive: true, force: true }); } catch { /* 子进程退出后再由系统清理 */ }
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      /* 子进程退出后再由系统清理 */
+    }
   }
 }

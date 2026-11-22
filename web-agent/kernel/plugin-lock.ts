@@ -30,11 +30,7 @@ function parseSemver(raw: string): boolean {
   return /^\d+\.\d+\.\d+$/.test(String(raw ?? '').trim());
 }
 
-export function buildPluginLockEntry(
-  pluginDir: string,
-  manifest: PluginManifest,
-  source?: string,
-): PluginLockEntry {
+export function buildPluginLockEntry(pluginDir: string, manifest: PluginManifest, source?: string): PluginLockEntry {
   return {
     version: manifest.version,
     integrity: dirDigest(pluginDir),
@@ -46,11 +42,7 @@ export function buildPluginLockEntry(
   };
 }
 
-export function verifyPluginLock(
-  entry: PluginLockEntry | undefined,
-  pluginDir: string,
-  manifest: PluginManifest,
-): PluginLockValidation {
+export function verifyPluginLock(entry: PluginLockEntry | undefined, pluginDir: string, manifest: PluginManifest): PluginLockValidation {
   const errors: string[] = [];
   const warnings: string[] = [];
   if (!entry) return { ok: false, errors: [`插件 ${manifest.id} 未登记在 plugins-lock.json`], warnings };

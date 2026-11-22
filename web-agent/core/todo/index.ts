@@ -24,11 +24,11 @@ export interface TodoCard {
   title: string;
   desc?: string;
   status: TodoStatus;
-  priority: TodoPriority;      // 优先级：low / medium / high / urgent
-  source: 'agent' | 'human';   // 谁创建的：模型（to do list）还是人类（看板）
-  sessionId?: string;          // 关联会话：模型建的卡片挂到当前会话
-  tenantId?: string;           // 租户归属：缺省按 default 兼容旧数据
-  order: number;               // 列内排序（拖拽重排）
+  priority: TodoPriority; // 优先级：low / medium / high / urgent
+  source: 'agent' | 'human'; // 谁创建的：模型（to do list）还是人类（看板）
+  sessionId?: string; // 关联会话：模型建的卡片挂到当前会话
+  tenantId?: string; // 租户归属：缺省按 default 兼容旧数据
+  order: number; // 列内排序（拖拽重排）
   createdAt: number;
   updatedAt: number;
 }
@@ -45,7 +45,11 @@ export default {
   name: '待办看板',
   version: '0.1.0',
   onLoad(ctx) {
-    const items = new PersonalItems(ctx.paths.data, (tenantId, id) => ctx.bus.emit({ type: 'items.updated', data: { tenantId, id }, ts: Date.now() }), ctx.kernel?.tenantQuota);
+    const items = new PersonalItems(
+      ctx.paths.data,
+      (tenantId, id) => ctx.bus.emit({ type: 'items.updated', data: { tenantId, id }, ts: Date.now() }),
+      ctx.kernel?.tenantQuota,
+    );
     registerItemTools(ctx, items);
     // 数据目录跟随 Kernel 的 dataDir 覆盖（AGENT_DATA_DIR/测试隔离），不写死源码树 data/
     const dataFile = join(ctx.paths.data, 'todo.json');
@@ -104,14 +108,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'todo_add',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         output: '{id, title, status}',
         outputSchema: {
-          type: 'object', required: ['id', 'title', 'status'],
+          type: 'object',
+          required: ['id', 'title', 'status'],
           properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string' }, sessionId: { type: 'string' } },
         },
         description: '向当前会话的 to do list 添加一项任务卡片（状态默认为 todo）。多步任务先逐项添加，执行中逐项更新。',
@@ -131,9 +136,10 @@ export default {
           const tenantId = tctx.tenantId ?? 'default';
           const tenantCards = cards.filter((card) => tenantOf(card) === tenantId);
           if (cards.length >= MAX_CARDS) return { ok: false, error: `全局卡片已达上限（${MAX_CARDS}），请先清理已完成项` };
-          if (tenantCards.length >= MAX_CARDS_PER_TENANT) return { ok: false, error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}），请先清理已完成项` };
+          if (tenantCards.length >= MAX_CARDS_PER_TENANT)
+            return { ok: false, error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}），请先清理已完成项` };
           const maxOrder = tenantCards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
-          const priority = PRIORITIES.includes(args.priority as TodoPriority) ? args.priority as TodoPriority : 'medium';
+          const priority = PRIORITIES.includes(args.priority as TodoPriority) ? (args.priority as TodoPriority) : 'medium';
           const card: TodoCard = {
             id: `td-${randomUUID()}`,
             title,
@@ -159,14 +165,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read","workspace.write"],
+        permissions: ['workspace.read', 'workspace.write'],
         name: 'todo_update',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'write',
         output: '{id, title, status}',
         outputSchema: {
-          type: 'object', required: ['id', 'title', 'status'],
+          type: 'object',
+          required: ['id', 'title', 'status'],
           properties: { id: { type: 'string' }, title: { type: 'string' }, status: { type: 'string' } },
         },
         description: '更新 to do list 中一项任务的状态：doing（进行中）/ done（完成）/ blocked（受阻）/ todo（回到待办）。可附进度说明。',
@@ -183,7 +190,7 @@ export default {
           const tenantId = tctx.tenantId ?? 'default';
           const card = cards.find((c) => c.id === args.id && tenantOf(c) === tenantId);
           if (!card) return { ok: false, error: `任务不存在: ${args.id}（todo_list 查看当前清单）` };
-          const status = STATUSES.includes(args.status as TodoStatus) ? args.status as TodoStatus : 'todo';
+          const status = STATUSES.includes(args.status as TodoStatus) ? (args.status as TodoStatus) : 'todo';
           card.status = status;
           card.updatedAt = Date.now();
           if (args.note) card.desc = String(args.note).slice(0, 500);
@@ -198,14 +205,15 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'todo_list',
         risk: 'low',
         costHint: 'low',
         sideEffect: 'read',
         output: '{cards: [{id, title, status, desc?, source}]}',
         outputSchema: {
-          type: 'object', required: ['cards', 'summary'],
+          type: 'object',
+          required: ['cards', 'summary'],
           properties: { cards: { type: 'array' }, summary: { type: 'string' } },
         },
         description: '查看 to do list 当前清单（本会话的卡片；传 all=true 查看跨会话全部）。执行多步任务前先查看，避免漏步。',
@@ -218,14 +226,19 @@ export default {
         async handler(args: { all?: boolean }, tctx: ToolContext) {
           const tenantId = tctx.tenantId ?? 'default';
           const tenantCards = cards.filter((card) => tenantOf(card) === tenantId);
-          const list = args.all === true
-            ? tenantCards
-            : tenantCards.filter((c) => !c.sessionId || c.sessionId === tctx.sessionId);
+          const list = args.all === true ? tenantCards : tenantCards.filter((c) => !c.sessionId || c.sessionId === tctx.sessionId);
           const sorted = [...list].sort((a, b) => a.createdAt - b.createdAt);
           return {
             ok: true,
             data: {
-              cards: sorted.map((c) => ({ id: c.id, title: c.title, status: c.status, priority: c.priority, desc: c.desc, source: c.source })),
+              cards: sorted.map((c) => ({
+                id: c.id,
+                title: c.title,
+                status: c.status,
+                priority: c.priority,
+                desc: c.desc,
+                source: c.source,
+              })),
               summary: `${sorted.filter((c) => c.status === 'done').length}/${sorted.length} 完成`,
             },
           };
@@ -239,17 +252,33 @@ export default {
       api: {
         mount: 'board',
         responses: {
-          'GET /panel': { type: 'object', required: ['title', 'html'], properties: { title: { type: 'string' }, html: { type: 'string' } } },
+          'GET /panel': {
+            type: 'object',
+            required: ['title', 'html'],
+            properties: { title: { type: 'string' }, html: { type: 'string' } },
+          },
           'GET /cards': { type: 'object', required: ['cards'], properties: { cards: { type: 'array' } } },
           'POST /cards': { type: 'object', required: ['ok', 'card'], properties: { ok: { type: 'boolean' }, card: { type: 'object' } } },
-          'PATCH /cards/:id': { type: 'object', required: ['ok', 'card'], properties: { ok: { type: 'boolean' }, card: { type: 'object' } } },
+          'PATCH /cards/:id': {
+            type: 'object',
+            required: ['ok', 'card'],
+            properties: { ok: { type: 'boolean' }, card: { type: 'object' } },
+          },
           'DELETE /cards/:id': { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
           'PATCH /cards/reorder': { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } },
-          'POST /clear-done': { type: 'object', required: ['ok', 'removed'], properties: { ok: { type: 'boolean' }, removed: { type: 'integer' } } },
+          'POST /clear-done': {
+            type: 'object',
+            required: ['ok', 'removed'],
+            properties: { ok: { type: 'boolean' }, removed: { type: 'integer' } },
+          },
         },
-        router: (async (req: { method?: string; path?: string; body?: unknown; tenantId?: string }, res: {
-          json: (v: unknown) => void; status: (n: number) => { json: (v: unknown) => void };
-        }) => {
+        router: (async (
+          req: { method?: string; path?: string; body?: unknown; tenantId?: string },
+          res: {
+            json: (v: unknown) => void;
+            status: (n: number) => { json: (v: unknown) => void };
+          },
+        ) => {
           // 挂载前缀剥离：请求 /api/plugins/todo/board/cards → req.path=/board/cards → p=/cards
           const raw = (req.path ?? '/').replace(/\/+$/, '') || '/';
           let p = raw;
@@ -290,9 +319,10 @@ export default {
             if (!title) return res.status(400).json({ error: '缺少 title' });
             if (title.length > 200) return res.status(400).json({ error: 'title 过长（≤200 字符）' });
             if (cards.length >= MAX_CARDS) return res.status(400).json({ error: `全局卡片已达上限（${MAX_CARDS}）` });
-            if (tenantCards.length >= MAX_CARDS_PER_TENANT) return res.status(400).json({ error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}）` });
+            if (tenantCards.length >= MAX_CARDS_PER_TENANT)
+              return res.status(400).json({ error: `当前租户卡片已达上限（${MAX_CARDS_PER_TENANT}）` });
             const maxOrder = tenantCards.reduce((m, c) => Math.max(m, c.order ?? 0), -1);
-            const priority = PRIORITIES.includes(body.priority as TodoPriority) ? body.priority as TodoPriority : 'medium';
+            const priority = PRIORITIES.includes(body.priority as TodoPriority) ? (body.priority as TodoPriority) : 'medium';
             const card: TodoCard = {
               id: `td-${randomUUID()}`,
               title,

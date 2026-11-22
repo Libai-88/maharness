@@ -10,8 +10,20 @@ import { createHash } from 'node:crypto';
 import { basename, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import type {
-  CacheLike, ConfigLike, EventListener, Logger, PathsLike, Plugin, PluginBus, PluginContext,
-  PluginStorage, StepHandle, ToolContext, ToolDef, ToolResult, TraceLike,
+  CacheLike,
+  ConfigLike,
+  EventListener,
+  Logger,
+  PathsLike,
+  Plugin,
+  PluginBus,
+  PluginContext,
+  PluginStorage,
+  StepHandle,
+  ToolContext,
+  ToolDef,
+  ToolResult,
+  TraceLike,
 } from './types';
 import type { HostToParent, ParentToHost, ProcessToolDescriptor } from './plugin-process-protocol';
 import { installNetworkGuard } from './plugin-network';
@@ -24,21 +36,23 @@ const send: Send = (message) => {
   if (process.send) process.send(message);
 };
 
-let childCtx: {
-  pluginId: string;
-  plugin: Plugin;
-  context: PluginContext;
-  handlers: Map<string, ToolDef['handler']>;
-  descriptors: Map<string, ProcessToolDescriptor>;
-  controllers: Map<number, AbortController>;
-  listeners: Map<number, EventListener>;
-  inverses: (() => void | Promise<void>)[];
-} | undefined;
+let childCtx:
+  | {
+      pluginId: string;
+      plugin: Plugin;
+      context: PluginContext;
+      handlers: Map<string, ToolDef['handler']>;
+      descriptors: Map<string, ProcessToolDescriptor>;
+      controllers: Map<number, AbortController>;
+      listeners: Map<number, EventListener>;
+      inverses: (() => void | Promise<void>)[];
+    }
+  | undefined;
 
 function configGet(snapshot: Record<string, unknown>, key: string, def?: unknown): unknown {
   let value: unknown = snapshot;
   for (const part of key.split('.')) {
-    if (!value || typeof value !== 'object' || !Object.prototype.hasOwnProperty.call(value, part)) return def;
+    if (!value || typeof value !== 'object' || !Object.hasOwn(value, part)) return def;
     value = (value as Record<string, unknown>)[part];
   }
   return value === undefined ? def : value;
@@ -46,11 +60,13 @@ function configGet(snapshot: Record<string, unknown>, key: string, def?: unknown
 
 function makeConfig(snapshot: Record<string, unknown>): ConfigLike {
   return {
-    get: <T,>(key: string, def?: T) => configGet(snapshot, key, def) as T,
-    set: () => { throw new Error('process 插件不支持写配置，请通过设置页或父进程配置变更'); },
+    get: <T>(key: string, def?: T) => configGet(snapshot, key, def) as T,
+    set: () => {
+      throw new Error('process 插件不支持写配置，请通过设置页或父进程配置变更');
+    },
     section: (id: string) => {
       const value = configGet(snapshot, id, {});
-      return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+      return value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
     },
     watch: () => () => undefined,
   };
@@ -65,8 +81,13 @@ function makeStorage(dir: string, maxBytes: number, maxFiles: number): PluginSto
     for (const name of readdirSync(dir)) {
       try {
         const stat = statSync(join(dir, name));
-        if (stat.isFile()) { files++; bytes += stat.size; }
-      } catch { /* 忽略瞬时消失 */ }
+        if (stat.isFile()) {
+          files++;
+          bytes += stat.size;
+        }
+      } catch {
+        /* 忽略瞬时消失 */
+      }
     }
     return { bytes, files };
   };
@@ -92,7 +113,11 @@ function makeStorage(dir: string, maxBytes: number, maxFiles: number): PluginSto
     },
     list() {
       return readdirSync(dir).filter((name) => {
-        try { return statSync(join(dir, name)).isFile(); } catch { return false; }
+        try {
+          return statSync(join(dir, name)).isFile();
+        } catch {
+          return false;
+        }
       });
     },
     remove(name) {
@@ -104,8 +129,16 @@ function makeStorage(dir: string, maxBytes: number, maxFiles: number): PluginSto
 function makeCache(): CacheLike {
   const l2 = new Map<string, { value: unknown; expiresAt: number; createdAt: number; hits: number }>();
   const stats = {
-    l2Hits: 0, l2Misses: 0, l1Hits: 0, l1Misses: 0,
-    l3Hits: 0, l3Tokens: 0, l3RealHits: 0, l3RealTokens: 0, l3RealMissTokens: 0, savedCost: 0,
+    l2Hits: 0,
+    l2Misses: 0,
+    l1Hits: 0,
+    l1Misses: 0,
+    l3Hits: 0,
+    l3Tokens: 0,
+    l3RealHits: 0,
+    l3RealTokens: 0,
+    l3RealMissTokens: 0,
+    savedCost: 0,
   };
   return {
     l2Get(key) {
@@ -118,10 +151,15 @@ function makeCache(): CacheLike {
       entry.hits++;
       stats.l2Hits++;
       return {
-        hit: true, value: entry.value,
+        hit: true,
+        value: entry.value,
         meta: {
-          key, namespace: key.split(':', 1)[0] ?? '', createdAt: entry.createdAt,
-          ageMs: Date.now() - entry.createdAt, ttlRemainingMs: Math.max(0, entry.expiresAt - Date.now()), hits: entry.hits,
+          key,
+          namespace: key.split(':', 1)[0] ?? '',
+          createdAt: entry.createdAt,
+          ageMs: Date.now() - entry.createdAt,
+          ttlRemainingMs: Math.max(0, entry.expiresAt - Date.now()),
+          hits: entry.hits,
         },
       };
     },
@@ -129,7 +167,9 @@ function makeCache(): CacheLike {
       const now = Date.now();
       l2.set(key, { value, createdAt: now, expiresAt: now + ttlMs, hits: 0 });
     },
-    l2Delete(key) { l2.delete(key); },
+    l2Delete(key) {
+      l2.delete(key);
+    },
     l2DeleteNamespace(ns) {
       for (const key of l2.keys()) if (key.startsWith(`${ns}:`)) l2.delete(key);
     },
@@ -138,14 +178,31 @@ function makeCache(): CacheLike {
       const scoped = scope?.tenantId ? [ns, `tenant:${scope.tenantId}`, ...parts.slice(1)] : parts;
       return `${ns}:${createHash('sha256').update(JSON.stringify(scoped)).digest('hex').slice(0, 32)}`;
     },
-    setEmbeddingFn() { /* 子进程内不共享父进程 embedding */ },
-    async l1Get() { stats.l1Misses++; return { hit: false }; },
-    async l1Set() { /* 子进程内 L1 不参与语义缓存 */ },
-    l1InvalidateSession() { /* 子进程内无 L1 条目 */ },
-    recordPrefixRepeat() { /* 子进程内不统计 L3 */ },
-    recordProviderCacheHit() { /* 子进程内不统计 L3 */ },
-    recordSavedCost() { /* 子进程内不统计成本 */ },
-    clear() { l2.clear(); },
+    setEmbeddingFn() {
+      /* 子进程内不共享父进程 embedding */
+    },
+    async l1Get() {
+      stats.l1Misses++;
+      return { hit: false };
+    },
+    async l1Set() {
+      /* 子进程内 L1 不参与语义缓存 */
+    },
+    l1InvalidateSession() {
+      /* 子进程内无 L1 条目 */
+    },
+    recordPrefixRepeat() {
+      /* 子进程内不统计 L3 */
+    },
+    recordProviderCacheHit() {
+      /* 子进程内不统计 L3 */
+    },
+    recordSavedCost() {
+      /* 子进程内不统计成本 */
+    },
+    clear() {
+      l2.clear();
+    },
     stats: () => ({ ...stats }),
   };
 }
@@ -160,23 +217,42 @@ function makeTrace(): TraceLike {
   return {
     startStep: () => noop,
     stats: () => ({
-      steps: 0, llmCalls: 0, toolCalls: 0, cacheHits: 0,
-      totalTokensIn: 0, totalTokensOut: 0, totalCost: 0, writeFailures: 0,
+      steps: 0,
+      llmCalls: 0,
+      toolCalls: 0,
+      cacheHits: 0,
+      totalTokensIn: 0,
+      totalTokensOut: 0,
+      totalCost: 0,
+      writeFailures: 0,
     }),
   };
 }
 
 function makeBus(): PluginBus {
   const eventOf = (event: { type: string; data?: unknown; ts?: number; traceId?: string }) => ({
-    type: event.type, data: event.data, ts: event.ts ?? Date.now(), traceId: event.traceId,
+    type: event.type,
+    data: event.data,
+    ts: event.ts ?? Date.now(),
+    traceId: event.traceId,
   });
   return {
     emit: (event) => send({ type: 'emit', event: eventOf(event) }),
-    emitAsync: async (event) => { send({ type: 'emit', event: eventOf(event) }); },
-    serial: async () => { throw new Error('process 插件不支持 serial 事件派发'); },
-    bail: () => { throw new Error('process 插件不支持 bail 事件派发'); },
-    parallel: async () => { throw new Error('process 插件不支持 parallel 事件派发'); },
-    waterfall: async () => { throw new Error('process 插件不支持 waterfall 事件派发'); },
+    emitAsync: async (event) => {
+      send({ type: 'emit', event: eventOf(event) });
+    },
+    serial: async () => {
+      throw new Error('process 插件不支持 serial 事件派发');
+    },
+    bail: () => {
+      throw new Error('process 插件不支持 bail 事件派发');
+    },
+    parallel: async () => {
+      throw new Error('process 插件不支持 parallel 事件派发');
+    },
+    waterfall: async () => {
+      throw new Error('process 插件不支持 waterfall 事件派发');
+    },
   };
 }
 
@@ -205,7 +281,9 @@ function makeContext(opts: {
   };
   return {
     pluginId: opts.pluginId,
-    get kernel(): never { throw new Error('process 插件不能直接访问内核对象'); },
+    get kernel(): never {
+      throw new Error('process 插件不能直接访问内核对象');
+    },
     bus: makeBus(),
     config: makeConfig(opts.config),
     trace: makeTrace(),
@@ -223,7 +301,9 @@ function makeContext(opts: {
       const descriptor: ProcessToolDescriptor = {
         version: tool.version,
         permissions: tool.permissions,
-        name: tool.name, description: tool.description, parameters: tool.parameters,
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
         ...(tool.risk ? { risk: tool.risk } : {}),
         ...(tool.costHint ? { costHint: tool.costHint } : {}),
         ...(tool.approval !== undefined ? { approval: tool.approval } : {}),
@@ -253,12 +333,24 @@ function makeContext(opts: {
         send({ type: 'unsubscribe', token });
       };
     },
-    provide() { throw new Error('process 插件不支持服务提供'); },
-    inject() { throw new Error('process 插件不支持服务注入'); },
-    onCapabilities() { throw new Error('process 插件不支持能力集订阅'); },
-    watchConfig() { throw new Error('process 插件不支持配置热更新订阅，请由父进程重载插件'); },
-    configWith() { throw new Error('process 插件不支持 configWith'); },
-    watchEnv() { return () => undefined; },
+    provide() {
+      throw new Error('process 插件不支持服务提供');
+    },
+    inject() {
+      throw new Error('process 插件不支持服务注入');
+    },
+    onCapabilities() {
+      throw new Error('process 插件不支持能力集订阅');
+    },
+    watchConfig() {
+      throw new Error('process 插件不支持配置热更新订阅，请由父进程重载插件');
+    },
+    configWith() {
+      throw new Error('process 插件不支持 configWith');
+    },
+    watchEnv() {
+      return () => undefined;
+    },
     async effect(fn, makeInverse) {
       const value = await fn();
       childCtx?.inverses.push(() => makeInverse(value)());
@@ -282,7 +374,7 @@ async function loadPlugin(message: Extract<ParentToHost, { type: 'load' }>): Pro
     });
   }
   const url = pathToFileURL(join(message.loadDir, message.entry)).href;
-  const mod = await import(url) as { default?: Plugin } & Plugin;
+  const mod = (await import(url)) as { default?: Plugin } & Plugin;
   // 文件守卫放在模块加载之后：Node 的模块解析会读取祖先 package.json，
   // 加载期就拦截会让合法插件无法解析依赖；onLoad 与工具执行仍全部受策略约束。
   if (message.runtime?.filesystem) {
@@ -361,13 +453,29 @@ async function shutdown(reason?: string): Promise<void> {
   const ctx = childCtx;
   childCtx = undefined;
   if (ctx) {
-    try { await ctx.plugin.onStop?.(ctx.context); } catch { /* 停用失败不阻断退出 */ }
-    try { await ctx.plugin.onUnload?.(ctx.context); } catch { /* 卸载失败不阻断退出 */ }
+    try {
+      await ctx.plugin.onStop?.(ctx.context);
+    } catch {
+      /* 停用失败不阻断退出 */
+    }
+    try {
+      await ctx.plugin.onUnload?.(ctx.context);
+    } catch {
+      /* 卸载失败不阻断退出 */
+    }
     for (const inverse of ctx.inverses.reverse()) {
-      try { await inverse(); } catch { /* 逆元失败继续 */ }
+      try {
+        await inverse();
+      } catch {
+        /* 逆元失败继续 */
+      }
     }
     for (const controller of ctx.controllers.values()) {
-      try { controller.abort(); } catch { /* 忽略 */ }
+      try {
+        controller.abort();
+      } catch {
+        /* 忽略 */
+      }
     }
   }
   send({ type: 'stopped' });

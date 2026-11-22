@@ -1,17 +1,101 @@
-export interface CompositionCase { id: string; kinds: string[]; prompt: string; proof: string; tools?: string[]; }
+export interface CompositionCase {
+  id: string;
+  kinds: string[];
+  prompt: string;
+  proof: string;
+  tools?: string[];
+}
 
 /** Tasks specify outputs and interfaces, leaving implementation and orchestration to the model. */
 export const compositionCases: CompositionCase[] = [
-  { id: 'pure-tool', kinds: ['tool'], tools: ['sum_values'], proof: 'sum=42', prompt: '创建并启用 calculator 插件，提供 sum_values(numbers:number[]) 工具；在当前任务调用它计算 [12,13,17]，最终回答 sum=42。' },
-  { id: 'multi-file', kinds: ['tool'], tools: ['normalize_words'], proof: 'alpha,beta', prompt: '创建 words 插件，index.ts 导入同目录 helper.ts 的纯函数（至少两个源码文件）；提供 normalize_words(text) 去重、小写并排序，用工具处理 BETA alpha beta，最终回答 alpha,beta。' },
-  { id: 'service-tool', kinds: ['service', 'tool'], tools: ['quote_total'], proof: 'total=84', prompt: '创建 pricing 插件，注册 service id=pricing，实例提供 total(n) 返回 n*21；quote_total 工具通过 ctx.inject("service:pricing").value 使用该服务，调用 n=4，最终回答 total=84。' },
-  { id: 'context', kinds: ['context', 'tool'], tools: ['context_ready'], proof: 'CTX-7319', prompt: '创建 context-note 插件，注册 context id=task-note，contentFn 返回材料编号 CTX-7319；另提供 context_ready 工具返回 ready=true。启用后调用此工具并从下一次模型输入读取材料编号，最终只报告材料编号。' },
-  { id: 'event-listener', kinds: ['listener', 'tool'], tools: ['emit_value'], proof: 'event=27', prompt: '创建 event-counter 插件，用 ctx.register listener 监听 counter.value 事件，收到 data.value 保存到本实例变量。提供 emit_value 工具发射值27并返回监听器观察到的值；调用工具后最终回答 event=27。' },
-  { id: 'command', kinds: ['command'], proof: 'command=READY', prompt: '创建 command-sample 插件，注册 command name=upper，参数数组第一个元素转换大写。启用后通过宿主提供的命令入口调用 ready，最终回答 command=READY。' },
-  { id: 'role', kinds: ['role'], proof: 'role=12', prompt: '创建 math-role 插件，注册 role id=math-check，要求读取用户给出的算式并只报告结果，工具范围 readonly。启用后通过角色调用入口委派计算3*4的子任务，最终回答 role=12。' },
-  { id: 'provider', kinds: ['provider'], proof: 'provider=LOCAL-OK', prompt: '创建 local-provider 插件，注册 provider id=local-response，label=Local，defaultModel=local，chat 异步生成器只输出 delta 文本 LOCAL-OK、usage input=1/output=1、done。不访问网络、不提供工具。启用后显式调用此供应商 local 模型，最终回答 provider=LOCAL-OK。' },
-  { id: 'api-panel', kinds: ['api'], proof: 'panel=29', prompt: '创建 result-panel 插件，注册 api mount=panel，router 返回 JSON {title:"Panel",html:"<p>value=29</p>"}，无需引入express。启用后最终回答 panel=29。' },
-  { id: 'dependency', kinds: ['service', 'command'], proof: 'dependency=35', prompt: '创建两个插件：factor-base 注册 service id=factor，实例为 {value:7}；factor-consumer 在 manifest.requires 声明 factor-base，注入 service:factor 并注册 command multiply 返回 value*5 的字符串。按依赖关系启用后调用 multiply，最终回答 dependency=35。' },
-  { id: 'failed-upgrade', kinds: ['tool'], tools: ['stable_value'], proof: 'stable=18', prompt: '创建 stable-plugin，提供 stable_value 工具返回18并启用；再为相同id创建一个引用未定义变量 missingValue 的候选版本，尝试启用并观察失败。最后调用原 stable_value 确认旧版仍返回18，最终回答 stable=18。' },
-  { id: 'release-resources', kinds: ['tool'], tools: ['lifetime_value'], proof: 'released=YES', prompt: '创建 temporary 插件，使用 ctx.resources.interval 管理一个计时器，并注册 lifetime_value 工具返回9。启用并调用后停用插件，确认 plugin_status 中它已 stopped，最终回答 released=YES。' },
+  {
+    id: 'pure-tool',
+    kinds: ['tool'],
+    tools: ['sum_values'],
+    proof: 'sum=42',
+    prompt: '创建并启用 calculator 插件，提供 sum_values(numbers:number[]) 工具；在当前任务调用它计算 [12,13,17]，最终回答 sum=42。',
+  },
+  {
+    id: 'multi-file',
+    kinds: ['tool'],
+    tools: ['normalize_words'],
+    proof: 'alpha,beta',
+    prompt:
+      '创建 words 插件，index.ts 导入同目录 helper.ts 的纯函数（至少两个源码文件）；提供 normalize_words(text) 去重、小写并排序，用工具处理 BETA alpha beta，最终回答 alpha,beta。',
+  },
+  {
+    id: 'service-tool',
+    kinds: ['service', 'tool'],
+    tools: ['quote_total'],
+    proof: 'total=84',
+    prompt:
+      '创建 pricing 插件，注册 service id=pricing，实例提供 total(n) 返回 n*21；quote_total 工具通过 ctx.inject("service:pricing").value 使用该服务，调用 n=4，最终回答 total=84。',
+  },
+  {
+    id: 'context',
+    kinds: ['context', 'tool'],
+    tools: ['context_ready'],
+    proof: 'CTX-7319',
+    prompt:
+      '创建 context-note 插件，注册 context id=task-note，contentFn 返回材料编号 CTX-7319；另提供 context_ready 工具返回 ready=true。启用后调用此工具并从下一次模型输入读取材料编号，最终只报告材料编号。',
+  },
+  {
+    id: 'event-listener',
+    kinds: ['listener', 'tool'],
+    tools: ['emit_value'],
+    proof: 'event=27',
+    prompt:
+      '创建 event-counter 插件，用 ctx.register listener 监听 counter.value 事件，收到 data.value 保存到本实例变量。提供 emit_value 工具发射值27并返回监听器观察到的值；调用工具后最终回答 event=27。',
+  },
+  {
+    id: 'command',
+    kinds: ['command'],
+    proof: 'command=READY',
+    prompt:
+      '创建 command-sample 插件，注册 command name=upper，参数数组第一个元素转换大写。启用后通过宿主提供的命令入口调用 ready，最终回答 command=READY。',
+  },
+  {
+    id: 'role',
+    kinds: ['role'],
+    proof: 'role=12',
+    prompt:
+      '创建 math-role 插件，注册 role id=math-check，要求读取用户给出的算式并只报告结果，工具范围 readonly。启用后通过角色调用入口委派计算3*4的子任务，最终回答 role=12。',
+  },
+  {
+    id: 'provider',
+    kinds: ['provider'],
+    proof: 'provider=LOCAL-OK',
+    prompt:
+      '创建 local-provider 插件，注册 provider id=local-response，label=Local，defaultModel=local，chat 异步生成器只输出 delta 文本 LOCAL-OK、usage input=1/output=1、done。不访问网络、不提供工具。启用后显式调用此供应商 local 模型，最终回答 provider=LOCAL-OK。',
+  },
+  {
+    id: 'api-panel',
+    kinds: ['api'],
+    proof: 'panel=29',
+    prompt:
+      '创建 result-panel 插件，注册 api mount=panel，router 返回 JSON {title:"Panel",html:"<p>value=29</p>"}，无需引入express。启用后最终回答 panel=29。',
+  },
+  {
+    id: 'dependency',
+    kinds: ['service', 'command'],
+    proof: 'dependency=35',
+    prompt:
+      '创建两个插件：factor-base 注册 service id=factor，实例为 {value:7}；factor-consumer 在 manifest.requires 声明 factor-base，注入 service:factor 并注册 command multiply 返回 value*5 的字符串。按依赖关系启用后调用 multiply，最终回答 dependency=35。',
+  },
+  {
+    id: 'failed-upgrade',
+    kinds: ['tool'],
+    tools: ['stable_value'],
+    proof: 'stable=18',
+    prompt:
+      '创建 stable-plugin，提供 stable_value 工具返回18并启用；再为相同id创建一个引用未定义变量 missingValue 的候选版本，尝试启用并观察失败。最后调用原 stable_value 确认旧版仍返回18，最终回答 stable=18。',
+  },
+  {
+    id: 'release-resources',
+    kinds: ['tool'],
+    tools: ['lifetime_value'],
+    proof: 'released=YES',
+    prompt:
+      '创建 temporary 插件，使用 ctx.resources.interval 管理一个计时器，并注册 lifetime_value 工具返回9。启用并调用后停用插件，确认 plugin_status 中它已 stopped，最终回答 released=YES。',
+  },
 ];

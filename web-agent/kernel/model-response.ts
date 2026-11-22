@@ -9,7 +9,11 @@ export function normalizeFinishReason(reason: unknown): FinishReason {
 }
 
 export class ModelResponseError extends Error {
-  constructor(readonly code: 'REQUEST_TIMEOUT' | 'STREAM_INTERRUPTED' | 'OUTPUT_BLOCKED', message: string) {
-    super(message); this.name = 'ModelResponseError';
+  constructor(
+    readonly code: 'REQUEST_TIMEOUT' | 'STREAM_INTERRUPTED' | 'OUTPUT_BLOCKED',
+    message: string,
+  ) {
+    super(message);
+    this.name = 'ModelResponseError';
   }
 }

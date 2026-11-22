@@ -34,41 +34,124 @@ const CATALOG: CatalogRule[] = [
   { re: /^gpt-4\.1-mini/, contextWindow: 1_000_000, maxOutput: 32_000, vision: true, tools: true, priceIn: 0.4, priceOut: 1.6 },
   { re: /^gpt-4\.1/, contextWindow: 1_000_000, maxOutput: 32_000, vision: true, tools: true, priceIn: 2, priceOut: 8 },
   { re: /^gpt-4-turbo|^gpt-4-vision/, contextWindow: 128_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 10, priceOut: 30 },
-  { re: /^gpt-5|^chatgpt-4o-latest/, contextWindow: 200_000, maxOutput: 64_000, vision: true, tools: true, reasoning: true, priceIn: 1.25, priceOut: 10 },
-  { re: /^o\d(-mini|-preview)?/, contextWindow: 200_000, maxOutput: 100_000, tools: true, reasoning: true, vision: true, priceIn: 3.5, priceOut: 14 },
+  {
+    re: /^gpt-5|^chatgpt-4o-latest/,
+    contextWindow: 200_000,
+    maxOutput: 64_000,
+    vision: true,
+    tools: true,
+    reasoning: true,
+    priceIn: 1.25,
+    priceOut: 10,
+  },
+  {
+    re: /^o\d(-mini|-preview)?/,
+    contextWindow: 200_000,
+    maxOutput: 100_000,
+    tools: true,
+    reasoning: true,
+    vision: true,
+    priceIn: 3.5,
+    priceOut: 14,
+  },
   { re: /^gpt-3\.5|^gpt-4$|^gpt-4-0/, contextWindow: 16_385, maxOutput: 4_096, vision: false, tools: true, priceIn: 3, priceOut: 6 },
 
   // ---- Anthropic ----
   // haiku 必须排在 claude-*-4 大杯之前（否则被宽泛规则吞掉）
   { re: /^claude-.*haiku/, contextWindow: 200_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 1, priceOut: 5 },
-  { re: /^claude-(opus|sonnet)-4|^claude-4/, contextWindow: 200_000, maxOutput: 32_000, vision: true, tools: true, reasoning: true, priceIn: 3, priceOut: 15 },
+  {
+    re: /^claude-(opus|sonnet)-4|^claude-4/,
+    contextWindow: 200_000,
+    maxOutput: 32_000,
+    vision: true,
+    tools: true,
+    reasoning: true,
+    priceIn: 3,
+    priceOut: 15,
+  },
   { re: /^claude-3-5-|^claude-3-7-/, contextWindow: 200_000, maxOutput: 8_192, vision: true, tools: true, priceIn: 3, priceOut: 15 },
   { re: /^claude-3-/, contextWindow: 200_000, maxOutput: 4_096, vision: true, tools: true, priceIn: 3, priceOut: 15 },
 
   // ---- Google ----
-  { re: /^gemini-2|^gemini-1\.5|^gemini-3/, contextWindow: 1_000_000, maxOutput: 65_536, vision: true, tools: true, priceIn: 0.1, priceOut: 0.4 },
+  {
+    re: /^gemini-2|^gemini-1\.5|^gemini-3/,
+    contextWindow: 1_000_000,
+    maxOutput: 65_536,
+    vision: true,
+    tools: true,
+    priceIn: 0.1,
+    priceOut: 0.4,
+  },
 
   // ---- DeepSeek ----
-  { re: /^deepseek-reasoner|^deepseek-r1/, contextWindow: 64_000, maxOutput: 8_000, vision: false, tools: false, reasoning: true, priceIn: 0.55, priceOut: 2.19 },
+  {
+    re: /^deepseek-reasoner|^deepseek-r1/,
+    contextWindow: 64_000,
+    maxOutput: 8_000,
+    vision: false,
+    tools: false,
+    reasoning: true,
+    priceIn: 0.55,
+    priceOut: 2.19,
+  },
   { re: /^deepseek-chat|^deepseek-v3/, contextWindow: 64_000, maxOutput: 8_000, vision: false, tools: true, priceIn: 0.27, priceOut: 1.1 },
 
   // ---- 国产：视觉系命名统一识别 ----
-  { re: /(^|[-.])vl([-.]|$)|vision|^qwen.*-v/, contextWindow: 32_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 0.5, priceOut: 2 },
-  { re: /^qwen3|^qwen2\.5|^qwen-max|^qwen-plus/, contextWindow: 128_000, maxOutput: 8_000, vision: false, tools: true, priceIn: 0.4, priceOut: 1.2 },
-  { re: /^glm-4\.(5|6|air)|^glm-4\.v|^glm-4v/, contextWindow: 128_000, maxOutput: 16_000, vision: true, tools: true, reasoning: true, priceIn: 0.6, priceOut: 2 },
+  {
+    re: /(^|[-.])vl([-.]|$)|vision|^qwen.*-v/,
+    contextWindow: 32_000,
+    maxOutput: 8_000,
+    vision: true,
+    tools: true,
+    priceIn: 0.5,
+    priceOut: 2,
+  },
+  {
+    re: /^qwen3|^qwen2\.5|^qwen-max|^qwen-plus/,
+    contextWindow: 128_000,
+    maxOutput: 8_000,
+    vision: false,
+    tools: true,
+    priceIn: 0.4,
+    priceOut: 1.2,
+  },
+  {
+    re: /^glm-4\.(5|6|air)|^glm-4\.v|^glm-4v/,
+    contextWindow: 128_000,
+    maxOutput: 16_000,
+    vision: true,
+    tools: true,
+    reasoning: true,
+    priceIn: 0.6,
+    priceOut: 2,
+  },
   { re: /^glm-/, contextWindow: 128_000, maxOutput: 4_096, vision: false, tools: true, priceIn: 0.6, priceOut: 2 },
   { re: /^kimi-|^moonshot/, contextWindow: 128_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 0.6, priceOut: 2 },
   { re: /^doubao-|^ep-/, contextWindow: 128_000, maxOutput: 12_000, vision: true, tools: true, priceIn: 0.8, priceOut: 2 },
   { re: /^ernie-|^qianfan/, contextWindow: 128_000, maxOutput: 8_000, vision: true, tools: true, priceIn: 0.85, priceOut: 4.25 },
-  { re: /:-\d+b$/, contextWindow: 32_768, maxOutput: 8_192, vision: false, tools: false, priceIn: 0.5, priceOut: 2 },   // Ollama 本地 tag
+  { re: /:-\d+b$/, contextWindow: 32_768, maxOutput: 8_192, vision: false, tools: false, priceIn: 0.5, priceOut: 2 }, // Ollama 本地 tag
 
   // ---- 开源权重系（ollama / sglang 常见） ----
-  { re: /^llama[-.]?[34]|^mistral|^mixtral|^qwen1|^yi-|^phi-|^gemma-|^deepseek-coder/, contextWindow: 32_768, maxOutput: 8_192, vision: false, tools: true, priceIn: 0, priceOut: 0 },
+  {
+    re: /^llama[-.]?[34]|^mistral|^mixtral|^qwen1|^yi-|^phi-|^gemma-|^deepseek-coder/,
+    contextWindow: 32_768,
+    maxOutput: 8_192,
+    vision: false,
+    tools: true,
+    priceIn: 0,
+    priceOut: 0,
+  },
   { re: /^coder|^.*-coder/, contextWindow: 64_000, maxOutput: 16_000, vision: false, tools: true, priceIn: 0.2, priceOut: 0.6 },
 ];
 
 const FALLBACK: ModelCapabilities = {
-  contextWindow: 32_768, maxOutput: 4_096, vision: false, tools: true, reasoning: false, priceIn: 1, priceOut: 4,
+  contextWindow: 32_768,
+  maxOutput: 4_096,
+  vision: false,
+  tools: true,
+  reasoning: false,
+  priceIn: 1,
+  priceOut: 4,
 };
 
 /** 本地/自托管服务的价格一律记 0 */
@@ -83,18 +166,21 @@ export function isKnownModel(modelId: string): boolean {
 
 export function inferCapabilities(modelId: string, providerId?: string): ModelCapabilities {
   const id = String(modelId ?? '').toLowerCase();
-  const rule = CATALOG.find(r => r.re.test(id));
+  const rule = CATALOG.find((r) => r.re.test(id));
   const out: ModelCapabilities = {
     contextWindow: rule?.contextWindow ?? FALLBACK.contextWindow,
     maxOutput: rule?.maxOutput ?? FALLBACK.maxOutput,
     vision: rule?.vision ?? FALLBACK.vision,
     tools: rule?.tools ?? FALLBACK.tools,
-    reasoning: rule?.reasoning ?? (/[_-](thinking|reasoner|r1)[_-]|[_-]o[13](?:[_-]|$)/.test(id)),
+    reasoning: rule?.reasoning ?? /[_-](thinking|reasoner|r1)[_-]|[_-]o[13](?:[_-]|$)/.test(id),
     priceIn: rule?.priceIn ?? FALLBACK.priceIn,
     priceOut: rule?.priceOut ?? FALLBACK.priceOut,
   };
-  if (providerId && LOCAL_PRICE.test(providerId)) { out.priceIn = 0; out.priceOut = 0; }
-  if (/(^|[-.])vl([-.]|$)|vision/.test(id)) out.vision = true;      // 名字里有 vl/vision 一定支持视觉
+  if (providerId && LOCAL_PRICE.test(providerId)) {
+    out.priceIn = 0;
+    out.priceOut = 0;
+  }
+  if (/(^|[-.])vl([-.]|$)|vision/.test(id)) out.vision = true; // 名字里有 vl/vision 一定支持视觉
   return out;
 }
 
@@ -104,13 +190,20 @@ export function extractFromProviderMeta(meta: unknown): Partial<ModelCapabilitie
   const m = meta as Record<string, unknown>;
   const out: Partial<ModelCapabilities> = {};
   const num = (v: unknown): number | undefined => (typeof v === 'number' && v > 0 ? v : undefined);
-  out.contextWindow = num(m.context_length) ?? num(m.context_window) ?? num(m.max_context_length)
-    ?? num((m.model_limits as Record<string, unknown> | undefined)?.context_length) ?? out.contextWindow;
-  out.maxOutput = num(m.max_tokens) ?? num(m.max_output_tokens)
-    ?? num((m.model_limits as Record<string, unknown> | undefined)?.output_length) ?? out.maxOutput;
+  out.contextWindow =
+    num(m.context_length) ??
+    num(m.context_window) ??
+    num(m.max_context_length) ??
+    num((m.model_limits as Record<string, unknown> | undefined)?.context_length) ??
+    out.contextWindow;
+  out.maxOutput =
+    num(m.max_tokens) ??
+    num(m.max_output_tokens) ??
+    num((m.model_limits as Record<string, unknown> | undefined)?.output_length) ??
+    out.maxOutput;
   const modalities = m.supported_modalities ?? m.modalities ?? m.input_modalities;
   if (Array.isArray(modalities)) {
-    const has = (k: string) => modalities.some(x => typeof x === 'string' && x.toLowerCase().includes(k));
+    const has = (k: string) => modalities.some((x) => typeof x === 'string' && x.toLowerCase().includes(k));
     if (has('image')) out.vision = true;
     if (has('text') && !has('image')) out.vision = false;
   }

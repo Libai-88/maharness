@@ -3,7 +3,8 @@ import { isAbsolute, relative, resolve } from 'node:path';
 export function pluginFilePath(directory: string, name: string): string {
   const path = resolve(directory, name);
   const rel = relative(directory, path);
-  if (!name || name.includes('\\') || name.includes(':') || isAbsolute(name) || !rel || rel.startsWith('..') || rel === 'plugin.json') throw new Error('PLUGIN_FILE_PATH');
+  if (!name || name.includes('\\') || name.includes(':') || isAbsolute(name) || !rel || rel.startsWith('..') || rel === 'plugin.json')
+    throw new Error('PLUGIN_FILE_PATH');
   return path;
 }
 

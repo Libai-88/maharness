@@ -2,7 +2,7 @@
  * 技能路由评测门禁：用同一套 scoreSkillEntries 对固定 prompt 做可重复的 top-K 检查。
  * 这不是模型行为评测，而是「技能索引是否会选错」的确定性回归；真实模型评测仍走 eval:ci。
  */
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, type Dirent } from 'node:fs';
 import { join, basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseFrontMatter, fmString, fmList } from '../kernel/frontmatter';
@@ -22,8 +22,12 @@ interface EvalFile {
 
 function findSkillFiles(dir: string, depth = 0, out: string[] = []): string[] {
   if (depth > 5 || !existsSync(dir)) return out;
-  let entries;
-  try { entries = readdirSync(dir, { withFileTypes: true }); } catch { return out; }
+  let entries: Dirent[];
+  try {
+    entries = readdirSync(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
   for (const entry of entries) {
     if (entry.name === 'node_modules' || entry.name === '.git' || entry.name.startsWith('.')) continue;
     const full = join(dir, entry.name);
@@ -47,7 +51,9 @@ function readSkills(root: string): SkillRouteEntry[] {
         appliesWhen: fmList(fm.data, 'applies-when').length ? fmList(fm.data, 'applies-when') : fmList(fm.data, 'applies_when'),
         rejectWhen: fmList(fm.data, 'reject-when').length ? fmList(fm.data, 'reject-when') : fmList(fm.data, 'reject_when'),
       });
-    } catch { /* 单个技能损坏不阻断其余评测 */ }
+    } catch {
+      /* 单个技能损坏不阻断其余评测 */
+    }
   }
   return out;
 }

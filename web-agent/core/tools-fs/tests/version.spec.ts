@@ -11,20 +11,33 @@ test('file writes and edits reject stale versions and preserve concurrent conten
   const tools = new Map<string, ToolDef>();
   const cache = { makeKey: () => '', l2Get: () => ({ hit: false }), l2Set: () => {}, l2DeleteNamespace: () => {} };
   const context = { sandboxRoot: root, turn: 0, cache, approved: true } as unknown as ToolContext;
-  const ctx = { paths: { root }, config: { get: (_key: string, fallback: unknown) => fallback }, register: (cap: Capability) => { if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool); }, logger: { info: () => {} } } as unknown as PluginContext;
+  const ctx = {
+    paths: { root },
+    config: { get: (_key: string, fallback: unknown) => fallback },
+    register: (cap: Capability) => {
+      if (cap.kind === 'tool') tools.set(cap.tool.name, cap.tool);
+    },
+    logger: { info: () => {} },
+  } as unknown as PluginContext;
   try {
     await plugin.onLoad(ctx);
     writeFileSync(join(root, 'file.txt'), 'original');
     const read = await tools.get('read_file')!.handler({ path: 'file.txt' }, context);
-    const version = (read.data as { version: string }).version; assert.match(version, /^[0-9a-f]{64}$/);
+    const version = (read.data as { version: string }).version;
+    assert.match(version, /^[0-9a-f]{64}$/);
     writeFileSync(join(root, 'file.txt'), 'concurrent');
-    for (const [tool, args] of [['write_file', { content: 'overwrite' }], ['edit_file', { edits: [{ oldText: 'concurrent', newText: 'overwrite' }] }]] as const) {
+    for (const [tool, args] of [
+      ['write_file', { content: 'overwrite' }],
+      ['edit_file', { edits: [{ oldText: 'concurrent', newText: 'overwrite' }] }],
+    ] as const) {
       const result = await tools.get(tool)!.handler({ path: 'file.txt', expectedVersion: version, ...args }, context);
       assert.equal(result.failure?.code, 'FILE_VERSION_CONFLICT');
       assert.equal(result.failure?.outcome, 'not_started');
       assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'concurrent');
     }
-    const mismatch = await tools.get('edit_file')!.handler({ path: 'file.txt', edits: [{ oldText: 'missing text', newText: 'replacement' }] }, context);
+    const mismatch = await tools
+      .get('edit_file')!
+      .handler({ path: 'file.txt', edits: [{ oldText: 'missing text', newText: 'replacement' }] }, context);
     assert.equal(mismatch.failure?.code, 'EDIT_NO_MATCH');
     assert.equal(mismatch.failure?.outcome, 'not_started');
     assert.equal(readFileSync(join(root, 'file.txt'), 'utf8'), 'concurrent');
@@ -33,5 +46,7 @@ test('file writes and edits reject stale versions and preserve concurrent conten
     const created = await tools.get('write_file')!.handler({ path: 'new.txt', expectedVersion: null, content: 'created' }, context);
     assert.equal(created.ok, true);
     assert.equal(readFileSync(join(root, 'new.txt'), 'utf8'), 'created');
-  } finally { rmSync(root, { recursive: true, force: true }); }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

@@ -22,35 +22,44 @@ describe('自然语言任务契约解析', () => {
   test('只从明确引号短语提取输出验收，不猜测普通问句', () => {
     const task = deriveTaskContract('请回答，并且必须包含“结论：通过”');
     assert.deepEqual(task.acceptance, [{ type: 'output_contains', value: '结论：通过' }]);
-    assert.deepEqual(task.inference, { confidence: 1, basis: 'explicit', needsConfirmation: false, rationale: '目标包含可直接验证的明确验收条件' });
+    assert.deepEqual(task.inference, {
+      confidence: 1,
+      basis: 'explicit',
+      needsConfirmation: false,
+      rationale: '目标包含可直接验证的明确验收条件',
+    });
     assert.equal(deriveTaskContract('今天北京天气怎么样？').acceptance.length, 0);
   });
 
   test('开放式行动目标只产生低置信度推断，并要求确认', () => {
     const task = deriveTaskContract('请整理一份项目报告');
     assert.deepEqual(task.acceptance, []);
-    assert.deepEqual(task.inference, { confidence: 0.45, basis: 'inferred', needsConfirmation: true, rationale: '识别到行动意图，但未识别到可验证的完成标准' });
+    assert.deepEqual(task.inference, {
+      confidence: 0.45,
+      basis: 'inferred',
+      needsConfirmation: true,
+      rationale: '识别到行动意图，但未识别到可验证的完成标准',
+    });
   });
 
   test('开放式问题标记为歧义，不能单独触发验收', () => {
     const task = deriveTaskContract('今天北京天气怎么样？');
-    assert.deepEqual(task.inference, { confidence: 0.1, basis: 'ambiguous', needsConfirmation: true, rationale: '目标是询问或开放式问题，缺少可验证的完成标准' });
+    assert.deepEqual(task.inference, {
+      confidence: 0.1,
+      basis: 'ambiguous',
+      needsConfirmation: true,
+      rationale: '目标是询问或开放式问题，缺少可验证的完成标准',
+    });
     assert.equal(task.acceptance.length, 0);
   });
 
   test('识别常见中英文明确输出格式并规范化空白', () => {
-    assert.deepEqual(deriveTaskContract('请输出内容为「  READY  」').acceptance, [
-      { type: 'output_contains', value: 'READY' },
-    ]);
-    assert.deepEqual(deriveTaskContract('output exactly as "done"').acceptance, [
-      { type: 'output_contains', value: 'done' },
-    ]);
+    assert.deepEqual(deriveTaskContract('请输出内容为「  READY  」').acceptance, [{ type: 'output_contains', value: 'READY' }]);
+    assert.deepEqual(deriveTaskContract('output exactly as "done"').acceptance, [{ type: 'output_contains', value: 'done' }]);
   });
 
   test('识别带引号的回答/返回表达式，同时拒绝无明确短语的普通问句', () => {
-    assert.deepEqual(deriveTaskContract('请回答「已完成」').acceptance, [
-      { type: 'output_contains', value: '已完成' },
-    ]);
+    assert.deepEqual(deriveTaskContract('请回答「已完成」').acceptance, [{ type: 'output_contains', value: '已完成' }]);
     assert.deepEqual(deriveTaskContract('respond with "READY" and must contain \'trace-id\'').acceptance, [
       { type: 'output_contains', value: 'READY' },
       { type: 'output_contains', value: 'trace-id' },
@@ -76,7 +85,9 @@ describe('自然语言任务契约解析', () => {
   });
 
   test('按出现顺序提取多项输出短语和文件产物，并去重', () => {
-    const task = deriveTaskContract('必须包含“alpha”，include the phrase "beta"，必须包含“alpha”；创建 reports/one.md 并生成 reports/two.json，再创建 reports/one.md');
+    const task = deriveTaskContract(
+      '必须包含“alpha”，include the phrase "beta"，必须包含“alpha”；创建 reports/one.md 并生成 reports/two.json，再创建 reports/one.md',
+    );
     assert.deepEqual(task.acceptance, [
       { type: 'output_contains', value: 'alpha' },
       { type: 'output_contains', value: 'beta' },

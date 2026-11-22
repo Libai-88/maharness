@@ -24,11 +24,16 @@ interface AllowEntry {
 }
 
 function normalizeHost(host: string): string {
-  return host.trim().toLowerCase().replace(/^\[|\]$/g, '');
+  return host
+    .trim()
+    .toLowerCase()
+    .replace(/^\[|\]$/g, '');
 }
 
 function parseEntry(raw: string): AllowEntry | null {
-  const text = String(raw ?? '').trim().toLowerCase();
+  const text = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!text) return null;
   const ipv6 = /^\[([^\]]+)\](?::(\d+))?$/.exec(text);
   if (ipv6) return { host: normalizeHost(ipv6[1]!), wildcard: false, ...(ipv6[2] ? { port: Number(ipv6[2]) } : {}) };
@@ -61,10 +66,18 @@ function errorFor(host: string, port?: number): Error {
 
 function urlOf(input: unknown): URL | null {
   if (typeof input === 'string' || input instanceof URL) {
-    try { return new URL(String(input)); } catch { return null; }
+    try {
+      return new URL(String(input));
+    } catch {
+      return null;
+    }
   }
   if (input && typeof input === 'object' && 'url' in input && typeof (input as { url?: unknown }).url === 'string') {
-    try { return new URL((input as { url: string }).url); } catch { return null; }
+    try {
+      return new URL((input as { url: string }).url);
+    } catch {
+      return null;
+    }
   }
   return null;
 }
@@ -87,10 +100,9 @@ function optionsOf(args: unknown[]): { host: string; port?: number } | null {
   }
   if (first && typeof first === 'object') {
     const opts = first as { host?: unknown; hostname?: unknown; port?: unknown; protocol?: unknown };
-    const host = typeof opts.hostname === 'string' ? opts.hostname
-      : typeof opts.host === 'string' ? opts.host : '127.0.0.1';
-    const port = typeof opts.port === 'number' ? opts.port
-      : typeof opts.port === 'string' && /^\d+$/.test(opts.port) ? Number(opts.port) : undefined;
+    const host = typeof opts.hostname === 'string' ? opts.hostname : typeof opts.host === 'string' ? opts.host : '127.0.0.1';
+    const port =
+      typeof opts.port === 'number' ? opts.port : typeof opts.port === 'string' && /^\d+$/.test(opts.port) ? Number(opts.port) : undefined;
     return { host, ...(port ? { port } : {}) };
   }
   return null;

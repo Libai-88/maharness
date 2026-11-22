@@ -45,13 +45,16 @@ function ensureBus(): void {
   if (busStop) return;
   busStop = subscribeEvents((e: BusEvent) => {
     for (const cb of busSubs.get(e.type) ?? []) {
-      try { cb(e.data); } catch { /* 订阅方异常不影响其它订阅 */ }
+      try {
+        cb(e.data);
+      } catch {
+        /* 订阅方异常不影响其它订阅 */
+      }
     }
   });
 }
 
-const apiBase = (pluginId: string, path: string): string =>
-  `/api/plugins/${pluginId}${path.startsWith('/') ? path : `/${path}`}`;
+const apiBase = (pluginId: string, path: string): string => `/api/plugins/${pluginId}${path.startsWith('/') ? path : `/${path}`}`;
 
 async function request<T>(pluginId: string, path: string, init?: RequestInit): Promise<T> {
   const t = getMutationToken();
@@ -71,15 +74,16 @@ function buildHost(item: PluginNavItem): PluginHostApi {
     ReactDOM,
     api: {
       get: <T,>(path: string) => request<T>(item.pluginId, path),
-      post: <T,>(path: string, body?: unknown) => request<T>(item.pluginId, path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: body === undefined ? undefined : JSON.stringify(body),
-      }),
+      post: <T,>(path: string, body?: unknown) =>
+        request<T>(item.pluginId, path, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: body === undefined ? undefined : JSON.stringify(body),
+        }),
     },
     toast: { success: (m) => toast.success(m), error: (m) => toast.error(m) },
     theme: {
-      current: (document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'),
+      current: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light',
       onChange: (cb) => {
         const observer = new MutationObserver(() => {
           cb(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
@@ -93,9 +97,13 @@ function buildHost(item: PluginNavItem): PluginHostApi {
       const set = busSubs.get(event) ?? new Set();
       set.add(cb);
       busSubs.set(event, set);
-      return () => { set.delete(cb); };
+      return () => {
+        set.delete(cb);
+      };
     },
-    openExternal: (url) => { window.open(url, '_blank', 'noopener,noreferrer'); },
+    openExternal: (url) => {
+      window.open(url, '_blank', 'noopener,noreferrer');
+    },
   };
 }
 
@@ -122,17 +130,31 @@ export default function PluginModuleView({ item }: { item: PluginNavItem }) {
     })();
     return () => {
       alive = false;
-      try { unmount?.(); } catch { /* 卸载异常不阻断标签页切换 */ }
+      try {
+        unmount?.();
+      } catch {
+        /* 卸载异常不阻断标签页切换 */
+      }
     };
   }, [item.moduleUrl, item.pluginId, item]);
 
-  if (!item.moduleUrl) return <Empty><EmptyHeader><EmptyTitle>未声明模块入口</EmptyTitle><EmptyDescription>插件需配置 nav.module。</EmptyDescription></EmptyHeader></Empty>;
-  if (error) return <Alert variant="destructive" className="m-4 w-auto"><AlertTitle>插件模块加载失败</AlertTitle><AlertDescription>{item.pluginId}：{error}</AlertDescription></Alert>;
-  return (
-    <div
-      ref={ref}
-      className="min-h-0 flex-1 overflow-auto p-4"
-      data-plugin-id={item.pluginId}
-    />
-  );
+  if (!item.moduleUrl)
+    return (
+      <Empty>
+        <EmptyHeader>
+          <EmptyTitle>未声明模块入口</EmptyTitle>
+          <EmptyDescription>插件需配置 nav.module。</EmptyDescription>
+        </EmptyHeader>
+      </Empty>
+    );
+  if (error)
+    return (
+      <Alert variant="destructive" className="m-4 w-auto">
+        <AlertTitle>插件模块加载失败</AlertTitle>
+        <AlertDescription>
+          {item.pluginId}：{error}
+        </AlertDescription>
+      </Alert>
+    );
+  return <div ref={ref} className="min-h-0 flex-1 overflow-auto p-4" data-plugin-id={item.pluginId} />;
 }

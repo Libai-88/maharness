@@ -17,22 +17,45 @@ describe('Anthropic 请求组装', () => {
   it('system 提为顶层参数，其余按 user/assistant 交替', () => {
     const b = buildBody('claude-sonnet-4-5', [sys, user('一'), asst('二'), user('三')], {});
     assert.equal(b.system, '你是测试助手');
-    assert.deepEqual(b.messages.map(m => m.role), ['user', 'assistant', 'user']);
+    assert.deepEqual(
+      b.messages.map((m) => m.role),
+      ['user', 'assistant', 'user'],
+    );
     assert.equal(b.messages[0].content[0].text, '一');
   });
 
   it('连续同角色合并为一条；末条为 assistant 时补一次继续提示', () => {
     const b = buildBody('m', [sys, user('a'), user('b'), asst('c'), asst('d')], {});
-    assert.deepEqual(b.messages.map(m => m.role), ['user', 'assistant', 'user']);
-    assert.deepEqual(b.messages[0].content.map(x => x.text), ['a', 'b']);
-    assert.deepEqual(b.messages[1].content.map(x => x.text), ['c', 'd']);
+    assert.deepEqual(
+      b.messages.map((m) => m.role),
+      ['user', 'assistant', 'user'],
+    );
+    assert.deepEqual(
+      b.messages[0].content.map((x) => x.text),
+      ['a', 'b'],
+    );
+    assert.deepEqual(
+      b.messages[1].content.map((x) => x.text),
+      ['c', 'd'],
+    );
     assert.equal(b.messages[2].content[0].text, '请继续。');
   });
 
   it('max_tokens 必填并带默认值；tools 转 input_schema', () => {
     const b = buildBody('m', [user('x')], {
       maxTokens: 900,
-      tools: [{version: '2.0.0', permissions: [], sideEffect: 'external', outputSchema: {},  name: 'read_file', description: '读文件', parameters: { type: 'object', properties: { path: { type: 'string' } } }, handler: async () => ({ ok: true }) }],
+      tools: [
+        {
+          version: '2.0.0',
+          permissions: [],
+          sideEffect: 'external',
+          outputSchema: {},
+          name: 'read_file',
+          description: '读文件',
+          parameters: { type: 'object', properties: { path: { type: 'string' } } },
+          handler: async () => ({ ok: true }),
+        },
+      ],
     });
     assert.equal(b.max_tokens, 900);
     assert.equal((b.tools ?? [])[0].name, 'read_file');
@@ -54,7 +77,11 @@ describe('Anthropic 请求组装', () => {
 
   it('tool 消息合并进 user 的 tool_result 块（防御性映射）', () => {
     const msgs: LLMMessage[] = [
-      { role: 'assistant', content: '先读文件', tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }] },
+      {
+        role: 'assistant',
+        content: '先读文件',
+        tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{"path":"a.ts"}' } }],
+      },
       { role: 'tool', content: '文件内容', tool_call_id: 'call_1' },
     ];
     const { messages } = mapMessages([sys, ...msgs]);
@@ -70,7 +97,10 @@ describe('Anthropic 请求组装', () => {
 
   it('空内容消息被丢弃；末条 assistant 时补继续提示', () => {
     const { messages } = mapMessages([sys, { role: 'user', content: '' }, asst('只有回复')]);
-    assert.deepEqual(messages.map(m => m.role), ['assistant', 'user']);
+    assert.deepEqual(
+      messages.map((m) => m.role),
+      ['assistant', 'user'],
+    );
     assert.equal(messages[1].content[0].text, '请继续。');
   });
 });
@@ -100,7 +130,10 @@ describe('Anthropic 流事件归约', () => {
 
   it('usage 分两处回报：input 在 message_start（不含缓存），output 在 message_delta', () => {
     const st = createStreamState();
-    reduceEvent({ type: 'message_start', message: { usage: { input_tokens: 100, cache_read_input_tokens: 800, cache_creation_input_tokens: 20 } } }, st);
+    reduceEvent(
+      { type: 'message_start', message: { usage: { input_tokens: 100, cache_read_input_tokens: 800, cache_creation_input_tokens: 20 } } },
+      st,
+    );
     reduceEvent({ type: 'message_delta', delta: { stop_reason: 'end_turn' }, usage: { output_tokens: 42 } }, st);
     const u = usageChunks(st);
     assert.equal(u.input, 920, '总输入 = 未缓存 + 缓存读 + 缓存写');
@@ -127,7 +160,10 @@ let sseFrames: string[] = ['data: {"type":"message_stop"}\n\n'];
 let httpStatus = 200;
 let retryAfterHeader: string | undefined;
 
-after(() => { server?.close(); server = null; });
+after(() => {
+  server?.close();
+  server = null;
+});
 
 async function startMock(): Promise<string> {
   if (server) {
@@ -136,12 +172,14 @@ async function startMock(): Promise<string> {
   }
   server = createServer((req, res) => {
     let raw = '';
-    req.on('data', (d: Buffer) => { raw += d.toString('utf8'); });
+    req.on('data', (d: Buffer) => {
+      raw += d.toString('utf8');
+    });
     req.on('end', () => {
       lastRequest = {
         path: String(req.url),
         headers: req.headers as Record<string, string | string[] | undefined>,
-        body: raw ? JSON.parse(raw) as Record<string, unknown> : {},
+        body: raw ? (JSON.parse(raw) as Record<string, unknown>) : {},
       };
       if (httpStatus !== 200) {
         res.writeHead(httpStatus, { 'Content-Type': 'application/json', ...(retryAfterHeader ? { 'Retry-After': retryAfterHeader } : {}) });
@@ -180,9 +218,12 @@ describe('Anthropic 原生端点端到端', () => {
     ];
     const p = createProvider({ id: 'anth', baseUrl: base, apiKey: 'sk-test', model: 'claude-sonnet-4-5', protocol: 'anthropic' });
     const chunks = await collect(p, [sys, user('在吗')], 'claude-sonnet-4-5');
-    const text = chunks.filter(c => c.type === 'delta').map(c => (c as { text: string }).text).join('');
+    const text = chunks
+      .filter((c) => c.type === 'delta')
+      .map((c) => (c as { text: string }).text)
+      .join('');
     assert.equal(text, '你好，世界');
-    const usage = chunks.find(c => c.type === 'usage') as { input: number; output: number };
+    const usage = chunks.find((c) => c.type === 'usage') as { input: number; output: number };
     assert.deepEqual([usage.input, usage.output], [11, 7]);
     assert.equal(chunks[chunks.length - 1].type, 'done');
 
@@ -191,7 +232,7 @@ describe('Anthropic 原生端点端到端', () => {
     assert.equal(lastRequest?.headers['anthropic-version'], '2023-06-01');
     assert.equal(lastRequest?.body.system, '你是测试助手');
     assert.equal(lastRequest?.body.max_tokens, 4096);
-    assert.equal((lastRequest?.body.messages as LLMMessage[]).length, 1);
+    assert.equal((lastRequest?.body.messages as LLMMessage[] | undefined)?.length, 1);
   });
 
   it('原生工具调用：tool_use 块转成 tool_call 供执行器接管', async () => {
@@ -207,16 +248,19 @@ describe('Anthropic 原生端点端到端', () => {
     const chunks = await collect(p, [sys, user('找 ts 文件')], 'claude-sonnet-4-5', {
       tools: [{ name: 'glob', description: 'd', parameters: { type: 'object', properties: {} }, handler: async () => ({ ok: true }) }],
     });
-    const tc = chunks.find(c => c.type === 'tool_call') as { toolCall: { id: string; function: { name: string; arguments: string } } };
+    const tc = chunks.find((c) => c.type === 'tool_call') as { toolCall: { id: string; function: { name: string; arguments: string } } };
     assert.equal(tc.toolCall.id, 'tu_9');
     assert.equal(tc.toolCall.function.name, 'glob');
     assert.deepEqual(JSON.parse(tc.toolCall.function.arguments), { pattern: '**/*.ts' });
-    assert.equal((lastRequest?.body.tools as unknown[]).length, 1);
+    assert.equal((lastRequest?.body.tools as unknown[] | undefined)?.length, 1);
   });
 
   it('图片经原生端点发出：messages[0].content 含 base64 image 块（视觉借道的落点）', async () => {
     const base = await startMock();
-    sseFrames = ['data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"图里是报错弹窗"}}\n\n', 'data: {"type":"message_stop"}\n\n'];
+    sseFrames = [
+      'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"图里是报错弹窗"}}\n\n',
+      'data: {"type":"message_stop"}\n\n',
+    ];
     const p = createProvider({ id: 'anth', baseUrl: base, apiKey: 'k', model: 'claude-sonnet-4-5', protocol: 'anthropic' });
     await collect(p, [user('这张图写了什么？', ['data:image/png;base64,iVBORw0KGgo='])], 'claude-sonnet-4-5');
     const msgs = lastRequest?.body.messages as { role: string; content: { type: string; source?: { type: string } }[] }[];
@@ -239,7 +283,11 @@ describe('Anthropic 原生端点端到端', () => {
     for (const protocol of ['openai', 'anthropic'] as const) {
       const p = createProvider({ id: `retry-after-${protocol}`, baseUrl: base, apiKey: 'k', model: 'm', protocol });
       let thrown: unknown;
-      try { await collect(p, [user('x')], 'm'); } catch (error) { thrown = error; }
+      try {
+        await collect(p, [user('x')], 'm');
+      } catch (error) {
+        thrown = error;
+      }
       assert.ok(thrown instanceof LLMHttpError);
       assert.equal((thrown as LLMHttpError).status, 429);
       assert.equal((thrown as LLMHttpError).retryAfterMs, 250);
@@ -250,7 +298,10 @@ describe('Anthropic 原生端点端到端', () => {
 
   it('流内 error 事件抛错；缺 message_stop 视为断流抛错', async () => {
     const base = await startMock();
-    sseFrames = ['data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n', 'data: {"type":"message_stop"}\n\n'];
+    sseFrames = [
+      'data: {"type":"error","error":{"type":"overloaded_error","message":"Overloaded"}}\n\n',
+      'data: {"type":"message_stop"}\n\n',
+    ];
     const p = createProvider({ id: 'anth', baseUrl: base, apiKey: 'k', model: 'm', protocol: 'anthropic' });
     await assert.rejects(() => collect(p, [user('x')], 'm'), /overloaded_error/);
 
@@ -261,10 +312,13 @@ describe('Anthropic 原生端点端到端', () => {
   it('OpenAI 兼容路径不受影响：仍打 /chat/completions + Bearer', async () => {
     const base = await startMock();
     httpStatus = 200;
-    sseFrames = ['data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n', 'data: [DONE]\n\n'];
+    sseFrames = [
+      'data: {"choices":[{"delta":{"content":"ok"}}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\n',
+      'data: [DONE]\n\n',
+    ];
     const p = createProvider({ id: 'oai', baseUrl: base, apiKey: 'sk-x', model: 'gpt-4o', protocol: 'openai' });
     const chunks = await collect(p, [sys, user('hi')], 'gpt-4o', { reasoningEffort: 'none' });
-    assert.equal(chunks.filter(c => c.type === 'delta').length, 1);
+    assert.equal(chunks.filter((c) => c.type === 'delta').length, 1);
     assert.equal(lastRequest?.path, '/chat/completions');
     assert.equal(lastRequest?.headers.authorization, 'Bearer sk-x');
     assert.equal(lastRequest?.body.reasoning_effort, 'none');
@@ -285,7 +339,9 @@ describe('Anthropic 原生端点端到端', () => {
   it('OpenAI 流取消后关闭底层 SSE 连接', async () => {
     let closed = false;
     const server = createServer((_req, res) => {
-      res.on('close', () => { closed = true; });
+      res.on('close', () => {
+        closed = true;
+      });
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
       res.write('data: {"choices":[{"delta":{"content":"开始"}}]}\n\n');
     });
@@ -304,7 +360,7 @@ describe('Anthropic 原生端点端到端', () => {
       assert.equal(closed, true, '取消后服务端应观察到 SSE 连接关闭');
     } finally {
       controller.abort();
-      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+      await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
     }
   });
 
@@ -312,7 +368,9 @@ describe('Anthropic 原生端点端到端', () => {
     for (const protocol of ['openai', 'anthropic'] as const) {
       let closed = false;
       const server = createServer((_req, res) => {
-        res.on('close', () => { closed = true; });
+        res.on('close', () => {
+          closed = true;
+        });
         res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
         res.flushHeaders();
       });
@@ -320,23 +378,51 @@ describe('Anthropic 原生端点端到端', () => {
       const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
       const p = createProvider({ id: `timeout-${protocol}`, baseUrl: base, apiKey: 'k', model: 'm', protocol, requestTimeoutMs: 40 });
       try {
-        await assert.rejects(() => collect(p, [user('timeout')], 'm'), (error: unknown) => (error as { code?: string }).code === 'REQUEST_TIMEOUT');
+        await assert.rejects(
+          () => collect(p, [user('timeout')], 'm'),
+          (error: unknown) => (error as { code?: string }).code === 'REQUEST_TIMEOUT',
+        );
         const deadline = Date.now() + 2_000;
         while (!closed && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 10));
         assert.equal(closed, true, `${protocol} 超时后应关闭服务端流`);
       } finally {
-        await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+        await new Promise<void>((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
       }
     }
   });
 });
 
 describe('Anthropic 模型参与能力路由（视觉借道再回切）', () => {
-  const textOnly = { id: 'deepseek', label: 'D', defaultModel: 'deepseek-chat', protocol: 'openai', models: [], prices: { in: 0.3, out: 1.2 }, chat: async function* () {} };
+  const textOnly = {
+    id: 'deepseek',
+    label: 'D',
+    defaultModel: 'deepseek-chat',
+    protocol: 'openai',
+    models: [],
+    prices: { in: 0.3, out: 1.2 },
+    chat: async function* () {},
+  };
   const claude = {
-    id: 'anth', label: 'A', defaultModel: 'claude-sonnet-4-5', protocol: 'anthropic',
-    models: [{ modelId: 'claude-sonnet-4-5', contextWindow: 200_000, maxOutput: 8192, vision: true, tools: true, reasoning: false, priceIn: 3, priceOut: 15, enabled: true, source: 'pulled' }],
-    prices: { in: 3, out: 15 }, chat: async function* () {},
+    id: 'anth',
+    label: 'A',
+    defaultModel: 'claude-sonnet-4-5',
+    protocol: 'anthropic',
+    models: [
+      {
+        modelId: 'claude-sonnet-4-5',
+        contextWindow: 200_000,
+        maxOutput: 8192,
+        vision: true,
+        tools: true,
+        reasoning: false,
+        priceIn: 3,
+        priceOut: 15,
+        enabled: true,
+        source: 'pulled',
+      },
+    ],
+    prices: { in: 3, out: 15 },
+    chat: async function* () {},
   };
 
   it('Anthropic provider 的视觉模型可被选中借道', () => {
@@ -358,4 +444,3 @@ describe('Anthropic 模型参与能力路由（视觉借道再回切）', () => 
     assert.equal(capabilityFor(bare, 'claude-3-5-sonnet-latest')?.vision, true);
   });
 });
-

@@ -14,14 +14,14 @@ describe('真实模型 live 评测', () => {
           messages?: { role?: string; content?: string }[];
         };
         const isJudge = body.messages?.[0]?.content?.includes('评测员') === true;
-        const content = isJudge
-          ? '{"score":5,"pass":true,"reason":"覆盖了关键点"}'
-          : '这是候选回答，覆盖关键点。';
+        const content = isJudge ? '{"score":5,"pass":true,"reason":"覆盖了关键点"}' : '这是候选回答，覆盖关键点。';
         res.setHeader('Content-Type', 'application/json');
-        res.end(JSON.stringify({
-          choices: [{ message: { content } }],
-          usage: { prompt_tokens: isJudge ? 20 : 10, completion_tokens: isJudge ? 5 : 8 },
-        }));
+        res.end(
+          JSON.stringify({
+            choices: [{ message: { content } }],
+            usage: { prompt_tokens: isJudge ? 20 : 10, completion_tokens: isJudge ? 5 : 8 },
+          }),
+        );
       })();
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -32,7 +32,8 @@ describe('真实模型 live 评测', () => {
       baseUrl: `http://127.0.0.1:${port}/v1`,
       apiKey: 'test',
       model: 'answer-model',
-      budgetUsd: 1, prices: { 'answer-model': { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
+      budgetUsd: 1,
+      prices: { 'answer-model': { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
       cases: [
         { name: 'a', prompt: '问题 A', rubric: ['标准 1'] },
         { name: 'b', prompt: '问题 B', rubric: ['标准 2'] },
@@ -59,8 +60,11 @@ describe('真实模型 live 评测', () => {
     t.after(() => new Promise<void>((resolve) => server.close(() => resolve())));
     const port = (server.address() as { port: number }).port;
     const report = await runLiveEval({
-      baseUrl: `http://127.0.0.1:${port}/v1`, apiKey: 'test', model: 'm',
-      budgetUsd: 1, prices: { m: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
+      baseUrl: `http://127.0.0.1:${port}/v1`,
+      apiKey: 'test',
+      model: 'm',
+      budgetUsd: 1,
+      prices: { m: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
       cases: [{ name: 'bad-judge', prompt: '问题', rubric: ['标准'] }],
     });
     assert.equal(report.cases[0]?.pass, false);
@@ -69,10 +73,15 @@ describe('真实模型 live 评测', () => {
   test('预算与价格缺失时禁止发请求，未知 usage 保守扣费并停止后续请求', async () => {
     let requests = 0;
     const options = {
-      baseUrl: 'https://test.invalid/v1', apiKey: 'test', model: 'm',
+      baseUrl: 'https://test.invalid/v1',
+      apiKey: 'test',
+      model: 'm',
       cases: [{ name: 'a', prompt: '问题', rubric: ['标准'] }],
       prices: { m: { inputUsdPerMillion: 1, outputUsdPerMillion: 1 } },
-      fetchImpl: (async () => { requests++; return new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }] })); }) as typeof fetch,
+      fetchImpl: (async () => {
+        requests++;
+        return new Response(JSON.stringify({ choices: [{ message: { content: 'answer' } }] }));
+      }) as typeof fetch,
     };
     await assert.rejects(runLiveEval({ ...options, budgetUsd: 0 }), /费用上限/);
     await assert.rejects(runLiveEval({ ...options, budgetUsd: 1, prices: {} }), /测试价格/);

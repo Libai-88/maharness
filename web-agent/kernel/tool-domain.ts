@@ -1,8 +1,16 @@
 /** 工具能力域：稳定、无业务副作用的展示/选择辅助标签。 */
 export function toolDomain(name: string): string {
   const n = String(name ?? '').toLowerCase();
-  if (n === 'list_dir' || n === 'read_file' || n === 'glob' || n === 'grep'
-    || n === 'write_file' || n === 'edit_file' || n === 'delete_file') return 'Files';
+  if (
+    n === 'list_dir' ||
+    n === 'read_file' ||
+    n === 'glob' ||
+    n === 'grep' ||
+    n === 'write_file' ||
+    n === 'edit_file' ||
+    n === 'delete_file'
+  )
+    return 'Files';
   if (n.startsWith('mcp_')) return 'MCP';
   if (n.startsWith('browser_')) return 'Browser';
   if (n.startsWith('web_')) return 'Research';
@@ -40,7 +48,25 @@ const DOMAIN_HINTS: Record<string, RegExp> = {
   Collaboration: /(blackboard|shared|共享|黑板)/i,
 };
 
-const BASE_DOMAIN_ORDER = ['Files', 'Plan', 'Tasks', 'Memory', 'Agents', 'Skills', 'Document', 'Code', 'Research', 'Browser', 'Media', 'Policy', 'System', 'Plugins', 'MCP', 'Collaboration', 'General'];
+const BASE_DOMAIN_ORDER = [
+  'Files',
+  'Plan',
+  'Tasks',
+  'Memory',
+  'Agents',
+  'Skills',
+  'Document',
+  'Code',
+  'Research',
+  'Browser',
+  'Media',
+  'Policy',
+  'System',
+  'Plugins',
+  'MCP',
+  'Collaboration',
+  'General',
+];
 
 /**
  * 按当前任务对工具做稳定分组排序：相关能力域排到前面，但不删除任何工具。

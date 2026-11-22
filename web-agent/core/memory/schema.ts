@@ -42,7 +42,13 @@ export function isFactActive(fact: MemoryFact, now = Date.now()): boolean {
 
 export function buildFact(id: string, text: string, now: number, input: MemoryFactInput = {}): MemoryFact {
   return normalizeFact({
-    id, text, ts: now, source: input.source ?? 'agent', confidence: input.confidence ?? 0.8,
-    expiresAt: input.expiresAt, conflictsWith: input.conflictsWith ?? [], tenantId: input.tenantId ?? 'default',
+    id,
+    text,
+    ts: now,
+    source: input.source ?? 'agent',
+    confidence: input.confidence ?? 0.8,
+    expiresAt: input.expiresAt,
+    conflictsWith: input.conflictsWith ?? [],
+    tenantId: input.tenantId ?? 'default',
   });
 }

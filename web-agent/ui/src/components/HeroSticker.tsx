@@ -5,7 +5,16 @@ import { useRef, useState } from 'react';
 import { Camera, RotateCcw } from 'lucide-react';
 import imageCompression from 'browser-image-compression';
 import { BRAND_LOGO_SRC } from '@/brand/BrandMark';
-import { Attachment, AttachmentAction, AttachmentActions, AttachmentContent, AttachmentDescription, AttachmentMedia, AttachmentTitle, AttachmentTrigger } from '@/components/ui/attachment';
+import {
+  Attachment,
+  AttachmentAction,
+  AttachmentActions,
+  AttachmentContent,
+  AttachmentDescription,
+  AttachmentMedia,
+  AttachmentTitle,
+  AttachmentTrigger,
+} from '@/components/ui/attachment';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 
@@ -14,13 +23,25 @@ const DEFAULT_SRC = BRAND_LOGO_SRC;
 const MAX_EDGE = 640;
 
 function readStored(): string | null {
-  try { return localStorage.getItem(STORAGE_KEY) || null; } catch { return null; }
+  try {
+    return localStorage.getItem(STORAGE_KEY) || null;
+  } catch {
+    return null;
+  }
 }
 function writeStored(v: string) {
-  try { localStorage.setItem(STORAGE_KEY, v); } catch { /* 忽略写满等异常 */ }
+  try {
+    localStorage.setItem(STORAGE_KEY, v);
+  } catch {
+    /* 忽略写满等异常 */
+  }
 }
 function clearStored() {
-  try { localStorage.removeItem(STORAGE_KEY); } catch { /* 忽略 */ }
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch {
+    /* 忽略 */
+  }
 }
 
 /** 等比缩小并压缩图片（避免 localStorage 超限），返回 dataURL */
@@ -51,7 +72,9 @@ export default function HeroSticker() {
       const small = await shrink(f);
       setSrc(small);
       writeStored(small);
-    } catch { /* 读取失败静默 */ }
+    } catch {
+      /* 读取失败静默 */
+    }
     setBusy(false);
   };
 
@@ -61,7 +84,10 @@ export default function HeroSticker() {
   };
 
   return (
-    <figure data-testid="hero-sticker" className="relative w-36 shrink-0 rotate-2 transition-transform hover:rotate-0 motion-reduce:transition-none motion-reduce:hover:rotate-2">
+    <figure
+      data-testid="hero-sticker"
+      className="relative w-36 shrink-0 rotate-2 transition-transform hover:rotate-0 motion-reduce:transition-none motion-reduce:hover:rotate-2"
+    >
       <Attachment orientation="vertical" className="w-full bg-card shadow-sm">
         <AttachmentMedia variant="icon" className="aspect-square w-full">
           <img
@@ -71,7 +97,16 @@ export default function HeroSticker() {
           />
           <AttachmentTrigger onClick={pick} disabled={busy} title="点击换一张图片" aria-label="更换首页贴纸照片" />
           <span className="pointer-events-none absolute inset-x-0 bottom-0 z-20 flex items-center justify-center gap-1 bg-primary/90 p-1 text-[11px] text-primary-foreground opacity-0 transition-opacity group-hover/attachment:opacity-100">
-            {busy ? <><Spinner className="size-3" />处理中…</> : <>换一张 <Camera size={12} /></>}
+            {busy ? (
+              <>
+                <Spinner className="size-3" />
+                处理中…
+              </>
+            ) : (
+              <>
+                换一张 <Camera size={12} />
+              </>
+            )}
           </span>
         </AttachmentMedia>
         <AttachmentContent className="text-center">
@@ -80,11 +115,13 @@ export default function HeroSticker() {
         </AttachmentContent>
         {custom && (
           <AttachmentActions>
-            <AttachmentAction onClick={reset} title="恢复默认" aria-label="恢复默认贴纸"><RotateCcw /></AttachmentAction>
+            <AttachmentAction onClick={reset} title="恢复默认" aria-label="恢复默认贴纸">
+              <RotateCcw />
+            </AttachmentAction>
           </AttachmentActions>
         )}
       </Attachment>
-      <input ref={fileRef} type="file" accept="image/*" onChange={onFile} hidden aria-hidden="true" />
+      <input ref={fileRef} type="file" accept="image/*" onChange={onFile} hidden />
     </figure>
   );
 }

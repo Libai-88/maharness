@@ -2,13 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { rankToolsForTask, toolDomain } from '../tool-domain';
 
-const tools = [
-  { name: 'read_file' },
-  { name: 'web_search' },
-  { name: 'browser_open' },
-  { name: 'create_plan' },
-  { name: 'remember_fact' },
-];
+const tools = [{ name: 'read_file' }, { name: 'web_search' }, { name: 'browser_open' }, { name: 'create_plan' }, { name: 'remember_fact' }];
 
 describe('工具能力域与任务相关排序', () => {
   it('能力域映射稳定', () => {
@@ -29,6 +23,9 @@ describe('工具能力域与任务相关排序', () => {
   });
 
   it('无任务文本时保持原顺序', () => {
-    assert.deepEqual(rankToolsForTask(tools, '').map((tool) => tool.name), tools.map((tool) => tool.name));
+    assert.deepEqual(
+      rankToolsForTask(tools, '').map((tool) => tool.name),
+      tools.map((tool) => tool.name),
+    );
   });
 });

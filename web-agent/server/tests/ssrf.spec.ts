@@ -16,8 +16,15 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import type { AddressInfo } from 'node:net';
 import {
-  isPrivateAddress, ipv4ToNumber, ipv6ToGroups, embeddedIpv4, isReservedIpv4,
-  assertPublicHttpUrl, assertProviderBaseUrl, allowsPrivateUrls, fetchWithPublicRedirects,
+  isPrivateAddress,
+  ipv4ToNumber,
+  ipv6ToGroups,
+  embeddedIpv4,
+  isReservedIpv4,
+  assertPublicHttpUrl,
+  assertProviderBaseUrl,
+  allowsPrivateUrls,
+  fetchWithPublicRedirects,
 } from '../routes/shared';
 import { isPrivateAddress as searchIsPrivateAddress } from '../../core/search/index';
 
@@ -26,8 +33,10 @@ const MODE_KEY = 'MAHARNESS_MODE';
 let savedEnv: string | undefined;
 let savedMode: string | undefined;
 before(() => {
-  savedEnv = process.env[ENV_KEY]; delete process.env[ENV_KEY];
-  savedMode = process.env[MODE_KEY]; process.env[MODE_KEY] = 'remote'; // A5② 的默认拒绝用例依赖拦截语义
+  savedEnv = process.env[ENV_KEY];
+  delete process.env[ENV_KEY];
+  savedMode = process.env[MODE_KEY];
+  process.env[MODE_KEY] = 'remote'; // A5② 的默认拒绝用例依赖拦截语义
 });
 after(() => {
   if (savedEnv === undefined) delete process.env[ENV_KEY];
@@ -40,24 +49,63 @@ after(() => {
 
 /** 与 core/search/tests/ssrf.spec.ts 同一张表（两处都拒绝/两处都放行的地址） */
 const PRIVATE: readonly string[] = [
-  '[::ffff:7f00:1]', '::ffff:7f00:1', '::ffff:a00:1', '::ffff:c0a8:1', '::ffff:a9fe:a9fe',
-  '::7f00:1', '2002:7f00:1::', '64:ff9b::7f00:1',
-  '100.64.0.1', '100.127.255.255', '198.18.0.1', '198.19.255.255', '192.0.0.1', '192.88.99.1',
-  '224.0.0.1', '240.0.0.1', '255.255.255.255', '0.0.0.0',
-  'fe80::1', 'fe90::1', 'febf::1', 'fc00::1', 'fd12:3456::1', 'ff02::1', '::1', '::',
-  '127.0.0.1', '10.0.0.8', '172.16.0.1', '172.31.255.255', '192.168.1.1', '169.254.169.254',
+  '[::ffff:7f00:1]',
+  '::ffff:7f00:1',
+  '::ffff:a00:1',
+  '::ffff:c0a8:1',
+  '::ffff:a9fe:a9fe',
+  '::7f00:1',
+  '2002:7f00:1::',
+  '64:ff9b::7f00:1',
+  '100.64.0.1',
+  '100.127.255.255',
+  '198.18.0.1',
+  '198.19.255.255',
+  '192.0.0.1',
+  '192.88.99.1',
+  '224.0.0.1',
+  '240.0.0.1',
+  '255.255.255.255',
+  '0.0.0.0',
+  'fe80::1',
+  'fe90::1',
+  'febf::1',
+  'fc00::1',
+  'fd12:3456::1',
+  'ff02::1',
+  '::1',
+  '::',
+  '127.0.0.1',
+  '10.0.0.8',
+  '172.16.0.1',
+  '172.31.255.255',
+  '192.168.1.1',
+  '169.254.169.254',
 ];
 const PUBLIC: readonly string[] = [
-  '::ffff:808:808', '2002:0808:0808::', '64:ff9b::808:808', '2001:4860:4860::8888',
-  '8.8.8.8', '1.1.1.1', '100.63.255.255', '100.128.0.1', '172.15.255.255', '172.32.0.1',
-  '198.17.255.255', '198.20.0.1', '192.0.1.1', '192.88.98.1', '223.255.255.255',
+  '::ffff:808:808',
+  '2002:0808:0808::',
+  '64:ff9b::808:808',
+  '2001:4860:4860::8888',
+  '8.8.8.8',
+  '1.1.1.1',
+  '100.63.255.255',
+  '100.128.0.1',
+  '172.15.255.255',
+  '172.32.0.1',
+  '198.17.255.255',
+  '198.20.0.1',
+  '192.0.1.1',
+  '192.88.98.1',
+  '223.255.255.255',
 ];
 
 describe('A5① providers 与 web_fetch 用同一套私网判定（交叉比对防漂移）', () => {
   for (const ip of [...PRIVATE, ...PUBLIC]) {
     it(`两处同判：${ip}`, () => {
       assert.equal(
-        isPrivateAddress(ip), searchIsPrivateAddress(ip),
+        isPrivateAddress(ip),
+        searchIsPrivateAddress(ip),
         'server/routes/shared 与 core/search 的判定必须逐条一致（两份等价实现）',
       );
     });
@@ -97,7 +145,7 @@ describe('A5① assertPublicHttpUrl：协议白名单与私网拦截', () => {
     await reject('http://[fe90::1]/x', /不允许连接/);
     await reject('http://100.64.0.1/x', /不允许连接/);
     await reject('http://198.18.0.1/x', /不允许连接/);
-    await reject('http://127.0.0.1:11434/x', /不允许连接/);   // 原语义不变
+    await reject('http://127.0.0.1:11434/x', /不允许连接/); // 原语义不变
     await reject('http://[::1]/x', /不允许连接/);
   });
 
@@ -137,9 +185,9 @@ describe('A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则', 
     process.env[ENV_KEY] = '1';
     try {
       assert.equal(allowsPrivateUrls(), true);
-      await assertProviderBaseUrl('http://127.0.0.1:11434');   // /test 用的就是这条
+      await assertProviderBaseUrl('http://127.0.0.1:11434'); // /test 用的就是这条
       await assertProviderBaseUrl('http://[::ffff:7f00:1]:11434');
-      await assertProviderBaseUrl('http://localhost:11434');   // 豁免时不再做 DNS 解析
+      await assertProviderBaseUrl('http://localhost:11434'); // 豁免时不再做 DNS 解析
     } finally {
       delete process.env[ENV_KEY];
     }
@@ -161,24 +209,42 @@ describe('A5③ AGENT_ALLOW_PRIVATE_URLS 豁免：四处入口同一条规则', 
     assert.equal(allowsPrivateUrls({ MAHARNESS_MODE: 'remote' }), false);
   });
 
-  it('providers.ts 不再自己读 env、也不再裸调 fetch（A5 的一致性收口）', () => {
-    const src = readFileSync(fileURLToPath(new URL('../routes/providers.ts', import.meta.url)), 'utf8');
+  it('provider 入口不再自己读 env、也不再裸调 fetch（A5 的一致性收口）', () => {
+    // 编排下沉到 usecases 后，判定点随业务代码移动：路由只剩映射，不再持有 SSRF 决策
+    const sources = ['../routes/providers.ts', '../usecases/providers.ts'].map((path) =>
+      readFileSync(fileURLToPath(new URL(path, import.meta.url)), 'utf8'),
+    );
+    const src = sources.join('\n');
     assert.match(src, /assertProviderBaseUrl\(/, '四处入口应统一走 assertProviderBaseUrl');
-    assert.doesNotMatch(src, /process\.env\.AGENT_ALLOW_PRIVATE_URLS/,
-      '豁免判定只能在 allowsPrivateUrls() 一处读 env，否则四处语义会再次分叉');
-    assert.doesNotMatch(src, /(?<![\w.])fetch\s*\(/,
-      '不得直接调 fetch()：必须走 fetchWithPublicRedirects（逐跳 SSRF 复检）');
+    assert.doesNotMatch(
+      src,
+      /process\.env\.AGENT_ALLOW_PRIVATE_URLS/,
+      '豁免判定只能在 allowsPrivateUrls() 一处读 env，否则四处语义会再次分叉',
+    );
+    assert.doesNotMatch(src, /(?<![\w.])fetch\s*\(/, '不得直接调 fetch()：必须走 fetchWithPublicRedirects（逐跳 SSRF 复检）');
   });
 });
 
 // ---------------------------------------------------------------- ② 逐跳重定向复检
 
-interface Hit { url: string; method: string; headers: Record<string, string | string[] | undefined> }
-interface Mock { base: string; port: number; hits: Hit[] }
+interface Hit {
+  url: string;
+  method: string;
+  headers: Record<string, string | string[] | undefined>;
+}
+interface Mock {
+  base: string;
+  port: number;
+  hits: Hit[];
+}
 const mocks: Mock[] = [];
 const servers: Server[] = [];
 
-after(() => { for (const s of servers) s.close(); servers.length = 0; mocks.length = 0; });
+after(() => {
+  for (const s of servers) s.close();
+  servers.length = 0;
+  mocks.length = 0;
+});
 
 /** 本地 mock：/redirect-to?url=… 302 到任意目标；/redirect-to-private 302 到自身 /leak；
  *  /loop 302 到自身（无限跳）；/ok 200；/leak 200（内网敏感端点的替身） */
@@ -194,10 +260,26 @@ async function startMock(): Promise<Mock> {
       res.end();
       return;
     }
-    if (req.url === '/redirect-to-private') { res.writeHead(302, { Location: `${self}/leak` }); res.end(); return; }
-    if (req.url === '/loop') { res.writeHead(302, { Location: `${self}/loop` }); res.end(); return; }
-    if (req.url === '/leak') { res.writeHead(200, { 'Content-Type': 'text/plain' }); res.end('TOP-SECRET-FROM-INTERNAL'); return; }
-    if (req.url === '/no-location') { res.writeHead(302); res.end(); return; }
+    if (req.url === '/redirect-to-private') {
+      res.writeHead(302, { Location: `${self}/leak` });
+      res.end();
+      return;
+    }
+    if (req.url === '/loop') {
+      res.writeHead(302, { Location: `${self}/loop` });
+      res.end();
+      return;
+    }
+    if (req.url === '/leak') {
+      res.writeHead(200, { 'Content-Type': 'text/plain' });
+      res.end('TOP-SECRET-FROM-INTERNAL');
+      return;
+    }
+    if (req.url === '/no-location') {
+      res.writeHead(302);
+      res.end();
+      return;
+    }
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ data: [{ id: 'm1' }] }));
   });
@@ -232,12 +314,16 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
     const previous = process.env[ENV_KEY];
     process.env[ENV_KEY] = '1';
     try {
-      const res = await fetchWithPublicRedirects(`http://${host}:${m.port}/ok`, {}, {
-        resolveAddresses: async (hostname) => {
-          resolves.push(hostname);
-          return [{ address: '127.0.0.1', family: 4 }];
+      const res = await fetchWithPublicRedirects(
+        `http://${host}:${m.port}/ok`,
+        {},
+        {
+          resolveAddresses: async (hostname) => {
+            resolves.push(hostname);
+            return [{ address: '127.0.0.1', family: 4 }];
+          },
         },
-      });
+      );
       assert.equal(res.status, 200);
       assert.equal(await res.text(), JSON.stringify({ data: [{ id: 'm1' }] }));
       assert.deepEqual(resolves, [host], '校验后不得再次对主机名执行 DNS 解析');
@@ -251,12 +337,17 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
   it('解析结果混有公网与私网地址时整体拒绝，不发起请求', async () => {
     const m = await startMock();
     await assert.rejects(
-      () => fetchWithPublicRedirects(`http://mixed.example.test:${m.port}/ok`, {}, {
-        resolveAddresses: async () => [
-          { address: '8.8.8.8', family: 4 },
-          { address: '127.0.0.1', family: 4 },
-        ],
-      }),
+      () =>
+        fetchWithPublicRedirects(
+          `http://mixed.example.test:${m.port}/ok`,
+          {},
+          {
+            resolveAddresses: async () => [
+              { address: '8.8.8.8', family: 4 },
+              { address: '127.0.0.1', family: 4 },
+            ],
+          },
+        ),
       /不允许连接内网/,
     );
     assert.equal(m.hits.length, 0, 'DNS 返回集合中存在私网地址时不能尝试连接公网成员绕过策略');
@@ -265,15 +356,18 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
   it('302 → http://127.0.0.1:xxx 被拒，且绝不向该目标发起请求', async () => {
     const m = await startMock();
     const v = firstHopFreeValidator();
-    await assert.rejects(
-      () => fetchWithPublicRedirects(`${m.base}/redirect-to-private`, {}, { assertUrl: v.assertUrl }),
-      /不允许连接/,
+    await assert.rejects(() => fetchWithPublicRedirects(`${m.base}/redirect-to-private`, {}, { assertUrl: v.assertUrl }), /不允许连接/);
+    assert.deepEqual(
+      v.hops.map((h) => new URL(h).pathname),
+      ['/redirect-to-private', '/leak'],
+      '每一跳都要过一次校验（旧实现只有首跳被校验过）',
     );
-    assert.deepEqual(v.hops.map(h => new URL(h).pathname), ['/redirect-to-private', '/leak'],
-      '每一跳都要过一次校验（旧实现只有首跳被校验过）');
-    assert.equal(m.hits.some(h => h.url === '/leak'), false,
-      '被拒的目标不能真的去连（/models 会把响应体解析后回吐 → 读了就泄露）');
-    assert.equal(m.hits.filter(h => h.url === '/redirect-to-private').length, 1);
+    assert.equal(
+      m.hits.some((h) => h.url === '/leak'),
+      false,
+      '被拒的目标不能真的去连（/models 会把响应体解析后回吐 → 读了就泄露）',
+    );
+    assert.equal(m.hits.filter((h) => h.url === '/redirect-to-private').length, 1);
   });
 
   it('manual 跟随：由我们自己跳一跳并复检，最终拿到 200（而非 302 原样返回）', async () => {
@@ -285,24 +379,18 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
       { assertUrl: async () => {} },
     );
     assert.equal(res.status, 200);
-    assert.equal(m.hits.filter(h => h.url === '/ok').length, 1);
+    assert.equal(m.hits.filter((h) => h.url === '/ok').length, 1);
   });
 
   it('跳数上限：超限报错，不再继续跟', async () => {
     const m = await startMock();
-    await assert.rejects(
-      () => fetchWithPublicRedirects(`${m.base}/loop`, {}, { assertUrl: async () => {} }),
-      /重定向次数过多/,
-    );
-    assert.equal(m.hits.filter(h => h.url === '/loop').length, 6, '首跳 + 5 跳，不多不少');
+    await assert.rejects(() => fetchWithPublicRedirects(`${m.base}/loop`, {}, { assertUrl: async () => {} }), /重定向次数过多/);
+    assert.equal(m.hits.filter((h) => h.url === '/loop').length, 6, '首跳 + 5 跳，不多不少');
   });
 
   it('302 无 Location 直接报错（不吞成空 URL）', async () => {
     const m = await startMock();
-    await assert.rejects(
-      () => fetchWithPublicRedirects(`${m.base}/no-location`, {}, { assertUrl: async () => {} }),
-      /缺少 Location/,
-    );
+    await assert.rejects(() => fetchWithPublicRedirects(`${m.base}/no-location`, {}, { assertUrl: async () => {} }), /缺少 Location/);
   });
 
   it('跨源跳转剥掉凭据头；同源保留（自己实现 follow 就得把这条规则也实现）', async () => {
@@ -314,7 +402,7 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
       { headers },
       { assertUrl: async () => {} },
     );
-    const cross = b.hits.find(h => h.url === '/ok');
+    const cross = b.hits.find((h) => h.url === '/ok');
     assert.ok(cross, '应已请求到目标');
     assert.equal(cross.headers.authorization, undefined, '跨源不得带上 Authorization');
     assert.equal(cross.headers['x-api-key'], undefined, '跨源不得带上 x-api-key');
@@ -324,7 +412,7 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
       { headers },
       { assertUrl: async () => {} },
     );
-    const same = a.hits.filter(h => h.url === '/ok').pop();
+    const same = a.hits.filter((h) => h.url === '/ok').pop();
     assert.equal(same?.headers.authorization, 'Bearer sk-secret', '同源跳转仍照常携带 key');
   });
 
@@ -337,7 +425,7 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
     );
     assert.equal(res.status, 200);
     assert.equal(m.hits[0].method, 'POST');
-    assert.equal(m.hits.find(h => h.url === '/ok')?.method, 'GET', '跳转后不得再 POST 到新地址');
+    assert.equal(m.hits.find((h) => h.url === '/ok')?.method, 'GET', '跳转后不得再 POST 到新地址');
   });
 
   it('默认校验器就是真实校验（不注入时本机地址在首跳即被拒）', async () => {
@@ -350,9 +438,7 @@ describe('A5② 重定向逐跳复检（302 跳内网 = 可读型 SSRF 的收口
     const m = await startMock();
     process.env[ENV_KEY] = '1';
     try {
-      const res = await fetchWithPublicRedirects(
-        `${m.base}/redirect-to?url=${encodeURIComponent(`${m.base}/ok`)}`, {},
-      );
+      const res = await fetchWithPublicRedirects(`${m.base}/redirect-to?url=${encodeURIComponent(`${m.base}/ok`)}`, {});
       assert.equal(res.status, 200);
     } finally {
       delete process.env[ENV_KEY];

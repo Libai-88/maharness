@@ -14,21 +14,23 @@ import { SocietyService } from '../services/society';
 
 function deferred() {
   let resolve!: () => void;
-  const promise = new Promise<void>(done => { resolve = done; });
+  const promise = new Promise<void>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
 function abortSignal(signal?: AbortSignal): Promise<void> {
   if (!signal) return new Promise<void>(() => {});
   if (signal.aborted) return Promise.resolve();
-  return new Promise<void>(resolve => {
+  return new Promise<void>((resolve) => {
     signal.addEventListener('abort', () => resolve(), { once: true });
   });
 }
 
 function releasedOrAborted(release: Promise<void>, signal?: AbortSignal): Promise<boolean> {
   if (signal?.aborted) return Promise.resolve(true);
-  return new Promise<boolean>(resolve => {
+  return new Promise<boolean>((resolve) => {
     const onAbort = () => resolve(true);
     signal?.addEventListener('abort', onAbort, { once: true });
     void release.then(() => {
@@ -39,13 +41,13 @@ function releasedOrAborted(release: Promise<void>, signal?: AbortSignal): Promis
 }
 
 function terminal(service: RunService, runId: string): Promise<void> {
-  return new Promise(resolve => {
+  return new Promise((resolve) => {
     const current = service.get(runId, 'default');
     if (RUN_TERMINAL.has(current.status)) {
       resolve();
       return;
     }
-    const unsubscribe = service.subscribe(runId, event => {
+    const unsubscribe = service.subscribe(runId, (event) => {
       if (event.type === 'state' && RUN_TERMINAL.has(event.data.status as RunRecord['status'])) {
         unsubscribe();
         resolve();
@@ -140,7 +142,7 @@ test('society restart resumes the same interrupted Run through real services', {
       maxBudgetUsd: 0.08,
       departmentId: 'operations',
     });
-    const schedule = society.tick('default').decisions.find(item => item.taskId === task.id);
+    const schedule = society.tick('default').decisions.find((item) => item.taskId === task.id);
     assert.ok(schedule, 'society task was not scheduled');
     const runId = schedule.runIds[0];
     const contractId = schedule.contractIds[0];
@@ -148,8 +150,11 @@ test('society restart resumes the same interrupted Run through real services', {
     assert.ok(runId, 'society schedule did not start a Run');
     assert.ok(contractId, 'society Run has no assignment contract');
     assert.ok(roleId, 'society schedule did not select a role');
-    assert.equal(organization.roleHistory(roleId, 'default').versions.length, 1,
-      'runtime workspace/session binding must not create a governance version');
+    assert.equal(
+      organization.roleHistory(roleId, 'default').versions.length,
+      1,
+      'runtime workspace/session binding must not create a governance version',
+    );
 
     await firstEntered.promise;
     assert.equal(firstRuns.get(runId, 'default').status, 'running');
@@ -166,8 +171,11 @@ test('society restart resumes the same interrupted Run through real services', {
     restartedRuns = new RunService(environment(store, restartedOrganization));
     const restartedSociety = new SocietyService({ store, organization: restartedOrganization });
     restartedSociety.attachRunService(restartedRuns);
-    assert.equal(restartedOrganization.roleHistory(roleId, 'default').versions.length, 1,
-      'restart must preserve the governance version history');
+    assert.equal(
+      restartedOrganization.roleHistory(roleId, 'default').versions.length,
+      1,
+      'restart must preserve the governance version history',
+    );
 
     const scheduler = new Scheduler(store, { file: join(root, 'schedules.db'), now: () => Date.now() });
     scheduler.attachSociety(restartedSociety);
@@ -182,20 +190,29 @@ test('society restart resumes the same interrupted Run through real services', {
     assert.equal(resumedSchedule?.status, 'active');
     assert.deepEqual(resumedSchedule?.selection, schedule.selection);
     assert.equal(store.organization.getSocietyTask(task.id, 'default')?.status, 'scheduled');
-    assert.deepEqual(store.runs.list('default').map(run => run.id), [runId]);
+    assert.deepEqual(
+      store.runs.list('default').map((run) => run.id),
+      [runId],
+    );
 
     const completed = terminal(restartedRuns, runId);
     finishResumed.resolve();
     await completed;
     assert.equal(restartedRuns.get(runId, 'default').status, 'completed');
-    const accepted = restartedSociety.releaseTask(
-      task.id, 'default', 'completed', '人工核对恢复后的交付与来源',
-    );
+    const accepted = restartedSociety.releaseTask(task.id, 'default', 'completed', '人工核对恢复后的交付与来源');
     assert.equal(accepted.task.status, 'completed');
-    assert.equal(store.organization.roleMemories('default', roleId, 20)
-      .some(memory => memory.kind === 'submission' && memory.scheduleId === schedule.id), true);
-    assert.equal(store.organization.roleMemories('default', roleId, 20)
-      .some(memory => memory.kind === 'delivery' && memory.scheduleId === schedule.id), true);
+    assert.equal(
+      store.organization
+        .roleMemories('default', roleId, 20)
+        .some((memory) => memory.kind === 'submission' && memory.scheduleId === schedule.id),
+      true,
+    );
+    assert.equal(
+      store.organization
+        .roleMemories('default', roleId, 20)
+        .some((memory) => memory.kind === 'delivery' && memory.scheduleId === schedule.id),
+      true,
+    );
 
     await restartedRuns.shutdown();
     restartedRuns = undefined;
@@ -204,12 +221,14 @@ test('society restart resumes the same interrupted Run through real services', {
     const reloadedSociety = new SocietyService({ store });
     const persistedLife = reloadedSociety.roleLife('default', roleId);
     assert.deepEqual(store.organization.getSocietySchedule(schedule.id, 'default')?.selection, schedule.selection);
-    assert.equal(persistedLife.memories.some(memory =>
-      memory.kind === 'submission' && memory.scheduleId === schedule.id
-    ), true);
-    assert.equal(persistedLife.memories.some(memory =>
-      memory.kind === 'delivery' && memory.scheduleId === schedule.id
-    ), true);
+    assert.equal(
+      persistedLife.memories.some((memory) => memory.kind === 'submission' && memory.scheduleId === schedule.id),
+      true,
+    );
+    assert.equal(
+      persistedLife.memories.some((memory) => memory.kind === 'delivery' && memory.scheduleId === schedule.id),
+      true,
+    );
   } finally {
     finishResumed.resolve();
     await restartedRuns?.shutdown();

@@ -1,0 +1,74 @@
+{
+  "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
+  "vcs": { "enabled": true, "clientKind": "git", "useIgnoreFile": true },
+  "files": {
+    "includes": [
+      "kernel/**",
+      "core/**",
+      "server/**",
+      "contracts/**",
+      "scripts/**",
+      "plugins/**",
+      "evals/**",
+      "ui/src/**",
+      "ui/e2e/**",
+      "!**/node_modules",
+      "!**/dist",
+      "!**/vendor",
+      "!**/data",
+      "!**/*@*",
+      "!**/*.html",
+      "!**/*.md"
+    ]
+  },
+  "formatter": {
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 140,
+    "lineEnding": "lf"
+  },
+  "javascript": {
+    "formatter": {
+      // 仓库既有代码统一单引号；测试里有按文本扫描源码的断言已改为引号无关，
+      // 但默认双引号会把 600+ 文件的既有 diff 冲掉，因此显式锁回单引号。
+      "quoteStyle": "single",
+      "jsxQuoteStyle": "double"
+    }
+  },
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended"
+    }
+  },
+  "assist": { "enabled": false },
+  "overrides": [
+    {
+      // 测试夹具常用“只抛错 / 只返回”的生成器与仅供类型收窄的变量
+      "includes": ["**/*.spec.ts", "**/e2e/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useYield": "off",
+            "noUnusedVariables": "warn"
+          }
+        }
+      }
+    },
+    {
+      // React 依赖数组是行为敏感的人工判断：多用依赖只是多跑一次 effect，
+      // 少用依赖会造成闭包读到陈旧值，两者都不能机械自动修。保持可见告警，
+      // 逐条修复清单见 QUALITY-REVIEW-2026-11-21.md 的“修复进度”章节。
+      "includes": ["ui/src/**"],
+      "linter": {
+        "rules": {
+          "correctness": {
+            "useExhaustiveDependencies": "warn"
+          }
+        }
+      }
+    }
+  ],
+  "css": { "parser": { "tailwindDirectives": true } }
+}

@@ -64,9 +64,16 @@ export function useApprovals(opts: {
         expiresAt: incoming.expiresAt ?? cur.expiresAt,
         approvalToken: incoming.approvalToken ?? cur.approvalToken,
       };
-      if (next === cur || (next.name === cur.name && next.summary === cur.summary
-        && next.sessionId === cur.sessionId && next.createdAt === cur.createdAt
-        && next.expiresAt === cur.expiresAt && next.approvalToken === cur.approvalToken)) return prev;
+      if (
+        next === cur ||
+        (next.name === cur.name &&
+          next.summary === cur.summary &&
+          next.sessionId === cur.sessionId &&
+          next.createdAt === cur.createdAt &&
+          next.expiresAt === cur.expiresAt &&
+          next.approvalToken === cur.approvalToken)
+      )
+        return prev;
       const out = prev.slice();
       out[i] = next;
       return out;
@@ -74,19 +81,25 @@ export function useApprovals(opts: {
   }, []);
 
   /** 来源 1：会话 SSE */
-  const onApprovalRequired = useCallback((id: string, name: string, summary: string, approvalToken?: string) => {
-    if (!id) return;
-    merge({ id, name, summary, approvalToken });
-  }, [merge]);
+  const onApprovalRequired = useCallback(
+    (id: string, name: string, summary: string, approvalToken?: string) => {
+      if (!id) return;
+      merge({ id, name, summary, approvalToken });
+    },
+    [merge],
+  );
 
   /** 来源 2：全局事件（子代理/并行）；同一 id 可能与来源 1 重复。
    *  事件帧的字段名是 approvalId（内核事件约定），内部统一用 id——在入口改名，
    *  而不是让调用方同时传两份 id。 */
-  const onGlobalApproval = useCallback((d: BusPending) => {
-    if (!d.approvalId) return;
-    const { approvalId, ...rest } = d;
-    merge({ ...rest, id: approvalId });
-  }, [merge]);
+  const onGlobalApproval = useCallback(
+    (d: BusPending) => {
+      if (!d.approvalId) return;
+      const { approvalId, ...rest } = d;
+      merge({ ...rest, id: approvalId });
+    },
+    [merge],
+  );
 
   /** 来源 3：首屏/刷新/切会话后的兜底拉取（服务端仍是权威） */
   const reseed = useCallback(async () => {
@@ -100,19 +113,27 @@ export function useApprovals(opts: {
         for (const p of r.pending) {
           const known = byId.get(p.id);
           byId.set(p.id, {
-            id: p.id, name: p.name, summary: p.summary, sessionId: p.sessionId,
-            createdAt: p.createdAt, expiresAt: p.expiresAt,
+            id: p.id,
+            name: p.name,
+            summary: p.summary,
+            sessionId: p.sessionId,
+            createdAt: p.createdAt,
+            expiresAt: p.expiresAt,
             // 本地没有凭据时才用清单补上（本地那份可能更新鲜）
             approvalToken: known?.approvalToken ?? p.approvalToken,
           });
         }
         return [...byId.values()];
       });
-    } catch { /* 对话服务未就绪时忽略：不影响实时通道 */ }
+    } catch {
+      /* 对话服务未就绪时忽略：不影响实时通道 */
+    }
   }, []);
 
   // 切会话/首屏重新拉取（挂起按会话过滤，服务端会返回该会话仍待回答的）
-  useEffect(() => { void reseed(); }, [reseed, activeId]);
+  useEffect(() => {
+    void reseed();
+  }, [reseed, activeId]);
 
   // 到点自动撤卡：服务端 10 分钟后自动拒绝，本地到点把卡撤掉并留一句人话
   // （不让用户对着一张已经作废的卡继续点，然后纳闷为什么没反应）
@@ -135,21 +156,24 @@ export function useApprovals(opts: {
   }, [approvals, pushSystemMessage]);
 
   /** 回答：带上该次挂起的一次性凭据（用过即作废，重放被服务端拒） */
-  const respond = useCallback(async (id: string, approved: boolean) => {
-    const token = approvalsRef.current.find((a) => a.id === id)?.approvalToken;
-    try {
-      await approvalsApi.respond(id, approved, token);
-      toast.success(approved ? '已批准执行' : '已拒绝');
-    } catch (err) {
-      // 403 = 凭据错/重放，404 = 已过期：说清是哪一种，别只丢一句"无效"
-      const msg = err instanceof Error ? err.message : String(err);
-      toast.error(/403|凭据/.test(msg) ? '这次审批的凭据已失效（它只能用一次），请等它重新挂起或让 agent 再请求一次' : msg);
-      // 网络失败时服务端可能仍在等待；先向权威清单校准，取不到就保留卡片供重试。
-      void reseed();
-      return;
-    }
-    setApprovals((prev) => prev.filter((a) => a.id !== id));
-  }, [reseed]);
+  const respond = useCallback(
+    async (id: string, approved: boolean) => {
+      const token = approvalsRef.current.find((a) => a.id === id)?.approvalToken;
+      try {
+        await approvalsApi.respond(id, approved, token);
+        toast.success(approved ? '已批准执行' : '已拒绝');
+      } catch (err) {
+        // 403 = 凭据错/重放，404 = 已过期：说清是哪一种，别只丢一句"无效"
+        const msg = err instanceof Error ? err.message : String(err);
+        toast.error(/403|凭据/.test(msg) ? '这次审批的凭据已失效（它只能用一次），请等它重新挂起或让 agent 再请求一次' : msg);
+        // 网络失败时服务端可能仍在等待；先向权威清单校准，取不到就保留卡片供重试。
+        void reseed();
+        return;
+      }
+      setApprovals((prev) => prev.filter((a) => a.id !== id));
+    },
+    [reseed],
+  );
 
   return { approvals, onApprovalRequired, onGlobalApproval, respond };
 }

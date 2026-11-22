@@ -11,7 +11,11 @@ export interface AtomicWriteOptions {
 
 export class ConcurrentWriteError extends Error {
   readonly code = 'concurrent_write';
-  constructor(readonly targetPath: string, readonly expectedRevision: string, readonly actualRevision: string) {
+  constructor(
+    readonly targetPath: string,
+    readonly expectedRevision: string,
+    readonly actualRevision: string,
+  ) {
     super(`目标文件已被其他进程修改：${targetPath}`);
     this.name = 'ConcurrentWriteError';
   }
@@ -21,8 +25,12 @@ export class ConcurrentWriteError extends Error {
 export function fileRevisionSync(targetPath: string): string {
   if (!existsSync(targetPath)) return 'missing';
   let bytes: Buffer;
-  try { bytes = readFileSync(targetPath); }
-  catch { if (!existsSync(targetPath)) return 'missing'; throw new Error(`无法读取目标文件版本：${targetPath}`); }
+  try {
+    bytes = readFileSync(targetPath);
+  } catch {
+    if (!existsSync(targetPath)) return 'missing';
+    throw new Error(`无法读取目标文件版本：${targetPath}`);
+  }
   const digest = createHash('sha256').update(bytes).digest('hex');
   return `sha256:${digest}`;
 }
@@ -50,9 +58,17 @@ export function atomicWriteFileSync(targetPath: string, content: string, options
     renameSync(tempPath, targetPath);
   } catch (error) {
     if (fd !== undefined) {
-      try { closeSync(fd); } catch { /* preserve the write/commit error */ }
+      try {
+        closeSync(fd);
+      } catch {
+        /* preserve the write/commit error */
+      }
     }
-    try { rmSync(tempPath, { force: true }); } catch { /* preserve the write/commit error */ }
+    try {
+      rmSync(tempPath, { force: true });
+    } catch {
+      /* preserve the write/commit error */
+    }
     throw error;
   }
 }

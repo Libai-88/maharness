@@ -9,8 +9,9 @@ import { tmpdir } from 'node:os';
 import browserPlugin, { assertBrowserUrl, startBrowserProxy } from '../index';
 
 const FULL_CHROME = 'D:\\DEEPSEEK\\pw-browsers\\chromium-1248\\chrome-win64\\chrome.exe';
-const CHROME = process.env.MAHARNESS_TEST_BROWSER
-  ?? 'D:\\DEEPSEEK\\pw-browsers\\chromium_headless_shell-1248\\chrome-headless-shell-win64\\chrome-headless-shell.exe';
+const CHROME =
+  process.env.MAHARNESS_TEST_BROWSER ??
+  'D:\\DEEPSEEK\\pw-browsers\\chromium_headless_shell-1248\\chrome-headless-shell-win64\\chrome-headless-shell.exe';
 
 describe('浏览器 URL 边界', () => {
   it('拒绝非 http/https 与私网地址', async () => {
@@ -31,10 +32,15 @@ describe('浏览器 URL 边界', () => {
           socket.write(`CONNECT 127.0.0.1:${port} HTTP/1.1\r\nHost: 127.0.0.1:${port}\r\n\r\n`);
         });
         let data = '';
-        socket.on('data', (chunk) => { data += chunk.toString(); });
+        socket.on('data', (chunk) => {
+          data += chunk.toString();
+        });
         socket.on('end', () => resolve(data));
         socket.on('error', reject);
-        setTimeout(() => { socket.destroy(); resolve(data); }, 2_000).unref?.();
+        setTimeout(() => {
+          socket.destroy();
+          resolve(data);
+        }, 2_000).unref?.();
       });
       assert.match(response, /403 Forbidden/);
     } finally {
@@ -65,7 +71,10 @@ describe('浏览器 URL 边界', () => {
         });
         socket.on('end', () => resolve(data));
         socket.on('error', reject);
-        setTimeout(() => { socket.destroy(); resolve(data); }, 2_000).unref?.();
+        setTimeout(() => {
+          socket.destroy();
+          resolve(data);
+        }, 2_000).unref?.();
       });
       assert.match(response, /200 Connection Established/);
       assert.match(response, /proxy-ok/);
@@ -88,7 +97,9 @@ describe('浏览器插件', () => {
         return;
       }
       res.writeHead(200, { 'Content-Type': 'text/html' });
-      res.end('<html><body><h1 id="title">Hello</h1><input id="name"><button id="go" onclick="document.getElementById(\'title\').textContent=\'Clicked\'">Go</button><a id="dl" href="/download" download>Download</a></body></html>');
+      res.end(
+        '<html><body><h1 id="title">Hello</h1><input id="name"><button id="go" onclick="document.getElementById(\'title\').textContent=\'Clicked\'">Go</button><a id="dl" href="/download" download>Download</a></body></html>',
+      );
     });
     await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
     const port = (server.address() as AddressInfo).port;
@@ -103,10 +114,14 @@ describe('浏览器插件', () => {
         ['browser.headless', true],
       ]);
       browserPlugin.onLoad({
-        config: { get: <T>(key: string, fallback?: T): T => (config.has(key) ? config.get(key) as T : fallback as T) },
+        config: { get: <T>(key: string, fallback?: T): T => (config.has(key) ? (config.get(key) as T) : (fallback as T)) },
         paths: { data: dataDir },
-        register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); },
-        effect(_init: () => void, cleanupFn: () => () => void) { cleanup = cleanupFn(); },
+        register(value: any) {
+          if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
+        },
+        effect(_init: () => void, cleanupFn: () => () => void) {
+          cleanup = cleanupFn();
+        },
         logger: { info() {} },
       } as never);
       const ctx = { sessionId: 'browser-test', turn: 0, sandboxRoot: dataDir, cache: {}, trace: {} };
@@ -134,9 +149,10 @@ describe('浏览器插件', () => {
   });
 
   it('下载与网络观测（完整 Chromium）', {
-    skip: !existsSync(FULL_CHROME) || process.env.MAHARNESS_TEST_DOWNLOAD !== '1'
-      ? '需要完整 Chromium 且设置 MAHARNESS_TEST_DOWNLOAD=1'
-      : false,
+    skip:
+      !existsSync(FULL_CHROME) || process.env.MAHARNESS_TEST_DOWNLOAD !== '1'
+        ? '需要完整 Chromium 且设置 MAHARNESS_TEST_DOWNLOAD=1'
+        : false,
   }, async () => {
     const server = createServer((req, res) => {
       if (req.url === '/download') {
@@ -154,14 +170,21 @@ describe('浏览器插件', () => {
     try {
       const tools = new Map<string, any>();
       const config = new Map<string, unknown>([
-        ['browser.enabled', true], ['browser.executablePath', FULL_CHROME],
-        ['browser.allowPrivate', true], ['browser.headless', true], ['browser.persistent', false],
+        ['browser.enabled', true],
+        ['browser.executablePath', FULL_CHROME],
+        ['browser.allowPrivate', true],
+        ['browser.headless', true],
+        ['browser.persistent', false],
       ]);
       browserPlugin.onLoad({
-        config: { get: <T>(key: string, fallback?: T): T => (config.has(key) ? config.get(key) as T : fallback as T) },
+        config: { get: <T>(key: string, fallback?: T): T => (config.has(key) ? (config.get(key) as T) : (fallback as T)) },
         paths: { data: dataDir },
-        register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); },
-        effect(_init: () => void, cleanupFn: () => () => void) { cleanup = cleanupFn(); },
+        register(value: any) {
+          if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
+        },
+        effect(_init: () => void, cleanupFn: () => () => void) {
+          cleanup = cleanupFn();
+        },
         logger: { info() {} },
       } as never);
       const ctx = { sessionId: 'download-test', turn: 0, sandboxRoot: dataDir, cache: {}, trace: {} };

@@ -83,7 +83,11 @@ let activeProxy: string | undefined;
  * 把凭据、查询参数或片段混入连接配置，避免日志/错误链路意外携带秘密。 */
 export function validateSearchProxy(value: string): URL {
   let url: URL;
-  try { url = new URL(value); } catch { throw new Error('SEARCH_PROXY 必须是合法的 http/https URL'); }
+  try {
+    url = new URL(value);
+  } catch {
+    throw new Error('SEARCH_PROXY 必须是合法的 http/https URL');
+  }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
     throw new Error('SEARCH_PROXY 仅支持 http/https 代理');
   }
@@ -137,15 +141,27 @@ function htmlToText(html: string, mode: 'text' | 'markdown'): string {
     .replace(/<(svg|canvas|noscript)[\s\S]*?<\/\1>/gi, ' ');
   if (mode === 'markdown') {
     s = s
-      .replace(/<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi, (_, n: string, t: string) => `\n\n${'#'.repeat(Number(n))} ${decodeHtml(stripMarkup(t)).trim()}\n`)
+      .replace(
+        /<h([1-6])[^>]*>([\s\S]*?)<\/h\1>/gi,
+        (_, n: string, t: string) => `\n\n${'#'.repeat(Number(n))} ${decodeHtml(stripMarkup(t)).trim()}\n`,
+      )
       .replace(/<a[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_, h: string, t: string) => `[${decodeHtml(stripMarkup(t)).trim()}](${h})`)
-      .replace(/<li[^>]*>([\s\S]*?)<\/li>/gi, (_, t: string) => `- ${decodeHtml(stripMarkup(t)).trim().replace(/\s*\n\s*/g, ' ')}\n`)
+      .replace(
+        /<li[^>]*>([\s\S]*?)<\/li>/gi,
+        (_, t: string) =>
+          `- ${decodeHtml(stripMarkup(t))
+            .trim()
+            .replace(/\s*\n\s*/g, ' ')}\n`,
+      )
       .replace(/<pre[^>]*>([\s\S]*?)<\/pre>/gi, (_, t: string) => `\n\`\`\`\n${decodeHtml(stripMarkup(t)).replace(/\s+$/g, '')}\n\`\`\`\n`)
       .replace(/<\/(p|div|tr|section|article|header|footer)>/gi, '\n')
       .replace(/<br\s*\/?>/gi, '\n');
   }
   s = decodeHtml(stripMarkup(s));
-  return s.replace(/[ \t]{2,}/g, ' ').replace(/\n{3,}/g, '\n\n').trim();
+  return s
+    .replace(/[ \t]{2,}/g, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
 
 function extractTitle(html: string): string | undefined {
@@ -248,9 +264,9 @@ export function embeddedIpv4(groups: number[]): number | null {
   const [g0, g1, g2, g3, g4, g5, g6, g7] = groups;
   const headZero = g0 === 0 && g1 === 0 && g2 === 0 && g3 === 0 && g4 === 0;
   if (headZero && (g5 === 0 || g5 === 0xffff)) return ((g6 << 16) | g7) >>> 0; // ::/96 与 ::ffff:0:0/96
-  if (g0 === 0x2002) return ((g1 << 16) | g2) >>> 0;                            // 6to4
+  if (g0 === 0x2002) return ((g1 << 16) | g2) >>> 0; // 6to4
   if (g0 === 0x0064 && g1 === 0xff9b && g2 === 0 && g3 === 0 && g4 === 0 && g5 === 0) {
-    return ((g6 << 16) | g7) >>> 0;                                             // NAT64 64:ff9b::/96
+    return ((g6 << 16) | g7) >>> 0; // NAT64 64:ff9b::/96
   }
   return null;
 }
@@ -281,24 +297,24 @@ function stripBrackets(host: string): string {
 
 function inCidrV4(n: number, base: number, bits: number): boolean {
   const shift = 32 - bits;
-  return (n >>> shift) === (base >>> shift);
+  return n >>> shift === base >>> shift;
 }
 
 /** IPv4 私网/保留段表（A3 补齐：100.64/10 CGNAT、198.18/15 基准测试、192.0.0/24、
  *  192.88.99/24 6to4 中继任播、224/4 组播、240/4 保留含有限广播） */
 const V4_RESERVED: readonly (readonly [number, number])[] = [
-  [0x0000_0000, 8],  // 0.0.0.0/8     「本机」
-  [0x0a00_0000, 8],  // 10.0.0.0/8    私网
+  [0x0000_0000, 8], // 0.0.0.0/8     「本机」
+  [0x0a00_0000, 8], // 10.0.0.0/8    私网
   [0x6440_0000, 10], // 100.64.0.0/10 CGNAT / Tailscale 等运营商级 NAT
-  [0x7f00_0000, 8],  // 127.0.0.0/8   环回
+  [0x7f00_0000, 8], // 127.0.0.0/8   环回
   [0xa9fe_0000, 16], // 169.254.0.0/16 链路本地（云 metadata 169.254.169.254）
   [0xac10_0000, 12], // 172.16.0.0/12 私网
   [0xc000_0000, 24], // 192.0.0.0/24  IETF 协议分配
   [0xc058_6300, 24], // 192.88.99.0/24 6to4 中继任播（已废弃，不可达）
   [0xc0a8_0000, 16], // 192.168.0.0/16 私网
   [0xc612_0000, 15], // 198.18.0.0/15 设备基准测试
-  [0xe000_0000, 4],  // 224.0.0.0/4   组播
-  [0xf000_0000, 4],  // 240.0.0.0/4   保留（含 255.255.255.255）
+  [0xe000_0000, 4], // 224.0.0.0/4   组播
+  [0xf000_0000, 4], // 240.0.0.0/4   保留（含 255.255.255.255）
 ];
 
 /** 校验 URL 并返回同一次 DNS 查询结果；fetchDoc 将该地址集合传给 socket lookup。 */
@@ -313,7 +329,11 @@ async function resolvePublicTarget(
   resolver: (hostname: string) => Promise<ResolvedAddress[]> = (hostname) => dnsLookup(hostname, { all: true }),
 ): Promise<{ url: URL; addresses: ResolvedAddress[] }> {
   let u: URL;
-  try { u = new URL(raw); } catch { throw new Error('URL 不合法'); }
+  try {
+    u = new URL(raw);
+  } catch {
+    throw new Error('URL 不合法');
+  }
   if (u.protocol !== 'http:' && u.protocol !== 'https:') throw new Error(`仅支持 http/https（当前 ${u.protocol}）`);
   // 部署模式决定私网豁免：local/trusted 下唯一使用者是本机用户，web_fetch 允许抓本机
   // 页面（本地开发服务器、内网文档站）；remote 下默认拦截，须显式 AGENT_ALLOW_PRIVATE_URLS=1。
@@ -329,19 +349,30 @@ async function resolvePublicTarget(
   const host = stripBrackets(u.hostname);
   if (!host) throw new Error('URL 缺少主机名');
   if (isIP(host)) {
-    if (isPrivateAddress(host)) throw new Error('拒绝访问内网/保留地址（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
+    if (isPrivateAddress(host))
+      throw new Error(
+        '拒绝访问内网/保留地址（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）',
+      );
     return { url: u, addresses: [{ address: host, family: isIP(host) }] };
   }
   if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.internal') || host.endsWith('.local')) {
-    throw new Error('拒绝访问内网主机名（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）');
+    throw new Error(
+      '拒绝访问内网主机名（remote 部署模式下如需访问内网：在 web-agent/.env 中加入 AGENT_ALLOW_PRIVATE_URLS=1 并保存，热生效后重试）',
+    );
   }
   const recs = await resolver(host);
   if (recs.length === 0) throw new Error('域名无法解析');
-  if (recs.some(r => isPrivateAddress(r.address))) throw new Error('域名解析到内网地址（SSRF 拦截）');
+  if (recs.some((r) => isPrivateAddress(r.address))) throw new Error('域名解析到内网地址（SSRF 拦截）');
   return { url: u, addresses: recs };
 }
 
-interface FetchedDoc { finalUrl: string; contentType: string; body: string; bytes: number; redirected: number }
+interface FetchedDoc {
+  finalUrl: string;
+  contentType: string;
+  body: string;
+  bytes: number;
+  redirected: number;
+}
 
 /** 流式累积响应体：一旦累计字节越界就立刻 abort 掐断连接。
  *  旧实现是 `await res.arrayBuffer()` 之后再判长度——对**没有 content-length** 的响应
@@ -359,8 +390,10 @@ async function readBodyCapped(res: UndiciResponse, limit: number, onOverLimit: (
     const chunk = value as Uint8Array;
     total += chunk.byteLength;
     if (total > limit) {
-      onOverLimit();                                        // 触发 signal.abort()：底层连接立即销毁
-      await reader.cancel().catch(() => { /* 已中止，取消失败不影响结论 */ });
+      onOverLimit(); // 触发 signal.abort()：底层连接立即销毁
+      await reader.cancel().catch(() => {
+        /* 已中止，取消失败不影响结论 */
+      });
       throw new Error(`响应过大（已读 ${total} 字节 > 上限 ${limit}，连接已中断）`);
     }
     chunks.push(chunk);
@@ -410,7 +443,9 @@ export async function fetchDoc(
       });
       if ([301, 302, 303, 307, 308].includes(res.status)) {
         const loc = res.headers.get('location');
-        await res.body?.cancel().catch(() => { /* 忽略 */ });
+        await res.body?.cancel().catch(() => {
+          /* 忽略 */
+        });
         if (!loc) throw new Error(`重定向缺少 Location（HTTP ${res.status}）`);
         current = new URL(loc, u).toString();
         hops++;
@@ -418,13 +453,18 @@ export async function fetchDoc(
         continue;
       }
       if (!res.ok) {
-        await res.body?.cancel().catch(() => { /* 忽略 */ });
-        if (res.status === 429) throw new Error(`文献服务请求限流，请稍后重试（Retry-After: ${res.headers.get('retry-after') ?? '未提供'}）`);
+        await res.body?.cancel().catch(() => {
+          /* 忽略 */
+        });
+        if (res.status === 429)
+          throw new Error(`文献服务请求限流，请稍后重试（Retry-After: ${res.headers.get('retry-after') ?? '未提供'}）`);
         throw new Error(`HTTP ${res.status}`);
       }
       const cl = Number(res.headers.get('content-length') ?? '0');
       if (cl > maxBytes) {
-        await res.body?.cancel().catch(() => { /* 忽略 */ });
+        await res.body?.cancel().catch(() => {
+          /* 忽略 */
+        });
         throw new Error(`响应过大（${cl} 字节 > ${maxBytes}）`);
       }
       const buf = await readBodyCapped(res, maxBytes, () => limitCtrl.abort(new Error('响应超过体积上限')));
@@ -445,21 +485,20 @@ export function resolveSearchProvider(env: NodeJS.ProcessEnv = process.env): 'se
 }
 
 export function parseSearxngResults(payload: unknown, max: number): SearchResult[] {
-  const results = payload && typeof payload === 'object'
-    ? (payload as { results?: unknown }).results
-    : undefined;
+  const results = payload && typeof payload === 'object' ? (payload as { results?: unknown }).results : undefined;
   if (!Array.isArray(results)) return [];
   return results.slice(0, max).flatMap((item) => {
     if (!item || typeof item !== 'object') return [];
     const row = item as { title?: unknown; url?: unknown; content?: unknown; snippet?: unknown };
     if (typeof row.url !== 'string' || !row.url) return [];
-    return [{
-      title: typeof row.title === 'string' ? row.title : '',
-      url: row.url,
-      snippet: typeof row.content === 'string'
-        ? row.content.slice(0, 500)
-        : typeof row.snippet === 'string' ? row.snippet.slice(0, 500) : '',
-    }];
+    return [
+      {
+        title: typeof row.title === 'string' ? row.title : '',
+        url: row.url,
+        snippet:
+          typeof row.content === 'string' ? row.content.slice(0, 500) : typeof row.snippet === 'string' ? row.snippet.slice(0, 500) : '',
+      },
+    ];
   });
 }
 
@@ -467,7 +506,11 @@ async function searchSearxng(query: string, max: number): Promise<SearchResult[]
   const rawBase = process.env.SEARXNG_BASE_URL;
   if (!rawBase) throw new Error('SEARXNG_BASE_URL 未配置');
   let base: URL;
-  try { base = new URL(rawBase); } catch { throw new Error('SEARXNG_BASE_URL 不是合法 URL'); }
+  try {
+    base = new URL(rawBase);
+  } catch {
+    throw new Error('SEARXNG_BASE_URL 不是合法 URL');
+  }
   if (base.protocol !== 'http:' && base.protocol !== 'https:') throw new Error('SEARXNG_BASE_URL 仅支持 http/https');
   if (base.username || base.password) throw new Error('SEARXNG_BASE_URL 不得包含凭据');
   const target = new URL('/search', base);
@@ -545,15 +588,26 @@ function cleanDdgUrl(raw: string): string {
   let u = raw;
   const uddg = u.match(/[?&]uddg=([^&]+)/);
   if (uddg?.[1]) {
-    try { u = decodeURIComponent(uddg[1]); } catch { /* 保留原样 */ }
+    try {
+      u = decodeURIComponent(uddg[1]);
+    } catch {
+      /* 保留原样 */
+    }
   }
   if (u.startsWith('//')) u = 'https:' + u;
   return decodeHtml(u);
 }
 
 const HTML_ENTITIES: Record<string, string> = {
-  '&amp;': '&', '&lt;': '<', '&gt;': '>', '&quot;': '"',
-  '&#x27;': "'", '&#39;': "'", '&nbsp;': ' ', '&#x2F;': '/', '&#47;': '/',
+  '&amp;': '&',
+  '&lt;': '<',
+  '&gt;': '>',
+  '&quot;': '"',
+  '&#x27;': "'",
+  '&#39;': "'",
+  '&nbsp;': ' ',
+  '&#x2F;': '/',
+  '&#47;': '/',
 };
 
 function decodeHtml(s: string): string {
@@ -561,7 +615,10 @@ function decodeHtml(s: string): string {
 }
 
 function stripTags(s: string): string {
-  return s.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ').trim();
+  return s
+    .replace(/<[^>]+>/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 // ---------- 插件 ----------
@@ -597,7 +654,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'web_search',
         risk: 'low',
         costHint: 'medium',
@@ -606,7 +663,8 @@ export default {
         limits: '外部搜索服务；结果可能不完整',
         output: '{source, count, results: [{title, url, snippet}]}',
         outputSchema: {
-          type: 'object', required: ['query', 'source', 'count', 'results'],
+          type: 'object',
+          required: ['query', 'source', 'count', 'results'],
           properties: { query: { type: 'string' }, source: { type: 'string' }, count: { type: 'integer' }, results: { type: 'array' } },
         },
         description: '联网搜索（SearXNG / Tavily / DuckDuckGo）：返回结果列表（标题、URL、摘要）。适合查询时事、外部信息、文档资料等。',
@@ -628,15 +686,23 @@ export default {
           const key = tctx.cache.makeKey(['web_search', 'v2', query.toLowerCase(), String(max)], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: hit.meta ? `web_search 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '搜索结果缓存命中' });
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+              .finish({
+                outputSummary: hit.meta
+                  ? `web_search 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）`
+                  : '搜索结果缓存命中',
+              });
             return { ok: true, data: hit.value };
           }
 
           try {
-            const rawResults = source === 'searxng'
-              ? await searchSearxng(query, max)
-              : source === 'tavily' ? await searchTavily(query, max) : await searchDdg(query, max);
+            const rawResults =
+              source === 'searxng'
+                ? await searchSearxng(query, max)
+                : source === 'tavily'
+                  ? await searchTavily(query, max)
+                  : await searchDdg(query, max);
             const results = rerankSearchResults(query, dedupeSearchResults(rawResults));
             const data = { query, source, count: results.length, results };
             tctx.cache.l2Set(key, data, SEARCH_TTL, tctx.tenantId);
@@ -656,7 +722,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'web_fetch',
         risk: 'medium',
         costHint: 'medium',
@@ -666,14 +732,21 @@ export default {
         limits: '仅 http/https；单页 ≤5MB；正文默认截断 8000 字符；拒绝内网地址（SSRF）',
         output: '{url, title, contentType, text, totalChars, truncated}',
         outputSchema: {
-          type: 'object', required: ['url', 'contentType', 'text', 'totalChars', 'truncated'],
+          type: 'object',
+          required: ['url', 'contentType', 'text', 'totalChars', 'truncated'],
           properties: {
-            url: { type: 'string' }, finalUrl: { type: 'string' }, contentType: { type: 'string' },
-            title: { type: 'string' }, text: { type: 'string' }, totalChars: { type: 'integer' },
-            truncated: { type: 'boolean' }, redirected: { type: 'integer' },
+            url: { type: 'string' },
+            finalUrl: { type: 'string' },
+            contentType: { type: 'string' },
+            title: { type: 'string' },
+            text: { type: 'string' },
+            totalChars: { type: 'integer' },
+            truncated: { type: 'boolean' },
+            redirected: { type: 'integer' },
           },
         },
-        description: '抓取指定 URL 的正文（HTML 自动转纯文本或轻量 Markdown，保留标题/链接/列表/代码块）。用于读文档、issue、博客正文——web_search 只给摘要，需要全文时用本工具。',
+        description:
+          '抓取指定 URL 的正文（HTML 自动转纯文本或轻量 Markdown，保留标题/链接/列表/代码块）。用于读文档、issue、博客正文——web_search 只给摘要，需要全文时用本工具。',
         parameters: {
           type: 'object',
           properties: {
@@ -691,8 +764,13 @@ export default {
           const key = tctx.cache.makeKey(['web_fetch', 'v1', raw.toLowerCase(), mode, String(maxChars)], { tenantId: tctx.tenantId });
           const hit = tctx.cache.l2Get(key);
           if (hit.hit) {
-            tctx.trace.startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
-              .finish({ outputSummary: hit.meta ? `web_fetch 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）` : '网页抓取缓存命中' });
+            tctx.trace
+              .startStep({ traceId: tctx.traceId ?? '', turn: tctx.turn, type: 'cache_hit', name: 'L2', cacheLayer: 'L2', cacheKey: key })
+              .finish({
+                outputSummary: hit.meta
+                  ? `web_fetch 缓存命中（剩余 ${Math.ceil(hit.meta.ttlRemainingMs / 60_000)} 分钟，第 ${hit.meta.hits} 次）`
+                  : '网页抓取缓存命中',
+              });
             return { ok: true, data: hit.value };
           }
           try {
@@ -701,8 +779,13 @@ export default {
             const text = mode === 'html' ? doc.body : isHtml ? htmlToText(doc.body, mode as 'text' | 'markdown') : doc.body;
             const title = isHtml && mode !== 'html' ? extractTitle(doc.body) : undefined;
             const data = {
-              url: raw, finalUrl: doc.finalUrl, contentType: doc.contentType, title,
-              text: text.slice(0, maxChars), totalChars: text.length, truncated: text.length > maxChars,
+              url: raw,
+              finalUrl: doc.finalUrl,
+              contentType: doc.contentType,
+              title,
+              text: text.slice(0, maxChars),
+              totalChars: text.length,
+              truncated: text.length > maxChars,
               redirected: doc.redirected || undefined,
             };
             tctx.cache.l2Set(key, data, SEARCH_TTL, tctx.tenantId);
@@ -722,7 +805,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["workspace.read"],
+        permissions: ['workspace.read'],
         name: 'web_crawl',
         risk: 'medium',
         costHint: 'medium',
@@ -730,12 +813,17 @@ export default {
         sideEffect: 'read',
         contentTrust: 'untrusted',
         limits: '1-5 个 http/https URL；每页 ≤5MB；单次总正文 ≤32000 字符；默认 3 并发；拒绝内网地址',
-        output: '{count, failed, totalChars, pages: [{url, finalUrl, title, text, totalChars, truncated, error?}], citations: [{index, title, url}]}',
+        output:
+          '{count, failed, totalChars, pages: [{url, finalUrl, title, text, totalChars, truncated, error?}], citations: [{index, title, url}]}',
         outputSchema: {
-          type: 'object', required: ['count', 'failed', 'totalChars', 'pages', 'citations'],
+          type: 'object',
+          required: ['count', 'failed', 'totalChars', 'pages', 'citations'],
           properties: {
-            count: { type: 'integer' }, failed: { type: 'integer' }, totalChars: { type: 'integer' },
-            pages: { type: 'array' }, citations: { type: 'array' },
+            count: { type: 'integer' },
+            failed: { type: 'integer' },
+            totalChars: { type: 'integer' },
+            pages: { type: 'array' },
+            citations: { type: 'array' },
           },
         },
         description: '并发抓取多个网页并统一清洗为正文，用于一次收集多篇资料、对比来源和建立引用。单页精读仍用 web_fetch。',
@@ -762,8 +850,13 @@ export default {
           const requested = Math.min(12_000, Math.max(500, Math.floor(Number(args.maxChars) || 6_000)));
           const perPage = Math.min(requested, Math.floor(32_000 / urls.length));
           const pages: {
-            url: string; finalUrl?: string; title?: string; text?: string;
-            totalChars?: number; truncated?: boolean; error?: string;
+            url: string;
+            finalUrl?: string;
+            title?: string;
+            text?: string;
+            totalChars?: number;
+            truncated?: boolean;
+            error?: string;
           }[] = new Array(urls.length);
           let next = 0;
           const worker = async (): Promise<void> => {
@@ -774,7 +867,7 @@ export default {
               const key = tctx.cache.makeKey(['web_crawl', 'v1', raw.toLowerCase(), mode, String(perPage)], { tenantId: tctx.tenantId });
               const hit = tctx.cache.l2Get(key);
               if (hit.hit) {
-                pages[index] = hit.value as typeof pages[number];
+                pages[index] = hit.value as (typeof pages)[number];
                 continue;
               }
               try {
@@ -782,9 +875,12 @@ export default {
                 const isHtml = doc.contentType.includes('html') || /^\s*</.test(doc.body);
                 const text = isHtml ? htmlToText(doc.body, mode) : doc.body;
                 const page = {
-                  url: raw, finalUrl: doc.finalUrl,
+                  url: raw,
+                  finalUrl: doc.finalUrl,
                   title: isHtml ? extractTitle(doc.body) : undefined,
-                  text: text.slice(0, perPage), totalChars: text.length, truncated: text.length > perPage,
+                  text: text.slice(0, perPage),
+                  totalChars: text.length,
+                  truncated: text.length > perPage,
                 };
                 pages[index] = page;
                 tctx.cache.l2Set(key, page, SEARCH_TTL, tctx.tenantId);
@@ -812,8 +908,10 @@ export default {
       },
     });
 
-    ctx.logger.info(process.env.TAVILY_API_KEY
-      ? '工具就绪: web_search（Tavily）+ web_fetch + web_crawl'
-      : '工具就绪: web_search（DuckDuckGo 降级，配置 TAVILY_API_KEY 可升级）+ web_fetch + web_crawl');
+    ctx.logger.info(
+      process.env.TAVILY_API_KEY
+        ? '工具就绪: web_search（Tavily）+ web_fetch + web_crawl'
+        : '工具就绪: web_search（DuckDuckGo 降级，配置 TAVILY_API_KEY 可升级）+ web_fetch + web_crawl',
+    );
   },
 } satisfies Plugin;

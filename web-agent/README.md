@@ -9,9 +9,10 @@
 
 | 信条 | 实现 |
 | --- | --- |
-| 内核极薄 | 内核聚合 6 个状态件：EventBus / Config / PluginLoader / Trace / Cache / Budget（另有 EffectScope **逐插件实例**、types/loop/service 三份契约件），**连对话都是插件** |
+| 内核只放机制与契约 | 6 个状态件（EventBus / Config / PluginLoader / Trace / Cache / Budget）+ 契约件（types / loop / service 等）+ 跨插件机制（快照、锁、沙箱、进程宿主、任务契约、重放、校验），当前 60 个源文件；判据见 [ADR 0006](../plan/adr/0006-kernel-scope.md)，具体能力全部在 core/ 与 plugins/，**连对话都是插件** |
 | 一切可插拔 | `plugins/` 目录现场写插件，保存即热加载，网页面板一键启停；能力、监听、服务、配置及已登记资源随卸载回收，外部副作用保留；**坏版本自动回滚**（事务性热重载，永不半加载） |
 | 全部自研 | Agent 循环、工具协议、插件机制、SSE 流式、缓存全部手写，零 agent 框架依赖 |
+| 分层有门禁 | `server/http`（传输）/ `server/usecases`（用例）/ `server/run`（执行器）/ `server/store`（端口+单写者）四层由 AST 边界测试固化；契约唯一来源 `contracts/api.ts` 生成 UI 类型并做字节比对；复杂度预算（文件 400 行 / 函数 60 行 / 圈复杂度 15）只降不升，见 [ADR 0007–0011](../plan/adr/index.md) |
 | 运行即轨迹 | 每次运行产生结构化 Trace：LLM 调用/工具调用/缓存命中，前端实时面板 + JSONL 审计 + 成本透明 |
 | 输入与缓存 | L1 相似答案缓存默认关闭；L2 工具结果缓存保留状态作用域，Provider 按实际输入复用原生前缀 |
 | Windows-first | 路径沙箱（防穿越）、编码自动识别（UTF-8/UTF-16/GBK）、中文路径 |
@@ -190,7 +191,7 @@ plugins/clock/index.ts
 ```
 
 ```ts
-import type { Plugin } from '../../kernel/types';
+import type { Plugin } from '../../kernel/plugin-sdk';
 
 export default {
   id: 'clock', name: '时钟工具', version: '0.1.0',

@@ -53,7 +53,7 @@ create_plugin 可以接收 source 字符串，或多文件 files 与 manifest：
 ```ts
 export default {
   id: 'word-count', name: 'Word count', version: '1.0.0',
-  onLoad(ctx: import('../../kernel/types').PluginContext) {
+  onLoad(ctx: import('../../kernel/plugin-sdk').PluginContext) {
     ctx.register({ kind: 'tool', tool: {
       name: 'count_words', version: '2.0.0', description: 'Count whitespace-separated words.',
       permissions: [], sideEffect: 'none',
@@ -68,7 +68,7 @@ export default {
 };
 ```
 
-id 使用小写字母、数字和连字符，最多 32 字符。源码文件使用插件内相对路径，不传 plugin.json。可导入本地模块与明确批准的包；SDK 类型用 ../../kernel/types 的 type import，不导入宿主实现或其他插件内部文件。纯工具可从 source 推导 manifest，其他能力使用完整清单。`capabilityIndex` 只能引用 `permissions.capabilities.tool` 已授权工具；v2 清单通过兼容适配层运行，但不能声明能力索引。
+id 使用小写字母、数字和连字符，最多 32 字符。源码文件使用插件内相对路径，不传 plugin.json。可导入本地模块与明确批准的包；SDK 类型用 ../../kernel/plugin-sdk 的 type import，不导入宿主实现或其他插件内部文件。纯工具可从 source 推导 manifest，其他能力使用完整清单。`capabilityIndex` 只能引用 `permissions.capabilities.tool` 已授权工具；v2 清单通过兼容适配层运行，但不能声明能力索引。
 
 ## 能力和调用入口
 
@@ -92,7 +92,7 @@ permissions.capabilities 按 kind 声明实际名称。requires 是先启用的�
 
 ```ts
 // 组合工具的 handler；ToolDef 另声明 invokesTools:true、permissions:['workspace.read']。
-async function handler(_args: unknown, tctx: import('../../kernel/types').ToolContext) {
+async function handler(_args: unknown, tctx: import('../../kernel/plugin-sdk').ToolContext) {
   if (!tctx.invoke) return { ok: false, error: '宿主工具代理不可用' };
   return tctx.invoke('read_file', { path: 'README.md' });
 }
@@ -116,3 +116,4 @@ node scripts/plugin-scaffold.mjs validate plugins/my-plugin
 ```
 
 实例插件可贡献 panel、iframe 或受信任的 module 页面，入口位于设置的高级区域，不增加主导航。plugins/ 受目录监听；core/ 内置插件需显式重载或重启；vendor/ 是技能材料。实例级的循环、缓存等服务替换由管理员配置，不属于任务生成插件的授权。
+

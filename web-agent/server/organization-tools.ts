@@ -1,6 +1,6 @@
 import type { ToolContext, ToolDef, ToolResult } from '../kernel/types';
 import type { Store } from './db';
-import { isOrganizationError, OrganizationService, type AssignmentDraft } from './services/organization/service';
+import { isOrganizationError, type OrganizationService, type AssignmentDraft } from './services/organization/service';
 import type { EvidenceRef, ExceptionCase } from './organization-store';
 
 function toolFailure(error: unknown): ToolResult {
@@ -35,27 +35,46 @@ export function organizationTools(service: OrganizationService, store: Store): T
       risk: 'low',
       costHint: 'low',
       sideEffect: 'read',
-      outputSchema: { type: 'object', required: ['roles', 'scorecards'], properties: { roles: { type: 'array' }, scorecards: { type: 'array' } } },
+      outputSchema: {
+        type: 'object',
+        required: ['roles', 'scorecards'],
+        properties: { roles: { type: 'array' }, scorecards: { type: 'array' } },
+      },
       description: '查看当前租户可复用的 AI 角色及其客观履历。履历只来自已完成契约；样本不足时只作弱提示。',
-      parameters: { type: 'object', properties: { projectId: { type: 'string' }, includePaused: { type: 'boolean' } }, additionalProperties: false },
+      parameters: {
+        type: 'object',
+        properties: { projectId: { type: 'string' }, includePaused: { type: 'boolean' } },
+        additionalProperties: false,
+      },
       async handler(args: { projectId?: string; includePaused?: boolean }, ctx) {
         try {
           const tenantId = ctx.tenantId ?? 'default';
           const roles = store.organization.listRoles(tenantId, args.projectId, args.includePaused === true);
-          const scorecards = service.scorecards(tenantId).filter(card => roles.some(role => role.id === card.roleId));
+          const scorecards = service.scorecards(tenantId).filter((card) => roles.some((role) => role.id === card.roleId));
           return { ok: true, data: { roles, scorecards } };
-        } catch (error) { return toolFailure(error); }
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
     {
-      version: '1.0.0', permissions: ['workspace.read'], name: 'role_assume',
+      version: '1.0.0',
+      permissions: ['workspace.read'],
+      name: 'role_assume',
       discovery: { initial: true, keywords: ['角色', '指定角色', 'role'] },
-      risk: 'low', costHint: 'low', sideEffect: 'write', outputSchema: { type: 'object' },
-      description: '按用户要求或任务需要选择 role_directory 中的持久角色承接当前任务，保留同一工作单和 Run，权限只可收窄。已有团队或子任务不能切换。',
+      risk: 'low',
+      costHint: 'low',
+      sideEffect: 'write',
+      outputSchema: { type: 'object' },
+      description:
+        '按用户要求或任务需要选择 role_directory 中的持久角色承接当前任务，保留同一工作单和 Run，权限只可收窄。已有团队或子任务不能切换。',
       parameters: { type: 'object', properties: { roleId: { type: 'string' } }, required: ['roleId'], additionalProperties: false },
       async handler(args: { roleId: string }, ctx) {
-        try { return { ok: true, data: service.assumeRole(requireRun(ctx), args.roleId) }; }
-        catch (error) { return toolFailure(error); }
+        try {
+          return { ok: true, data: service.assumeRole(requireRun(ctx), args.roleId) };
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
     {
@@ -68,15 +87,19 @@ export function organizationTools(service: OrganizationService, store: Store): T
       costHint: 'high',
       sideEffect: 'write',
       outputSchema: {
-        type: 'object', required: ['teamCycle', 'contracts', 'economics'],
+        type: 'object',
+        required: ['teamCycle', 'contracts', 'economics'],
         properties: { teamCycle: { type: 'object' }, contracts: { type: 'array' }, economics: { type: 'object' } },
       },
-      description: '按角色能力建立 2-5 个互不重叠的可交付分支，至少两个独立分支。预算可省略，显式预算继续生效；简单任务直接执行。成功后下轮加载委派工具。',
+      description:
+        '按角色能力建立 2-5 个互不重叠的可交付分支，至少两个独立分支。预算可省略，显式预算继续生效；简单任务直接执行。成功后下轮加载委派工具。',
       parameters: {
         type: 'object',
         properties: {
           assignments: {
-            type: 'array', minItems: 2, maxItems: 5,
+            type: 'array',
+            minItems: 2,
+            maxItems: 5,
             items: {
               type: 'object',
               required: ['objective', 'expectedArtifacts', 'acceptance'],
@@ -84,7 +107,11 @@ export function organizationTools(service: OrganizationService, store: Store): T
                 roleId: { type: 'string' },
                 roleName: { type: 'string' },
                 objective: { type: 'string' },
-                expectedArtifacts: { type: 'array', description: '分支承诺交付的文件相对路径；只交分析或结论时填空数组', items: { type: 'string' } },
+                expectedArtifacts: {
+                  type: 'array',
+                  description: '分支承诺交付的文件相对路径；只交分析或结论时填空数组',
+                  items: { type: 'string' },
+                },
                 acceptance: { type: 'array', minItems: 1, items: { type: 'string' } },
                 evidenceInputs: { type: 'array', items: { type: 'object' } },
                 dependsOn: { type: 'array', items: { type: 'string' } },
@@ -101,12 +128,15 @@ export function organizationTools(service: OrganizationService, store: Store): T
         required: ['assignments'],
         additionalProperties: false,
       },
-      async handler(args: {
-        assignments?: AssignmentDraft[];
-        singleAgentEstimateUsd?: number;
-        teamEstimateUsd?: number;
-        reason?: string;
-      }, ctx) {
+      async handler(
+        args: {
+          assignments?: AssignmentDraft[];
+          singleAgentEstimateUsd?: number;
+          teamEstimateUsd?: number;
+          reason?: string;
+        },
+        ctx,
+      ) {
         try {
           const run = requireRun(ctx);
           return {
@@ -118,7 +148,9 @@ export function organizationTools(service: OrganizationService, store: Store): T
               reason: args.reason,
             }),
           };
-        } catch (error) { return toolFailure(error); }
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
     {
@@ -129,7 +161,11 @@ export function organizationTools(service: OrganizationService, store: Store): T
       risk: 'low',
       costHint: 'low',
       sideEffect: 'write',
-      outputSchema: { type: 'object', required: ['id', 'status', 'delivery'], properties: { id: { type: 'string' }, status: { type: 'string' }, delivery: { type: 'object' } } },
+      outputSchema: {
+        type: 'object',
+        required: ['id', 'status', 'delivery'],
+        properties: { id: { type: 'string' }, status: { type: 'string' }, delivery: { type: 'object' } },
+      },
       description: '为已结束的子任务登记契约交付摘要、产物、证据和未完成项。交付状态由运行事实决定。',
       parameters: {
         type: 'object',
@@ -148,11 +184,15 @@ export function organizationTools(service: OrganizationService, store: Store): T
           return {
             ok: true,
             data: service.deliver(run.id, run.tenantId, {
-              summary: args.summary ?? '', artifacts: args.artifacts,
-              evidence: args.evidence, unfinished: args.unfinished,
+              summary: args.summary ?? '',
+              artifacts: args.artifacts,
+              evidence: args.evidence,
+              unfinished: args.unfinished,
             }),
           };
-        } catch (error) { return toolFailure(error); }
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
     {
@@ -163,12 +203,19 @@ export function organizationTools(service: OrganizationService, store: Store): T
       risk: 'low',
       costHint: 'low',
       sideEffect: 'write',
-      outputSchema: { type: 'object', required: ['id', 'status', 'requiresHuman'], properties: { id: { type: 'string' }, status: { type: 'string' }, requiresHuman: { type: 'boolean' } } },
+      outputSchema: {
+        type: 'object',
+        required: ['id', 'status', 'requiresHuman'],
+        properties: { id: { type: 'string' }, status: { type: 'string' }, requiresHuman: { type: 'boolean' } },
+      },
       description: '提交结构化异常。maharness 先裁决已记录事实；费用、权限和价值取舍等待人类。',
       parameters: {
         type: 'object',
         properties: {
-          kind: { type: 'string', enum: ['ambiguity', 'rule-conflict', 'tool-failure', 'budget', 'authority', 'handoff', 'overload', 'opinion-conflict'] },
+          kind: {
+            type: 'string',
+            enum: ['ambiguity', 'rule-conflict', 'tool-failure', 'budget', 'authority', 'handoff', 'overload', 'opinion-conflict'],
+          },
           summary: { type: 'string' },
           facts: { type: 'array', minItems: 1, items: { type: 'string' } },
           contractId: { type: 'string' },
@@ -177,13 +224,16 @@ export function organizationTools(service: OrganizationService, store: Store): T
         required: ['kind', 'summary', 'facts'],
         additionalProperties: false,
       },
-      async handler(args: {
-        kind?: ExceptionCase['kind'];
-        summary?: string;
-        facts?: string[];
-        contractId?: string;
-        evidence?: EvidenceRef[];
-      }, ctx) {
+      async handler(
+        args: {
+          kind?: ExceptionCase['kind'];
+          summary?: string;
+          facts?: string[];
+          contractId?: string;
+          evidence?: EvidenceRef[];
+        },
+        ctx,
+      ) {
         try {
           const run = requireRun(ctx);
           const workOrder = service.workOrderForRun(run);
@@ -200,7 +250,9 @@ export function organizationTools(service: OrganizationService, store: Store): T
               createdBy: 'ai',
             }),
           };
-        } catch (error) { return toolFailure(error); }
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
     {
@@ -215,8 +267,11 @@ export function organizationTools(service: OrganizationService, store: Store): T
       description: '读取由实际契约结果计算的客观角色履历。样本不足时不会产生高置信排名。',
       parameters: { type: 'object', properties: {}, additionalProperties: false },
       async handler(_args, ctx) {
-        try { return { ok: true, data: { scorecards: service.scorecards(ctx.tenantId ?? 'default') } }; }
-        catch (error) { return toolFailure(error); }
+        try {
+          return { ok: true, data: { scorecards: service.scorecards(ctx.tenantId ?? 'default') } };
+        } catch (error) {
+          return toolFailure(error);
+        }
       },
     },
   ];

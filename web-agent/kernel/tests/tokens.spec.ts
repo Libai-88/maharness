@@ -29,9 +29,10 @@ test('deterministic input ceiling includes message, tool, image and response fra
     tools: [{ name: 'read_file', description: 'read', parameters: { type: 'object' } }],
     responseFormat: { type: 'json_object' },
   };
-  const rawBytes = Buffer.byteLength(JSON.stringify(payload.messages[0]), 'utf8')
-    + Buffer.byteLength(JSON.stringify(payload.tools[0]), 'utf8')
-    + Buffer.byteLength(JSON.stringify(payload.responseFormat), 'utf8');
+  const rawBytes =
+    Buffer.byteLength(JSON.stringify(payload.messages[0]), 'utf8') +
+    Buffer.byteLength(JSON.stringify(payload.tools[0]), 'utf8') +
+    Buffer.byteLength(JSON.stringify(payload.responseFormat), 'utf8');
   const bound = deterministicInputTokenUpperBound(payload.messages, payload.tools, payload.responseFormat);
   assert.ok(bound >= rawBytes);
   assert.equal(bound, rawBytes + 128 + 64);

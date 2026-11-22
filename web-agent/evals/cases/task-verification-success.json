@@ -7,12 +7,10 @@
     "objective": "Confirm the artifact exists",
     "acceptance": [{ "type": "file_contains", "path": "deliverable.txt", "value": "verified artifact" }]
   },
-  "requests": [{
-    "chunks": [
-      { "type": "delta", "text": "The artifact is ready." },
-      { "type": "usage", "input": 20, "output": 8 },
-      { "type": "done" }
-    ]
-  }],
+  "requests": [
+    {
+      "chunks": [{ "type": "delta", "text": "The artifact is ready." }, { "type": "usage", "input": 20, "output": 8 }, { "type": "done" }]
+    }
+  ],
   "expect": { "answerContains": ["artifact"], "llmCalls": 1, "noErrors": true, "taskOutcome": "verified" }
 }

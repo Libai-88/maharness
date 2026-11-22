@@ -4,53 +4,199 @@ import { api, authHeaders, type ChatHandlers, type ErrorKind } from './api';
 export type RunStatus = 'queued' | 'running' | 'waiting_approval' | 'stopping' | 'interrupted' | 'completed' | 'failed' | 'cancelled';
 export type RuleSource = 'runtime' | 'user' | 'project' | 'skill' | 'plugin' | 'example';
 export interface RuleDescriptor {
-  id: string; label: string; source: RuleSource; scope: 'runtime' | 'workspace' | 'run';
-  priority: number; trust: 'core' | 'user' | 'reference'; contentHash: string; active: boolean;
+  id: string;
+  label: string;
+  source: RuleSource;
+  scope: 'runtime' | 'workspace' | 'run';
+  priority: number;
+  trust: 'core' | 'user' | 'reference';
+  contentHash: string;
+  active: boolean;
 }
 export interface RunInfo {
-  workOrderId?: string; reworkOfRunId?: string;
+  workOrderId?: string;
+  reworkOfRunId?: string;
   supplements?: { queued: number; delivered: number };
   materials?: Material[];
-  id: string; sessionId: string; parentId?: string; objective: string; status: RunStatus;
-  providerId: string; model: string; cost: number; tokensIn: number; tokensOut: number;
-  budgetPolicy?: 'advisory' | 'enforce'; billingNotice?: string; billingAcknowledgedAt?: number;
+  id: string;
+  sessionId: string;
+  parentId?: string;
+  objective: string;
+  status: RunStatus;
+  providerId: string;
+  model: string;
+  cost: number;
+  tokensIn: number;
+  tokensOut: number;
+  budgetPolicy?: 'advisory' | 'enforce';
+  billingNotice?: string;
+  billingAcknowledgedAt?: number;
   usageStatus?: 'reported' | 'estimated' | 'unknown';
   eventCursor?: number;
-  budgetUsd?: number; deadlineAt?: number;
-  answer?: string; error?: string; verification?: unknown; createdAt: number; updatedAt: number;
+  budgetUsd?: number;
+  deadlineAt?: number;
+  answer?: string;
+  error?: string;
+  verification?: unknown;
+  createdAt: number;
+  updatedAt: number;
   problem?: { code: string; stage: string; hint: string };
   authorization: { workspace: string; profile: 'standard' | 'developer'; readOnly: boolean; revision: number };
-  capabilityResolution?: { selected: string[]; tools: string[]; reason: string; conflicts: { capabilityId: string; shadowedBy: string; reason?: string; candidates?: { pluginId: string; priority: number; version?: string }[] }[] };
-  ruleResolution?: { schemaVersion: 1; applied: RuleDescriptor[]; ignored: RuleDescriptor[]; conflicts: { left: string; right: string; reason: string; winner: string }[] };
+  capabilityResolution?: {
+    selected: string[];
+    tools: string[];
+    reason: string;
+    conflicts: {
+      capabilityId: string;
+      shadowedBy: string;
+      reason?: string;
+      candidates?: { pluginId: string; priority: number; version?: string }[];
+    }[];
+  };
+  ruleResolution?: {
+    schemaVersion: 1;
+    applied: RuleDescriptor[];
+    ignored: RuleDescriptor[];
+    conflicts: { left: string; right: string; reason: string; winner: string }[];
+  };
   origin?:
     | { kind: 'item'; itemId: string; revision: number }
     | { kind: 'automation'; automationId: string; occurrenceId: string }
     | { kind: 'society'; societyTaskId: string; scheduleId: string; assignmentContractId: string };
 }
-export interface RunArtifact { id: string; runId: string; callId: string; kind: string; label: string; ref: string; createdAt: number; metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number } }
+export interface RunArtifact {
+  id: string;
+  runId: string;
+  callId: string;
+  kind: string;
+  label: string;
+  ref: string;
+  createdAt: number;
+  metadata?: { status?: 'draft' | 'final'; format?: string; draftId?: string; draftVersion?: string; count?: number };
+}
 export type RunSummary = Pick<RunInfo, 'id' | 'sessionId' | 'parentId' | 'objective' | 'status' | 'origin' | 'workOrderId' | 'updatedAt'>;
-export interface ModelCall { id: string; purpose: string; providerId: string; model: string; actualModel?: string; status: string; usageStatus: string; priceSource: string; cost?: number; input?: number; output?: number; inputEstimate: number; finishReason?: string; errorCode?: string }
-export interface ModelInput { callId?: string; purpose?: string; diagnostics?: { messageTokens: number; toolTokens: number; sources: { source: string; tokens: number }[]; toolSources?: { name: string; tokens: number }[]; measurement?: 'estimated' | 'tokenizer'; capabilityRevision?: number; fingerprint: string; attemptId?: string; resumedFromTurn?: number }; id: string; turn: number; providerId: string; model: string; createdAt: number; usage?: { inputTokens: number; window: number; outputReserve: number; outputLimitSource?: 'model' | 'default' }; messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[]; tools: { name: string }[] }
+export interface ModelCall {
+  id: string;
+  purpose: string;
+  providerId: string;
+  model: string;
+  actualModel?: string;
+  status: string;
+  usageStatus: string;
+  priceSource: string;
+  cost?: number;
+  input?: number;
+  output?: number;
+  inputEstimate: number;
+  finishReason?: string;
+  errorCode?: string;
+}
+export interface ModelInput {
+  callId?: string;
+  purpose?: string;
+  diagnostics?: {
+    messageTokens: number;
+    toolTokens: number;
+    sources: { source: string; tokens: number }[];
+    toolSources?: { name: string; tokens: number }[];
+    measurement?: 'estimated' | 'tokenizer';
+    capabilityRevision?: number;
+    fingerprint: string;
+    attemptId?: string;
+    resumedFromTurn?: number;
+  };
+  id: string;
+  turn: number;
+  providerId: string;
+  model: string;
+  createdAt: number;
+  usage?: { inputTokens: number; window: number; outputReserve: number; outputLimitSource?: 'model' | 'default' };
+  messages: { role: string; content: string | null; context?: { source: string; trust: string; retention: string } }[];
+  tools: { name: string }[];
+}
 export interface RunTool {
-  id: string; name: string; status: string; argsSummary: string;
-  version?: string; sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
+  id: string;
+  name: string;
+  status: string;
+  argsSummary: string;
+  version?: string;
+  sideEffect?: 'none' | 'read' | 'write' | 'external' | 'irreversible';
   sideEffectOutcome?: 'none' | 'not_started' | 'applied' | 'unknown';
   failure?: { code: string; retryable: boolean; outcome: 'not_started' | 'applied' | 'unknown' };
 }
-export interface PluginGrant { enabled: boolean; permissions: string[]; dependencies: string[] }
-export interface TaskPluginInfo { id: string; version: string; hash: string; scope: string; owner: string; state: string; error?: string; files: string[]; manifest: { name: string; requires?: string[]; permissions: { capabilities: Record<string, string[]> } } }
-export interface WorkspacePermission { workspace: string; profile: 'standard' | 'developer'; revision: number; pluginDevelopment?: PluginGrant; allowedPluginDependencies?: string[] }
+export interface PluginGrant {
+  enabled: boolean;
+  permissions: string[];
+  dependencies: string[];
+}
+export interface TaskPluginInfo {
+  id: string;
+  version: string;
+  hash: string;
+  scope: string;
+  owner: string;
+  state: string;
+  error?: string;
+  files: string[];
+  manifest: { name: string; requires?: string[]; permissions: { capabilities: Record<string, string[]> } };
+}
+export interface WorkspacePermission {
+  workspace: string;
+  profile: 'standard' | 'developer';
+  revision: number;
+  pluginDevelopment?: PluginGrant;
+  allowedPluginDependencies?: string[];
+}
 export const activeRun = (run: RunInfo) => ['queued', 'running', 'waiting_approval', 'stopping'].includes(run.status);
-export const runLabels: Record<RunStatus, string> = { queued: '排队中', running: '执行中', waiting_approval: '等待审批', stopping: '停止中', interrupted: '已中断', completed: '执行完成', failed: '失败', cancelled: '已取消' };
+export const runLabels: Record<RunStatus, string> = {
+  queued: '排队中',
+  running: '执行中',
+  waiting_approval: '等待审批',
+  stopping: '停止中',
+  interrupted: '已中断',
+  completed: '执行完成',
+  failed: '失败',
+  cancelled: '已取消',
+};
 export const runsApi = {
   plugins: (id: string) => api<{ plugins: TaskPluginInfo[]; grant: PluginGrant }>(`/api/v2/runs/${id}/plugins`),
-  savePlugin: (id: string, plugin: TaskPluginInfo) => api(`/api/v2/runs/${id}/plugins/${encodeURIComponent(plugin.id)}/save`, { method: 'POST', body: JSON.stringify({ hash: plugin.hash }) }),
-  setPluginDevelopment: (grant: PluginGrant, revision: number) => api<WorkspacePermission>('/api/v2/workspace/plugin-development', { method: 'PUT', body: JSON.stringify({ ...grant, revision }) }),
+  savePlugin: (id: string, plugin: TaskPluginInfo) =>
+    api(`/api/v2/runs/${id}/plugins/${encodeURIComponent(plugin.id)}/save`, {
+      method: 'POST',
+      body: JSON.stringify({ hash: plugin.hash }),
+    }),
+  setPluginDevelopment: (grant: PluginGrant, revision: number) =>
+    api<WorkspacePermission>('/api/v2/workspace/plugin-development', { method: 'PUT', body: JSON.stringify({ ...grant, revision }) }),
   list: (sessionId?: string) => api<RunInfo[]>(`/api/v2/runs${sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''}`),
   summaries: () => api<RunSummary[]>('/api/v2/runs?summary=1'),
   get: (id: string) => api<RunInfo>(`/api/v2/runs/${id}`),
-  create: (session: string, message: string, model?: string, provider?: string, frameworkChangeId?: string, materials?: MaterialRef[], reworkOfRunId?: string) => api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message, model: model || undefined, provider: provider || undefined, frameworkChangeId, materials, reworkOfRunId }) }),
-  supplement: (id: string, message: string) => api(`/api/v2/runs/${id}/messages`, { method: 'POST', headers: { 'Idempotency-Key': crypto.randomUUID() }, body: JSON.stringify({ message }) }),
+  create: (
+    session: string,
+    message: string,
+    model?: string,
+    provider?: string,
+    frameworkChangeId?: string,
+    materials?: MaterialRef[],
+    reworkOfRunId?: string,
+  ) =>
+    api<{ runId: string; run: RunInfo }>(`/api/v2/sessions/${session}/runs`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({
+        message,
+        model: model || undefined,
+        provider: provider || undefined,
+        frameworkChangeId,
+        materials,
+        reworkOfRunId,
+      }),
+    }),
+  supplement: (id: string, message: string) =>
+    api(`/api/v2/runs/${id}/messages`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ message }),
+    }),
   cancel: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST' }),
   pause: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/cancel`, { method: 'POST', body: JSON.stringify({ resumable: true }) }),
   resume: (id: string) => api<RunInfo>(`/api/v2/runs/${id}/resume`, { method: 'POST' }),
@@ -59,29 +205,69 @@ export const runsApi = {
   children: (id: string) => api<RunInfo[]>(`/api/v2/runs/${id}/children`),
   artifacts: (id: string) => api<RunArtifact[]>(`/api/v2/runs/${id}/artifacts`),
   tools: (id: string) => api<RunTool[]>(`/api/v2/runs/${id}/tools`),
-  inputs: (id: string, before?: string) => api<ModelInput[]>(`/api/v2/runs/${id}/inputs${before ? `?before=${encodeURIComponent(before)}` : ''}`),
-  result: (id: string, callId: string, offset = 0) => api<{ content: string; nextOffset?: number }>(`/api/v2/runs/${id}/results/${callId}?offset=${offset}&limit=8000`),
+  inputs: (id: string, before?: string) =>
+    api<ModelInput[]>(`/api/v2/runs/${id}/inputs${before ? `?before=${encodeURIComponent(before)}` : ''}`),
+  result: (id: string, callId: string, offset = 0) =>
+    api<{ content: string; nextOffset?: number }>(`/api/v2/runs/${id}/results/${callId}?offset=${offset}&limit=8000`),
   permission: () => api<WorkspacePermission>('/api/v2/workspace/permissions'),
-  setPermission: (profile: WorkspacePermission['profile'], revision: number) => api<WorkspacePermission>('/api/v2/workspace/permissions', { method: 'PUT', body: JSON.stringify({ profile, revision }) }),
+  setPermission: (profile: WorkspacePermission['profile'], revision: number) =>
+    api<WorkspacePermission>('/api/v2/workspace/permissions', { method: 'PUT', body: JSON.stringify({ profile, revision }) }),
 };
 
 function dispatch(event: string, d: Record<string, unknown>, h: Partial<ChatHandlers>) {
   const checks = (d.checks ?? []) as { ok: boolean; reason?: string }[];
   switch (event) {
-    case 'start': h.onStart?.(String(d.traceId ?? '')); break;
-    case 'status': h.onStatus?.(String(d.text ?? '')); break;
-    case 'delta': h.onDelta?.(String(d.text ?? '')); break;
-    case 'reasoning': h.onReasoning?.(String(d.text ?? '')); break;
-    case 'tool_start': h.onToolStart?.(d.id as string | undefined, String(d.name), d.args); break;
-    case 'tool_result': h.onToolResult?.(d.id as string | undefined, String(d.name), String(d.summary ?? ''), Boolean(d.ok), Boolean(d.stored), d.evidence as never, d.warnings as never); break;
-    case 'approval_required': if (d.active !== false) h.onApprovalRequired?.(String(d.approvalId), String(d.name), String(d.summary), d.approvalToken as string | undefined); break;
-    case 'done': h.onDone?.(d as Parameters<ChatHandlers['onDone']>[0]); break;
-    case 'retry': h.onRetry?.(d.reason as 'attempt' | 'failover', d.detail as string); break;
-    case 'budget_hit': h.onBudgetHit?.(Number(d.cost), Number(d.budget)); break;
-    case 'task_verified': h.onTaskVerified?.(String(d.objective), checks, d.evidence as never); break;
-    case 'task_partial': h.onTaskPartial?.(String(d.objective), checks, d.evidence as never); break;
-    case 'task_failed': h.onTaskFailed?.(String(d.objective), checks, d.evidence as never); break;
-    case 'error': h.onError?.(String(d.error), d.kind as ErrorKind); break;
+    case 'start':
+      h.onStart?.(String(d.traceId ?? ''));
+      break;
+    case 'status':
+      h.onStatus?.(String(d.text ?? ''));
+      break;
+    case 'delta':
+      h.onDelta?.(String(d.text ?? ''));
+      break;
+    case 'reasoning':
+      h.onReasoning?.(String(d.text ?? ''));
+      break;
+    case 'tool_start':
+      h.onToolStart?.(d.id as string | undefined, String(d.name), d.args);
+      break;
+    case 'tool_result':
+      h.onToolResult?.(
+        d.id as string | undefined,
+        String(d.name),
+        String(d.summary ?? ''),
+        Boolean(d.ok),
+        Boolean(d.stored),
+        d.evidence as never,
+        d.warnings as never,
+      );
+      break;
+    case 'approval_required':
+      if (d.active !== false)
+        h.onApprovalRequired?.(String(d.approvalId), String(d.name), String(d.summary), d.approvalToken as string | undefined);
+      break;
+    case 'done':
+      h.onDone?.(d as Parameters<ChatHandlers['onDone']>[0]);
+      break;
+    case 'retry':
+      h.onRetry?.(d.reason as 'attempt' | 'failover', d.detail as string);
+      break;
+    case 'budget_hit':
+      h.onBudgetHit?.(Number(d.cost), Number(d.budget));
+      break;
+    case 'task_verified':
+      h.onTaskVerified?.(String(d.objective), checks, d.evidence as never);
+      break;
+    case 'task_partial':
+      h.onTaskPartial?.(String(d.objective), checks, d.evidence as never);
+      break;
+    case 'task_failed':
+      h.onTaskFailed?.(String(d.objective), checks, d.evidence as never);
+      break;
+    case 'error':
+      h.onError?.(String(d.error), d.kind as ErrorKind);
+      break;
   }
 }
 
@@ -102,35 +288,69 @@ export async function subscribeRun(id: string, h: Partial<ChatHandlers>, signal?
           const { done, value } = await reader.read();
           if (done) break;
           buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, '\n');
-          let boundary: number;
-          while ((boundary = buffer.indexOf('\n\n')) >= 0) {
-            const block = buffer.slice(0, boundary); buffer = buffer.slice(boundary + 2);
+          let boundary = buffer.indexOf('\n\n');
+          while (boundary >= 0) {
+            const block = buffer.slice(0, boundary);
+            buffer = buffer.slice(boundary + 2);
+            boundary = buffer.indexOf('\n\n');
             const lines = block.split('\n');
-            const seq = Number(lines.find(line => line.startsWith('id:'))?.slice(3));
+            const seq = Number(lines.find((line) => line.startsWith('id:'))?.slice(3));
             if (!Number.isSafeInteger(seq) || seq <= cursor) continue;
-            const event = lines.find(line => line.startsWith('event:'))?.slice(6).trim() ?? '';
-            const json = lines.filter(line => line.startsWith('data:')).map(line => line.slice(5).trim()).join('\n');
+            const event =
+              lines
+                .find((line) => line.startsWith('event:'))
+                ?.slice(6)
+                .trim() ?? '';
+            const json = lines
+              .filter((line) => line.startsWith('data:'))
+              .map((line) => line.slice(5).trim())
+              .join('\n');
             const data = JSON.parse(json) as Record<string, unknown>;
             dispatch(event, data, h);
-            cursor = seq; errors = 0;
+            cursor = seq;
+            errors = 0;
             if (event === 'done') doneSeen = true;
-            if (h.onRun && ['state', 'usage', 'usage_status', 'message_queued', 'message_delivered'].includes(event)) h.onRun(await runsApi.get(id));
+            if (h.onRun && ['state', 'usage', 'usage_status', 'message_queued', 'message_delivered'].includes(event))
+              h.onRun(await runsApi.get(id));
           }
         }
-      } finally { await reader.cancel().catch(() => undefined); reader.releaseLock(); }
-      const run = await runsApi.get(id); h.onRun?.(run);
+      } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+      }
+      const run = await runsApi.get(id);
+      h.onRun?.(run);
       if (!activeRun(run)) {
-        if (!doneSeen && run.status === 'completed') h.onDone?.({ content: run.answer ?? '', usage: { input: run.tokensIn, output: run.tokensOut }, cost: run.cost });
-        else if (run.status !== 'completed') h.onError?.(run.error ?? runLabels[run.status], run.status === 'cancelled' ? 'aborted' : run.problem?.code === 'DEADLINE_EXCEEDED' ? 'deadline' : run.problem?.code === 'REQUEST_TIMEOUT' || run.problem?.code === 'STREAM_INTERRUPTED' ? 'transient' : 'upstream');
-        h.onEnd?.(); return;
+        if (!doneSeen && run.status === 'completed')
+          h.onDone?.({ content: run.answer ?? '', usage: { input: run.tokensIn, output: run.tokensOut }, cost: run.cost });
+        else if (run.status !== 'completed')
+          h.onError?.(
+            run.error ?? runLabels[run.status],
+            run.status === 'cancelled'
+              ? 'aborted'
+              : run.problem?.code === 'DEADLINE_EXCEEDED'
+                ? 'deadline'
+                : run.problem?.code === 'REQUEST_TIMEOUT' || run.problem?.code === 'STREAM_INTERRUPTED'
+                  ? 'transient'
+                  : 'upstream',
+          );
+        h.onEnd?.();
+        return;
       }
     } catch (error) {
       if (signal?.aborted) return;
-      if (++errors >= 8) { h.onError?.(`订阅已断开，任务仍保存在任务列表：${error instanceof Error ? error.message : String(error)}`, 'network'); return; }
+      if (++errors >= 8) {
+        h.onError?.(`订阅已断开，任务仍保存在任务列表：${error instanceof Error ? error.message : String(error)}`, 'network');
+        return;
+      }
     }
     h.onStatus?.('正在重新连接任务…');
-    await new Promise<void>(resolve => {
-      const stop = () => { clearTimeout(timer); signal?.removeEventListener('abort', stop); resolve(); };
+    await new Promise<void>((resolve) => {
+      const stop = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener('abort', stop);
+        resolve();
+      };
       const timer = setTimeout(stop, Math.min(10000, 1000 * 2 ** Math.min(errors, 3)));
       signal?.addEventListener('abort', stop, { once: true });
       if (signal?.aborted) stop();
@@ -138,12 +358,37 @@ export async function subscribeRun(id: string, h: Partial<ChatHandlers>, signal?
   }
 }
 
-export async function streamChat(session: string, body: { message?: string; model?: string; provider?: string; resume?: boolean; frameworkChangeId?: string; materials?: MaterialRef[]; reworkOfRunId?: string }, h: ChatHandlers, signal?: AbortSignal) {
+export async function streamChat(
+  session: string,
+  body: {
+    message?: string;
+    model?: string;
+    provider?: string;
+    resume?: boolean;
+    frameworkChangeId?: string;
+    materials?: MaterialRef[];
+    reworkOfRunId?: string;
+  },
+  h: ChatHandlers,
+  signal?: AbortSignal,
+) {
   try {
     const record = body.resume
-      ? await runsApi.resume((await runsApi.list(session)).find(run => !run.parentId && run.status === 'interrupted')?.id ?? '')
-      : (await runsApi.create(session, body.message ?? '', body.model, body.provider, body.frameworkChangeId, body.materials, body.reworkOfRunId)).run;
+      ? await runsApi.resume((await runsApi.list(session)).find((run) => !run.parentId && run.status === 'interrupted')?.id ?? '')
+      : (
+          await runsApi.create(
+            session,
+            body.message ?? '',
+            body.model,
+            body.provider,
+            body.frameworkChangeId,
+            body.materials,
+            body.reworkOfRunId,
+          )
+        ).run;
     h.onRun?.(record);
     await subscribeRun(record.id, h, signal, record.eventCursor ?? 0);
-  } catch (error) { if (!signal?.aborted) h.onError?.(error instanceof Error ? error.message : String(error)); }
+  } catch (error) {
+    if (!signal?.aborted) h.onError?.(error instanceof Error ? error.message : String(error));
+  }
 }

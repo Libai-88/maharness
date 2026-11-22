@@ -24,12 +24,8 @@
         "list_memory_blocks",
         "delete_memory_block"
       ],
-      "persona": [
-        "memory-rules"
-      ],
-      "context": [
-        "memory-recall"
-      ]
+      "persona": ["memory-rules"],
+      "context": ["memory-recall"]
     }
   },
   "apiVersion": 2

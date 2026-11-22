@@ -190,7 +190,7 @@ export class Config {
 
   /** 插件的独立配置命名空间：config.<pluginId>.* */
   section(pluginId: string): Record<string, unknown> {
-    return (this.get<Record<string, unknown>>(pluginId) ?? {});
+    return this.get<Record<string, unknown>>(pluginId) ?? {};
   }
 
   /** 生效配置的浅引用（defaults ← config.json ← 运行时 set）。

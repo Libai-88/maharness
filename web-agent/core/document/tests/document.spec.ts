@@ -13,7 +13,9 @@ type Tool = { name: string; version?: string; handler: (args: Record<string, unk
 
 function deferred<T = void>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
-  const promise = new Promise<T>(done => { resolve = done; });
+  const promise = new Promise<T>((done) => {
+    resolve = done;
+  });
   return { promise, resolve };
 }
 
@@ -31,10 +33,12 @@ function makeContent(text: string, version = 'v1'): DocumentContent {
 function loadTools(config: Record<string, unknown> = {}, kernelRoot = tmpdir()): Map<string, Tool> {
   const tools = new Map<string, Tool>();
   (documentPlugin as any).onLoad({
-    register(value: any) { if (value.kind === 'tool') tools.set(value.tool.name, value.tool); },
+    register(value: any) {
+      if (value.kind === 'tool') tools.set(value.tool.name, value.tool);
+    },
     logger: { info() {} },
     kernel: { rootDir: kernelRoot },
-    config: { get: (key: string, fallback: unknown) => key in config ? config[key] : fallback },
+    config: { get: (key: string, fallback: unknown) => (key in config ? config[key] : fallback) },
   });
   return tools;
 }
@@ -65,9 +69,18 @@ function makePdf(text: string): Buffer {
 
 async function makeDocxBody(body: string): Promise<Buffer> {
   const zip = new JSZip();
-  zip.file('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>');
-  zip.file('_rels/.rels', '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>');
-  zip.file('word/document.xml', `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`);
+  zip.file(
+    '[Content_Types].xml',
+    '<?xml version="1.0" encoding="UTF-8"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>',
+  );
+  zip.file(
+    '_rels/.rels',
+    '<?xml version="1.0" encoding="UTF-8"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>',
+  );
+  zip.file(
+    'word/document.xml',
+    `<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}</w:body></w:document>`,
+  );
   return zip.generateAsync({ type: 'nodebuffer' });
 }
 
@@ -81,11 +94,15 @@ describe('文档读取', () => {
     try {
       writeFileSync(join(root, 'sample.pdf'), makePdf('Hello PDF'));
       const tools = loadTools();
-      const result = await tools.get('read_document')!.handler({ path: 'sample.pdf' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      const result = await tools
+        .get('read_document')!
+        .handler({ path: 'sample.pdf' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, true, result.error);
       assert.match(result.data.text, /Hello PDF/);
       assert.equal(result.data.truncated, false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('拒绝非 PDF 文件', async () => {
@@ -96,7 +113,9 @@ describe('文档读取', () => {
       const result = await tools.get('read_document')!.handler({ path: 'note.txt' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, false);
       assert.match(String(result.error), /仅支持 PDF \/ DOCX/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('拒绝读取 data/ 下的文档', async () => {
@@ -105,10 +124,14 @@ describe('文档读取', () => {
       mkdirSync(join(root, 'data'), { recursive: true });
       writeFileSync(join(root, 'data', 'secret.pdf'), makePdf('secret'));
       const tools = loadTools();
-      const result = await tools.get('read_document')!.handler({ path: 'data/secret.pdf' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      const result = await tools
+        .get('read_document')!
+        .handler({ path: 'data/secret.pdf' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, false);
       assert.match(String(result.error), /拒绝读取/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('抽取 DOCX 文本', async () => {
@@ -116,11 +139,15 @@ describe('文档读取', () => {
     try {
       writeFileSync(join(root, 'sample.docx'), await makeDocx('Hello DOCX'));
       const tools = loadTools();
-      const result = await tools.get('read_document')!.handler({ path: 'sample.docx' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      const result = await tools
+        .get('read_document')!
+        .handler({ path: 'sample.docx' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, true, result.error);
       assert.equal(result.data.format, 'docx');
       assert.match(result.data.text, /Hello DOCX/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('抽取 DOCX 表格为结构化行', async () => {
@@ -131,12 +158,19 @@ describe('文档读取', () => {
       const table = `<w:tbl>${row(cell('指标') + cell('数值'))}${row(cell('准确率') + cell('98%'))}</w:tbl>`;
       writeFileSync(join(root, 'table.docx'), await makeDocxBody(`<w:p><w:r><w:t>实验数据</w:t></w:r></w:p>${table}`));
       const tools = loadTools();
-      const result = await tools.get('read_document')!.handler({ path: 'table.docx' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      const result = await tools
+        .get('read_document')!
+        .handler({ path: 'table.docx' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, true, result.error);
       assert.equal(result.data.tableCount, 1);
-      assert.deepEqual(result.data.tables[0].rows, [['指标', '数值'], ['准确率', '98%']]);
+      assert.deepEqual(result.data.tables[0].rows, [
+        ['指标', '数值'],
+        ['准确率', '98%'],
+      ]);
       assert.match(result.data.text, /实验数据/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('ocr_image 调用管理员配置的外部 OCR 命令并返回文本', async () => {
@@ -152,7 +186,9 @@ describe('文档读取', () => {
       assert.equal(result.ok, true, result.error);
       assert.match(result.data.text, /OCR: .*scan\.png/);
       assert.equal(result.data.truncated, false);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('ocr_image 未配置时明确报错，不静默返回空文本', async () => {
@@ -163,29 +199,46 @@ describe('文档读取', () => {
       const result = await tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, false);
       assert.match(result.error, /OCR 未配置/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   it('OCR 进程超时与主动取消均返回失败并结束子进程', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-ocr-cancel-'));
     try {
-      const script = join(root, 'wait.mjs'); writeFileSync(script, 'setInterval(() => {}, 1000);'); writeFileSync(join(root, 'scan.png'), 'x');
+      const script = join(root, 'wait.mjs');
+      writeFileSync(script, 'setInterval(() => {}, 1000);');
+      writeFileSync(join(root, 'scan.png'), 'x');
       const tools = loadTools({ 'document.ocr': { command: process.execPath, args: [script, '{file}'], timeoutMs: 1000 } });
       const timedOut = await tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root });
-      assert.equal(timedOut.ok, false); assert.match(timedOut.error, /超时/);
-      const controller = new AbortController(); const pending = tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root, signal: controller.signal });
+      assert.equal(timedOut.ok, false);
+      assert.match(timedOut.error, /超时/);
+      const controller = new AbortController();
+      const pending = tools.get('ocr_image')!.handler({ path: 'scan.png' }, { sandboxRoot: root, signal: controller.signal });
       const timer = setTimeout(() => controller.abort(), 100);
-      const cancelled = await pending; clearTimeout(timer); assert.equal(cancelled.ok, false); assert.match(cancelled.error, /取消/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      const cancelled = await pending;
+      clearTimeout(timer);
+      assert.equal(cancelled.ok, false);
+      assert.match(cancelled.error, /取消/);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
   it('OCR 保留失败时的部分输出，文件名不经 shell 解释', async () => {
     const root = mkdtempSync(join(tmpdir(), 'mh-ocr-output-'));
     try {
-      const script = join(root, 'ocr.mjs'); writeFileSync(script, 'console.log(process.argv[2]); process.exit(1);');
-      const name = 'scan & whoami.png'; writeFileSync(join(root, name), 'x');
+      const script = join(root, 'ocr.mjs');
+      writeFileSync(script, 'console.log(process.argv[2]); process.exit(1);');
+      const name = 'scan & whoami.png';
+      writeFileSync(join(root, name), 'x');
       const tools = loadTools({ 'document.ocr': { command: process.execPath, args: [script, '{file}'] } });
       const result = await tools.get('ocr_image')!.handler({ path: name }, { sandboxRoot: root });
-      assert.equal(result.ok, false); assert.equal(result.data.partial, true); assert.equal(result.data.text, join(root, name));
-    } finally { rmSync(root, { recursive: true, force: true }); }
+      assert.equal(result.ok, false);
+      assert.equal(result.data.partial, true);
+      assert.equal(result.data.text, join(root, name));
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it('ocr_pdf 先渲染页面再逐页 OCR，并清理临时目录', async () => {
@@ -194,14 +247,17 @@ describe('文档读取', () => {
       const ocrScript = join(root, 'mock-ocr.mjs');
       const renderScript = join(root, 'mock-render.mjs');
       writeFileSync(ocrScript, 'console.log(`OCR:${process.argv[2]}`);\n');
-      writeFileSync(renderScript, [
-        "import { mkdirSync, writeFileSync } from 'node:fs';",
-        "import { join } from 'node:path';",
-        'const out = process.argv[3];',
-        'mkdirSync(out, { recursive: true });',
-        "writeFileSync(join(out, 'page-1.png'), 'a');",
-        "writeFileSync(join(out, 'page-2.png'), 'b');",
-      ].join('\n'));
+      writeFileSync(
+        renderScript,
+        [
+          "import { mkdirSync, writeFileSync } from 'node:fs';",
+          "import { join } from 'node:path';",
+          'const out = process.argv[3];',
+          'mkdirSync(out, { recursive: true });',
+          "writeFileSync(join(out, 'page-1.png'), 'a');",
+          "writeFileSync(join(out, 'page-2.png'), 'b');",
+        ].join('\n'),
+      );
       writeFileSync(join(root, 'scan.pdf'), '%PDF-1.4\n');
       const tools = loadTools({
         'document.ocr': {
@@ -212,13 +268,17 @@ describe('文档读取', () => {
           timeoutMs: 5_000,
         },
       });
-      const result = await tools.get('ocr_pdf')!.handler({ path: 'scan.pdf', maxPages: 2 }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
+      const result = await tools
+        .get('ocr_pdf')!
+        .handler({ path: 'scan.pdf', maxPages: 2 }, { sandboxRoot: root, turn: 0, cache: {}, trace: {} });
       assert.equal(result.ok, true, result.error);
       assert.equal(result.data.rendered, 2);
       assert.equal(result.data.pages.length, 2);
       assert.match(result.data.text, /OCR:.*page-1\.png/);
       assert.match(result.data.text, /OCR:.*page-2\.png/);
-    } finally { rmSync(root, { recursive: true, force: true }); }
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
 
@@ -247,7 +307,7 @@ describe('文档内容 L2 缓存', () => {
       const first = handler({ path: 'shared.docx' }, context());
       const second = handler({ path: 'shared.docx' }, context());
       await started.promise;
-      await new Promise<void>(resolve => setImmediate(resolve));
+      await new Promise<void>((resolve) => setImmediate(resolve));
       assert.equal(reads, 1);
 
       gate.resolve();
@@ -331,12 +391,27 @@ describe('文档内容 L2 缓存', () => {
         return makeContent('cancel', 'doc-v1');
       };
       const handler = tools.get('read_document_content')!.handler;
-      const first = handler({ path: 'cancel.docx' }, {
-        sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {}, signal: firstController.signal,
-      });
-      const second = handler({ path: 'cancel.docx' }, {
-        sandboxRoot: root, tenantId: 'tenant-a', turn: 0, cache, trace: {},
-      });
+      const first = handler(
+        { path: 'cancel.docx' },
+        {
+          sandboxRoot: root,
+          tenantId: 'tenant-a',
+          turn: 0,
+          cache,
+          trace: {},
+          signal: firstController.signal,
+        },
+      );
+      const second = handler(
+        { path: 'cancel.docx' },
+        {
+          sandboxRoot: root,
+          tenantId: 'tenant-a',
+          turn: 0,
+          cache,
+          trace: {},
+        },
+      );
       await started.promise;
       await cache.secondEntered.promise;
 
@@ -380,9 +455,9 @@ describe('文档内容 L2 缓存', () => {
       assert.equal(tools.get('read_document_content')!.version, '1.0.0');
       assert.equal((await read({})).ok, true);
       assert.ok(lastParts.includes('tool:1.0.0'));
-      assert.ok(lastParts.some(part => part === 'tenant:tenant-a'));
-      assert.ok(lastParts.some(part => part.startsWith('workspace:')));
-      assert.ok(lastParts.some(part => part.startsWith('file:')));
+      assert.ok(lastParts.some((part) => part === 'tenant:tenant-a'));
+      assert.ok(lastParts.some((part) => part.startsWith('workspace:')));
+      assert.ok(lastParts.some((part) => part.startsWith('file:')));
       assert.equal((await read({})).ok, true);
       assert.equal(reads, 1);
 

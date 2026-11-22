@@ -62,10 +62,13 @@ export interface SocietyTickAllResult {
   failed: Array<{ tenantId: string; error: string }>;
 }
 
-export type SocietyRunRuntime = Pick<RunService, 'startSocietyAssignment' | 'get' | 'subscribe' | 'cancel'>
-  & Partial<Pick<RunService, 'resume'>>;
+export type SocietyRunRuntime = Pick<RunService, 'startSocietyAssignment' | 'get' | 'subscribe' | 'cancel'> &
+  Partial<Pick<RunService, 'resume'>>;
 
-export function teamCostEligible(objective: string, estimate: SocietyEconomicsEstimate, explicitTeamRequest: (text: string) => boolean): boolean {
-  return explicitTeamRequest(objective)
-    || estimate.team.costUsd <= estimate.single.costUsd + 1e-10;
+export function teamCostEligible(
+  objective: string,
+  estimate: SocietyEconomicsEstimate,
+  explicitTeamRequest: (text: string) => boolean,
+): boolean {
+  return explicitTeamRequest(objective) || estimate.team.costUsd <= estimate.single.costUsd + 1e-10;
 }

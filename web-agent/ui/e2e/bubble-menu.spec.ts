@@ -30,13 +30,35 @@ function mockChatStream(page: Page) {
 
 /** 让 textarea 可用（hasModels）：mock 一个 provider + 一个 model */
 async function mockModelApis(page: Page) {
-  await page.route('**/api/providers', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider', label: 'E2E Provider', baseUrl: 'http://e2e.local', model: 'e2e-model',
-    enabled: true, apiKeyMasked: 'sk-***', hasKey: true, createdAt: 0, updatedAt: 0,
-  }] }));
-  await page.route('**/api/models', (route) => route.fulfill({ json: [{
-    id: 'e2e-provider@e2e-model', provider: 'e2e-provider', label: 'E2E Model', model: 'e2e-model',
-  }] }));
+  await page.route('**/api/providers', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider',
+          label: 'E2E Provider',
+          baseUrl: 'http://e2e.local',
+          model: 'e2e-model',
+          enabled: true,
+          apiKeyMasked: 'sk-***',
+          hasKey: true,
+          createdAt: 0,
+          updatedAt: 0,
+        },
+      ],
+    }),
+  );
+  await page.route('**/api/models', (route) =>
+    route.fulfill({
+      json: [
+        {
+          id: 'e2e-provider@e2e-model',
+          provider: 'e2e-provider',
+          label: 'E2E Model',
+          model: 'e2e-model',
+        },
+      ],
+    }),
+  );
 }
 
 /** 统一前置：mock 模型接口 + 首屏就绪 + 保证至少有一轮对话气泡（空库时自动种子一条 mock 对话） */
@@ -68,7 +90,10 @@ test.describe('消息菜单', () => {
     expect(box).not.toBeNull();
     const touch = await page.context().newCDPSession(page);
     await touch.send('Emulation.setTouchEmulationEnabled', { enabled: true, maxTouchPoints: 1 });
-    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }] });
+    await touch.send('Input.dispatchTouchEvent', {
+      type: 'touchStart',
+      touchPoints: [{ x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 }],
+    });
     await expect(page.getByTestId('bubble-menu')).toBeVisible();
     await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     await touch.detach();
@@ -131,15 +156,19 @@ test.describe('消息菜单', () => {
 test.describe('Provider 诊断', () => {
   test('设置页展示配置完整性、模型数量和可操作问题', async ({ page }) => {
     await mockModelApis(page);
-    await page.route('**/api/providers/e2e-provider/diagnose', (route) => route.fulfill({ json: {
-      schemaVersion: 1,
-      providerId: 'e2e-provider',
-      protocol: 'openai',
-      configured: { baseUrl: true, apiKey: false, defaultModel: true },
-      health: null,
-      models: [],
-      issues: ['缺少 API Key', '最近请求失败 2 次'],
-    } }));
+    await page.route('**/api/providers/e2e-provider/diagnose', (route) =>
+      route.fulfill({
+        json: {
+          schemaVersion: 1,
+          providerId: 'e2e-provider',
+          protocol: 'openai',
+          configured: { baseUrl: true, apiKey: false, defaultModel: true },
+          health: null,
+          models: [],
+          issues: ['缺少 API Key', '最近请求失败 2 次'],
+        },
+      }),
+    );
     await page.route('**/api/config', (route) => route.fulfill({ json: { routingTargets: [] } }));
     await page.route('**/api/stats', (route) => route.fulfill({ json: { cache: {}, trace: {} } }));
     await page.route('**/api/personas', (route) => route.fulfill({ json: [] }));
@@ -226,8 +255,7 @@ test.describe('工具审批', () => {
       ].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
     });
-    await page.route('**/api/approvals**', (route) =>
-      route.fulfill({ status: 503, json: { error: '审批服务暂时不可用' } }));
+    await page.route('**/api/approvals**', (route) => route.fulfill({ status: 503, json: { error: '审批服务暂时不可用' } }));
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('删除草稿文件');
     await page.keyboard.press('Enter');
 
@@ -344,11 +372,14 @@ test.describe('子代理与并行任务', () => {
 test.describe('运行轨迹', () => {
   test('span 树父子展开、错误定位与类型筛选平铺', async ({ page }) => {
     let releaseTrace!: () => void;
-    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    const traceGate = new Promise<void>((resolve) => {
+      releaseTrace = resolve;
+    });
     await page.route('**/api/events', async (route) => {
       await traceGate;
       const t = Date.now();
-      const step = (data: Record<string, unknown>) => JSON.stringify({ type: 'trace.step', data: { traceId: 'e2e-span-run', ts: t, ...data } });
+      const step = (data: Record<string, unknown>) =>
+        JSON.stringify({ type: 'trace.step', data: { traceId: 'e2e-span-run', ts: t, ...data } });
       await route.fulfill({
         status: 200,
         headers: { 'Content-Type': 'text/event-stream' },
@@ -366,10 +397,12 @@ test.describe('运行轨迹', () => {
         ].join('\n'),
       });
     });
-    await page.route('**/api/trace/stats', (route) => route.fulfill({
-      status: 200,
-      json: { trace: { steps: 3, llmCalls: 1, toolCalls: 2 }, cache: {}, l1Enabled: false },
-    }));
+    await page.route('**/api/trace/stats', (route) =>
+      route.fulfill({
+        status: 200,
+        json: { trace: { steps: 3, llmCalls: 1, toolCalls: 2 }, cache: {}, l1Enabled: false },
+      }),
+    );
     await setup(page);
     await mockTaskEvents(page, async (route) => {
       const body = [
@@ -413,25 +446,50 @@ test.describe('运行轨迹', () => {
 
   test('大事件量（200 步）渲染完整且可滚动', async ({ page }) => {
     let releaseTrace!: () => void;
-    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    const traceGate = new Promise<void>((resolve) => {
+      releaseTrace = resolve;
+    });
     await page.route('**/api/events', async (route) => {
       await traceGate;
       const t = Date.now();
       const lines: string[] = [];
       for (let i = 0; i < 200; i++) {
-        const step = { id: `e2e-bulk-${i}`, traceId: 'e2e-bulk-run', turn: 1, type: 'llm_call', name: `bulk-step-${i}`, outputSummary: `批量步骤 ${i}`, status: 'done', durationMs: 1, ts: t - (200 - i) };
+        const step = {
+          id: `e2e-bulk-${i}`,
+          traceId: 'e2e-bulk-run',
+          turn: 1,
+          type: 'llm_call',
+          name: `bulk-step-${i}`,
+          outputSummary: `批量步骤 ${i}`,
+          status: 'done',
+          durationMs: 1,
+          ts: t - (200 - i),
+        };
         lines.push('event: event', `data: ${JSON.stringify({ type: 'trace.step', data: step })}`, '');
       }
       lines.push('');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: lines.join('\n') });
     });
-    await page.route('**/api/trace/stats', (route) => route.fulfill({
-      status: 200,
-      json: { trace: { steps: 200, llmCalls: 200, toolCalls: 0 }, cache: {}, l1Enabled: false },
-    }));
+    await page.route('**/api/trace/stats', (route) =>
+      route.fulfill({
+        status: 200,
+        json: { trace: { steps: 200, llmCalls: 200, toolCalls: 0 }, cache: {}, l1Enabled: false },
+      }),
+    );
     await setup(page);
     await mockTaskEvents(page, async (route) => {
-      const body = ['event: start', 'data: {"traceId":"e2e-bulk-run"}', '', 'event: done', 'data: {"content":"批量完成。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-bulk-run"}',
+        '',
+        'event: done',
+        'data: {"content":"批量完成。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+        '',
+      ].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
       setTimeout(releaseTrace, 200);
     });
@@ -444,15 +502,21 @@ test.describe('运行轨迹', () => {
     const scroller = panel.getByTestId('trace-scroll').locator('[data-slot="scroll-area-viewport"]');
     await expect(scroller).toBeVisible();
     // 滚动到底部：首尾步骤都真实渲染（无虚拟化截断即全部可查）
-    await scroller.evaluate((el) => { el.scrollTop = el.scrollHeight; });
+    await scroller.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
     await expect(panel.getByTestId('trace-step').filter({ hasText: '批量步骤 0' })).toBeVisible();
-    await scroller.evaluate((el) => { el.scrollTop = 0; });
+    await scroller.evaluate((el) => {
+      el.scrollTop = 0;
+    });
     await expect(panel.getByTestId('trace-step').filter({ hasText: '批量步骤 199' })).toBeVisible();
   });
 
   test('接收当前 run 的 Trace 步骤，支持筛选和导出', async ({ page }) => {
     let releaseTrace!: () => void;
-    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    const traceGate = new Promise<void>((resolve) => {
+      releaseTrace = resolve;
+    });
     await page.route('**/api/events', async (route) => {
       await traceGate;
       await route.fulfill({
@@ -463,9 +527,15 @@ test.describe('运行轨迹', () => {
           `data: ${JSON.stringify({
             type: 'trace.step',
             data: {
-              id: 'e2e-trace-step', traceId: 'e2e-trace-run', turn: 1,
-              type: 'llm_call', name: 'e2e-answer', outputSummary: '确定性回放完成',
-              status: 'done', durationMs: 42, ts: Date.now(),
+              id: 'e2e-trace-step',
+              traceId: 'e2e-trace-run',
+              turn: 1,
+              type: 'llm_call',
+              name: 'e2e-answer',
+              outputSummary: '确定性回放完成',
+              status: 'done',
+              durationMs: 42,
+              ts: Date.now(),
             },
           })}`,
           '',
@@ -473,9 +543,15 @@ test.describe('运行轨迹', () => {
           `data: ${JSON.stringify({
             type: 'trace.step',
             data: {
-              id: 'e2e-trace-tool', traceId: 'e2e-trace-run', turn: 1,
-              type: 'tool_call', name: 'delete_file', outputSummary: '已删除临时文件',
-              status: 'done', durationMs: 18, ts: Date.now(),
+              id: 'e2e-trace-tool',
+              traceId: 'e2e-trace-run',
+              turn: 1,
+              type: 'tool_call',
+              name: 'delete_file',
+              outputSummary: '已删除临时文件',
+              status: 'done',
+              durationMs: 18,
+              ts: Date.now(),
             },
           })}`,
           '',
@@ -483,10 +559,12 @@ test.describe('运行轨迹', () => {
         ].join('\n'),
       });
     });
-    await page.route('**/api/trace/stats', (route) => route.fulfill({
-      status: 200,
-      json: { trace: { steps: 2, llmCalls: 1, toolCalls: 1 }, cache: {}, l1Enabled: false },
-    }));
+    await page.route('**/api/trace/stats', (route) =>
+      route.fulfill({
+        status: 200,
+        json: { trace: { steps: 2, llmCalls: 1, toolCalls: 1 }, cache: {}, l1Enabled: false },
+      }),
+    );
     await setup(page);
     await mockTaskEvents(page, async (route) => {
       const body = [
@@ -535,26 +613,49 @@ test.describe('运行轨迹', () => {
 
   test('长上下文压缩步骤展示来源范围与省略原因', async ({ page }) => {
     let releaseTrace!: () => void;
-    const traceGate = new Promise<void>((resolve) => { releaseTrace = resolve; });
+    const traceGate = new Promise<void>((resolve) => {
+      releaseTrace = resolve;
+    });
     await page.route('**/api/events', async (route) => {
       await traceGate;
       const step = {
-        id: 'e2e-context-step', traceId: 'e2e-context-run', turn: 1,
-        type: 'system', name: '上下文压缩',
+        id: 'e2e-context-step',
+        traceId: 'e2e-context-run',
+        turn: 1,
+        type: 'system',
+        name: '上下文压缩',
         inputSummary: 'history[3..18] · 16 条早期消息',
         outputSummary: '来源 history[3..18]；LLM 摘要压缩 16 条早期消息（2400 → 180 tokens，省 2220）',
-        status: 'done', durationMs: 120, ts: Date.now(),
+        status: 'done',
+        durationMs: 120,
+        ts: Date.now(),
       };
-      await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body: [
-        'event: event', `data: ${JSON.stringify({ type: 'trace.step', data: step })}`, '', '',
-      ].join('\n') });
+      await route.fulfill({
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+        body: ['event: event', `data: ${JSON.stringify({ type: 'trace.step', data: step })}`, '', ''].join('\n'),
+      });
     });
-    await page.route('**/api/trace/stats', (route) => route.fulfill({
-      status: 200, json: { trace: { steps: 1, llmCalls: 1, toolCalls: 0 }, cache: {}, l1Enabled: false },
-    }));
+    await page.route('**/api/trace/stats', (route) =>
+      route.fulfill({
+        status: 200,
+        json: { trace: { steps: 1, llmCalls: 1, toolCalls: 0 }, cache: {}, l1Enabled: false },
+      }),
+    );
     await setup(page);
     await mockTaskEvents(page, async (route) => {
-      const body = ['event: start', 'data: {"traceId":"e2e-context-run"}', '', 'event: done', 'data: {"content":"已压缩上下文。","usage":{"input":8,"output":4},"cost":0}', '', 'event: end', 'data: {}', '', ''].join('\n');
+      const body = [
+        'event: start',
+        'data: {"traceId":"e2e-context-run"}',
+        '',
+        'event: done',
+        'data: {"content":"已压缩上下文。","usage":{"input":8,"output":4},"cost":0}',
+        '',
+        'event: end',
+        'data: {}',
+        '',
+        '',
+      ].join('\n');
       await route.fulfill({ status: 200, headers: { 'Content-Type': 'text/event-stream' }, body });
     });
     await page.getByPlaceholder(INPUT_PLACEHOLDER).fill('继续处理长任务');
@@ -568,7 +669,9 @@ test.describe('运行轨迹', () => {
 });
 
 test('旧断点不会自动恢复或显示可执行恢复入口', async ({ page }) => {
-  await page.route('**/api/sessions/*/checkpoint', route => route.fulfill({ json: { exists: true, legacy: true, resumable: false, turn: 2 } }));
+  await page.route('**/api/sessions/*/checkpoint', (route) =>
+    route.fulfill({ json: { exists: true, legacy: true, resumable: false, turn: 2 } }),
+  );
   await setup(page);
   await expect(page.getByTestId('resume-banner')).toHaveCount(0);
   await expect(page.getByRole('button', { name: '继续任务', exact: true })).toHaveCount(0);

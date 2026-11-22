@@ -175,7 +175,9 @@ export class McpOAuthClient {
         ...(data.refresh_token ? { refreshToken: data.refresh_token } : {}),
         expiresAt: this.now() + Math.max(60, Number(data.expires_in) || 3600) * 1000,
       });
-    })().finally(() => { this.refreshing = undefined; });
+    })().finally(() => {
+      this.refreshing = undefined;
+    });
     return this.refreshing;
   }
 
@@ -206,7 +208,7 @@ export class McpOAuthClient {
       signal: AbortSignal.timeout(15_000),
     });
     if (!res.ok) throw new Error(`MCP OAuth token 端点 HTTP ${res.status}`);
-    const data = await res.json() as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
+    const data = (await res.json()) as { access_token?: unknown; refresh_token?: unknown; expires_in?: unknown };
     if (typeof data.access_token !== 'string' || !data.access_token) throw new Error('MCP OAuth token 响应缺少 access_token');
     return {
       access_token: data.access_token,

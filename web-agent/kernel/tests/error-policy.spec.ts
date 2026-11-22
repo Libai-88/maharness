@@ -42,16 +42,25 @@ describe('统一错误分类与重试策略', () => {
 
   test('固定错误集宏 F1 达到 0.85 且每类均有覆盖', () => {
     const cases = [
-      { message: 'gateway timeout', expected: 'transient' as const }, { message: 'ECONNRESET', expected: 'transient' as const },
-      { message: 'unauthorized', status: 401, expected: 'auth' as const }, { message: 'forbidden', status: 403, expected: 'auth' as const },
-      { message: 'permission denied by workspace policy', expected: 'auth' as const }, { message: 'invalid api key', expected: 'auth' as const },
-      { message: 'invalid schema', expected: 'parameter' as const }, { message: '参数错误', expected: 'parameter' as const },
-      { message: 'tool not found: read_file', expected: 'parameter' as const }, { message: 'HTTP invalid request body', expected: 'parameter' as const },
-      { message: 'quota exceeded', expected: 'business' as const }, { message: '内容审核拒绝', expected: 'business' as const },
-      { message: 'business rule rejected the transfer', expected: 'business' as const }, { message: '用户拒绝该操作', expected: 'business' as const },
-      { message: '用户停止', expected: 'aborted' as const }, { message: 'This operation was aborted', expected: 'aborted' as const },
+      { message: 'gateway timeout', expected: 'transient' as const },
+      { message: 'ECONNRESET', expected: 'transient' as const },
+      { message: 'unauthorized', status: 401, expected: 'auth' as const },
+      { message: 'forbidden', status: 403, expected: 'auth' as const },
+      { message: 'permission denied by workspace policy', expected: 'auth' as const },
+      { message: 'invalid api key', expected: 'auth' as const },
+      { message: 'invalid schema', expected: 'parameter' as const },
+      { message: '参数错误', expected: 'parameter' as const },
+      { message: 'tool not found: read_file', expected: 'parameter' as const },
+      { message: 'HTTP invalid request body', expected: 'parameter' as const },
+      { message: 'quota exceeded', expected: 'business' as const },
+      { message: '内容审核拒绝', expected: 'business' as const },
+      { message: 'business rule rejected the transfer', expected: 'business' as const },
+      { message: '用户拒绝该操作', expected: 'business' as const },
+      { message: '用户停止', expected: 'aborted' as const },
+      { message: 'This operation was aborted', expected: 'aborted' as const },
       { message: 'AbortError', expected: 'aborted' as const },
-      { message: '模型返回了奇怪结果', expected: 'unknown' as const }, { message: 'unexpected provider state', expected: 'unknown' as const },
+      { message: '模型返回了奇怪结果', expected: 'unknown' as const },
+      { message: 'unexpected provider state', expected: 'unknown' as const },
       { message: 'opaque failure 78', expected: 'unknown' as const },
     ];
     const score = scoreErrorCorpus(cases);
@@ -63,6 +72,9 @@ describe('统一错误分类与重试策略', () => {
     assert.equal(score.total, 20);
     assert.ok(score.macroF1 >= 0.85, `macro F1=${score.macroF1}`);
     assert.equal(score.correct, 20);
-    assert.ok(Object.values(score.perCategory).every((metric) => metric.recall > 0), '每个类别必须有标注样本');
+    assert.ok(
+      Object.values(score.perCategory).every((metric) => metric.recall > 0),
+      '每个类别必须有标注样本',
+    );
   });
 });

@@ -23,7 +23,12 @@ export function registerPersonaRoutes(app: Express, deps: RouteDeps): void {
       return res.status(400).json({ error: '名称与内容均为必填' });
     }
     const id = `persona-${Math.random().toString(36).slice(2, 8)}`;
-    store.upsertPersona({ id, name: name.trim(), content: content.trim(), sortOrder: sortOrder === undefined ? store.listPersonas().length : Number(sortOrder) });
+    store.upsertPersona({
+      id,
+      name: name.trim(),
+      content: content.trim(),
+      sortOrder: sortOrder === undefined ? store.listPersonas().length : Number(sortOrder),
+    });
     refreshChatPersonas(kernel, store);
     res.json(store.getPersona(id));
   });
@@ -36,7 +41,7 @@ export function registerPersonaRoutes(app: Express, deps: RouteDeps): void {
       id: existing.id,
       name: name?.trim() || existing.name,
       content: content?.trim() || existing.content,
-      enabled: enabled === undefined ? existing.enabled : (enabled ? 1 : 0),
+      enabled: enabled === undefined ? existing.enabled : enabled ? 1 : 0,
       sortOrder: sortOrder === undefined ? existing.sortOrder : Number(sortOrder),
     });
     refreshChatPersonas(kernel, store);

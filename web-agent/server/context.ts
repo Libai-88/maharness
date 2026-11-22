@@ -27,7 +27,7 @@ export function truncateHistory(history: LLMMessage[], maxTokens: number): Conte
   const rest = history.slice(1);
   const systemTokens = estimateTokens(system.content ?? '');
   // system 再大也至少留 256 token 给对话
-  let budget = Math.max(maxTokens - systemTokens, 256);
+  const budget = Math.max(maxTokens - systemTokens, 256);
 
   const kept: LLMMessage[] = [];
   let acc = 0;

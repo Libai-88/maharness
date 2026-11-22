@@ -9,7 +9,9 @@ import { defineConfig } from '@playwright/test';
 // 会让 Node 在每个 webserver/worker 启动时发出冲突警告。
 delete process.env.NO_COLOR;
 
-const agentDataDir = path.join(os.tmpdir(), `maharness-e2e-${process.pid}`);
+// 运行时目录名带时间戳：只靠 pid 会命中前几天遗留的同名目录（里面可能是 v8 旧库，
+// 启动即被迁移门禁拒绝：实测 2026-11-21 的 E2E 就因此在 webServer 阶段失败）。
+const agentDataDir = path.join(os.tmpdir(), `maharness-e2e-${process.pid}-${Date.now()}`);
 process.env.AGENT_DATA_DIR = agentDataDir;
 const e2ePort = process.env.E2E_PORT ?? '3137';
 

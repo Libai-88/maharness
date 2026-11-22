@@ -3,7 +3,21 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { globToRegex, matchesGlob, walkFiles, grepFiles, sliceLines, applyEdits, countOccurrences, detectEol, convertEol, toRel, directoryFingerprint, fileFingerprint, treeFingerprint } from '../fssearch';
+import {
+  globToRegex,
+  matchesGlob,
+  walkFiles,
+  grepFiles,
+  sliceLines,
+  applyEdits,
+  countOccurrences,
+  detectEol,
+  convertEol,
+  toRel,
+  directoryFingerprint,
+  fileFingerprint,
+  treeFingerprint,
+} from '../fssearch';
 
 let root = '';
 
@@ -17,12 +31,18 @@ before(() => {
   writeFileSync(join(root, 'node_modules', 'pkg', 'shadow.ts'), 'target in node_modules\n');
 });
 
-after(() => { try { rmSync(root, { recursive: true, force: true }); } catch { /* 忽略 */ } });
+after(() => {
+  try {
+    rmSync(root, { recursive: true, force: true });
+  } catch {
+    /* 忽略 */
+  }
+});
 
 describe('glob 匹配', () => {
   it('**/*.ts 递归命中且不进 node_modules', () => {
-    const { hits } = walkFiles(root, { accept: rel => matchesGlob(rel, '**/*.ts') });
-    assert.deepEqual(hits.map(h => h.rel).sort(), ['src/a.ts', 'src/nested/c.ts']);
+    const { hits } = walkFiles(root, { accept: (rel) => matchesGlob(rel, '**/*.ts') });
+    assert.deepEqual(hits.map((h) => h.rel).sort(), ['src/a.ts', 'src/nested/c.ts']);
   });
 
   it('无斜杠模式按文件名匹配', () => {
@@ -33,7 +53,7 @@ describe('glob 匹配', () => {
   it('{a,b} 交替与显式 ignore', () => {
     assert.ok(matchesGlob('src/a.ts', 'src/*.{ts,md}'));
     const all = walkFiles(root, { ignore: [] });
-    assert.ok(all.hits.some(h => h.rel.startsWith('node_modules')));
+    assert.ok(all.hits.some((h) => h.rel.startsWith('node_modules')));
   });
 
   it('globToRegex 转义点号', () => {
@@ -76,13 +96,13 @@ describe('文件缓存指纹', () => {
     mkdirSync(join(dir, 'src'), { recursive: true });
     const file = join(dir, 'src', 'a.ts');
     writeFileSync(file, 'line1\nline2 target\n');
-    const snapshot = treeFingerprint(dir, { accept: rel => rel === 'src/a.ts', includeContent: true });
+    const snapshot = treeFingerprint(dir, { accept: (rel) => rel === 'src/a.ts', includeContent: true });
     assert.equal(snapshot.complete, true);
     assert.equal(snapshot.contentComplete, true);
     assert.equal(snapshot.hits.length, 1);
     const before = snapshot.fingerprint;
     writeFileSync(file, 'line1\nline2 changed\n');
-    const after = treeFingerprint(dir, { accept: rel => rel === 'src/a.ts', includeContent: true });
+    const after = treeFingerprint(dir, { accept: (rel) => rel === 'src/a.ts', includeContent: true });
     assert.notEqual(after.fingerprint, before);
     const overBudget = treeFingerprint(dir, { includeContent: true, maxTotalContentBytes: 1 });
     assert.equal(overBudget.contentComplete, false);

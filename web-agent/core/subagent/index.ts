@@ -14,9 +14,20 @@ import type { Plugin, ProviderDef, ToolContext, ToolDef } from '../../kernel/plu
  *  M4 防递归：不含 run_subagent/run_parallel——子代理不得再开子代理
  *  （递归委派会造成不可控的成本与配额放大）。 */
 const READ_ONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
-  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
-  'plugin_status', 'mcp_status', 'todo_list',
+  'list_dir',
+  'read_file',
+  'glob',
+  'grep',
+  'web_search',
+  'web_fetch',
+  'list_skills',
+  'get_skill',
+  'get_skill_file',
+  'recall_facts',
+  'list_memory_blocks',
+  'plugin_status',
+  'mcp_status',
+  'todo_list',
 ]);
 /** 委派类工具永远不交给子代理，避免 tools:"all" 打开递归委派的成本放大器。 */
 const DELEGATION_TOOLS = new Set(['run_subagent', 'run_parallel', 'run_review']);
@@ -50,17 +61,23 @@ export function parseReview(text: string): {
     const end = text.lastIndexOf('}');
     if (start >= 0 && end > start) {
       const obj = JSON.parse(text.slice(start, end + 1)) as {
-        verdict?: unknown; summary?: unknown; issues?: unknown; confidence?: unknown;
+        verdict?: unknown;
+        summary?: unknown;
+        issues?: unknown;
+        confidence?: unknown;
       };
       const verdict = obj.verdict === 'pass' || obj.verdict === 'fail' ? obj.verdict : 'concern';
       const issues = Array.isArray(obj.issues)
-        ? obj.issues.filter((i): i is { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string } =>
-          !!i && typeof i === 'object' && typeof (i as { point?: unknown }).point === 'string')
+        ? obj.issues.filter(
+            (i): i is { severity: 'critical' | 'major' | 'minor'; point: string; evidence?: string } =>
+              !!i && typeof i === 'object' && typeof (i as { point?: unknown }).point === 'string',
+          )
         : [];
-      const parsed = (obj.verdict === 'pass' || obj.verdict === 'concern' || obj.verdict === 'fail')
-        && typeof obj.summary === 'string'
-        && Array.isArray(obj.issues)
-        && typeof obj.confidence === 'number';
+      const parsed =
+        (obj.verdict === 'pass' || obj.verdict === 'concern' || obj.verdict === 'fail') &&
+        typeof obj.summary === 'string' &&
+        Array.isArray(obj.issues) &&
+        typeof obj.confidence === 'number';
       return {
         verdict,
         summary: typeof obj.summary === 'string' ? obj.summary : '',
@@ -69,7 +86,9 @@ export function parseReview(text: string): {
         parsed,
       };
     }
-  } catch { /* 落入降级 */ }
+  } catch {
+    /* 落入降级 */
+  }
   return {
     verdict: 'concern',
     summary: '审查输出无法解析为结构化 JSON，请人工查看原文',
@@ -86,10 +105,16 @@ export default {
   onLoad(ctx) {
     // 反应性共效应（coeffect）：声明依赖 chat 服务——提供者激活/停用/换主时自动更新引用。
     // 依赖不可用 → 优雅降级（返回明确错误而非悬空引用）；提供者恢复 → 自动可用，无需重启。
-    let chatSvc: {
-      providers: ProviderDef[];
-      routeForTask?: (taskText: string, routing: Record<string, string>, providers: ProviderDef[]) => { provider: ProviderDef; model: string } | undefined;
-    } | undefined;
+    let chatSvc:
+      | {
+          providers: ProviderDef[];
+          routeForTask?: (
+            taskText: string,
+            routing: Record<string, string>,
+            providers: ProviderDef[],
+          ) => { provider: ProviderDef; model: string } | undefined;
+        }
+      | undefined;
     const chatDep = ctx.inject('service:chat', (v) => {
       chatSvc = v as { providers: ProviderDef[] } | undefined;
     });
@@ -97,15 +122,14 @@ export default {
     ctx.inject('service:rules', (v) => {
       rulesText = (v as { promptBlock?: () => string } | undefined)?.promptBlock?.() ?? '';
     });
-    const withUserRules = (base: string): string =>
-      rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base;
+    const withUserRules = (base: string): string => (rulesText ? `${base}\n\n【用户规则（与主会话一致，必须遵守）】\n${rulesText}` : base);
     chatSvc = chatDep.value as typeof chatSvc;
 
     ctx.register({
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network","delegate"],
+        permissions: ['network', 'delegate'],
         name: 'run_subagent',
         delegates: true,
         risk: 'low',
@@ -128,7 +152,8 @@ export default {
           },
         },
         timeoutMs: 240_000, // 子代理内部多轮，独立超时 4 分钟
-        description: '委派一个子代理独立完成目标（复用完整 Agent 循环，独立上下文）。' +
+        description:
+          '委派一个子代理独立完成目标（复用完整 Agent 循环，独立上下文）。' +
           '用于：任务可拆分为多个独立部分时并行分工；或需要独立视角交叉审查自己的产出。' +
           '默认只读工具（侦查/搜索/记忆）；tools="all" 可放开全部工具（含写操作，慎用）。',
         parameters: {
@@ -142,21 +167,33 @@ export default {
           },
           required: ['objective'],
         },
-        async handler(args: { objective?: string; tools?: string; maxTurns?: number; plugins?: string[]; contractId?: string }, tctx: ToolContext) {
+        async handler(
+          args: { objective?: string; tools?: string; maxTurns?: number; plugins?: string[]; contractId?: string },
+          tctx: ToolContext,
+        ) {
           const objective = String(args.objective ?? '').trim();
           if (!objective) return { ok: false, error: '缺少 objective' };
           if (objective.length > 800) return { ok: false, error: 'objective 过长（≤800 字符）' };
           const maxTurns = Math.max(1, Math.min(24, Math.floor(Number(args.maxTurns) || 12)));
           if (tctx.delegate) {
-            const result = await tctx.delegate({
-              objective,
-              tools: args.tools === 'all' ? 'all' : 'read',
-              maxTurns,
-              instructions: SUB_SYSTEM_PROMPT,
-              plugins: args.plugins,
-              ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
-            }, tctx.signal);
-            return { ok: !result.error, ...(result.error ? { error: result.error, failure: { code: 'DELEGATION_INCOMPLETE', retryable: false, outcome: 'applied' as const } } : {}), data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
+            const result = await tctx.delegate(
+              {
+                objective,
+                tools: args.tools === 'all' ? 'all' : 'read',
+                maxTurns,
+                instructions: SUB_SYSTEM_PROMPT,
+                plugins: args.plugins,
+                ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
+              },
+              tctx.signal,
+            );
+            return {
+              ok: !result.error,
+              ...(result.error
+                ? { error: result.error, failure: { code: 'DELEGATION_INCOMPLETE', retryable: false, outcome: 'applied' as const } }
+                : {}),
+              data: { ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } },
+            };
           }
 
           // 复用主代理的 provider 配置（chat 服务第一个启用的 provider；反应性注入保持新鲜）
@@ -169,12 +206,11 @@ export default {
           if (!provider) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派子代理' };
           const model = route?.model ?? provider.defaultModel;
 
-          const allTools = ctx.kernel.plugins.capabilities('tool')
+          const allTools = ctx.kernel.plugins
+            .capabilities('tool')
             .map((c) => c.tool)
             .filter((tool) => !DELEGATION_TOOLS.has(tool.name));
-          const tools: ToolDef[] = args.tools === 'all'
-            ? allTools
-            : allTools.filter((t) => READ_ONLY_TOOLS.has(t.name));
+          const tools: ToolDef[] = args.tools === 'all' ? allTools : allTools.filter((t) => READ_ONLY_TOOLS.has(t.name));
 
           // 循环经服务解析取得（service:runner）——子代理与顶层用同一份循环实现，
           // 插件替换循环后子代理同步改变（避免「顶层换了、子代理跑旧循环」的割裂）
@@ -225,8 +261,10 @@ export default {
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
-              else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
-              else if (ev.type === 'approval_required') {
+              else if (ev.type === 'assistant_done') {
+                usage = ev.usage;
+                cost = ev.cost;
+              } else if (ev.type === 'approval_required') {
                 // 子代理审批可达性：审批注册在共享 ApprovalBoard（/api/approvals/:id
                 // 经主 runner 可达）；事件经全局事件总线广播给 UI——父执行器阻塞在
                 // 本 handler 内，事件无法经其 yield 流透传，必须走带外通道。
@@ -236,8 +274,10 @@ export default {
                   ts: Date.now(),
                   data: { approvalId: ev.approvalId, name: ev.name, summary: ev.summary, sessionId: tctx.sessionId },
                 });
+              } else if (ev.type === 'error') {
+                error = ev.error;
+                cancelled = ev.kind === 'aborted';
               }
-              else if (ev.type === 'error') { error = ev.error; cancelled = ev.kind === 'aborted'; }
             }
           } catch (err) {
             error = err instanceof Error ? err.message : String(err);
@@ -245,17 +285,18 @@ export default {
           } finally {
             releaseSlot();
           }
-          if (error) return {
-            ok: false,
-            error: `子代理失败: ${error}`,
-            cancelled,
-            toolCalls,
-            tokensIn: usage.input,
-            tokensOut: usage.output,
-            cost,
-            traceId,
-            subagentCost: { cost, tokensIn: usage.input, tokensOut: usage.output },
-          };
+          if (error)
+            return {
+              ok: false,
+              error: `子代理失败: ${error}`,
+              cancelled,
+              toolCalls,
+              tokensIn: usage.input,
+              tokensOut: usage.output,
+              cost,
+              traceId,
+              subagentCost: { cost, tokensIn: usage.input, tokensOut: usage.output },
+            };
           return {
             ok: true,
             data: {
@@ -280,7 +321,7 @@ export default {
       kind: 'tool',
       tool: {
         version: '2.0.0',
-        permissions: ["network","delegate"],
+        permissions: ['network', 'delegate'],
         name: 'run_review',
         delegates: true,
         risk: 'low',
@@ -294,12 +335,24 @@ export default {
           properties: {
             verdict: { type: 'string', enum: ['pass', 'concern', 'fail'] },
             summary: { type: 'string' },
-            issues: { type: 'array', items: { type: 'object', required: ['severity', 'point'], properties: { severity: { type: 'string', enum: ['critical', 'major', 'minor'] }, point: { type: 'string' }, evidence: { type: 'string' } } } },
+            issues: {
+              type: 'array',
+              items: {
+                type: 'object',
+                required: ['severity', 'point'],
+                properties: {
+                  severity: { type: 'string', enum: ['critical', 'major', 'minor'] },
+                  point: { type: 'string' },
+                  evidence: { type: 'string' },
+                },
+              },
+            },
             confidence: { type: 'number', minimum: 0, maximum: 1 },
           },
         },
         timeoutMs: 240_000,
-        description: '用全新上下文的独立审查者审查产出（生成/评估分离，对抗偏见）：' +
+        description:
+          '用全新上下文的独立审查者审查产出（生成/评估分离，对抗偏见）：' +
           '审查者只标记正确性与需求符合度缺陷（不追逐风格），结论以只读取证为准，输出 {verdict, issues, confidence}。' +
           '用于：重要交付物在提交/告知用户前自查；对关键结论做独立复核；发现矛盾时裁决。',
         parameters: {
@@ -316,17 +369,25 @@ export default {
           if (!target) return { ok: false, error: '缺少 target' };
           if (target.length > 2000) return { ok: false, error: 'target 过长（≤2000 字符）；文件内容请用路径引用，审查者会自己读取' };
           if (tctx.delegate) {
-            const result = await tctx.delegate({
-              objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`,
-              tools: 'read',
-              maxTurns: 8,
-              instructions: REVIEWER_SYSTEM_PROMPT,
-              ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
-            }, tctx.signal);
+            const result = await tctx.delegate(
+              {
+                objective: `审查标准：${args.criteria || '正确性与需求符合度'}。待审查产出：${target}`,
+                tools: 'read',
+                maxTurns: 8,
+                instructions: REVIEWER_SYSTEM_PROMPT,
+                ...(args.contractId ? { assignmentContractId: args.contractId } : {}),
+              },
+              tctx.signal,
+            );
             const { parsed, ...review } = parseReview(result.answer);
-            return { ok: !result.error && parsed, error: result.error ?? (parsed ? undefined : '审查输出不符合 JSON 契约'), data: { ...review, ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } } };
+            return {
+              ok: !result.error && parsed,
+              error: result.error ?? (parsed ? undefined : '审查输出不符合 JSON 契约'),
+              data: { ...review, ...result, subagentCost: { cost: result.cost, tokensIn: result.tokensIn, tokensOut: result.tokensOut } },
+            };
           }
-          if (!chatSvc?.providers?.[0]) return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
+          if (!chatSvc?.providers?.[0])
+            return { ok: false, error: 'chat 服务不可用（未配置 LLM Provider 或对话引擎未加载），无法委派审查' };
 
           const allTools = ctx.kernel.plugins.capabilities('tool').map((c) => c.tool);
           const tools: ToolDef[] = allTools.filter((t) => READ_ONLY_TOOLS.has(t.name)); // 审查者只读世界
@@ -381,8 +442,10 @@ export default {
             })) {
               if (ev.type === 'delta') answer += ev.text;
               else if (ev.type === 'tool_result') toolCalls++;
-              else if (ev.type === 'assistant_done') { usage = ev.usage; cost = ev.cost; }
-              else if (ev.type === 'error') error = ev.error;
+              else if (ev.type === 'assistant_done') {
+                usage = ev.usage;
+                cost = ev.cost;
+              } else if (ev.type === 'error') error = ev.error;
             }
           } catch (err) {
             error = err instanceof Error ? err.message : String(err);
@@ -421,9 +484,14 @@ export default {
                 ...(provider.capabilities?.structuredOutput ? { responseFormat: { type: 'json_object' as const } } : {}),
               })) {
                 if (ev.type === 'delta') repaired += ev.text;
-                else if (ev.type === 'assistant_done') { repairUsage = ev.usage; repairCost = ev.cost; }
+                else if (ev.type === 'assistant_done') {
+                  repairUsage = ev.usage;
+                  repairCost = ev.cost;
+                }
               }
-            } catch { /* 修复失败保留原降级结果 */ }
+            } catch {
+              /* 修复失败保留原降级结果 */
+            }
             usage = { input: usage.input + repairUsage.input, output: usage.output + repairUsage.output };
             cost += repairCost;
             const repairedReview = parseReview(repaired);
@@ -453,7 +521,8 @@ export default {
       role: {
         id: 'reviewer',
         name: '独立审查者',
-        description: '独立审查者：以全新上下文审查产出，只标记正确性与需求符合度缺陷，结论以只读取证为准。移交给 reviewer 后会话由审查者接管（只读工具）。',
+        description:
+          '独立审查者：以全新上下文审查产出，只标记正确性与需求符合度缺陷，结论以只读取证为准。移交给 reviewer 后会话由审查者接管（只读工具）。',
         systemPrompt: withUserRules(REVIEWER_SYSTEM_PROMPT),
         tools: 'readonly',
       },

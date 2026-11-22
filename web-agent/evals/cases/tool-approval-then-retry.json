@@ -1,9 +1,7 @@
 {
   "name": "tool-approval-then-retry",
   "description": "高风险工具先被审批挂起 → 批准后执行 → 下一轮给出最终回答（审批路径 + 工具序列断言）",
-  "messages": [
-    { "role": "user", "content": "请把结果写入 out/result.txt 文件" }
-  ],
+  "messages": [{ "role": "user", "content": "请把结果写入 out/result.txt 文件" }],
   "requests": [
     {
       "chunks": [

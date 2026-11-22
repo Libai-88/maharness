@@ -485,14 +485,16 @@ export interface SocietyRoleLifeView {
 export interface SocietySnapshot {
   schemaVersion: 1;
   institution: InstitutionVersionView;
-  departments: Array<SocietyDepartmentPolicy & {
-    queued: number;
-    active: number;
-    reservedUsd: number;
-    spentUsd: number;
-    quotaRemainingUsd: number;
-    roleIds: string[];
-  }>;
+  departments: Array<
+    SocietyDepartmentPolicy & {
+      queued: number;
+      active: number;
+      reservedUsd: number;
+      spentUsd: number;
+      quotaRemainingUsd: number;
+      roleIds: string[];
+    }
+  >;
   roles: OrganizationRoleView[];
   roleLife: SocietyRoleLifeView[];
   tasks: SocietyTaskView[];
@@ -596,62 +598,71 @@ export interface SocietySnapshot {
 }
 
 export const workbenchApi = {
-  summary: () => api<WorkbenchSummary>(`/api/workbench/summary?timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
-  execute: (item: WorkbenchItem) => api<{ sessionId: string }>(`/api/items/${encodeURIComponent(item.id)}/execute`, {
-    method: 'POST',
-    headers: { 'Idempotency-Key': crypto.randomUUID() },
-    body: JSON.stringify({ revision: item.revision, newAttempt: false }),
-  }),
-  artifact: (runId: string, artifact: RunArtifact) => api<Material>('/api/materials/artifact', {
-    method: 'POST',
-    body: JSON.stringify({ runId, artifactId: artifact.id }),
-  }),
-  teamAction: (id: string, action: 'pause' | 'resume' | 'dissolve') => api<{ teamCycle: unknown; runIds: string[] }>(
-    `/api/organization/teams/${encodeURIComponent(id)}/${action}`,
-    { method: 'POST' },
-  ),
-  reassignContract: (teamId: string, contractId: string, roleId: string) => api<{ contract: WorkContractView }>(
-    `/api/organization/teams/${encodeURIComponent(teamId)}/contracts/${encodeURIComponent(contractId)}/reassign`,
-    { method: 'POST', body: JSON.stringify({ roleId }) },
-  ),
-  confirmRole: (id: string) => api<{ role: OrganizationRoleView }>(
-    `/api/organization/roles/${encodeURIComponent(id)}/confirm`,
-    { method: 'POST' },
-  ),
+  summary: () =>
+    api<WorkbenchSummary>(`/api/workbench/summary?timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`),
+  execute: (item: WorkbenchItem) =>
+    api<{ sessionId: string }>(`/api/items/${encodeURIComponent(item.id)}/execute`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': crypto.randomUUID() },
+      body: JSON.stringify({ revision: item.revision, newAttempt: false }),
+    }),
+  artifact: (runId: string, artifact: RunArtifact) =>
+    api<Material>('/api/materials/artifact', {
+      method: 'POST',
+      body: JSON.stringify({ runId, artifactId: artifact.id }),
+    }),
+  teamAction: (id: string, action: 'pause' | 'resume' | 'dissolve') =>
+    api<{ teamCycle: unknown; runIds: string[] }>(`/api/organization/teams/${encodeURIComponent(id)}/${action}`, { method: 'POST' }),
+  reassignContract: (teamId: string, contractId: string, roleId: string) =>
+    api<{ contract: WorkContractView }>(
+      `/api/organization/teams/${encodeURIComponent(teamId)}/contracts/${encodeURIComponent(contractId)}/reassign`,
+      { method: 'POST', body: JSON.stringify({ roleId }) },
+    ),
+  confirmRole: (id: string) =>
+    api<{ role: OrganizationRoleView }>(`/api/organization/roles/${encodeURIComponent(id)}/confirm`, { method: 'POST' }),
   updateRole: (
     id: string,
     revision: number,
-    patch: Partial<Pick<OrganizationRoleView, 'name' | 'responsibilities' | 'capabilities' | 'budgetLimitUsd' | 'employment' | 'persistent'>>,
+    patch: Partial<
+      Pick<OrganizationRoleView, 'name' | 'responsibilities' | 'capabilities' | 'budgetLimitUsd' | 'employment' | 'persistent'>
+    >,
     reason: string,
-  ) => api<{ role: OrganizationRoleView }>(
-    `/api/organization/roles/${encodeURIComponent(id)}`,
-    { method: 'PATCH', body: JSON.stringify({ revision, patch, reason }) },
-  ),
-  rollbackRole: (id: string, version: number, reason: string) => api<{ role: OrganizationRoleView }>(
-    `/api/organization/roles/${encodeURIComponent(id)}/rollback`,
-    { method: 'POST', body: JSON.stringify({ version, reason }) },
-  ),
-  evaluations: () => api<{
-    active: EvaluationVersionView;
-    versions: EvaluationVersionView[];
-    audits: OrganizationVersionAuditView[];
-  }>('/api/organization/evaluations'),
-  updateEvaluation: (policy: Partial<EvaluationPolicyView>, reason: string) => api<{ evaluation: EvaluationVersionView }>(
-    '/api/organization/evaluations',
-    { method: 'POST', body: JSON.stringify({ policy, reason }) },
-  ),
-  rollbackEvaluation: (version: number, reason: string) => api<{ evaluation: EvaluationVersionView }>(
-    '/api/organization/evaluations/rollback',
-    { method: 'POST', body: JSON.stringify({ version, reason }) },
-  ),
-  resolveException: (id: string, decision: string) => api<{ exception: OrganizationExceptionView }>(
-    `/api/organization/exceptions/${encodeURIComponent(id)}/resolve`,
-    { method: 'POST', body: JSON.stringify({ decision }) },
-  ),
-  decideProposal: (id: string, accepted: boolean, decision: string) => api<{ proposal: unknown }>(
-    `/api/organization/proposals/${encodeURIComponent(id)}/decide`,
-    { method: 'POST', body: JSON.stringify({ accepted, decision }) },
-  ),
+  ) =>
+    api<{ role: OrganizationRoleView }>(`/api/organization/roles/${encodeURIComponent(id)}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ revision, patch, reason }),
+    }),
+  rollbackRole: (id: string, version: number, reason: string) =>
+    api<{ role: OrganizationRoleView }>(`/api/organization/roles/${encodeURIComponent(id)}/rollback`, {
+      method: 'POST',
+      body: JSON.stringify({ version, reason }),
+    }),
+  evaluations: () =>
+    api<{
+      active: EvaluationVersionView;
+      versions: EvaluationVersionView[];
+      audits: OrganizationVersionAuditView[];
+    }>('/api/organization/evaluations'),
+  updateEvaluation: (policy: Partial<EvaluationPolicyView>, reason: string) =>
+    api<{ evaluation: EvaluationVersionView }>('/api/organization/evaluations', {
+      method: 'POST',
+      body: JSON.stringify({ policy, reason }),
+    }),
+  rollbackEvaluation: (version: number, reason: string) =>
+    api<{ evaluation: EvaluationVersionView }>('/api/organization/evaluations/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ version, reason }),
+    }),
+  resolveException: (id: string, decision: string) =>
+    api<{ exception: OrganizationExceptionView }>(`/api/organization/exceptions/${encodeURIComponent(id)}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ decision }),
+    }),
+  decideProposal: (id: string, accepted: boolean, decision: string) =>
+    api<{ proposal: unknown }>(`/api/organization/proposals/${encodeURIComponent(id)}/decide`, {
+      method: 'POST',
+      body: JSON.stringify({ accepted, decision }),
+    }),
   societyTask: (input: {
     objective: string;
     valueUsd: number;
@@ -664,39 +675,43 @@ export const workbenchApi = {
     teamMode?: 'auto' | 'solo' | 'team';
     branches?: SocietyTaskView['branches'];
     materials?: SocietyTaskView['materials'];
-  }) => api<{ task: SocietyTaskView }>('/api/organization/society/tasks', {
-    method: 'POST',
-    body: JSON.stringify(input),
-  }),
-  tickSociety: (projectId?: string) => api<{
-    decisions: SocietyScheduleView[];
-    queued: number;
-    waitingApproval: number;
-    snapshot: SocietySnapshot;
-  }>('/api/organization/society/tick', {
-    method: 'POST',
-    body: JSON.stringify({ projectId }),
-  }),
-  approveSocietyTask: (id: string, approved: boolean) => api<{ task: SocietyTaskView }>(
-    `/api/organization/society/tasks/${encodeURIComponent(id)}/approve`,
-    { method: 'POST', body: JSON.stringify({ approved }) },
-  ),
-  releaseSocietyTask: (id: string, outcome: 'completed' | 'failed', summary: string) => api<{
-    task: SocietyTaskView;
-    schedule: SocietyScheduleView;
-  }>(`/api/organization/society/tasks/${encodeURIComponent(id)}/release`, {
-    method: 'POST',
-    body: JSON.stringify({ outcome, summary }),
-  }),
-  roleLife: (id: string) => api<{ life: SocietyRoleLifeView }>(
-    `/api/organization/roles/${encodeURIComponent(id)}/life`,
-  ),
-  updateInstitution: (policies: Record<string, unknown>, reason: string) => api<{ institution: InstitutionVersionView }>(
-    '/api/organization/institution',
-    { method: 'POST', body: JSON.stringify({ policies, reason }) },
-  ),
-  rollbackInstitution: (version: number, reason: string) => api<{ institution: InstitutionVersionView }>(
-    '/api/organization/institution/rollback',
-    { method: 'POST', body: JSON.stringify({ version, reason }) },
-  ),
+  }) =>
+    api<{ task: SocietyTaskView }>('/api/organization/society/tasks', {
+      method: 'POST',
+      body: JSON.stringify(input),
+    }),
+  tickSociety: (projectId?: string) =>
+    api<{
+      decisions: SocietyScheduleView[];
+      queued: number;
+      waitingApproval: number;
+      snapshot: SocietySnapshot;
+    }>('/api/organization/society/tick', {
+      method: 'POST',
+      body: JSON.stringify({ projectId }),
+    }),
+  approveSocietyTask: (id: string, approved: boolean) =>
+    api<{ task: SocietyTaskView }>(`/api/organization/society/tasks/${encodeURIComponent(id)}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ approved }),
+    }),
+  releaseSocietyTask: (id: string, outcome: 'completed' | 'failed', summary: string) =>
+    api<{
+      task: SocietyTaskView;
+      schedule: SocietyScheduleView;
+    }>(`/api/organization/society/tasks/${encodeURIComponent(id)}/release`, {
+      method: 'POST',
+      body: JSON.stringify({ outcome, summary }),
+    }),
+  roleLife: (id: string) => api<{ life: SocietyRoleLifeView }>(`/api/organization/roles/${encodeURIComponent(id)}/life`),
+  updateInstitution: (policies: Record<string, unknown>, reason: string) =>
+    api<{ institution: InstitutionVersionView }>('/api/organization/institution', {
+      method: 'POST',
+      body: JSON.stringify({ policies, reason }),
+    }),
+  rollbackInstitution: (version: number, reason: string) =>
+    api<{ institution: InstitutionVersionView }>('/api/organization/institution/rollback', {
+      method: 'POST',
+      body: JSON.stringify({ version, reason }),
+    }),
 };

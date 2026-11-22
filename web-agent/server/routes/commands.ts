@@ -44,8 +44,7 @@ export function registerCommandRoutes(app: Express, deps: RouteDeps): void {
     switch (name) {
       case 'help': {
         const pluginCmds = kernel.plugins.capabilities('command').map((c) => [c.command.name, c.command.description]);
-        const lines = [...BUILTIN_COMMANDS, ...pluginCmds]
-          .map(([n, p, d]) => `/${n}${p ? ` ${p}` : ''} — ${d}`);
+        const lines = [...BUILTIN_COMMANDS, ...pluginCmds].map(([n, p, d]) => `/${n}${p ? ` ${p}` : ''} — ${d}`);
         return res.json({ ok: true, type: 'message', data: { text: `可用命令：\n${lines.join('\n')}` } });
       }
       case 'new':

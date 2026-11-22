@@ -4,9 +4,7 @@
   "sandbox": {
     "files": {}
   },
-  "messages": [
-    { "role": "user", "content": "请帮我查看 no-such-file.txt 并处理其中的任务" }
-  ],
+  "messages": [{ "role": "user", "content": "请帮我查看 no-such-file.txt 并处理其中的任务" }],
   "requests": [
     {
       "chunks": [

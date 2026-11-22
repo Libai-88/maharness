@@ -32,7 +32,11 @@ export function isPurposeEncrypted(blob: string): boolean {
 export function secretPurpose(blob: string): string | undefined {
   if (!isPurposeEncrypted(blob)) return undefined;
   const encoded = blob.slice(PURPOSE_SECRET_PREFIX.length).split(':')[0];
-  try { return Buffer.from(encoded, 'base64').toString('utf8'); } catch { return undefined; }
+  try {
+    return Buffer.from(encoded, 'base64').toString('utf8');
+  } catch {
+    return undefined;
+  }
 }
 
 /** 加密：`v2:<base64(purpose)>:<base64(iv)>:<base64(tag)>:<base64(ct)>` */
@@ -67,7 +71,9 @@ export function createSecretBox(): MutableSecretBox {
   let key: Buffer | undefined;
   return {
     available: () => !!key,
-    configure(next?: Buffer): void { key = next; },
+    configure(next?: Buffer): void {
+      key = next;
+    },
     encrypt(plain: string, purpose: string): string {
       if (!key || !plain) return plain;
       return encryptPurposeSecret(plain, key, purpose);

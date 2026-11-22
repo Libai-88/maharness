@@ -4,9 +4,7 @@
   "version": "0.1.0",
   "entry": "index.ts",
   "enabled": true,
-  "requires": [
-    "skills"
-  ],
+  "requires": ["skills"],
   "compatibility": {
     "api": {
       "min": "3.0.0",
@@ -18,14 +16,8 @@
   },
   "permissions": {
     "capabilities": {
-      "persona": [
-        "ars-routing",
-        "academic-light"
-      ],
-      "tool": [
-        "search_papers",
-        "verify_reference"
-      ]
+      "persona": ["ars-routing", "academic-light"],
+      "tool": ["search_papers", "verify_reference"]
     }
   },
   "apiVersion": 3,

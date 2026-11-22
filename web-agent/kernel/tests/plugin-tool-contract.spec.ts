@@ -8,13 +8,17 @@ const root = join(process.cwd(), 'core');
 
 function toolBlocks(source: string): { name: string; block: string }[] {
   const out: { name: string; block: string }[] = [];
-  const re = /kind:\s*'tool'/g;
-  let match: RegExpExecArray | null;
-  while ((match = re.exec(source)) !== null) {
-    const tail = source.slice(match.index, match.index + 1500);
-    const name = /name:\s*'([^']+)'/.exec(tail)?.[1];
+  // 只认行首的 kind 声明：文档字符串里也写着 `ctx.register({ kind: "tool", tool: {...} })`，
+  // 若不加行首锚定，会把说明文字误当工具定义（并抽到没有 sideEffect 的假块）。
+  const re = /^\s*kind:\s*['"]tool['"]/gm;
+  let match: RegExpExecArray | null = re.exec(source);
+  while (match !== null) {
+    const index = match.index;
+    const tail = source.slice(index, index + 1500);
+    match = re.exec(source);
+    const name = /name:\s*['"]([^'"]+)['"]/.exec(tail)?.[1];
     if (!name) continue;
-    const start = source.indexOf('{', source.indexOf('tool:', match.index));
+    const start = source.indexOf('{', source.indexOf('tool:', index));
     if (start < 0) continue;
     let depth = 0;
     let end = start;
@@ -44,9 +48,17 @@ describe('内置工具副作用契约', () => {
 
   it('外部内容通道声明 contentTrust=untrusted', () => {
     const required = [
-      'web_search', 'web_fetch', 'web_crawl', 'read_document', 'ocr_image', 'ocr_pdf',
-      'browser_snapshot', 'browser_network', 'recall_facts',
-      'list_memory_blocks', 'blackboard_get',
+      'web_search',
+      'web_fetch',
+      'web_crawl',
+      'read_document',
+      'ocr_image',
+      'ocr_pdf',
+      'browser_snapshot',
+      'browser_network',
+      'recall_facts',
+      'list_memory_blocks',
+      'blackboard_get',
     ];
     const blocks = new Map<string, string>();
     for (const entry of readdirSync(root, { withFileTypes: true })) {
@@ -55,8 +67,11 @@ describe('内置工具副作用契约', () => {
       if (!existsSync(file)) continue;
       for (const tool of toolBlocks(readFileSync(file, 'utf8'))) blocks.set(tool.name, tool.block);
     }
-    const missing = required.filter((name) => !new RegExp(`name:\\s*'${name}'`).test(blocks.get(name) ?? '')
-      || !/contentTrust:\s*'untrusted'/.test(blocks.get(name) ?? ''));
+    const missing = required.filter(
+      (name) =>
+        !new RegExp(`name:\\s*['"]${name}['"]`).test(blocks.get(name) ?? '') ||
+        !/contentTrust:\s*['"]untrusted['"]/.test(blocks.get(name) ?? ''),
+    );
     assert.deepEqual(missing, []);
     assert.equal(createResultTool().contentTrust, 'untrusted');
     assert.equal(createResultTool().sideEffect, 'read');
@@ -64,11 +79,28 @@ describe('内置工具副作用契约', () => {
 
   it('长耗时工具声明独立 timeoutMs', () => {
     const required = [
-      'read_document', 'ocr_image', 'ocr_pdf', 'web_fetch', 'web_crawl',
-      'browser_open', 'browser_download', 'browser_screenshot',
-      'repo_map', 'project_diagnostics', 'lsp_definition', 'lsp_hover', 'lsp_diagnostics',
-      'mcp_resource_read', 'mcp_prompt_get', 'mcp_reconnect', 'mcp_oauth_complete',
-      'mcp_registry_search', 'mcp_registry_install', 'run_subagent', 'run_review', 'run_parallel',
+      'read_document',
+      'ocr_image',
+      'ocr_pdf',
+      'web_fetch',
+      'web_crawl',
+      'browser_open',
+      'browser_download',
+      'browser_screenshot',
+      'repo_map',
+      'project_diagnostics',
+      'lsp_definition',
+      'lsp_hover',
+      'lsp_diagnostics',
+      'mcp_resource_read',
+      'mcp_prompt_get',
+      'mcp_reconnect',
+      'mcp_oauth_complete',
+      'mcp_registry_search',
+      'mcp_registry_install',
+      'run_subagent',
+      'run_review',
+      'run_parallel',
       'analyze_image',
     ];
     const blocks = new Map<string, string>();

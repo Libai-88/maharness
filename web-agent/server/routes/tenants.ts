@@ -6,8 +6,7 @@ const TENANT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
 
 export function registerTenantRoutes(app: Express, deps: RouteDeps): void {
   const { store } = deps;
-  const apiRoleOf = (req: unknown): string | undefined =>
-    (req as { apiRole?: unknown } | undefined)?.apiRole as string | undefined;
+  const apiRoleOf = (req: unknown): string | undefined => (req as { apiRole?: unknown } | undefined)?.apiRole as string | undefined;
 
   app.get('/api/tenants', (req, res) => {
     res.json({ current: tenantIdOf(req), tenants: store.listTenants() });

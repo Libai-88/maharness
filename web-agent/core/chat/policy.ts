@@ -14,9 +14,20 @@ export const MODE_PROMPTS: Record<string, string> = {
 
 /** 角色只读工具白名单（与 subagent 语义一致：侦查/搜索/记忆，不改变世界） */
 export const ROLE_READONLY_TOOLS = new Set([
-  'list_dir', 'read_file', 'glob', 'grep', 'web_search', 'web_fetch',
-  'list_skills', 'get_skill', 'get_skill_file', 'recall_facts', 'list_memory_blocks',
-  'plugin_status', 'mcp_status', 'todo_list',
+  'list_dir',
+  'read_file',
+  'glob',
+  'grep',
+  'web_search',
+  'web_fetch',
+  'list_skills',
+  'get_skill',
+  'get_skill_file',
+  'recall_facts',
+  'list_memory_blocks',
+  'plugin_status',
+  'mcp_status',
+  'todo_list',
 ]);
 
 /**
@@ -24,7 +35,9 @@ export const ROLE_READONLY_TOOLS = new Set([
  * tool 消息带 tool_call_id——否则 provider 会拒绝请求（missing tool_call_id）。
  * 返回 null = 完整可恢复；返回字符串 = 不一致原因（调用方应清除断点并明确告知）。
  */
-export function validateCheckpointHistory(history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[]): string | null {
+export function validateCheckpointHistory(
+  history: { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }[],
+): string | null {
   const pending = new Set<string>();
   for (let i = 0; i < history.length; i++) {
     const m = history[i];
@@ -37,7 +50,8 @@ export function validateCheckpointHistory(history: { role: string; content: stri
       pending.delete(m.tool_call_id);
     }
   }
-  if (pending.size > 0) return `断点存在 ${pending.size} 个未配对的工具调用（${[...pending].slice(0, 3).join(', ')}${pending.size > 3 ? '…' : ''}）`;
+  if (pending.size > 0)
+    return `断点存在 ${pending.size} 个未配对的工具调用（${[...pending].slice(0, 3).join(', ')}${pending.size > 3 ? '…' : ''}）`;
   return null;
 }
 
@@ -46,7 +60,9 @@ export function validateCheckpointHistory(history: { role: string; content: stri
  * 断点校验负责拒绝不完整历史；普通组装路径必须把旧会话、压缩或截断产物
  * 转换为 provider 可接受的原生协议。
  */
-export function sanitizeToolHistory<T extends { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>(history: T[]): T[] {
+export function sanitizeToolHistory<T extends { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }>(
+  history: T[],
+): T[] {
   const pending = new Set<string>();
   const answered = new Set<string>();
   const validToolIndexes = new Set<number>();

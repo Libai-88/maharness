@@ -107,8 +107,7 @@ export function validatePairedLiveConfig(config: PairedLiveConfig): void {
   if (!Number.isFinite(config.outputUsdPerMillion) || config.outputUsdPerMillion < 0)
     throw new Error('outputUsdPerMillion must be non-negative');
   if (!Number.isSafeInteger(config.maxCalls) || config.maxCalls < 3) throw new Error('maxCalls must be at least 3');
-  if (!Number.isSafeInteger(config.maxOutputTokens) || config.maxOutputTokens < 32)
-    throw new Error('maxOutputTokens must be at least 32');
+  if (!Number.isSafeInteger(config.maxOutputTokens) || config.maxOutputTokens < 32) throw new Error('maxOutputTokens must be at least 32');
   if (!Number.isSafeInteger(config.timeoutMs) || config.timeoutMs < 1000) throw new Error('timeoutMs is invalid');
   if (!config.reportDir.trim()) throw new Error('reportDir is required');
 }
@@ -149,14 +148,13 @@ function runtimeSources(): string[] {
 }
 
 export function pairedLiveRuntimeSources(): string[] {
-  return runtimeSources().map(source => relative(root, source).replaceAll('\\', '/'));
+  return runtimeSources().map((source) => relative(root, source).replaceAll('\\', '/'));
 }
 
 export function pairedLiveRuntimeFingerprint(): string {
   const digest = createHash('sha256');
   for (const source of runtimeSources()) {
-    digest.update(relative(root, source).replaceAll('\\', '/')).update('\0')
-      .update(readFileSync(source)).update('\0');
+    digest.update(relative(root, source).replaceAll('\\', '/')).update('\0').update(readFileSync(source)).update('\0');
   }
   for (const lockfile of ['package.json', 'package-lock.json']) {
     const file = join(root, lockfile);
@@ -207,11 +205,7 @@ function evalArtifactTool(workspace: string): ToolDef {
   };
 }
 
-function pairedTeamTool(
-  organization: OrganizationService,
-  store: Store,
-  config: PairedLiveConfig,
-): ToolDef {
+function pairedTeamTool(organization: OrganizationService, store: Store, config: PairedLiveConfig): ToolDef {
   return {
     name: 'run_paired_team',
     version: '1.0.0',
@@ -252,24 +246,25 @@ function pairedTeamTool(
       });
       const results = [];
       for (const contract of team.contracts) {
-        const branchContent = contract.expectedArtifacts.includes(ARTIFACT_A)
-          ? `ALPHA=17\nBETA=29\n`
-          : `GAMMA=41\n`;
-        const result = await ctx.delegate({
-          objective: contract.branchObjective,
-          tools: 'all',
-          assignmentContractId: contract.id,
-          allowedTools: ['write_paired_artifact'],
-          instructions: `Use write_paired_artifact exactly once. Write ${contract.expectedArtifacts.join(', ')} with this exact content:\n${branchContent}`,
-          maxTurns: config.maxCalls,
-        }, ctx.signal);
+        const branchContent = contract.expectedArtifacts.includes(ARTIFACT_A) ? `ALPHA=17\nBETA=29\n` : `GAMMA=41\n`;
+        const result = await ctx.delegate(
+          {
+            objective: contract.branchObjective,
+            tools: 'all',
+            assignmentContractId: contract.id,
+            allowedTools: ['write_paired_artifact'],
+            instructions: `Use write_paired_artifact exactly once. Write ${contract.expectedArtifacts.join(', ')} with this exact content:\n${branchContent}`,
+            maxTurns: config.maxCalls,
+          },
+          ctx.signal,
+        );
         results.push(result);
         if (result.error) break;
       }
       return {
-        ok: results.every(result => !result.error),
+        ok: results.every((result) => !result.error),
         data: { teamCycleId: team.teamCycle.id, results },
-        error: results.find(result => result.error)?.error,
+        error: results.find((result) => result.error)?.error,
       };
     },
   };
@@ -298,15 +293,20 @@ function waitForTerminal(service: RunService, runId: string, sessionId: string, 
 
 function artifactChecks(workspace: string): { checks: Array<{ name: string; passed: boolean }>; artifacts: string[] } {
   const paths = [ARTIFACT_A, ARTIFACT_B];
-  const content = Object.fromEntries(paths.map(path => {
-    const file = join(workspace, path);
-    return [path, existsSync(file) ? readFileSync(file, 'utf8') : ''];
-  }));
+  const content = Object.fromEntries(
+    paths.map((path) => {
+      const file = join(workspace, path);
+      return [path, existsSync(file) ? readFileSync(file, 'utf8') : ''];
+    }),
+  );
   return {
-    artifacts: paths.filter(path => existsSync(join(workspace, path))),
+    artifacts: paths.filter((path) => existsSync(join(workspace, path))),
     checks: [
       { name: `${ARTIFACT_A} exists`, passed: Boolean(content[ARTIFACT_A]) },
-      { name: `${ARTIFACT_A} contains ALPHA=17 and BETA=29`, passed: content[ARTIFACT_A].includes('ALPHA=17') && content[ARTIFACT_A].includes('BETA=29') },
+      {
+        name: `${ARTIFACT_A} contains ALPHA=17 and BETA=29`,
+        passed: content[ARTIFACT_A].includes('ALPHA=17') && content[ARTIFACT_A].includes('BETA=29'),
+      },
       { name: `${ARTIFACT_B} exists`, passed: Boolean(content[ARTIFACT_B]) },
       { name: `${ARTIFACT_B} contains GAMMA=41`, passed: content[ARTIFACT_B].includes('GAMMA=41') },
     ],
@@ -321,11 +321,14 @@ function artifactEvidence(workspace: string): {
   const result = artifactChecks(workspace);
   return {
     ...result,
-    artifactHashes: Object.fromEntries(result.artifacts.map(path => [path, hash(readFileSync(join(workspace, path)))])),
+    artifactHashes: Object.fromEntries(result.artifacts.map((path) => [path, hash(readFileSync(join(workspace, path)))])),
   };
 }
 
-function aggregateUsage(store: Store, runs: RunRecord[]): {
+function aggregateUsage(
+  store: Store,
+  runs: RunRecord[],
+): {
   modelCalls: number;
   costUsd: number;
   inputTokens: number;
@@ -335,10 +338,10 @@ function aggregateUsage(store: Store, runs: RunRecord[]): {
   cacheWriteTokens: number | null;
   usageComplete: boolean;
 } {
-  const calls = runs.flatMap(run => store.runs.modelCalls(run.id, 0, 500));
-  const cacheKnown = calls.length > 0 && calls.every(call => call.cachedInput !== undefined);
-  const cacheMissKnown = calls.length > 0 && calls.every(call => call.missInput !== undefined);
-  const cacheWriteKnown = calls.length > 0 && calls.every(call => call.cacheWriteTokens !== undefined);
+  const calls = runs.flatMap((run) => store.runs.modelCalls(run.id, 0, 500));
+  const cacheKnown = calls.length > 0 && calls.every((call) => call.cachedInput !== undefined);
+  const cacheMissKnown = calls.length > 0 && calls.every((call) => call.missInput !== undefined);
+  const cacheWriteKnown = calls.length > 0 && calls.every((call) => call.cacheWriteTokens !== undefined);
   return {
     modelCalls: calls.length,
     costUsd: round(calls.reduce((sum, call) => sum + (call.cost ?? 0), 0)),
@@ -347,15 +350,11 @@ function aggregateUsage(store: Store, runs: RunRecord[]): {
     cachedInputTokens: cacheKnown ? calls.reduce((sum, call) => sum + (call.cachedInput ?? 0), 0) : null,
     cacheMissTokens: cacheMissKnown ? calls.reduce((sum, call) => sum + (call.missInput ?? 0), 0) : null,
     cacheWriteTokens: cacheWriteKnown ? calls.reduce((sum, call) => sum + (call.cacheWriteTokens ?? 0), 0) : null,
-    usageComplete: calls.length > 0 && calls.every(call => call.usageStatus === 'reported'),
+    usageComplete: calls.length > 0 && calls.every((call) => call.usageStatus === 'reported'),
   };
 }
 
-async function executeArm(
-  config: PairedLiveConfig,
-  sourceProvider: ProviderDef,
-  arm: 'solo' | 'team',
-): Promise<PairedArmReport> {
+async function executeArm(config: PairedLiveConfig, sourceProvider: ProviderDef, arm: 'solo' | 'team'): Promise<PairedArmReport> {
   const started = Date.now();
   const armDir = join(config.reportDir, arm);
   const workspace = join(armDir, 'workspace');
@@ -363,17 +362,25 @@ async function executeArm(
   writeFileSync(join(workspace, 'material.txt'), config.material, { flag: 'wx' });
 
   const budget = new EvaluationBudget(arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd);
-  const provider = budgetedEvaluationProvider({ ...sourceProvider, outputLimitGuaranteed: true }, {
-    model: config.model,
-    inputUsdPerMillion: config.inputUsdPerMillion,
-    outputUsdPerMillion: config.outputUsdPerMillion,
-    maxOutputTokens: config.maxOutputTokens,
-    scope: arm,
-  }, budget);
-  const kernel = new Kernel(root, { sandboxRoot: workspace }, {
-    dataDir: join(armDir, 'runtime'),
-    userPluginsDir: join(armDir, 'plugins'),
-  });
+  const provider = budgetedEvaluationProvider(
+    { ...sourceProvider, outputLimitGuaranteed: true },
+    {
+      model: config.model,
+      inputUsdPerMillion: config.inputUsdPerMillion,
+      outputUsdPerMillion: config.outputUsdPerMillion,
+      maxOutputTokens: config.maxOutputTokens,
+      scope: arm,
+    },
+    budget,
+  );
+  const kernel = new Kernel(
+    root,
+    { sandboxRoot: workspace },
+    {
+      dataDir: join(armDir, 'runtime'),
+      userPluginsDir: join(armDir, 'plugins'),
+    },
+  );
   const store = new Store(join(armDir, 'runs.sqlite'));
   store.runs.setPermission('default', workspace, 'developer');
   const organization = new OrganizationService({ store });
@@ -403,7 +410,9 @@ async function executeArm(
       'You are executing a deterministic paired evaluation.',
       'Use tools for every claimed artifact and never claim completion without successful tool evidence.',
       record.instructions ?? '',
-    ].filter(Boolean).join('\n'),
+    ]
+      .filter(Boolean)
+      .join('\n'),
   });
   const service = new RunService({
     store,
@@ -418,7 +427,9 @@ async function executeArm(
       const runner = new AgentRunner(kernel, kernel.bus);
       return {
         approveApproval: runner.approveApproval.bind(runner),
-        async *run(options) { yield* runner.run(options); },
+        async *run(options) {
+          yield* runner.run(options);
+        },
       };
     },
   });
@@ -426,9 +437,10 @@ async function executeArm(
   try {
     const session = store.createSession(config.model, config.providerId);
     const artifactContract = `验收要求：${ARTIFACT_A} 必须逐字包含 "ALPHA=17" 和 "BETA=29"；${ARTIFACT_B} 必须逐字包含 "GAMMA=41"。不要改写键名或使用中文说明替代这些字符串。`;
-    const prompt = arm === 'team'
-      ? `${config.objective}\n${artifactContract}\n调用 run_paired_team 一次，创建并执行两个独立分工。子任务完成后直接报告结果，不要再次写入文件。材料：\n${config.material}`
-      : `${config.objective}\n${artifactContract}\n分别调用 write_paired_artifact 写入 ${ARTIFACT_A} 和 ${ARTIFACT_B}。每个文件只写一次；两次写入均成功后直接报告，不要重试或再次写入。材料：\n${config.material}`;
+    const prompt =
+      arm === 'team'
+        ? `${config.objective}\n${artifactContract}\n调用 run_paired_team 一次，创建并执行两个独立分工。子任务完成后直接报告结果，不要再次写入文件。材料：\n${config.material}`
+        : `${config.objective}\n${artifactContract}\n分别调用 write_paired_artifact 写入 ${ARTIFACT_A} 和 ${ARTIFACT_B}。每个文件只写一次；两次写入均成功后直接报告，不要重试或再次写入。材料：\n${config.material}`;
     rootRun = service.create(session, {
       message: prompt,
       budgetUsd: arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd,
@@ -442,15 +454,24 @@ async function executeArm(
     const children = store.runs.children(rootRun.id, 'default');
     const detail = organization.detail(organization.workOrderForRun(final).id, 'default');
     const team = detail.teamCycles.at(-1);
-    const contracts = team ? detail.contracts.filter(contract => contract.teamCycleId === team.id) : [];
+    const contracts = team ? detail.contracts.filter((contract) => contract.teamCycleId === team.id) : [];
     const files = artifactEvidence(workspace);
     const allRuns = [final, ...children];
     const usage = aggregateUsage(store, allRuns);
     const checks = [
       ...files.checks,
       { name: 'root run completed', passed: final.status === 'completed' },
-      { name: arm === 'team' ? 'team has exactly two child runs' : 'solo has no child runs', passed: children.length === (arm === 'team' ? 2 : 0) },
-      { name: arm === 'team' ? 'team has two delivered contracts' : 'solo has no team', passed: arm === 'team' ? contracts.length === 2 && contracts.every(contract => contract.status === 'delivered') : detail.teamCycles.length === 0 },
+      {
+        name: arm === 'team' ? 'team has exactly two child runs' : 'solo has no child runs',
+        passed: children.length === (arm === 'team' ? 2 : 0),
+      },
+      {
+        name: arm === 'team' ? 'team has two delivered contracts' : 'solo has no team',
+        passed:
+          arm === 'team'
+            ? contracts.length === 2 && contracts.every((contract) => contract.status === 'delivered')
+            : detail.teamCycles.length === 0,
+      },
     ];
     const armBudget = arm === 'solo' ? config.soloBudgetUsd : config.teamBudgetUsd;
     return {
@@ -468,13 +489,14 @@ async function executeArm(
       cacheMissTokens: usage.cacheMissTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
       usageComplete: usage.usageComplete,
-      budgetCompliant: usage.costUsd <= armBudget + 1e-9 && allRuns.every(run => run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
+      budgetCompliant:
+        usage.costUsd <= armBudget + 1e-9 && allRuns.every((run) => run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
       checks,
       artifacts: files.artifacts,
       artifactHashes: files.artifactHashes,
-      childRunIds: children.map(run => run.id),
+      childRunIds: children.map((run) => run.id),
       teamCycleId: team?.id,
-      contractIds: contracts.map(contract => contract.id),
+      contractIds: contracts.map((contract) => contract.id),
     };
   } catch (error) {
     const latestRoot = rootRun ? store.runs.get(rootRun.id, 'default') : undefined;
@@ -497,12 +519,13 @@ async function executeArm(
       cacheMissTokens: usage.cacheMissTokens,
       cacheWriteTokens: usage.cacheWriteTokens,
       usageComplete: usage.usageComplete,
-      budgetCompliant: usage.costUsd <= armBudget + 1e-9
-        && [latestRoot, ...children].every(run => !run || run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
+      budgetCompliant:
+        usage.costUsd <= armBudget + 1e-9 &&
+        [latestRoot, ...children].every((run) => !run || run.budgetUsd === undefined || run.cost <= run.budgetUsd + 1e-9),
       checks: [],
       artifacts: files.artifacts,
       artifactHashes: files.artifactHashes,
-      childRunIds: children.map(run => run.id),
+      childRunIds: children.map((run) => run.id),
       contractIds: [],
     };
   } finally {
@@ -553,22 +576,17 @@ export async function runPairedLive(
   mkdirSync(config.reportDir, { recursive: true });
   const solo = await executeArm(config, sourceProvider, 'solo');
   const team = await executeArm(config, sourceProvider, 'team');
-  const executionChecks = [solo, team].every(arm =>
-    arm.status === 'completed'
-    && arm.modelCalls > 0
-    && arm.budgetCompliant
-    && arm.checks.every(check => check.passed));
+  const executionChecks = [solo, team].every(
+    (arm) => arm.status === 'completed' && arm.modelCalls > 0 && arm.budgetCompliant && arm.checks.every((check) => check.passed),
+  );
   const usageComplete = solo.usageComplete && team.usageComplete;
-  const quality = (arm: PairedArmReport) => arm.checks.length
-    ? arm.checks.filter(check => check.passed).length / arm.checks.length
-    : 0;
+  const quality = (arm: PairedArmReport) => (arm.checks.length ? arm.checks.filter((check) => check.passed).length / arm.checks.length : 0);
   const soloQuality = quality(solo);
   const teamQuality = quality(team);
-  const risk = (arm: PairedArmReport) => arm.status === 'completed' && arm.budgetCompliant ? 0 : 1;
+  const risk = (arm: PairedArmReport) => (arm.status === 'completed' && arm.budgetCompliant ? 0 : 1);
   const soloRisk = risk(solo);
   const teamRisk = risk(team);
-  const net = (arm: PairedArmReport, armQuality: number) =>
-    round(config.valueUsd * armQuality * armQuality - arm.costUsd);
+  const net = (arm: PairedArmReport, armQuality: number) => round(config.valueUsd * armQuality * armQuality - arm.costUsd);
   const soloNet = net(solo, soloQuality);
   const teamNet = net(team, teamQuality);
   const report: PairedLiveReport = {
@@ -580,7 +598,7 @@ export async function runPairedLive(
       tokens: {
         solo: solo.inputTokens + solo.outputTokens,
         team: team.inputTokens + team.outputTokens,
-        marginal: (team.inputTokens + team.outputTokens) - (solo.inputTokens + solo.outputTokens),
+        marginal: team.inputTokens + team.outputTokens - (solo.inputTokens + solo.outputTokens),
       },
       elapsedMs: {
         solo: solo.elapsedMs,
@@ -589,7 +607,7 @@ export async function runPairedLive(
       },
       coordination: {
         costUsd: round(team.costUsd - solo.costUsd),
-        tokens: (team.inputTokens + team.outputTokens) - (solo.inputTokens + solo.outputTokens),
+        tokens: team.inputTokens + team.outputTokens - (solo.inputTokens + solo.outputTokens),
         elapsedMs: team.elapsedMs - solo.elapsedMs,
       },
       risk: {
@@ -624,23 +642,34 @@ export function unexecutedPairedReport(
   if (existsSync(config.reportDir)) throw new Error('reportDir must not already exist');
   mkdirSync(config.reportDir, { recursive: true });
   const report = emptyReport(config, 'unexecuted', reason, evidenceMode);
-  writeFileSync(join(config.reportDir, 'manifest.json'), JSON.stringify({
-    kind: 'organization-paired-live-manifest',
-    createdAt: report.createdAt,
-    providerId: config.providerId,
-    model: config.model,
-    objectiveHash: report.objectiveHash,
-    materialHash: report.materialHash,
-    budgets: { soloUsd: config.soloBudgetUsd, teamUsd: config.teamBudgetUsd },
-    execute: false,
-  }, null, 2), 'utf8');
+  writeFileSync(
+    join(config.reportDir, 'manifest.json'),
+    JSON.stringify(
+      {
+        kind: 'organization-paired-live-manifest',
+        createdAt: report.createdAt,
+        providerId: config.providerId,
+        model: config.model,
+        objectiveHash: report.objectiveHash,
+        materialHash: report.materialHash,
+        budgets: { soloUsd: config.soloBudgetUsd, teamUsd: config.teamBudgetUsd },
+        execute: false,
+      },
+      null,
+      2,
+    ),
+    'utf8',
+  );
   writeFileSync(join(config.reportDir, 'report.json'), JSON.stringify(report, null, 2), 'utf8');
   return report;
 }
 
 function cliConfig(): PairedLiveConfig {
   return {
-    reportDir: resolve(root, process.env.EVAL_REPORT_DIR ?? `evals/reports/organization-paired-live/${new Date().toISOString().replace(/[:.]/g, '-')}`),
+    reportDir: resolve(
+      root,
+      process.env.EVAL_REPORT_DIR ?? `evals/reports/organization-paired-live/${new Date().toISOString().replace(/[:.]/g, '-')}`,
+    ),
     providerId: String(process.env.EVAL_PROVIDER_ID ?? ''),
     model: String(process.env.EVAL_MODEL ?? ''),
     objective: String(process.env.EVAL_OBJECTIVE ?? DEFAULT_OBJECTIVE),
@@ -666,7 +695,8 @@ async function main(): Promise<void> {
   }
   const dataDir = process.env.AGENT_DATA_DIR ?? join(root, 'data');
   const source = new Database(join(dataDir, 'agent.db'), { readonly: true });
-  const configured = source.prepare(`SELECT id,label,model,base_url AS baseUrl,api_key AS apiKey,protocol FROM providers WHERE id=? AND enabled=1`)
+  const configured = source
+    .prepare(`SELECT id,label,model,base_url AS baseUrl,api_key AS apiKey,protocol FROM providers WHERE id=? AND enabled=1`)
     .get(config.providerId) as { id: string; label: string; model: string; baseUrl: string; apiKey: string; protocol: string } | undefined;
   source.close();
   if (!configured) throw new Error('configured enabled provider not found');
@@ -688,17 +718,23 @@ async function main(): Promise<void> {
     requestTimeoutMs: config.timeoutMs,
   });
   const report = await runPairedLive(config, provider, 'configured-provider');
-  console.log(JSON.stringify({
-    status: report.status,
-    report: join(config.reportDir, 'report.json'),
-    teamPreferred: report.comparison?.teamPreferred,
-    marginalNetBenefitUsd: report.comparison?.netBenefitUsd.marginal,
-  }, null, 2));
+  console.log(
+    JSON.stringify(
+      {
+        status: report.status,
+        report: join(config.reportDir, 'report.json'),
+        teamPreferred: report.comparison?.teamPreferred,
+        marginalNetBenefitUsd: report.comparison?.netBenefitUsd.marginal,
+      },
+      null,
+      2,
+    ),
+  );
   if (report.status !== 'passed') process.exitCode = 1;
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
-  main().catch(error => {
+  main().catch((error) => {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 1;
   });
